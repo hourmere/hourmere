@@ -6,6 +6,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import * as Zod from 'zod'
 import * as Availability from './availability.ts'
 import * as BookingPage from './booking-page.ts'
 import * as Conferences from './conferences.ts'
@@ -13,6 +14,7 @@ import type { PublicContext } from './context.ts'
 import * as Errors from './errors.ts'
 import * as GroupSeatAdmission from './group-seat-admission.ts'
 import * as Hosts from './hosts.ts'
+import * as LocationOptions from './location-options.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
@@ -32,6 +34,7 @@ type Change = readonly [string, string]
 const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
+  zod: Zod,
   '@hourmere/db': HourmereDb,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
@@ -39,6 +42,7 @@ const dependencies: Record<string, object> = {
   './errors.ts': Errors,
   './group-seat-admission.ts': GroupSeatAdmission,
   './hosts.ts': Hosts,
+  './location-options.ts': LocationOptions,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
   './payment-expiry.ts': PaymentExpiry,

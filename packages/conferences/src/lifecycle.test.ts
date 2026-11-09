@@ -194,6 +194,57 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       },
     },
   })
+  it.each([false, true])(
+    'provisions the selected non-default Zoom option with provider failure=%s',
+    async (failure) => {
+      await updateEventType({ ...ctx, principal: owner }, eventId, {
+        locations: [
+          { id: 'office', kind: 'in_person', address: '100 Example Street' },
+          { id: 'video', kind: 'zoom', autoCreate: true },
+        ],
+      })
+      const input = {
+        handle: 'zoom-host',
+        slug: 'zoom',
+        start: Temporal.Instant.from(START),
+        invitee: { name: 'Synthetic Invitee', email: 'synthetic@example.com', timeZone: 'UTC' },
+        locationOptionId: 'video',
+        idempotencyKey: 'selected-zoom',
+      }
+      const b = await createPublicBooking(ctx, input)
+      expect((await createPublicBooking(ctx, input)).booking.id).toBe(b.booking.id)
+      expect(b.booking.conference?.status).toBe('pending')
+      expect((await row()).provider).toBe('zoom')
+      if (failure)
+        provider.controls.meetingHook = async (_url, init) =>
+          Response.json({
+            ...JSON.parse(String(init.body)),
+            id: 81234567890,
+            host_id: 'synthetic-zoom-identity',
+            join_url: 'https://zoom.us/j/81234567890',
+            start_time: '2030-11-04T10:00:00Z',
+          })
+      await writeBookingConference(deps, b.booking.id)
+      expect((await row()).state).toBe(failure ? 'failed' : 'ready')
+      expect(posts()).toHaveLength(1)
+      const managed = await getManagedBooking(ctx, b.manageToken as string)
+      expect(!!managed.location?.url).toBe(!failure)
+      await sendBookingNotification(
+        mail(),
+        b.booking.id,
+        failure ? 'conference_failed' : 'confirmed',
+      )
+      expect(sent).toHaveLength(2)
+      expect(sent.every((message) => !!message.attachments?.length)).toBe(!failure)
+      const snapshot = await db
+        .selectFrom('bookings')
+        .select('location_option')
+        .where('id', '=', b.booking.id)
+        .executeTakeFirstOrThrow()
+      expect(snapshot.location_option).toEqual({ id: 'video', kind: 'zoom', autoCreate: true })
+    },
+  )
+
   it('creates one pinned meeting without Google and returns no private pin or participant URL before ready', async () => {
     const b = await book(),
       retry = await book()

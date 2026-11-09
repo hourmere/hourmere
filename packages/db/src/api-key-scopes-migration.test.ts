@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createDb } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
@@ -21,10 +21,22 @@ const keyNow = Date.now()
 // These deterministic synthetic credentials are never included in assertion diagnostics.
 const predecessorKey = (index: number) => `hm_${String.fromCharCode(65 + index).repeat(64)}`
 
-async function predecessorDirectory() {
+// Mutation and malformed-row cases need only the real migrations defining their
+// fixtures. Keep the complete predecessor in the upgrade/fresh-schema integration case.
+const fixtureMigrations = new Set([
+  '0001_auth.sql',
+  '0002_scheduling.sql',
+  '0003_schema_followups.sql',
+  '0010_booking_cancellation_origin.sql',
+  '0016_mcp_oauth.sql',
+  '0030_mcp_oauth_client_activity.sql',
+  '0047_event_type_durations.sql',
+])
+
+async function predecessorDirectory(complete = false) {
   const directory = await mkdtemp(join(tmpdir(), 'hourmere-scoped-keys-predecessor-'))
   for (const file of await readdir(migrationsDir)) {
-    if (file.endsWith('.sql') && file < migration) {
+    if (file.endsWith('.sql') && file < migration && (complete || fixtureMigrations.has(file))) {
       await copyFile(join(migrationsDir, file), join(directory, file))
     }
   }
@@ -202,20 +214,108 @@ const sqlstate = async (work: Promise<unknown>) => {
   }
 }
 
+async function afterFixtureWork<T extends { setup?: Promise<void>; pending?: Promise<void> }>(
+  state: T,
+  cleanup: (state: T) => Promise<void>,
+) {
+  await Promise.allSettled([state.setup, state.pending])
+  await cleanup(state)
+}
+
+it('drains aborted fixture work and releases only its original database after the next case starts', async () => {
+  const barrier = Promise.withResolvers<void>()
+  const controller = new AbortController()
+  const released: string[] = []
+  const first = {
+    id: 'first',
+    pending: barrier.promise.then(() => controller.signal.throwIfAborted()),
+  }
+  let current = first
+  const release = async (state: { id: string }) => {
+    released.push(state.id)
+  }
+  const firstCleanup = afterFixtureWork(current, release)
+  controller.abort(new Error('Synthetic fixture timeout'))
+  try {
+    expect(released).toEqual([])
+    // Model a timed-out teardown whose old promise still runs after the runner
+    // has started another case. Old cleanup must retain its original owner.
+    current = { id: 'second', pending: Promise.resolve() }
+    await afterFixtureWork(current, release)
+    expect(released).toEqual(['second'])
+  } finally {
+    barrier.resolve()
+    await firstCleanup
+  }
+  expect(released).toEqual(['second', 'first'])
+})
+
 describe.skipIf(!serverUrl)('API key scope migration', () => {
-  it('preserves real predecessor keys, backfills full, matches fresh schema and reruns without writes', async () => {
-    const directory = await predecessorDirectory()
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    let authPool: ReturnType<typeof createAuthPool> | undefined
+  const databases: TestDatabase[] = []
+  const available: TestDatabase[] = []
+  beforeAll(async () => {
+    // Physical CREATE/DROP can wait for shared-server checkpoints. Reuse two
+    // owned databases and reset their schemas between cases instead of paying
+    // that cost twice in every mutation test.
+    for (let index = 0; index < 2; index++) {
+      const database = await createTestDatabase(serverUrl as string, undefined, { migrate: false })
+      databases.push(database)
+      available.push(database)
+    }
+  })
+  afterAll(async () => {
+    await Promise.all(databases.map((database) => database.drop()))
+  })
+  async function fixtureDatabase(directory: string, migrate = true): Promise<TestDatabase> {
+    const database = available.pop()
+    if (!database) throw new Error('No isolated migration fixture database available')
+    let dropping: Promise<void> | undefined
+    const drop = () => {
+      dropping ??= (async () => {
+        await database.pool.query(
+          'DROP SCHEMA IF EXISTS auth CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;',
+        )
+        available.push(database)
+      })()
+      return dropping
+    }
     try {
-      upgraded = await createTestDatabase(serverUrl as string, directory)
+      if (migrate) await runMigrations(database.pool, directory)
+      return { ...database, drop }
+    } catch (error) {
+      await drop()
+      throw error
+    }
+  }
+
+  describe('complete predecessor upgrade', () => {
+    let directory: string
+    let upgraded: TestDatabase
+    let fresh: TestDatabase
+    let before: Awaited<ReturnType<typeof records>>
+    let sentinels: Awaited<ReturnType<typeof sentinelRecords>>
+    let applied: string[]
+    beforeAll(async () => {
+      // Prepare the two historical schemas once. The cases below separately prove
+      // data/schema preservation and real credential verification on that full upgrade.
+      directory = await predecessorDirectory(true)
+      upgraded = await fixtureDatabase(directory)
       await seed(upgraded.pool)
-      const before = await records(upgraded.pool)
-      const sentinels = await sentinelRecords(upgraded.pool)
-      for (const rows of Object.values(sentinels)) expect(rows.length).toBeGreaterThan(0)
+      before = await records(upgraded.pool)
+      sentinels = await sentinelRecords(upgraded.pool)
       await copyFile(join(migrationsDir, migration), join(directory, migration))
-      expect(await runMigrations(upgraded.pool, directory)).toEqual([migration])
+      applied = await runMigrations(upgraded.pool, directory)
+      fresh = await fixtureDatabase(directory)
+    })
+    afterAll(async () => {
+      await fresh?.drop()
+      await upgraded?.drop()
+      if (directory) await rm(directory, { recursive: true, force: true })
+    })
+
+    it('preserves real predecessor keys, backfills full, matches fresh schema and reruns without writes', async () => {
+      for (const rows of Object.values(sentinels)) expect(rows.length).toBeGreaterThan(0)
+      expect(applied).toEqual([migration])
       expect(await records(upgraded.pool)).toEqual(
         before.map((row) => ({ ...row, metadata: { ...row.metadata, scope: 'full' } })),
       )
@@ -235,52 +335,53 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
           .rows,
       ).toEqual(tuples)
       expect(await sentinelRecords(upgraded.pool)).toEqual(sentinels)
-      fresh = await createTestDatabase(serverUrl as string, directory)
       expect(await snapshotSchema(fresh.pool)).toEqual(schema)
       expect(await runMigrations(fresh.pool, directory)).toEqual([])
+    })
 
-      const signup = { mode: 'open', allowedDomains: [] } as const
-      authPool = createAuthPool(upgraded.url, signup)
-      const auth = createAuth({
-        pool: authPool,
-        db: createDb(upgraded.pool),
-        baseURL: 'http://localhost:43847',
-        secret: 'synthetic-predecessor-scope-authentication-secret-32-characters',
-        signup,
-        mailer: { send: async () => {} },
-      })
-      const resolve = createCallerResolver({ auth, db: createDb(upgraded.pool) })
-      // Real plugin verification proves the retained digests still authenticate as full,
-      // including absent/null/non-string organization fallbacks and explicit personal/team pins.
-      for (const index of [0, 1, 2, 5, 6, 7, 8]) {
-        const result = await resolve(
-          new Headers({ authorization: `Bearer ${predecessorKey(index)}` }),
-        )
-        expect(result).toMatchObject({
-          ok: true,
-          principal: {
-            kind: 'api_key',
-            apiKeyScope: 'full',
-            user: { id: userId },
-            organization: { id: index === 2 ? teamId : personalId, personal: index !== 2 },
-          },
+    it('authenticates preserved predecessor credentials with full scope and retains disabled/expired failures', async () => {
+      let authPool: ReturnType<typeof createAuthPool> | undefined
+      try {
+        const signup = { mode: 'open', allowedDomains: [] } as const
+        authPool = createAuthPool(upgraded.url, signup)
+        const auth = createAuth({
+          pool: authPool,
+          db: createDb(upgraded.pool),
+          baseURL: 'http://localhost:43847',
+          secret: 'synthetic-predecessor-scope-authentication-secret-32-characters',
+          signup,
+          mailer: { send: async () => {} },
         })
+        const resolve = createCallerResolver({ auth, db: createDb(upgraded.pool) })
+        // Real plugin verification proves the retained digests still authenticate as full,
+        // including absent/null/non-string organization fallbacks and explicit personal/team pins.
+        for (const index of [0, 1, 2, 5, 6, 7, 8]) {
+          const result = await resolve(
+            new Headers({ authorization: `Bearer ${predecessorKey(index)}` }),
+          )
+          expect(result).toMatchObject({
+            ok: true,
+            principal: {
+              kind: 'api_key',
+              apiKeyScope: 'full',
+              user: { id: userId },
+              organization: { id: index === 2 ? teamId : personalId, personal: index !== 2 },
+            },
+          })
+        }
+        // Disabled and expired predecessor keys keep their previous credential failure.
+        for (const index of [3, 4]) {
+          expect(
+            await resolve(new Headers({ authorization: `Bearer ${predecessorKey(index)}` })),
+          ).toMatchObject({ ok: false, error: 'unauthorized' })
+        }
+        expect(await sentinelRecords(upgraded.pool)).toEqual(sentinels)
+        expect(authPool.totalCount).toBeLessThanOrEqual(3)
+        expect(upgraded.pool.totalCount).toBeLessThanOrEqual(3)
+      } finally {
+        await authPool?.end()
       }
-      // Disabled and expired predecessor keys keep their previous credential failure.
-      for (const index of [3, 4]) {
-        expect(
-          await resolve(new Headers({ authorization: `Bearer ${predecessorKey(index)}` })),
-        ).toMatchObject({ ok: false, error: 'unauthorized' })
-      }
-      expect(await sentinelRecords(upgraded.pool)).toEqual(sentinels)
-      expect(authPool.totalCount).toBeLessThanOrEqual(3)
-      expect(upgraded.pool.totalCount).toBeLessThanOrEqual(3)
-    } finally {
-      await authPool?.end()
-      await fresh?.drop()
-      await upgraded?.drop()
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
 
   it.each(['{broken', '[]', 'null', '"string"', '3'])(
@@ -289,7 +390,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
       const directory = await predecessorDirectory()
       let database: TestDatabase | undefined
       try {
-        database = await createTestDatabase(serverUrl as string, directory)
+        database = await fixtureDatabase(directory)
         await seed(database.pool)
         await database.pool.query(
           'UPDATE auth.apikey SET metadata=$1 WHERE name=$2 AND enabled=false',
@@ -328,8 +429,11 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
   )
 
   it('canonicalizes direct inserts and refuses invalid, changed or removed scopes while allowing native maintenance', async () => {
-    const database = await createTestDatabase(serverUrl as string)
+    const directory = await predecessorDirectory()
+    let database: TestDatabase | undefined
     try {
+      await copyFile(join(migrationsDir, migration), join(directory, migration))
+      database = await fixtureDatabase(directory)
       const pool = database.pool
       const insert = (metadata: string | null) =>
         pool.query(
@@ -375,10 +479,11 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
         expect(await sqlstate(insert(metadata))).toBe('23514')
       }
     } finally {
-      await database.drop()
+      await database?.drop()
+      await rm(directory, { recursive: true, force: true })
     }
   })
-  it.each([
+  describe.each([
     'backfill',
     'hash preservation',
     'organization preservation',
@@ -388,81 +493,111 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
     'OAuth grant preservation',
     'booking attribution preservation',
     'duration configuration preservation',
-  ] as const)(
-    'detects a source-copy %s migration mutation and verifies restored SQL',
-    async (protection) => {
-      const directory = await predecessorDirectory()
-      let database: TestDatabase | undefined
-      let restored: TestDatabase | undefined
-      try {
-        database = await createTestDatabase(serverUrl as string, directory)
-        await seed(database.pool)
-        const before = await records(database.pool)
-        const sentinels = await sentinelRecords(database.pool)
-        const source = await readFile(join(migrationsDir, migration), 'utf8')
-        let mutant = source
-        if (protection === 'backfill')
-          mutant = source.replace(
-            'UPDATE auth.apikey\nSET metadata = (coalesce(metadata::jsonb, \'{}\'::jsonb) || \'{"scope":"full"}\'::jsonb)::text;',
-            'SELECT 1;',
-          )
-        if (protection === 'hash preservation')
-          mutant += "\nUPDATE auth.apikey SET key='mutated-synthetic-hash';"
-        if (protection === 'organization preservation')
-          mutant += "\nUPDATE auth.apikey SET metadata=(metadata::jsonb - 'organizationId')::text;"
-        if (protection === 'state preservation') mutant += '\nUPDATE auth.apikey SET enabled=true;'
-        if (protection === 'immutable trigger')
-          mutant = source.replace(
-            "IF parsed -> 'scope' IS DISTINCT FROM old_scope THEN",
-            'IF false THEN',
-          )
-        if (protection === 'session preservation')
-          mutant += `\nUPDATE auth.session SET "activeOrganizationId"='00000000-0000-4000-8000-000000000003';`
-        if (protection === 'OAuth grant preservation')
-          mutant +=
-            "\nUPDATE mcp_oauth_grants SET organization_id='00000000-0000-4000-8000-000000000003';"
-        if (protection === 'booking attribution preservation')
-          mutant +=
-            '\nUPDATE bookings SET api_key_id=null,cancelled_api_key_id=null,idempotency_key=null,idempotency_fingerprint=null;'
-        if (protection === 'duration configuration preservation')
-          mutant += '\nUPDATE event_types SET allowed_durations_minutes=ARRAY[duration_minutes];'
-        expect(mutant).not.toBe(source)
-        await writeFile(join(directory, migration), mutant)
-        await runMigrations(database.pool, directory)
-        const assertPreserved = async (pool: pg.Pool, expectedSentinels = sentinels) => {
-          if (protection === 'immutable trigger') {
-            expect(
-              await sqlstate(
-                pool.query(
-                  "UPDATE auth.apikey SET metadata=jsonb_set(metadata::jsonb,'{scope}','\"read\"')::text",
-                ),
-              ),
-            ).toBe('23514')
-          } else {
-            expect(await records(pool)).toEqual(
-              before.map((row) => ({ ...row, metadata: { ...row.metadata, scope: 'full' } })),
-            )
-            expect(await sentinelRecords(pool)).toEqual(expectedSentinels)
-          }
+  ] as const)('source-copy %s migration protection', (protection) => {
+    interface FixtureState {
+      directory?: string
+      database?: TestDatabase
+      before?: Awaited<ReturnType<typeof records>>
+      sentinels?: Awaited<ReturnType<typeof sentinelRecords>>
+      setup?: Promise<void>
+      pending?: Promise<void>
+    }
+    let state: FixtureState
+    beforeEach(() => {
+      const current: FixtureState = {}
+      state = current
+      current.setup = (async () => {
+        current.directory = await predecessorDirectory()
+        current.database = await fixtureDatabase(current.directory)
+        await seed(current.database.pool)
+        current.before = await records(current.database.pool)
+        current.sentinels = await sentinelRecords(current.database.pool)
+      })()
+      return current.setup
+    })
+    afterEach(async () => {
+      // Capture ownership before awaiting: even if teardown itself times out,
+      // its continuation must never release a subsequent case's database.
+      await afterFixtureWork(state, async (current) => {
+        try {
+          await current.database?.drop()
+        } finally {
+          if (current.directory) await rm(current.directory, { recursive: true, force: true })
         }
-        await expect(assertPreserved(database.pool)).rejects.toMatchObject({
-          name: 'AssertionError',
-        })
-        await writeFile(join(directory, migration), source)
-        restored = await createTestDatabase(serverUrl as string, directory, { migrate: false })
-        // Seed through the actual predecessor before applying the restored migration.
-        await rm(join(directory, migration))
-        await runMigrations(restored.pool, directory)
-        await seed(restored.pool)
-        const restoredSentinels = await sentinelRecords(restored.pool)
-        await writeFile(join(directory, migration), source)
-        await runMigrations(restored.pool, directory)
-        await assertPreserved(restored.pool, restoredSentinels)
-      } finally {
-        await restored?.drop()
-        await database?.drop()
-        await rm(directory, { recursive: true, force: true })
-      }
-    },
-  )
+      })
+    })
+    for (const variant of ['mutated', 'restored'] as const) {
+      it(`checks ${variant} SQL against the preservation assertion`, ({ signal }) => {
+        const current = state
+        current.pending = (async () => {
+          const fixture = current.database
+          const path = current.directory
+          const before = current.before
+          const sentinels = current.sentinels
+          if (!fixture || !path || !before || !sentinels)
+            throw new Error('Migration fixture setup did not complete')
+          signal.throwIfAborted()
+          const source = await readFile(join(migrationsDir, migration), 'utf8')
+          let mutant = source
+          if (protection === 'backfill')
+            mutant = source.replace(
+              'UPDATE auth.apikey\nSET metadata = (coalesce(metadata::jsonb, \'{}\'::jsonb) || \'{"scope":"full"}\'::jsonb)::text;',
+              'SELECT 1;',
+            )
+          if (protection === 'hash preservation')
+            mutant += "\nUPDATE auth.apikey SET key='mutated-synthetic-hash';"
+          if (protection === 'organization preservation')
+            mutant +=
+              "\nUPDATE auth.apikey SET metadata=(metadata::jsonb - 'organizationId')::text;"
+          if (protection === 'state preservation')
+            mutant += '\nUPDATE auth.apikey SET enabled=true;'
+          if (protection === 'immutable trigger')
+            mutant = source.replace(
+              "IF parsed -> 'scope' IS DISTINCT FROM old_scope THEN",
+              'IF false THEN',
+            )
+          if (protection === 'session preservation')
+            mutant += `\nUPDATE auth.session SET "activeOrganizationId"='00000000-0000-4000-8000-000000000003';`
+          if (protection === 'OAuth grant preservation')
+            mutant +=
+              "\nUPDATE mcp_oauth_grants SET organization_id='00000000-0000-4000-8000-000000000003';"
+          if (protection === 'booking attribution preservation')
+            mutant +=
+              '\nUPDATE bookings SET api_key_id=null,cancelled_api_key_id=null,idempotency_key=null,idempotency_fingerprint=null;'
+          if (protection === 'duration configuration preservation')
+            mutant += '\nUPDATE event_types SET allowed_durations_minutes=ARRAY[duration_minutes];'
+          expect(mutant).not.toBe(source)
+          signal.throwIfAborted()
+          await writeFile(join(path, migration), variant === 'mutated' ? mutant : source)
+          signal.throwIfAborted()
+          await runMigrations(fixture.pool, path)
+          signal.throwIfAborted()
+          const assertPreserved = async (pool: pg.Pool, expectedSentinels = sentinels) => {
+            if (protection === 'immutable trigger') {
+              expect(
+                await sqlstate(
+                  pool.query(
+                    "UPDATE auth.apikey SET metadata=jsonb_set(metadata::jsonb,'{scope}','\"read\"')::text",
+                  ),
+                ),
+              ).toBe('23514')
+            } else {
+              expect(await records(pool)).toEqual(
+                before.map((row) => ({ ...row, metadata: { ...row.metadata, scope: 'full' } })),
+              )
+              expect(await sentinelRecords(pool)).toEqual(expectedSentinels)
+            }
+          }
+          if (variant === 'mutated') {
+            await expect(assertPreserved(fixture.pool)).rejects.toMatchObject({
+              name: 'AssertionError',
+            })
+          } else {
+            await assertPreserved(fixture.pool)
+          }
+        })()
+        return current.pending
+      })
+    }
+  })
 })

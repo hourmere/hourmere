@@ -318,6 +318,38 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       const schedules = await run('schedules', { limit: 1 })
       expect(schedules.data.data).toHaveLength(1)
       expect((await run('schedule', { id: schedules.data.data[0].id })).code).toBe(0)
+      const scheduleId = schedules.data.data[0].id
+      const availability = await run('schedule-availability', { id: scheduleId })
+      expect(availability.code).toBe(0)
+      const availabilityInput = {
+        id: scheduleId,
+        name: availability.data.schedule.name,
+        timeZone: availability.data.schedule.timeZone,
+        weeklyHours: availability.data.schedule.weeklyHours,
+        overrides: [{ date: '2026-12-25', intervals: [] }],
+        expectedVersion: availability.data.version,
+      }
+      const savedAvailability = await run('save-availability', availabilityInput)
+      expect(savedAvailability.code).toBe(0)
+      expect(savedAvailability.data.overrides).toEqual(availabilityInput.overrides)
+      expect((await run('schedule-availability', { id: scheduleId })).data).toEqual(
+        savedAvailability.data,
+      )
+      expect((await run('save-availability', availabilityInput)).error.error).toBe(
+        'schedule_conflict',
+      )
+      for (const token of [readKey.key, bookingsKey.key]) {
+        expect(
+          (await run('save-availability', availabilityInput, { key: token })).error.error,
+        ).toBe('insufficient_scope')
+      }
+      expect(
+        (await run('schedule-availability', { id: scheduleId }, { key: readKey.key })).code,
+      ).toBe(0)
+      expect(
+        (await run('schedule-availability', { id: scheduleId }, { key: bookingsKey.key })).error
+          .error,
+      ).toBe('insufficient_scope')
       const slots = await run('slots', {
         handle: 'cli-host',
         slug: 'intro',

@@ -256,6 +256,36 @@ describe.skipIf(!serverUrl)('MCP access-token profile validation', () => {
       await db.insertInto('auth.member').values(member).execute()
     }
   })
+  it('checks consent membership on the broker transaction before binding the grant', async () => {
+    const bind = mcpOAuthPlugins(db, BASE)[1].options.postLogin?.consentReferenceId
+    if (typeof bind !== 'function') throw new Error('Missing consent binding policy')
+    const user = await db
+      .selectFrom('auth.user')
+      .selectAll()
+      .where('id', '=', userId)
+      .executeTakeFirstOrThrow()
+    const intent = { id: randomUUID(), userId, sessionId: randomUUID(), organizationId, grantId }
+    const rollback = new Error('Roll back the synthetic verification change')
+    await expect(
+      db.transaction().execute(async (trx) => {
+        await trx
+          .updateTable('auth.user')
+          .set({ emailVerified: false })
+          .where('id', '=', userId)
+          .execute()
+        // A second connection would still see the committed verified user. The callback
+        // must recheck membership through the broker's client, without skipping the check.
+        await expect(
+          withMcpOAuthIntent(
+            intent,
+            () => bind({ user, session: { id: intent.sessionId } } as Parameters<typeof bind>[0]),
+            trx,
+          ),
+        ).rejects.toMatchObject({ status: 'FORBIDDEN' })
+        throw rollback
+      }),
+    ).rejects.toBe(rollback)
+  })
   it('matches both the user and browser session before clearing organization selection', async () => {
     const redirect = mcpOAuthPlugins(db, BASE)[1].options.postLogin?.shouldRedirect
     if (typeof redirect !== 'function') throw new Error('Missing post-login policy')

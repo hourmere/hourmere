@@ -12,6 +12,8 @@ export type BookingEvent =
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
   | { type: 'cancelled'; bookingId: string }
+  | { type: 'reschedule_requested'; bookingId: string; requestId: string }
+  | { type: 'reschedule_request_expired'; bookingId: string; requestId: string }
 
 /**
  * Called by the booking services inside the transaction that makes the change, with that
@@ -26,7 +28,19 @@ export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Insta
  * What a service function receives for an authenticated call. REST routes and MCP tools
  * build it the same way, so people and agents get exactly the same behavior.
  */
+export type AttendeeNoShowNotifier = (
+  trx: Db,
+  event: {
+    bookingId: string
+    attendeeId: string
+    noShowMarkedAt: string | null
+    noShowMarkedBy: string | null
+  },
+  now: Temporal.Instant,
+) => Promise<void>
+
 export interface ServiceContext {
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   db: Db
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined

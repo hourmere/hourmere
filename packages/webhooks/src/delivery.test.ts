@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
@@ -75,6 +77,67 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     )
     return { user, ctx, webhook, secret, bookingId }
   }
+  it('captures each request generation once and keeps notes out of webhook payloads', async () => {
+    const { bookingId, webhook } = await fixture()
+    const ids = [randomUUID(), randomUUID()]
+    for (const requestId of ids) {
+      for (const type of ['reschedule_requested', 'reschedule_request_expired'] as const) {
+        for (let replay = 0; replay < 2; replay++) {
+          await db
+            .transaction()
+            .execute((trx) =>
+              webhookBookingNotifier(jobs, settings)(trx, { type, bookingId, requestId }, NOW),
+            )
+        }
+      }
+    }
+    const rows = await db
+      .selectFrom('webhook_deliveries')
+      .selectAll()
+      .where('webhook_id', '=', webhook.id)
+      .execute()
+    expect(rows).toHaveLength(4)
+    expect(rows.filter((row) => row.event_type === 'booking.reschedule_requested')).toHaveLength(2)
+    expect(
+      rows.filter((row) => row.event_type === 'booking.reschedule_request_expired'),
+    ).toHaveLength(2)
+    for (const row of rows) {
+      const payload = JSON.parse(row.payload)
+      expect(ids).toContain(payload.data.requestId)
+      expect(payload.data.status).toBe('confirmed')
+      expect(payload.data).not.toHaveProperty('note')
+      expect(payload.data).not.toHaveProperty('manageToken')
+    }
+  })
+
+  it.each([
+    ['request event type', "? 'booking.reschedule_requested'", "? 'booking.cancelled'"],
+    ['request generation identity', 'request_id: receiptId', 'request_id: null'],
+  ])('detects removing webhook %s with a source-copy assertion', async (_, from, to) => {
+    const notify = await webhookSourceCopy(from, to)
+    const { bookingId, webhook } = await fixture()
+    for (let index = 0; index < 2; index++) {
+      await db
+        .transaction()
+        .execute((trx) =>
+          notify(jobs, settings)(
+            trx,
+            { type: 'reschedule_requested', bookingId, requestId: randomUUID() },
+            NOW,
+          ),
+        )
+    }
+    const rows = await db
+      .selectFrom('webhook_deliveries')
+      .selectAll()
+      .where('webhook_id', '=', webhook.id)
+      .execute()
+    expect(() => {
+      expect(rows).toHaveLength(2)
+      expect(rows.every((row) => row.event_type === 'booking.reschedule_requested')).toBe(true)
+    }).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
+  })
+
   async function captured() {
     const data = await fixture()
     await db.transaction().execute((trx) =>
@@ -910,3 +973,32 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     })
   })
 })
+
+async function webhookSourceCopy(
+  before: string,
+  after: string,
+): Promise<typeof webhookBookingNotifier> {
+  const url = new URL('./delivery.ts', import.meta.url)
+  let source = readFileSync(url, 'utf8')
+  expect(source).toContain(before)
+  source = stripTypeScriptTypes(source.replace(before, after))
+  const dependencies: Record<string, unknown> = {}
+  for (const item of [...source.matchAll(/^import\s*\{([\s\S]*?)\}\s*from '([^']+)'\n/gm)]) {
+    const specifier = item[2] as string
+    const imported = await import(
+      specifier.startsWith('.') ? new URL(specifier, url).href : specifier
+    )
+    for (const binding of (item[1] as string)
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)) {
+      const [name, local] = binding.split(/\s+as\s+/)
+      dependencies[local ?? (name as string)] = imported[name as string]
+    }
+    source = source.replace(item[0], '')
+  }
+  source = source.replace(/\bexport /g, '')
+  return new Function(...Object.keys(dependencies), `${source}; return webhookBookingNotifier`)(
+    ...Object.values(dependencies),
+  )
+}

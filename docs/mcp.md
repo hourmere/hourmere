@@ -54,6 +54,8 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `get_branding` | — | `branding get` | `full, read` |
+| `set_branding` | — | `branding set` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -62,6 +64,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `manageToken` | `reschedule` | `full, bookings` |
@@ -69,6 +72,9 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
+| `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
+| `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
@@ -77,6 +83,8 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `get_schedule_availability` | — | `schedule-availability` | `full, read` |
+| `save_schedule_availability` | — | `save-availability` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
@@ -162,6 +170,31 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
 
+## Store organization branding
+
+`get_branding` reads the current organization's saved logo reference, primary color and
+WCAG contrast results (`full` or `read` keys). `set_branding` accepts `brandPrimaryColor`
+as `#RRGGBB` and `brandLogo` as an existing uploaded SHA-256 reference (`full` keys).
+Omitted fields stay unchanged; `null` clears a field. Personal owners and team
+owners/admins can use these tools; members cannot. Readable black or white button text
+is selected automatically. The background contrast is reported against white.
+
+Upload a PNG, JPEG or WebP through REST `POST /api/v1/branding/logo` or
+`hourmere branding upload --file logo.png --content-type image/png`; MCP accepts the
+returned reference, not binary image data or remote URLs. Uploads are limited to
+512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG, and attached to
+the current organization. SVG and animated images are rejected. This stores branding;
+public page and email theme application is not included yet.
+
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
+`inviteePhone`, normalized to E.164 after removing common phone separators.
+CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.
+
 ## Configure booking limits
 
 `create_event_type` and `update_event_type` accept nullable `maxBookingsPerDay`,
@@ -171,3 +204,31 @@ explicit null clears a ceiling. Day ≤ week, week ≤ month and day ≤ month a
 whenever each pair is configured. The same REST permissions and validation apply.
 See [booking limits](https://hourmere.com/docs/booking-limits) for examples, host
 time zones, Monday-based weeks, calendar months and cancellation/reschedule behavior.
+## Export bookings without filling agent context
+
+`export_bookings` validates the same bounded range and permissions as REST, then
+returns `downloadPath`, `authentication: "api_key_or_session"` and
+`containsPersonalData: true`. It never returns CSV rows, signed URLs or credentials.
+The relative pointer is not a capability: downloading requires an authorized session
+or `read`/`full` API key on the same instance, with organization membership checked
+again. An OAuth MCP grant can obtain the pointer but cannot authenticate the REST
+request; use a suitable API key or the signed-in bookings page to download.
+
+Required inputs are RFC 3339 `from` (inclusive) and `to` (exclusive), at most 366 days
+apart. Optional inputs are `timeZone` (UTC by default), `bom` (false by default),
+`status`, `eventTypeId`, `hostUserId`, `endAfter`, `endTo` and `order`. Personal owners
+export their own bookings. Team exports require a browser session and are unavailable
+to MCP API keys or OAuth grants (`team_management_access_denied`). The pointer pins the
+organization to prevent a browser workspace switch from downloading another workspace.
+Use `hourmere export --input export.json --output bookings.csv` for a streamed private
+file. Keeping rows out of MCP responses prevents large personal-data dumps in model
+context. See [CSV exports](https://hourmere.com/docs/booking-export).
+
+## Attendee attendance access
+
+`get_booking_attendees` and `set_attendee_no_show` require the caller to host the booking
+in the current organization, for API keys of every scope and MCP OAuth alike. Team
+owner/admin status does not grant access to bookings hosted by other members through
+MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
+Non-host team administrators must use a browser session. See the
+[no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.

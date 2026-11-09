@@ -147,6 +147,12 @@ The personal and `/api/v1/public/teams/{handle}/{slug}` endpoints share this con
 
 ## Create and manage one booking
 
+For reporting, [export bookings as CSV](/docs/booking-export) using
+`GET /api/v1/bookings/export.csv`. A `read` or `full` key and a bounded date range are
+required for personal exports. Team exports require a verified browser session and current
+owner/admin membership, and use the limited team-admin field set. Team API keys and OAuth
+credentials cannot export team data.
+
 Bookings send email to the host/invitee when workers are enabled. Additional guests require
 the host to enable `allowGuests` on the event type (off by default, at most ten). Otherwise
 nonempty `guests` return `400 guests_not_allowed`. Existing guests keep receiving updates
@@ -242,6 +248,40 @@ delivery state, attempts, fixed error classification and current resend eligibil
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
 
+## Meeting location choices
+
+Configure an ordered `locations` list through the event-type create/update operations,
+and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
+`inviteePhone`, normalized to E.164 after removing common phone separators.
+CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
+for configuration examples, public discovery, compatibility and conference rules.
+
+## Ask an invitee to choose another time
+
+Hosts can send `POST /api/v1/bookings/{id}/request-reschedule` with
+`{"idempotencyKey":"<random UUID>","note":"Could you choose another time?"}`.
+The MCP equivalent is `request_reschedule` with `bookingId` and the same fields;
+CLI users run `hourmere request-reschedule --input request.json`.
+A `bookings` or `full` API key and existing host permission are required.
+The optional plain-text note is limited to 2000 UTF-16 code units and appears only
+in the email body. Retain the UUID and identical input for safe retries; use a new
+UUID to replace the outstanding request.
+
+The returned booking stays `confirmed`, with optional `pendingReschedule` containing
+`id`, `expiresAt` and `note`. The original time stays booked and blocks availability
+until the invitee uses their normal manage link to pick another time or cancel.
+The request expires after 48 hours or when the original meeting starts, whichever
+comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+cannot receive a request. Picking uses the normal availability rules and reschedule
+limit, calendar updates, conference handling and reminders.
+
+When answering a request through REST or MCP, include `rescheduleRequestId` from
+`pendingReschedule.id` with the managed pick or cancel input. This rejects stale
+replaced requests and makes identical retries safe; a replayed pick returns the
+same successor with `manageToken: null`. Without that field, existing ordinary
+reschedule retry semantics remain unchanged.
+
 ## Configure booking limits
 
 Event-type creation and updates accept `maxBookingsPerDay`, `maxBookingsPerWeek` and
@@ -252,6 +292,17 @@ weekly limit. Event-type reads return all three settings. API keys need `full` s
 for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
 CLI examples, host schedule time zones, Monday-based weeks, calendar months and
 counting rules. Lowering a ceiling does not cancel existing bookings.
+
+## Record attendee no-shows
+
+[Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
+scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
+MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
+`noShow`. API keys require `bookings` or `full` plus booked-host authority. API keys
+of every scope and MCP OAuth can read or mark attendees only on bookings the caller
+hosts in the current organization. Non-host team owners/admins need a browser session;
+agent credentials receive `booking_not_found`, just as for a missing booking.
+Invitee pages and messages are unchanged, including scheduled follow-ups.
 
 ## Booking waitlists
 

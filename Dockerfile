@@ -12,9 +12,15 @@ WORKDIR /app
 # dependency of some workspace, as pg is, although better-auth lists it as optional.
 FROM base AS build
 COPY . .
+# Sharp's platform binaries and libvips are optional npm dependencies, but required
+# by logo uploads. Preserve only its @img packages while pruning optional dev peers.
 RUN npm ci --ignore-scripts \
  && npm run build --workspace @hourmere/web \
- && npm prune --omit=dev --omit=optional --ignore-scripts
+ && cp -a node_modules/@img /tmp/hourmere-sharp-img \
+ && npm prune --omit=dev --omit=optional --ignore-scripts \
+ && mkdir -p node_modules/@img \
+ && cp -a /tmp/hourmere-sharp-img/. node_modules/@img/ \
+ && node --input-type=module -e "import sharp from 'sharp'; await sharp({create:{width:1,height:1,channels:3,background:'white'}}).png().toBuffer()"
 
 FROM base AS runtime
 ENV NODE_ENV=production \
