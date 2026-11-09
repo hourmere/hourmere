@@ -10,6 +10,7 @@
     "schema:sql": "auth generate --config src/schema-cli.ts --output auth-schema.generated.sql --yes"
   },
   "devDependencies": {
+    "@better-auth/sso": "1.7.16",
     "@types/pg": "8.23.1",
     "auth": "1.7.16"
   },
@@ -20,7 +21,6 @@
     "@better-auth/kysely-adapter": "1.7.16",
     "@better-auth/mcp": "1.7.16",
     "@better-auth/oauth-provider": "1.7.16",
-    "@better-auth/sso": "1.7.16",
     "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/mail": "*",

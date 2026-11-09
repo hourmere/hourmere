@@ -3,9 +3,10 @@
 Status: design only. The plugin evaluation was first run 2026-11-06 against the Better
 Auth 1.7.12 family and re-run 2026-11-09, in the Upgrade step, against the installed
 1.7.16 family that main pins since the November security upgrade. `@better-auth/sso`
-1.7.16 is a production dependency of the auth workspace, so the audited production tree
-and the image carry the plugin and its SAML and XML stack; no shipped source imports or
-registers it. No SSO provider, route, feature flag or migration is enabled. SSO will be
+1.7.16 is a development dependency of the auth workspace: no shipped source imports or
+registers it, and the production image does not contain it. The first plan step that
+imports it from shipped code moves it to `dependencies`. No SSO provider, route, feature
+flag or migration is enabled. SSO will be
 available to every instance, including self-hosted ones; there is no license,
 subscription or hosted-service requirement.
 
@@ -24,7 +25,7 @@ A post-login hook cannot repair a session that should never have been issued.
 
 ### Method and exact versions
 
-packages/auth/package.json pins better-auth, `@better-auth/sso` and every other family package at exactly 1.7.16, and the root lockfile records the whole tree. The evaluation reads the installed JS, chiefly `packages/auth/node_modules/@better-auth/sso/dist/index.mjs`; line numbers below refer to that file unless another file is named. Lockfile versions of the plugin's dependencies: samlify 2.15.1, jose 6.2.12, @xmldom/xmldom 0.9.12 (0.8.15 nested under xml-crypto and @authenio/xml-encryption), fast-xml-parser 5.12.0, xml-crypto 6.4.0 and tldts 7.4.18; all are MIT-licensed. `npm audit --omit=dev` reported no vulnerabilities before and after the package was added.
+packages/auth/package.json pins better-auth, `@better-auth/sso` and every other family package at exactly 1.7.16, and the root lockfile records the whole tree. The evaluation reads the installed JS, chiefly `packages/auth/node_modules/@better-auth/sso/dist/index.mjs`; line numbers below refer to that file unless another file is named. Lockfile versions of the plugin's dependencies: samlify 2.15.1, jose 6.2.12, @xmldom/xmldom 0.9.12 (0.8.15 nested under xml-crypto and @authenio/xml-encryption), fast-xml-parser 5.12.0, xml-crypto 6.4.0 and tldts 7.4.18; all are MIT-licensed. The plugin is a `devDependencies` entry with the exact 1.7.16 pin, so `npm prune --omit=dev` in the image build leaves the plugin and its SAML and XML stack out of the image. `npm audit` and `npm audit --omit=dev` report no vulnerabilities, and the production tree keeps its 174 packages. The first plan step that imports the plugin from shipped code moves it to `dependencies` and re-runs the production audit.
 
 Against 1.7.12, the 2026-11-06 baseline, the plugin's runtime JS differs only in bundler output: folded constants, added block braces and one local hoisted out of an object literal (the remote JWKS set is still created on every callback). The plugin's changelog has empty entries for 1.7.13 to 1.7.16, and core's `oauth2/verify-id-token.mjs` is byte-identical. Every row below was re-checked against the 1.7.16 source. The 1.7.12 baseline came from an owned spike install (`.sso-evaluation-spike`, deleted after inspection) that resolved jose 6.2.15; the lockfile now resolves 6.2.12, which has the same `iat` behaviour.
 
@@ -1093,8 +1094,8 @@ behaviour keeps available stay available.
 ## Out of scope and remaining decisions
 
 No product implementation or migration lands with this design. The Upgrade step adds one
-dependency, `@better-auth/sso` at the pinned family version, which no shipped source
-imports or registers.
+development dependency, `@better-auth/sso` at the pinned family version, which no shipped
+source imports or registers.
 SCIM, IdP group role mapping, service accounts, IdP-initiated SAML, SAML SLO, encrypted
 assertions, automatic domain transfers, wildcard domain claims, a separate
 recovery-owner withdrawal operation and global forced SSO

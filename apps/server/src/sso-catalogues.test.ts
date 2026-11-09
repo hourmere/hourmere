@@ -456,8 +456,8 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     expect(() => expectNoSsoRoutes([...literals, '/sso/callback'])).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
-    // The SSO plugin package is a dependency for evaluation only (docs/sso.md); no shipped
-    // source imports it, so no Better Auth instance can register it.
+    // The SSO plugin package is a development dependency, for evaluation only (docs/sso.md);
+    // no shipped source imports it, so no Better Auth instance can register it.
     const ssoPluginImport = /(['"`])@better-auth\/sso(\/[^'"`]*)?\1/
     expect(sources.filter(([, source = '']) => ssoPluginImport.test(source))).toEqual([])
     expect(ssoPluginImport.test("import { sso } from '@better-auth/sso'")).toBe(true)
