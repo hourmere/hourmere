@@ -144,15 +144,19 @@ const productionOnlyPaths = [
 ]
 
 // Better Auth serves every endpoint of its plugins behind the one `/api/auth/*` mount, which
-// the route inventory sees as a single route. Their own paths come from `auth.api` of
+// the route inventory sees as a single route. Their own paths come from
 // createAuth(productionAuthOptions(...)), the call startServer makes, with every input
 // startServer passes supplied: once with every optional group of the configuration on, and
 // once for each combination of the groups that change what createAuth registers (AUTH_GROUPS),
 // every other setting at its default. Each combination's paths must be among the all-on
-// ones, as the route inventory requires of the document-only app. An endpoint that createAuth
-// registers for any of those inputs and combinations is seen, wherever its path string comes
+// ones, as the route inventory requires of the document-only app. The paths are read twice:
+// from `auth.api`, which Better Auth builds before any plugin's init runs, and, once startup
+// has settled, from the endpoints of the plugin objects in createAuth's options, which its
+// router reads again on every request. An endpoint that createAuth registers for any of those
+// inputs and combinations, by the end of plugin init, is seen wherever its path string comes
 // from. One gated on the value of a setting the combinations do not vary (the signup mode,
-// the PUBLIC_URL scheme) or on an input startServer does not pass is not.
+// the PUBLIC_URL scheme) or on an input startServer does not pass is not, and neither is one
+// added after startup has settled (from a timer, for example).
 // A plugin's onRequest and onResponse run before and after Better Auth matches a route, so
 // either can answer a path no endpoint registers, which no inventory sees. Better Auth runs
 // them from the plugin list in its context: the declared plugins after every plugin's init,
@@ -160,7 +164,8 @@ const productionOnlyPaths = [
 // actually runs after plugin init, in every configuration it builds: they must be exactly
 // the declared ones, and the ones with either hook exactly the known ones (the MCP OAuth
 // provider plugin, which answers its own discovery documents). What that plugin's own hook
-// answers is not checked. Router middlewares and before/after hooks run only for a
+// answers is not checked, and neither is a plugin added to the list after startup has
+// settled. Router middlewares and before/after hooks run only for a
 // registered endpoint, whose path is checked.
 // Hourmere is the OAuth authorization server for MCP clients, and this is that server's own
 // OpenID discovery document (the OAuth provider plugin in mcpOAuthPlugins, served at
@@ -220,12 +225,19 @@ async function productionAuth(config: Config) {
     )
     // Let startup settle against the refused pool before it is closed.
     const context = await auth.$context
-    const declaredPlugins: { id: string }[] = auth.options.plugins
+    const declaredPlugins: { id: string; endpoints?: object }[] = auth.options.plugins
     // The list Better Auth's router runs onRequest and onResponse from, after plugin init.
     const plugins: { id: string; onRequest?: unknown; onResponse?: unknown }[] =
       context.options.plugins ?? []
+    // auth.api is built before any plugin's init runs. The router builds its endpoints again on
+    // every request from the endpoints of the plugin objects in createAuth's options, which an
+    // init can add to, so those are read here too, after plugin init.
+    const pluginEndpoints = Object.assign(
+      {},
+      ...declaredPlugins.map(({ endpoints }) => endpoints ?? {}),
+    )
     return {
-      paths: authEndpointPaths(auth.api),
+      paths: [...new Set([...authEndpointPaths(auth.api), ...authEndpointPaths(pluginEndpoints)])],
       providers: context.socialProviders.map(({ id }) => id).sort(),
       declaredPlugins: declaredPlugins.map(({ id }) => id),
       plugins: plugins.map(({ id }) => id),

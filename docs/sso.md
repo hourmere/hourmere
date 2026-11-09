@@ -940,7 +940,9 @@ From the Upgrade step on they also check the endpoint paths of every Better Auth
 which the route inventory sees only as the single `/api/auth/*` mount: `createAuth` is
 built from `productionAuthOptions` (`apps/server/src/server.ts`), the options `startServer`
 itself passes, with every input `startServer` supplies, against a database pool that
-never connects, and every `auth.api` endpoint path is checked. It is built under the same
+never connects. Every endpoint path is checked twice: in `auth.api`, which Better Auth
+builds before any plugin's `init` runs, and, once startup has settled, in the plugin objects
+of `createAuth`'s options, whose endpoints its router reads again on every request. It is built under the same
 all-groups-on configuration (including MCP OAuth and both social providers) and again
 under each of the eight combinations of the groups that change what `createAuth`
 registers (MCP OAuth, Google sign-in and Microsoft sign-in, from none of them, a default
@@ -962,11 +964,12 @@ the `src` directory of each apps, packages and tools workspace is checked too, l
 only an explicit list of test-support and generated files, and no such source may import
 `@better-auth/sso`. These checks are by name. A path assembled from pieces escapes the
 literal scan, although the route and endpoint inventories still see it once it is
-registered for a configuration they build; an endpoint gated on the value of a setting
-the combinations do not vary (the signup mode, the `PUBLIC_URL` scheme) or on an input
-`startServer` does not pass, what the MCP OAuth provider plugin's own request hook
-answers, a run-together name outside the word list, and shipped code outside a `src`
-directory (the web service worker, the site worker, Astro page routes) are not seen.
+registered for a configuration they build, by the end of plugin init; an endpoint gated
+on the value of a setting the combinations do not vary (the signup mode, the `PUBLIC_URL`
+scheme) or on an input `startServer` does not pass, an endpoint or plugin added after
+startup has settled (from a timer, for example), what the MCP OAuth provider plugin's own
+request hook answers, a run-together name outside the word list, and shipped code outside
+a `src` directory (the web service worker, the site worker, Astro page routes) are not seen.
 Names match `saml`, `oidc` and `openid` anywhere, `sso` as a word (after splitting
 camelCase, separators, digits, the plural or version suffix — `ssos`, `SSOv2`,
 `listSSOs` — and a short list of words run together with it: `ssoconfig`,
