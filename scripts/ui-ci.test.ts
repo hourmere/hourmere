@@ -180,8 +180,9 @@ describe('UI measurement CI contract', () => {
 
   // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
-    // Also run the isolated Caddy upgrade integration; PostgreSQL limits stay unchanged.
-    ['check', '108d0bfde8853d30249ccbb817b61152784571bb04f1c623a465b5371b7896f4'],
+    // Also enforce the storage-only interface comparison against the event merge base;
+    // the Caddy upgrade integration and PostgreSQL limits stay unchanged.
+    ['check', '88dc470822a88bb361bb5b98bd0869bc6092ef8f1440d414817c5a9a07c66ede'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],
