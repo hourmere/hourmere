@@ -1574,7 +1574,7 @@ unique index, so they cannot collide with ordinary booking idempotency keys.
 
 ## Private attendee no-show markers
 
-Migration 0062 adds nullable `booking_attendees.no_show_marked_at` and
+Migration 0070 adds nullable `booking_attendees.no_show_marked_at` and
 `no_show_marked_by` as a paired current-state marker. Existing attendees remain unmarked.
 Attribution is the acting account UUID, retained as history rather than a cascading account
 foreign key. Unmarking clears both fields. Booking/attendee deletion retains its existing
@@ -1590,12 +1590,15 @@ Rescheduling creates fresh attendee rows; cancellation retains historical marks.
 Follow-ups and notifications are unaffected. See [no-shows](https://hourmere.com/docs/no-shows).
 
 The migration adds `booking.attendee_no_show_changed` to webhook subscriptions and delivery
-types. The old booking/event deduplication remains for lifecycle events; attendance changes
-can emit multiple transitions for the same booking. Existing subscription arrays and
-delivery snapshots are preserved. This upgrade is not rolling-safe: stop every old
-web/all/worker process, apply migration 0062, then start all roles together with upgraded
-code. Old webhook capture uses the previous unique constraint and fails with PostgreSQL
-`42P10` after migration, potentially rolling back booking changes.
+types. Migration 0064's delivery key (webhook, booking, event type and request identity,
+with NULLs equal) becomes the partial unique index `webhook_deliveries_booking_lifecycle`,
+which still deduplicates lifecycle and reschedule-request receipts. Attendance changes are
+outside it and can emit multiple transitions for the same booking. Existing subscription
+arrays and delivery snapshots are preserved. This upgrade is not rolling-safe: stop every
+old web/all/worker process, apply migration 0070, then start all roles together with
+upgraded code. Old webhook capture names the previous unique constraint's columns without
+the index predicate and fails with PostgreSQL `42P10` after migration, potentially rolling
+back booking changes.
 
 ## Group slots and independent seats
 

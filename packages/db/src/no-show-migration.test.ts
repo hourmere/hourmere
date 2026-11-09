@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,9 +10,9 @@ import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0062_attendee_no_show.sql'
+const migration = '0070_attendee_no_show.sql'
 describe.skipIf(!serverUrl)('attendee no-show migration', () => {
-  it('preserves predecessor records, installs fresh, reruns without writes, and enforces paired markers', async () => {
+  it('upgrades from every earlier migration, matches a fresh install, reruns without writes, and enforces markers and receipts', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-no-show-'))
     let old: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -27,6 +28,12 @@ describe.skipIf(!serverUrl)('attendee no-show migration', () => {
       await runMigrations(old.pool, directory)
       await seedLater(old.pool)
       const pool = old.pool
+      // A 0064 reschedule-request receipt must survive and keep its request-scoped identity.
+      const requestId = (
+        await pool.query(`INSERT INTO webhook_deliveries (webhook_id,organization_id,booking_id,event_id,event_type,payload,request_id)
+          SELECT webhook_id,organization_id,booking_id,gen_random_uuid(),'booking.reschedule_requested','{}',gen_random_uuid()
+          FROM webhook_deliveries ORDER BY id LIMIT 1 RETURNING request_id`)
+      ).rows[0].request_id as string
       const snapshot = async () =>
         (
           await pool.query(
@@ -73,8 +80,37 @@ describe.skipIf(!serverUrl)('attendee no-show migration', () => {
       ).rejects.toMatchObject({ code: '23514' })
       await expect(
         pool.query(`INSERT INTO webhook_deliveries (webhook_id,organization_id,booking_id,event_id,event_type,payload)
-        SELECT webhook_id,organization_id,booking_id,gen_random_uuid(),event_type,payload FROM webhook_deliveries LIMIT 1`),
+        SELECT webhook_id,organization_id,booking_id,gen_random_uuid(),event_type,payload FROM webhook_deliveries WHERE request_id IS NULL LIMIT 1`),
       ).rejects.toMatchObject({ code: '23505' })
+      const copyRequest = (id: string) =>
+        pool.query(
+          `INSERT INTO webhook_deliveries (webhook_id,organization_id,booking_id,event_id,event_type,payload,request_id)
+          SELECT webhook_id,organization_id,booking_id,gen_random_uuid(),event_type,payload,$2 FROM webhook_deliveries WHERE request_id=$1`,
+          [requestId, id],
+        )
+      await expect(copyRequest(requestId)).rejects.toMatchObject({ code: '23505' })
+      await copyRequest(randomUUID())
+      // Capture's arbiter is the partial lifecycle index; pre-0070 code omits its predicate.
+      const capture = (eventType: string, predicate = true) =>
+        pool.query(
+          `INSERT INTO webhook_deliveries (webhook_id,organization_id,booking_id,event_id,event_type,payload)
+          SELECT webhook_id,organization_id,booking_id,gen_random_uuid(),$1,payload FROM webhook_deliveries WHERE request_id IS NULL AND event_type='booking.created' ORDER BY id LIMIT 1
+          ON CONFLICT (webhook_id,booking_id,event_type,request_id)
+          ${predicate ? "WHERE event_type <> 'booking.attendee_no_show_changed'" : ''} DO NOTHING RETURNING id`,
+          [eventType],
+        )
+      expect((await capture('booking.created')).rowCount).toBe(0)
+      expect((await capture('booking.attendee_no_show_changed')).rowCount).toBe(1)
+      expect((await capture('booking.attendee_no_show_changed')).rowCount).toBe(1)
+      await expect(capture('booking.created', false)).rejects.toMatchObject({ code: '42P10' })
+      await pool.query(
+        `UPDATE webhooks SET events=ARRAY['booking.created','booking.rescheduled','booking.cancelled','booking.reschedule_requested','booking.reschedule_request_expired','booking.attendee_no_show_changed']`,
+      )
+      await expect(
+        pool.query(
+          `UPDATE webhooks SET events=ARRAY['booking.attendee_no_show_changed','booking.unknown']`,
+        ),
+      ).rejects.toMatchObject({ code: '23514' })
       await pool.query(`INSERT INTO webhook_deliveries (webhook_id,organization_id,booking_id,event_id,event_type,payload)
         SELECT webhook_id,organization_id,booking_id,gen_random_uuid(),'booking.attendee_no_show_changed',payload FROM webhook_deliveries LIMIT 1`)
       await pool.query(`INSERT INTO webhook_deliveries (webhook_id,organization_id,booking_id,event_id,event_type,payload)

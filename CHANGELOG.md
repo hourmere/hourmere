@@ -210,7 +210,7 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
-- **Coordinate the attendee no-show upgrade (migration 0062).** Stop every old web/all
+- **Coordinate the attendee no-show upgrade (migration 0070).** Stop every old web/all
   and worker process, apply the migration, then start all roles together with the new code.
   The migration replaces the webhook delivery uniqueness constraint with a partial index that
   excludes attendance changes; old webhook writes fail with PostgreSQL `42P10` after
