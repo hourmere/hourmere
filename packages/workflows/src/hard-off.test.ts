@@ -202,12 +202,32 @@ describe('workflow hard-off', () => {
     const declaration = readFileSync(join(root, 'packages/workflows/src/hard-off.ts'), 'utf8')
     expect(declaration).toMatch(/^export const WORKFLOWS_IMPLEMENTED: boolean = false$/m)
 
-    // The package reads no environment, configuration or global state.
-    for (const file of sources.filter((path) => path.startsWith('packages/workflows/src/'))) {
+    // The package reads no environment, configuration or global state, and imports only the
+    // pure modules it needs: no `node:process`, configuration or server module.
+    const allowed = new Set([
+      'zod',
+      '@hourmere/core/language',
+      '@hourmere/db',
+      '@hourmere/scheduling',
+      '@hourmere/scheduling/errors',
+      '@hourmere/scheduling/text',
+    ])
+    const own = sources.filter(
+      (path) => path.startsWith('packages/workflows/src/') && !path.endsWith('/testing.ts'),
+    )
+    expect(own).toContain('packages/workflows/src/definition.ts')
+    for (const file of own) {
       const source = readFileSync(join(root, file), 'utf8')
       expect(source, file).not.toMatch(
-        /\bprocess\.|\bglobalThis\b|\bloadConfig\b|\bexport (?:let|var)\b|\bimport\.meta\.env\b/,
+        /\bprocess\b|\bglobalThis\b|\bloadConfig\b|\bexport (?:let|var)\b|\bimport\.meta\b|\brequire\(|\bimport\(/,
       )
+      const specifiers = [...source.matchAll(/^(?:import|export)\b[^'"]*?from '([^']+)'/gm)].map(
+        (match) => match[1] as string,
+      )
+      expect(
+        specifiers.filter((specifier) => !specifier.startsWith('./') && !allowed.has(specifier)),
+        file,
+      ).toEqual([])
     }
   })
 })

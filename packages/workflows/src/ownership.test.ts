@@ -24,6 +24,9 @@ describe('workflow ownership selectors', () => {
       kind: 'team',
       id: ids.team,
     })
+    expect(
+      WorkflowOwnerSelectorSchema.parse({ kind: 'personal', id: ids.user.toUpperCase() }),
+    ).toEqual({ kind: 'personal', id: ids.user })
     for (const value of [
       { kind: 'organization', id: ids.team },
       { kind: 'team', id: 'not-a-uuid' },
@@ -60,6 +63,8 @@ describe('workflow ownership selectors', () => {
     expect(isWorkflowEventType(facts(ids.groupEvent))).toBe(false)
     expect(isWorkflowEventType(facts(ids.deletedEvent))).toBe(false)
     expect(isWorkflowEventType({ ...facts(ids.event), bookingMode: 'seats' })).toBe(false)
+    const { deleted: _deleted, ...withoutDeleted } = facts(ids.event)
+    expect(isWorkflowEventType(withoutDeleted as never)).toBe(false)
   })
 
   it('lets an all-event scope select current and future own event types, skipping groups', () => {
@@ -98,6 +103,8 @@ describe('workflow ownership selectors', () => {
     expect(isWorkflowBooking(booking({ source: 'import' }))).toBe(false)
     expect(isWorkflowBooking(booking({ groupSeat: true }))).toBe(false)
     expect(isWorkflowBooking(booking({ source: '' }))).toBe(false)
+    expect(isWorkflowBooking(booking({ imported: undefined as never }))).toBe(false)
+    expect(isWorkflowBooking(booking({ groupSeat: null as never }))).toBe(false)
   })
 
   it('matches a booking only through scope, eligibility and every condition', () => {

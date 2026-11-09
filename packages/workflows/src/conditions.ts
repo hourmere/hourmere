@@ -75,7 +75,10 @@ export const PERSONAL_ONLY_CONDITION_FIELDS: readonly WorkflowCondition['field']
   'location_kind',
 ]
 
-/** One predicate against the snapshot; absent or mistyped data is false. */
+/**
+ * One predicate against the snapshot; absent or mistyped data is false. It does not check
+ * that the booking is one workflows may consider: callers use evaluateConditions.
+ */
 export function evaluateCondition(
   condition: WorkflowCondition,
   booking: WorkflowBookingFacts,
@@ -87,7 +90,9 @@ export function evaluateCondition(
       return booking.source === condition.value
     case 'answer': {
       // An absent answer is false, never a match; equality is exact, type included.
-      if (!Object.hasOwn(booking.responses, condition.questionId)) return false
+      const responses: unknown = booking.responses
+      if (typeof responses !== 'object' || responses === null) return false
+      if (!Object.hasOwn(responses, condition.questionId)) return false
       return booking.responses[condition.questionId] === condition.value
     }
     case 'location_kind':

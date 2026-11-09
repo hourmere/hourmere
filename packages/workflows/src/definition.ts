@@ -5,7 +5,7 @@
 // need the owner and the facts a service loaded for the IDs the definition references.
 // Errors are `invalid_workflow` with a path and a fixed constraint, never a submitted value.
 
-import { localeRegistry } from '@hourmere/core/locales'
+import { interfaceLanguages } from '@hourmere/core/language'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { isMultiLineText, isSingleLineText } from '@hourmere/scheduling/text'
 import { type core, z } from 'zod'
@@ -81,13 +81,7 @@ export type WorkflowTrigger = z.output<typeof WorkflowTriggerSchema>
 export type WorkflowTriggerType = WorkflowTrigger['type']
 
 /** The public locales custom content may be written in, from the shared registry. */
-export const WORKFLOW_CONTENT_LOCALES = Object.entries(localeRegistry)
-  .filter(
-    ([, definition]) =>
-      !('interfaces' in definition) ||
-      (definition.interfaces as readonly string[]).includes('public'),
-  )
-  .map(([code]) => code)
+export const WORKFLOW_CONTENT_LOCALES: readonly string[] = interfaceLanguages('public')
 
 const localizedContent = z.strictObject({ subject: z.string(), body: z.string() })
 const content = z
@@ -140,6 +134,12 @@ export interface WorkflowValidationContext {
   webhooks: ReadonlyMap<string, WorkflowWebhookFacts>
 }
 
+/**
+ * Question types an answer condition may compare: one option or one box. Free text has no
+ * exact-match condition, and multi-select answers are lists.
+ */
+export const WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES = ['select', 'checkbox'] as const
+
 const invalid = (path: string, constraint: string) =>
   new DomainError('invalid', 'invalid_workflow', `${path}: ${constraint}`)
 
@@ -174,7 +174,11 @@ function shapeError(value: unknown, issue: core.$ZodIssue): DomainError {
   return invalid(path, issue.message)
 }
 
-/** The strict shape alone, for stored revisions and for checks that need no facts. */
+/**
+ * The strict request shape alone, with the create defaults (disabled, no conditions, no
+ * delay). It is not a reader for stored revisions: those keep the canonical form
+ * validateWorkflowDefinition returns, and a later step reads them without defaults.
+ */
 export function parseWorkflowDefinition(value: unknown): WorkflowDefinition {
   const result = WorkflowDefinitionSchema.safeParse(value)
   if (result.success) return result.data
@@ -267,13 +271,13 @@ function checkedCondition(
   if (!scopeEventType) throw invalid(path, 'needs a workflow scoped to one event type')
   const question = scopeEventType.questions.find(({ id }) => id === condition.questionId)
   if (!question) throw invalid(`${path}.questionId`, 'names a question the event type does not ask')
+  if (!(WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES as readonly string[]).includes(question.type))
+    throw invalid(`${path}.questionId`, 'names a question that supports no equality condition')
   if (question.type === 'select') {
     if (typeof condition.value !== 'string' || !question.options?.includes(condition.value))
       throw invalid(`${path}.value`, 'is not an option of the question')
-  } else if (question.type === 'checkbox') {
-    if (typeof condition.value !== 'boolean') throw invalid(`${path}.value`, 'must be a boolean')
-  } else {
-    throw invalid(`${path}.questionId`, 'names a question that supports no equality condition')
+  } else if (typeof condition.value !== 'boolean') {
+    throw invalid(`${path}.value`, 'must be a boolean')
   }
 }
 

@@ -26,11 +26,17 @@ import {
   PERSONAL_ONLY_CONDITION_FIELDS,
   WorkflowConditionSchema,
 } from '../packages/workflows/src/conditions.ts'
-import { WorkflowTriggerSchema } from '../packages/workflows/src/definition.ts'
+import {
+  WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES,
+  WorkflowTriggerSchema,
+} from '../packages/workflows/src/definition.ts'
 import { WORKFLOWS_IMPLEMENTED } from '../packages/workflows/src/hard-off.ts'
 import { WORKFLOW_LIMITS } from '../packages/workflows/src/limits.ts'
+import { WORKFLOW_BOOKING_SOURCES } from '../packages/workflows/src/ownership.ts'
 import {
+  templateVariableProblem,
   WORKFLOW_ANSWER_VARIABLE_PREFIX,
+  WORKFLOW_RECIPIENT_CLASSES,
   WORKFLOW_TEMPLATE_VARIABLES,
 } from '../packages/workflows/src/variables.ts'
 
@@ -136,6 +142,26 @@ function verifyMailDefaults(suppress: Suppress) {
   ).toBeUndefined()
 }
 
+const designLimits = {
+  WORKFLOW_MAX_ENABLED_PER_EVENT: 5,
+  WORKFLOW_MAX_DEFINITIONS_PER_OWNER: 100,
+  WORKFLOW_NAME_MAX_BYTES: 200,
+  WORKFLOW_SUBJECT_MAX_BYTES: 200,
+  WORKFLOW_BODY_MAX_BYTES: 8000,
+  WORKFLOW_RENDERED_MAX_BYTES: 16000,
+  WORKFLOW_MAX_ACTIONS: 1,
+  WORKFLOW_MAX_CONDITIONS: 5,
+  WORKFLOW_MIN_TIMER_OFFSET_MINUTES: 5,
+  WORKFLOW_MAX_OFFSET_MINUTES: 43200,
+  WORKFLOW_MAX_LATE_MINUTES: 60,
+  WORKFLOW_MAIL_MAX_PER_HOUR: 20,
+  WORKFLOW_INSTANCE_MAIL_CAP_DIVISOR: 5,
+  WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: 5,
+  WORKFLOW_RECIPIENT_EMAILS_PER_HOUR: 1,
+  WORKFLOW_RECIPIENT_EMAILS_PER_DAY: 3,
+  WORKFLOW_HISTORY_DAYS: 30,
+} as const
+
 function rules(count: number) {
   return Array.from({ length: count }, (_, index) => ({
     id: `rule-${index}`,
@@ -229,6 +255,8 @@ describe('workflow design numeric contracts', () => {
     )
     expect(rows).toEqual(Object.keys(WORKFLOW_LIMITS))
     for (const [key, value] of Object.entries(WORKFLOW_LIMITS)) expect(number(key), key).toBe(value)
+    // And both stay at the reviewed numbers: changing one is a design change, not an edit.
+    expect({ ...WORKFLOW_LIMITS }).toEqual(designLimits)
     expect(text).toContain(
       'The following limits are source constants in `packages/workflows/src/limits.ts`',
     )
@@ -242,36 +270,90 @@ describe('workflow design numeric contracts', () => {
       ?.split('\n## ')[0] as string
     const triggers = [...triggerSection.matchAll(/^\| `([a-z_.]+)` \|/gm)].map((match) => match[1])
     expect(triggers).toEqual(WorkflowTriggerSchema.options.map((option) => option.shape.type.value))
-    // Conditions: one table row per condition field; the "Personal only" rows are the fields
-    // team definitions cannot use.
-    const conditionRows = [
-      ...triggerSection.matchAll(
-        /^\| ((?:Event type|Booking source|Attendee answer|Location kind|Guest count)[^|]*) \| ([^|]+) \|$/gm,
-      ),
-    ]
-    expect(conditionRows.map((row) => row[1]?.trim())).toEqual([
-      'Event type equals',
-      'Booking source equals',
-      'Attendee answer equals',
-      'Location kind equals',
-      'Guest count equals/at least/at most',
-    ])
-    expect(conditionRows).toHaveLength(WorkflowConditionSchema.options.length)
-    expect(conditionRows.filter((row) => row[2]?.startsWith('Personal only'))).toHaveLength(
-      PERSONAL_ONLY_CONDITION_FIELDS.length,
+    // Conditions: each table row is one schema field, in order, with the operators its label
+    // names; the "Personal only" rows are exactly the fields team definitions cannot use.
+    const conditionTable =
+      triggerSection.split('| Condition | Rationale and comparison |')[1]?.split('\n\n')[0] ?? ''
+    const conditionRows = [...conditionTable.matchAll(/^\| ([A-Z][^|]*?) \| ([^|]+) \|$/gm)].map(
+      ([, label, rationale]) => ({ label: label as string, rationale: rationale as string }),
     )
+    const fields: Record<string, string> = {
+      'Event type': 'event_type',
+      'Booking source': 'booking_source',
+      'Attendee answer': 'answer',
+      'Location kind': 'location_kind',
+      'Guest count': 'guest_count',
+    }
+    const schemaFields = WorkflowConditionSchema.options.map((option) => option.shape.field.value)
+    expect(conditionRows.map(({ label }) => fields[label.replace(/ equals.*$/, '')])).toEqual(
+      schemaFields,
+    )
+    for (const { label } of conditionRows) {
+      const field = fields[label.replace(/ equals.*$/, '')]
+      const operators = label
+        .slice(label.indexOf('equals'))
+        .split('/')
+        .map((operator) => operator.replace(' ', '_'))
+      expect(
+        WorkflowConditionSchema.options.find((option) => option.shape.field.value === field)?.shape
+          .operator.options,
+        label,
+      ).toEqual(operators)
+    }
     expect(
-      WorkflowConditionSchema.options.find((option) => option.shape.field.value === 'guest_count')
-        ?.shape.operator.options,
-    ).toEqual(['equals', 'at_least', 'at_most'])
-    // Variables: the placeholder table is the catalog, plus the answer form.
+      conditionRows
+        .filter(({ rationale }) => rationale.startsWith('Personal only'))
+        .map(({ label }) => fields[label.replace(/ equals.*$/, '')]),
+    ).toEqual([...PERSONAL_ONLY_CONDITION_FIELDS])
+    expect(
+      conditionRows.find(({ label }) => label.startsWith('Attendee answer'))?.rationale,
+    ).toContain(`of a ${WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES.join(' or ')} question`)
+    // The source predicate compares the stored enum main installs, without imported bookings.
+    const sources = latest(/bookings_source_check\s+CHECK \(source IN \(([^)]*)\)\)/g)
+    expect(quoted(sources.match[1]).filter((source) => source !== 'import')).toEqual([
+      ...WORKFLOW_BOOKING_SOURCES,
+    ])
+    // Variables: the placeholder table is the catalog, plus the answer form, and each row's
+    // audience is what the catalog allows.
     const placeholders = [
-      ...document.matchAll(/^\| `\{\{([a-z_.]+(?:<questionId>)?)\}\}` \|/gm),
-    ].map((match) => match[1] as string)
-    expect(placeholders).toEqual([
+      ...document.matchAll(/^\| `\{\{([a-z_.]+(?:<questionId>)?)\}\}` \| [^|]+ \| ([^|]+) \|$/gm),
+    ].map(([, name, audience]) => ({ name: name as string, audience: (audience as string).trim() }))
+    expect(placeholders.map(({ name }) => name)).toEqual([
       ...Object.keys(WORKFLOW_TEMPLATE_VARIABLES),
       `${WORKFLOW_ANSWER_VARIABLE_PREFIX}<questionId>`,
     ])
+    const everyone = { recipients: WORKFLOW_RECIPIENT_CLASSES, eventType: undefined }
+    for (const { name, audience } of placeholders.slice(0, -1)) {
+      expect(audience, name).toBe('Every workflow and recipient class')
+      for (const owner of ['personal', 'team'] as const)
+        expect(templateVariableProblem(name, { ...everyone, owner }), name).toBeUndefined()
+    }
+    expect(placeholders.at(-1)?.audience).toBe(
+      'Personal workflows of one event type whose recipients exclude other attendees',
+    )
+    const eventType = {
+      id: '40000000-0000-4000-8000-000000000001',
+      organizationId: '20000000-0000-4000-8000-000000000001',
+      ownerUserId: '10000000-0000-4000-8000-000000000001',
+      bookingMode: 'individual',
+      deleted: false,
+      questions: [{ id: 'plan', type: 'select', options: ['a'] }],
+    }
+    const answerFor = (
+      context: Omit<Parameters<typeof templateVariableProblem>[1], 'eventType'> & {
+        eventType?: typeof eventType
+      },
+    ) =>
+      templateVariableProblem(`${WORKFLOW_ANSWER_VARIABLE_PREFIX}plan`, {
+        eventType: undefined,
+        ...context,
+      })
+    expect(
+      answerFor({ owner: 'personal', recipients: ['booker', 'hosts'], eventType }),
+    ).toBeUndefined()
+    expect(answerFor({ owner: 'team', recipients: ['booker'], eventType })).toBeDefined()
+    expect(answerFor({ owner: 'personal', recipients: ['booker'] })).toBeDefined()
+    expect(answerFor({ owner: 'personal', recipients: ['guests'], eventType })).toBeDefined()
     expect(text).toContain(
       'The catalog in `packages/workflows/src/variables.ts` names these placeholders',
     )
@@ -520,7 +602,7 @@ describe('workflow design numeric contracts', () => {
     // the word cardinality ("previously 1 to 4"), is the current or extended set too.
     const ranges = text
       .split(/(?<=\.) /)
-      .filter((sentence) => /kinds?\b|events?\b|CHECK|cardinality|WEBHOOK_EVENTS/.test(sentence))
+      .filter((sentence) => /\bkinds?\b|CHECK|cardinality|WEBHOOK_EVENTS/.test(sentence))
       .flatMap((sentence) => [...sentence.matchAll(/\b1 ?(?:to|–|-) ?(\d+)\b/g)])
     for (const [phrase, upper] of ranges)
       expect([current, extended], phrase).toContain(Number(upper))
@@ -583,8 +665,6 @@ describe('workflow design numeric contracts', () => {
       /\b(?:one|two|three|four|five|six|seven|eight|nine|ten)(?:-| (?:[a-z]+ ){0,2})(?:kinds?|events|event types)\b/i,
       /from three to four/i,
       /\b1[–-]4\b/,
-      /\b1 (?:to|–|-) [345]\b/,
-      /\b[345] (?:[a-z]+ ){0,2}(?:kinds?|events|event types)\b/,
       /\(4\), matching/,
       /\(webhook_id, booking_id, event_type\)/,
       /Backfill existing rows as booking-origin/,

@@ -13,7 +13,6 @@ export {
   type WorkflowSkipReason,
 } from './audit.ts'
 export {
-  evaluateCondition,
   evaluateConditions,
   PERSONAL_ONLY_CONDITION_FIELDS,
   type WorkflowCondition,
@@ -23,6 +22,7 @@ export {
 export {
   parseWorkflowDefinition,
   validateWorkflowDefinition,
+  WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES,
   WORKFLOW_CONTENT_LOCALES,
   type WorkflowAction,
   WorkflowActionSchema,

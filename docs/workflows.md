@@ -174,7 +174,7 @@ bookings and their reschedule chains are excluded, matching existing import sile
 | --- | --- |
 | Event type equals | Equivalent to an event-specific scope; retained as an explicit AND predicate for editor consistency. |
 | Booking source equals | Personal only; exact existing stored source enum, never caller-supplied inference. |
-| Attendee answer equals | Personal only; booker's saved answer for a stable question ID, exact typed scalar equality. |
+| Attendee answer equals | Personal only; booker's saved answer for a stable question ID of a select or checkbox question, exact typed scalar equality. |
 | Location kind equals | Personal only; fixed location discriminator, never URL/text matching. |
 | Guest count equals/at least/at most | Number of non-booker attendees saved on this booking, inclusive integer comparison. |
 

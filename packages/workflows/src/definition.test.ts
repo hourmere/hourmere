@@ -207,6 +207,69 @@ describe('workflow definition shape', () => {
     )
   })
 
+  it('rejects an extra field on every accepted shape', () => {
+    const extra = { caseInsensitive: true }
+    const triggers = [
+      { type: 'booking.created' },
+      { type: 'booking.cancelled', delayMinutes: 5 },
+      { type: 'booking.rescheduled' },
+      { type: 'before_start', offsetMinutes: 60 },
+      { type: 'after_end', offsetMinutes: 60 },
+    ]
+    for (const trigger of triggers) {
+      expect(validate(candidate({ trigger })).trigger.type).toBe(trigger.type)
+      expect(refused(candidate({ trigger: { ...trigger, ...extra } }))).toBe(
+        'trigger: contains an unknown field',
+      )
+    }
+    const conditions = [
+      { field: 'event_type', operator: 'equals', value: ids.event },
+      { field: 'booking_source', operator: 'equals', value: 'web' },
+      { field: 'answer', questionId: 'plan', operator: 'equals', value: 'enterprise' },
+      { field: 'location_kind', operator: 'equals', value: 'zoom' },
+      { field: 'guest_count', operator: 'at_most', value: 3 },
+    ]
+    for (const condition of conditions) {
+      expect(validate(candidate({ conditions: [condition] })).conditions).toEqual([condition])
+      expect(refused(candidate({ conditions: [{ ...condition, ...extra }] }))).toBe(
+        'conditions[0]: contains an unknown field',
+      )
+    }
+    for (const scope of [
+      { type: 'all_event_types' },
+      { type: 'event_type', eventTypeId: ids.event },
+    ])
+      expect(refused(candidate({ scope: { ...scope, ...extra } }))).toBe(
+        'scope: contains an unknown field',
+      )
+    for (const action of [email(), { type: 'webhook', webhookId: ids.webhook }])
+      expect(refused(candidate({ actions: [{ ...action, ...extra }] }))).toBe(
+        'actions[0]: contains an unknown field',
+      )
+    expect(
+      refused(
+        candidate({
+          actions: [email({ content: { en: { subject: 'S', body: 'B', ...extra } } })],
+        }),
+      ),
+    ).toBe('actions[0].content.en: contains an unknown field')
+    expect(refused({ ...candidate(), ...extra })).toBe('workflow: contains an unknown field')
+  })
+
+  it('accepts IDs in any case and returns them lowercased', () => {
+    const upper = (id: string) => id.toUpperCase()
+    const definition = validate(
+      candidate({
+        scope: { type: 'event_type', eventTypeId: upper(ids.event) },
+        conditions: [{ field: 'event_type', operator: 'equals', value: upper(ids.event) }],
+        actions: [{ type: 'webhook', webhookId: upper(ids.webhook) }],
+      }),
+    )
+    expect(definition.scope).toEqual({ type: 'event_type', eventTypeId: ids.event })
+    expect(definition.conditions[0]).toMatchObject({ value: ids.event })
+    expect(definition.actions[0]).toEqual({ type: 'webhook', webhookId: ids.webhook })
+  })
+
   it('rejects unknown operators on every condition', () => {
     const conditions = [
       { field: 'event_type', value: ids.event },

@@ -16,7 +16,8 @@ export type WorkflowOwner =
   | { kind: 'team'; organizationId: string }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export const uuidSchema = z.string().regex(UUID, { error: 'must be a UUID' })
+/** A UUID, lowercased like the IDs the database returns, so fact lookups match. */
+export const uuidSchema = z.string().regex(UUID, { error: 'must be a UUID' }).toLowerCase()
 
 /**
  * The explicit owner selector that create, list and preview carry: the user for a personal
@@ -78,10 +79,11 @@ export function ownsWebhook(owner: WorkflowOwner, webhook: WorkflowWebhookFacts)
 
 /**
  * Whether workflows may apply to an event type at all. Group event types are excluded in this
- * version, deleted ones take no new workflow, and an unknown booking mode fails closed.
+ * version; a deleted event type is selected by no scope, so its remaining bookings start no
+ * further workflow run either; an unknown booking mode or a missing flag fails closed.
  */
 export function isWorkflowEventType(eventType: WorkflowEventTypeFacts): boolean {
-  return eventType.bookingMode === 'individual' && !eventType.deleted
+  return eventType.bookingMode === 'individual' && eventType.deleted === false
 }
 
 /** One event type of the owner, or all of its current and future event types. */
@@ -134,6 +136,7 @@ export interface WorkflowBookingFacts {
  * silent, as they do for notifications; group seats are excluded; an unknown source fails closed.
  */
 export function isWorkflowBooking(booking: WorkflowBookingFacts): boolean {
-  if (booking.imported || booking.groupSeat) return false
+  // Only an explicit false clears a flag: a missing one fails closed.
+  if (booking.imported !== false || booking.groupSeat !== false) return false
   return (WORKFLOW_BOOKING_SOURCES as readonly string[]).includes(booking.source)
 }

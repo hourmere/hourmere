@@ -92,6 +92,21 @@ describe('workflow condition evaluation', () => {
     expect(evaluateCondition(operator, booking())).toBe(false)
   })
 
+  it('fails closed when the snapshot lacks its flags or answers', () => {
+    const { imported: _imported, ...withoutImported } = booking()
+    const { groupSeat: _groupSeat, ...withoutGroupSeat } = booking()
+    for (const facts of [withoutImported, withoutGroupSeat])
+      expect(evaluateConditions(personalOwner, [], facts as never)).toBe(false)
+    for (const responses of [null, undefined, 'plan'])
+      expect(
+        evaluateConditions(
+          personalOwner,
+          [answer('plan', 'enterprise')],
+          booking({ responses: responses as never }),
+        ),
+      ).toBe(false)
+  })
+
   it('fails closed for imported, group and unknown-source bookings', () => {
     expect(evaluateConditions(personalOwner, [], booking({ imported: true }))).toBe(false)
     expect(evaluateConditions(personalOwner, [], booking({ source: 'import' }))).toBe(false)
