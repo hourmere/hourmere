@@ -127,7 +127,11 @@ for verification requirements, exceptions and reconnecting expired grants.
 CalDAV connections are not available in the app yet. The
 [design and foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
 provides encrypted credentials and guarded discovery for later integration, with no
-busy-time synchronization or booking writes.
+busy-time synchronization or booking writes. Relative discovery hrefs resolve against
+the request URI, including nested endpoints that respond without redirects. Internal
+decrypted credentials hide usernames and passwords from routine serialization and
+spread/clone copies; explicit field reads remain sensitive. Raw caller inputs are not
+protected by that wrapper. Real-provider compatibility testing is still pending.
 
 Future CalDAV workers will need outbound DNS and verified HTTPS to the calendar server;
 no new inbound port is needed. For private Nextcloud installations, the internal
