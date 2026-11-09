@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createFixtures } from '@hourmere/scheduling/testing'
+import { createFixtures, testContext } from '@hourmere/scheduling/testing'
+import { createWebhook, webhookAttendeeNoShowNotifier } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { groupFixture, occupiedSlot } from '../../../packages/db/src/group-seats-fixtures.ts'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { runTool } from './mcp/tools.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -124,6 +126,64 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
       noShowMarkedAt: null,
       noShowMarkedBy: null,
     })
+  })
+  it('returns stored attendee IDs for uppercase REST writes and replays, including webhook payloads', async () => {
+    const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 9).toString('base64') }
+    const { webhook } = await createWebhook(testContext(db, caller), settings, {
+      url: 'https://hooks.example.com/attendance',
+      events: ['booking.attendee_no_show_changed'],
+    })
+    const queue = { enqueue: vi.fn(async () => randomUUID()) }
+    const canonicalApp = createApp({
+      publicUrl: 'http://localhost:4186',
+      checkDb: async () => {},
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: true, principal: caller, setCookie: [] }),
+      routes: [
+        bookingRoutes({
+          db,
+          now,
+          notifyAttendeeNoShow: webhookAttendeeNoShowNotifier(queue, settings),
+        }),
+      ],
+    })
+    const canonicalId = 'abcdefab-1234-4abc-8abc-abcdefabcdef'
+    await db
+      .insertInto('booking_attendees')
+      .values({
+        id: canonicalId,
+        booking_id: bookingId,
+        name: 'Guest',
+        email: 'guest@example.com',
+        time_zone: 'UTC',
+        is_booker: false,
+      })
+      .execute()
+    for (const noShow of [true, true, false, false]) {
+      const response = await canonicalApp.request(
+        `/api/v1/bookings/${bookingId}/attendees/${canonicalId.toUpperCase()}/no-show`,
+        {
+          method: 'PATCH',
+          headers: { authorization: 'Bearer synthetic', 'content-type': 'application/json' },
+          body: JSON.stringify({ noShow }),
+        },
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        attendeeId: canonicalId,
+        noShowMarkedAt: noShow ? new Date(now().epochMilliseconds).toISOString() : null,
+        noShowMarkedBy: noShow ? caller.user.id : null,
+      })
+    }
+    const deliveries = await db
+      .selectFrom('webhook_deliveries')
+      .select(['payload'])
+      .where('webhook_id', '=', webhook.id)
+      .execute()
+    expect(deliveries).toHaveLength(2)
+    for (const delivery of deliveries)
+      expect(JSON.parse(delivery.payload).data.attendeeId).toBe(canonicalId)
+    expect(queue.enqueue).toHaveBeenCalledTimes(2)
   })
   it('exposes real group-seat attendee IDs and marks one seat without changing another', async () => {
     const fixture = await groupFixture(owned.pool)
@@ -272,6 +332,34 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
               )
             }
             if (credential.kind !== 'session') {
+              if (caller.kind === 'session') throw new Error('Expected an MCP credential')
+              for (const name of ['get_booking_attendees', 'set_attendee_no_show']) {
+                const tool = bookingTools({ db, now }).find((tool) => tool.name === name)
+                if (!tool) throw new Error(`Missing attendance tool: ${name}`)
+                const write = name === 'set_attendee_no_show'
+                const readOnly = credential.kind === 'api_key' && credential.apiKeyScope === 'read'
+                const result = await runTool(
+                  tool,
+                  { bookingId: id, ...(write ? { attendeeId: attendee.id, noShow: true } : {}) },
+                  { caller, rateLimit: () => {} },
+                  () => {
+                    throw new Error('Unexpected MCP tool error')
+                  },
+                )
+                const error =
+                  write && readOnly
+                    ? 'insufficient_scope'
+                    : actor !== host
+                      ? 'booking_not_found'
+                      : undefined
+                expect(result.isError === true).toBe(error !== undefined)
+                if (error)
+                  expect(result.content).toEqual([
+                    { type: 'text', text: expect.stringContaining(error) },
+                  ])
+                else expect(result.structuredContent).toBeDefined()
+              }
+
               const read = await cli('booking-attendees', { bookingId: id })
               expect(read.code).toBe(actor === host ? 0 : 1)
               if (actor !== host) expect(read.stderr).toContain('booking_not_found')

@@ -483,6 +483,7 @@ const BOOKING_COLUMNS = [
   'b.group_slot_id',
   'b.event_type_id',
   'b.status',
+  'b.payment_hold_expires_at',
   'b.start_at',
   'b.end_at',
   'b.title',
@@ -499,6 +500,7 @@ const BOOKING_COLUMNS = [
 ] as const
 
 interface BookingRow {
+  payment_hold_expires_at: Date | null
   id: string
   group_slot_id: string | null
   event_type_id: string | null
@@ -730,6 +732,7 @@ async function toBookings(
         ? {
             canManageNoShow:
               r.status === 'confirmed' &&
+              r.payment_hold_expires_at === null &&
               !imported.has(r.id) &&
               Temporal.Instant.compare(host.now(), toInstant(r.start_at)) > 0,
           }

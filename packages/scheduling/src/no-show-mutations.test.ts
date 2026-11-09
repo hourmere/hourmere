@@ -158,6 +158,44 @@ describe.skipIf(!serverUrl)('no-show source-copy mutations', () => {
           .execute()
       await verify(setAttendeeNoShow)
     })
+  it.each(['current', 'result'])('kills input-spelled attendee IDs in %s', async (branch) => {
+    const host = await createTestUser(db)
+    const booking = await createFixtures(db).booking(
+      host.principal.organization.id,
+      [host.id],
+      '2026-11-01T09:30:00Z',
+      '2026-11-01T10:00:00Z',
+    )
+    const { id: attendeeId } = await db
+      .selectFrom('booking_attendees')
+      .select('id')
+      .where('booking_id', '=', booking)
+      .executeTakeFirstOrThrow()
+    expect(attendeeId.toUpperCase()).not.toBe(attendeeId)
+    const ctx = testContext(db, host.principal, () => Temporal.Instant.from('2026-11-01T10:00:00Z'))
+    const capturedIds: string[] = []
+    ctx.notifyAttendeeNoShow = async (_trx, event) => {
+      capturedIds.push(event.attendeeId)
+    }
+    const verify = async (fn: typeof setAttendeeNoShow) => {
+      await db
+        .updateTable('booking_attendees')
+        .set({ no_show_marked_at: null, no_show_marked_by: null })
+        .where('id', '=', attendeeId)
+        .execute()
+      capturedIds.length = 0
+      for (const noShow of [true, true, false, false]) {
+        const marker = await fn(ctx, booking, attendeeId.toUpperCase(), noShow)
+        expect(marker.attendeeId).toBe(attendeeId)
+      }
+      expect(capturedIds).toEqual([attendeeId, attendeeId])
+    }
+    await verify(setAttendeeNoShow)
+    const from = `const ${branch}: AttendeeNoShow = {\n      attendeeId: attendee.id,`
+    const to = `const ${branch}: AttendeeNoShow = {\n      attendeeId,`
+    await expect(verify(sourceCopy(from, to))).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(setAttendeeNoShow)
+  })
   it('kills public attendee metadata disclosure', () => {
     const original = readFileSync(new URL('./bookings.ts', import.meta.url), 'utf8')
     const start = original.indexOf(

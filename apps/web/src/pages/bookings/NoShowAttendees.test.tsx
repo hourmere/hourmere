@@ -58,6 +58,64 @@ describe('admin no-show controls', () => {
     expect(await screen.findByRole('button', { name: 'Mark Visitor as a no-show' })).toBeTruthy()
   })
 
+  it('hides no-show controls on confirmed paid host booking details', async () => {
+    fakeApi({
+      ...signedInAs(ME),
+      ...profile(),
+      [`GET /api/v1/bookings/${BOOKING_ID}`]: () =>
+        json(
+          200,
+          hostBooking({
+            eventTypeId: null,
+            start: booking.start,
+            canManageNoShow: false,
+            attendees: [{ ...attendee, timeZone: 'UTC', locale: 'en', isBooker: true }],
+          }),
+        ),
+    })
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    expect(await screen.findByText('Visitor')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Mark Visitor as a no-show' })).toBeNull()
+  })
+
+  it('detects removal of the paid-booking guard from the host projection', () => {
+    const original = readFileSync('packages/scheduling/src/bookings.ts', 'utf8')
+    const expression = original.match(/canManageNoShow:\s*([\s\S]*?),\n\s*}/)?.[1]
+    if (!expression) throw new Error('Missing host no-show projection')
+    const verify = (text: string) => {
+      const canManageNoShow = new Function(
+        'r',
+        'imported',
+        `
+        const host = { now: () => Temporal.Instant.from('2026-11-01T10:00:00Z') };
+        const toInstant = (date) => Temporal.Instant.from(date.toISOString());
+        return ${text};
+      `,
+      )(
+        {
+          id: 'paid',
+          status: 'confirmed',
+          start_at: new Date(booking.start),
+          payment_hold_expires_at: new Date(booking.start),
+        },
+        new Set(),
+      )
+      const view = display({ canManageNoShow })
+      try {
+        expect(screen.queryByRole('button')).toBeNull()
+      } finally {
+        view.unmount()
+      }
+    }
+    const guard = 'r.payment_hold_expires_at === null &&'
+    expect(expression.split(guard)).toHaveLength(2)
+    verify(expression)
+    expect(() => verify(expression.replace(guard, ''))).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verify(expression)
+  })
+
   it.each([
     ['en', 'Mark Visitor as a no-show', 'Clear no-show for Visitor', 'No-show mark updated.'],
     ['zh-CN', '将 Visitor 标记为未出席', '清除 Visitor 的未出席标记', '未出席标记已更新。'],
