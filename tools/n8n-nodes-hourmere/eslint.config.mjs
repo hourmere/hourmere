@@ -1,9 +1,8 @@
 import { createRequire, registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
-// Only this ESLint process uses the workspace's pinned compiler API. npm hoists
-// ts-api-utils beside the repository's TypeScript 7, which has no JS compiler API.
-// Keep the official n8n rules; change only their TypeScript module resolution.
+// The n8n lint packages bundle their own TypeScript copies. Resolve every `typescript`
+// import to this package's pinned compiler; keep the official n8n rules unchanged.
 const require = createRequire(import.meta.url)
 const compilerUrl = pathToFileURL(require.resolve('typescript')).href
 registerHooks({
