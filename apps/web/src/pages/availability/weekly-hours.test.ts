@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { translateMessage } from '../../i18n/translate.ts'
 import {
+  comparable,
+  copyDay,
   intervalDraft,
   intervalField,
+  newScheduleDraft,
   summarize,
   todayIn,
   toIntervals,
@@ -92,5 +95,25 @@ describe('todayIn', () => {
     expect(todayIn('UTC', lateUtc)).toBe('2030-03-04')
     expect(todayIn('Asia/Tokyo', lateUtc)).toBe('2030-03-05')
     expect(todayIn('America/Los_Angeles', lateUtc)).toBe('2030-03-04')
+  })
+})
+
+describe('copyDay', () => {
+  it('copies empty available days and unavailable days without resurrecting hidden ranges', () => {
+    const original = newScheduleDraft('UTC')
+    original.days.monday.intervals = []
+    const empty = copyDay(original, 'monday', ['tuesday'])
+    expect(empty.days.tuesday.intervals).toEqual([])
+    original.days.monday = { available: false, intervals: [intervalDraft()] }
+    const off = copyDay(original, 'monday', ['tuesday', 'monday'])
+    expect(off.days.tuesday).toEqual({ available: false, intervals: [] })
+    expect(off.days.monday).toBe(original.days.monday)
+  })
+  it('creates independent interval objects and identities for every target', () => {
+    const original = newScheduleDraft('UTC')
+    const copied = copyDay(original, 'monday', ['tuesday', 'wednesday'])
+    expect(copied.days.tuesday.intervals[0]).not.toBe(original.days.monday.intervals[0])
+    expect(copied.days.tuesday.intervals[0]?.key).not.toBe(copied.days.wednesday.intervals[0]?.key)
+    expect(comparable(copied)).toBe(comparable(original))
   })
 })

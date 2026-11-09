@@ -64,7 +64,7 @@ function AccountDateNotice() {
       <LanguageSwitcher />
       <p data-testid="date-format-locale">{formatLocale ?? 'browser-default'}</p>
       <p data-testid="notice-date">
-        {ui(msg('Removed the override for {0}.', { '0': dateMessage('2026-11-02') }))}
+        {ui(msg('Undo removal: {0}', { '0': dateMessage('2026-11-02') }))}
       </p>
     </>
   )
@@ -226,7 +226,7 @@ describe('typed interface messages and language state', () => {
     expect(translateMessage('zh-CN', nested)).toContain('无法取消预约。无法连接 Hourmere。')
   })
   it('formats dates and nested overlap pairs after the language changes', () => {
-    const notice = msg('Removed the override for {0}.', { '0': dateMessage('2026-11-02') })
+    const notice = msg('Undo removal: {0}', { '0': dateMessage('2026-11-02') })
     expect(translateMessage('en', notice)).toContain('Nov')
     expect(translateMessage('zh-CN', notice)).toContain('11月')
     const problem = msg('These hours overlap: {0}.', {

@@ -31,6 +31,7 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     roundRobinActive: false,
     conferenceOrganizer: null,
     hosts: [{ userId: ME.user.id }],
+    locations: null,
     location: null,
     questions: [],
     waitlist: { enabled: false },

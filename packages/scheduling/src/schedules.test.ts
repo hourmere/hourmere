@@ -146,7 +146,7 @@ describe.skipIf(!serverUrl)('schedule service', () => {
       const before = await listSchedules(ctx(user))
       expect(await confirmDefaultSchedule(ctx(user), 'zh-CN')).toEqual({
         created: false,
-        schedule: existing,
+        schedule: before.find((schedule) => schedule.id === existing.id),
       })
       expect(await listSchedules(ctx(user))).toEqual(before)
       expect(await listScheduleOverrides(ctx(user), existing.id)).toEqual([

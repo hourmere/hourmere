@@ -15,6 +15,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   startup failures.
 - [Compare scheduling options](/docs/comparison): deployment, agent access and the current
   limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
+- [Availability and working hours](/docs/availability): copy hours between days and save
+  weekly hours and date overrides together.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
 - [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
@@ -45,6 +47,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
+- [Availability drafts](/docs/availability#known-limitations) have no autosave or automatic
+  conflict merge; use the combined API for atomic edits with version checks.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
@@ -75,6 +79,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
+- [Meeting location choices](/docs/location-choices) are configured through REST, MCP or CLI;
+  the editor does not yet offer a multiple-location editor. Rescheduling preserves the choice.
 - [Multiple meeting lengths](/docs/multiple-durations) share one set of hosts, location
   and booking rules; per-length overrides are unavailable. Web rescheduling keeps the
   original length; changing it requires REST, MCP or CLI.

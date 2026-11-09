@@ -427,6 +427,8 @@ and linked operating guides before deploying:
   calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
   actual host; collective and round-robin event types are unsupported.
+- [Meeting location choices](https://hourmere.com/docs/location-choices) are configured through REST, MCP or CLI;
+  the editor does not yet offer a multiple-location editor. Rescheduling preserves the choice.
 - [Multiple meeting lengths](https://hourmere.com/docs/multiple-durations) share one set of
   hosts, location and booking rules; per-length overrides are unavailable. Web rescheduling
   keeps the original length; changing it requires REST, MCP or CLI.
