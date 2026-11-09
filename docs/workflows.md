@@ -122,11 +122,30 @@ offers no workflow trigger for reschedule requests.
 captures `booking.created` exactly once at confirmation, with timer anchors at the booked
 instants; payment release or `expired` holds emit no `booking.cancelled` workflow.
 
-No-show marking is absent from the inspected main booking service and routes. Reserve no
-public `no_show` enum now: introduce `booking.no_show_marked` only alongside a real
-permission-checked attendance transition, event capture and parity-complete interfaces.
-Repeated marking must not create another occurrence; an undo/re-mark policy needs design
-with that feature. Do not infer absence from conference-provider attendance.
+Attendee no-show marking is on main (migration 0070,
+[no-shows](../apps/site/src/content/docs/docs/no-shows.md)). A host marks or unmarks one
+attendee after the scheduled start through REST, MCP or CLI, and webhooks can subscribe to
+`booking.attendee_no_show_changed`. The change does not pass through `BookingNotifier`:
+`setAttendeeNoShow` calls a separate `AttendeeNoShowNotifier`, which only webhook capture
+implements. V1 workflows treat it as follows:
+
+- `booking.attendee_no_show_changed` is not a workflow trigger. The marker is private host
+  metadata: invitee pages, public booking responses and emails never show it, and marking
+  sends no email. A workflow email sent because of a mark would disclose that judgment to
+  the invitee. A mark also belongs to one attendee and can be undone, while a workflow
+  occurrence belongs to a booking lifecycle. Integrations that need the change subscribe to
+  the signed webhook directly. A later trigger needs its own contract: per-attendee
+  occurrence identity, an unmark and re-mark policy, a privacy review of invitee-facing
+  mail, and team access, because team owners and admins can mark only through a browser
+  session.
+- Workflows register nothing on `AttendeeNoShowNotifier`, and a mark or unmark changes no
+  workflow run. As with follow-ups, an `after_end` workflow still runs for a marked
+  attendee. No condition or template variable reads the marker. Do not infer absence from
+  conference-provider attendance either.
+
+So the booking webhook kinds on main that are not workflow triggers are
+`booking.reschedule_requested`, `booking.reschedule_request_expired` and
+`booking.attendee_no_show_changed`.
 
 Lifecycle triggers permit a nonnegative whole-minute `delayMinutes` through the maximum
 offset; zero means immediately eligible after commit. Before/after triggers use their
@@ -224,31 +243,40 @@ in a workflow or a template. Extend the existing signed transactional webhook ou
 a distinct `workflow.executed` event kind and stable event/delivery IDs; do not manufacture
 another `booking.created` subscription event. Only the selected endpoint gets this event.
 
-The webhook baseline on main comes from migration 0064 (reschedule requests):
+The webhook baseline on main comes from migration 0070 (attendee no-shows), which last
+redefined both event CHECKs; the delivery key is still the one 0064 added:
 
-- `WEBHOOK_EVENTS` has 5 kinds: `booking.created`, `booking.rescheduled`,
-  `booking.cancelled`, `booking.reschedule_requested` and `booking.reschedule_request_expired`.
+- `WEBHOOK_EVENTS` has 6 kinds: `booking.created`, `booking.rescheduled`,
+  `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`
+  and `booking.attendee_no_show_changed`.
 - Service `eventsOf()` already validates `.max(WEBHOOK_EVENTS.length)`.
-- The `webhooks.events` CHECK is `cardinality(events) BETWEEN 1 AND 5` over those kinds,
-  and the `webhook_deliveries.event_type` CHECK allows the same set.
+- 0070's `webhooks_events_check` is `cardinality(events) BETWEEN 1 AND 6` over those kinds,
+  and its `webhook_deliveries_event_type_check` allows the same set. 0070 only widened both
+  constraints; 0017 created them and 0064 replaced them before.
 - Deliveries are unique by
-  `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id)`.
-  Request-origin rows carry `request_id`; booking-origin rows leave it NULL.
+  `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id)`, which 0064
+  added and 0070 left unchanged. `request_id` is a plain `uuid` without a foreign key, and
+  it has two uses. Request-origin rows carry the reschedule request's ID. Attendance rows
+  carry a fresh per-change receipt ID, so every mark or unmark gets its own delivery; that
+  value never appears as `data.requestId`. Booking-origin rows leave it NULL.
 
 That key cannot represent several workflow executions for one booking and endpoint. Step
 14a's new outbox migration follows 0064's `request_id` pattern. It adds a nullable
 `workflow_run_id uuid` with no foreign key, like `request_id`, and replaces the key with
 `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id, workflow_run_id)`.
+Workflow rows get their own column instead of reusing `request_id` as attendance rows do,
+so each column keeps a meaning the schema can check.
 A CHECK requires `workflow_run_id` exactly on `workflow.executed` rows, and another forbids
 a row carrying both `request_id` and `workflow_run_id`. No existing row is rewritten or
-backfilled: booking-origin rows (both columns NULL) and request-origin rows (`request_id`
-set) keep their uniqueness, payloads, signatures and receipts. The same migration extends
-the `webhook_deliveries.event_type` CHECK from the 5 current kinds to 6, before any workflow
-delivery can be inserted. Postgres infers an `ON CONFLICT` arbiter only from the exact column
-set, so step 14a also moves the existing capture's conflict target in
-`packages/webhooks/src/delivery.ts` from the four columns to the five; booking and request
-duplicate capture must still coalesce. Verify a populated predecessor that includes
-request-origin rows, fresh installation and a no-op rerun.
+backfilled: booking-origin rows (both columns NULL), request-origin rows and attendance
+rows (`request_id` set) keep their uniqueness, payloads, signatures and receipts. The same
+migration replaces 0070's `webhook_deliveries.event_type` CHECK, extending it from the
+6 current kinds to 7, before any workflow delivery can be inserted. Postgres infers an
+`ON CONFLICT` arbiter only from the exact column set, so step 14a also moves the existing
+capture's conflict target in `packages/webhooks/src/delivery.ts` from the four columns to
+the five. Booking and request duplicate capture must still coalesce, and each attendance
+change must still get its own delivery. Verify a populated predecessor that includes
+request-origin and attendance rows, fresh installation and a no-op rerun.
 
 The endpoint must explicitly subscribe to this new event kind and remain active; removal,
 rotation, pause, global webhook disablement and private-target policy retain their existing
@@ -256,20 +284,51 @@ semantics. Existing endpoint configuration is a prerequisite; steps 13a–13c sh
 missing MCP/CLI mappings. Steps 13d and 13e own the additive `workflow.executed`
 subscription expansion:
 
-- Step 13d appends `workflow.executed` to `WEBHOOK_EVENTS`, which goes from 5 to 6 kinds.
+- Step 13d appends `workflow.executed` to `WEBHOOK_EVENTS`, which goes from 6 to 7 kinds.
   `eventsOf()` keeps `.max(WEBHOOK_EVENTS.length)` and gains no literal. The published
   create/update request schemas keep no `maxItems`, as today; the bound stays in
-  `eventsOf()`. Its new migration replaces 0064's `webhooks.events` CHECK with
-  `cardinality(events) BETWEEN 1 AND 6` over the extended set. Tests cover a populated
-  predecessor with endpoints subscribed to the request kinds, fresh install, no-op rerun and
-  DB types. Published migrations 0017 and 0064 remain unchanged. The route schemas build
-  their enums from `WEBHOOK_EVENTS`, so 13d also regenerates OpenAPI and the client, and
-  verifies an additive OpenAPI diff.
+  `eventsOf()`. Its new migration replaces 0070's `webhooks.events` CHECK
+  (`webhooks_events_check`) with `cardinality(events) BETWEEN 1 AND 7` over the extended
+  set. Tests cover a populated predecessor with endpoints subscribed to the request and
+  attendance kinds, fresh install, no-op rerun and DB types. Published migrations 0017,
+  0064 and 0070 remain unchanged. The route schemas build their enums from
+  `WEBHOOK_EVENTS`, so 13d also regenerates OpenAPI and the client, and verifies an
+  additive OpenAPI diff.
 - Step 13e updates the interfaces and guides: list `Webhook.events`, delivery `eventType`,
   MCP/CLI inputs, outputs and help, the webhook/MCP/CLI guides and the published payload
   field list. Document response enums as open and tell consumers to ignore unknown events,
-  per [API conventions](api-conventions.md). The two request kinds were appended to the same
-  published enums; the webhook guide has no such compatibility note yet, so 13e adds it.
+  per [API conventions](api-conventions.md). The request kinds and the attendance kind were
+  appended to the same published enums, and the webhook guide already tells consumers to
+  ignore unknown event types; 13e extends that note to the workflow kind.
+
+Existing subscriptions that include `booking.attendee_no_show_changed` keep working
+unchanged. No stored `events` array is rewritten or expanded: as with the attendance kind,
+an endpoint receives `workflow.executed` only after it subscribes explicitly. The bound of 7
+lets an endpoint already subscribed to all 6 current kinds add the workflow kind. The
+`workflows_disabled` check below concerns only adding `workflow.executed`, so keeping,
+adding or removing the attendance kind behaves as today. An attendance change never emits
+`workflow.executed`, and a workflow never emits the attendance kind.
+
+Zapier, n8n and Make do not offer `workflow.executed` in v1. The kind reaches only the
+endpoint that a workflow action selects by ID, but the Zapier and n8n triggers create their
+endpoint on activation and delete it on deactivation, so a definition could not keep
+pointing at it. Until step 20, a default instance also refuses the kind as
+`workflows_disabled`, so an integration offering it would fail to activate. Two integration
+tests bind to `WEBHOOK_EVENTS`, so step 13d, which appends the kind, updates them in the
+same change:
+
+- `tools/n8n-nodes-hourmere/contract.test.ts` requires the trigger's `EVENTS` to equal
+  `WEBHOOK_EVENTS` and the generated OpenAPI subscription enum.
+- `scripts/make-template-validation.test.ts` requires a notifier capture and a README and
+  site table row for every `WEBHOOK_EVENTS` kind.
+
+Both then compare against `WEBHOOK_EVENTS` without `workflow.executed`, through one explicit
+exclusion of that kind, so a later booking kind still fails them until its integration is
+updated. The n8n trigger's `EVENTS` and translations, and the Make recipes and tables, stay
+unchanged; the n8n signature check already rejects a delivery whose type is not in
+`EVENTS`. Zapier needs no change: its triggers are a fixed subset, and its contract test
+validates requests against the generated OpenAPI, where the extra enum value is additive.
+Step 13e says in the Zapier, n8n and Make guides that they do not offer the workflow kind.
 
 While workflows are off, a create or update whose resulting event set adds
 `workflow.executed` to an endpoint not already subscribed returns `404 workflows_disabled`.
@@ -281,7 +340,7 @@ destination recheck. Update has no `webhooks_disabled` check today and gains non
 
 The workflow payload has the existing bounded booking ID/time/status projection plus
 `workflowId`, `workflowRevision`, `trigger` and stable `workflowRunId`, never `requestId`;
-existing booking and request payloads stay unchanged. `WebhookDelivery.bookingId` remains
+existing booking, request and attendance payloads stay unchanged. `WebhookDelivery.bookingId` remains
 a required UUID, never null or omitted, including team workflow deliveries. Internal
 subscription tests may use the enabled context after 13d but insert no workflow deliveries
 before 14a. Before step 13d, steps 5–6 validate endpoint existence and ownership but
@@ -690,7 +749,8 @@ above, and each operator configures the mail sub-caps.
 Out of scope: SMS, WhatsApp, AI calls, arbitrary HTTP methods/bodies, attachments, billing,
 marketing campaigns, arbitrary recipient lists, OR/path builders, loops, multiple action
 chains, attendance inference, historical bulk execution, manual resend, retroactive rule
-edits, automatic legacy conversion and triggers on reschedule requests. Delayed-created
+edits, automatic legacy conversion, triggers on reschedule requests or attendee no-show
+changes, and workflow triggers in Zapier, n8n or Make. Delayed-created
 messages are retired on reschedule, unlike the cited Cal.com example.
 Custom subject/body text is unavailable while host notes are disabled. SMTP can lose an
 ambiguous message under the chosen at-most-once potentially accepted attempt policy; webhook
@@ -720,7 +780,7 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 
 | Step (about one day) | Dependencies | Work and owned REST / MCP / CLI operations | Rollout state | Concrete acceptance |
 |---|---|---|---|---|
-| 1. Pure definition contract | None | None. Introduce WORKFLOWS_IMPLEMENTED=false and behavioral guards, then strict schemas, AND evaluation, ownership selectors, template variable catalog, pinned limits and the injected audit port interface. | Hard-off | Unknown fields/operators rejected; absent answers false; cross-owner IDs rejected; imported/group/no-show cases fail closed. |
+| 1. Pure definition contract | None | None. Introduce WORKFLOWS_IMPLEMENTED=false and behavioral guards, then strict schemas, AND evaluation, ownership selectors, template variable catalog, pinned limits and the injected audit port interface. | Hard-off | Unknown fields/operators rejected; absent answers false; cross-owner IDs rejected; imported/group cases fail closed; a no-show trigger, condition or variable is rejected as unknown. |
 | 2. Definition storage | 1 | None. New migration for definitions and immutable revisions; select next available migration number at implementation time. | Hard-off | Populated predecessor upgrade preserves reminders and booking snapshots; fresh install equivalent; rerun no-op; generated DB types match. |
 | 3. Execution storage | 2 | None. New migration for enrollments, due runs, per-recipient claims, minimal history and workflow mail reservations, plus nullable `notification_email_sends.workflow_reservation_id` without a foreign key; indexed cleanup. | Hard-off | Unique constraints kill concurrent duplicate capture; deletion/retention cannot revive a dispatch; existing ledger rows keep NULL and core count queries are unchanged; predecessor/fresh/no-op upgrade tests. |
 | 4. Definition reads and availability signals | 2 | `GET /api/v1/workflows` (`listWorkflows`) / `list_workflows` / `workflows list`; `GET /api/v1/workflows/{id}` (`getWorkflow`) / `get_workflow` / `workflows get`. Add optional `workflowsEnabled` to existing `GET /api/v1/instance`; add the workflow feature predicate to the `registerTools()` catalog/visible split. | Hard-off | Full/read scope and current owner/admin checks; foreign IDs and team-context changes reveal no data; `tools/list` omits workflow tools while a direct call returns 404 workflows_disabled; `/instance` reports false; additive OpenAPI responses and generated client. |
@@ -729,8 +789,8 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 | 7. Delete and retirement | 3, 6 | `DELETE /api/v1/workflows/{id}` (`deleteWorkflow`) / `delete_workflow` / `workflows delete`. Emit the deletion audit event through the port; retention behavior. | Hard-off | Repeated authorized delete safe; storage-state invariant: the deleting transaction marks every pending fixture run of the definition retired, and no retired row can return to pending; history remains minimal; no cross-tenant existence leaks. (Claim races are tested in 9.) |
 | 8a. Timer calculations | 1 | None. Pure UTC due-time, minimum-gap, capture-time and expiration rules used by capture and dispatch. | Hard-off | Before/after start/end anchors; minimum_gap and offset_not_future equality; spring/fall DST and non-hour shifts; late-bound equality. |
 | 8b. Creation capture and intents | 3, 7, 8a | None. Native confirmed creation hooks on the `created` notifier event, immutable enrollments, due rows from 8a, and reminder/workflow intent ordering. | Hard-off | Rollback creates no run; duplicate capture coalesces; hold-confirm captures once; hold-expire/release creates nothing; imported/group bookings remain silent; minimum_gap and offset_not_future recorded at capture. |
-| 8c. Cancellation, reschedule and request-event capture | 8b | None. Cancellation and successor hooks with occurrence identities; `reschedule_requested` and `reschedule_request_expired` notifier events capture nothing. | Hard-off | Reschedule emits neither a second created nor an actual-cancel trigger; cancellation replay coalesces; successor retains timer revisions; delayed-created work retires and never transfers to the successor; request and request-expiry events create no occurrence and leave pending runs and wakes unchanged; a pick captures as an ordinary reschedule and a request cancellation as an ordinary cancellation. |
-| 9. Dispatcher and repair | 8c | None. Bounded due claims, fences, lazy definition-disable check at wake and missing-wake repair. | Hard-off | Cancel/reschedule/disable/delete while claim waits; a claim while its definition is disabled ends as workflow_disabled, and re-enabling before the claim dispatches within the late bound; racing worker cannot reclaim retired work; a pending reschedule request neither delays nor skips a due run; repair preserves unique identity; no late first attempt. |
+| 8c. Cancellation, reschedule and request-event capture | 8b | None. Cancellation and successor hooks with occurrence identities; `reschedule_requested` and `reschedule_request_expired` notifier events capture nothing; workflows register nothing on `AttendeeNoShowNotifier`. | Hard-off | Reschedule emits neither a second created nor an actual-cancel trigger; cancellation replay coalesces; successor retains timer revisions; delayed-created work retires and never transfers to the successor; request and request-expiry events create no occurrence and leave pending runs and wakes unchanged, and so does marking or unmarking an attendee as a no-show; a pick captures as an ordinary reschedule and a request cancellation as an ordinary cancellation. |
+| 9. Dispatcher and repair | 8c | None. Bounded due claims, fences, lazy definition-disable check at wake and missing-wake repair. | Hard-off | Cancel/reschedule/disable/delete while claim waits; a claim while its definition is disabled ends as workflow_disabled, and re-enabling before the claim dispatches within the late bound; racing worker cannot reclaim retired work; a pending reschedule request or a no-show mark neither delays nor skips a due run; repair preserves unique identity; no late first attempt. |
 | 10. Shared mail admission and sub-caps | 3 | None. Shared global ledger/lock and workflow-purpose hash; admission inserts the workflow-linked `notification_email_sends` row and the reservation row in one transaction; retry re-admission restamps that row; instance/owner settings in loadConfig with Compose `${…:-}` forwards and no .env.example or configuration.md entry yet. | Hard-off | Unchanged core queries count workflow rows; last-slot races across core/workflow workers admit once; workflow flood leaves 80 core and 20 reserve slots; re-admission excludes its own row, adds none and suppresses when full; small/zero caps and sliding windows; deletion cannot reset budget; Compose forwards both with empty defaults; close pools below CI ceiling. |
 | 11a. Safe email renderer and text policy | 6 | None. Bounded escaped interpolation and FOLLOW_UP_HOST_NOTES_ENABLED policy in save/update, the shared candidate validator and the renderer's built-in fallback used by dispatch (preview endpoint integrates in 15a). | Hard-off | Hostile HTML/header/control inputs inert; unauthorized variables rejected; switch off rejects custom subject/body in save/update and candidate-validator fixtures, including host recipients; the renderer falls back to built-in text for a stored custom revision when the switch is off; built-ins remain valid. |
 | 11b. Localized built-in catalogs | 11a | None. Templates for every shipped public locale and fixture snapshots. | Hard-off | Locale fallback is built-in; plain-text/HTML snapshots; no sibling contacts, capabilities or unauthorized team fields; self-hosted/Cloud defaults documented. |
@@ -739,9 +799,9 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 | 13a. Webhook discovery and creation parity | 4 | Existing `GET /api/v1/webhooks` (`listWebhooks`) / `list_webhooks` / `webhooks list`; existing `POST /api/v1/webhooks` (`createWebhook`) / `create_webhook` / `webhooks create`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Full/read discovery, full-only create; current owner/admin checks; one-time secret returned only on creation; CLI JSON/help and parity mapping; existing event kinds unchanged. |
 | 13b. Webhook edit and retirement parity | 13a | Existing `PATCH /api/v1/webhooks/{id}` (`updateWebhook`) / `update_webhook` / `webhooks update`; existing `DELETE /api/v1/webhooks/{id}` (`deleteWebhook`) / `delete_webhook` / `webhooks delete`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Pause after URL policy removal; immutable URL and permission tests; deletion race; parity gaps removed without changing unrelated gaps. |
 | 13c. Webhook rotation and history parity | 13b | Existing `POST /api/v1/webhooks/{id}/rotate-secret` (`rotateWebhookSecret`) / `rotate_webhook_secret` / `webhooks rotate-secret`; existing `GET /api/v1/webhooks/{id}/deliveries` (`listWebhookDeliveries`) / `list_webhook_deliveries` / `webhooks deliveries`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Rotation exposes secret once with no CLI logging; current authorization and secret rotation races; safe paginated metadata; full/read read scope and full-only rotation. |
-| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (5 to 6 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0064 webhooks.events CHECK with cardinality BETWEEN 1 AND 6 over the extended set; regenerate OpenAPI and client. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request-kind subscriptions preserved, fresh install, no-op rerun and DB types; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected; the docs/workflows.md baseline and its doc test are updated to the new constant and CHECK. |
-| 13e. Webhook subscription interfaces and guides | 13d | Existing listWebhooks/listWebhookDeliveries responses and the create_webhook/update_webhook and webhooks create/update interfaces carry the new kind; update MCP/CLI help, webhook/MCP/CLI guides, the payload field list and the open-enum compatibility note. | Hard-off for workflow event kind | MCP and CLI return the same 404 workflows_disabled for the new kind; list Webhook.events and delivery eventType documented as open enums; required bookingId remains UUID; guides name every kind and the disabled state. |
-| 14a. Webhook outbox extension | 9, 13e | None. Signed workflow delivery payload; new migration adds nullable webhook_deliveries.workflow_run_id, re-keys the 0064 NULLS NOT DISTINCT uniqueness with it, and extends the event_type CHECK from 5 to 6 kinds without changing booking or request deliveries; move the existing ON CONFLICT target in delivery.ts to the new key. | Hard-off | Populated predecessor with booking- and request-origin rows preserved unchanged, fresh install and no-op rerun; the existing capture's conflict target moves to the five-column key and booking/request duplicate capture still coalesces; the docs/workflows.md baseline and its doc test are updated; two workflow runs targeting one endpoint retain distinct identities; duplicate capture coalesces; transactional rollback; signatures verified with fake receiver; payload contains no new booking personal fields and no requestId. |
+| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (6 to 7 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0070 webhooks.events CHECK with cardinality BETWEEN 1 AND 7 over the extended set; regenerate OpenAPI and client. Update the integration tests that bind to WEBHOOK_EVENTS, `tools/n8n-nodes-hourmere/contract.test.ts` and `scripts/make-template-validation.test.ts`, to exclude workflow.executed explicitly; the n8n EVENTS, Make tables and Zapier app stay unchanged. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request- and attendance-kind subscriptions preserved, fresh install, no-op rerun and DB types; an endpoint subscribed to all current kinds can add the workflow kind; the n8n and Make tests still fail for a booking kind that their integration lacks; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected; the docs/workflows.md baseline and its doc test are updated to the new constant and CHECK. |
+| 13e. Webhook subscription interfaces and guides | 13d | Existing listWebhooks/listWebhookDeliveries responses and the create_webhook/update_webhook and webhooks create/update interfaces carry the new kind; update MCP/CLI help, webhook/MCP/CLI guides and the payload field list; extend the existing open-enum compatibility note to the workflow kind; state in the Zapier, n8n and Make guides that they do not offer it. | Hard-off for workflow event kind | MCP and CLI return the same 404 workflows_disabled for the new kind; list Webhook.events and delivery eventType documented as open enums; required bookingId remains UUID; guides name every kind and the disabled state. |
+| 14a. Webhook outbox extension | 9, 13e | None. Signed workflow delivery payload; new migration adds nullable webhook_deliveries.workflow_run_id, re-keys the 0064 NULLS NOT DISTINCT uniqueness with it, and replaces the 0070 event_type CHECK, extending it from 6 to 7 kinds without changing booking, request or attendance deliveries; move the existing ON CONFLICT target in delivery.ts to the new key. | Hard-off | Populated predecessor with booking-origin, request-origin and attendance rows preserved unchanged, fresh install and no-op rerun; the existing capture's conflict target moves to the five-column key, booking/request duplicate capture still coalesces and each attendance change still gets its own delivery; the docs/workflows.md baseline and its doc test are updated; two workflow runs targeting one endpoint retain distinct identities; duplicate capture coalesces; transactional rollback; signatures verified with fake receiver; payload contains no new booking personal fields and no requestId. |
 | 14b. Webhook delivery fences | 14a | None. Reuse guarded transport and bounded delivery repair; add workflow cancellation/disable and expiration checks. | Hard-off | DNS rebinding, redirects, forbidden/private targets and policy removal refused; endpoint pause/rotation race; first attempt expires at due+60min but timely-started delivery retries beyond that bound with same ID and receiver dedupe; no real outbound calls. |
 | 15a. Synthetic preview | 11b, 14b | `POST /api/v1/workflows/preview` (`previewWorkflow`) / `preview_workflow` / `workflows preview`. | Hard-off | Only synthetic examples; no booking lookup, mail, DNS or webhook call; same validation/rendering as execution; estimates reveal only static candidate limits, no instance usage; full scope and parity mapping. |
 | 15b. Execution audit wiring | 12b, 14b, 15a | None. Wire run_scheduled/run_cancelled (8b, 8c), run_skipped (9), the email events (12a, 12b), the webhook events (14a, 14b) and previewed (15a) into the audit port inside their transactions; production stays no-op until 16c. | Hard-off | A recording fake port sees each event once per transition; rollback records none; replay adds no terminal duplicate; background actors explicit; no bodies, answers, addresses, raw URLs or secrets. |
