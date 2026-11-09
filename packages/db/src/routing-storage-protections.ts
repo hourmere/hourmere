@@ -400,6 +400,8 @@ const dependencyValues = (f: RoutingFixture) => ({
   event_type_id: f.event,
 })
 const UUID_FORMAT = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+const DIGEST_FORMAT = '^[0-9a-f]{64}$'
+const FALLBACK = 'fallback'
 const formats: [
   string,
   string,
@@ -407,14 +409,16 @@ const formats: [
   (f: RoutingFixture) => Record<string, unknown>,
   string,
   () => string,
+  string | undefined,
 ][] = [
   [
     'receipt digest format',
     'routing_receipts',
     'token_hash',
     receiptValues,
-    '^[0-9a-f]{64}$',
+    DIGEST_FORMAT,
     () => randomUUID().replaceAll('-', '').repeat(2),
+    undefined,
   ],
   [
     'dependency rule identity',
@@ -423,6 +427,7 @@ const formats: [
     dependencyValues,
     UUID_FORMAT,
     randomUUID,
+    FALLBACK,
   ],
 ]
 for (const table of ['routing_receipts', 'booking_routing'])
@@ -434,38 +439,75 @@ for (const table of ['routing_receipts', 'booking_routing'])
       table === 'routing_receipts' ? receiptValues : bookingRoutingValues,
       UUID_FORMAT,
       randomUUID,
+      FALLBACK,
     ])
-// Each invalid value differs from a valid one only at an edge or in letter case, so dropping
-// either regex anchor, or the whole CHECK, admits at least one of them.
-const edgeValues = (valid: string) => [
-  'malformed',
-  valid.slice(1),
-  `0${valid}`,
-  `x${valid}`,
-  `${valid}0`,
-  `${valid}x`,
-  `A${valid.slice(1)}`,
-]
-// Rewrites one column's pattern inside one table; unchanged source fails the harness.
-const withoutAnchor =
-  (table: string, column: string, pattern: string, anchor: '^' | '$') => (source: string) => {
-    const start = source.indexOf(`CREATE TABLE ${table} (`)
-    const end = source.indexOf('\n);', start)
-    const find = `${column} ~ '${pattern}'`
-    const body = source.slice(start, end)
-    if (start < 0 || body.split(find).length !== 2) return source
-    const relaxed = `${column} ~ '${pattern.replace(anchor, '')}'`
-    return `${source.slice(0, start)}${body.replace(find, () => relaxed)}${source.slice(end)}`
-  }
-for (const [name, table, column, values, pattern, valid] of formats) {
+// pg_get_constraintdef renders each format CHECK in this canonical form. Pinning the whole
+// definition rejects every widening of a quantifier or of the literal, including ones the
+// probes below do not enumerate.
+const formatDefinition = (column: string, pattern: string, literal: string | undefined) =>
+  literal === undefined
+    ? `CHECK ((${column} ~ '${pattern}'::text))`
+    : `CHECK (((${column} = '${literal}'::text) OR (${column} ~ '${pattern}'::text)))`
+// Each invalid value differs from a valid one only at an edge, in letter case or by one
+// character in one group, so dropping either regex anchor, widening one quantifier,
+// loosening the literal or dropping the whole CHECK admits at least one of them.
+const edgeValues = (valid: string, literal: string | undefined) => {
+  const groups = valid.split('-')
+  const last = groups.length - 1
+  const regroup = (index: number, group: string) =>
+    groups.map((current, i) => (i === index ? group : current)).join('-')
+  return [
+    ...new Set([
+      'malformed',
+      valid.slice(1),
+      `0${valid}`,
+      `x${valid}`,
+      `${valid}0`,
+      `${valid}x`,
+      `A${valid.slice(1)}`,
+      // Last group one hex digit short (11 of 12, or 63 of 64) and one long (13, or 65).
+      regroup(last, (groups[last] ?? '').slice(1)),
+      regroup(last, `${groups[last]}0`),
+      // Fourth UUID group with 3 and with 5 hex digits.
+      ...(groups.length === 5
+        ? [regroup(3, (groups[3] ?? '').slice(1)), regroup(3, `${groups[3]}0`)]
+        : []),
+      // Only the exact literal is accepted: no prefix, suffix or case variant.
+      ...(literal === undefined
+        ? []
+        : [`${literal}x`, `x${literal}`, `${literal[0]?.toUpperCase()}${literal.slice(1)}`]),
+    ]),
+  ]
+}
+// Rewrites one column's CHECK inside one table; unchanged source fails the harness.
+const rewriteFormat = (table: string, find: string, replacement: string) => (source: string) => {
+  const start = source.indexOf(`CREATE TABLE ${table} (`)
+  const end = source.indexOf('\n);', start)
+  const body = source.slice(start, end)
+  if (start < 0 || body.split(find).length !== 2) return source
+  return `${source.slice(0, start)}${body.replace(find, () => replacement)}${source.slice(end)}`
+}
+const withoutAnchor = (table: string, column: string, pattern: string, anchor: '^' | '$') =>
+  rewriteFormat(table, `${column} ~ '${pattern}'`, `${column} ~ '${pattern.replace(anchor, '')}'`)
+for (const [name, table, column, values, pattern, valid, literal] of formats) {
   const constraint = `${table}_${column}_check`
   const check = async (f: RoutingFixture) => {
     const value = valid()
-    for (const invalid of edgeValues(value))
+    for (const invalid of edgeValues(value, literal))
       await expect(
         insertRow(f.pool, table, { ...values(f), [column]: invalid }),
       ).rejects.toMatchObject({ ...checkViolation, constraint })
+    // booking_routing has one row per booking, so its literal acceptance is covered by the
+    // fixture rows other protections insert.
+    if (literal !== undefined && table !== 'booking_routing')
+      await insertRow(f.pool, table, { ...values(f), [column]: literal })
     await insertRow(f.pool, table, { ...values(f), [column]: value })
+    const { rows } = await f.pool.query<{ definition: string }>(
+      `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+      WHERE conrelid = $1::regclass AND conname = $2`,
+      [table, constraint],
+    )
+    expect(rows[0]?.definition).toBe(formatDefinition(column, pattern, literal))
   }
   routingProtections[name] = { check, break: drop(table, constraint) }
   routingProtections[`${name} start anchor`] = {
@@ -476,6 +518,26 @@ for (const [name, table, column, values, pattern, valid] of formats) {
     check,
     break: withoutAnchor(table, column, pattern, '$'),
   }
+  const widened = (find: string, replacement: string) =>
+    rewriteFormat(
+      table,
+      `${column} ~ '${pattern}'`,
+      `${column} ~ '${pattern.replace(find, replacement)}'`,
+    )
+  routingProtections[`${name} last group length`] = {
+    check,
+    break: pattern === UUID_FORMAT ? widened('{12}$', '{11,12}$') : widened('{64}$', '{63,64}$'),
+  }
+  if (pattern === UUID_FORMAT)
+    routingProtections[`${name} inner group length`] = {
+      check,
+      break: widened('-[0-9a-f]{4}-[0-9a-f]{12}$', '-[0-9a-f]{3,4}-[0-9a-f]{12}$'),
+    }
+  if (literal !== undefined)
+    routingProtections[`${name} literal exact`] = {
+      check,
+      break: rewriteFormat(table, `${column} = '${literal}'`, `${column} LIKE '${literal}%'`),
+    }
 }
 for (const [name, table, constraint, values] of [
   ['unique form slug', 'routing_forms', 'routing_forms_organization_id_slug_key', formValues],
