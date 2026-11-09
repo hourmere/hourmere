@@ -7,11 +7,13 @@ import {
   insertBooking,
   lockHosts,
   requireOfferedSlot,
+  resolveBookingLocation,
   validateInvitee,
 } from './bookings.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { lockOrganization } from './hosts.ts'
+import { selectLocationOption } from './location-options.ts'
 import { createNotificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 import { validateResponses } from './questions.ts'
@@ -90,11 +92,12 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
     if (
       current.schedulingType !== 'individual' ||
       current.hostUserIds.length !== 1 ||
-      model.booking_mode !== 'individual' ||
-      current.location?.kind === 'google_meet' ||
-      current.location?.kind === 'zoom' ||
-      current.location?.kind === 'phone'
+      model.booking_mode !== 'individual'
     )
+      throw new DomainError('invalid', 'payment_flow_unsupported')
+    // Gate the option this hold would store: the invitee's choice, or the default without one.
+    const chosen = selectLocationOption(current.locations, input.locationOptionId)
+    if (chosen?.kind === 'google_meet' || chosen?.kind === 'zoom' || chosen?.kind === 'phone')
       throw new DomainError('invalid', 'payment_flow_unsupported')
     const responses = validateResponses(current.questions, input.responses ?? {})
     const duration = selectDurationMinutes(current, input.durationMinutes)
@@ -113,6 +116,7 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       now,
       durationMinutes: duration,
     })
+    const choice = await resolveBookingLocation(ctx, trx, current, current.hostUserIds, input)
     const expiresAt = now.add({ minutes: PAYMENT_HOLD_MINUTES }).toString()
     const { id } = await insertBooking(trx, {
       organizationId: current.organizationId,
@@ -120,7 +124,8 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       start: input.start,
       end,
       title: `${current.title} with ${invitee.name}`,
-      location: current.location,
+      location: choice.location,
+      locationOption: choice.locationOption,
       responses,
       source: 'web',
       apiKeyId: null,

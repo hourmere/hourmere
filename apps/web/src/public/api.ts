@@ -122,12 +122,16 @@ export async function getOneTimeBookingPage(
   return data
 }
 
-export function oneTimeLinkSlots(token: string, durationMinutes?: number): SlotLoader {
+export function oneTimeLinkSlots(
+  token: string,
+  durationMinutes?: number,
+  locationOptionId?: string,
+): SlotLoader {
   return async (start, end, signal) => {
     const { data } = await call(
       () =>
         api.GET('/api/v1/book/{token}/slots', {
-          params: { path: { token }, query: { start, end, durationMinutes } },
+          params: { path: { token }, query: { start, end, durationMinutes, locationOptionId } },
           signal,
         }),
       signal,
@@ -162,17 +166,24 @@ export function eventSlots(
   slug: string,
   team = false,
   durationMinutes?: number,
+  locationOptionId?: string,
 ): SlotLoader {
   return async (start, end, signal) => {
     const { data } = await call(
       () =>
         team
           ? api.GET('/api/v1/public/teams/{handle}/{slug}/slots', {
-              params: { path: { handle, slug }, query: { start, end, durationMinutes } },
+              params: {
+                path: { handle, slug },
+                query: { start, end, durationMinutes, locationOptionId },
+              },
               signal,
             })
           : api.GET('/api/v1/public/{handle}/{slug}/slots', {
-              params: { path: { handle, slug }, query: { start, end, durationMinutes } },
+              params: {
+                path: { handle, slug },
+                query: { start, end, durationMinutes, locationOptionId },
+              },
               signal,
             }),
       signal,

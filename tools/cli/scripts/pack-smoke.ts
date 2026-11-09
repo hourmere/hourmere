@@ -1,5 +1,6 @@
-import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import assert from 'node:assert/strict'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +34,55 @@ try {
     execFileSync('npm', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   const manifest = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8'))
   assertPackage(manifest)
+  // Exercise npm's actual publication lifecycle outside the five-second unit
+  // test budget. Offline dry-run never sends the package to a registry.
+  const unpublished = join(root, 'unpublished')
+  await mkdir(unpublished)
+  await writeFile(join(unpublished, 'package.json'), JSON.stringify(manifest))
+  const publication = spawnSync('npm', ['publish', '--dry-run', '--offline'], {
+    cwd: unpublished,
+    env,
+    encoding: 'utf8',
+  })
+  assert.equal(publication.status, 1)
+  assert.match(publication.stdout, /node dist\/index.js --version/)
+  assert.match(publication.stderr, /MODULE_NOT_FOUND/)
+
+  // Compile the real Node compatibility probe for both inherited configs.
+  // Keep this semantic check in the existing Node 22/24 integration job.
+  for (const name of ['tsconfig.json', 'tsconfig.build.json']) {
+    const directory = join(root, name)
+    await mkdir(directory)
+    const configPath = join(directory, 'tsconfig.json')
+    await writeFile(
+      join(directory, 'probe.ts'),
+      `void fetch(new Request(new URL('https://hourmere.example.invalid/mcp'), {
+        signal: AbortSignal.timeout(30_000),
+      })).then((response: Response) => response.json())
+      // @ts-expect-error Node 22 has no native Temporal API.
+      Temporal.Now.instant()
+      export {}
+      `,
+    )
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        extends: join(packageDirectory, name),
+        compilerOptions: {
+          noEmit: true,
+          rootDir: directory,
+          typeRoots: [fileURLToPath(new URL('../../../node_modules/@types', import.meta.url))],
+        },
+        include: ['probe.ts'],
+      }),
+    )
+    const compiler = fileURLToPath(new URL('../../../node_modules/.bin/tsc', import.meta.url))
+    const diagnostics = execFileSync(compiler, ['-p', configPath, '--pretty', 'false'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    assert.equal(diagnostics, '')
+  }
   // Development scripts stay at the repository root, outside the published manifest.
   npm(['run', 'cli:build'], fileURLToPath(new URL('../../..', import.meta.url)))
   const dryRun = JSON.parse(npm(['pack', '--dry-run', '--json'])) as {

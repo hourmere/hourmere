@@ -11,7 +11,7 @@ import {
   createMcpOAuthResolver,
   TeamManagementError,
 } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, importedBookingIds } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   cancelTeamAdminBooking,
@@ -304,6 +304,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     expect(first).toEqual({
       id: seeded.ids[0],
       status: 'cancelled',
+      canManageNoShow: false,
       start: '2026-11-04T09:00:00.000Z',
       isRescheduled: true,
       end: '2026-11-04T09:30:00.000Z',
@@ -318,7 +319,15 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
         },
       ],
       attendees: [
-        { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC', isBooker: true },
+        {
+          id: expect.any(String),
+          noShowMarkedAt: null,
+          noShowMarkedBy: null,
+          name: 'Invitee',
+          email: 'invitee@example.com',
+          timeZone: 'UTC',
+          isBooker: true,
+        },
       ],
     })
     expect(JSON.stringify(result).includes('private-only')).toBe(false)
@@ -327,8 +336,24 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       seeded.hosts.map((host) => host.id).sort(),
     )
     expect(collective?.attendees).toEqual([
-      { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC', isBooker: true },
-      { name: 'Guest', email: 'guest@example.com', timeZone: 'Asia/Shanghai', isBooker: false },
+      {
+        id: expect.any(String),
+        noShowMarkedAt: null,
+        noShowMarkedBy: null,
+        name: 'Invitee',
+        email: 'invitee@example.com',
+        timeZone: 'UTC',
+        isBooker: true,
+      },
+      {
+        id: expect.any(String),
+        noShowMarkedAt: null,
+        noShowMarkedBy: null,
+        name: 'Guest',
+        email: 'guest@example.com',
+        timeZone: 'Asia/Shanghai',
+        isBooker: false,
+      },
     ])
   })
 
@@ -755,6 +780,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     const item = resolve(document, data?.items as Record<string, unknown>)
     expect(Object.keys(item.properties as object).sort()).toEqual([
       'attendees',
+      'canManageNoShow',
       'cancelledAt',
       'end',
       'eventType',
@@ -858,6 +884,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       bookingPageQuery,
       encodeBookingCursor,
       cancelTeamBookingInTransaction,
+      importedBookingIds,
       DomainError,
       isUuid,
       toTeamAdminBooking,
