@@ -170,7 +170,15 @@ it('opens nondefault settings and preserves their values after a collapsed title
   const user = userEvent.setup()
   const view = renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
   const title = await screen.findByLabelText('Title', { exact: true })
-  for (const id of ['description', 'bufferBeforeMinutes']) {
+  for (const id of [
+    'description',
+    'bufferBeforeMinutes',
+    'allowedDurationsMinutes',
+    'waitlist',
+    'questions-heading',
+    'successRedirect.url',
+    'notifications',
+  ]) {
     expect(disclosureFor(document.getElementById(id) as HTMLElement).open).toBe(true)
   }
   for (const group of view.container.querySelectorAll('details')) group.open = false
@@ -200,4 +208,86 @@ it('reopens a group when returning from the error summary after it was collapsed
   await user.click(link)
   expect(group.open).toBe(true)
   expect(document.activeElement).toBe(field)
+})
+
+describe.each(['en', 'zh-CN'] as const)('first-screen feedback in %s', (language) => {
+  it('keeps an invalid single duration error on the duration input', async () => {
+    chooseLanguage(language)
+    setup()
+    const user = userEvent.setup()
+    renderApp('/app/event-types/new')
+    await screen.findByLabelText(language === 'en' ? 'Title' : '标题', { exact: true })
+    fireEvent.change(document.getElementById('title') as HTMLElement, {
+      target: { value: 'Intro' },
+    })
+    const duration = document.getElementById('durationMinutes') as HTMLInputElement
+    fireEvent.change(duration, { target: { value: '2000' } })
+    await user.click(
+      screen.getByRole('button', {
+        name: language === 'en' ? 'Create event type' : '创建活动类型',
+      }),
+    )
+    expect(document.activeElement).toBe(duration)
+    expect(duration.getAttribute('aria-invalid')).toBe('true')
+    expect(document.querySelectorAll('.field-error')).toHaveLength(1)
+    expect(
+      disclosureFor(document.getElementById('allowedDurationsMinutes') as HTMLElement).open,
+    ).toBe(false)
+    const links = document.querySelectorAll('.error-summary a')
+    expect(links).toHaveLength(1)
+    expect(links[0]?.textContent).toContain(
+      language === 'en' ? 'Duration (minutes)' : '时长（分钟）',
+    )
+  })
+})
+
+it('keeps focus on a reminder edit after the user closes a failed field group', async () => {
+  chooseLanguage('en')
+  setup()
+  const user = userEvent.setup()
+  renderApp('/app/event-types/new')
+  await user.type(await screen.findByLabelText('Title', { exact: true }), 'Intro')
+  const invalid = document.getElementById('bufferAfterMinutes') as HTMLInputElement
+  fireEvent.change(invalid, { target: { value: '-1' } })
+  await user.click(screen.getByRole('button', { name: 'Create event type' }))
+  const group = disclosureFor(invalid)
+  await user.click(group.querySelector('summary') as HTMLElement)
+  expect(group.open).toBe(false)
+  const notifications = disclosureFor(document.getElementById('notifications') as HTMLElement)
+  await user.click(notifications.querySelector('summary') as HTMLElement)
+  const offset = notifications.querySelector('input[inputmode="numeric"]') as HTMLInputElement
+  await user.click(offset)
+  fireEvent.change(offset, { target: { value: '120' } })
+  expect(group.open).toBe(false)
+  expect(document.activeElement).toBe(offset)
+})
+
+it('shows the no-schedule notice on create without opening settings', async () => {
+  chooseLanguage('en')
+  fakeApi({
+    ...signedInAs(ME),
+    ...profile(),
+    'GET /api/v1/schedules': () => json(200, { data: [] }),
+  })
+  renderApp('/app/event-types/new')
+  await screen.findByLabelText('Title', { exact: true })
+  const notice = screen.getByText(/You have no schedule yet/)
+  expect(notice.closest('details')).toBeNull()
+  expect(screen.getByRole('link', { name: 'Set your availability' })).toBeTruthy()
+})
+
+it('shows a team-role failure on create without opening settings', async () => {
+  chooseLanguage('en')
+  const me = { ...ME, organization: { ...ME.organization, personal: false } }
+  fakeApi({
+    ...signedInAs(me),
+    ...profile(),
+    'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
+    'GET /api/auth/organization/get-active-member': () => json(500, { message: 'Unavailable' }),
+  })
+  renderApp('/app/event-types/new')
+  await screen.findByLabelText('Title', { exact: true })
+  const notice = await screen.findByText('Could not load your team role.')
+  expect(notice.closest('details')).toBeNull()
+  expect(notice.closest('[role="alert"]')).not.toBeNull()
 })

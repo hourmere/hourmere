@@ -189,10 +189,13 @@ function EventTypeForm({
   const [status, setStatus] = useState<UiText>(message ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  const focusedAttempt = useRef(0)
   // Fields stay mounted in disclosures, so opening a group cannot reset its values.
   // Run after ErrorSummary's effect: a hidden invalid field takes focus once revealed.
+  // Editing a field may prune errors, but only a new submit should reveal/focus them.
   useEffect(() => {
-    if (!attempt) return
+    if (!attempt || focusedAttempt.current === attempt) return
+    focusedAttempt.current = attempt
     let hiddenField: HTMLElement | null = null
     for (const id of Object.keys(errors)) {
       const field = document.getElementById(id) ?? document.getElementById(`${id}-error`)
@@ -203,7 +206,9 @@ function EventTypeForm({
         hiddenField ??= field
       }
     }
-    hiddenField?.focus()
+    if (hiddenField) hiddenField.focus()
+    else if (Object.keys(errors).length === 1 && errors.durationMinutes)
+      document.getElementById('durationMinutes')?.focus()
   }, [attempt, errors])
   const mounted = useMounted()
   const [readiness, retryReadiness, invalidateReadiness, shareReadiness] = useEditorReadiness(
@@ -622,7 +627,14 @@ function EventTypeForm({
                       value={draft.durationMinutes}
                       onChange={(event) => {
                         set('durationMinutes', event.target.value)
-                        set('allowedDurationsMinutes', [Number(event.target.value)])
+                        const minutes = parseWhole(event.target.value)
+                        if (
+                          minutes !== null &&
+                          Number.isInteger(minutes) &&
+                          minutes >= RULES.durationMinutes.min &&
+                          minutes <= RULES.durationMinutes.max
+                        )
+                          set('allowedDurationsMinutes', [minutes])
                       }}
                     />
                   )
@@ -631,6 +643,16 @@ function EventTypeForm({
               <LocationFields draft={draft} errors={errors} set={set} />
             </div>
           </section>
+          {!editing &&
+            draft.schedulingType === 'individual' &&
+            ownSchedule &&
+            schedules.length === 0 && (
+              <p className="hint">
+                {noScheduleHint[0]}
+                <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>
+                {noScheduleHint[1]}
+              </p>
+            )}
           <SettingsGroup
             label="Description and visibility"
             initiallyOpen={changed('description', 'position', 'isActive', 'isHidden')}
@@ -743,6 +765,21 @@ function EventTypeForm({
               onDefaultChange={(value) => set('durationMinutes', value)}
             />
           </SettingsGroup>
+          {!me.organization.personal && !canAssignHosts && access.status !== 'ready' && (
+            <section className="panel" aria-labelledby="hosts-heading">
+              <h2 id="hosts-heading">{t('Hosts')}</h2>
+              {access.status === 'loading' ? (
+                <p role="status">{t('Loading your team role…')}</p>
+              ) : (
+                <div role="alert">
+                  <p>{t('Could not load your team role.')}</p>
+                  <button type="button" onClick={access.reload}>
+                    {t('Try again')}
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
           {!me.organization.personal && (
             <SettingsGroup label="Hosts" initiallyOpen={editing}>
               {!me.organization.personal && canAssignHosts && (
@@ -755,21 +792,6 @@ function EventTypeForm({
                   organizerError={errors.conferenceOrganizer}
                   set={set}
                 />
-              )}
-              {!me.organization.personal && !canAssignHosts && access.status !== 'ready' && (
-                <section className="panel" aria-labelledby="hosts-heading">
-                  <h2 id="hosts-heading">{t('Hosts')}</h2>
-                  {access.status === 'loading' ? (
-                    <p role="status">{t('Loading your team role…')}</p>
-                  ) : (
-                    <div role="alert">
-                      <p>{t('Could not load your team role.')}</p>
-                      <button type="button" onClick={access.reload}>
-                        {t('Try again')}
-                      </button>
-                    </div>
-                  )}
-                </section>
               )}
               {!me.organization.personal && !canAssignHosts && access.status === 'ready' && (
                 <ReadOnlyHosts draft={draft} me={me} role={role} onReload={confirmReload} />
@@ -981,11 +1003,13 @@ function EventTypeForm({
                     error={errors.scheduleId}
                     hint={
                       schedules.length === 0 ? (
-                        <>
-                          {noScheduleHint[0]}
-                          <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>
-                          {noScheduleHint[1]}
-                        </>
+                        editing ? (
+                          <>
+                            {noScheduleHint[0]}
+                            <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>
+                            {noScheduleHint[1]}
+                          </>
+                        ) : undefined
                       ) : (
                         <>
                           {scheduleHint[0]}

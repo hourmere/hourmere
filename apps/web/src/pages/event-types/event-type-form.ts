@@ -284,7 +284,10 @@ export function allowedDurationsProblem(
   )
     return msg('Enter a number from {0} to {1}.', { '0': '1', '1': '1,440' })
   if (new Set(durations).size !== durations.length) return 'Offer each duration only once.'
-  if (!durations.includes(parseWhole(defaultDuration) as number))
+  if (
+    !wholeNumberProblem(defaultDuration, RULES.durationMinutes, true) &&
+    !durations.includes(parseWhole(defaultDuration) as number)
+  )
     return 'Include the default duration in the allowed durations.'
   return null
 }
@@ -597,7 +600,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     maxBookingsPerWeek: whole(draft.maxBookingsPerWeek),
     maxBookingsPerMonth: whole(draft.maxBookingsPerMonth),
     bookingWindowDays: whole(draft.bookingWindowDays),
-    ...(draft.locationOptions === null
+    ...(draft.locationOptions === null && !(location?.kind === 'phone' && location.askInvitee)
       ? { location }
       : { locations: orderedLocations(draft).length ? orderedLocations(draft) : null }),
     questions: draft.questions.map((q) => ({
@@ -675,7 +678,7 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
     if (draft.locationKind === 'google_meet') delete body.location
     if (draft.scheduleId === baseline.scheduleId) delete body.scheduleId
   }
-  if (draft.schedulingType === 'round_robin' && sameHosts) delete body.scheduleId
+  if (draft.schedulingType !== 'individual' && sameHosts) delete body.scheduleId
   return body
 }
 
@@ -688,7 +691,7 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     title: 'Title',
     slug: 'Booking link',
     description: 'Description',
-    durationMinutes: 'Default duration',
+    durationMinutes: 'Duration (minutes)',
     allowedDurationsMinutes: 'Allowed durations',
     slotStepMinutes: 'Start times every',
     'location-kind': 'Location',

@@ -45,7 +45,7 @@ The website at hourmere.com is separate from your Hourmere instance.
 ## Create an event type
 
 Open **Event types**, then **New event type** in your Hourmere instance. Start with four
-things: **Title**, **Link**, **Duration** and **Location**. The link follows your title and
+things: **Title**, **Booking link**, **Duration (minutes)** and **Where the meeting happens**. The link follows your title and
 meeting length until you edit it yourself. A location can be left unset; phone, address
 and meeting-link choices ask for the details needed for that choice.
 

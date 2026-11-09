@@ -56,6 +56,67 @@ function detects(before: string, after: string, assertion: (values: typeof formF
 }
 
 describe('location editor production-source mutation controls', () => {
+  it('detects sending primary invitee collection through the rejected legacy path', () => {
+    detects(
+      "draft.locationOptions === null && !(location?.kind === 'phone' && location.askInvitee)",
+      'draft.locationOptions === null',
+      (values) => {
+        const draft = {
+          ...values.emptyDraft(),
+          locationKind: 'phone' as const,
+          phoneAskInvitee: true,
+        }
+        expect(values.toInput(draft).locations).toEqual([
+          { id: draft.primaryLocationId, kind: 'phone', askInvitee: true },
+        ])
+        expect(values.toInput(draft)).not.toHaveProperty('location')
+      },
+    )
+  })
+  it('detects dropping a named primary while changing another location', () => {
+    detects('            ...(option.label && { label: option.label }),', '', (values) => {
+      const baseline = values.draftFromEventType(
+        eventType({
+          location: { kind: 'phone', askInvitee: true },
+          locations: [
+            { id: 'call', kind: 'phone', askInvitee: true, label: 'Call me', isDefault: true },
+            { id: 'office', kind: 'in_person', address: '1 Main Street' },
+          ],
+        }),
+      )
+      const draft = {
+        ...baseline,
+        locationOptions: (baseline.locationOptions ?? []).map((option) =>
+          option.id === 'office' ? { ...option, address: '2 Main Street' } : option,
+        ),
+      }
+      expect(values.toPatchInput(draft, baseline).locations?.[0]).toEqual({
+        id: 'call',
+        kind: 'phone',
+        askInvitee: true,
+        label: 'Call me',
+        isDefault: true,
+      })
+    })
+  })
+
+  it('detects clearing collective host schedules on a metadata save', () => {
+    detects(
+      "if (draft.schedulingType !== 'individual' && sameHosts) delete body.scheduleId",
+      "if (draft.schedulingType === 'round_robin' && sameHosts) delete body.scheduleId",
+      (values) => {
+        const baseline = {
+          ...values.emptyDraft(),
+          schedulingType: 'collective' as const,
+          hostUserIds: ['host-one', 'host-two'],
+        }
+        expect(
+          values.toPatchInput({ ...baseline, title: 'Renamed panel' }, baseline),
+        ).not.toHaveProperty('scheduleId')
+      },
+    )
+  })
+
   it('detects displaying a location conflict as untranslated server prose', () => {
     detects("case 'location_options_conflict':", "case 'unused_location_conflict':", (values) => {
       const result = values.serverErrors(
@@ -77,7 +138,9 @@ describe('location editor production-source mutation controls', () => {
         const baseline = values.draftFromEventType(
           eventType({ location: { kind: 'phone', askInvitee: true } }),
         )
-        expect(values.toInput(baseline).location).toEqual({ kind: 'phone', askInvitee: true })
+        expect(values.toInput(baseline).locations).toEqual([
+          { id: baseline.primaryLocationId, kind: 'phone', askInvitee: true },
+        ])
       },
     )
   })
@@ -118,7 +181,9 @@ describe('location editor production-source mutation controls', () => {
         const baseline = values.draftFromEventType(
           eventType({ location: { kind: 'phone', askInvitee: true } }),
         )
-        expect(values.toInput(baseline).location).toEqual({ kind: 'phone', askInvitee: true })
+        expect(values.toInput(baseline).locations).toEqual([
+          { id: baseline.primaryLocationId, kind: 'phone', askInvitee: true },
+        ])
       },
     )
   })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Field, type FieldErrors } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import {
@@ -19,6 +19,13 @@ export function OrderedLocationsEditor({
 }) {
   const { t, ui } = useI18n()
   const [addition, setAddition] = useState('')
+  const pendingFocus = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (pendingFocus.current) {
+      document.getElementById(pendingFocus.current)?.focus()
+      pendingFocus.current = null
+    }
+  })
   const options = orderedLocations(draft)
   const defaultId = (options.find((option) => option.isDefault) ?? options[0])?.id
   const available = LOCATION_KINDS.filter(
@@ -31,10 +38,14 @@ export function OrderedLocationsEditor({
     )
   }
   function move(index: number, direction: number) {
-    const next = [...options]
+    // Reordering changes presentation, not the invitee's default choice.
+    const next = options.map((item) =>
+      item.id === defaultId ? { ...item, isDefault: true as const } : item,
+    )
     const [option] = next.splice(index, 1)
     if (!option) return
     next.splice(index + direction, 0, option)
+    pendingFocus.current = `location-option-${option.id}-label`
     set('locationOptions', next)
   }
   function add() {
@@ -184,12 +195,16 @@ export function OrderedLocationsEditor({
                 <button
                   className="button button-small"
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    const neighbor = options[index - 1] ?? options[index + 1]
+                    pendingFocus.current = neighbor
+                      ? `location-option-${neighbor.id}-label`
+                      : 'location-option-add-kind'
                     set(
                       'locationOptions',
                       options.filter((item) => item.id !== option.id),
                     )
-                  }
+                  }}
                 >
                   {t('Remove location option')}
                 </button>
