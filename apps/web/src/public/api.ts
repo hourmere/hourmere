@@ -122,12 +122,16 @@ export async function getOneTimeBookingPage(
   return data
 }
 
-export function oneTimeLinkSlots(token: string, durationMinutes?: number): SlotLoader {
+export function oneTimeLinkSlots(
+  token: string,
+  durationMinutes?: number,
+  locationOptionId?: string,
+): SlotLoader {
   return async (start, end, signal) => {
     const { data } = await call(
       () =>
         api.GET('/api/v1/book/{token}/slots', {
-          params: { path: { token }, query: { start, end, durationMinutes } },
+          params: { path: { token }, query: { start, end, durationMinutes, locationOptionId } },
           signal,
         }),
       signal,
@@ -162,17 +166,24 @@ export function eventSlots(
   slug: string,
   team = false,
   durationMinutes?: number,
+  locationOptionId?: string,
 ): SlotLoader {
   return async (start, end, signal) => {
     const { data } = await call(
       () =>
         team
           ? api.GET('/api/v1/public/teams/{handle}/{slug}/slots', {
-              params: { path: { handle, slug }, query: { start, end, durationMinutes } },
+              params: {
+                path: { handle, slug },
+                query: { start, end, durationMinutes, locationOptionId },
+              },
               signal,
             })
           : api.GET('/api/v1/public/{handle}/{slug}/slots', {
-              params: { path: { handle, slug }, query: { start, end, durationMinutes } },
+              params: {
+                path: { handle, slug },
+                query: { start, end, durationMinutes, locationOptionId },
+              },
               signal,
             }),
       signal,
@@ -303,11 +314,18 @@ export async function getManagedBooking(
   return data
 }
 
-export async function cancelManagedBooking(token: string, reason: string): Promise<Booking> {
+export async function cancelManagedBooking(
+  token: string,
+  reason: string,
+  rescheduleRequestId?: string,
+): Promise<Booking> {
   const { data } = await call(() =>
     api.POST('/api/v1/bookings/manage/cancel', {
       params: { header: { 'x-manage-token': token } },
-      body: reason ? { reason } : {},
+      body: {
+        ...(reason ? { reason } : {}),
+        ...(rescheduleRequestId ? { rescheduleRequestId } : {}),
+      },
     }),
   )
   return data
@@ -316,11 +334,12 @@ export async function cancelManagedBooking(token: string, reason: string): Promi
 export async function rescheduleManagedBooking(
   token: string,
   start: string,
+  rescheduleRequestId?: string,
 ): Promise<BookingWithToken> {
   const { data } = await call(() =>
     api.POST('/api/v1/bookings/manage/reschedule', {
       params: { header: { 'x-manage-token': token } },
-      body: { start },
+      body: { start, ...(rescheduleRequestId ? { rescheduleRequestId } : {}) },
     }),
   )
   return data

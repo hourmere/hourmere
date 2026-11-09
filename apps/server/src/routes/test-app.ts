@@ -7,6 +7,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createApp } from '../app.ts'
 import { analyticsRoutes } from './analytics.ts'
 import { bookingRoutes } from './bookings.ts'
+import { brandingRoutes } from './branding.ts'
 import { calendarRoutes } from './calendars.ts'
 import { conferenceRoutes } from './conferences.ts'
 import { eventTypeRoutes } from './event-types.ts'
@@ -66,6 +67,7 @@ export const productRoutes = (db: Db) => [
   profileRoutes({ db }),
   scheduleRoutes({ db }),
   webhookRoutes({ db, enabled: false }),
+  brandingRoutes({ db }),
   eventTypeRoutes({ db }),
   publicRoutes({ db }),
   oneTimeLinkRoutes({ db, publicUrl: PUBLIC_URL }),

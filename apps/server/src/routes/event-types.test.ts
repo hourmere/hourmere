@@ -45,9 +45,14 @@ describe('event type routes in the OpenAPI document', () => {
         expect(result).toHaveProperty(field, 1)
       }
       verify(projection)
-      expect(() => verify(projection.replace('...eventType', `${omitted}...eventType`))).toThrow(
-        expect.objectContaining({ name: 'AssertionError' }),
-      )
+      expect(() =>
+        verify(
+          projection.replace(
+            '(eventType: ServiceEventType)',
+            `({ ${omitted}...eventType }: ServiceEventType)`,
+          ),
+        ),
+      ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
     },
   )
 
@@ -68,10 +73,15 @@ describe('event type routes in the OpenAPI document', () => {
       )
     }
     verify(projection)
-    const anchor = 'const eventTypeResponse = ({'
+    const anchor = '(eventType: ServiceEventType)'
     expect(projection).toContain(anchor)
     expect(() =>
-      verify(projection.replace(anchor, `${anchor}\n  successRedirect: _successRedirect,`)),
+      verify(
+        projection.replace(
+          anchor,
+          '({ successRedirect: _successRedirect, ...eventType }: ServiceEventType)',
+        ),
+      ),
     ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
 
@@ -91,6 +101,7 @@ describe('event type routes in the OpenAPI document', () => {
       expect(closedObjects(doc, schema)).toEqual([
         '$',
         ...[0, 1, 2, 3, 4].map((i) => `$.location|oneOf${i}`),
+        ...[0, 1, 2, 3, 4].map((i) => `$.locations[]|oneOf${i}`),
         '$.conferenceOrganizer',
         '$.questions[]',
         '$.notifications',
@@ -188,6 +199,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
         schedulingType: 'round_robin',
         hosts: [{ userId: user.id }],
         successRedirect,
+        location: { kind: 'in_person', address: '1 Main Street' },
         maxBookingsPerWeek: 3,
         maxBookingsPerMonth: 8,
       }),
@@ -217,7 +229,9 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       expect(response.body, name).toHaveProperty('successRedirect', successRedirect)
       expect(response.body, name).toHaveProperty('maxBookingsPerWeek', 3)
       expect(response.body, name).toHaveProperty('maxBookingsPerMonth', 8)
-      expect(response.body, name).not.toHaveProperty('locations')
+      expect(response.body, name).toHaveProperty('locations', [
+        { id: 'legacy', kind: 'in_person', address: '1 Main Street' },
+      ])
     }
     expect(
       await t.db
@@ -387,6 +401,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       conferenceOrganizer: null,
       hosts: [{ userId: user.id }],
       location: { kind: 'phone', number: '+14155550123' },
+      locations: [{ id: 'legacy', kind: 'phone', number: '+14155550123' }],
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       notifications: DEFAULT_NOTIFICATIONS,
       waitlist: { enabled: false },

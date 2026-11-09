@@ -6,16 +6,20 @@ import {
   deleteSchedule,
   deleteScheduleOverride,
   getSchedule,
+  getScheduleAvailability,
   listScheduleOverrides,
   listSchedules,
+  MAX_SCHEDULE_OVERRIDES,
   putScheduleOverride,
   SCHEDULE_NAME_MAX_LENGTH,
+  saveScheduleAvailability,
   updateSchedule,
 } from '@hourmere/scheduling'
 import {
   authenticated,
   CROSS_ORIGIN_WRITE,
   callerWithBodyLimit,
+  ErrorBody,
   errorResponses,
   json,
   type RouteModule,
@@ -129,6 +133,32 @@ const ScheduleOverrideInput = z
     }),
   })
   .openapi('ScheduleOverrideInput')
+
+export const ScheduleAvailability = z
+  .object({
+    schedule: Schedule,
+    overrides: z.array(ScheduleOverride),
+    version: z
+      .string()
+      .openapi({ description: 'Opaque revision for the complete availability snapshot' }),
+  })
+  .openapi('ScheduleAvailability')
+
+export const ScheduleAvailabilityInput = z
+  .strictObject({
+    ...ScheduleInput.shape,
+    overrides: z
+      .array(z.strictObject({ date, intervals: z.array(WallClockIntervalInput) }))
+      .openapi({
+        maxItems: MAX_SCHEDULE_OVERRIDES,
+        description:
+          'Complete replacement, at most 10,000 overrides; excess returns too_many_overrides',
+      }),
+    expectedVersion: z.string().openapi({
+      description: 'Version from getScheduleAvailability; stale revisions return schedule_conflict',
+    }),
+  })
+  .openapi('ScheduleAvailabilityInput')
 
 const ScheduleOverrideList = z
   .object({ data: z.array(ScheduleOverride) })
@@ -252,6 +282,75 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
       async (c) =>
         c.json(
           await getSchedule(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          200,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/schedules/{id}/availability',
+        operationId: 'getScheduleAvailability',
+        summary: 'Read weekly hours and all date overrides together',
+        request: { params: IdParams },
+        responses: {
+          200: {
+            description: 'Consistent snapshot and opaque revision',
+            content: json(ScheduleAvailability),
+          },
+          ...errorResponses({ 404: notFound }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          ScheduleAvailability.parse(
+            await getScheduleAvailability(
+              serviceContext(deps, c.var.principal),
+              c.req.valid('param').id,
+            ),
+          ),
+          200,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        middleware: callerWithBodyLimit(caller, SCHEDULE_BODY_LIMIT),
+        method: 'put',
+        path: '/api/v1/schedules/{id}/availability',
+        operationId: 'saveScheduleAvailability',
+        summary: 'Save weekly hours and replace all date overrides atomically',
+        description:
+          'Requires the version from the complete availability snapshot. A concurrent change returns schedule_conflict without saving anything. All date overrides are replaced; omitted dates resume weekly hours. Requests are limited to 2 MiB and 10,000 overrides (including past dates), checked before saving.',
+        request: {
+          params: IdParams,
+          body: { content: json(ScheduleAvailabilityInput), required: true },
+        },
+        responses: {
+          200: {
+            description: 'Saved snapshot and new revision',
+            content: json(ScheduleAvailability),
+          },
+          413: { description: 'payload_too_large', content: json(ErrorBody) },
+          ...errorResponses({
+            400: 'invalid_request, invalid_schedule, invalid_time_zone, invalid_weekly_hours, invalid_date, invalid_intervals, duplicate_override_date, invalid_schedule_version, invalid_schedule_overrides or too_many_overrides',
+            403: CROSS_ORIGIN_WRITE,
+            404: notFound,
+            409: 'schedule_conflict: availability changed since it was read; schedule_is_default: cannot unset the default',
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          ScheduleAvailability.parse(
+            await saveScheduleAvailability(
+              serviceContext(deps, c.var.principal),
+              c.req.valid('param').id,
+              c.req.valid('json'),
+            ),
+          ),
           200,
         ),
     )

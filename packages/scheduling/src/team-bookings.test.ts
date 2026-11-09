@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, importedBookingIds } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -67,6 +67,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     'DomainError',
     'isUuid',
     'resolvedBookingHosts',
+    'importedBookingIds',
     'toTeamAdminBooking',
     'findPublicEventType',
     'findPublicTeamEventType',
@@ -78,6 +79,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     DomainError,
     isUuid,
     resolvedBookingHosts,
+    importedBookingIds,
     toTeamAdminBooking,
     findPublicEventType,
     findPublicTeamEventType,
@@ -257,6 +259,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
         id,
         status: 'confirmed',
         isRescheduled: false,
+        canManageNoShow: false,
         start: '2026-11-02T09:00:00.000Z',
         end: '2026-11-02T09:30:00.000Z',
         cancelledAt: null,
@@ -265,8 +268,24 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
           { userId: f.member.id, name: f.member.name, timeZone: null, isCurrentMember: true },
         ],
         attendees: [
-          { name: 'Booker', email: 'booker@example.com', timeZone: 'UTC', isBooker: true },
-          { name: 'Guest', email: 'guest@example.com', timeZone: 'UTC', isBooker: false },
+          {
+            id: expect.any(String),
+            noShowMarkedAt: null,
+            noShowMarkedBy: null,
+            name: 'Booker',
+            email: 'booker@example.com',
+            timeZone: 'UTC',
+            isBooker: true,
+          },
+          {
+            id: expect.any(String),
+            noShowMarkedAt: null,
+            noShowMarkedBy: null,
+            name: 'Guest',
+            email: 'guest@example.com',
+            timeZone: 'UTC',
+            isBooker: false,
+          },
         ],
       },
     ])

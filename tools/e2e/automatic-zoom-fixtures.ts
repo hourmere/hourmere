@@ -344,12 +344,18 @@ export const test = base.extend<{
                   if (mode === 'lost') throw new TypeError('Synthetic accepted lost response')
                   return Response.json({ ...value, join_url: 'https://evil.invalid/j/81234567890' })
                 }
-          for (const event of events.splice(0))
+          for (const event of events.splice(0)) {
+            if (
+              event.type === 'reschedule_requested' ||
+              event.type === 'reschedule_request_expired'
+            )
+              continue
             await sendBookingNotification(
               mail,
               event.bookingId,
               event.type === 'created' ? 'confirmed' : event.type,
             )
+          }
           const root = await db
             .selectFrom('booking_conferences')
             .select('root_booking_id')

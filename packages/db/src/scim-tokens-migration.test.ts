@@ -26,13 +26,15 @@ async function records(pool: pg.Pool) {
     ).rows
   return result
 }
+// The predecessor is every other migration in the current set, including later ones such as
+// 0070: deployed instances apply 0066 out of order, and the result must equal a fresh install.
 async function predecessor() {
   const directory = await mkdtemp(join(tmpdir(), 'hourmere-scim-predecessor-'))
   const early = await mkdtemp(join(tmpdir(), 'hourmere-scim-early-'))
   let database: TestDatabase | undefined
   try {
     for (const f of (await readdir(migrationsDir)).filter(
-      (f) => f.endsWith('.sql') && f < migration,
+      (f) => f.endsWith('.sql') && f !== migration,
     )) {
       await copyFile(join(migrationsDir, f), join(directory, f))
       if (f.slice(0, 4) <= '0012') await copyFile(join(migrationsDir, f), join(early, f))

@@ -218,6 +218,27 @@ function formatShortTime(
 
 // --- Locations ----------------------------------------------------------------------------
 
+/** Recipient-specific phone wording; collected numbers never enter guest payloads. */
+export function bookingLocationForRecipient(
+  location: MeetingLocation | null,
+  inviteePhone: boolean,
+  role: 'host' | 'invitee' | 'guest',
+  locale?: string | null,
+): MeetingLocation | null {
+  if (location?.kind !== 'phone') return location
+  const language = interfaceLanguage(locale) ?? 'en'
+  const key = inviteePhone
+    ? role === 'host'
+      ? 'phone.callInvitee'
+      : role === 'invitee'
+        ? 'phone.hostCallsYou'
+        : 'phone.hostCallsInvitee'
+    : role === 'host'
+      ? 'phone.inviteeCallsYou'
+      : 'phone.callHost'
+  return { kind: 'custom', text: message(language, key, { number: location.number }) }
+}
+
 /** The location as plain text, e.g. for a calendar invitation's LOCATION. */
 export function meetingLocationText(location: MeetingLocation): string {
   switch (location.kind) {
@@ -427,6 +448,61 @@ export function followUpEmail(
     bookingUrl,
     hostNote: note ? { label: t('followUp.hostNote'), text: note } : undefined,
     receivedWhy: t(receivedWhy, { host, invitee }),
+  }
+  return { ...render(recipient.email, content), sensitive: true }
+}
+
+/** A request is informational: it changes neither calendar invitations nor meeting links. */
+export function rescheduleRequestEmail(
+  meeting: BookingEmailMeeting,
+  recipient: BookingEmailRecipient,
+  options: {
+    expired?: boolean
+    expiresAt: Temporal.Instant
+    hostNote?: string | undefined
+    bookingUrl?: string | undefined
+  },
+): MailMessage {
+  const language = interfaceLanguage(recipient.locale) ?? 'en'
+  const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
+  const event = singleLine(meeting.eventName)
+  const host = meetingHosts(meeting, language)
+  const invitee = singleLine(meeting.inviteeName)
+  const note = multiLine(normalizeFollowUpHostNote(options.hostNote ?? ''))
+  const expired = options.expired === true
+  const content: Content = {
+    language,
+    subject: t(expired ? 'rescheduleRequest.expiredSubject' : 'rescheduleRequest.subject', {
+      event,
+    }),
+    intro: expired
+      ? t('rescheduleRequest.expiredIntroduction', { invitee })
+      : t('rescheduleRequest.introduction', {
+          host,
+          expiry: formatMailDateTime(
+            options.expiresAt.toZonedDateTimeISO(recipient.timeZone),
+            { dateStyle: 'full', timeStyle: 'long' },
+            language,
+          ),
+        }),
+    fields: [
+      field(t('What'), event),
+      field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
+      field(t('Host'), host),
+    ],
+    answers: [],
+    hostNote: !expired && note ? { label: t('followUp.hostNote'), text: note } : undefined,
+    manageLinks: !expired && recipient.role === 'attendee' ? recipient.manageLinks : undefined,
+    bookingUrl:
+      expired && recipient.role === 'host' && options.bookingUrl
+        ? linkableUrl(options.bookingUrl)
+        : undefined,
+    receivedWhy: t(
+      recipient.role === 'host'
+        ? 'You received this email because {invitee} booked a meeting with you via Hourmere.'
+        : 'You received this email because you booked a meeting with {host} via Hourmere.',
+      { host, invitee },
+    ),
   }
   return { ...render(recipient.email, content), sensitive: true }
 }

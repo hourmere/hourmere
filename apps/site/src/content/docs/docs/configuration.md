@@ -199,6 +199,7 @@ but no email.
 | `HSTS_MAX_AGE` | `31536000` | Whole non-negative seconds. Sent only for HTTPS `PUBLIC_URL` outside localhost; `0` asks browsers to forget the policy. Configure subdomains/preload at the proxy if desired. |
 | `HTTP_HEADERS_TIMEOUT` | `20` | Whole seconds, 1–3600, to receive request headers. Must not exceed request timeout. |
 | `HTTP_REQUEST_TIMEOUT` | `60` | Whole seconds, 1–3600, to receive the request. |
+| `BOOKING_EXPORT_MAX_CONCURRENT` | `2` | Process-wide CSV export cap, 1–8; invalid values use 2. The export service refuses excess requests with `409 export_busy` before acquiring a connection. Keep pool headroom for other requests. Streams close after 30 seconds without reader progress and after five minutes overall. See [CSV exports](/docs/booking-export). |
 | `HTTP_KEEP_ALIVE_TIMEOUT` | `125` | Whole seconds, 1–3600, for an idle HTTP connection. Keep above the proxy's upstream idle timeout. |
 
 ## Social sign-in
