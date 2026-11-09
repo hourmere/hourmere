@@ -20,6 +20,8 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createGoogleCalendarClient, createMicrosoftCalendarClient } from '@hourmere/calendars'
+import { createZoomClient } from '@hourmere/conferences'
 import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../apps/server/src/app.ts'
@@ -132,6 +134,24 @@ function productionSources(): string[] {
   return files.sort()
 }
 
+// Source files beside the production code that do not ship, so a path a test scenario uses
+// is not mistaken for a served route: test support and fixtures (named `test/`, `testing/`,
+// `*testing.ts`, `test-app.ts`, `*fixtures.ts`, `*-seed*.ts`, `*.test-helper.ts`) and
+// generated files (`*.d.ts`, the database table types).
+const NOT_SHIPPED: readonly RegExp[] = [
+  /(^|\/)test\//,
+  /(^|\/)testing\//,
+  /(^|[-/])testing\.tsx?$/,
+  /testing-clock\.ts$/,
+  /test-app\.ts$/,
+  /test-database-registry\.ts$/,
+  /\.test-helper\.ts$/,
+  /fixtures?\.tsx?$/,
+  /-seed(-[a-z]+)?\.ts$/,
+  /\.d\.ts$/,
+  /^packages\/db\/src\/tables\.ts$/,
+]
+
 describe('routing forms are storage only', () => {
   it('names each documented routing surface so an added one is recognised', () => {
     for (const name of [
@@ -157,6 +177,13 @@ describe('routing forms are storage only', () => {
       'routing2',
       'v2route',
       'routings',
+      // Run-together compounds.
+      'routeforms',
+      'routingforms',
+      '/api/v1/routingforms',
+      'routeleads',
+      'ROUTEDSLOTS',
+      'getRoutelead',
     ])
       expect(isRoutingName(name), name).toBe(true)
     // Words that merely contain the letters are not routing names.
@@ -205,9 +232,11 @@ describe('routing forms are storage only', () => {
   it('registers no routing route on the app startServer serves, with every optional group on', async () => {
     // The production assembly (createApp of productionAppOptions, as startServer calls it),
     // from a configuration that enables each optional route group: SCIM, MCP OAuth, slot snippets,
-    // webhooks, the Zoom event webhook, the waitlist pages and the built web app. Creating
-    // the app touches no database (Better Auth is stood in for, since creating it would
-    // check its schema); the pool is still closed explicitly.
+    // webhooks, the Zoom event webhook, the waitlist pages and the built web app, with the
+    // Google Calendar, Microsoft Calendar and Zoom clients built the way startServer builds
+    // them (dummy credentials; no handler runs, so none is ever called). Creating the app
+    // touches no database (Better Auth is stood in for, since creating it would check its
+    // schema); the pool is still closed explicitly.
     const databaseUrl = 'postgres://routing-off@127.0.0.1:9/routing-off'
     const config = loadConfig({
       DATABASE_URL: databaseUrl,
@@ -222,6 +251,8 @@ describe('routing forms are storage only', () => {
       WEB_DIST: rootPath,
     })
     const db = createDb(createPool(databaseUrl))
+    const credentials = { clientId: 'routing-off', clientSecret: 'routing-off' }
+    const encryptionKey = Buffer.alloc(32, 1).toString('base64')
     try {
       const app = createApp(
         productionAppOptions({
@@ -239,18 +270,28 @@ describe('routing forms are storage only', () => {
           },
           notify: async () => {},
           notifyAttendeeNoShow: async () => {},
-          googleCalendar: undefined,
-          microsoftCalendar: undefined,
-          zoomConference: undefined,
+          googleCalendar: {
+            client: createGoogleCalendarClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
+            encryptionKey,
+          },
+          microsoftCalendar: {
+            client: createMicrosoftCalendarClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
+            encryptionKey,
+          },
+          zoomConference: {
+            client: createZoomClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
+            encryptionKey,
+            meetingsEnabled: true,
+          },
           enqueueCalendarSync: async () => null,
           enqueueCalendarWritebackRecovery: async () => null,
         }),
       )
       const paths = app.routes.map(({ path }) => path)
       expect(paths.length).toBeGreaterThan(100)
-      // A versioned API route, a page outside /api, and one route from each group that the
-      // configuration above turns on: MCP, its OAuth authorize guard, the waitlist pages,
-      // the Zoom event webhook, SCIM and the web app's assets.
+      // A versioned API route, a page outside /api, one route from each group whose switch
+      // registers routes (MCP, its OAuth authorize guard, the waitlist pages, the Zoom event
+      // webhook, the web app's assets), the SCIM mount, and each client's OAuth callback.
       for (const control of [
         '/api/v1/bookings/:id',
         '/sign-in/confirm',
@@ -258,8 +299,11 @@ describe('routing forms are storage only', () => {
         '/api/auth/oauth2/authorize',
         '/booking/waitlist/verify',
         '/api/conference/zoom/events',
-        '/scim/*',
         '/assets/*',
+        '/scim/*',
+        '/api/calendar/google/callback',
+        '/api/calendar/microsoft/callback',
+        '/api/conference/zoom/callback',
       ])
         expect(paths, control).toContain(control)
       expect(paths.filter(isRoutingName)).toEqual([])
@@ -268,18 +312,23 @@ describe('routing forms are storage only', () => {
     }
   })
 
-  it('names no routing path in a server source string literal', () => {
-    // Backstop for a route registered outside the shared assembly (a `.get` on the app in
-    // startServer, say): every string literal that begins with `/` in the server's sources.
+  it('names no routing path in a production source string literal', () => {
+    // Backstop for a route the inventory cannot see: one registered outside the shared
+    // assembly (a `.get` on the app in startServer, say), one gated on something the test
+    // does not configure, or a Better Auth endpoint behind /api/auth/*. Its path string must
+    // be written somewhere, so every string literal that begins with `/` in every shipped
+    // source (apps, packages and tools) is checked, wherever the constant lives.
     const literals = productionSources()
-      .filter((file) => file.startsWith('apps/server/src/'))
+      .filter((file) => !NOT_SHIPPED.some((pattern) => pattern.test(file)))
       .flatMap((file) => [
         ...readFileSync(new URL(file, root), 'utf8').matchAll(/(['"`])(\/[^'"`\s]*)\1/g),
       ])
       .map(([, , literal]) => literal ?? '')
-    expect(literals.length).toBeGreaterThan(100)
+    expect(literals.length).toBeGreaterThan(500)
+    // One literal each from the server, a package and the web app.
     expect(literals).toContain('/api/v1/bookings/{id}')
-    expect(literals).toContain('/mcp')
+    expect(literals).toContain('/sign-in/confirm')
+    expect(literals).toContain('/booking')
     expect(literals.filter(isRoutingName)).toEqual([])
   })
 

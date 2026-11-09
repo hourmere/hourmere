@@ -14,6 +14,21 @@ export const ROUTING_WORDS: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Run-together spellings of the design's compound names, which split into one token:
+ * `routeforms`, `routingforms`, `routeleads`, `routedslots` and their singulars.
+ */
+export const ROUTING_COMPOUNDS: ReadonlySet<string> = new Set([
+  'routeform',
+  'routeforms',
+  'routingform',
+  'routingforms',
+  'routelead',
+  'routeleads',
+  'routedslot',
+  'routedslots',
+])
+
+/**
  * Splits an identifier or path on separators, camelCase boundaries (including an acronym
  * run, `MCPRoute`) and letter/digit boundaries (`route2`, `v2route`, `V2Route`), lower-cased.
  */
@@ -28,7 +43,10 @@ export function nameTokens(name: string): string[] {
     .filter((token) => token.length > 0)
 }
 
-/** True when any whole token of the name is a routing word (`routeLead`, `/route/x`, `RoutingForm`). */
+/**
+ * True when any whole token of the name is a routing word (`routeLead`, `/route/x`,
+ * `RoutingForm`) or a run-together compound (`routingforms`).
+ */
 export function isRoutingName(name: string): boolean {
-  return nameTokens(name).some((token) => ROUTING_WORDS.has(token))
+  return nameTokens(name).some((token) => ROUTING_WORDS.has(token) || ROUTING_COMPOUNDS.has(token))
 }
