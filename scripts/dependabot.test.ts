@@ -10,7 +10,8 @@ interface Update {
   schedule?: unknown
   cooldown?: unknown
   groups?: unknown
-  ignore?: { 'dependency-name': string; 'update-types'?: string[] }[]
+  'open-pull-requests-limit'?: number
+  ignore?: { 'dependency-name': string; versions?: string[]; 'update-types'?: string[] }[]
 }
 
 const root = resolve(import.meta.dirname, '..')
@@ -35,6 +36,16 @@ it('updates every committed npm lockfile on the root schedule and grouping', () 
   const policy = ({ schedule, cooldown, groups }: Update) => ({ schedule, cooldown, groups })
   const rootPolicy = policy(npm.find((update) => update.directory === '/') as Update)
   for (const update of npm) expect(policy(update), update.directory).toEqual(rootPolicy)
+})
+
+it('keeps version updates switched on in every npm directory', () => {
+  for (const update of npm) {
+    // A zero pull request limit, or an ignore that names every dependency, silences a directory.
+    expect(update['open-pull-requests-limit'] ?? 5, update.directory).toBeGreaterThan(0)
+    for (const rule of update.ignore ?? []) {
+      expect(rule['dependency-name'], update.directory).not.toMatch(/^\*+$/)
+    }
+  }
 })
 
 it('leaves the n8n workflow pin and TypeScript majors to manual updates', () => {
