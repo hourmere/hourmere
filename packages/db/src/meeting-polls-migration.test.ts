@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  attempts,
   digest,
   type Fixture,
   fixture,
@@ -641,6 +642,21 @@ describe.skipIf(!serverUrl)('meeting poll storage protections', { timeout: 60_00
     database = await createTestDatabase(serverUrl as string, undefined, { tag: 'pollchecks' })
   }, 60_000)
   afterAll(() => database?.drop())
+
+  it('compares only integrity rejections in savepoint probes and rethrows anything else', async () => {
+    const pool = (database as TestDatabase).pool
+    const f = await fixture(pool)
+    const [rejected, accepted] = await attempts(pool, [
+      { sql: 'UPDATE meeting_polls SET title=NULL WHERE id=$1', params: [f.poll] },
+      { sql: 'SELECT 1' },
+    ])
+    expect(rejected).toMatchObject({ code: '23502', column: 'title' })
+    expect(accepted).toBeUndefined()
+    await expect(
+      attempts(pool, [{ sql: 'SELECT 1' }, { sql: 'SELECT * FROM missing_relation' }]),
+    ).rejects.toMatchObject({ code: '42P01' })
+    expect(pool.totalCount).toBeLessThanOrEqual(3)
+  })
 
   // One database, one fixture (own organizations, users and polls) per protection.
   it.each(Object.keys(checks))('enforces %s', async (name) => {

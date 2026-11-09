@@ -194,11 +194,20 @@ describe.skipIf(!serverUrl)('routing form constraint coverage', () => {
 
 Write the suite as checks that create their own rows, because one copy serves the whole
 suite: rejected and accepted writes, cascades, defaults and, for an index that has no other
-behaviour, its definition. Only an assertion about an integrity rejection counts as coverage:
-a value mismatch, or a database error of SQLSTATE class 23, 22 or P0 on the assertion's
-received value or in its `cause` chain. Wrap every expected success in `expect(...).resolves`;
-if that rejects with any other error (a syntax error, a statement timeout, a deadlock, a lost
-connection), the whole run aborts and names the object instead of counting it as covered.
+behaviour, its definition. The verdict comes from what the database did, not from how the
+suite asserted it: the helper records every rejected query on the pool it hands over (and on
+clients from `connect()`, and on pools opened with `openRelatedPool(pool, url)`). On any copy,
+a recorded error whose SQLSTATE is not class 23, 22 or P0, or that has no SQLSTATE (lost
+connection, socket or driver error), aborts the whole run and names the object, even if the
+suite swallowed the error, turned it into a string, compared `error.code`, or used
+`toHaveProperty`, `toThrow(/…/)` or an `allSettled` result. A failure that is not an
+`AssertionError` aborts too, and an assertion whose received value or cause chain holds an
+error without an integrity code aborts. What counts is an assertion about an integrity
+rejection, or a plain value mismatch with no unrelated database error behind it. Write every
+expected success as `expect(...).resolves` and assert on the error object (`toMatchObject({
+code, constraint })`), and open any extra pool only with `openRelatedPool`; a check that must
+provoke a non-integrity error cannot be part of a coverage suite. The suite runs twice on
+unmodified copies before the drops, so a check that fails only sometimes aborts the run.
 Generate the expectation file with `HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`, review it and
 commit it; adding, removing or redefining an object later fails until the file is updated.
 Allow-list only objects that are not protections on their own, each with a reason; they are
@@ -213,6 +222,9 @@ their defaults. It does not see:
 - column types (CI's `db:types -- --verify` covers the generated types);
 - row-level security policies and whether RLS is enabled;
 - whether a trigger is enabled, disabled or replica-only;
+- functions that a trigger function calls (only the trigger's own function is digested);
+- NOT NULL constraints on domains;
+- grants, privileges and ownership;
 - objects a migration drops or alters away;
 - a loosened predicate, a changed FK action or deferrability, a widened unique key or a weaker
   trigger-function clause, which dropping an object cannot reach.
@@ -223,6 +235,8 @@ Guard those with behavioural checks and source-copy mutation tests.
 `@hourmere/db/testing`) migrates a schema once for any test that needs many copies of it.
 `packages/db/src/testing/migration-objects.test.ts` fails when a migration from 0071 on has no
 expectation file; migrations whose coverage test lands in a follow-up are listed there explicitly.
+It checks only that the expectation file exists, not that a coverage test reads it: the
+coverage test is what keeps the file honest.
 
 ## Browser tests
 

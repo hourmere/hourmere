@@ -940,7 +940,7 @@ describe('meeting poll shared SQL, TypeScript and documentation policy', () => {
 })
 
 const receiptColumns =
-  'nullable `booking_id` (set by finalize; a receipt stores no other result). Replays return only stored references: a create replay returns `poll_id` as `poll_already_created`, a finalize replay returns the booking reference, and invite, resend and rotate-link replays return their safe outcome or conflict without a stored result'
+  'nullable `booking_id` (set by finalize; a receipt stores no result beyond its `poll_id` and `booking_id` references). Replays return only those stored references: a create replay returns `poll_id` as `poll_already_created`, a finalize replay returns the booking reference, and invite, resend and rotate-link replays return their safe outcome or conflict without a stored result'
 const receiptCleanup =
   'On poll deletion erase poll/booking references (`poll_id` and `booking_id`);'
 
@@ -965,6 +965,15 @@ describe('meeting poll operation receipt columns', () => {
       'design replay wording',
       receiptColumns,
       'nullable `booking_id` (the only stored replay result reference)',
+      'design',
+    ],
+    [
+      'design stored-result wording',
+      receiptColumns,
+      receiptColumns.replace(
+        'stores no result beyond its `poll_id` and `booking_id` references',
+        'stores no other result',
+      ),
       'design',
     ],
     [

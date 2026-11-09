@@ -15,17 +15,34 @@
  * 2. The enumerated objects and their definitions must equal the committed expectation file,
  *    so adding, removing or redefining an object needs a reviewed expectation change. Rewrite
  *    it after review with `HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`.
- * 3. The assertion suite must pass on an unmodified copy of the template.
+ * 3. The assertion suite must pass on two unmodified copies of the template (a check that
+ *    fails only sometimes would make dropped objects look covered).
  * 4. For every object, a fresh `CREATE DATABASE … TEMPLATE` copy drops exactly that object and
- *    runs the suite again. Each object that is not allow-listed must fail an assertion; an
- *    allow-listed object must not (otherwise the entry is stale). Only an AssertionError
- *    about an integrity rejection counts: a plain value mismatch, or a database error of
- *    SQLSTATE class 23 (integrity constraint), 22 (data exception) or P0 (raised by a trigger
- *    or function), found on the assertion's `actual` value or anywhere in its `cause` chain
- *    (`expect(...).resolves` puts the rejection there). Any other error, any other SQLSTATE
- *    (connection 08, deadlock or serialization 40, syntax 42, resources 53, lock 55, timeout or
- *    shutdown 57, …) and any error without a SQLSTATE abort the whole run and name the object,
- *    so write every expected outcome as an `expect`.
+ *    runs the suite again. Each object that is not allow-listed must fail; an allow-listed
+ *    object must not (otherwise the entry is stale).
+ *
+ * What makes a failure count as coverage is what the database did, not how the suite
+ * asserted it. Every rejected `query` on the pool handed to the suite, on the clients it
+ * hands out through `connect()`, on `connect()` itself, and on pools opened through
+ * `openRelatedPool`, is recorded with its SQLSTATE. On every copy, baseline or dropped,
+ * passing or failing:
+ * - a recorded error of any class other than 23 (integrity constraint), 22 (data exception)
+ *   or P0 (raised by a trigger or function), or without a SQLSTATE at all (lost connection,
+ *   socket or driver error), aborts the whole run and names the object and the error. This
+ *   holds when the suite swallowed the error, turned it into a string or boolean, asserted on
+ *   `error.code`, used `toHaveProperty`, `toThrow(/regex/)` or an `allSettled` result;
+ * - a failure that is not an `AssertionError` (a raw database error, even an integrity one,
+ *   outside an `expect`; a `TypeError`; the per-object timeout) aborts;
+ * - an `AssertionError` is then walked: its `actual` value, `actual.cause`, its `cause` chain
+ *   (`expect(...).resolves` puts the rejection there), nested assertions and
+ *   `AggregateError.errors`. A received value that is an Error without an integrity code, an
+ *   assertion that expected a code and received none, or any linked error whose code is not
+ *   23/22/P0 or is missing, aborts;
+ * - what remains, an assertion about an integrity rejection or a plain value mismatch with
+ *   no unrelated database error behind it, counts.
+ * A check that must provoke a non-integrity error therefore cannot be part of a coverage
+ * suite. Open additional pools only with `openRelatedPool(pool, url)`, so that their errors
+ * are recorded too; errors on other pools are invisible to the verdict.
  *
  * What the helper does not see, and what must be guarded by behavioural checks, source-copy
  * mutations or other tests instead:
@@ -33,6 +50,9 @@
  * - column types (CI's `db:types -- --verify` covers the generated types);
  * - row-level security policies and whether RLS is enabled;
  * - whether a trigger is enabled, disabled or replica-only (`tgenabled`);
+ * - functions that a trigger function calls (only the trigger's own function is digested);
+ * - NOT NULL constraints on domains (domain CHECKs are seen, table columns are seen);
+ * - grants, privileges and ownership (what `SECURITY DEFINER` runs as);
  * - objects a migration drops or alters away;
  * - a loosened predicate, FK action, unique key or trigger clause, which only the pinned
  *   definitions make visible in review.
@@ -64,6 +84,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type pg from 'pg'
+import { createPool } from '../index.ts'
 import { migrationsDir, runMigrations } from '../migrate.ts'
 import {
   createTestDatabaseTemplate,
@@ -246,33 +267,141 @@ const sqlState = (value: unknown): string | undefined => {
   return typeof code === 'string' ? code : undefined
 }
 
+/** An Error, or an object shaped like one (a plain copy keeps `message` and `stack`). */
+const errorLike = (value: unknown): boolean =>
+  value instanceof Error ||
+  (typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { message?: unknown }).message === 'string' &&
+    typeof (value as { stack?: unknown }).stack === 'string')
+
+/** One rejected query on a pool the helper handed to the suite. */
+export interface RecordedQueryError {
+  /** SQLSTATE, or undefined for connection, socket and driver errors. */
+  code: string | undefined
+  message: string
+  sql: string | undefined
+}
+
+const ledgerKey = Symbol.for('hourmere.constraint-coverage.query-errors')
+
 /**
- * Why a suite failure is not an assertion about an integrity rejection, or undefined when it
- * is one and therefore counts as coverage. An AssertionError's `actual` value (from
- * `expect(...).rejects.toMatchObject`) and every error in its `cause` chain (from
- * `expect(...).resolves`) must either carry an integrity SQLSTATE or be a plain value.
+ * The ledger is the verdict's source of truth: every rejection of `query` on the pool, of
+ * `connect()`, and of `query` on every client it hands out is recorded, whatever the suite
+ * then does with the error (asserts on it, converts it to a string, swallows it).
+ */
+function recordQueryErrors(pool: pg.Pool, ledger: RecordedQueryError[]): pg.Pool {
+  const record = (error: unknown, sql: unknown) => {
+    const text =
+      typeof sql === 'string'
+        ? sql
+        : ((sql as { text?: unknown } | null)?.text as string | undefined)
+    ledger.push({
+      code: sqlState(error),
+      message: firstLine(error),
+      sql: typeof text === 'string' ? text.slice(0, 160) : undefined,
+    })
+  }
+  const recordingQuery =
+    (target: pg.Pool | pg.PoolClient) =>
+    async (...args: unknown[]) => {
+      try {
+        return await (target.query as (...a: unknown[]) => Promise<unknown>)(...args)
+      } catch (error) {
+        record(error, args[0])
+        throw error
+      }
+    }
+  const wrapClient = (client: pg.PoolClient): pg.PoolClient =>
+    new Proxy(client, {
+      get(target, property) {
+        if (property === 'query') return recordingQuery(target)
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  return new Proxy(pool, {
+    get(target, property) {
+      if (property === ledgerKey) return ledger
+      if (property === 'query') return recordingQuery(target)
+      if (property === 'connect')
+        return async () => {
+          try {
+            return wrapClient(await target.connect())
+          } catch (error) {
+            record(error, undefined)
+            throw error
+          }
+        }
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+}
+
+/**
+ * Opens another pool for the suite (for example with a different `search_path`) that records
+ * into the same ledger as `pool`, so its errors take part in the verdict. Outside a coverage
+ * run it is an ordinary pool. Close it in the check that opened it.
+ */
+export function openRelatedPool(pool: pg.Pool, connectionString: string): pg.Pool {
+  const related = createPool(connectionString)
+  const ledger = (pool as unknown as Record<symbol, unknown>)[ledgerKey] as
+    | RecordedQueryError[]
+    | undefined
+  return ledger ? recordQueryErrors(related, ledger) : related
+}
+
+/** Recorded database errors that are not integrity rejections, formatted for the abort. */
+function nonIntegrityRecords(ledger: RecordedQueryError[]): string[] {
+  return ledger
+    .filter((entry) => entry.code === undefined || !integrityState.test(entry.code))
+    .map(
+      (entry) =>
+        `${entry.code === undefined ? 'an error without SQLSTATE' : `code ${entry.code}`}: ${entry.message}${entry.sql ? ` (statement: ${entry.sql})` : ''}`,
+    )
+}
+
+/**
+ * Second line of defence, applied to the thrown failure itself: it must be an AssertionError,
+ * and every error reachable from it (`actual`, `actual.cause`, `cause` chains and
+ * `AggregateError.errors`) must carry an integrity SQLSTATE. A received value that is an Error
+ * without one, a nested assertion about such an error, or an error without a code anywhere
+ * in the graph, aborts. Returns the reason, or undefined when the failure counts.
  */
 function notIntegrityAssertion(error: unknown): string | undefined {
   if (!(error instanceof Error) || error.name !== 'AssertionError')
     return `${error instanceof Error ? error.name : typeof error}${sqlState(error) ? ` ${sqlState(error)}` : ''}: ${firstLine(error)}`
   const seen = new Set<unknown>()
-  for (let current: unknown = error; current !== undefined && current !== null; ) {
-    if (seen.has(current)) break
+  const queue: unknown[] = [error]
+  const enqueue = (value: unknown) => {
+    if (typeof value === 'object' && value !== null && !seen.has(value)) queue.push(value)
+  }
+  for (let current = queue.shift(); current !== undefined; current = queue.shift()) {
+    if (seen.has(current)) continue
     seen.add(current)
+    const withLinks = current as { cause?: unknown; errors?: unknown }
     if (current instanceof Error && current.name === 'AssertionError') {
-      const actual = (current as { actual?: unknown }).actual
+      const { actual, expected } = current as { actual?: unknown; expected?: unknown }
       const code = sqlState(actual)
       if (code !== undefined && !integrityState.test(code))
         return `an assertion about an error with code ${code}: ${firstLine(actual)}`
-      current = current.cause
-      continue
+      if (code === undefined && errorLike(actual))
+        return `an assertion about an error without SQLSTATE: ${firstLine(actual)}`
+      // toMatchObject keeps only the compared keys of the received error: an expected code
+      // that is missing from the received value means the rejection carried no SQLSTATE.
+      if (code === undefined && sqlState(expected) !== undefined)
+        return `an assertion that expected code ${sqlState(expected)} but received none: ${firstLine(current)}`
+      enqueue(actual)
+    } else if (errorLike(current) || sqlState(current) !== undefined) {
+      const code = sqlState(current)
+      if (code === undefined)
+        return `an error without SQLSTATE in the cause chain: ${firstLine(current)}`
+      if (!integrityState.test(code))
+        return `an error with code ${code} in the cause chain: ${firstLine(current)}`
     }
-    const code = sqlState(current)
-    if (code === undefined)
-      return `an error without SQLSTATE in the cause chain: ${firstLine(current)}`
-    if (!integrityState.test(code))
-      return `an error with code ${code} in the cause chain: ${firstLine(current)}`
-    current = (current as { cause?: unknown }).cause
+    enqueue(withLinks.cause)
+    if (Array.isArray(withLinks.errors)) for (const entry of withLinks.errors) enqueue(entry)
   }
   return undefined
 }
@@ -322,19 +451,34 @@ async function runOnCopy(
         return { dropError }
       }
     }
+    const ledger: RecordedQueryError[] = []
+    // Every query error is recorded first; suites also expect many failed statements, so the
+    // outer view keeps their connection instead of reopening it after each one.
+    const suitePool = reuseConnectionsAfterErrors(recordQueryErrors(copy.pool, ledger))
+    let failure: unknown
+    let failed = false
     try {
-      // Suites expect many failed statements; keep their connection instead of reopening it.
-      await withTimeout(assertions(reuseConnectionsAfterErrors(copy.pool)), timeoutMs, label)
-      return {}
-    } catch (failure) {
-      const reason = notIntegrityAssertion(failure)
-      if (reason !== undefined)
-        throw new Error(
-          `Constraint coverage could not evaluate ${label}: expected an assertion about an integrity rejection, got ${reason}`,
-          { cause: failure },
-        )
-      return { failure }
+      await withTimeout(assertions(suitePool), timeoutMs, label)
+    } catch (error) {
+      failed = true
+      failure = error
     }
+    // The verdict comes from what the database did, whatever the suite asserted: any recorded
+    // error that is not an integrity rejection aborts, on a failed and on a passing run alike.
+    const unrelated = nonIntegrityRecords(ledger)
+    if (unrelated.length > 0)
+      throw new Error(
+        `Constraint coverage could not evaluate ${label}: the database reported ${unrelated.length} error(s) that are not integrity rejections: ${unrelated.join('; ')}${failed ? `; the suite then failed with ${firstLine(failure)}` : '; the suite passed anyway'}`,
+        { cause: failure },
+      )
+    if (!failed) return {}
+    const reason = notIntegrityAssertion(failure)
+    if (reason !== undefined)
+      throw new Error(
+        `Constraint coverage could not evaluate ${label}: expected an assertion about an integrity rejection, got ${reason}${ledger.length === 0 ? ' (the database reported no error)' : ''}`,
+        { cause: failure },
+      )
+    return { failure }
   } finally {
     await copy.drop()
   }
@@ -392,11 +536,20 @@ export async function checkConstraintCoverage(
     for (const key of Object.keys(allowList))
       if (!Object.hasOwn(definitions, key)) problems.push(`allow-list entry is not created: ${key}`)
 
-    const baseline = await runOnCopy(template, options.assertions, timeoutMs, 'the baseline')
-    if (baseline.failure)
-      throw new Error('The assertion suite fails on the unmodified schema', {
-        cause: baseline.failure,
-      })
+    // Twice: a check that fails only sometimes would make dropped objects look covered.
+    for (const [first, second] of [
+      await Promise.all([
+        runOnCopy(template, options.assertions, timeoutMs, 'the baseline'),
+        runOnCopy(template, options.assertions, timeoutMs, 'the second baseline'),
+      ]),
+    ]) {
+      const baseline = first.failure ? first : second
+      if (baseline.failure)
+        throw new Error(
+          `The assertion suite fails on the unmodified schema${first.failure ? '' : ' (on the second baseline run only)'}`,
+          { cause: baseline.failure },
+        )
+    }
 
     const results: CoverageResult[] = []
     const pending = [...objects]

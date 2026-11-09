@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { checkConstraintCoverage } from './constraint-coverage.ts'
+import { checkConstraintCoverage, openRelatedPool } from './constraint-coverage.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
@@ -65,6 +65,36 @@ const created = [
 
 async function rejects(pool: pg.Pool, sql: string, code: string) {
   await expect(pool.query(sql)).rejects.toMatchObject({ code })
+}
+
+/** A real SQLSTATE 57014 from the server, on a client of the given pool. */
+async function realTimeout(pool: pg.Pool): Promise<never> {
+  const client = await pool.connect()
+  try {
+    await client.query("SET statement_timeout='10ms'")
+    await client.query('SELECT pg_sleep(1)')
+    throw new Error('expected a statement timeout')
+  } finally {
+    await client.query('RESET statement_timeout').catch(() => {})
+    client.release()
+  }
+}
+
+const caught = (pool: pg.Pool) => realTimeout(pool).catch((error: unknown) => error)
+
+/** A real code-less driver error: the socket is cut while the statement is in flight. */
+async function socketCut(pool: pg.Pool): Promise<never> {
+  const client = await pool.connect()
+  try {
+    const pending = client.query('SELECT pg_sleep(1)')
+    ;(
+      client as unknown as { connection: { stream: { destroy(): void } } }
+    ).connection.stream.destroy()
+    await pending
+    throw new Error('expected a lost connection')
+  } finally {
+    client.release(true)
+  }
 }
 
 /** An expected success, written the way suites write it (CONTRIBUTING.md). */
@@ -218,7 +248,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
         'a bug in the suite',
         async (pool: pg.Pool) => {
           calls += 1
-          if (calls > 1) throw new TypeError('suite bug')
+          if (calls > 2) throw new TypeError('suite bug')
           await fullSuite(pool)
         },
       ],
@@ -263,7 +293,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
         },
       }),
     ).rejects.toThrow(
-      /could not evaluate constraint public\.child\.child_pkey: .*code 42P10 in the cause chain: there is no unique or exclusion constraint/,
+      /could not evaluate constraint public\.child\.child_pkey: .*code 42P10: there is no unique or exclusion constraint/,
     )
 
     // A real 57014 on one copy, as a loaded server produces; the first copy drops amount_check.
@@ -273,7 +303,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
         concurrency: 1,
         assertions: async (pool) => {
           timeouts += 1
-          if (timeouts > 1)
+          if (timeouts > 2)
             await expect(
               pool.query("SET statement_timeout='10ms'; SELECT pg_sleep(1)"),
             ).resolves.toBeDefined()
@@ -281,7 +311,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
         },
       }),
     ).rejects.toThrow(
-      /could not evaluate constraint public\.child\.child_amount_check: .*code 57014 in the cause chain: canceling statement/,
+      /could not evaluate constraint public\.child\.child_amount_check: .*code 57014: canceling statement/,
     )
 
     // Errors without a SQLSTATE: a dropped connection, or a driver/socket error.
@@ -295,7 +325,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
           concurrency: 1,
           assertions: async (pool) => {
             calls += 1
-            if (calls > 1) await expect(Promise.reject(error)).resolves.toBeDefined()
+            if (calls > 2) await expect(Promise.reject(error)).resolves.toBeDefined()
             await fullSuite(pool)
           },
         }),
@@ -318,7 +348,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
           concurrency: 1,
           assertions: async (pool) => {
             calls += 1
-            if (calls > 1)
+            if (calls > 2)
               await expect(Promise.reject(databaseError(code, message))).resolves.toBeDefined()
             await fullSuite(pool)
           },
@@ -335,7 +365,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
           concurrency: 1,
           assertions: async (pool) => {
             attempts += 1
-            if (attempts > 1)
+            if (attempts > 2)
               await expect(Promise.reject(databaseError(code, message))).rejects.toMatchObject({
                 code: '23514',
               })
@@ -380,7 +410,7 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
         assertions: async (pool) => {
           calls += 1
           await pool.query('INSERT INTO parent (id) VALUES (1) ON CONFLICT DO NOTHING')
-          if (calls > 1) await failing(pool)
+          if (calls > 2) await failing(pool)
           await partialSuite(pool)
         },
       })
@@ -446,4 +476,338 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
       await writeFile(file, original)
     }
   }, 240_000)
+
+  // Styles that put the database error anywhere but on `actual.code` or in the cause chain.
+  // Only the ledger of recorded query errors can see these, so each must still abort.
+  it.each<[name: string, failing: (pool: pg.Pool) => Promise<void>, reason: RegExp]>([
+    [
+      'expect(error.code).toBe(...) on a real 57014',
+      async (pool) => {
+        const error = (await caught(pool)) as { code?: string }
+        expect(error.code).toBe('23514')
+      },
+      /code 57014: canceling statement/,
+    ],
+    [
+      '.rejects.toHaveProperty(code) on a real 57014',
+      async (pool) => {
+        await expect(realTimeout(pool)).rejects.toHaveProperty('code', '23514')
+      },
+      /code 57014: canceling statement/,
+    ],
+    [
+      '.rejects.toThrow(/regex/) on a real 57014',
+      async (pool) => {
+        await expect(realTimeout(pool)).rejects.toThrow(/violates check constraint/)
+      },
+      /code 57014: canceling statement/,
+    ],
+    [
+      'codes mapped to strings (the "required columns" shape) on a real 57014',
+      async (pool) => {
+        const errors = [(await caught(pool)) as { code?: string; column?: string } | undefined]
+        expect(
+          errors.flatMap((error) =>
+            error?.code === '23502' && error?.column === 'amount'
+              ? []
+              : [`child.amount: ${error?.code ?? 'accepted'}`],
+          ),
+        ).toEqual([])
+      },
+      /code 57014: canceling statement/,
+    ],
+    [
+      'an allSettled reason inside toEqual on a real 57014',
+      async (pool) => {
+        const [result] = await Promise.allSettled([realTimeout(pool)])
+        expect(result).toEqual({
+          status: 'rejected',
+          reason: expect.objectContaining({ code: '23514' }),
+        })
+      },
+      /code 57014: canceling statement/,
+    ],
+    [
+      '.rejects.toMatchObject({ code }) receiving a wrapper whose cause is a real 57014',
+      async (pool) => {
+        await expect(
+          realTimeout(pool).catch((error: unknown) => {
+            throw new Error('insert failed', { cause: error })
+          }),
+        ).rejects.toMatchObject({ code: '23514' })
+      },
+      /code 57014: canceling statement/,
+    ],
+    [
+      '.rejects.toMatchObject({ code }) receiving a real lost connection',
+      async (pool) => {
+        await expect(socketCut(pool)).rejects.toMatchObject({ code: '23514' })
+      },
+      /an error without SQLSTATE: Connection terminated/,
+    ],
+    [
+      'a real 57014 swallowed entirely, then a value mismatch',
+      async (pool) => {
+        await caught(pool)
+        expect(1).toBe(2)
+      },
+      /code 57014: canceling statement.*; the suite then failed with expected 1 to be 2/,
+    ],
+    [
+      '.resolves on an AggregateError faking code 23505 around a real 57014',
+      async (pool) => {
+        const inner = await caught(pool)
+        await expect(
+          Promise.reject(Object.assign(new AggregateError([inner], 'x'), { code: '23505' })),
+        ).resolves.toBeDefined()
+      },
+      /code 57014: canceling statement/,
+    ],
+    [
+      'a 42P01 on a pool opened with openRelatedPool, swallowed',
+      async (pool) => {
+        const related = openRelatedPool(pool, pool.options.connectionString as string)
+        try {
+          await related.query('SELECT * FROM missing_relation').catch(() => {})
+        } finally {
+          await related.end()
+        }
+        expect(1).toBe(2)
+      },
+      /code 42P01: relation "missing_relation" does not exist/,
+    ],
+  ])(
+    'aborts on %s, whatever the assertion style',
+    async (_name, failing, reason) => {
+      await writeExpectation()
+      let calls = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            calls += 1
+            if (calls > 2) await failing(pool)
+            await fullSuite(pool)
+          },
+        }),
+      ).rejects.toThrow(
+        new RegExp(
+          `could not evaluate constraint public\\.child\\.child_amount_check: the database reported 1 error\\(s\\) that are not integrity rejections: ${reason.source}`,
+        ),
+      )
+    },
+    120_000,
+  )
+
+  it('aborts on a real 57014 inside the first check, between savepoints', async () => {
+    await writeExpectation()
+    let calls = 0
+    // The reference suite's first check probes NOT NULL columns in savepoints of one
+    // transaction and compares the codes as strings; a cancel in one probe must not count.
+    const requiredColumns = async (pool: pg.Pool, cancelFirst: boolean) => {
+      const client = await pool.connect()
+      const codes: string[] = []
+      try {
+        await client.query('BEGIN')
+        for (const [i, column] of ['amount', 'parent_id'].entries()) {
+          await client.query('SAVEPOINT attempt')
+          try {
+            if (cancelFirst && i === 0) {
+              await client.query("SET LOCAL statement_timeout='10ms'")
+              await client.query('SELECT pg_sleep(1)')
+            }
+            await client.query(
+              `INSERT INTO child (id,parent_id,amount) VALUES (40,${column === 'parent_id' ? 'NULL' : '1'},${column === 'amount' ? 'NULL' : '1'})`,
+            )
+            codes.push(`${column}: accepted`)
+          } catch (error) {
+            codes.push(`${column}: ${(error as { code?: string }).code}`)
+          }
+          await client.query('ROLLBACK TO SAVEPOINT attempt')
+        }
+      } finally {
+        await client.query('ROLLBACK').catch(() => {})
+        client.release()
+      }
+      expect(codes).toEqual(['amount: 23502', 'parent_id: 23502'])
+    }
+    await expect(
+      coverage({
+        concurrency: 1,
+        assertions: async (pool) => {
+          calls += 1
+          await pool.query('INSERT INTO parent (id) VALUES (1) ON CONFLICT DO NOTHING')
+          await requiredColumns(pool, calls > 2)
+          await fullSuite(pool)
+        },
+      }),
+    ).rejects.toThrow(
+      /could not evaluate constraint public\.child\.child_amount_check: the database reported 1 error\(s\) that are not integrity rejections: code 57014: canceling statement.*SELECT pg_sleep/,
+    )
+  }, 120_000)
+
+  it('aborts when a non-integrity error is recorded even though the suite passes', async () => {
+    await writeExpectation()
+    let calls = 0
+    await expect(
+      coverage({
+        concurrency: 1,
+        assertions: async (pool) => {
+          calls += 1
+          if (calls === 1) await caught(pool)
+          await fullSuite(pool)
+        },
+      }),
+    ).rejects.toThrow(
+      /could not evaluate the (second )?baseline: the database reported 1 error\(s\).*code 57014.*; the suite passed anyway/,
+    )
+  }, 120_000)
+
+  // Shapes with no database error behind them: the walk over the thrown failure must abort.
+  it.each<[name: string, failing: (pool: pg.Pool) => Promise<void>, reason: RegExp]>([
+    [
+      'a raw database error with an integrity code thrown outside expect',
+      async () => {
+        throw databaseError('23505', 'duplicate key value violates unique constraint')
+      },
+      /got error 23505: duplicate key value violates unique constraint \(the database reported no error\)/,
+    ],
+    [
+      'a real integrity rejection outside expect',
+      async (pool) => {
+        await pool.query('INSERT INTO parent (id) VALUES (1)')
+      },
+      /got error 23505: duplicate key value violates unique constraint "parent_pkey"/,
+    ],
+    [
+      '.resolves on an Error with code 23505 whose cause is a 57014',
+      async () => {
+        await expect(
+          Promise.reject(
+            Object.assign(
+              new Error('outer', { cause: databaseError('57014', 'canceling statement') }),
+              { code: '23505' },
+            ),
+          ),
+        ).resolves.toBeDefined()
+      },
+      /got an error with code 57014 in the cause chain: canceling statement/,
+    ],
+    [
+      '.resolves on a nested AssertionError whose actual is { code: 57014 }',
+      async () => {
+        let nested: unknown
+        try {
+          expect({ code: '57014' }).toMatchObject({ code: '23514' })
+        } catch (error) {
+          nested = error
+        }
+        await expect(Promise.reject(nested)).resolves.toBeDefined()
+      },
+      /got an assertion about an error with code 57014/,
+    ],
+    [
+      '.rejects.toMatchObject({ code }) receiving an error without a code',
+      async () => {
+        await expect(
+          Promise.reject(new Error('Connection terminated unexpectedly')),
+        ).rejects.toMatchObject({ code: '23514' })
+      },
+      /got an assertion (about an error without SQLSTATE: Connection terminated unexpectedly|that expected code 23514 but received none)/,
+    ],
+    [
+      'toEqual receiving an Error without a code',
+      async () => {
+        expect(new Error('read ECONNRESET')).toEqual({ code: '23514' })
+      },
+      /got an assertion about an error without SQLSTATE: read ECONNRESET/,
+    ],
+    [
+      'an assertion that received an Error without a code and expected no code',
+      async () => {
+        expect(new Error('read ECONNRESET')).toBeUndefined()
+      },
+      /got an assertion about an error without SQLSTATE: read ECONNRESET/,
+    ],
+    [
+      '.rejects.toMatchObject({ code }) receiving a plain object without a code',
+      async () => {
+        await expect(
+          Promise.reject({ message: 'Connection terminated unexpectedly' }),
+        ).rejects.toMatchObject({ code: '23514' })
+      },
+      /got an assertion that expected code 23514 but received none/,
+    ],
+    [
+      '.resolves on an AggregateError with code 23505 whose errors hold a 57014',
+      async () => {
+        await expect(
+          Promise.reject(
+            Object.assign(new AggregateError([databaseError('57014', 'canceling')], 'x'), {
+              code: '23505',
+            }),
+          ),
+        ).resolves.toBeDefined()
+      },
+      /got an error with code 57014 in the cause chain: canceling/,
+    ],
+    [
+      '.resolves on an AggregateError whose errors hold a 57014',
+      async () => {
+        await expect(
+          Promise.reject(new AggregateError([databaseError('57014', 'canceling statement')], 'x')),
+        ).resolves.toBeDefined()
+      },
+      /got an error without SQLSTATE in the cause chain: x/,
+    ],
+    [
+      'an assertion whose received error has an integrity code but a 57014 cause',
+      async () => {
+        const error = Object.assign(
+          new Error('wrapped', { cause: databaseError('57014', 'canceling') }),
+          { code: '23505' },
+        )
+        expect(error).toEqual(expect.objectContaining({ code: '23514' }))
+      },
+      /got an error with code 57014 in the cause chain: canceling/,
+    ],
+  ])(
+    'aborts on %s',
+    async (_name, failing, reason) => {
+      await writeExpectation()
+      let calls = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            calls += 1
+            await pool.query('INSERT INTO parent (id) VALUES (1) ON CONFLICT DO NOTHING')
+            if (calls > 2) await failing(pool)
+            await fullSuite(pool)
+          },
+        }),
+      ).rejects.toThrow(
+        new RegExp(
+          `could not evaluate constraint public\\.child\\.child_amount_check: .*${reason.source}`,
+        ),
+      )
+    },
+    120_000,
+  )
+
+  it('runs the baseline twice and aborts when either run fails', async () => {
+    await writeExpectation()
+    let calls = 0
+    await expect(
+      coverage({
+        concurrency: 1,
+        assertions: async (pool) => {
+          calls += 1
+          if (calls === 2) expect('flaky').toBe('stable')
+          await fullSuite(pool)
+        },
+      }),
+    ).rejects.toThrow(/The assertion suite fails on the unmodified schema/)
+    expect(calls).toBe(2)
+  }, 120_000)
 })

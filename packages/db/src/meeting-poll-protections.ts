@@ -5,7 +5,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { setTimeout } from 'node:timers/promises'
 import type pg from 'pg'
 import { expect } from 'vitest'
-import { createPool } from './index.ts'
+import { openRelatedPool } from './testing/constraint-coverage.ts'
 import { reuseConnectionsAfterErrors } from './testing.ts'
 
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
@@ -39,8 +39,11 @@ export async function transaction<T>(pool: pg.Pool, action: (client: pg.PoolClie
   }
 }
 
-/** Runs each statement in its own savepoint of one rolled-back transaction. */
-async function attempts(
+/**
+ * Runs each statement in its own savepoint of one rolled-back transaction and returns the
+ * integrity rejections; any other error (syntax, timeout, lost connection) is rethrown.
+ */
+export async function attempts(
   pool: pg.Pool,
   statements: { sql: string; params?: unknown[] }[],
   setup?: string,
@@ -56,6 +59,9 @@ async function attempts(
         await client.query(statement.sql, statement.params)
         errors.push(undefined)
       } catch (error) {
+        // Only integrity rejections are outcomes to compare; anything else is a broken run.
+        const code = (error as { code?: unknown }).code
+        if (typeof code !== 'string' || !/^(23|22|P0)/.test(code)) throw error
         errors.push(error as pg.DatabaseError)
       }
       await client.query('ROLLBACK TO SAVEPOINT attempt')
@@ -887,7 +893,8 @@ export const meetingPollProtections: Record<string, (f: Fixture) => Promise<void
 
     const authUrl = new URL(f.pool.options.connectionString as string)
     authUrl.searchParams.set('options', '-c search_path=auth')
-    const authOnly = createPool(authUrl.toString())
+    // Opened through the coverage helper, so its query errors take part in the verdict.
+    const authOnly = openRelatedPool(f.pool, authUrl.toString())
     try {
       // (a) The creator of a team poll: the poll stays, attributed to nobody.
       await accept(authOnly.query('DELETE FROM "user" WHERE id=$1', [f.user]), 'team poll creator')
