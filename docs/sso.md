@@ -951,9 +951,12 @@ sign-in endpoints adds no endpoint name (Better Auth's `genericOAuth` does this)
 suite also requires the sign-in providers to be exactly the configured ones (Google and
 Microsoft when both are set) and no `genericOAuth` plugin to be registered in any of these
 configurations. A plugin's `onRequest` or `onResponse` hook runs outside route matching
-and can answer a path without registering an endpoint, which no inventory sees, so the
-suite also requires that only the MCP OAuth provider plugin, which answers its own
-discovery documents that way, defines one. As a
+and can answer a path without registering an endpoint, which no inventory sees. Better
+Auth runs these hooks from the plugin list in its context, which a plugin's `init` can add
+to, so the suite also pins, by id, the plugins Better Auth actually runs after plugin init:
+in every one of these configurations they must be exactly the declared ones, and the ones
+with either hook must be exactly the MCP OAuth provider plugin when MCP OAuth is on (it
+answers its own discovery documents that way) and none otherwise. As a
 backstop for a surface no inventory sees, every string literal that begins with `/` in
 the `src` directory of each apps, packages and tools workspace is checked too, leaving out
 only an explicit list of test-support and generated files, and no such source may import

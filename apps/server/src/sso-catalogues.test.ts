@@ -154,10 +154,14 @@ const productionOnlyPaths = [
 // from. One gated on the value of a setting the combinations do not vary (the signup mode,
 // the PUBLIC_URL scheme) or on an input startServer does not pass is not.
 // A plugin's onRequest and onResponse run before and after Better Auth matches a route, so
-// either can answer a path no endpoint registers, which no inventory sees. Only the MCP
-// OAuth provider plugin defines either (it answers its own discovery documents), and the
-// suite requires exactly that in every configuration it builds. Router middlewares and
-// before/after hooks run only for a registered endpoint, whose path is checked.
+// either can answer a path no endpoint registers, which no inventory sees. Better Auth runs
+// them from the plugin list in its context: the declared plugins after every plugin's init,
+// which can add plugins to that list. The suite pins, by id, the plugins Better Auth
+// actually runs after plugin init, in every configuration it builds: they must be exactly
+// the declared ones, and the ones with either hook exactly the known ones (the MCP OAuth
+// provider plugin, which answers its own discovery documents). What that plugin's own hook
+// answers is not checked. Router middlewares and before/after hooks run only for a
+// registered endpoint, whose path is checked.
 // Hourmere is the OAuth authorization server for MCP clients, and this is that server's own
 // OpenID discovery document (the OAuth provider plugin in mcpOAuthPlugins, served at
 // /api/auth/.well-known/openid-configuration), not a route for signing users in through an
@@ -216,11 +220,14 @@ async function productionAuth(config: Config) {
     )
     // Let startup settle against the refused pool before it is closed.
     const context = await auth.$context
+    const declaredPlugins: { id: string }[] = auth.options.plugins
+    // The list Better Auth's router runs onRequest and onResponse from, after plugin init.
     const plugins: { id: string; onRequest?: unknown; onResponse?: unknown }[] =
-      auth.options.plugins
+      context.options.plugins ?? []
     return {
       paths: authEndpointPaths(auth.api),
       providers: context.socialProviders.map(({ id }) => id).sort(),
+      declaredPlugins: declaredPlugins.map(({ id }) => id),
       plugins: plugins.map(({ id }) => id),
       requestHookPlugins: plugins
         .filter(({ onRequest, onResponse }) => onRequest || onResponse)
@@ -441,7 +448,8 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
   })
 
   it('registers no SSO Better Auth endpoint, as startServer assembles createAuth', async () => {
-    const { paths, providers, plugins, requestHookPlugins } = await productionAuth(productionConfig)
+    const { paths, providers, declaredPlugins, plugins, requestHookPlugins } =
+      await productionAuth(productionConfig)
     // One endpoint from each plugin group, so the inventory proves that it saw them: core
     // sessions, magic links, Google/Microsoft sign-in, organizations, API keys and MCP OAuth.
     expect(paths).toEqual(
@@ -463,6 +471,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     expect(providers).toEqual(['google', 'microsoft'])
     expect(plugins).not.toContain('generic-oauth')
     expect(requestHookPlugins).toEqual(['oauth-provider'])
+    expect(plugins).toEqual(declaredPlugins)
   })
 
   it.each(authGroupCombinations)(
@@ -481,6 +490,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       expect(built.requestHookPlugins).toEqual(
         groups.flatMap(({ requestHookPlugins }) => requestHookPlugins),
       )
+      expect(built.plugins).toEqual(built.declaredPlugins)
     },
   )
 
