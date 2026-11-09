@@ -233,6 +233,21 @@ function firstLine(error: unknown): string {
   return (message.split('\n')[0] ?? '').slice(0, 240)
 }
 
+/**
+ * Copying the template is infrastructure, not part of the check: on a busy shared server the
+ * CREATE/ALTER DATABASE can exceed the admin timeout. Retry it (never the assertions).
+ */
+async function cloneWithRetry(template: TestDatabaseTemplate, attempts = 3) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await template.clone(undefined, { migrate: false, tag: 'coverage' })
+    } catch (error) {
+      if (attempt >= attempts) throw error
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1_000))
+    }
+  }
+}
+
 async function runOnCopy(
   template: TestDatabaseTemplate,
   assertions: ConstraintCoverageOptions['assertions'],
@@ -240,7 +255,7 @@ async function runOnCopy(
   label: string,
   drop?: string,
 ): Promise<{ dropError?: unknown; failure?: unknown }> {
-  const copy = await template.clone(undefined, { migrate: false, tag: 'coverage' })
+  const copy = await cloneWithRetry(template)
   try {
     if (drop) {
       try {
