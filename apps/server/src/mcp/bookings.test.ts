@@ -158,6 +158,40 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     }
   }
 
+  it('passes an invitee location choice and phone to the shared booking service', async () => {
+    const host = await f.host({ handle: `choice-${randomUUID().slice(0, 8)}` })
+    await f.schedule(host.userId)
+    const id = await f.eventType(host.organizationId, host.userId, { slug: 'choice' })
+    await db
+      .updateTable('event_types')
+      .set({
+        locations: JSON.stringify([
+          { id: 'office', kind: 'in_person', address: 'Private address' },
+          { id: 'call', kind: 'phone', askInvitee: true },
+        ]),
+      })
+      .where('id', '=', id)
+      .execute()
+    const input = {
+      handle: host.handle,
+      slug: 'choice',
+      start: '2026-11-02T08:00:00Z',
+      locationOptionId: 'call',
+      idempotencyKey: randomUUID(),
+      invitee: { name: 'Guest', email: 'guest@example.test', timeZone: 'UTC' },
+    }
+    expect(errorOf(await call('create_booking', input)).error).toBe('invalid_invitee_phone')
+    const selected = { ...input, inviteePhone: '+14155550123' }
+    const result = ok<{ booking: { location: unknown }; replayed: boolean }>(
+      await call('create_booking', selected),
+    )
+    expect(result.booking.location).toEqual({ kind: 'phone', number: '+14155550123' })
+    expect(ok<{ replayed: boolean }>(await call('create_booking', selected)).replayed).toBe(true)
+    expect(
+      errorOf(await call('create_booking', { ...selected, locationOptionId: 'office' })).error,
+    ).toBe('idempotency_key_reused')
+  })
+
   it('documents host-pool and activation conflicts with availability refresh in create_booking', async () => {
     const client = await connect(agent.key)
     try {
@@ -445,6 +479,65 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     return { host, key, booked }
   }
 
+  it('requests another time through MCP with host permission and replay safety', async () => {
+    const { key, booked } = await hostedBooking()
+    const input = {
+      bookingId: booked.booking.id,
+      idempotencyKey: randomUUID(),
+      note: 'Could you choose a new time?',
+    }
+    expect(errorOf(await call('request_reschedule', input, agent.key)).error).toBe(
+      'booking_not_found',
+    )
+    const result = ok<{
+      id: string
+      status: string
+      pendingReschedule: { id: string; note: string }
+    }>(await call('request_reschedule', input, key.key))
+    expect(result).toMatchObject({
+      id: booked.booking.id,
+      status: 'confirmed',
+      pendingReschedule: { note: input.note },
+    })
+    expect(
+      errorOf(await call('request_reschedule', { ...input, note: 'bad\tcontrol' }, key.key)),
+    ).toMatchObject({
+      error: 'invalid_request',
+      message: 'note: must not contain control characters other than LF',
+    })
+    expect(ok(await call('request_reschedule', input, key.key))).toEqual(result)
+    expect(
+      errorOf(await call('request_reschedule', { ...input, note: 'Changed' }, key.key)).error,
+    ).toBe('idempotency_key_reused')
+    expect(
+      errorOf(await call('request_reschedule', { ...input, note: 'x'.repeat(2001) }, key.key))
+        .error,
+    ).toBe('invalid_request')
+  })
+
+  it.each(['pick', 'cancel'])(
+    'forwards the request generation for an idempotent invitee %s',
+    async (action) => {
+      const { key, booked } = await hostedBooking()
+      const pending = ok<{ pendingReschedule: { id: string } }>(
+        await call(
+          'request_reschedule',
+          { bookingId: booked.booking.id, idempotencyKey: randomUUID() },
+          key.key,
+        ),
+      )
+      const args = {
+        manageToken: booked.manageToken,
+        rescheduleRequestId: pending.pendingReschedule.id,
+        ...(action === 'pick' ? { start: '2026-11-02T10:00:00Z' } : {}),
+      }
+      const tool = action === 'pick' ? 'reschedule_booking' : 'cancel_booking'
+      const first = ok<Record<string, unknown>>(await call(tool, args))
+      const replay = ok<Record<string, unknown>>(await call(tool, args))
+      expect(replay).toEqual(action === 'pick' ? { ...first, manageToken: null } : first)
+    },
+  )
+
   describe('rescheduling as the host', () => {
     it('applies the configured invitee cap without limiting host moves or cancellation', async () => {
       const { key, booked } = await hostedBooking()
@@ -717,6 +810,21 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   })
 
   describe('find_available_slots', () => {
+    it('validates the selected location when finding slots', async () => {
+      expect(
+        errorOf(
+          await call('find_available_slots', {
+            handle: 'ada',
+            slug: 'intro',
+            timeZone: 'UTC',
+            startDate: '2026-11-02',
+            endDate: '2026-11-02',
+            locationOptionId: 'missing',
+          }),
+        ).error,
+      ).toBe('invalid_location_choice')
+    })
+
     it('reads the dates in the requested time zone and gives each slot in UTC and in it', async () => {
       const berlin = ok<{
         eventType: { title: string; questions: unknown[]; host: { timeZone: string } }

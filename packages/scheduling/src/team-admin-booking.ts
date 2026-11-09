@@ -7,6 +7,7 @@ import { z } from 'zod'
  * minimum contract, so neither ownership nor stale provider state can disclose one.
  */
 export const TeamAdminBookingSchema = z.strictObject({
+  canManageNoShow: z.boolean().optional(),
   id: z.uuid(),
   status: z.enum(['confirmed', 'cancelled']),
   start: z.iso.datetime(),
@@ -21,6 +22,9 @@ export const TeamAdminBookingSchema = z.strictObject({
   hosts: z.array(z.strictObject({ userId: z.uuid(), name: z.string() })),
   attendees: z.array(
     z.strictObject({
+      id: z.uuid().optional(),
+      noShowMarkedAt: z.iso.datetime().nullable().optional(),
+      noShowMarkedBy: z.uuid().nullable().optional(),
       name: z.string(),
       email: z.string(),
       timeZone: z.string(),

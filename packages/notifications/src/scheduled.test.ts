@@ -106,18 +106,50 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     end = END,
     guests = false,
     timeZone?: string,
+    inviteePhone?: string,
   ) {
     const host = await f.host(timeZone === undefined ? {} : { timeZone })
     const eventTypeId = await f.eventType(host.organizationId, host.userId, {
       questions: [{ id: 'answer', label: 'Private answer' }],
     })
-    const bookingId = await f.booking(
-      host.organizationId,
-      [host.userId],
-      start.toString(),
-      end.toString(),
-      { eventTypeId },
-    )
+    const bookingId = inviteePhone
+      ? (
+          await db
+            .insertInto('bookings')
+            .values({
+              organization_id: host.organizationId,
+              event_type_id: eventTypeId,
+              start_at: start.toString(),
+              end_at: end.toString(),
+              title: 'Phone meeting',
+              source: 'api',
+              status: 'confirmed',
+              manage_token_hash: Buffer.alloc(32, 1),
+              location: JSON.stringify({ kind: 'phone', number: inviteePhone }),
+              location_option: JSON.stringify({ id: 'call', kind: 'phone', askInvitee: true }),
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+        ).id
+      : await f.booking(host.organizationId, [host.userId], start.toString(), end.toString(), {
+          eventTypeId,
+        })
+    if (inviteePhone) {
+      await db
+        .insertInto('booking_hosts')
+        .values({ booking_id: bookingId, user_id: host.userId })
+        .execute()
+      await db
+        .insertInto('booking_attendees')
+        .values({
+          booking_id: bookingId,
+          name: 'Invitee',
+          email: 'invitee@example.com',
+          is_booker: true,
+          time_zone: 'UTC',
+        })
+        .execute()
+    }
     await db
       .updateTable('bookings')
       .set({
@@ -196,6 +228,36 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     expect(
       followups.every((m) => !m.text.includes('#token=') && !m.text.includes('Secret detail')),
     ).toBe(true)
+  })
+  it('keeps collected phone numbers out of every guest scheduled payload', async () => {
+    const number = '+14155550123'
+    const { bookingId } = await setup(
+      {
+        reminders: [rule('phone-reminder', 120)],
+        followUps: [rule('phone-followup', 5)],
+      },
+      START,
+      END,
+      true,
+      undefined,
+      number,
+    )
+    for (const scheduled of await rows(bookingId)) {
+      sent = []
+      await run(scheduled.id, Temporal.Instant.fromEpochMilliseconds(scheduled.due_at.getTime()))
+      expect(sent).toHaveLength(3)
+      const guest = sent.find((m) => m.to.startsWith('guest-'))
+      expect(guest).toBeDefined()
+      expect(JSON.stringify(guest)).not.toContain(number)
+      if (scheduled.kind === 'reminder') {
+        expect(guest?.text).toContain('Phone call — the host will call the invitee')
+        expect(guest?.html).toContain('Phone call — the host will call the invitee')
+        for (const message of sent.filter((m) => m !== guest)) {
+          expect(message.text).toContain(number)
+          expect(message.html).toContain(number)
+        }
+      }
+    }
   })
   it('names all required hosts and co-hosts in configured reminders and follow-ups', async () => {
     const { bookingId, host } = await setup({

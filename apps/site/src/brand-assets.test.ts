@@ -6,7 +6,7 @@ import { siteCopy } from './ui-copy.ts'
 const read = (path: string) => readFileSync(new URL(path, import.meta.url))
 
 describe('brand raster exports and delivery', () => {
-  it('keeps font tools outside the workspace and limits runtime HTML parsing to the importer', () => {
+  it('keeps font tools external and limits runtime image and HTML tools to their consumers', () => {
     const lock = JSON.parse(read('../../../package-lock.json').toString()) as {
       packages: Record<
         string,
@@ -28,9 +28,11 @@ describe('brand raster exports and delivery', () => {
           expect(manifest[field]?.wawoff2, `${path}: ${field}`).toBeUndefined()
         }
         for (const tool of tools) {
-          // The offline importer parses source HTML at runtime; site tooling stays dev-only.
+          // Runtime consumers need these tools; site-only tooling stays dev-only.
           if (path === 'packages/import-calcom' && tool === 'parse5')
             expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('8.0.1')
+          else if (path === 'packages/scheduling' && tool === 'sharp')
+            expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('0.35.5')
           else expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBeUndefined()
           expect(manifest.optionalDependencies?.[tool], `${path}: optional ${tool}`).toBeUndefined()
         }
@@ -42,6 +44,10 @@ describe('brand raster exports and delivery', () => {
         if (path === 'node_modules/parse5') {
           expect(metadata.version).toBe('8.0.1')
           expect(lock.packages['packages/import-calcom']?.dependencies?.parse5).toBe('8.0.1')
+          expect(metadata.dev || metadata.devOptional).not.toBe(true)
+        } else if (path === 'node_modules/sharp') {
+          expect(metadata.version).toBe('0.35.5')
+          expect(lock.packages['packages/scheduling']?.dependencies?.sharp).toBe('0.35.5')
           expect(metadata.dev || metadata.devOptional).not.toBe(true)
         } else
           expect(metadata.dev || metadata.devOptional, `${path}: production lock entry`).toBe(true)

@@ -1,9 +1,17 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Meeting location': '会议地点',
+  'Your phone number': '你的电话号码',
+  'Choose one of the available locations.': '请选择一个可用的会议地点。',
+  'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.':
+    '请输入以 + 开头、共 7–15 位数字（含国家代码）的号码，可包含空格、括号、点和连字符。',
+  'This request has expired or changed. Reload your booking to choose what to do next.':
+    '此请求已过期或发生变更。请重新加载预约，再选择下一步操作。',
+  'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
+    '主持人请你选择新时间。在你改期或取消前，原预约仍然有效。',
   'This waitlist is full (100 entries). Please check available times later.':
     '此候补名单已满（100 人）。请稍后查看可预约时间。',
   'Waitlist email is unavailable. Please contact the host.': '候补邮件暂不可用。请联系主持人。',
-
   'This imported booking is read-only and managed in the original system.':
     '此导入预约为只读记录，请在原系统中管理。',
   'This location is unavailable. Contact the host to book.':

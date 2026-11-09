@@ -12,6 +12,10 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Private per-attendee no-show marking after the scheduled start, with dashboard, REST,
+  MCP and CLI access for hosts and browser-session access for team owners/admins. Optional
+  `booking.attendee_no_show_changed` webhooks report actual changes without attendee contacts.
+
 - `security.txt` on hourmere.com and www.hourmere.com lists Hourmere's private vulnerability
   reporting channels.
 - Self-hosted operators can allow exact private webhook hosts or IP/CIDR and port ranges
@@ -81,6 +85,21 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Keep concurrent MCP OAuth organization selection and consent from exhausting the application database connection pool.
+
+- Upgrade the Better Auth family and schema CLI from 1.7.12 to 1.7.16 for
+  GHSA-9hm7-xhfp-cx58 (unverified OAuth email), GHSA-fvxx-76fc-893x (revoked
+  cached sessions), GHSA-c85h-5mrr-mgx4 (padded organization owner roles),
+  GHSA-fmh4-wcc4-5jm3 (organization invitations accepted by an unverified account)
+  and GHSA-hwq2-v29r-p69r (email-change links after the address changes hands),
+  including the other fixes in the November security release. Hourmere already
+  required a verified email before accepting an invitation, so GHSA-fmh4 was blocked
+  by its own check as well; change-email is not enabled, so GHSA-hwq2 does not apply. Google and Microsoft
+  sign-in reject false email-verification claims, including the string `"false"`.
+  No database migration is needed. Rebuild and restart all application roles;
+  Hourmere uses PostgreSQL sessions without secondary storage or cookie caching.
+  Social token/JWKS requests now reject redirects, and invalid MCP client-metadata
+  responses fail with `invalid_client`. See the self-hosting upgrade notes.
 - All-day Google events block their dates in each host's availability schedule zone,
   including collective and round-robin hosts, when the calendar uses another zone.
   Exclusive end dates and daylight-saving transitions are preserved; timed events remain
@@ -191,6 +210,15 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
+  apply while the previous version is still running: it adds nullable attendee columns and
+  only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply
+  it before starting the new version (automatic with `AUTO_MIGRATE=true`). See the
+  [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#private-attendee-no-show-markers).
+- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
+  and worker process before applying the migration, then restart every role with the new
+  code. The webhook delivery uniqueness constraint changes to include the request identity;
+  old booking writers cannot use it after migration. Do not run mixed application versions.
 - **Coordinate the mail-budget upgrade (migration 0040).** Build the new application,
   stop every old `web`, `all` and `worker` process, including any on other hosts, then
   start all roles with the upgraded code: build → stop app (and any separate worker) → up.

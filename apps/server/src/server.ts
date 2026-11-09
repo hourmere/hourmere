@@ -28,7 +28,7 @@ import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
-import { createJobs, oneTimeBookingLinksRetentionJob } from '@hourmere/jobs'
+import { createJobs, oneTimeBookingLinksRetentionJob, paymentHoldsExpiryJob } from '@hourmere/jobs'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -45,6 +45,7 @@ import {
   notificationEmailCleanupJob,
   queuedSignInEmail,
   repairScheduledBookingEmails,
+  rescheduleRequestExpiryJob,
   reserveInvitationEmailBudget,
   type ScheduledEmailQueue,
   scheduledBookingEmailJob,
@@ -54,20 +55,28 @@ import {
 } from '@hourmere/notifications'
 import type { ServiceContext } from '@hourmere/scheduling'
 import {
+  type AttendeeNoShowNotifier,
   type BookingNotifier,
   cleanupWaitlist,
   ensureWaitlistKey,
+  expirePaymentHolds,
   leaveTeamMember,
   removeWaitlist,
   scanWaitlists,
   verifyWaitlist,
 } from '@hourmere/scheduling'
-import { webhookBookingNotifier, webhookCleanupJob, webhookDeliveryJob } from '@hourmere/webhooks'
+import {
+  webhookAttendeeNoShowNotifier,
+  webhookBookingNotifier,
+  webhookCleanupJob,
+  webhookDeliveryJob,
+} from '@hourmere/webhooks'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
+import { brandingTools } from './mcp/branding.ts'
 import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
@@ -82,6 +91,7 @@ import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { bookingRoutes } from './routes/bookings.ts'
+import { brandingRoutes } from './routes/branding.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -113,6 +123,7 @@ export function productRoutes({
   db,
   socialProviders,
   notify,
+  notifyAttendeeNoShow,
   googleCalendar,
   microsoftCalendar,
   zoomConference,
@@ -157,6 +168,7 @@ export function productRoutes({
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
   socialProviders: Config['socialProviders']
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
   notify?: BookingNotifier | undefined
   googleCalendar?: CalendarDeps['google']
@@ -197,6 +209,7 @@ export function productRoutes({
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
+    brandingRoutes({ db }),
     eventTypeRoutes({
       db,
       followUpHostNotesEnabled,
@@ -223,7 +236,14 @@ export function productRoutes({
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
-    bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
+    bookingRoutes({
+      db,
+      notify,
+      notifyAttendeeNoShow,
+      automaticMeet,
+      automaticZoom,
+      bookingMaxInviteeReschedules,
+    }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
@@ -244,6 +264,7 @@ export function productTools({
   followUpHostNotesEnabled,
   successRedirectPolicy,
   notify,
+  notifyAttendeeNoShow,
   automaticMeet,
   automaticZoom,
   bookingMaxInviteeReschedules,
@@ -257,6 +278,7 @@ export function productTools({
   publicUrl?: string | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -271,11 +293,13 @@ export function productTools({
       waitlistSecret,
       smtpConfigured,
       notify,
+      notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
       bookingMaxInviteeReschedules,
     }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
+    ...brandingTools({ db }),
     ...eventTypeTools({
       db,
       automaticMeet,
@@ -507,6 +531,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }),
       waitlistEmailJob(runWaitlistEmail),
       oneTimeBookingLinksRetentionJob(db),
+      paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,
@@ -519,6 +544,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
       }),
       bookingNotificationJob(notificationDeps),
+      rescheduleRequestExpiryJob({
+        db,
+        notify: async (trx, event, now) => {
+          await bookingNotifier(jobs)(trx, event, now)
+          await webhookBookingNotifier(jobs, webhookSettings)(trx, event, now)
+        },
+      }),
       groupHostMailJob(notificationDeps),
       scheduledBookingEmailJob(notificationDeps),
       scheduledBookingEmailRepairJob(notificationDeps, scheduledQueue),
@@ -611,11 +643,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     const emailNotifier = bookingNotifier(jobs)
     const calendarNotifier = calendarBookingNotifier(jobs)
     const conferenceNotifier = conferenceBookingNotifier(jobs)
+    const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
     const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
     const notify: BookingNotifier = async (trx, event, now) => {
-      await conferenceNotifier(trx, event)
+      if (!('requestId' in event)) await conferenceNotifier(trx, event)
       await emailNotifier(trx, event, now)
-      if (googleCalendar) await calendarNotifier(trx, event)
+      if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
       await webhookNotifier(trx, event, now)
     }
     const auth = createAuth({
@@ -675,6 +708,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         termsUrl: config.TERMS_URL,
         webhooks: webhookSettings,
         notify,
+        notifyAttendeeNoShow,
         googleCalendar,
         microsoftCalendar,
         zoomConference,
@@ -707,6 +741,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           successRedirectPolicy,
           smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
           notify,
+          notifyAttendeeNoShow,
           automaticMeet: config.GOOGLE_MEET_ENABLED,
           automaticZoom: config.ZOOM_MEETINGS_ENABLED,
           bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,

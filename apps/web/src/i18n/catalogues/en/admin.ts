@@ -1,5 +1,112 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'No-shows': 'No-shows',
+  'No-show': 'No-show',
+  'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
+    'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.',
+  'Clear no-show for {name}': 'Clear no-show for {name}',
+  'Mark {name} as a no-show': 'Mark {name} as a no-show',
+  'Clear no-show': 'Clear no-show',
+  'Mark no-show': 'Mark no-show',
+  'Could not update the no-show mark. Refresh the booking and try again.':
+    'Could not update the no-show mark. Refresh the booking and try again.',
+  'No-show mark updated.': 'No-show mark updated.',
+
+  '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
+    '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
+  'Loading logo preview…': 'Loading logo preview…',
+  'Logo preview is unavailable.': 'Logo preview is unavailable.',
+  'Saved brand logo': 'Saved brand logo',
+
+  'Booking page branding': 'Booking page branding',
+  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
+    'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.',
+  'Branding access has not been confirmed.': 'Branding access has not been confirmed.',
+  'Only the personal owner or team owners and admins can manage branding.':
+    'Only the personal owner or team owners and admins can manage branding.',
+  'Manage branding': 'Manage branding',
+  'Loading branding…': 'Loading branding…',
+  'Could not load branding.': 'Could not load branding.',
+  'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
+    'Enter a colour in #RRGGBB format, or leave it empty to clear it.',
+  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
+    'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.',
+  'Edit branding': 'Edit branding',
+  'Primary colour': 'Primary colour',
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
+    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
+  'Brand logo': 'Brand logo',
+  'A logo is saved for this space.': 'A logo is saved for this space.',
+  'Remove logo': 'Remove logo',
+  'Save branding': 'Save branding',
+  'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.':
+    'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.',
+  Black: 'Black',
+  White: 'White',
+  'Branding saved. Booking pages and emails are unchanged.':
+    'Branding saved. Booking pages and emails are unchanged.',
+  'Group-seat bookings do not support reschedule requests.':
+    'Group-seat bookings do not support reschedule requests.',
+  'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
+    'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.',
+
+  'Waiting for the invitee to choose a new time.': 'Waiting for the invitee to choose a new time.',
+  'Ask the invitee to choose a new time': 'Ask the invitee to choose a new time',
+  'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.':
+    'The original time stays booked. The invitee can choose another time or cancel. If they do not respond within 48 hours or before the meeting starts, the original booking stays in place.',
+  'The request is saved. The invitee will receive an email, subject to delivery limits.':
+    'The request is saved. The invitee will receive an email, subject to delivery limits.',
+  'Request reschedule': 'Request reschedule',
+  'A new request replaces any previous request for this booking.':
+    'A new request replaces any previous request for this booking.',
+  'Note to the invitee': 'Note to the invitee',
+  'Plain text, up to 2000 characters. Included only in the email body.':
+    'Plain text, up to 2000 characters. Included only in the email body.',
+  'Use at most 2000 characters for your note.': 'Use at most 2000 characters for your note.',
+  'Could not request a new time. {0}': 'Could not request a new time. {0}',
+  'Retry the same request': 'Retry the same request',
+  'Send request': 'Send request',
+
+  'Export bookings as CSV': 'Export bookings as CSV',
+  'Choose a start-time range of at most 366 days. Current booking filters also apply.':
+    'Choose a start-time range of at most 366 days. Current booking filters also apply.',
+  'This file contains personal data. Store and share it carefully.':
+    'This file contains personal data. Store and share it carefully.',
+  'CSV times use {zone} and UTC.': 'CSV times use {zone} and UTC.',
+  'Bookings starting at or after (UTC)': 'Bookings starting at or after (UTC)',
+  'Bookings starting before (UTC)': 'Bookings starting before (UTC)',
+  'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
+  'Could not download CSV. Check the booking range and try again shortly.':
+    'Could not download CSV. Check the booking range and try again shortly.',
+  'Download CSV': 'Download CSV',
+
+  'Past date overrides ({0})': 'Past date overrides ({0})',
+  'Times are in {0}.': 'Times are in {0}.',
+  'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.':
+    'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.',
+  'Review latest version': 'Review latest version',
+  'Latest saved version': 'Latest saved version',
+  'Apply my draft to this version': 'Apply my draft to this version',
+  'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.':
+    'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.',
+  'Could not load the latest version. {0}': 'Could not load the latest version. {0}',
+  'Copy hours from {0}': 'Copy hours from {0}',
+  'Copy to…': 'Copy to…',
+  'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.':
+    'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.',
+  Weekdays: 'Weekdays',
+  'All days': 'All days',
+  'Apply copy': 'Apply copy',
+  'Each date can have only one override.': 'Each date can have only one override.',
+  'Date overrides replace weekly hours on that date. Save changes applies every change on this page.':
+    'Date overrides replace weekly hours on that date. Save changes applies every change on this page.',
+  'No date overrides.': 'No date overrides.',
+  'Date override {0}': 'Date override {0}',
+  'Save schedule details, weekly hours and date overrides together with Save changes.':
+    'Save schedule details, weekly hours and date overrides together with Save changes.',
+
   Imported: 'Imported',
   'the original scheduling system': 'the original scheduling system',
 
@@ -767,17 +874,9 @@ export const admin = {
     'Give the key a name above, then choose Create key.',
   'Connect a Zoom account to get started.': 'Connect a Zoom account to get started.',
   'Review calendar connection options': 'Review calendar connection options',
-  'Save schedule details and weekly hours here. Save date overrides in their section below.':
-    'Save schedule details and weekly hours here. Save date overrides in their section below.',
-  '. Use Save override to save a date. Select dates to remove, then use Save removals.':
-    '. Use Save override to save a date. Select dates to remove, then use Save removals.',
-  'Save removals': 'Save removals',
-  'Unsaved date override removals': 'Unsaved date override removals',
   'Removal pending save': 'Removal pending save',
   'Undo removal: {0}': 'Undo removal: {0}',
   'Undo removal': 'Undo removal',
-  'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}':
-    'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}',
   '.': '.',
   '{0}–{1}.': '{0}–{1}.',
   '= {0}.': '= {0}.',
@@ -1065,7 +1164,6 @@ export const admin = {
   'Could not disconnect {0} Calendar.': 'Could not disconnect {0} Calendar.',
   'Could not load more bookings. {0}': 'Could not load more bookings. {0}',
   'Could not load the booking.': 'Could not load the booking.',
-  'Could not load the date overrides.': 'Could not load the date overrides.',
   'Could not load the event type.': 'Could not load the event type.',
   'Could not load the schedule.': 'Could not load the schedule.',
   'Could not load your bookings.': 'Could not load your bookings.',
@@ -1077,7 +1175,6 @@ export const admin = {
   'Could not remove it. {0}': 'Could not remove it. {0}',
   'Could not revoke the key. {0}': 'Could not revoke the key. {0}',
   'Could not save the event type. {0}': 'Could not save the event type. {0}',
-  'Could not save the override. {0}': 'Could not save the override. {0}',
   'Could not save the schedule. {0}': 'Could not save the schedule. {0}',
   'Could not save your display name. {0}': 'Could not save your display name. {0}',
   'Could not save your profile. {0}': 'Could not save your profile. {0}',
@@ -1193,7 +1290,6 @@ export const admin = {
   Hours: 'Hours',
   'Hours {0}, from': 'Hours {0}, from',
   'Hours {0}, until': 'Hours {0}, until',
-  'Hours on that date': 'Hours on that date',
   'How far ahead a meeting must be booked.': 'How far ahead a meeting must be booked.',
   'I’ve saved my key': 'I’ve saved my key',
   'In 1 year': 'In 1 year',
@@ -1219,7 +1315,6 @@ export const admin = {
   'Loading calendars…': 'Loading calendars…',
   'Loading event types…': 'Loading event types…',
   'Loading keys…': 'Loading keys…',
-  'Loading overrides…': 'Loading overrides…',
   'Loading schedules…': 'Loading schedules…',
   'Loading the booking…': 'Loading the booking…',
   'Loading your profile…': 'Loading your profile…',
@@ -1268,7 +1363,6 @@ export const admin = {
   'No past bookings yet.': 'No past bookings yet.',
   'No public booking link': 'No public booking link',
   'No upcoming bookings.': 'No upcoming bookings.',
-  'No upcoming date overrides.': 'No upcoming date overrides.',
   None: 'None',
   'Not set': 'Not set',
   'Offer at most {0} options.': 'Offer at most {0} options.',
@@ -1283,9 +1377,6 @@ export const admin = {
   Organization: 'Organization',
   'Organization to connect': 'Organization to connect',
   'Organization:': 'Organization:',
-  'Other hours': 'Other hours',
-  'Other hours on single dates, such as holidays, in':
-    'Other hours on single dates, such as holidays, in',
   'Other video or meeting link': 'Other video or meeting link',
   Past: 'Past',
   'Past bookings': 'Past bookings',
@@ -1312,7 +1403,6 @@ export const admin = {
   'Remove special control characters (tabs and line breaks are fine).':
     'Remove special control characters (tabs and line breaks are fine).',
   'Removed question {0}{1}.': 'Removed question {0}{1}.',
-  'Removed the override for {0}.': 'Removed the override for {0}.',
   'Removing…': 'Removing…',
   Replaced: 'Replaced',
   Required: 'Required',
@@ -1336,7 +1426,6 @@ export const admin = {
   Saturday: 'Saturday',
   'Save changes': 'Save changes',
   'Save display name': 'Save display name',
-  'Save override': 'Save override',
   'Save profile': 'Save profile',
   'Saved.': 'Saved.',
   'Saving…': 'Saving…',
@@ -1415,8 +1504,6 @@ export const admin = {
     'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.',
   'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.':
     'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
-  'This date has an override already; saving replaces it.':
-    'This date has an override already; saving replaces it.',
   'This email address already has an account. {0}':
     'This email address already has an account. {0}',
   'This event type does not exist, or it was deleted.':
@@ -1545,8 +1632,6 @@ export const admin = {
   '{label}, hours {count}, from': '{label}, hours {count}, from',
   '{label}, hours {count}, until': '{label}, hours {count}, until',
   '“{name}” is now your default schedule.': '“{name}” is now your default schedule.',
-  'Added the override for {date}: {hours}.': 'Added the override for {date}: {hours}.',
-  'Replaced the override for {date}: {hours}.': 'Replaced the override for {date}: {hours}.',
   Availability: 'Availability',
   Bookings: 'Bookings',
   Calendars: 'Calendars',
