@@ -20,6 +20,7 @@
     "@better-auth/kysely-adapter": "1.7.16",
     "@better-auth/mcp": "1.7.16",
     "@better-auth/oauth-provider": "1.7.16",
+    "@better-auth/sso": "1.7.16",
     "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/mail": "*",
