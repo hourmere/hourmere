@@ -213,7 +213,7 @@ describe('built website', () => {
     }
     expect(
       nodes.filter((node) => node.tagName === 'table').map((node) => attr(node, 'role')),
-    ).toEqual(Array(7).fill('table'))
+    ).toEqual(Array(8).fill('table'))
     // Identifiers stay whole; long code gains a <wbr> after each separator run.
     expect(html).toContain('<code dir="auto">DATABASE_URL</code>')
     expect(html).toContain('<code dir="auto">MICROSOFT_CALENDAR_CLIENT_SECRET</code>')

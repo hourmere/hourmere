@@ -10,6 +10,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Self-host with Docker Compose](/docs/self-hosting): install, configure email and a proxy,
   split workers, back up and upgrade.
+- [Install the app](/docs/install-app): add Hourmere to your home screen and understand
+  its offline notice and privacy boundaries.
 - [Configuration reference](/docs/configuration): environment variables and Compose behavior.
 - [Troubleshooting](/docs/troubleshooting): email delivery, workers, HTTPS, DNS and database
   startup failures.
