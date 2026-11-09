@@ -217,8 +217,8 @@ function productionSources(): string[] {
 // Source files beside the production code that do not ship, so a path a test scenario uses
 // is not mistaken for a served route: test support and fixtures (named `test/`, `testing/`,
 // `*testing.ts`, `test-app.ts`, `*fixtures.ts`, `*-seed*.ts`, `*.test-helper.ts`) and
-// generated files (`*.d.ts`, the database table types). The same rules as the routing forms
-// Off test's scan.
+// generated files (`*.d.ts`, the database table types). The same list and walk as the
+// routing forms Off test's scan (scripts/routing-forms-off.test.ts), kept in step with it.
 const NOT_SHIPPED: readonly RegExp[] = [
   /(^|\/)test\//,
   /(^|\/)testing\//,
