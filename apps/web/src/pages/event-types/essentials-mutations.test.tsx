@@ -133,3 +133,64 @@ describe('essentials production-source negative controls', () => {
     })
   })
 })
+
+it('detects closed disclosure contents retaining layout boxes', () => {
+  const styles = readFileSync('apps/web/src/styles.css', 'utf8')
+  const rule = styles.slice(styles.indexOf('.event-settings-group:not([open]) > .stack'))
+  detects(rule, 'display: none;', 'display: block;', (copy) => {
+    const style = document.createElement('style')
+    style.textContent = copy
+    document.head.append(style)
+    const view = render(
+      <details className="event-settings-group">
+        <summary>Settings</summary>
+        <div className="stack">
+          <input defaultValue="Kept" />
+        </div>
+      </details>,
+    )
+    try {
+      const content = view.container.querySelector('.stack') as HTMLElement
+      expect(getComputedStyle(content).display).toBe('none')
+      expect(view.container.querySelector('input')?.value).toBe('Kept')
+      view.container.querySelector('details')?.setAttribute('open', '')
+      expect(getComputedStyle(content).display).not.toBe('none')
+    } finally {
+      view.unmount()
+      style.remove()
+    }
+  })
+})
+
+it('detects location actions losing their usable target size', () => {
+  const locationSource = readFileSync(
+    'apps/web/src/pages/event-types/OrderedLocationsEditor.tsx',
+    'utf8',
+  )
+  const start = locationSource.indexOf('<button')
+  const action = locationSource.slice(
+    start,
+    locationSource.indexOf('</button>', start) + '</button>'.length,
+  )
+  const style = document.createElement('style')
+  style.textContent = readFileSync('apps/web/src/styles.css', 'utf8')
+  document.head.append(style)
+  try {
+    detects(action, 'className="button button-small"', 'className=""', (copy) => {
+      const Action = compile<react.ComponentType>(
+        `function Action() { return (${copy}) }`,
+        'Action',
+        { index: 1, move: () => {}, t: (text: string) => text },
+      )
+      const view = render(<Action />)
+      try {
+        const button = view.container.querySelector('button') as HTMLButtonElement
+        expect(Number.parseFloat(getComputedStyle(button).minHeight)).toBeGreaterThanOrEqual(24)
+      } finally {
+        view.unmount()
+      }
+    })
+  } finally {
+    style.remove()
+  }
+})

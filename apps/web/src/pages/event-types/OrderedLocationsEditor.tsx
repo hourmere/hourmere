@@ -164,10 +164,16 @@ export function OrderedLocationsEditor({
               {t('Default location')}
             </label>
             <div className="row">
-              <button type="button" disabled={index === 0} onClick={() => move(index, -1)}>
+              <button
+                className="button button-small"
+                type="button"
+                disabled={index === 0}
+                onClick={() => move(index, -1)}
+              >
                 {t('Move location up')}
               </button>
               <button
+                className="button button-small"
                 type="button"
                 disabled={index === options.length - 1}
                 onClick={() => move(index, 1)}
@@ -176,6 +182,7 @@ export function OrderedLocationsEditor({
               </button>
               {!primary && (
                 <button
+                  className="button button-small"
                   type="button"
                   onClick={() =>
                     set(
@@ -211,7 +218,12 @@ export function OrderedLocationsEditor({
           </select>
         )}
       </Field>
-      <button type="button" disabled={available.length === 0} onClick={add}>
+      <button
+        className="button button-small"
+        type="button"
+        disabled={available.length === 0}
+        onClick={add}
+      >
         {t('Add location option')}
       </button>
     </section>

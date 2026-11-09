@@ -2645,3 +2645,9 @@ h3:lang(zh) {
   box-shadow: none;
   padding: 0;
 }
+
+/* Native closed details may retain child layout boxes. Suppress those boxes too,
+   while keeping the controls mounted so collapsing never loses draft values. */
+.event-settings-group:not([open]) > .stack {
+  display: none;
+}
