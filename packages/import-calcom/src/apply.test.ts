@@ -769,6 +769,48 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       ).rows[0],
     ).toEqual({ handle: 'kept', time_zone: 'UTC', locale: 'zh-CN' })
   })
+  it.each(['route', 'Route', 'ROUTE'])(
+    'refuses the claim-reserved personal handle %s as a resolution and writes nothing',
+    async (handle) => {
+      const f = await setup()
+      f.input.resolutions = { handles: { 1: handle } }
+      f.plan = await repreview(f)
+      expect(f.plan.blocked).toBe(true)
+      expect(f.plan.losses.map((p) => p.code)).toContain('user_handle_invalid')
+      expect(await apply(f)).toMatchObject({ status: 'failed', code: 'IMPORT_PREVIEW_BLOCKED' })
+      expect(await businessCounts(f.user.id)).toEqual(empty)
+    },
+  )
+  it('refuses a source username route and keeps a legacy route profile without renaming it', async () => {
+    const f = await setup()
+    const named = structuredClone(f.snapshot)
+    required(named.tables.users?.[0]).username = 'route'
+    const refused = await repreview(f, named)
+    expect(refused.blocked).toBe(true)
+    expect(refused.losses.map((p) => p.code)).toContain('user_handle_invalid')
+    // Stored before the claim check existed: preserved as is, and its import goes ahead.
+    await target.pool.query(
+      "INSERT INTO profiles(user_id,handle,time_zone,locale) VALUES($1,'route','UTC','en')",
+      [f.user.id],
+    )
+    f.plan = await repreview(f)
+    expect(f.plan.blocked).toBe(false)
+    expect(f.plan.addresses).toContainEqual({
+      kind: 'handle',
+      sourceId: 1,
+      old: 'owner',
+      proposed: 'route',
+      action: 'preserve',
+    })
+    expect((await apply(f)).status).toBe('applied')
+    expect(
+      (
+        await target.pool.query('SELECT handle,time_zone,locale FROM profiles WHERE user_id=$1', [
+          f.user.id,
+        ])
+      ).rows,
+    ).toEqual([{ handle: 'route', time_zone: 'UTC', locale: 'en' }])
+  })
   it.each(['booking', 'schedule', 'event_type', 'profile', 'user'] as const)(
     'retains minimal %s tombstones and never resurrects deleted targets',
     async (kind) => {
@@ -900,6 +942,25 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       expect(output.some((s) => s.includes('IMPORT_NOOP'))).toBe(true)
       expect(output.join('\n')).not.toContain(sourceOwnerEmail())
       expect(output.join('\n')).not.toMatch(/invitee@example.test|postgres:/)
+    })
+  })
+  it('refuses a route handle resolution through the operator CLI preview and apply', async () => {
+    await cliFixture(async ({ config, plan, env, fixture }) => {
+      const { connectionString: _connectionString, ...options } = fixture.input
+      await writeFile(
+        config,
+        JSON.stringify({ ...options, resolutions: { handles: { 1: 'route' } } }),
+      )
+      const output: string[] = []
+      expect(
+        await runCli(['preview', '--config', config, '--out', plan], env, (s) => output.push(s)),
+      ).toBe(2)
+      expect(output.join('\n')).toContain('user_handle_invalid')
+      expect(
+        await runCli(['apply', '--config', config, '--plan', plan], env, (s) => output.push(s)),
+      ).toBe(1)
+      expect(output.join('\n')).toContain('IMPORT_PREVIEW_BLOCKED')
+      expect(await businessCounts(fixture.user.id)).toEqual(empty)
     })
   })
   it('refuses to overwrite an existing CLI preview plan', async () => {

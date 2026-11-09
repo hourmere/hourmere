@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { isPublicTeamSlug, isReservedName, RESERVED_NAMES } from './reserved.ts'
+import {
+  CLAIM_RESERVED_HANDLES,
+  isClaimReservedHandle,
+  isPublicTeamSlug,
+  isReservedName,
+  RESERVED_NAMES,
+} from './reserved.ts'
 
 describe('reserved names', () => {
   it('cover the top-level paths of the app, the server and the product', () => {
@@ -85,6 +91,56 @@ describe('reserved names', () => {
       `${stripTypeScriptTypes(source.replace(marker, `${marker}\n  'waitlist',`)).replace(/\bexport /g, '')}; return { isReservedName, isPublicTeamSlug }`,
     )() as { isReservedName: typeof isReservedName; isPublicTeamSlug: typeof isPublicTeamSlug }
     expect(() => assertCompatible(copied.isReservedName, copied.isPublicTeamSlug)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+})
+
+describe('claim-reserved handles', () => {
+  type Names = {
+    isReservedName: typeof isReservedName
+    isPublicTeamSlug: typeof isPublicTeamSlug
+    isClaimReservedHandle: typeof isClaimReservedHandle
+  }
+  // `route` is refused only as a newly claimed personal handle: never a reserved name (that
+  // would stop serving a legacy `route` owner's pages) and still a valid team slug.
+  const assertRoute = ({ isReservedName, isPublicTeamSlug, isClaimReservedHandle }: Names) => {
+    for (const name of ['route', 'Route', 'ROUTE']) {
+      expect(isClaimReservedHandle(name), name).toBe(true)
+      expect(isReservedName(name), name).toBe(false)
+      expect(isPublicTeamSlug(name), name).toBe(true)
+    }
+    for (const name of ['router', 'routes', 'my-route', 'routing', 'admin', ''])
+      expect(isClaimReservedHandle(name), name).toBe(false)
+  }
+  const copy = (change?: readonly [string, string]): Names => {
+    let source = readFileSync(new URL('./reserved.ts', import.meta.url), 'utf8')
+    if (change) {
+      expect(source.includes(change[0]), change[0]).toBe(true)
+      source = source.replace(...change)
+    }
+    return new Function(
+      `${stripTypeScriptTypes(source).replace(/\bexport /g, '')}; return { isReservedName, isPublicTeamSlug, isClaimReservedHandle }`,
+    )() as Names
+  }
+
+  it('reserve route for claims only, in any case, and are listed in lowercase', () => {
+    assertRoute({ isReservedName, isPublicTeamSlug, isClaimReservedHandle })
+    assertRoute(copy())
+    expect([...CLAIM_RESERVED_HANDLES]).toEqual(['route'])
+    expect(RESERVED_NAMES.has('route')).toBe(false)
+  })
+
+  it.each([
+    ['the route entry', "new Set(['route'])", 'new Set([])'],
+    [
+      'case folding',
+      'CLAIM_RESERVED_HANDLES.has(name.toLowerCase())',
+      'CLAIM_RESERVED_HANDLES.has(name)',
+    ],
+    ['the separate list (route made a reserved name)', "  'booking',", "  'booking',\n  'route',"],
+  ])('fail in a source copy without %s', (_, before, after) => {
+    expect(() => assertRoute(copy([before, after]))).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
   })
