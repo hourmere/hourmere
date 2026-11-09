@@ -1,5 +1,4 @@
 -- Storage foundation only; admission and delivery workers land separately.
-CREATE UNIQUE INDEX bookings_organization_identity ON bookings(organization_id,id);
 CREATE TABLE meeting_polls (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
   organization_id uuid NOT NULL REFERENCES auth.organization(id) ON DELETE CASCADE,

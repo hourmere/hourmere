@@ -141,6 +141,44 @@ document the reason and assert the exact expected change or backfill instead of 
 excluding the affected columns from preservation checks. Keep migration-specific tests for
 behavior that needs additional fixtures.
 
+### Constraint coverage for new migrations
+
+A migration that adds constraints, NOT NULL columns, indexes or triggers gets a constraint
+coverage test, so none of them can be removed while every test stays green, except
+allow-listed objects that are not protections on their own.
+`checkConstraintCoverage` (`packages/db/src/testing/constraint-coverage.ts`) records the
+catalog before and after the migration and compares the objects it created or redefined,
+with their definitions, to the committed
+`packages/db/src/testing/migration-objects/<migration>.json`. It then drops each object in its
+own `CREATE DATABASE … TEMPLATE` copy and requires your assertion suite to fail:
+
+```ts
+it('fails an assertion when any 0072 object is dropped', async () => {
+  const report = await checkConstraintCoverage({
+    serverUrl: process.env.DATABASE_URL as string,
+    migration: '0072_routing_forms.sql',
+    assertions: assertRoutingFormProtections, // (pool) => Promise<void>; throws on failure
+    allowList: { 'constraint public.t.t_key': 'One-line reason it is not a protection' },
+  })
+  expect(report.problems).toEqual([])
+}, 600_000)
+```
+
+Write the suite as checks that create their own rows, because one copy serves the whole
+suite: rejected and accepted writes, cascades, defaults and, for an index that has no other
+behaviour, its definition. Only an assertion failure counts; any other error aborts the run,
+so wrap every expected success in `expect(...).resolves`. Generate the expectation file with
+`HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`, review it and commit it; adding, removing or
+redefining an object later fails until the file is updated. Allow-list only objects that are
+not protections on their own, each with a reason; they are still dropped, and an entry whose
+removal does fail an assertion is reported as stale. `HOURMERE_CONSTRAINT_COVERAGE_REPORT=<file>`
+writes which assertion failed for each object. Dropping one object cannot reach a loosened
+predicate, a changed FK action or deferrability, a widened unique key, a changed default or a
+weaker trigger-function clause, so keep source-copy mutation tests for those.
+`packages/db/src/meeting-poll-protections.ts` with `meeting-polls-coverage.test.ts` and
+`meeting-polls-migration.test.ts` is the reference. `createTestDatabaseTemplate` (from
+`@hourmere/db/testing`) migrates a schema once for any test that needs many copies of it.
+
 ## Browser tests
 
 Install Google Chrome separately if it is not already available. The Playwright suite uses

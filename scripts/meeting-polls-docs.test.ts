@@ -8,6 +8,7 @@ import {
 } from '../packages/scheduling/src/meeting-poll-policy.ts'
 
 const document = readFileSync(new URL('../docs/meeting-polls.md', import.meta.url), 'utf8')
+const dataModel = readFileSync(new URL('../docs/data-model.md', import.meta.url), 'utf8')
 
 const limits = [
   ['Candidates per poll', '2–20'],
@@ -812,6 +813,15 @@ const migration = readFileSync(
   'utf8',
 )
 
+/** Exactly one whole-token occurrence: `AND 3)` must not match a widened `AND 30)`. */
+function expectExactFragment(sql: string, fragment: string) {
+  const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  expect(
+    sql.match(new RegExp(`(?<![\\w'])${escaped}(?![\\w'])`, 'g')) ?? [],
+    fragment,
+  ).toHaveLength(1)
+}
+
 function verifyStoragePolicy(sql: string, docs: string) {
   const limits = MEETING_POLL_LIMITS
   const retention = MEETING_POLL_RETENTION
@@ -844,7 +854,7 @@ function verifyStoragePolicy(sql: string, docs: string) {
     `attempts BETWEEN 0 AND ${retention.deliveryMaxAttempts}`,
     `purge_at=clock_timestamp()+interval '${retention.deletedReceiptDays} days'`,
   ])
-    expect(sql, fragment).toContain(fragment)
+    expectExactFragment(sql, fragment)
   const text = docs.replace(/\s+/g, ' ')
   expect(retention.sweepSeconds).toBe(3600)
   expect(text).toContain(`run hourly, in batches of at most ${retention.batchSize} rows`)
@@ -882,6 +892,30 @@ describe('meeting poll shared SQL, TypeScript and documentation policy', () => {
     ['recovery', 'recovery_count BETWEEN 0 AND 3', 'recovery_count BETWEEN 0 AND 4'],
     ['attempts', 'attempts BETWEEN 0 AND 5', 'attempts BETWEEN 0 AND 6'],
     ['receipt retention', "interval '90 days'", "interval '91 days'"],
+    [
+      'appended candidate position digit',
+      'position BETWEEN 0 AND 19)',
+      'position BETWEEN 0 AND 199)',
+    ],
+    [
+      'appended candidate count digit',
+      'total NOT BETWEEN 2 AND 20 THEN',
+      'total NOT BETWEEN 2 AND 200 THEN',
+    ],
+    ['appended enrollment digit', 'IF total>=40 THEN', 'IF total>=400 THEN'],
+    ['appended pending IP digit', 'IF total>=3 THEN', 'IF total>=30 THEN'],
+    ['appended resend digit', 'resend_count BETWEEN 0 AND 3)', 'resend_count BETWEEN 0 AND 30)'],
+    [
+      'appended recovery digit',
+      'recovery_count BETWEEN 0 AND 3)',
+      'recovery_count BETWEEN 0 AND 30)',
+    ],
+    ['appended attempts digit', 'attempts BETWEEN 0 AND 5)', 'attempts BETWEEN 0 AND 50)'],
+    [
+      'duplicated pending IP cap',
+      'IF total>=3 THEN',
+      'IF total>=3 THEN NULL; END IF; IF total>=3 THEN',
+    ],
   ])('rejects a SQL source-copy change to %s', (_name, before, after) => {
     const mutated = migration.replace(before, after)
     expect(mutated).not.toBe(migration)
@@ -900,6 +934,49 @@ describe('meeting poll shared SQL, TypeScript and documentation policy', () => {
     const mutated = document.replace(before, after)
     expect(mutated).not.toBe(document)
     expect(() => verifyStoragePolicy(migration, mutated)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+})
+
+const receiptColumns = 'nullable `booking_id` (the only stored replay result reference)'
+const receiptCleanup =
+  'On poll deletion erase poll/booking references (`poll_id` and `booking_id`);'
+
+function verifyReceiptWording(design: string, model: string) {
+  expect(tableRow(design, '`meeting_poll_operations`')[1]).toContain(receiptColumns)
+  expect(tableRow(design, 'Operation receipts')[1]).toContain(receiptCleanup)
+  expect(model.replace(/\s+/g, ' ')).toContain(
+    'Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion',
+  )
+  // 0071 stores no result metadata column; only booking_id references a replay result.
+  for (const source of [design, model]) expect(source).not.toMatch(/result metadata/i)
+}
+
+describe('meeting poll operation receipt columns', () => {
+  it('names the stored result reference and the references erased on deletion', () => {
+    verifyReceiptWording(document, dataModel)
+  })
+
+  it.each([
+    ['design columns', receiptColumns, 'nullable `booking_id`, minimal result metadata', 'design'],
+    [
+      'design cleanup',
+      receiptCleanup,
+      'On poll deletion erase poll/booking references and result metadata;',
+      'design',
+    ],
+    [
+      'data model cleanup',
+      'lose poll/booking references (`poll_id` and `booking_id`)',
+      'lose poll/booking references and result metadata',
+      'model',
+    ],
+  ])('rejects a source-copy revert of the %s', (_name, before, after, file) => {
+    const design = file === 'design' ? document.replace(before, after) : document
+    const model = file === 'model' ? dataModel.replace(before, after) : dataModel
+    expect([design, model]).not.toEqual([document, dataModel])
+    expect(() => verifyReceiptWording(design, model)).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
   })

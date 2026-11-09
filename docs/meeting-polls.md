@@ -205,7 +205,7 @@ camelCase API fields, CHECK-constrained text states, and organization-scoped que
 | `meeting_poll_capabilities` | `id`, `poll_id`, `voter_id`, `purpose` (verification/voting/reminder_opt_out), nullable `capability_ciphertext`, `token_digest`, `generation`, `expires_at`, `consumed_at`, `revoked_at` | scoped voter FK; unique token digest; positive generation; purpose-bound credentials following `waitlist_capabilities`; public verification expiry bounded by pending expiry, invited voting credential expires at deadline; opt-out never grants voting authority |
 | `meeting_poll_mailbox_counters` | `id`, `poll_id`, `email_key`, `resend_count`, `last_resend_at`, `recovery_count`, `last_recovery_at`, `reminder_consumed_at`, `reminder_opted_out_at`, `removed_at`, `purge_at` | UNIQUE `(poll_id,email_key)`; no voter FK, survives voter expiry/removal/recreation; resend count 0–3; recovery count 0–3 for the current credential, reset when a new one is mailed; reminder receipt and opt-out never reset; poll deletion/retention purges ledger |
 | `meeting_poll_votes` | `id`, `poll_id`, `voter_id`, `slot_id`, `value` | UNIQUE `(poll_id,voter_id,slot_id)`; composite organization/poll/voter and organization/poll/slot FKs prevent cross-poll/tenant votes; value CHECK yes/if_need_be/no; `(poll_id,slot_id,value)` tally index |
-| `meeting_poll_operations` | `id`, nullable `poll_id`, `operation`, `actor_scope_digest`, `idempotency_key_digest`, `request_fingerprint`, nullable `booking_id`, minimal result metadata | UNIQUE `(organization_id,operation,actor_scope_digest,idempotency_key_digest)`; scoped poll/booking FKs; no raw request, token, roster or response cache |
+| `meeting_poll_operations` | `id`, nullable `poll_id`, `operation`, `actor_scope_digest`, `idempotency_key_digest`, `request_fingerprint`, nullable `booking_id` (the only stored replay result reference) | UNIQUE `(organization_id,operation,actor_scope_digest,idempotency_key_digest)`; scoped poll/booking FKs; no raw request, token, roster or response cache |
 | `meeting_poll_deliveries` | `id`, `poll_id`, nullable `voter_id`, nullable `host_user_id`, `kind`, `generation`, `sequence`, `due_at`, `state`, `attempts`, `lease_id`, `lease_until`, nullable purpose-bound `capability_ciphertext`, safe error class | exactly one recipient: scoped voter FK or host user FK; separate partial UNIQUE `(poll_id,voter_id,kind,generation,sequence)` and `(poll_id,host_user_id,kind,generation)`; `sequence` is 0 for the first delivery of a kind and generation; recovery copies and booking-update outcome notices take the next ordinal under the poll lock, so re-deliveries never collide while duplicate first deliveries are still rejected; partial due index for pending rows and expired claims; bounded retries and terminal sent/suppressed/skipped outcomes |
 
 `email_key` is a domain-separated keyed HMAC digest of the normalized mailbox, never
@@ -224,9 +224,9 @@ until poll retention/deletion; removal/revocation invalidates reads as well.
 
 Add a composite chosen-slot FK `(organization_id,id,chosen_slot_id)` to slots' scoped
 identity, and a scoped booking FK `(organization_id,booking_id)` to a matching unique
-booking key. Add supporting unique indexes in the future migration if absent today.
+booking key; migration 0049's `bookings_id_organization_unique` already provides it.
 A deferred constraint trigger verifies that the scheduled booking belongs to the poll's
-event and selected UTC interval when first linked, and enforces the scheduled pair.
+event and selected UTC interval when first linked; a CHECK enforces the scheduled pair.
 Cancellation/rescheduling later does not invalidate that historical link. Trigger/service
 checks enforce candidate and enrollment caps under the poll lock; CHECK cannot count child rows.
 The service, not user input, controls lifecycle timestamps/revisions and token digests.

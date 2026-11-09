@@ -21,7 +21,27 @@ export interface TestDatabaseOptions {
   migrate?: boolean
   /** Optional readable name segment, using up to 16 lowercase letters, digits or underscores. */
   tag?: string
+  /**
+   * Copies this test template database (see `createTestDatabaseTemplate`) instead of
+   * `template1`. Migrations still run unless `migrate` is false; already applied files are
+   * skipped, so a clone of a predecessor template applies only the newer migrations.
+   */
+  template?: string
 }
+
+export interface TestDatabaseTemplate {
+  /** Database name; pass it as the `template` option or use `clone`. */
+  name: string
+  /** Creates an independent copy with CREATE DATABASE … TEMPLATE. */
+  clone: (
+    migrationsDirectory?: string,
+    options?: Omit<TestDatabaseOptions, 'template'>,
+  ) => Promise<TestDatabase>
+  /** Force-drops the template; safe to call more than once. */
+  drop: () => Promise<void>
+}
+
+const TEMPLATE_NAME = /^hourmere_test_[a-z0-9_]{1,80}$/
 
 const POOL_CLOSE_GRACE_MS = 250
 const DROP_STATEMENT_TIMEOUT_MS = 30_000
@@ -110,6 +130,9 @@ export async function createTestDatabase(
   if (options.tag !== undefined && !/^[a-z][a-z0-9_]{0,15}$/.test(options.tag)) {
     throw new Error('Test database tag must contain 1–16 lowercase letters, digits or underscores')
   }
+  if (options.template !== undefined && !TEMPLATE_NAME.test(options.template)) {
+    throw new Error('Test database templates must be test databases')
+  }
   const name = `hourmere_test_${options.tag ? `${options.tag}_` : ''}${process.pid}_${randomBytes(8).toString('hex')}`
   const maintenance = new URL(serverUrl)
   if (maintenance.protocol !== 'postgres:' && maintenance.protocol !== 'postgresql:') {
@@ -157,7 +180,9 @@ export async function createTestDatabase(
   setup = (async () => {
     const admin = adminPool(maintenanceUrl)
     try {
-      await admin.query(`CREATE DATABASE ${name}`)
+      await admin.query(
+        `CREATE DATABASE ${name}${options.template ? ` TEMPLATE ${options.template}` : ''}`,
+      )
       created = true
       // Throwaway data: commits need not wait for the disk (tests stay fast under load).
       await admin.query(`ALTER DATABASE ${name} SET synchronous_commit = off`)
@@ -178,4 +203,57 @@ export async function createTestDatabase(
     }
     throw error
   }
+}
+
+/**
+ * Prepares a database once (for example migrations up to a checkpoint) for cheap copies.
+ * `prepare` gets its own pool, which is closed before cloning: PostgreSQL copies a
+ * template only while nobody is connected to it. Drop the template after its clones.
+ */
+export async function createTestDatabaseTemplate(
+  serverUrl: string,
+  prepare: (pool: pg.Pool) => Promise<void>,
+  options: Pick<TestDatabaseOptions, 'tag'> = {},
+): Promise<TestDatabaseTemplate> {
+  const template = await createTestDatabase(serverUrl, undefined, { ...options, migrate: false })
+  const name = new URL(template.url).pathname.slice(1)
+  const pool = createPool(template.url)
+  try {
+    await prepare(pool)
+  } catch (error) {
+    await pool.end().catch(() => {})
+    await template.drop()
+    throw error
+  }
+  await pool.end()
+  return {
+    name,
+    clone: (migrationsDirectory, cloneOptions = {}) =>
+      createTestDatabase(serverUrl, migrationsDirectory, { ...cloneOptions, template: name }),
+    drop: template.drop,
+  }
+}
+
+/**
+ * pg.Pool.query discards its connection after any failed statement, so a test that expects
+ * many constraint violations would open (and leave in TIME_WAIT) a connection for each one.
+ * This view of the pool keeps the connection: a single failed statement outside a transaction
+ * leaves the session usable. Everything else, including connect() and end(), is unchanged.
+ */
+export function reuseConnectionsAfterErrors(pool: pg.Pool): pg.Pool {
+  return new Proxy(pool, {
+    get(target, property) {
+      if (property === 'query')
+        return async (text: string, values?: unknown[]) => {
+          const client = await target.connect()
+          try {
+            return await client.query(text, values)
+          } finally {
+            client.release()
+          }
+        }
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
 }

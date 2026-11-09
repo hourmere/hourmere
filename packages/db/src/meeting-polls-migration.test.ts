@@ -1,12 +1,25 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setTimeout } from 'node:timers/promises'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import {
+  digest,
+  type Fixture,
+  fixture,
+  insert,
+  meetingPollProtections,
+  meetingPollSerializationChecks,
+  transaction,
+} from './meeting-poll-protections.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  createTestDatabase,
+  createTestDatabaseTemplate,
+  type TestDatabase,
+  type TestDatabaseTemplate,
+} from './testing.ts'
 import { seedEarly } from './upgrade-path-seed-early.ts'
 import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
@@ -14,33 +27,8 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 const serverUrl = process.env.DATABASE_URL
 const migration = '0071_meeting_polls.sql'
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
-const digest = () => randomBytes(32)
-type Connection = pg.Pool | pg.PoolClient
-
-async function insert(db: Connection, table: string, values: Record<string, unknown>) {
-  const fields = Object.keys(values)
-  return (
-    await db.query<{ id: string }>(
-      `INSERT INTO ${quote(table)} (${fields.map(quote).join(',')}) VALUES (${fields.map((_, i) => `$${i + 1}`).join(',')}) RETURNING id`,
-      Object.values(values),
-    )
-  ).rows[0]?.id as string
-}
-
-async function transaction<T>(pool: pg.Pool, action: (client: pg.PoolClient) => Promise<T>) {
-  const client = await pool.connect()
-  try {
-    await client.query('BEGIN')
-    const result = await action(client)
-    await client.query('COMMIT')
-    return result
-  } catch (error) {
-    await client.query('ROLLBACK')
-    throw error
-  } finally {
-    client.release()
-  }
-}
+const checkViolation = { code: '23514' }
+const foreignKeyViolation = { code: '23503' }
 
 async function predecessorFiles(directory: string) {
   const files = (await readdir(migrationsDir))
@@ -67,653 +55,6 @@ async function records(pool: pg.Pool) {
       )
     ).rows
   return result
-}
-
-async function fixture(pool: pg.Pool) {
-  const user = (
-    await pool.query(
-      `INSERT INTO auth."user" (name,email,"emailVerified") VALUES ('Poll host',$1,true) RETURNING id`,
-      [`${randomUUID()}@example.test`],
-    )
-  ).rows[0].id as string
-  const organizations = (
-    await pool.query(
-      `INSERT INTO auth.organization (name,slug,"createdAt") VALUES ('Poll team',$1,now()),('Other team',$2,now()) RETURNING id`,
-      [randomUUID(), randomUUID()],
-    )
-  ).rows
-  const organization = organizations[0].id as string
-  const otherOrganization = organizations[1].id as string
-  await pool.query(
-    `INSERT INTO auth.member ("organizationId","userId",role,"createdAt") VALUES ($1,$2,'owner',now())`,
-    [organization, user],
-  )
-  const event = await insert(pool, 'event_types', {
-    organization_id: organization,
-    slug: 'poll',
-    title: 'Poll meeting',
-    duration_minutes: 30,
-  })
-  const otherEvent = await insert(pool, 'event_types', {
-    organization_id: otherOrganization,
-    slug: 'other',
-    title: 'Other meeting',
-    duration_minutes: 30,
-  })
-  const clock = (
-    await pool.query(
-      `SELECT clock_timestamp() AS created,clock_timestamp()+interval '2 days' AS deadline,clock_timestamp()+interval '3 days' AS start`,
-    )
-  ).rows[0]
-  const created = (clock.created as Date).toISOString()
-  const deadline = (clock.deadline as Date).toISOString()
-  const start = (clock.start as Date).toISOString()
-  const end = new Date(new Date(start).getTime() + 30 * 60_000).toISOString()
-  const pollValues = {
-    organization_id: organization,
-    event_type_id: event,
-    created_by_user_id: user,
-    title: 'Choose a time',
-    duration_minutes: 30,
-    display_time_zone: 'UTC',
-    settings_snapshot: { title: 'Poll meeting' },
-    settings_fingerprint: digest(),
-    admission_mode: 'public_link',
-    created_at: created,
-    deadline_at: deadline,
-  }
-  const makePoll = (overrides: Record<string, unknown> = {}) =>
-    transaction(pool, async (client) => {
-      const poll = await insert(client, 'meeting_polls', { ...pollValues, ...overrides })
-      const org = overrides.organization_id ?? organization
-      const slots: string[] = []
-      for (let position = 0; position < 2; position++)
-        slots.push(
-          await insert(client, 'meeting_poll_slots', {
-            organization_id: org,
-            poll_id: poll,
-            start_at: new Date(new Date(start).getTime() + position * 3600_000),
-            end_at: new Date(new Date(end).getTime() + position * 3600_000),
-            position,
-          }),
-        )
-      return { poll, slots }
-    })
-  const first = await makePoll()
-  const second = await makePoll()
-  const foreign = await makePoll({
-    organization_id: otherOrganization,
-    event_type_id: otherEvent,
-    created_by_user_id: null,
-  })
-  const voterValues = {
-    organization_id: organization,
-    poll_id: first.poll,
-    name: 'Voter',
-    email: 'voter@example.test',
-    email_key: digest(),
-    time_zone: 'UTC',
-    locale: 'en',
-    invited_at: created,
-  }
-  const voter = await insert(pool, 'meeting_poll_voters', voterValues)
-  const otherVoter = await insert(pool, 'meeting_poll_voters', {
-    ...voterValues,
-    organization_id: otherOrganization,
-    poll_id: foreign.poll,
-    email_key: digest(),
-  })
-  const booking = await insert(pool, 'bookings', {
-    organization_id: organization,
-    event_type_id: event,
-    title: 'Selected meeting',
-    source: 'web',
-    start_at: start,
-    end_at: end,
-  })
-  return {
-    pool,
-    user,
-    organization,
-    otherOrganization,
-    event,
-    otherEvent,
-    created,
-    deadline,
-    start,
-    end,
-    pollValues,
-    makePoll,
-    ...first,
-    second,
-    foreign,
-    voter,
-    otherVoter,
-    voterValues,
-    booking,
-  }
-}
-type Fixture = Awaited<ReturnType<typeof fixture>>
-async function raceAtCapacity(f: Fixture, pending: boolean) {
-  const poll = pending ? f.second.poll : f.poll
-  const values = pending
-    ? {
-        ...f.voterValues,
-        poll_id: poll,
-        invited_at: null,
-        created_at: f.created,
-        pending_expires_at: new Date(new Date(f.created).getTime() + 3600_000),
-        admission_ip_digest: digest(),
-      }
-    : f.voterValues
-  for (let i = pending ? 0 : 1; i < (pending ? 2 : 39); i++)
-    await insert(f.pool, 'meeting_poll_voters', { ...values, email_key: digest() })
-  const first = await f.pool.connect()
-  const second = await f.pool.connect()
-  try {
-    await first.query('BEGIN')
-    await second.query('BEGIN')
-    const pid = (await second.query('SELECT pg_backend_pid() AS pid')).rows[0].pid as number
-    await insert(first, 'meeting_poll_voters', { ...values, email_key: digest() })
-    let settled = false
-    const contender = insert(second, 'meeting_poll_voters', {
-      ...values,
-      email_key: digest(),
-    }).then(
-      (id) => {
-        settled = true
-        return { status: 'fulfilled', id }
-      },
-      (reason) => {
-        settled = true
-        return { status: 'rejected', reason }
-      },
-    )
-    let blocked = false
-    for (let attempt = 0; attempt < 1_000 && !settled; attempt++) {
-      await first.query('SELECT pg_stat_clear_snapshot()')
-      blocked =
-        (
-          await first.query(
-            "SELECT wait_event_type='Lock' AS blocked FROM pg_stat_activity WHERE pid=$1",
-            [pid],
-          )
-        ).rows[0]?.blocked === true
-      if (blocked) break
-      await setTimeout(5)
-    }
-    // Commit even if the lock disappears, so a mutation produces a real assertion
-    // failure rather than leaking a client with a pending query.
-    await first.query('COMMIT')
-    const result = await contender
-    expect(blocked).toBe(true)
-    expect(result).toEqual({
-      status: 'rejected',
-      reason: expect.objectContaining({
-        code: '23514',
-        constraint: pending ? 'meeting_poll_voters_ip_cap' : 'meeting_poll_voters_enrollment_cap',
-      }),
-    })
-    await second.query('ROLLBACK')
-    expect(
-      (
-        await first.query('SELECT count(*)::int AS n FROM meeting_poll_voters WHERE poll_id=$1', [
-          poll,
-        ])
-      ).rows,
-    ).toEqual([{ n: pending ? 3 : 40 }])
-    expect(f.pool.totalCount).toBeLessThanOrEqual(2)
-  } finally {
-    await first.query('ROLLBACK')
-    await second.query('ROLLBACK')
-    first.release()
-    second.release()
-  }
-}
-
-const checkViolation = { code: '23514' }
-const foreignKeyViolation = { code: '23503' }
-
-const protections: Record<
-  string,
-  { assert: (f: Fixture) => Promise<void>; mutation: string | ((source: string) => string) }
-> = {
-  'deadline lower bound': {
-    assert: async (f) => {
-      await f.pool.query(
-        "UPDATE meeting_polls SET deadline_at=created_at+interval '1 hour' WHERE id=$1",
-        [f.poll],
-      )
-      await expect(
-        f.pool.query(
-          "UPDATE meeting_polls SET deadline_at=created_at+interval '1 hour'-interval '1 millisecond' WHERE id=$1",
-          [f.poll],
-        ),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_polls_deadline_cap' })
-    },
-    mutation: (source) =>
-      source.replace(
-        "deadline_at BETWEEN created_at+interval '1 hour'",
-        "deadline_at BETWEEN created_at+interval '1 minute'",
-      ),
-  },
-  'deadline upper bound': {
-    assert: async (f) => {
-      await f.pool.query(
-        "UPDATE meeting_polls SET deadline_at=created_at+interval '720 hours' WHERE id=$1",
-        [f.poll],
-      )
-      await expect(
-        f.pool.query(
-          "UPDATE meeting_polls SET deadline_at=created_at+interval '720 hours'+interval '1 millisecond' WHERE id=$1",
-          [f.poll],
-        ),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_polls_deadline_cap' })
-    },
-    mutation: (source) =>
-      source.replace("created_at+interval '720 hours'", "created_at+interval '1000 hours'"),
-  },
-  'mailbox uniqueness': {
-    assert: async (f) => {
-      await insert(f.pool, 'meeting_poll_voters', { ...f.voterValues, poll_id: f.second.poll })
-      await expect(insert(f.pool, 'meeting_poll_voters', f.voterValues)).rejects.toMatchObject({
-        code: '23505',
-      })
-    },
-    mutation:
-      'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_poll_id_email_key_key;',
-  },
-  'withdrawn privacy': {
-    assert: async (f) => {
-      for (const fields of [
-        'responses=\'{"answer":"private"}\'::jsonb',
-        'join_consent_at=clock_timestamp()',
-      ])
-        await expect(
-          f.pool.query(
-            `UPDATE meeting_poll_voters SET withdrawn_at=clock_timestamp(),${fields} WHERE id=$1`,
-            [f.voter],
-          ),
-        ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_withdrawn_pair' })
-      // The pending/IP pair also forbids retaining a digest after withdrawal.
-      await expect(
-        f.pool.query(
-          'UPDATE meeting_poll_voters SET withdrawn_at=clock_timestamp(),admission_ip_digest=$1 WHERE id=$2',
-          [digest(), f.voter],
-        ),
-      ).rejects.toMatchObject(checkViolation)
-      await f.pool.query(
-        'UPDATE meeting_poll_voters SET withdrawn_at=clock_timestamp() WHERE id=$1',
-        [f.voter],
-      )
-      expect(
-        (
-          await f.pool.query(
-            'SELECT responses,join_consent_at,admission_ip_digest,ballot_submitted_at FROM meeting_poll_voters WHERE id=$1',
-            [f.voter],
-          )
-        ).rows,
-      ).toEqual([
-        {
-          responses: {},
-          join_consent_at: null,
-          admission_ip_digest: null,
-          ballot_submitted_at: null,
-        },
-      ])
-    },
-    mutation: 'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_withdrawn_pair;',
-  },
-  'creator deletion preserves team polls': {
-    assert: async (f) => {
-      await f.pool.query('DELETE FROM auth."user" WHERE id=$1', [f.user])
-      expect(
-        (await f.pool.query('SELECT created_by_user_id FROM meeting_polls WHERE id=$1', [f.poll]))
-          .rows,
-      ).toEqual([{ created_by_user_id: null }])
-      expect(
-        (await f.pool.query('SELECT id FROM meeting_poll_slots WHERE poll_id=$1', [f.poll]))
-          .rowCount,
-      ).toBe(2)
-    },
-    mutation: (source) =>
-      source.replace(
-        'created_by_user_id uuid REFERENCES auth."user"(id) ON DELETE SET NULL',
-        'created_by_user_id uuid REFERENCES auth."user"(id) ON DELETE CASCADE',
-      ),
-  },
-  'scoped candidate foreign key': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_slots', {
-          organization_id: f.otherOrganization,
-          poll_id: f.poll,
-          position: 2,
-          start_at: new Date(new Date(f.start).getTime() + 7200_000),
-          end_at: new Date(new Date(f.end).getTime() + 7200_000),
-        }),
-      ).rejects.toMatchObject({ code: '23503', constraint: 'meeting_poll_slots_poll_fk' })
-    },
-    mutation: (source) =>
-      source.replace(
-        'CONSTRAINT meeting_poll_slots_poll_fk FOREIGN KEY(organization_id,poll_id)\n    REFERENCES meeting_polls(organization_id,id)',
-        'CONSTRAINT meeting_poll_slots_poll_fk FOREIGN KEY(poll_id)\n    REFERENCES meeting_polls(id)',
-      ),
-  },
-  'pending IP pair': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_voters', {
-          ...f.voterValues,
-          email_key: digest(),
-          invited_at: null,
-          created_at: f.created,
-          pending_expires_at: new Date(new Date(f.created).getTime() + 3600_000),
-        }),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_pending_pair' })
-      await expect(
-        f.pool.query(
-          'UPDATE meeting_poll_voters SET verified_at=clock_timestamp(),admission_ip_digest=$1 WHERE id=$2',
-          [digest(), f.voter],
-        ),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_pending_pair' })
-    },
-    mutation: (source) =>
-      source.replace('AND (pending_expires_at IS NULL)=(admission_ip_digest IS NULL)', ''),
-  },
-  'ballot verification and consent': {
-    assert: async (f) => {
-      for (const fields of ['join_consent_at=clock_timestamp()', 'verified_at=clock_timestamp()'])
-        await expect(
-          f.pool.query(
-            `UPDATE meeting_poll_voters SET ballot_submitted_at=clock_timestamp(),${fields} WHERE id=$1`,
-            [f.voter],
-          ),
-        ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_ballot_pair' })
-      await f.pool.query(
-        'UPDATE meeting_poll_voters SET ballot_submitted_at=clock_timestamp(),verified_at=clock_timestamp(),join_consent_at=clock_timestamp() WHERE id=$1',
-        [f.voter],
-      )
-    },
-    mutation: 'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_ballot_pair;',
-  },
-  'invited poll token privacy': {
-    assert: async (f) => {
-      await f.makePoll({ admission_mode: 'invited' })
-      await expect(
-        f.makePoll({ admission_mode: 'invited', public_token_digest: digest() }),
-      ).rejects.toMatchObject(checkViolation)
-    },
-    mutation: (source) =>
-      source.replace(
-        "CHECK (admission_mode<>'invited' OR public_token_digest IS NULL)",
-        'CHECK (true)',
-      ),
-  },
-  'unique booking link': {
-    assert: async (f) => {
-      const schedule = (poll: string, slot: string) =>
-        f.pool.query(
-          "UPDATE meeting_polls SET status='scheduled',scheduled_at=clock_timestamp(),chosen_slot_id=$1,booking_id=$2 WHERE id=$3",
-          [slot, f.booking, poll],
-        )
-      await schedule(f.poll, f.slots[0] as string)
-      await expect(schedule(f.second.poll, f.second.slots[0] as string)).rejects.toMatchObject({
-        code: '23505',
-      })
-    },
-    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_booking_id_key;',
-  },
-  'verification expiry respects pending expiry': {
-    assert: async (f) => {
-      const expiry = new Date(new Date(f.created).getTime() + 3600_000)
-      const voter = await insert(f.pool, 'meeting_poll_voters', {
-        ...f.voterValues,
-        email_key: digest(),
-        invited_at: null,
-        created_at: f.created,
-        pending_expires_at: expiry,
-        admission_ip_digest: digest(),
-      })
-      const values = {
-        organization_id: f.organization,
-        poll_id: f.poll,
-        voter_id: voter,
-        purpose: 'verification',
-        created_at: f.created,
-      }
-      await insert(f.pool, 'meeting_poll_capabilities', {
-        ...values,
-        token_digest: digest(),
-        expires_at: expiry,
-      })
-      await expect(
-        insert(f.pool, 'meeting_poll_capabilities', {
-          ...values,
-          token_digest: digest(),
-          expires_at: new Date(expiry.getTime() + 1),
-        }),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_capabilities_expiry_cap' })
-    },
-    mutation: (source) =>
-      source.replace('pending IS NULL OR NEW.expires_at>pending', 'pending IS NULL'),
-  },
-  'vote value': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_votes', {
-          organization_id: f.organization,
-          poll_id: f.poll,
-          voter_id: f.voter,
-          slot_id: f.slots[0],
-          value: 'maybe',
-        }),
-      ).rejects.toMatchObject(checkViolation)
-    },
-    mutation: 'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_value_check;',
-  },
-  'unique vote cell': {
-    assert: async (f) => {
-      const vote = {
-        organization_id: f.organization,
-        poll_id: f.poll,
-        voter_id: f.voter,
-        slot_id: f.slots[0],
-        value: 'yes',
-      }
-      await insert(f.pool, 'meeting_poll_votes', vote)
-      await expect(
-        insert(f.pool, 'meeting_poll_votes', { ...vote, value: 'no' }),
-      ).rejects.toMatchObject({ code: '23505' })
-    },
-    mutation:
-      'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_poll_id_voter_id_slot_id_key;',
-  },
-  'source API key attribution': {
-    assert: async (f) => {
-      for (const source of ['web', 'api', 'mcp']) await f.makePoll({ source })
-      for (const source of ['api', 'mcp']) await f.makePoll({ source, api_key_id: randomUUID() })
-      await expect(f.makePoll({ source: 'web', api_key_id: randomUUID() })).rejects.toMatchObject({
-        code: '23514',
-        constraint: 'meeting_polls_source_api_key_check',
-      })
-    },
-    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_source_api_key_check;',
-  },
-  'enrollment serialization': {
-    assert: (f) => raceAtCapacity(f, false),
-    mutation: (source) =>
-      source.replaceAll(
-        'AND organization_id=NEW.organization_id FOR UPDATE;',
-        'AND organization_id=NEW.organization_id;',
-      ),
-  },
-  'pending IP serialization': {
-    assert: (f) => raceAtCapacity(f, true),
-    mutation: (source) =>
-      source.replaceAll(
-        'AND organization_id=NEW.organization_id FOR UPDATE;',
-        'AND organization_id=NEW.organization_id;',
-      ),
-  },
-  'pending IP cap': {
-    assert: async (f) => {
-      const values = {
-        ...f.voterValues,
-        invited_at: null,
-        created_at: f.created,
-        pending_expires_at: new Date(new Date(f.created).getTime() + 3600_000),
-        admission_ip_digest: digest(),
-      }
-      for (let i = 0; i < 3; i++)
-        await insert(f.pool, 'meeting_poll_voters', { ...values, email_key: digest() })
-      await expect(
-        insert(f.pool, 'meeting_poll_voters', { ...values, email_key: digest() }),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_ip_cap' })
-    },
-    mutation: 'ALTER TABLE meeting_poll_voters DISABLE TRIGGER meeting_poll_voters_guard;',
-  },
-  'recovery cap': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_mailbox_counters', {
-          organization_id: f.organization,
-          poll_id: f.poll,
-          email_key: digest(),
-          recovery_count: 4,
-          last_recovery_at: f.created,
-        }),
-      ).rejects.toMatchObject({
-        code: '23514',
-        constraint: 'meeting_poll_mailbox_counters_recovery_cap',
-      })
-    },
-    mutation:
-      'ALTER TABLE meeting_poll_mailbox_counters DROP CONSTRAINT meeting_poll_mailbox_counters_recovery_cap;',
-  },
-  'capability expiry': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_capabilities', {
-          organization_id: f.organization,
-          poll_id: f.poll,
-          voter_id: f.voter,
-          purpose: 'voting',
-          token_digest: digest(),
-          expires_at: new Date(new Date(f.deadline).getTime() + 1),
-        }),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_capabilities_expiry_cap' })
-    },
-    mutation:
-      'ALTER TABLE meeting_poll_capabilities DISABLE TRIGGER meeting_poll_capabilities_guard;',
-  },
-  'booking interval match': {
-    assert: async (f) => {
-      await expect(
-        f.pool.query(
-          `UPDATE meeting_polls SET status='scheduled',scheduled_at=clock_timestamp(),chosen_slot_id=$1,booking_id=$2 WHERE id=$3`,
-          [f.slots[1], f.booking, f.poll],
-        ),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_polls_booking_match' })
-    },
-    mutation: 'ALTER TABLE meeting_polls DISABLE TRIGGER meeting_polls_booking_match;',
-  },
-  'candidate immutability': {
-    assert: async (f) => {
-      await expect(
-        f.pool.query(
-          `UPDATE meeting_poll_slots SET start_at=start_at+interval '1 minute',end_at=end_at+interval '1 minute' WHERE id=$1`,
-          [f.slots[0]],
-        ),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_slots_immutable' })
-    },
-    mutation: 'ALTER TABLE meeting_poll_slots DISABLE TRIGGER meeting_poll_slots_guard;',
-  },
-  'candidate duration': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_slots', {
-          organization_id: f.organization,
-          poll_id: f.poll,
-          position: 2,
-          start_at: new Date(new Date(f.start).getTime() + 7200_000),
-          end_at: new Date(new Date(f.start).getTime() + 7200_000 + 60_000),
-        }),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_slots_interval' })
-    },
-    mutation: 'ALTER TABLE meeting_poll_slots DISABLE TRIGGER meeting_poll_slots_guard;',
-  },
-  'enrollment cap': {
-    assert: async (f) => {
-      for (let i = 1; i < 40; i++)
-        await insert(f.pool, 'meeting_poll_voters', { ...f.voterValues, email_key: digest() })
-      await expect(
-        insert(f.pool, 'meeting_poll_voters', { ...f.voterValues, email_key: digest() }),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_enrollment_cap' })
-    },
-    mutation: 'ALTER TABLE meeting_poll_voters DISABLE TRIGGER meeting_poll_voters_guard;',
-  },
-  'minimum candidate cap': {
-    assert: async (f) => {
-      await expect(
-        transaction(f.pool, (client) => insert(client, 'meeting_polls', f.pollValues)),
-      ).rejects.toMatchObject(checkViolation)
-    },
-    mutation: 'ALTER TABLE meeting_polls DISABLE TRIGGER meeting_polls_slot_count;',
-  },
-  'scheduled history immutability': {
-    assert: async (f) => {
-      await f.pool.query(
-        `UPDATE meeting_polls SET status='scheduled',scheduled_at=clock_timestamp(),chosen_slot_id=$1,booking_id=$2 WHERE id=$3`,
-        [f.slots[0], f.booking, f.poll],
-      )
-      await expect(
-        f.pool.query('UPDATE meeting_polls SET chosen_slot_id=$1 WHERE id=$2', [
-          f.slots[1],
-          f.poll,
-        ]),
-      ).rejects.toMatchObject(checkViolation)
-    },
-    mutation: 'ALTER TABLE meeting_polls DISABLE TRIGGER meeting_polls_history;',
-  },
-  'scoped voter foreign key': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_votes', {
-          organization_id: f.organization,
-          poll_id: f.poll,
-          voter_id: f.otherVoter,
-          slot_id: f.slots[0],
-          value: 'yes',
-        }),
-      ).rejects.toMatchObject(foreignKeyViolation)
-    },
-    mutation: 'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_voter_fk;',
-  },
-  'scheduled pair': {
-    assert: async (f) => {
-      await expect(
-        f.pool.query('UPDATE meeting_polls SET booking_id=$1 WHERE id=$2', [f.booking, f.poll]),
-      ).rejects.toMatchObject(checkViolation)
-    },
-    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_scheduled_pair;',
-  },
-  'resend cap': {
-    assert: async (f) => {
-      await expect(
-        insert(f.pool, 'meeting_poll_mailbox_counters', {
-          organization_id: f.organization,
-          poll_id: f.poll,
-          email_key: digest(),
-          resend_count: 4,
-          last_resend_at: f.created,
-          purge_at: new Date(new Date(f.deadline).getTime() + 86400_000),
-        }),
-      ).rejects.toMatchObject(checkViolation)
-    },
-    mutation:
-      'ALTER TABLE meeting_poll_mailbox_counters DROP CONSTRAINT meeting_poll_mailbox_counters_resend_cap;',
-  },
 }
 
 describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
@@ -1286,38 +627,529 @@ describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
       await owned.drop()
     }
   })
+})
 
-  it.each(Object.keys(protections))(
-    'enforces %s and kills its source-copy mutation',
-    async (name) => {
-      const directory = await mkdtemp(join(tmpdir(), 'hourmere-poll-mutation-'))
+const checks: Record<string, (f: Fixture) => Promise<void>> = {
+  ...meetingPollProtections,
+  ...meetingPollSerializationChecks,
+}
+
+describe.skipIf(!serverUrl)('meeting poll storage protections', () => {
+  let database: TestDatabase | undefined
+  beforeAll(async () => {
+    database = await createTestDatabase(serverUrl as string, undefined, { tag: 'pollchecks' })
+  }, 60_000)
+  afterAll(() => database?.drop())
+
+  // One database, one fixture (own organizations, users and polls) per protection.
+  it.each(Object.keys(checks))('enforces %s', async (name) => {
+    const pool = (database as TestDatabase).pool
+    await (checks[name] as (f: Fixture) => Promise<void>)(await fixture(pool))
+    expect(pool.totalCount).toBeLessThanOrEqual(3)
+  })
+})
+
+type Mutation = string | ((source: string) => string)
+const voterGuardLock =
+  'DECLARE parent meeting_polls; checked_at timestamptz; total integer;\nBEGIN\n  SELECT * INTO parent FROM meeting_polls WHERE id=NEW.poll_id AND organization_id=NEW.organization_id FOR UPDATE;'
+const slotGuardLock =
+  'DECLARE parent meeting_polls;\nBEGIN\n  SELECT * INTO parent FROM meeting_polls WHERE id=NEW.poll_id AND organization_id=NEW.organization_id FOR UPDATE;'
+const replace =
+  (before: string, after = '') =>
+  (source: string) =>
+    source.replace(before, () => after)
+
+/**
+ * Source-copy mutations: each one weakens 0071 and must make its protection check fail.
+ * Dropping a whole catalog object is covered by meeting-polls-coverage.test.ts; these also
+ * relax predicates and trigger-function clauses, which dropping objects cannot reach.
+ */
+const mutations: Record<string, { check: string; mutation: Mutation }> = {
+  'deadline lower bound': {
+    check: 'deadline lower bound',
+    mutation: replace(
+      "deadline_at BETWEEN created_at+interval '1 hour'",
+      "deadline_at BETWEEN created_at+interval '1 minute'",
+    ),
+  },
+  'deadline upper bound': {
+    check: 'deadline upper bound',
+    mutation: replace("created_at+interval '720 hours'", "created_at+interval '1000 hours'"),
+  },
+  'voter mailbox uniqueness': {
+    check: 'mailbox uniqueness',
+    mutation:
+      'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_poll_id_email_key_key;',
+  },
+  'withdrawn privacy': {
+    check: 'withdrawn privacy',
+    mutation: 'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_withdrawn_pair;',
+  },
+  'creator deletion cascades': {
+    check: 'creator deletion preserves team polls',
+    mutation: replace(
+      'created_by_user_id uuid REFERENCES auth."user"(id) ON DELETE SET NULL',
+      'created_by_user_id uuid REFERENCES auth."user"(id) ON DELETE CASCADE',
+    ),
+  },
+  'unscoped candidate poll': {
+    check: 'scoped candidate foreign key',
+    mutation: replace(
+      'CONSTRAINT meeting_poll_slots_poll_fk FOREIGN KEY(organization_id,poll_id)\n    REFERENCES meeting_polls(organization_id,id)',
+      'CONSTRAINT meeting_poll_slots_poll_fk FOREIGN KEY(poll_id)\n    REFERENCES meeting_polls(id)',
+    ),
+  },
+  'pending IP arm': {
+    check: 'pending IP pair',
+    mutation: replace('AND (pending_expires_at IS NULL)=(admission_ip_digest IS NULL)'),
+  },
+  'ballot pair': {
+    check: 'ballot verification and consent',
+    mutation: 'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_ballot_pair;',
+  },
+  'invited token': {
+    check: 'invited poll token privacy',
+    mutation: replace(
+      "CHECK (admission_mode<>'invited' OR public_token_digest IS NULL)",
+      'CHECK (true)',
+    ),
+  },
+  'booking link uniqueness': {
+    check: 'unique booking link',
+    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_booking_id_key;',
+  },
+  'verification beyond pending expiry': {
+    check: 'verification expiry respects pending expiry',
+    mutation: replace('pending IS NULL OR NEW.expires_at>pending', 'pending IS NULL'),
+  },
+  'verification for an invitee': {
+    check: 'verification expiry respects pending expiry',
+    mutation: replace('pending IS NULL OR NEW.expires_at>pending', 'NEW.expires_at>pending'),
+  },
+  'vote value': {
+    check: 'vote value',
+    mutation: 'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_value_check;',
+  },
+  'vote cell uniqueness': {
+    check: 'unique vote cell',
+    mutation:
+      'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_poll_id_voter_id_slot_id_key;',
+  },
+  'source API key attribution': {
+    check: 'source API key attribution',
+    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_source_api_key_check;',
+  },
+  'voter guard lock (enrollment)': {
+    check: 'enrollment serialization',
+    mutation: replace(voterGuardLock, voterGuardLock.replace(' FOR UPDATE;', ';')),
+  },
+  'voter guard lock (pending IP)': {
+    check: 'pending IP serialization',
+    mutation: replace(voterGuardLock, voterGuardLock.replace(' FOR UPDATE;', ';')),
+  },
+  'candidate guard lock': {
+    check: 'candidate insert serialization',
+    mutation: replace(slotGuardLock, slotGuardLock.replace(' FOR UPDATE;', ';')),
+  },
+  'candidate count lock': {
+    check: 'candidate deletion serialization',
+    mutation: replace(
+      'PERFORM 1 FROM meeting_polls WHERE id=target FOR UPDATE;',
+      'PERFORM 1 FROM meeting_polls WHERE id=target;',
+    ),
+  },
+  'pending IP cap 4': {
+    check: 'pending IP cap',
+    mutation: replace('IF total>=3 THEN', 'IF total>=4 THEN'),
+  },
+  'pending IP cap across polls': {
+    check: 'pending IP cap',
+    mutation: replace(
+      'FROM meeting_poll_voters WHERE poll_id=NEW.poll_id AND id<>NEW.id\n      AND pending_expires_at>checked_at AND admission_ip_digest',
+      'FROM meeting_poll_voters WHERE id<>NEW.id\n      AND pending_expires_at>checked_at AND admission_ip_digest',
+    ),
+  },
+  'recovery cap': {
+    check: 'resend and recovery caps',
+    mutation:
+      'ALTER TABLE meeting_poll_mailbox_counters DROP CONSTRAINT meeting_poll_mailbox_counters_recovery_cap;',
+  },
+  'resend cap': {
+    check: 'resend and recovery caps',
+    mutation:
+      'ALTER TABLE meeting_poll_mailbox_counters DROP CONSTRAINT meeting_poll_mailbox_counters_resend_cap;',
+  },
+  'capability guard': {
+    check: 'capability expiry',
+    mutation:
+      'ALTER TABLE meeting_poll_capabilities DISABLE TRIGGER meeting_poll_capabilities_guard;',
+  },
+  'credential beyond the deadline': {
+    check: 'capability expiry',
+    mutation: replace('IF NEW.expires_at>deadline OR ', 'IF '),
+  },
+  'voting credential before the deadline': {
+    check: 'capability expiry',
+    mutation: replace("\n    OR (NEW.purpose='voting' AND NEW.expires_at<>deadline)"),
+  },
+  'booking match trigger': {
+    check: 'booking match',
+    mutation: 'ALTER TABLE meeting_polls DISABLE TRIGGER meeting_polls_booking_match;',
+  },
+  'booking of another event': {
+    check: 'booking match',
+    mutation: replace(' AND b.event_type_id=NEW.event_type_id'),
+  },
+  'unscoped booking link': {
+    check: 'scoped booking link',
+    mutation: replace(
+      'CONSTRAINT meeting_polls_booking_fk FOREIGN KEY(organization_id,booking_id)\n    REFERENCES bookings(organization_id,id),',
+      'CONSTRAINT meeting_polls_booking_fk FOREIGN KEY(booking_id)\n    REFERENCES bookings(id),',
+    ),
+  },
+  'candidate guard': {
+    check: 'candidate immutability',
+    mutation: 'ALTER TABLE meeting_poll_slots DISABLE TRIGGER meeting_poll_slots_guard;',
+  },
+  'candidate duration clause': {
+    check: 'candidate duration',
+    mutation: replace('NEW.end_at-NEW.start_at<>make_interval(mins=>parent.duration_minutes) OR '),
+  },
+  'candidate before the deadline': {
+    check: 'candidates start after the deadline',
+    mutation: replace(' OR NEW.start_at<=parent.deadline_at'),
+  },
+  'enrollment cap 41': {
+    check: 'enrollment cap',
+    mutation: replace('IF total>=40 THEN', 'IF total>=41 THEN'),
+  },
+  'expired reservations hold places': {
+    check: 'expired reservations free enrollment places',
+    mutation: replace(
+      'AND (verified_at IS NOT NULL OR invited_at IS NOT NULL OR pending_expires_at>checked_at);',
+      'AND (verified_at IS NOT NULL OR invited_at IS NOT NULL OR pending_expires_at IS NOT NULL);',
+    ),
+  },
+  'pending reservation beyond the deadline': {
+    check: 'pending reservations end by the deadline',
+    mutation: replace('IF NEW.pending_expires_at>parent.deadline_at THEN', 'IF false THEN'),
+  },
+  'poll without candidates': {
+    check: 'minimum candidate cap',
+    mutation: 'ALTER TABLE meeting_polls DISABLE TRIGGER meeting_polls_slot_count;',
+  },
+  'single remaining candidate': {
+    check: 'minimum candidate cap',
+    mutation: replace('total NOT BETWEEN 2 AND 20', 'total NOT BETWEEN 1 AND 20'),
+  },
+  'scheduled history trigger': {
+    check: 'scheduled history immutability',
+    mutation: 'ALTER TABLE meeting_polls DISABLE TRIGGER meeting_polls_history;',
+  },
+  'scheduled booking reassignment': {
+    check: 'scheduled history immutability',
+    mutation: (source) =>
+      source
+        .replace(
+          'NEW.chosen_slot_id,NEW.booking_id,NEW.scheduled_at',
+          'NEW.chosen_slot_id,NEW.scheduled_at',
+        )
+        .replace(
+          'OLD.chosen_slot_id,OLD.booking_id,OLD.scheduled_at',
+          'OLD.chosen_slot_id,OLD.scheduled_at',
+        ),
+  },
+  'unscoped vote voter': {
+    check: 'scoped vote voter and candidate',
+    mutation: 'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_voter_fk;',
+  },
+  'scheduled pair': {
+    check: 'scheduled pair',
+    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_scheduled_pair;',
+  },
+  'chosen slot outside scheduling': {
+    check: 'scheduled pair',
+    mutation: replace("(status='scheduled')=(chosen_slot_id IS NOT NULL) AND\n    "),
+  },
+  'capability digest uniqueness': {
+    check: 'unique capability digest',
+    mutation: replace(
+      'token_digest bytea NOT NULL UNIQUE CHECK',
+      'token_digest bytea NOT NULL CHECK',
+    ),
+  },
+  'mailbox counter uniqueness': {
+    check: 'unique mailbox counter',
+    mutation: replace('  UNIQUE(poll_id,email_key),\n'),
+  },
+  'short receipt retention': {
+    check: 'poll deletion keeps only replay tombstones',
+    mutation: replace("interval '90 days'", "interval '30 days'"),
+  },
+  'tombstone keeps booking reference': {
+    check: 'linked booking deletion erases poll history',
+    mutation: replace('SET poll_id=NULL,booking_id=NULL,', 'SET poll_id=NULL,'),
+  },
+  'verified voters uncounted': {
+    check: 'enrollment cap counts every active voter',
+    mutation: replace(
+      'AND (verified_at IS NOT NULL OR invited_at IS NOT NULL OR pending_expires_at>checked_at);',
+      'AND (invited_at IS NOT NULL OR pending_expires_at>checked_at);',
+    ),
+  },
+  'live reservations uncounted': {
+    check: 'enrollment cap counts every active voter',
+    mutation: replace(
+      'AND (verified_at IS NOT NULL OR invited_at IS NOT NULL OR pending_expires_at>checked_at);',
+      'AND (verified_at IS NOT NULL OR invited_at IS NOT NULL);',
+    ),
+  },
+  'new reservations skip the cap': {
+    check: 'enrollment cap counts every active voter',
+    mutation: replace(
+      'NEW.invited_at IS NOT NULL OR NEW.pending_expires_at>checked_at) THEN',
+      'NEW.invited_at IS NOT NULL) THEN',
+    ),
+  },
+  'enrollment counts the updated voter': {
+    check: 'enrollment cap on updates',
+    mutation: replace(
+      'WHERE poll_id=NEW.poll_id AND id<>NEW.id AND withdrawn_at IS NULL',
+      'WHERE poll_id=NEW.poll_id AND withdrawn_at IS NULL',
+    ),
+  },
+  'voter guard on inserts only': {
+    check: 'enrollment cap on updates',
+    mutation: replace(
+      'BEFORE INSERT OR UPDATE ON meeting_poll_voters',
+      'BEFORE INSERT ON meeting_poll_voters',
+    ),
+  },
+  'pending IP cap ignores the address': {
+    check: 'pending IP cap',
+    mutation: replace(' AND admission_ip_digest=NEW.admission_ip_digest'),
+  },
+  'pending IP cap counts expired reservations': {
+    check: 'expired reservations free pending IP places',
+    mutation: replace(
+      '\n      AND pending_expires_at>checked_at AND admission_ip_digest',
+      '\n      AND admission_ip_digest',
+    ),
+  },
+  'withdrawn enrollee keeps a reservation': {
+    check: 'pending state pair',
+    mutation: replace(
+      '(verified_at IS NULL AND invited_at IS NULL AND withdrawn_at IS NULL)=',
+      '(verified_at IS NULL AND invited_at IS NULL)=',
+    ),
+  },
+  'capability guard on inserts only': {
+    check: 'capability expiry',
+    mutation: replace(
+      'BEFORE INSERT OR UPDATE ON meeting_poll_capabilities',
+      'BEFORE INSERT ON meeting_poll_capabilities',
+    ),
+  },
+  'capability expiry updates skip the guard': {
+    check: 'capability expiry',
+    mutation: (source) =>
+      source
+        .replace('NEW.purpose,NEW.expires_at)', 'NEW.purpose)')
+        .replace('OLD.purpose,OLD.expires_at)', 'OLD.purpose)'),
+  },
+  'booking end ignored': {
+    check: 'booking match',
+    mutation: replace(' AND b.end_at=s.end_at'),
+  },
+  'booking start ignored': {
+    check: 'booking match',
+    mutation: replace(' AND b.start_at=s.start_at'),
+  },
+  'booking match on updates only': {
+    check: 'booking match',
+    mutation: replace(
+      'meeting_polls_booking_match AFTER INSERT OR UPDATE ON meeting_polls',
+      'meeting_polls_booking_match AFTER UPDATE ON meeting_polls',
+    ),
+  },
+  'candidate position mutable': {
+    check: 'candidate immutability',
+    mutation: (source) =>
+      source
+        .replace('NEW.end_at,NEW.position)', 'NEW.end_at)')
+        .replace('OLD.end_at,OLD.position)', 'OLD.end_at)'),
+  },
+  'candidate moves between polls': {
+    check: 'candidate immutability',
+    mutation: (source) =>
+      source
+        .replace(
+          '(NEW.poll_id,NEW.organization_id,NEW.start_at',
+          '(NEW.organization_id,NEW.start_at',
+        )
+        .replace(
+          '(OLD.poll_id,OLD.organization_id,OLD.start_at',
+          '(OLD.organization_id,OLD.start_at',
+        ),
+  },
+  'longer candidates': {
+    check: 'candidate duration',
+    mutation: replace(
+      '<>make_interval(mins=>parent.duration_minutes)',
+      '<make_interval(mins=>parent.duration_minutes)',
+    ),
+  },
+  'chosen candidate deletion cascades': {
+    check: 'scoped chosen candidate',
+    mutation: replace(
+      'REFERENCES meeting_poll_slots(organization_id,poll_id,id) DEFERRABLE',
+      'REFERENCES meeting_poll_slots(organization_id,poll_id,id) ON DELETE CASCADE DEFERRABLE',
+    ),
+  },
+  'longer mailbox digest': {
+    check: 'voter column checks',
+    mutation: replace('CHECK (octet_length(email_key)=32)', 'CHECK (octet_length(email_key)>=32)'),
+  },
+  'longer replay digest': {
+    check: 'receipt column checks',
+    mutation: replace(
+      'CHECK (octet_length(request_fingerprint)=32)',
+      'CHECK (octet_length(request_fingerprint)>=32)',
+    ),
+  },
+  'unsafe error class characters': {
+    check: 'delivery column checks',
+    mutation: replace("'^[a-z][a-z0-9_]{0,63}$'", "'^[a-z][a-z0-9_@. -]{0,63}$'"),
+  },
+  'skipped delivery keeps no terminal time': {
+    check: 'delivery recipient, lease and terminal pairs',
+    mutation: replace(
+      "CHECK ((state IN ('sent','suppressed','skipped'))=",
+      "CHECK ((state IN ('sent','suppressed'))=",
+    ),
+  },
+  'selected role without consent': {
+    check: 'selected booking role',
+    mutation: replace(
+      'CHECK (selected_booking_role IS NULL OR (verified_at IS NOT NULL AND withdrawn_at IS NULL AND join_consent_at IS NOT NULL))',
+      'CHECK (selected_booking_role IS NULL OR (verified_at IS NOT NULL AND withdrawn_at IS NULL))',
+    ),
+  },
+  'selected role without verification': {
+    check: 'selected booking role',
+    mutation: replace(
+      'CHECK (selected_booking_role IS NULL OR (verified_at IS NOT NULL AND withdrawn_at IS NULL AND join_consent_at IS NOT NULL))',
+      'CHECK (selected_booking_role IS NULL OR (withdrawn_at IS NULL AND join_consent_at IS NOT NULL))',
+    ),
+  },
+  'replay key includes the request': {
+    check: 'unique replay key',
+    mutation: replace(
+      'UNIQUE(organization_id,operation,actor_scope_digest,idempotency_key_digest)',
+      'UNIQUE(organization_id,operation,actor_scope_digest,idempotency_key_digest,request_fingerprint)',
+    ),
+  },
+  'sent voter deliveries leave the identity': {
+    check: 'voter delivery identity',
+    mutation: replace(
+      '(poll_id,voter_id,kind,generation,sequence) WHERE voter_id IS NOT NULL',
+      "(poll_id,voter_id,kind,generation,sequence) WHERE voter_id IS NOT NULL AND state<>'sent'",
+    ),
+  },
+  'host identity includes due time': {
+    check: 'host delivery identity',
+    mutation: replace(
+      '(poll_id,host_user_id,kind,generation) WHERE',
+      '(poll_id,host_user_id,kind,generation,due_at) WHERE',
+    ),
+  },
+  'aggregate visibility by default': {
+    check: 'privacy and lifecycle defaults',
+    mutation: replace("DEFAULT 'private'", "DEFAULT 'aggregate'"),
+  },
+  'receipt poll reference cascades': {
+    check: 'receipt poll references without the tombstone trigger',
+    mutation: replace('ON DELETE SET NULL (poll_id)', 'ON DELETE CASCADE'),
+  },
+  'infinite capability expiry': {
+    check: 'checks without triggers',
+    mutation: replace(
+      'CHECK (isfinite(expires_at) AND expires_at>created_at)',
+      'CHECK (expires_at>created_at)',
+    ),
+  },
+  'voter mailbox key includes the address': {
+    check: 'mailbox uniqueness',
+    mutation: replace('  UNIQUE (poll_id,email_key),', '  UNIQUE (poll_id,email_key,email),'),
+  },
+  'mailbox counter key includes removal': {
+    check: 'unique mailbox counter',
+    mutation: replace('  UNIQUE(poll_id,email_key),', '  UNIQUE(poll_id,email_key,removed_at),'),
+  },
+  'rotate-link receipts rejected': {
+    check: 'every enumerated value is accepted',
+    mutation: replace(
+      "('create','invite','resend','rotate_link','finalize')",
+      "('create','invite','resend','finalize')",
+    ),
+  },
+}
+
+// Every copy starts from a 0070 template and applies its own 0071 source. Tests run one at a
+// time (the protection checks use the global expect); each runs its two copies in parallel.
+describe.skipIf(!serverUrl)('meeting poll source-copy mutations', () => {
+  let template: TestDatabaseTemplate | undefined
+  let source: string
+  beforeAll(async () => {
+    const predecessors = await mkdtemp(join(tmpdir(), 'hourmere-poll-predecessors-'))
+    try {
+      await predecessorFiles(predecessors)
+      template = await createTestDatabaseTemplate(
+        serverUrl as string,
+        async (pool) => {
+          await runMigrations(pool, predecessors)
+        },
+        { tag: 'pollmut' },
+      )
+    } finally {
+      await rm(predecessors, { recursive: true, force: true })
+    }
+    source = await readFile(join(migrationsDir, migration), 'utf8')
+  }, 60_000)
+  afterAll(() => template?.drop())
+
+  async function run(sql: string, protection: (f: Fixture) => Promise<void>) {
+    const directory = await mkdtemp(join(tmpdir(), 'hourmere-poll-mutation-'))
+    try {
+      await writeFile(join(directory, migration), sql)
+      const owned = await (template as TestDatabaseTemplate).clone(directory, { tag: 'pollmut' })
       try {
-        await predecessorFiles(directory)
-        const source = await readFile(join(migrationsDir, migration), 'utf8')
-        const protection = protections[name] as (typeof protections)[string]
-        const check = async (sql: string) => {
-          await writeFile(join(directory, migration), sql)
-          const owned = await createTestDatabase(serverUrl as string, directory)
-          try {
-            await protection.assert(await fixture(owned.pool))
-            expect(owned.pool.totalCount).toBeLessThanOrEqual(3)
-          } finally {
-            await owned.drop()
-          }
-        }
-        await check(source)
-        const mutant =
-          typeof protection.mutation === 'string'
-            ? `${source}\n${protection.mutation}`
-            : protection.mutation(source)
-        expect(mutant).not.toBe(source)
-        await expect(check(mutant)).rejects.toMatchObject({
-          name: 'AssertionError',
-        })
-        await check(source)
+        await protection(await fixture(owned.pool))
+        expect(owned.pool.totalCount).toBeLessThanOrEqual(3)
       } finally {
-        await rm(directory, { recursive: true, force: true })
+        await owned.drop()
       }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+
+  it.each(Object.keys(mutations))(
+    'kills the %s mutation',
+    async (name) => {
+      const { check, mutation } = mutations[name] as (typeof mutations)[string]
+      const protection = checks[check] as (f: Fixture) => Promise<void>
+      const mutant = typeof mutation === 'string' ? `${source}\n${mutation}` : mutation(source)
+      expect(mutant).not.toBe(source)
+      const [original, mutated] = await Promise.allSettled([
+        run(source, protection),
+        run(mutant, protection),
+      ])
+      expect(original).toEqual({ status: 'fulfilled', value: undefined })
+      expect(mutated).toMatchObject({
+        status: 'rejected',
+        reason: { name: 'AssertionError' },
+      })
     },
     60_000,
   )
