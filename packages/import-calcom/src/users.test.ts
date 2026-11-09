@@ -89,12 +89,25 @@ describe('verified identity and profile proposals', () => {
     { movedToProfileId: 3 },
     { timeZone: 'Invalid/Zone' },
     { username: 'admin' },
+    { username: 'route' },
+    { username: 'Route' },
     { username: 'a'.repeat(41) },
     { locale: 'invalid_locale' },
   ])('blocks invalid scope or profile %j', (change) => {
     const problems = [] as Parameters<typeof parseUsers>[2]
     expect(parseUsers(snapshot([{ ...user(), ...change }]), target, problems).size).toBe(0)
     expect(problems.some((p) => p.severity === 'import_blocker')).toBe(true)
+  })
+  it('blocks route as a proposed handle but preserves a legacy route profile unchanged', () => {
+    const problems = [] as Parameters<typeof parseUsers>[2]
+    expect(parseUsers(snapshot([{ ...user(), username: 'route' }]), target, problems).size).toBe(0)
+    expect(problems.map((p) => p.code)).toEqual(['user_handle_invalid'])
+    const legacy = structuredClone(target)
+    required(legacy.users[0]).profile = { handle: 'route', timeZone: 'UTC', locale: 'en' }
+    expect(parseUsers(snapshot(), legacy, []).get(1)).toMatchObject({
+      profileAction: 'preserve',
+      profile: { handle: 'route', timeZone: 'UTC', locale: 'en' },
+    })
   })
   it('preserves existing profile, blocks collisions and reports nonzero user buffers', () => {
     const existing = structuredClone(target)
@@ -145,6 +158,9 @@ it('kills source-copy identity, authorization, scope and collision mutations', a
   )
   await checkSourceMutation(source, 'isReservedName(handle)', 'false', profiles, (run) =>
     expect(run(snapshot([{ ...user(), username: 'admin' }]), target, []).size).toBe(0),
+  )
+  await checkSourceMutation(source, 'isClaimReservedHandle(handle)', 'false', profiles, (run) =>
+    expect(run(snapshot([{ ...user(), username: 'route' }]), target, []).size).toBe(0),
   )
   await checkSourceMutation(
     source,

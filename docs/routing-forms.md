@@ -558,9 +558,14 @@ e4c `.env.example`; an explicit `false` remains the opt-out.
 effectively on only when the setting is `true` and no stored personal handle `route` exists
 (team slugs cannot collide). The server runs a1c's case-insensitive collision detector at
 startup, logs a warning with the remedy when it finds one, and keeps routing off until an
-operator-led rename with the owner and a server restart. Because a1c rejects new `route`
-handles, no new collision can appear later. So whenever routing is on, no legacy page exists
-under `/route`, and while it is off the legacy pages keep being served.
+operator-led rename with the owner and a server restart. The detector is
+`findLegacyHandleCollisions(db)` in `packages/scheduling/src/profile.ts` (exported by
+`@hourmere/scheduling`): it returns each stored handle matching `CLAIM_RESERVED_HANDLES` in
+`packages/core/src/reserved.ts` with its owner's user ID, and changes nothing. e4b's
+effective-state computation calls it, and e4c runs that computation in server composition at
+startup. Because a1c rejects new `route` handles, no new collision can appear later. So
+whenever routing is on, no legacy page exists under `/route`, and while it is off the legacy
+pages keep being served.
 `GET /api/v1/instance` reports the effective value as `routingFormsEnabled`; the web reads
 only that field, never a separate build flag. Publishing never overrides it.
 
