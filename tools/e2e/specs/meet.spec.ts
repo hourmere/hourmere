@@ -16,7 +16,9 @@ test('a host explicitly enables automatic Meet and language switching preserves 
     name: 'Create a unique Google Meet link for each booking',
     exact: true,
   })
-  await revealEventSetting(optIn)
+  await revealEventSetting(
+    page.getByLabel('Create a unique Google Meet link for each booking', { exact: true }),
+  )
   await expect(optIn).not.toBeChecked()
   await optIn.check()
   await page

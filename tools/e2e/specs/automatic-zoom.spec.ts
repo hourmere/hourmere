@@ -48,7 +48,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
     await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Synthetic Zoom call')
     expect(reads).toBe(0)
     await revealEventSetting(
-      page.getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' }),
+      page.getByLabel('Create a unique Zoom meeting for each booking', { exact: true }),
     )
     app.failAccountRead(true)
     await page
@@ -382,7 +382,7 @@ test.describe('automatic Zoom defaults off', () => {
       if (new URL(r.url()).pathname.startsWith('/api/v1/conference-connections')) reads++
     })
     await revealEventSetting(
-      page.getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' }),
+      page.getByLabel('Create a unique Zoom meeting for each booking', { exact: true }),
     )
     await expect(
       page.getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' }),

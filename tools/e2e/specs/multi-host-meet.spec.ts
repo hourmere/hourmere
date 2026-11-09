@@ -28,10 +28,7 @@ for (const language of ['en', 'zh-CN'] as const) {
     await page.getByLabel('Third Unconnected Host', { exact: true }).check()
     await page.getByLabel('Where the meeting happens', { exact: true }).selectOption('google_meet')
     await revealEventSetting(
-      page.getByRole('checkbox', {
-        name: 'Create a unique Google Meet link for each booking',
-        exact: true,
-      }),
+      page.getByLabel('Create a unique Google Meet link for each booking', { exact: true }),
     )
     await page
       .getByRole('checkbox', {
