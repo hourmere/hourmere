@@ -697,7 +697,7 @@ it('detects dropping the selected location from slot availability', async () => 
   }
   await killed(
     assertion,
-    'eventSlots(handle, slug, team, duration, locationOptionId)',
+    'eventSlots(handle, slug, team, duration, requestedLocationOptionId)',
     'eventSlots(handle, slug, team, duration)',
   )
 })
@@ -792,4 +792,85 @@ it('detects keeping an unchecked time after changing the location', async () => 
     'selectedLocation(event.locations ?? [], next.locationOptionId)?.id !==\n                    locationOptionId',
     'false',
   )
+})
+
+describe('singleton location source-copy controls', () => {
+  it('detects sending a singleton choice when loading slots', async () => {
+    async function assertion(text: string) {
+      const api = fakeApi(routes())
+      const view = display(text, '/ada/intro')
+      try {
+        await waitFor(() => expect(api.to(`GET ${API}/slots`).length).toBeGreaterThan(0))
+        expect(query(api.to(`GET ${API}/slots`)[0] as Call).has('locationOptionId')).toBe(false)
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(
+      assertion,
+      'eventSlots(handle, slug, team, duration, requestedLocationOptionId)',
+      'eventSlots(handle, slug, team, duration, locationOptionId)',
+    )
+  })
+
+  it('detects omitting a choice when multiple locations are offered', async () => {
+    async function assertion(text: string) {
+      const api = fakeApi(
+        routes({
+          [`GET ${API}`]: () =>
+            json(200, {
+              ...EVENT,
+              locations: [
+                { id: 'office', kind: 'in_person', isDefault: true },
+                { id: 'meet', kind: 'google_meet' },
+              ],
+            }),
+        }),
+      )
+      const view = display(text)
+      try {
+        await fill()
+        await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
+        await screen.findByRole('heading', { name: 'You’re booked' })
+        expect(api.to(`POST ${API}/bookings`)[0]?.body).toHaveProperty('locationOptionId', 'office')
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(
+      assertion,
+      '(event.locations?.length ?? 0) > 1 ? locationOptionId : undefined',
+      'undefined',
+    )
+  })
+
+  it.each([
+    [
+      'slot requests',
+      '(event.locations?.length ?? 0) > 1 ? locationOptionId : undefined',
+      'locationOptionId',
+    ],
+    [
+      'booking requests',
+      '...(requestedLocationOptionId && { locationOptionId: requestedLocationOptionId }),',
+      '...(chosenLocation && { locationOptionId: chosenLocation.id }),',
+    ],
+  ])('detects sending a singleton choice in %s', async (_name, before, after) => {
+    async function assertion(text: string) {
+      const api = fakeApi(routes())
+      const view = display(text)
+      try {
+        await fill()
+        await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
+        await screen.findByRole('heading', { name: 'You’re booked' })
+        for (const call of api.to(`GET ${API}/slots`)) {
+          expect(query(call).has('locationOptionId')).toBe(false)
+        }
+        expect(api.to(`POST ${API}/bookings`)[0]?.body).not.toHaveProperty('locationOptionId')
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(assertion, before, after)
+  })
 })
