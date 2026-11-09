@@ -191,8 +191,9 @@ printing the actual token strings.
 
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
-The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing required `check`,
-`cli-compatibility`, `docker` and `e2e` check names. Four `e2e-shard` jobs run the
+The required checks are `check`, `e2e`, `docker` and `sign-off`; `cli-compatibility`
+is not required. The reusable [CI workflow](.github/workflows/ci.yml) runs the first three,
+and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Four `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
 web and disposable site fixture and retains the browser-artifact privacy check. The separate
