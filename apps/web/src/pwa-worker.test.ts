@@ -45,11 +45,14 @@ function harness(active = false, worker = source) {
   const postMessage = vi.fn()
   const unregister = vi.fn(async () => true)
   const registration = { active: active ? {} : null, waiting: { postMessage }, unregister }
-  runInNewContext(worker, {
+  const context = {
     URL,
     Request,
     Response,
     Set,
+    // Browsers reject fetch() with the worker realm's TypeError; share it so that
+    // `error instanceof TypeError` inside the worker behaves as in production.
+    TypeError,
     fetch,
     caches,
     self: {
@@ -61,7 +64,11 @@ function harness(active = false, worker = source) {
         listeners[name] = listener
       },
     },
-  })
+  }
+  runInNewContext(worker, context)
+  const isWorkerTypeError = runInNewContext('(error) => error instanceof TypeError', context) as (
+    error: unknown,
+  ) => boolean
   async function lifecycle(name: string) {
     let promise: Promise<unknown> | undefined
     listeners[name]?.({
@@ -97,6 +104,7 @@ function harness(active = false, worker = source) {
     unregister,
     postMessage,
     listeners,
+    isWorkerTypeError,
   }
 }
 
@@ -397,12 +405,14 @@ it('reuses unchanged hashed URLs from an older Hourmere cache but refreshes muta
 })
 
 type ReuseFailure = 'list' | 'open' | 'match' | 'copy'
+type ReuseState = ReuseFailure | 'none'
+const asset = '/assets/main-abc123.js'
 
-async function verifyReuseFailure(failure: ReuseFailure, worker = source) {
-  const sw = harness(true, worker)
-  const asset = '/assets/main-abc123.js'
+// Put a reusable copy of the hashed asset into the old cache ('none': no old entry), then
+// make the given step of reusing it fail so the worker falls back to a network fetch.
+function arrangeReuse(sw: ReturnType<typeof harness>, failure: ReuseState) {
   const cached = new Response('previous')
-  sw.oldStore.set(asset, cached)
+  if (failure !== 'none') sw.oldStore.set(asset, cached)
   const error = new Error('old cache unavailable')
   if (failure === 'list') sw.caches.keys.mockRejectedValue(error)
   if (failure === 'open' || failure === 'match') {
@@ -424,6 +434,18 @@ async function verifyReuseFailure(failure: ReuseFailure, worker = source) {
       return put(path, response)
     })
   }
+}
+
+// The fallback fetch for the hashed asset answers with `respond`; every other path succeeds.
+function answerAsset(sw: ReturnType<typeof harness>, respond: () => Response) {
+  sw.fetch.mockImplementation(async (request) =>
+    new URL(request.url).pathname === asset ? respond() : new Response('static'),
+  )
+}
+
+async function verifyReuseFailure(failure: ReuseFailure, worker = source) {
+  const sw = harness(true, worker)
+  arrangeReuse(sw, failure)
   await expect(sw.lifecycle('install')).resolves.toBeUndefined()
   expect(sw.fetch.mock.calls.map(([request]) => new URL(request.url).pathname)).toEqual(paths)
   for (const [request] of sw.fetch.mock.calls) {
@@ -448,7 +470,6 @@ it.each([false, true])(
   'discards the partial cache when fetch rejects after cache reuse (reuse failed: %s)',
   async (reuseFails) => {
     const sw = harness()
-    const asset = '/assets/main-abc123.js'
     sw.oldStore.set(asset, new Response('previous'))
     if (reuseFails) sw.caches.keys.mockRejectedValue(new Error('old cache unavailable'))
     sw.fetch.mockImplementation(async (request) => {
@@ -457,6 +478,51 @@ it.each([false, true])(
     })
     await expect(sw.lifecycle('install')).rejects.toThrow('offline')
     expect(await sw.store.get(asset)?.text()).toBe(reuseFails ? 'static' : 'previous')
+    expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+    expect(sw.skipWaiting).not.toHaveBeenCalled()
+  },
+)
+
+it('rejects network failures with the worker realm TypeError, as browsers do', () => {
+  const sw = harness()
+  expect(sw.isWorkerTypeError(new TypeError('offline'))).toBe(true)
+  expect(sw.isWorkerTypeError(new Error('offline'))).toBe(false)
+})
+
+// No active worker: a tolerated failure would install an incomplete cache and skip waiting.
+it.each<ReuseState>(['none', 'list', 'open', 'match', 'copy'])(
+  'fails installation when the hashed asset fetch itself rejects (reuse: %s)',
+  async (failure) => {
+    const sw = harness()
+    arrangeReuse(sw, failure)
+    answerAsset(sw, () => {
+      throw new TypeError('offline')
+    })
+    await expect(sw.lifecycle('install')).rejects.toThrow('offline')
+    expect(sw.store.has(asset)).toBe(false)
+    expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+    expect(sw.skipWaiting).not.toHaveBeenCalled()
+  },
+)
+
+it.each<[ReuseFailure, string, ResponseInit]>([
+  ['open', 'private', { headers: { 'cache-control': 'private' } }],
+  ['open', '404', { status: 404 }],
+  ['open', '500', { status: 500 }],
+  ['match', 'private', { headers: { 'cache-control': 'private' } }],
+  ['match', '404', { status: 404 }],
+  ['match', '500', { status: 500 }],
+  ['copy', 'private', { headers: { 'cache-control': 'private' } }],
+  ['copy', '404', { status: 404 }],
+  ['copy', '500', { status: 500 }],
+])(
+  'validates the fallback fetch after reuse %s fails (%s response)',
+  async (failure, _label, init) => {
+    const sw = harness()
+    arrangeReuse(sw, failure)
+    answerAsset(sw, () => new Response('unsafe', init))
+    await expect(sw.lifecycle('install')).rejects.toThrow('Unsafe precache response')
+    expect(sw.store.has(asset)).toBe(false)
     expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
     expect(sw.skipWaiting).not.toHaveBeenCalled()
   },

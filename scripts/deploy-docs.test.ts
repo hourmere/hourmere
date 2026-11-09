@@ -245,11 +245,22 @@ describe('documented deployment operations', () => {
     { tag: '', version: '1.2.3', gitStatus: 128, expectedStatus: 1 },
   ])('checks the image conversion checkout ($tag, git status $gitStatus)', (scenario) => {
     const section = guide.split('To convert an existing image install,')[1]?.split('\n## ')[0]
-    const command = section?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
-    if (!command) throw new Error('Image conversion must include a runnable version check')
+    if (!section) throw new Error('Missing image conversion section')
+    const block = section.match(/```sh\n([\s\S]*?)\n```/)
+    const command = block?.[1]
+    if (!command || block.index === undefined)
+      throw new Error('Image conversion must include a runnable version check')
+    // The check must run while HOURMERE_VERSION is still set and before anything is edited.
+    for (const step of ['remove only', 'Unset `HOURMERE_VERSION`', 'source rebuild']) {
+      expect(section.indexOf(step), step).toBeGreaterThan(block.index)
+    }
+    // The stub reports its arguments: only the release-tag pattern may satisfy the check.
     const result = spawnSync(
       'sh',
-      ['-c', `git() { printf '%s\\n' "$CHECKOUT_TAG"; return "$GIT_STATUS"; }\n${command}`],
+      [
+        '-c',
+        `git() { printf 'git %s\\n' "$*" >&2; printf '%s\\n' "$CHECKOUT_TAG"; return "$GIT_STATUS"; }\n${command}`,
+      ],
       {
         encoding: 'utf8',
         env: {
@@ -260,7 +271,8 @@ describe('documented deployment operations', () => {
         },
       },
     )
-    expect(result.status, result.stderr).toBe(scenario.expectedStatus)
+    expect(result.stderr.trim()).toBe('git describe --tags --exact-match --match v[0-9]*')
+    expect(result.status).toBe(scenario.expectedStatus)
   })
 
   it('requires a root host in every deployment and a portless HTTPS host for bundled Caddy', () => {
