@@ -123,6 +123,11 @@ export async function startProbe(page: Page) {
           down: rel(down),
           up: up ? rel(up) : null,
           click: click ? rel(click) : null,
+          parentBeforeDown:
+            top
+              .filter((entry) => entry[0] === 'frame' && Number(entry[1]) <= downT)
+              .at(-2)
+              ?.slice(2) ?? null,
           parentAtDown: at(top, downT)?.slice(2) ?? null,
           parentAtUp: at(top, upT)?.slice(2) ?? null,
           innerAtDown: embed ? (at(inner, downT)?.slice(2) ?? null) : null,

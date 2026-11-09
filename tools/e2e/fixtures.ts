@@ -1427,7 +1427,8 @@ export async function pickSlot(scope: Page | Locator | FrameLocator, page: Page)
         await day.click()
         const slot = scope.locator('.slots button').first()
         if (process.env.HOURMERE_E2E_PICK_MODE === 'settle') await probeSettle(slot, page)
-        await slot.click()
+        const delay = Number(process.env.HOURMERE_E2E_PICK_DELAY ?? 0)
+        await slot.click(delay ? { delay } : undefined)
         if (probe) {
           const shown = await scope
             .locator('#details-heading')
