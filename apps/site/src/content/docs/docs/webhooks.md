@@ -4,9 +4,10 @@ description: Configure signed outbound booking webhooks and their delivery limit
 ---
 
 Webhooks are optional outbound signed notifications for booking creation, rescheduling and
-cancellation. They use the same booking services for public pages, REST and MCP. They do
-not depend on Google, Microsoft, mail or a billing account. This first version is API-only;
-there is no webhook settings page or third-party integration template.
+cancellation, plus private attendee no-show changes. They use the same booking services for public pages, REST and MCP. They do
+not depend on Google, Microsoft, mail or a billing account. Webhook management is REST-only;
+there is no webhook settings page. The private [Zapier app](/docs/zapier) uses these endpoints
+to subscribe and unsubscribe automatically.
 
 ## Enable and configure
 
@@ -52,10 +53,10 @@ stored organization. See [browser organization context](/docs/api-conventions#br
 | `GET /webhooks/{id}/deliveries?after=…` | At most fifty delivery metadata rows, newest first |
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
-`booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested` and
-`booking.reschedule_request_expired`. Request events add `data.requestId`, keep
-`data.status` as `confirmed`, and omit notes and management links. Each replacement
-request has its own delivery identity. There are at most ten endpoints per organization.
+`booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
+`booking.reschedule_request_expired` and `booking.attendee_no_show_changed`. Request events
+add `data.requestId`, keep `data.status` as `confirmed`, and omit notes and management links.
+Each replacement request has its own delivery identity. There are at most ten endpoints per organization.
 The URL is immutable: create a replacement endpoint to change the destination. By default,
 URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user information
 or fragment, and at most 2048 characters. Private, loopback and special-purpose destinations
@@ -149,8 +150,15 @@ The JSON is an immutable snapshot captured inside the booking's transaction:
 }
 ```
 
+For `booking.attendee_no_show_changed`, `data` additionally contains `attendeeId`,
+`noShowMarkedAt` and `noShowMarkedBy`. Unmarking sets both marker fields to null. Each
+actual transition has a new event ID; repeating the same state emits no event. Existing
+subscriptions are not expanded automatically. This extends the subscription and delivery
+response event enums: consumers must ignore unknown event types and update closed
+validators when upgrading. See [no-shows](/docs/no-shows).
+
 Only these bounded identifiers, timestamps and status/source values are included. Invitee
-and host names/emails, attendees, answers, locations, management capabilities, API keys and
+and host names/emails, attendee contact details, answers, locations, management capabilities, API keys and
 OAuth credentials are absent. A reschedule emits one event for the new booking, with its
 predecessor ID; it does not emit a second cancellation event for the old booking. A later
 cancellation has its own snapshot. Old events are still delivered even when a newer state

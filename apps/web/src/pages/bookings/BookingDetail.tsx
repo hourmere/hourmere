@@ -33,6 +33,7 @@ import {
   SOURCE_LABELS,
 } from './booking-format.ts'
 import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
+import { NoShowAttendees } from './NoShowAttendees.tsx'
 import { RequestReschedule } from './RequestReschedule.tsx'
 import { RescheduleBooking } from './RescheduleBooking.tsx'
 
@@ -358,6 +359,8 @@ function BookingView({
           }}
         />
       )}
+
+      <NoShowAttendees booking={booking} expectedOrganizationId={expectedOrganizationId} />
 
       <ConferenceNotice
         key={booking.id}

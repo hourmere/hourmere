@@ -206,6 +206,8 @@ describe('the session gate', () => {
       ...emptyTeamLists,
       ...profile(),
       'GET /api/v1/me': () => (me ? json(200, me) : json(401, { error: 'unauthorized' })),
+      [`GET /api/v1/organizations/${TEAM_ID}/provisioning-tokens`]: () =>
+        json(200, { tokens: [], nextCursor: null }),
       'GET /api/auth/organization/get-active-member': () =>
         json(200, { organizationId: TEAM_ID, userId: ME.user.id, role: 'owner' }),
       ...instance(),

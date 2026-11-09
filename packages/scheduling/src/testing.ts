@@ -372,7 +372,61 @@ export function createFixtures(db: Db) {
     })
   }
 
-  return { user, organization, member, host, schedule, eventType, calendarBusy, booking }
+  /** A Meet-capable owned Google destination for readiness checks; it never checks conflicts. */
+  async function meetDestination(userId: string): Promise<string> {
+    const connection = await db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: userId,
+        provider: 'google',
+        external_account_id: `acct-${unique()}`,
+        credentials: Buffer.from('synthetic-never-used-credential'),
+        status: 'active',
+        scopes: [
+          'https://www.googleapis.com/auth/calendar.events.owned',
+          'https://www.googleapis.com/auth/calendar.events.readonly',
+        ],
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const calendar = await db
+      .insertInto('calendars')
+      .values({
+        connection_id: connection.id,
+        external_id: `cal-${unique()}`,
+        name: 'Meet destination',
+        access_role: 'owner',
+        supports_google_meet: true,
+        check_conflicts: false,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: userId,
+        handle: `meet-${unique()}`,
+        time_zone: 'UTC',
+        destination_calendar_id: calendar.id,
+      })
+      .onConflict((oc) =>
+        oc.column('user_id').doUpdateSet({ destination_calendar_id: calendar.id }),
+      )
+      .execute()
+    return calendar.id
+  }
+
+  return {
+    user,
+    organization,
+    member,
+    host,
+    schedule,
+    eventType,
+    calendarBusy,
+    booking,
+    meetDestination,
+  }
 }
 
 export type Fixtures = ReturnType<typeof createFixtures>

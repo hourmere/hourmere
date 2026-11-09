@@ -33,8 +33,10 @@ installation and checks.
 The server applies database migrations when it starts. `npm run db:down` stops the database
 and keeps its data.
 
-The root npm workspace includes `apps/*`, `packages/*`, `tools/api-types`, `tools/cli`
-and `tools/e2e`, with `package-lock.json` at the root. Add a dependency to the workspace that uses it, e.g.
+The main npm workspace covers `apps/*`, `packages/*`, `tools/api-types`, `tools/cli`
+and `tools/e2e`, with a `package-lock.json` at the root. The separate
+`tools/zapier-hourmere` package has its own lockfile; root installs do not download its
+Zapier Platform Agreement–licensed dependencies. Add a dependency to the workspace that uses it, e.g.
 `npm install <package> --workspace @hourmere/scheduling`, and commit the updated lockfile.
 
 The standalone n8n package uses its own committed lockfile and the separate
@@ -57,6 +59,16 @@ npm run lint        # Biome: formatting and lint rules (`npm run format` fixes m
 npm run typecheck
 npm test            # Vitest; database tests are skipped unless DATABASE_URL is set (.env sets it)
 npm run build
+```
+
+These need only the root install. `npm test` includes the Zapier app's OpenAPI contract
+test, which loads the app definition without the Zapier Platform packages. Install those
+only if you change `tools/zapier-hourmere`. CI's separate `zapier-compatibility` job runs
+the commands below, plus offline validation and the build check, on Node.js 22:
+
+```sh
+npm ci --ignore-scripts --prefix tools/zapier-hourmere
+npm --prefix tools/zapier-hourmere test # Zapier runtime and packaging tests
 ```
 
 An optional clock diagnostic runs the same suite at +7, +30, +90, +400 and +1600 days:
@@ -203,9 +215,12 @@ printing the actual token strings.
 
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
-The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing `check`,
-`cli-compatibility`, `docker` and `e2e` jobs unchanged, alongside the standalone
-`n8n-compatibility` job. The separate
+The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing required `check`,
+`cli-compatibility`, `docker` and `e2e` check names, alongside the standalone
+`n8n-compatibility` job. Four `e2e-shard` jobs run the
+complete functional browser suite in parallel; the `e2e` aggregator succeeds only
+when every shard succeeds, including on merge-queue runs. Each shard builds its own
+web and disposable site fixture and retains the browser-artifact privacy check. The separate
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
 and manual dispatches. Layout shards fail on every layout finding, scan error, browser
 failure or missing report; axe fails on serious/critical violations and scan/execution
@@ -231,7 +246,8 @@ Browser downloads are cached by the pinned Playwright version. The system depend
 runs even on cache hits because a browser cache does not preserve runner apt packages;
 Playwright installs system packages only when its dry-run check finds packages missing.
 
-可复用 CI 保留原有四个任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
+可复用 CI 保留原有必需检查名称。功能浏览器测试分为四片并行运行，
+`e2e` 汇总任务仅在所有分片成功时通过，合并队列也执行这些任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
 布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
 CI 和发布工作流都不调用它，发布标签不会运行这些检测。
 布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
@@ -388,6 +404,12 @@ When adding or changing a write operation:
    rejects new or reintroduced entries, directing authors to add the MCP tool and CLI
    command. When closing a gap, add its real mapping and remove its gap entry; stale gaps
    fail, including operations removed, changed to reads or made browser-session-only.
+   The branding image upload has a narrow binary transport mapping:
+   `{ "mcpReference": "set_branding", "cliUpload": "branding upload", "reason": "…" }`.
+   The guard checks the exact upload operation and route, the CLI's `REST_COMMANDS`
+   destination, and the registered reference-setting MCP tool. This does not exempt
+   other writes or permit a new known gap; binary uploads travel through REST while
+   MCP sets an already uploaded reference.
 4. Update or remove the entry when the operation or either interface name changes. Run
    `npm run api:types` and commit the regenerated API types after route changes.
 5. Run the guard locally:

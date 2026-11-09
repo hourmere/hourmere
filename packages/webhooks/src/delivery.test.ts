@@ -112,7 +112,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
 
   it.each([
     ['request event type', "? 'booking.reschedule_requested'", "? 'booking.cancelled'"],
-    ['request generation identity', 'request_id: requestId', 'request_id: null'],
+    ['request generation identity', 'request_id: receiptId', 'request_id: null'],
   ])('detects removing webhook %s with a source-copy assertion', async (_, from, to) => {
     const notify = await webhookSourceCopy(from, to)
     const { bookingId, webhook } = await fixture()

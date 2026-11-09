@@ -337,6 +337,19 @@ describe('location choice resolution', () => {
     ).toEqual({ kind: 'phone', number: '+14155550123' })
   })
 
+  it.each(['+1 415 555 0123', '+1 (415) 555-0123', '+1.415.555.0123'])(
+    'normalizes collected phone %s',
+    (inviteePhone) => {
+      expect(
+        resolveLocationChoice(
+          [{ id: 'call', kind: 'phone', askInvitee: true }],
+          { inviteePhone },
+          context,
+        ).location,
+      ).toEqual({ kind: 'phone', number: '+14155550123' })
+    },
+  )
+
   it.each([
     undefined,
     '',

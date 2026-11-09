@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { constants, readFileSync } from 'node:fs'
-import { mkdtemp, open, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -71,8 +71,11 @@ function sourceCopy(change?: readonly [string, string]): typeof runCli {
     expect(source.includes(change[0]), 'mutation must match source').toBe(true)
     source = source.replace(...change)
   }
-  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
-  const bindings = { constants, open, ...client }
+  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+    /\bexport /g,
+    '',
+  )
+  const bindings = { constants, open, unlink, ...client }
   return new Function(...Object.keys(bindings), `${source}; return runCli`)(
     ...Object.values(bindings),
   ) as typeof runCli
@@ -88,7 +91,10 @@ function clientSourceCopy(change?: readonly [string, string]): typeof callTool {
     /export const \{ version \} = JSON.parse\([\s\S]*?as \{ version: string \}/,
     '',
   )
-  source = stripTypeScriptTypes(source.replace(/^import[^\n]+\n/gm, '')).replace(/\bexport /g, '')
+  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+    /\bexport /g,
+    '',
+  )
   return new Function('version', `${source}; return callTool`)(client.version) as typeof callTool
 }
 
@@ -216,6 +222,7 @@ describe('CLI transport and arguments', () => {
         : { slug: 'intro', title: 'Intro' }),
       durationMinutes: 30,
       allowedDurationsMinutes: [15, 30, 60],
+      locations: [{ id: 'call', kind: 'phone', askInvitee: true, label: 'Call me' }],
     }
     const result = await run([command, '--input', '-'], input, { runner })
     expect(result.code).toBe(0)
@@ -226,12 +233,56 @@ describe('CLI transport and arguments', () => {
     })
   }
   it.each([false, true])(
-    'forwards all event type duration settings for update=%s',
+    'forwards all event type duration and location settings for update=%s',
     async (update) => {
       await verifyEventTypeWrite(runCli, update)
       await verifyEventTypeWrite(sourceCopy(), update)
     },
   )
+
+  it('forwards the selected location and collected phone through book JSON', async () => {
+    const input = {
+      handle: 'ada',
+      slug: 'intro',
+      start: '2026-12-01T10:00:00Z',
+      locationOptionId: 'call',
+      inviteePhone: '+14155550123',
+      idempotencyKey: 'choice-test',
+    }
+    const result = await run(['book', '--input', '-'], input)
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params.arguments).toEqual(input)
+  })
+
+  async function verifySlotLocation(runner = runCli) {
+    const input = {
+      teamSlug: 'team',
+      slug: 'intro',
+      from: '2026-12-01T10:00:00Z',
+      to: '2026-12-01T12:00:00Z',
+      locationOptionId: 'meet',
+    }
+    const result = await run(['slots', '--input', '-'], input, { runner })
+    expect(result.code).toBe(0)
+    const init = (result.fetcher as ReturnType<typeof vi.fn<typeof fetch>>).mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).params).toMatchObject({
+      name: 'find_available_slots',
+      arguments: input,
+    })
+  }
+  it('forwards the selected location to slot availability through JSON', async () => {
+    await verifySlotLocation()
+    await verifySlotLocation(sourceCopy())
+    await expect(
+      verifySlotLocation(
+        sourceCopy([
+          'const input = await readInput(args.input, options.stdin)',
+          'const input = await readInput(args.input, options.stdin); delete input.locationOptionId',
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 
   async function verifyRedirectFlags(runner = runCli) {
     for (const command of ['create-event', 'update-event']) {
@@ -716,6 +767,8 @@ describe('CLI transport and arguments', () => {
     ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
+    ['schedule-availability', 'get_schedule_availability'],
+    ['save-availability', 'save_schedule_availability'],
     ['slots', 'find_available_slots'],
     ['book', 'create_booking'],
     ['list', 'list_bookings'],
@@ -724,6 +777,7 @@ describe('CLI transport and arguments', () => {
     ['cancel', 'cancel_booking'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],
+    ['set-no-show', 'set_attendee_no_show'],
   ])(
     'maps %s to the existing %s tool and sends one authenticated request',
     async (command, tool) => {

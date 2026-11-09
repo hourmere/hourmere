@@ -91,6 +91,8 @@ describe.each(translations)(
         ...signedInAs(original),
         ...profile(),
         'GET /api/v1/me': () => json(200, active),
+        [`GET /api/v1/organizations/${target.organization.id}/provisioning-tokens`]: () =>
+          json(200, { tokens: [], nextCursor: null }),
         'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
         'GET /api/v1/event-type-hosts': () =>
           json(200, { data: [{ id: ME.user.id, name: 'Ada' }], nextAfter: null }),
