@@ -73,6 +73,14 @@ function harness(active = false, worker = source) {
       get code() {
         return { QuotaExceededError: 22, SecurityError: 18 }[this.name] ?? 0
       }
+    }
+    // Chromium rejects over-quota writes with the QuotaExceededError interface.
+    globalThis.QuotaExceededError = class QuotaExceededError extends DOMException {
+      constructor(message = '', options = {}) {
+        super(message, 'QuotaExceededError')
+        this.quota = options.quota ?? null
+        this.requested = options.requested ?? null
+      }
     }`,
     context,
   )
@@ -84,6 +92,7 @@ function harness(active = false, worker = source) {
       Error,
       TypeError,
       DOMException,
+      QuotaExceededError,
       isError: (error) => error instanceof Error,
       isTypeError: (error) => error instanceof TypeError,
     })`,
@@ -92,6 +101,10 @@ function harness(active = false, worker = source) {
     Error: ErrorConstructor
     TypeError: TypeErrorConstructor
     DOMException: new (message?: string, name?: string) => Error & { code: number }
+    QuotaExceededError: new (
+      message?: string,
+      options?: { quota?: number; requested?: number },
+    ) => Error & { code: number; quota: number | null; requested: number | null }
     isError: (error: unknown) => boolean
     isTypeError: (error: unknown) => boolean
   }
@@ -135,6 +148,41 @@ function harness(active = false, worker = source) {
     global,
   }
 }
+
+type Harness = ReturnType<typeof harness>
+type ErrorKind = [label: string, make: (sw: Harness, message: string) => Error]
+
+// The worker must treat every failure the same whatever its type, so the same assertions
+// run once per realm-own error kind: WebKit reports disk and internal failures (and every
+// engine reports network failures) as TypeError; Chromium and WebKit use DOMExceptions
+// with these names (SecurityError when storage access is denied); current Chromium rejects
+// over-quota writes with the QuotaExceededError interface; a plain Error stands for the rest.
+const typeError: ErrorKind[1] = (sw, message) => new sw.realm.TypeError(message)
+const errorKinds: ErrorKind[] = [
+  ['TypeError', typeError],
+  [
+    'DOMException UnknownError',
+    (sw, message) => new sw.realm.DOMException(message, 'UnknownError'),
+  ],
+  [
+    'DOMException QuotaExceededError',
+    (sw, message) => new sw.realm.DOMException(message, 'QuotaExceededError'),
+  ],
+  [
+    'DOMException InvalidStateError',
+    (sw, message) => new sw.realm.DOMException(message, 'InvalidStateError'),
+  ],
+  [
+    'DOMException NotFoundError',
+    (sw, message) => new sw.realm.DOMException(message, 'NotFoundError'),
+  ],
+  [
+    'DOMException SecurityError',
+    (sw, message) => new sw.realm.DOMException(message, 'SecurityError'),
+  ],
+  ['QuotaExceededError', (sw, message) => new sw.realm.QuotaExceededError(message)],
+  ['Error', (sw, message) => new sw.realm.Error(message)],
+]
 
 describe('offline shell routing', () => {
   it.each([
@@ -227,13 +275,16 @@ describe('offline shell routing', () => {
     expect(await (await slow)?.text()).toBe('offline notice')
   })
 
-  it('keeps online navigation and static files working when storage is unavailable', async () => {
-    const sw = harness()
-    sw.caches.open.mockRejectedValue(new sw.realm.DOMException('storage denied', 'SecurityError'))
-    expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('static')
-    expect(await (await sw.request('/assets/main-abc123.js'))?.text()).toBe('static')
-    expect(sw.fetch).toHaveBeenCalledTimes(2)
-  })
+  it.each(errorKinds)(
+    'keeps online navigation and static files working when storage is unavailable (%s)',
+    async (_kind, make) => {
+      const sw = harness()
+      sw.caches.open.mockRejectedValue(make(sw, 'storage denied'))
+      expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('static')
+      expect(await (await sw.request('/assets/main-abc123.js'))?.text()).toBe('static')
+      expect(sw.fetch).toHaveBeenCalledTimes(2)
+    },
+  )
 
   it('preserves server denial responses instead of substituting an offline page', async () => {
     const sw = harness()
@@ -307,6 +358,18 @@ describe('offline shell installation and updates', () => {
     expect(sw.caches.delete.mock.calls).toEqual([['hourmere-shell-old']])
     expect(sw.claim).not.toHaveBeenCalled()
   })
+
+  it.each(errorKinds)(
+    'fails activation when deleting an old shell cache fails (%s)',
+    async (_kind, make) => {
+      const sw = harness()
+      const error = make(sw, 'delete failed')
+      sw.caches.delete.mockRejectedValue(error)
+      await expect(sw.lifecycle('activate')).rejects.toBe(error)
+      expect(sw.caches.delete.mock.calls).toEqual([['hourmere-shell-old']])
+      expect(sw.claim).not.toHaveBeenCalled()
+    },
+  )
 })
 
 describe('build precache selection', () => {
@@ -438,14 +501,10 @@ const asset = '/assets/main-abc123.js'
 
 // Put a reusable copy of the hashed asset into the old cache ('none': no old entry), then
 // make the given step of reusing it fail so the worker falls back to a network fetch.
-function arrangeReuse(sw: ReturnType<typeof harness>, failure: ReuseState) {
+function arrangeReuse(sw: Harness, failure: ReuseState, make = typeError) {
   const cached = new Response('previous')
   if (failure !== 'none') sw.oldStore.set(asset, cached)
-  // Copying fails like a full cache; listing, opening and matching fail like a broken backend.
-  const error = new sw.realm.DOMException(
-    'old cache unavailable',
-    failure === 'copy' ? 'QuotaExceededError' : 'UnknownError',
-  )
+  const error = make(sw, 'old cache unavailable')
   if (failure === 'list') sw.caches.keys.mockRejectedValue(error)
   if (failure === 'open' || failure === 'match') {
     const open = sw.caches.open.getMockImplementation()
@@ -469,15 +528,15 @@ function arrangeReuse(sw: ReturnType<typeof harness>, failure: ReuseState) {
 }
 
 // The fallback fetch for the hashed asset answers with `respond`; every other path succeeds.
-function answerAsset(sw: ReturnType<typeof harness>, respond: () => Response) {
+function answerAsset(sw: Harness, respond: () => Response) {
   sw.fetch.mockImplementation(async (request) =>
     new URL(request.url).pathname === asset ? respond() : new Response('static'),
   )
 }
 
-async function verifyReuseFailure(failure: ReuseFailure, worker = source) {
+async function verifyReuseFailure(failure: ReuseFailure, worker = source, make = typeError) {
   const sw = harness(true, worker)
-  arrangeReuse(sw, failure)
+  arrangeReuse(sw, failure, make)
   await expect(sw.lifecycle('install')).resolves.toBeUndefined()
   expect(sw.fetch.mock.calls.map(([request]) => new URL(request.url).pathname)).toEqual(paths)
   for (const [request] of sw.fetch.mock.calls) {
@@ -491,22 +550,22 @@ async function verifyReuseFailure(failure: ReuseFailure, worker = source) {
   expect(sw.skipWaiting).not.toHaveBeenCalled()
 }
 
-it.each<ReuseFailure>(['list', 'open', 'match', 'copy'])(
-  'fetches fresh assets when previous cache %s fails',
-  async (failure) => {
-    await verifyReuseFailure(failure)
-  },
-)
+const reuseFailures: ReuseFailure[] = ['list', 'open', 'match', 'copy']
+
+it.each<[ReuseFailure, string, ErrorKind[1]]>(
+  reuseFailures.flatMap((failure) =>
+    errorKinds.map(([kind, make]): [ReuseFailure, string, ErrorKind[1]] => [failure, kind, make]),
+  ),
+)('fetches fresh assets when previous cache %s fails (%s)', async (failure, _kind, make) => {
+  await verifyReuseFailure(failure, source, make)
+})
 
 it.each([false, true])(
   'discards the partial cache when fetch rejects after cache reuse (reuse failed: %s)',
   async (reuseFails) => {
     const sw = harness()
     sw.oldStore.set(asset, new Response('previous'))
-    if (reuseFails)
-      sw.caches.keys.mockRejectedValue(
-        new sw.realm.DOMException('old cache unavailable', 'UnknownError'),
-      )
+    if (reuseFails) sw.caches.keys.mockRejectedValue(typeError(sw, 'old cache unavailable'))
     sw.fetch.mockImplementation(async (request) => {
       if (new URL(request.url).pathname === '/app/icon-192.png')
         throw new sw.realm.TypeError('offline')
@@ -525,6 +584,7 @@ it('injects failures as worker realm errors, which the worker sees as browsers w
   expect(sw.realm.Error).toBe(sw.global.Error)
   expect(sw.realm.TypeError).toBe(sw.global.TypeError)
   expect(sw.realm.DOMException).toBe(sw.global.DOMException)
+  expect(sw.realm.QuotaExceededError).toBe(sw.global.QuotaExceededError)
   const network = new sw.realm.TypeError('offline')
   const storage = new sw.realm.DOMException('storage full', 'QuotaExceededError')
   expect(sw.realm.isTypeError(network)).toBe(true)
@@ -535,6 +595,13 @@ it('injects failures as worker realm errors, which the worker sees as browsers w
   expect(storage.name).toBe('QuotaExceededError')
   expect(storage.code).toBe(22)
   expect(new sw.realm.DOMException('denied', 'SecurityError').code).toBe(18)
+  const quota = new sw.realm.QuotaExceededError('storage full')
+  expect(quota).toBeInstanceOf(sw.realm.DOMException)
+  expect(sw.realm.isError(quota)).toBe(true)
+  expect(quota.name).toBe('QuotaExceededError')
+  expect(quota.code).toBe(22)
+  expect([quota.quota, quota.requested]).toEqual([null, null])
+  for (const [, make] of errorKinds) expect(sw.realm.isError(make(sw, 'any kind'))).toBe(true)
   // An error the worker itself throws shares the realm of the injected ones.
   sw.fetch.mockResolvedValue(new Response('secret', { headers: { 'Cache-Control': 'no-store' } }))
   const thrown: unknown = await sw.lifecycle('install').then(
@@ -550,15 +617,20 @@ it('injects failures as worker realm errors, which the worker sees as browsers w
 })
 
 // No active worker: a tolerated failure would install an incomplete cache and skip waiting.
-it.each<ReuseState>(['none', 'list', 'open', 'match', 'copy'])(
-  'fails installation when the hashed asset fetch itself rejects (reuse: %s)',
-  async (failure) => {
+it.each<[ReuseState, string, ErrorKind[1]]>(
+  (['none', ...reuseFailures] as ReuseState[]).flatMap((failure) =>
+    errorKinds.map(([kind, make]): [ReuseState, string, ErrorKind[1]] => [failure, kind, make]),
+  ),
+)(
+  'fails installation when the hashed asset fetch itself rejects (reuse: %s, %s)',
+  async (failure, _kind, make) => {
     const sw = harness()
-    arrangeReuse(sw, failure)
+    arrangeReuse(sw, failure, make)
+    const error = make(sw, 'offline')
     answerAsset(sw, () => {
-      throw new sw.realm.TypeError('offline')
+      throw error
     })
-    await expect(sw.lifecycle('install')).rejects.toThrow('offline')
+    await expect(sw.lifecycle('install')).rejects.toBe(error)
     expect(sw.store.has(asset)).toBe(false)
     expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
     expect(sw.skipWaiting).not.toHaveBeenCalled()
@@ -603,28 +675,34 @@ it('fails installation when fetching the offline notice rejects', async () => {
   expect(sw.skipWaiting).not.toHaveBeenCalled()
 })
 
-it('fails installation when the new shell cache cannot be opened', async () => {
-  const sw = harness()
-  sw.caches.open.mockRejectedValue(new sw.realm.DOMException('storage full', 'QuotaExceededError'))
-  await expect(sw.lifecycle('install')).rejects.toThrow('storage full')
-  expect(sw.fetch).not.toHaveBeenCalled()
-  expect(sw.cache.put).not.toHaveBeenCalled()
-  expect(sw.store.size).toBe(0)
-  expect(sw.skipWaiting).not.toHaveBeenCalled()
-})
+it.each(errorKinds)(
+  'fails installation when the new shell cache cannot be opened (%s)',
+  async (_kind, make) => {
+    const sw = harness()
+    const error = make(sw, 'storage unavailable')
+    sw.caches.open.mockRejectedValue(error)
+    await expect(sw.lifecycle('install')).rejects.toBe(error)
+    expect(sw.fetch).not.toHaveBeenCalled()
+    expect(sw.cache.put).not.toHaveBeenCalled()
+    expect(sw.store.size).toBe(0)
+    expect(sw.skipWaiting).not.toHaveBeenCalled()
+  },
+)
 
-it('still rejects installation when fresh asset storage fails after reuse fails', async () => {
-  const sw = harness(true)
-  sw.caches.keys.mockRejectedValue(
-    new sw.realm.DOMException('old cache unavailable', 'UnknownError'),
-  )
-  // Browsers reject Cache.put over quota with a QuotaExceededError DOMException.
-  sw.cache.put.mockRejectedValue(new sw.realm.DOMException('storage full', 'QuotaExceededError'))
-  await expect(sw.lifecycle('install')).rejects.toThrow('storage full')
-  expect(sw.fetch).toHaveBeenCalledOnce()
-  expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
-  expect(sw.skipWaiting).not.toHaveBeenCalled()
-})
+it.each(errorKinds)(
+  'fails installation when storing a fresh asset fails after reuse fails (%s)',
+  async (_kind, make) => {
+    const sw = harness()
+    sw.caches.keys.mockRejectedValue(make(sw, 'old cache unavailable'))
+    const error = make(sw, 'storage full')
+    sw.cache.put.mockRejectedValue(error)
+    await expect(sw.lifecycle('install')).rejects.toBe(error)
+    expect(sw.fetch).toHaveBeenCalledOnce()
+    expect(sw.store.size).toBe(0)
+    expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+    expect(sw.skipWaiting).not.toHaveBeenCalled()
+  },
+)
 
 it('detects source-copy mutations that make cache reuse errors abort installation', async () => {
   const listGuard = 'caches.keys().catch(() => [])'
@@ -664,10 +742,13 @@ it('ships a disabled-build worker that immediately retires installed workers wit
     const worker = await readFile(join(root, 'dist/app/sw.js'), 'utf8')
     await verifyDisabled(worker)
     expect(existsSync(join(root, 'dist/app/offline.html'))).toBe(false)
-    const sw = harness(true, worker)
-    sw.caches.keys.mockRejectedValue(new sw.realm.DOMException('storage denied', 'SecurityError'))
-    await expect(sw.lifecycle('activate')).rejects.toThrow('storage denied')
-    expect(sw.unregister).toHaveBeenCalledOnce()
+    for (const [, make] of errorKinds) {
+      const sw = harness(true, worker)
+      const error = make(sw, 'storage denied')
+      sw.caches.keys.mockRejectedValue(error)
+      await expect(sw.lifecycle('activate')).rejects.toBe(error)
+      expect(sw.unregister).toHaveBeenCalledOnce()
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }
