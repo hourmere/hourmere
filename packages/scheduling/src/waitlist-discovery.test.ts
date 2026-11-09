@@ -109,6 +109,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await db
       .transaction()
       .execute((trx) => ensureWaitlistKey(trx, SECRET, new Date(NOW.epochMilliseconds)))
+    // Signal-batch tests choose their planner statistics; a background ANALYZE must not
+    // replace them at an arbitrary moment.
+    await testDb.pool.query('ALTER TABLE waitlist_scan_signals SET (autovacuum_enabled = false)')
   })
 
   afterAll(async () => {
@@ -542,12 +545,29 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     },
   )
 
+  /**
+   * Empty the signal table and record the statistics ANALYZE takes right after a drain:
+   * zero rows on allocated pages. A later backlog is then planned as a near-empty table,
+   * the plan in which a rescanned IN (... LIMIT ... SKIP LOCKED) batch removed every row.
+   */
+  async function emptySignalsWithStaleStatistics() {
+    await testDb.pool.query(
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
+      [randomUUID()],
+    )
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    await testDb.pool.query('ANALYZE waitlist_scan_signals')
+    const { rows } = await testDb.pool.query<{ reltuples: number; relpages: number }>(
+      `SELECT reltuples, relpages FROM pg_class WHERE oid='waitlist_scan_signals'::regclass`,
+    )
+    expect(rows[0]?.reltuples).toBe(0)
+    expect(rows[0]?.relpages).toBeGreaterThan(0)
+  }
+
   async function verifyBoundedConsumption(scan = scanWaitlistEvent) {
     const s = await setup()
     await entry(s)
-    await testDb.pool.query('DELETE FROM waitlist_scan_signals WHERE event_type_id=$1', [
-      s.eventTypeId,
-    ])
+    await emptySignalsWithStaleStatistics()
     await testDb.pool.query(
       'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
       [s.eventTypeId],
@@ -601,6 +621,30 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       name: 'AssertionError',
     })
   })
+
+  it(
+    'detects source-copy signal consumption through a rescannable IN subquery',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          `WHERE id = ANY(ARRAY(
+      SELECT id FROM waitlist_scan_signals`,
+          `WHERE id IN (
+      SELECT id FROM waitlist_scan_signals`,
+        ],
+        [
+          `FOR UPDATE SKIP LOCKED
+    )) RETURNING id`,
+          `FOR UPDATE SKIP LOCKED
+    ) RETURNING id`,
+        ],
+      ])
+      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
 
   it(
     'detects source-copy postponement of discovery behind an existing backlog',
@@ -830,7 +874,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
   )
 
   async function verifyCleanupBudget(cleanup = cleanupWaitlistSignals) {
-    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    // The batch bound must hold under every plan, including the one chosen with
+    // statistics recorded while the table was empty.
+    await emptySignalsWithStaleStatistics()
     const orphan = randomUUID()
     const active = await setup()
     await entry(active)
@@ -865,7 +911,8 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         ])
       ).rows,
     ).toHaveLength(1501)
-    expect(await cleanup(ctx)).toBe(1501)
+    // A frozen clock gives the next run its whole budget regardless of machine load.
+    expect(await cleanup(ctx, { now: () => 0 })).toBe(1501)
     expect(
       (await testDb.pool.query('SELECT event_type_id FROM waitlist_scan_signals')).rows,
     ).toEqual([{ event_type_id: active.eventTypeId }])
@@ -886,6 +933,30 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       name: 'AssertionError',
     })
   })
+
+  it(
+    'detects source-copy irrelevant-signal cleanup through a rescannable IN subquery',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          `WHERE id = ANY(ARRAY(
+            SELECT s.id FROM waitlist_scan_signals s`,
+          `WHERE id IN (
+            SELECT s.id FROM waitlist_scan_signals s`,
+        ],
+        [
+          `FOR UPDATE OF s SKIP LOCKED
+          )) RETURNING id`,
+          `FOR UPDATE OF s SKIP LOCKED
+          ) RETURNING id`,
+        ],
+      ])
+      await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+  )
 
   it('detects source-copy cleanup limited to one batch per run', SERIALIZED, async () => {
     const copy = sourceCopy('waitlist-discovery', [['if (count < SIGNAL_LIMIT) break', 'break']])
