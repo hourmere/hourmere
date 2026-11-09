@@ -1,7 +1,8 @@
 # Meeting polls: data model and flow proposal
 
-Status: design only, checked against the repository and official help on 2026-11-06.
-Nothing in this document is an implemented endpoint, table or product promise. The later
+Status: storage foundation implemented by migration `0071_meeting_polls.sql`;
+service, transport, workers and UI remain proposed. Competitor research was checked
+against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
 [data model](data-model.md), [API conventions](api-conventions.md),
@@ -189,7 +190,8 @@ poll privacy does not promise a private calendar attendee list.
 
 ## Proposed tables and invariants
 
-No migration is included here. New application IDs use UUIDv7 with `DEFAULT uuidv7()`;
+Migration `0071_meeting_polls.sql` implements the storage foundation below.
+New application IDs use UUIDv7 with `DEFAULT uuidv7()`;
 FK types match existing UUID organization/user/event/booking keys. Every table carries
 `organization_id`, `created_at` and `updated_at` (`timestamptz`, server assigned). Instants
 are UTC; `display_time_zone`/`time_zone` are validated IANA names. Use snake_case columns,
@@ -436,9 +438,9 @@ verification, explicit rotation and revocation. No raw capabilities in list/resu
 Rate-limit by trusted client IP, poll, organization and normalized mailbox digest, with
 bounded payloads, enrollment and mail work. Reuse existing email budgets; do not deliver
 arbitrary host HTML or reminders to unverified public-link enrollees. Configure shared rate-limit enforcement
-for multiple processes; per-process limits alone are insufficient. Additional mail budgets
-and retention schedules must be selected and documented in the service task using existing
-abuse-control policy; they are not new constants pinned here. Forwarded public links and
+for multiple processes; per-process limits alone are insufficient. Additional mail budgets must be selected and documented before service admission using
+existing abuse-control policy. The storage cleanup schedule is specified below; it does
+not replace the existing recipient and organization mail budgets. Forwarded public links and
 mailbox aliases can still admit unwanted voters; invited mode is recommended for sensitive
 meetings. Email verification is not proof of a unique human.
 
@@ -464,8 +466,8 @@ Bulk removal retains mailbox tombstones/counters and uses the same poll lock and
 
 ## Initial limits
 
-These are proposed numeric contract facts for the later implementation; the doc-fact test
-pins this table. Boundary validation belongs in the service and API tests later.
+These numeric contract facts are encoded in the shared storage policy constants; the
+doc-fact test pins this table. Boundary validation belongs in the service and API tests later.
 
 | Limit | Value | Reason |
 |---|---|---|
@@ -488,6 +490,36 @@ The enrollment cap does not raise booking capacity. Expiry and host removal boun
 public-link saturation lasts; per-IP/poll/organization/mailbox admission budgets bound refill
 and retained tombstone growth, and link rotation lets the host stop further leaked-link joins. Caps apply equally to self-hosting,
 REST, MCP, CLI and UI. Expanding them requires reviewing booking capacity and mail budgets.
+
+## Storage policy and cleanup schedule
+
+`packages/scheduling/src/meeting-poll-policy.ts` names all initial admission limits,
+including the shared public request bucket sizes. These constants do not enable service
+admission or register a worker. SQL independently enforces storage bounds; future service
+validation must use the same limits and preserve the database constraints.
+
+The cleanup implementation must run hourly, in batches of at most 500 rows per
+transaction, continuing bounded batches on later runs. It captures the database clock
+under the poll lock. Delayed cleanup never grants a vote, retains an expired public
+reservation's capacity, or extends credential validity. The schedule is:
+
+| Stored data | Expiry and cleanup contract |
+|---|---|
+| Open polls, including abandoned polls | Derive closed at the deadline immediately; the hourly sweep persists closure even without a host visit. Terminal personal history then follows the installation's booking-data retention policy. |
+| Terminal polls | Use the same retention period and deletion eligibility as the installation's booking data, measured from scheduling/cancellation/closure (the deadline for deadline closure). The repository currently has no automatic general booking-data expiry, so without an installation retention policy, terminal history remains until explicit poll, linked-booking or organization deletion. This does not retain open voting indefinitely. |
+| Expired public pending voters | Delete on the first hourly sweep after `pending_expires_at`, cascading votes, capabilities and deliveries. Enrollment/invitation replaces expired rows synchronously when needed; no name, mailbox, responses or IP digest remains after cleanup. |
+| Capability ciphertext | Clear immediately on revocation and on the first hourly sweep after expiry. Preserve a voting digest for read-only own-ballot access until poll deletion/retention; expired public pending rows are deleted entirely. |
+| Mailbox counters | Keep counters, reminder receipt, opt-out and removal digest for the entire retained poll lifetime, with no voter FK and no early purge/reset. Set `purge_at` only when the parent retention policy makes the poll due; delete the poll and its counters together. Poll privacy deletion cascades immediately. |
+| Operation receipts | Keep minimal receipts while their poll is retained. On poll deletion erase poll/booking references and result metadata; keep only non-personal replay digests for 90 days from deletion, then delete in the first hourly sweep at or after `purge_at`. Organization deletion cascades immediately. |
+| Recipient deliveries | Erase ciphertext immediately on sent/suppressed/skipped terminal transition. Retain the minimal terminal recipient receipt for the poll lifetime to prevent duplicate reminders/outcomes; voter/poll deletion cascades. Expired claims keep their attempt count; allow at most 5 attempts with a 5-minute lease, then terminally skip and clear ciphertext. |
+
+Workers and retention-policy integration land in the later cleanup and delivery steps;
+no background expiry or mail delivery is introduced by this storage migration. A poll
+privacy deletion never deletes its booking. Deleting a linked booking deletes its poll
+history first, preserving the scheduled-pair invariant and clearing receipt references.
+Installation policies must delete poll history alongside due booking history rather than
+leave an indefinitely retained personal-data copy. Numeric cleanup and delivery bounds
+are named in `MEETING_POLL_RETENTION` alongside the admission constants.
 
 ## Proposed REST, MCP and CLI contract
 
@@ -603,7 +635,7 @@ check demonstrating a real assertion fails when removed, then restoration.
 
 ## Out of scope and decisions to confirm
 
-This change contains no schema, storage/service implementation, public page, host UI,
+The storage foundation contains no service admission, worker, public page, host UI,
 API/MCP/CLI registration or new UI strings. No automatic winner, candidate edits/reopening,
 calendar holds, arbitrary non-event hosts, named public vote matrix, recurring polls,
 payments, group seats, one-time-link composition or imported polls. Polls are preferences,
@@ -615,6 +647,6 @@ a poll; the host should choose the final settings before sharing.
 Project-lead acceptance should confirm the ordinary booker/guest mapping and separate enrollment/attendee caps,
 aggregate-only sharing option, no-hold policy and explicit unsupported modes before storage
 work starts. Cal.com's host-created multi-voter poll premise needs an official source if
-it is to appear in future competitive claims. Later storage work must finalize numeric
-abuse budgets/retention and prove lock-order compatibility; these are release gates, not
+it is to appear in future competitive claims. Later service work must finalize additional mail
+abuse budgets and prove lock-order compatibility; these are release gates, not
 permission to ship unbounded enrollment or mail.

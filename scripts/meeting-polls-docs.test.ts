@@ -631,3 +631,150 @@ describe('meeting poll day-sized implementation plan', () => {
     verifyPlan(document)
   })
 })
+
+const contractRevisions = [
+  ['POST `/meeting-polls`', []],
+  ['GET `/meeting-polls`, GET `/meeting-polls/{id}`', []],
+  ['GET `/meeting-polls/{id}/results`', []],
+  ['POST `/meeting-polls/{id}/invitations`', []],
+  ['POST `/meeting-polls/{id}/invitations/{voterId}/resend`', ['expectedHostRevision']],
+  ['DELETE `/meeting-polls/{id}/voters/{voterId}`', ['expectedHostRevision']],
+  ['POST `/meeting-polls/{id}/remove-unverified`', ['expectedHostRevision']],
+  ['DELETE `/meeting-polls/{id}`', ['expectedHostRevision']],
+  ['POST `/meeting-polls/{id}/close`, `/cancel`', ['expectedHostRevision']],
+  ['POST `/meeting-polls/{id}/finalize`', ['expectedResultsRevision']],
+  ['POST `/meeting-polls/{id}/rotate-link`', ['expectedHostRevision']],
+  ['POST `/public/meeting-polls/read`', []],
+  ['POST `/public/meeting-polls/enroll`, `/recover`', []],
+  ['POST `/public/meeting-polls/verify`', []],
+  ['POST `/public/meeting-polls/vote`', ['expectedBallotRevision']],
+  ['POST `/public/meeting-polls/reminder-opt-out`', []],
+  ['POST `/public/meeting-polls/withdraw`', ['expectedBallotRevision']],
+] as const
+
+function verifyRevisionContract(source: string) {
+  const text = source.replace(/\s+/g, ' ')
+  expect(text).toContain(
+    '`host_revision` changes only on accepted host writes (invitation, resend, removal, bulk removal, link rotation) and host lifecycle transitions (close, cancel, finalize); voter actions, recovery, reminder opt-out, public pending expiry and the derived deadline transition never change it.',
+  )
+  expect(text).toContain(
+    '`results_revision` changes whenever the results/attendee snapshot changes: admission, verification, ballot and profile edits, withdrawal, reactivation, invitation, removal and bulk removal. Only finalize checks it, through `expectedResultsRevision`',
+  )
+  expect(text).toContain(
+    'Bulk removal retains mailbox tombstones/counters and uses the same poll lock and `expectedHostRevision`, so voter activity cannot make any of these remedies fail.',
+  )
+  expect(source).not.toMatch(/\bexpectedRevision\b/)
+  for (const [resource, revisions] of contractRevisions) {
+    expect(
+      tableRow(source, resource)[3]?.match(/\bexpected\w*Revision\b/g) ?? [],
+      resource,
+    ).toEqual(revisions)
+  }
+}
+
+describe('meeting poll exact revision contract', () => {
+  it('pins both bump lists, bulk removal and every contract row revision field', () => {
+    verifyRevisionContract(document)
+  })
+
+  it.each([
+    [
+      'host bump list',
+      'removal, link rotation) and host lifecycle',
+      'removal, link rotation, ballot edits) and host lifecycle',
+    ],
+    [
+      'host lifecycle bump list',
+      '(close, cancel, finalize); voter',
+      '(close, cancel, finalize, verification); voter',
+    ],
+    [
+      'results bump list',
+      'bulk removal. Only finalize checks it',
+      'bulk removal, recovery. Only finalize checks it',
+    ],
+    [
+      'bulk-removal prose',
+      '`expectedHostRevision`, so voter activity',
+      '`expectedResultsRevision`, so voter activity',
+    ],
+    ['legacy revision field', 'Require `expectedBallotRevision`', 'Require `expectedRevision`'],
+  ])('rejects a source-copy regression of %s', (_name, before, after) => {
+    verifyRevisionContract(document)
+    const mutated = document.replace(before, after)
+    expect(mutated).not.toBe(document)
+    expect(() => verifyRevisionContract(mutated)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verifyRevisionContract(document)
+  })
+
+  it.each(contractRevisions)(
+    'rejects a source-copy revision change in %s',
+    (resource, revisions) => {
+      verifyRevisionContract(document)
+      const original = document.split('\n').find((line) => line.startsWith(`| ${resource} |`))
+      expect(original).toBeDefined()
+      const replacement = revisions.length
+        ? original?.replace(
+            revisions[0],
+            revisions[0] === 'expectedHostRevision'
+              ? 'expectedResultsRevision'
+              : 'expectedHostRevision',
+          )
+        : original?.replace(/ \|$/, '; expectedHostRevision |')
+      const mutated = document.replace(original ?? '', replacement ?? '')
+      expect(mutated).not.toBe(document)
+      expect(() => verifyRevisionContract(mutated)).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+      verifyRevisionContract(document)
+    },
+  )
+})
+
+const invitationOutcomes = [
+  [
+    'Active host invitee, verified or not',
+    'Unchanged: no new place, credential or mail; lost mail uses resend',
+  ],
+  ['Verified public-link voter', 'Unchanged: keeps its place, credential and ballot; no mail'],
+  [
+    'Unexpired public pending enrollee',
+    'Upgraded to an invitation: pending expiry and IP digest cleared, verification credential revoked, invitation mail with a voting credential; still one place',
+  ],
+  [
+    'Withdrawn voter',
+    "Unchanged: withdrawal opted out of poll mail; only the voter's own capability can reactivate. A host who removes and then re-invites the address overrides this deliberately and sends one invitation; a reminder opt-out still applies",
+  ],
+  [
+    'Expired public pending enrollee',
+    'Invited as new: the expired row is replaced and a new place is reserved',
+  ],
+  [
+    'Removed mailbox',
+    "Re-invited: the host's explicit invitation clears the removal tombstone and reserves a new place; mailbox counters persist",
+  ],
+] as const
+
+function verifyInvitationOutcomes(source: string) {
+  for (const [state, outcome] of invitationOutcomes) {
+    expect(tableRow(source, `${state} |`)[1], state).toBe(outcome)
+  }
+}
+
+describe('meeting poll invitation outcome contract', () => {
+  it('pins the complete outcome of each of the six mailbox states', () => {
+    verifyInvitationOutcomes(document)
+  })
+
+  it.each(invitationOutcomes)('rejects a source-copy outcome change for %s', (state, outcome) => {
+    verifyInvitationOutcomes(document)
+    const mutated = document.replace(`| ${state} | ${outcome} |`, `| ${state} | Re-invited |`)
+    expect(mutated).not.toBe(document)
+    expect(() => verifyInvitationOutcomes(mutated)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    verifyInvitationOutcomes(document)
+  })
+})
