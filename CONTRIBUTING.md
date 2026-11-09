@@ -191,8 +191,11 @@ printing the actual token strings.
 
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
-The reusable [CI workflow](.github/workflows/ci.yml) keeps exactly its existing `check`,
-`cli-compatibility`, `docker` and `e2e` jobs. The separate
+The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing required `check`,
+`cli-compatibility`, `docker` and `e2e` check names. Four `e2e-shard` jobs run the
+complete functional browser suite in parallel; the `e2e` aggregator succeeds only
+when every shard succeeds, including on merge-queue runs. Each shard builds its own
+web and disposable site fixture and retains the browser-artifact privacy check. The separate
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
 and manual dispatches. Layout shards fail on every layout finding, scan error, browser
 failure or missing report; axe fails on serious/critical violations and scan/execution
@@ -218,7 +221,8 @@ Browser downloads are cached by the pinned Playwright version. The system depend
 runs even on cache hits because a browser cache does not preserve runner apt packages;
 Playwright installs system packages only when its dry-run check finds packages missing.
 
-可复用 CI 保留原有四个任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
+可复用 CI 保留原有必需检查名称。功能浏览器测试分为四片并行运行，
+`e2e` 汇总任务仅在所有分片成功时通过，合并队列也执行这些任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
 布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
 CI 和发布工作流都不调用它，发布标签不会运行这些检测。
 布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
