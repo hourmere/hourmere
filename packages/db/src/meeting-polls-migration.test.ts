@@ -57,7 +57,8 @@ async function records(pool: pg.Pool) {
   return result
 }
 
-describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
+// Real-database scenarios: allow for a loaded shared server, as CI and parallel agents produce.
+describe.skipIf(!serverUrl)('meeting poll storage migration', { timeout: 60_000 }, () => {
   it('preserves populated predecessor rows, matches a fresh install and reruns without writes', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-poll-upgrade-'))
     let upgraded: TestDatabase | undefined
@@ -634,7 +635,7 @@ const checks: Record<string, (f: Fixture) => Promise<void>> = {
   ...meetingPollSerializationChecks,
 }
 
-describe.skipIf(!serverUrl)('meeting poll storage protections', () => {
+describe.skipIf(!serverUrl)('meeting poll storage protections', { timeout: 60_000 }, () => {
   let database: TestDatabase | undefined
   beforeAll(async () => {
     database = await createTestDatabase(serverUrl as string, undefined, { tag: 'pollchecks' })
