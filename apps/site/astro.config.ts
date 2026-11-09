@@ -78,6 +78,7 @@ export default defineConfig({
             { label: 'Overview', link: '/docs' },
             { label: 'Self-hosting', link: '/docs/self-hosting' },
             { label: 'Configuration', link: '/docs/configuration' },
+            { label: 'Cal.com / cal.diy import', link: '/docs/calcom-import' },
             { label: 'Install the app', link: '/docs/install-app' },
             { label: 'Paid bookings (foundation)', link: '/docs/payments' },
             { label: 'Troubleshooting', link: '/docs/troubleshooting' },
