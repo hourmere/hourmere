@@ -130,7 +130,7 @@ describe('multiple meeting length documentation', () => {
       for (const [before, after] of [
         ['Additional durations', 'More settings'],
         ['Duration (minutes)', 'Default duration'],
-      ]) {
+      ] as const) {
         expect(source).toContain(before)
         expect(() => assertEditorLabels(source.replace(before, after))).toThrow(
           expect.objectContaining({ name: 'AssertionError' }),

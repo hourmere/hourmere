@@ -66,7 +66,7 @@ describe('essentials production-source negative controls', () => {
   const effect = source.slice(effectStart, source.indexOf('  const mounted', effectStart))
   it.each([
     ['group.open = true', 'group.open = false'],
-    ['hiddenField?.focus()', 'void hiddenField'],
+    ['hiddenField.focus()', 'void hiddenField'],
   ])('detects loss of hidden validation recovery: %s', (before, after) => {
     detects(effect, before, after, (copy) => {
       const view = render(
@@ -81,6 +81,7 @@ describe('essentials production-source negative controls', () => {
         compile<() => void>(`function reveal() { ${copy} }`, 'reveal', {
           useEffect: (run: () => void) => run(),
           attempt: 1,
+          focusedAttempt: { current: 0 },
           errors: { 'mutation-buffer': 'Invalid' },
           formRef: { current: view.container.querySelector('form') },
         })()
