@@ -12,6 +12,7 @@ const paths = ['/index.html', '/app/offline.html', '/assets/main-abc123.js', '/a
 const source = readFileSync(new URL('../pwa/worker.js', import.meta.url), 'utf8')
   .replace('__PRECACHE__', JSON.stringify(paths))
   .replace('__CACHE_NAME__', JSON.stringify('hourmere-shell-current'))
+const disabledSource = readFileSync(new URL('../pwa/disabled-worker.js', import.meta.url), 'utf8')
 
 function harness(active = false, worker = source) {
   const listeners: Record<string, (event: unknown) => void> = {}
@@ -716,24 +717,58 @@ const failurePoints: FailurePoint[] = [
       await expect(sw.request(asset)).rejects.toBe(error)
     },
   },
+  {
+    site: 'disabled:caches.keys',
+    behaviour:
+      'retirement fails with the error; nothing deleted; the registration is still removed',
+    drive: async (make) => {
+      const sw = harness(true, disabledSource)
+      const error = make(sw, 'storage denied')
+      sw.caches.keys.mockRejectedValue(error)
+      await expect(sw.lifecycle('activate')).rejects.toBe(error)
+      expect(sw.caches.delete).not.toHaveBeenCalled()
+      expect(sw.unregister).toHaveBeenCalledOnce()
+    },
+  },
+  {
+    site: 'disabled:caches.delete',
+    behaviour: 'retirement fails with the error; the registration is still removed',
+    drive: async (make) => {
+      const sw = harness(true, disabledSource)
+      const error = make(sw, 'delete failed')
+      sw.caches.delete.mockRejectedValue(error)
+      await expect(sw.lifecycle('activate')).rejects.toBe(error)
+      expect(sw.caches.delete).toHaveBeenCalled()
+      expect(sw.unregister).toHaveBeenCalledOnce()
+    },
+  },
 ]
 
-// Every rejectable call in worker.js as `<context>:<callee>`: fetch(), caches.<method>() and
-// cache.<method>() (including `(await caches.open(name)).match(path)`). The context is the
-// listener, split into the install's reuse, fresh and cleanup steps and the fetch route's
-// navigation and static branches. Comments are ignored.
-function rejectableCallSites(code: string) {
-  const text = code.replace(/\/\/.*$/gm, '')
-  const markers: [string, string][] = [
-    ["self.addEventListener('install'", 'install'],
-    ['const previous =', 'reuse'],
-    ['if (reused) continue', 'fresh'],
-    ['} catch (error) {', 'cleanup'],
-    ["self.addEventListener('message'", 'message'],
-    ["self.addEventListener('activate'", 'activate'],
-    ["self.addEventListener('fetch'", 'navigation'],
-    ['if (!staticRequest(request)) return', 'static'],
-  ]
+// The regions a worker source is split into: each marker starts a context, in source order.
+type RegionMarkers = [marker: string, region: string][]
+const workerRegions: RegionMarkers = [
+  ["self.addEventListener('install'", 'install'],
+  ['const previous =', 'reuse'],
+  ['if (reused) continue', 'fresh'],
+  ['} catch (error) {', 'cleanup'],
+  ["self.addEventListener('message'", 'message'],
+  ["self.addEventListener('activate'", 'activate'],
+  ["self.addEventListener('fetch'", 'navigation'],
+  ['if (!staticRequest(request)) return', 'static'],
+]
+const disabledRegions: RegionMarkers = [
+  ["self.addEventListener('install'", 'disabled-install'],
+  ["self.addEventListener('activate'", 'disabled'],
+]
+
+// Every rejectable call in a worker source as `<context>:<callee>`: fetch(), caches.<method>()
+// and any Cache method call, whatever the receiver is called (`cache.put(`, `shell.put(`,
+// `(await caches.open(name)).match(path)`, `cache?.match(`). The context is the listener,
+// split into the install's reuse, fresh and cleanup steps and the fetch route's navigation
+// and static branches. Only whole-line comments are ignored, so a `//` inside a string does
+// not hide the rest of its line.
+function rejectableCallSites(code: string, markers: RegionMarkers = workerRegions) {
+  const text = code.replace(/^\s*\/\/.*$/gm, '')
   const regions = markers
     .map(([marker, region]) => [text.indexOf(marker), region] as const)
     .filter(([at]) => at >= 0)
@@ -742,9 +777,11 @@ function rejectableCallSites(code: string) {
   const sites: string[] = []
   const patterns: [RegExp, (match: RegExpExecArray) => string][] = [
     [/\bfetch\s*\(/g, () => 'fetch'],
-    [/\bcaches\s*\.\s*(open|keys|delete|match|has)\s*\(/g, (match) => `caches.${match[1]}`],
-    [/\bcache\s*\.\s*(match|put|add|addAll|delete|keys)\s*\(/g, (match) => `cache.${match[1]}`],
-    [/\)\s*\.\s*(match|put|add|addAll|delete|keys)\s*\(/g, (match) => `cache.${match[1]}`],
+    [/\bcaches\s*\??\.\s*(open|keys|delete|match|has)\s*\(/g, (match) => `caches.${match[1]}`],
+    [
+      /(?<!\bcaches\s*\??)\??\.\s*(match|matchAll|put|add|addAll|delete|keys)\s*\(/g,
+      (match) => `cache.${match[1]}`,
+    ],
   ]
   for (const [pattern, callee] of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -755,27 +792,42 @@ function rejectableCallSites(code: string) {
 }
 
 it('lists every rejectable fetch, caches and cache call in worker.js exactly once', () => {
-  // The regions the scan splits worker.js into must all still exist.
-  for (const marker of [
-    "self.addEventListener('install'",
-    'const previous =',
-    'if (reused) continue',
-    '} catch (error) {',
-    "self.addEventListener('activate'",
-    "self.addEventListener('fetch'",
-    'if (!staticRequest(request)) return',
-  ])
-    expect(source).toContain(marker)
+  // The regions the scan splits each worker source into must all still exist.
+  for (const [marker] of workerRegions) expect(source).toContain(marker)
+  for (const [marker] of disabledRegions) expect(disabledSource).toContain(marker)
   const listed = failurePoints.map((point) => point.site)
   expect(new Set(listed).size).toBe(listed.length)
-  expect(rejectableCallSites(source)).toEqual([...listed].sort())
-  // The scan sees through comments and chained calls.
+  expect(
+    [
+      ...rejectableCallSites(source),
+      ...rejectableCallSites(disabledSource, disabledRegions),
+    ].sort(),
+  ).toEqual([...listed].sort())
+  // The scan ignores whole-line comments only, and sees chained, optional and renamed receivers.
+  const inInstall = (body: string) => `self.addEventListener('install', async () => {\n${body}\n})`
   expect(rejectableCallSites("// fetch(x)\nself.addEventListener('fetch', () => {})")).toEqual([])
+  expect(rejectableCallSites(inInstall("await (await caches.open('a')).match('b')"))).toEqual([
+    'install:cache.match',
+    'install:caches.open',
+  ])
+  expect(rejectableCallSites(inInstall("await cache?.match('b')"))).toEqual(['install:cache.match'])
+  expect(rejectableCallSites(inInstall("await cache.matchAll('b')"))).toEqual([
+    'install:cache.matchAll',
+  ])
   expect(
     rejectableCallSites(
-      "self.addEventListener('install', async () => {\n  await (await caches.open('a')).match('b')\n})",
+      inInstall("const shell = cache\nawait shell.put('a', r)\nawait current.delete('b')"),
     ),
-  ).toEqual(['install:cache.match', 'install:caches.open'])
+  ).toEqual(['install:cache.delete', 'install:cache.put'])
+  expect(
+    rejectableCallSites(
+      inInstall("const current = await caches.open('x')\nawait current.delete('y')"),
+    ),
+  ).toEqual(['install:cache.delete', 'install:caches.open'])
+  expect(rejectableCallSites(inInstall("await caches?.has('x')"))).toEqual(['install:caches.has'])
+  expect(
+    rejectableCallSites(inInstall("await caches.has('https://cdn.example/a') // trailing")),
+  ).toEqual(['install:caches.has'])
 })
 
 it.each(
@@ -954,13 +1006,8 @@ it('ships a disabled-build worker that immediately retires installed workers wit
     const worker = await readFile(join(root, 'dist/app/sw.js'), 'utf8')
     await verifyDisabled(worker)
     expect(existsSync(join(root, 'dist/app/offline.html'))).toBe(false)
-    for (const [, make] of errorKinds) {
-      const sw = harness(true, worker)
-      const error = make(sw, 'storage denied')
-      sw.caches.keys.mockRejectedValue(error)
-      await expect(sw.lifecycle('activate')).rejects.toBe(error)
-      expect(sw.unregister).toHaveBeenCalledOnce()
-    }
+    // The build ships disabled-worker.js unchanged, so the failure-point rows test the shipped file.
+    expect(worker).toBe(disabledSource)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
