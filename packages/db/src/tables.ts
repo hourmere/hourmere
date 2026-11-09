@@ -393,6 +393,18 @@ export interface BookingRescheduleRequests {
   state: Generated<string>;
 }
 
+export interface BookingRouting {
+  answers: Json;
+  booking_id: string;
+  form_id: string;
+  matched_rule_id: string;
+  organization_id: string;
+  questions: Json;
+  resolved_rule_id: string;
+  version_id: string;
+  version_number: number;
+}
+
 export interface Bookings {
   api_key_id: string | null;
   cancel_reason: string | null;
@@ -1000,6 +1012,57 @@ export interface RoundRobinState {
   next_sequence: Generated<Int8>;
 }
 
+export interface RoutingForms {
+  archived_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string;
+  draft: Json;
+  draft_revision: Generated<number>;
+  enabled: Generated<boolean>;
+  id: Generated<string>;
+  last_version_number: Generated<number>;
+  organization_id: string;
+  published_version_id: string | null;
+  slug: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface RoutingFormVersions {
+  fallback: Json;
+  form_id: string;
+  id: Generated<string>;
+  organization_id: string;
+  published_at: Generated<Timestamp>;
+  published_by_user_id: string;
+  questions: Json;
+  rules: Json;
+  version_number: number;
+}
+
+export interface RoutingReceipts {
+  answers_ciphertext: Buffer | null;
+  consumed_booking_id: string | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  form_id: string;
+  id: Generated<string>;
+  matched_rule_id: string;
+  organization_id: string;
+  resolved_rule_id: string;
+  resolved_target: Json;
+  token_hash: string;
+  version_id: string;
+}
+
+export interface RoutingTargetDependencies {
+  event_type_id: string;
+  health_checked_at: Timestamp | null;
+  health_code: Generated<string>;
+  organization_id: string;
+  rule_id: string;
+  version_id: string;
+}
+
 export interface ScheduleOverrides {
   date: string;
   intervals: Json;
@@ -1226,6 +1289,7 @@ export interface DB {
   booking_notification_conference_context: BookingNotificationConferenceContext;
   booking_notifications: BookingNotifications;
   booking_reschedule_requests: BookingRescheduleRequests;
+  booking_routing: BookingRouting;
   booking_scheduled_messages: BookingScheduledMessages;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
@@ -1267,6 +1331,10 @@ export interface DB {
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;
+  routing_form_versions: RoutingFormVersions;
+  routing_forms: RoutingForms;
+  routing_receipts: RoutingReceipts;
+  routing_target_dependencies: RoutingTargetDependencies;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
   scim_provisioning_tokens: ScimProvisioningTokens;

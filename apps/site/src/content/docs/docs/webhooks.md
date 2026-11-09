@@ -7,7 +7,8 @@ Webhooks are optional outbound signed notifications for booking creation, resche
 cancellation, plus private attendee no-show changes. They use the same booking services for public pages, REST and MCP. They do
 not depend on Google, Microsoft, mail or a billing account. Webhook management is REST-only;
 there is no webhook settings page. The private [Zapier app](/docs/zapier) uses these endpoints
-to subscribe and unsubscribe automatically.
+to subscribe and unsubscribe automatically. [Make recipes](/docs/make) give manual module
+settings for `booking.created` and `booking.cancelled`.
 
 ## Enable and configure
 

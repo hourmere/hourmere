@@ -795,11 +795,44 @@ Canceling from the confirmation removes the continuation link.
 Group seats retain `manage_token_hash` and `responses` on each independent `bookings`
 row; they do not move private seat data onto shared slots or attendee rosters.
 
-## Routing forms design
+## Routing form storage
 
-[Routing forms — proposed design](routing-forms.md) sketches versioned questions, rules,
-fallback targets, private answer retention and booking provenance. It is design only; no
-routing tables or public feature are installed yet.
+Migration 0072 installs the five tables specified in [Routing forms](routing-forms.md):
+`routing_forms`, `routing_form_versions`, `routing_target_dependencies`,
+`routing_receipts` and `booking_routing`. Storage alone enables no routing execution,
+transport, UI or operator setting.
+
+Each organization may retain **100 non-archived forms**, including disabled forms,
+and **1000 total forms**, including archived forms; each form may retain
+**1000 published versions**. A transaction advisory lock keyed by
+`hourmere.routing-form-quota:<organizationId>` serializes form admission without writing
+the organization row. Form creation and unarchiving require `READ COMMITTED`; other
+isolation modes fail closed with `40001` and must restart at `READ COMMITTED` so that
+quota counts use a fresh snapshot after waiting. Version admission writes the form row,
+so stale repeatable-read version writers must retry. Archiving frees a non-archived slot
+but not a total-forms slot. Cleanup may free a version slot but cannot lower the form's
+`last_version_number` high-water mark or reuse an old version number.
+
+Composite organization foreign keys fence versions, published pointers, dependencies,
+receipts and consuming bookings. A published pointer additionally belongs to the same
+form and is deferred for atomic publication. Form identity and organization cannot change.
+Published versions and booking routing snapshots reject updates. The current pointer and
+all receipts (including consumed replay evidence) prevent version deletion; unreferenced
+old versions may be cleaned up. Historical target/user UUIDs and booking snapshot
+form/version UUIDs have no foreign keys to deletable targets/users/forms, so deletion
+cannot cascade away booking history or block event deletion. Organization deletion
+cascades all routing rows; booking deletion cascades its snapshot and consumed receipt.
+
+SQL checks enforce the same lowercase slug format as event types (with unique
+organization/slug pairs), JSON containers, positive revisions/version numbers, enabled/archive
+shape, expiry after creation, digest/rule identity shape and no ciphertext on consumed
+receipts. Dependency identity (organization, version, rule and event type) is immutable;
+only health metadata changes, with `health_code` restricted to `ok`, `unavailable` or `unknown`. Receipt issuance bindings and nonnull answer ciphertext cannot change; ciphertext can
+only be erased. A null ciphertext also permits expiry purge without consuming a receipt.
+Consumed receipt evidence cannot be rebound or revived.
+Question/rule/target semantics remain the future shared validator's responsibility.
+Unconsumed receipt indexes support bounded expiry cleanup and form/instance admission
+counts; receipt lifetime, encryption and admission services land in later steps.
 
 ## Planned additions (each a new migration)
 
@@ -1120,6 +1153,17 @@ The phases within that organization boundary are:
   order, then share-locks their member rows in sorted user-ID order. Round-robin bookings
   next lock their assignment state. A changed host set is refused; do not append newly
   discovered advisory locks out of order.
+- Routing form creation takes the organization share lock, then the transaction advisory
+  lock `hashtextextended('hourmere.routing-form-quota:' || organizationId, 0)` before
+  inserting the form. It never upgrades or writes the organization row. Any transaction
+  combining form admission with event/form/receipt operations must take this advisory
+  lock after the organization lock and before event-type, form and receipt row locks.
+  Any future operation that unarchives a form must take the organization lock and then
+  this advisory lock explicitly before it locks or updates the form row. The form trigger
+  also takes the advisory lock to check capacity, but only as a backstop: a bare
+  `UPDATE … SET archived_at = NULL` locks the form row before the trigger runs and can
+  deadlock (`40P01`) with a transaction that took the advisory lock first. No unarchive
+  operation exists yet.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
