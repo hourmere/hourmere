@@ -44,6 +44,9 @@ const Instance = z
     ssoSamlEnabled: z.boolean().optional().openapi({
       description: 'Whether SAML SSO is enabled; absent when unknown',
     }),
+    routingFormsEnabled: z.boolean().optional().openapi({
+      description: 'Whether routing forms are enabled; absent when unknown',
+    }),
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
@@ -77,6 +80,7 @@ export function instanceRoutes({
   slotSnippetsEnabled = false,
   ssoOidcEnabled = false,
   ssoSamlEnabled = false,
+  routingFormsEnabled = false,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
   termsUrl,
@@ -94,6 +98,8 @@ export function instanceRoutes({
   slotSnippetsEnabled?: boolean
   ssoOidcEnabled?: boolean
   ssoSamlEnabled?: boolean
+  /** The effective routing-forms state; the server passes its hard-off constant. */
+  routingFormsEnabled?: boolean
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -110,6 +116,7 @@ export function instanceRoutes({
     slotSnippetsEnabled,
     ssoOidcEnabled,
     ssoSamlEnabled,
+    routingFormsEnabled,
     scimProvisioningEnabled,
     signIn: {
       email: true,
