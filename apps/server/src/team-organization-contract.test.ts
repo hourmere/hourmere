@@ -136,6 +136,17 @@ describe.skipIf(!serverUrl)('team organization HTTP contract (Better Auth 1.7.10
     const member = await actor('switch-member@contract.example')
     const outsider = await actor('switch-outsider@contract.example')
     const team = await create(owner.cookie, 'contract-switch')
+    // Branding is an admin-only product resource, never a native organization field.
+    await testDb.pool.query('INSERT INTO organization_brand_logos VALUES ($1,$2,$3)', [
+      team.id,
+      'a'.repeat(64),
+      Buffer.from('synthetic png'),
+    ])
+    await testDb.pool.query(
+      'INSERT INTO organization_branding (organization_id,brand_logo,brand_primary_color) VALUES ($1,$2,$3)',
+      [team.id, 'a'.repeat(64), '#123456'],
+    )
+
     await testDb.pool.query(
       `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt")
        VALUES ($1, $2, 'member', now())`,
@@ -144,6 +155,13 @@ describe.skipIf(!serverUrl)('team organization HTTP contract (Better Auth 1.7.10
     for (const user of [owner, member]) {
       const listed = await get('list', user.cookie)
       expect(listed.status).toBe(200)
+      const full = await get(`get-full-organization?organizationId=${team.id}`, user.cookie)
+      expect(full.status).toBe(200)
+      const fullBody = await full.json()
+      for (const field of ['brand_logo', 'brand_primary_color', 'brandLogo', 'brandPrimaryColor'])
+        expect(fullBody).not.toHaveProperty(field)
+      expect(JSON.stringify(fullBody)).not.toContain('#123456')
+
       expect(await listed.json()).toEqual([
         {
           id: team.id,

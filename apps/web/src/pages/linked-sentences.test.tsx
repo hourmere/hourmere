@@ -23,7 +23,8 @@ function pageApi({ schedules = [schedule()], hasProfile = true } = {}) {
     'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
     [`GET /api/v1/bookings/${BOOKING_ID}`]: () => json(200, booking()),
     [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, eventType()),
-    [`GET /api/v1/schedules/${SCHEDULE_ID}`]: () => json(200, schedule()),
+    [`GET /api/v1/schedules/${SCHEDULE_ID}/availability`]: () =>
+      json(200, { schedule: schedule(), overrides: [], version: '0' }),
     [`GET /api/v1/schedules/${SCHEDULE_ID}/overrides`]: () => json(200, { data: [] }),
   })
 }

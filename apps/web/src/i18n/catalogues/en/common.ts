@@ -1,5 +1,10 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'Meeting location': 'Meeting location',
+  'Your phone number': 'Your phone number',
+  'Choose one of the available locations.': 'Choose one of the available locations.',
+  'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.':
+    'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.',
   'This request has expired or changed. Reload your booking to choose what to do next.':
     'This request has expired or changed. Reload your booking to choose what to do next.',
   'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':

@@ -46,6 +46,36 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
+  it('keeps the location editor notice in lazy admin catalogues', () => {
+    const key =
+      '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.'
+    for (const { code } of registeredLocales) {
+      expect(groups.common[`./catalogues/${code}/common.ts`], code).not.toHaveProperty(key)
+      expect(groups.admin[`./catalogues/${code}/admin.ts`]?.[key], code).toBeTruthy()
+    }
+  })
+
+  it('uses the existing Chinese register for collected phone numbers', () => {
+    expect(groups.common['./catalogues/zh-CN/common.ts']?.['Your phone number']).toBe(
+      '你的电话号码',
+    )
+  })
+
+  it('translates location choice and phone collection in every public locale', () => {
+    const keys = [
+      'Meeting location',
+      'Your phone number',
+      'Choose one of the available locations.',
+      'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.',
+    ]
+    for (const { code } of registeredLocales) {
+      const catalogue = groups.common[`./catalogues/${code}/common.ts`]
+      for (const key of keys) {
+        expect(catalogue?.[key], `${code}: ${key}`).toBeTruthy()
+        if (code !== 'en') expect(catalogue?.[key]).not.toBe(key)
+      }
+    }
+  })
   it('translates suggested-time statuses in every public locale', () => {
     const keys = [
       'We could not use the time details in this link. Please choose a time.',

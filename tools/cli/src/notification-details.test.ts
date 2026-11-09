@@ -13,7 +13,9 @@ function sourceCopy(file: string, replacement?: Replacement) {
     source = source.replace(...replacement)
   }
   return stripTypeScriptTypes(
-    source.replace(/^import[^\n]*\n/gm, '').replaceAll('import.meta.url', 'clientModuleUrl'),
+    source
+      .replace(/^import[\s\S]*?from '[^']+'\n/gm, '')
+      .replaceAll('import.meta.url', 'clientModuleUrl'),
   ).replace(/^export /gm, '')
 }
 function clientCopy(replacement?: Replacement): typeof client {
@@ -21,7 +23,7 @@ function clientCopy(replacement?: Replacement): typeof client {
   return new Function(
     'readFileSync',
     'clientModuleUrl',
-    `${source}; return { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES, version }`,
+    `${source}; return { CliError, callTool, downloadCsv, endpoint, isObject, MAX_INPUT_BYTES, version }`,
   )(readFileSync, new URL('./client.ts', import.meta.url).href) as typeof client
 }
 function commandCopy(

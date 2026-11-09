@@ -158,6 +158,83 @@ describe.skipIf(!url)('payment holds', () => {
     expect((await snapshot()).notification_snapshot).toEqual(expected)
     expect(ctx.notify).toHaveBeenCalledTimes(1)
   })
+  it('holds store the chosen location option like a confirmed booking and fingerprint it', async () => {
+    const { ctx, input, eventTypeId } = await setup()
+    const options = [
+      { id: 'office', kind: 'in_person', address: 'Private office', isDefault: true },
+      { id: 'video', kind: 'link', url: 'https://meet.example.test/room', label: 'Video link' },
+      { id: 'call', kind: 'phone', askInvitee: true },
+    ]
+    await db
+      .updateTable('event_types')
+      .set({ locations: JSON.stringify(options) })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const stored = (id: string) =>
+      db
+        .selectFrom('bookings')
+        .select(['status', 'location', 'location_option'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow()
+    const holds = () =>
+      db.selectFrom('bookings').select('id').where('event_type_id', '=', eventTypeId).execute()
+    await expect(
+      createPaymentHold(ctx, { ...input, idempotencyKey: 'removed', locationOptionId: 'removed' }),
+    ).rejects.toMatchObject({ code: 'invalid_location_choice' })
+    // Phone locations stay outside the payment foundation, chosen or default.
+    await expect(
+      createPaymentHold(ctx, {
+        ...input,
+        idempotencyKey: 'call',
+        locationOptionId: 'call',
+        inviteePhone: '+14155550123',
+      }),
+    ).rejects.toMatchObject({ code: 'payment_flow_unsupported' })
+    expect(await holds()).toEqual([])
+    const chosen = { ...input, locationOptionId: 'video' }
+    const hold = await createPaymentHold(ctx, chosen)
+    expect(await stored(hold.id)).toEqual({
+      status: 'pending_payment',
+      location: { kind: 'link', url: 'https://meet.example.test/room' },
+      location_option: options[1],
+    })
+    expect((await createPaymentHold(ctx, chosen)).id).toBe(hold.id)
+    await expect(
+      createPaymentHold(ctx, { ...input, locationOptionId: 'office' }),
+    ).rejects.toMatchObject({ code: 'idempotency_key_reused' })
+    expect(await confirmPaymentHold(ctx, hold.id, 'pi_test_location')).toMatchObject({
+      outcome: 'confirmed',
+    })
+    expect(await stored(hold.id)).toEqual({
+      status: 'confirmed',
+      location: { kind: 'link', url: 'https://meet.example.test/room' },
+      location_option: options[1],
+    })
+    expect(await holds()).toEqual([{ id: hold.id }])
+  })
+  it('holds without a choice store the default option snapshot', async () => {
+    const { ctx, input, eventTypeId } = await setup()
+    const options = [
+      { id: 'call', kind: 'phone', askInvitee: true },
+      { id: 'office', kind: 'in_person', address: 'Private office', isDefault: true },
+    ]
+    await db
+      .updateTable('event_types')
+      .set({ locations: JSON.stringify(options) })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const { id } = await createPaymentHold(ctx, input)
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select(['location', 'location_option'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({
+      location: { kind: 'in_person', address: 'Private office' },
+      location_option: options[1],
+    })
+  })
   it('prevents switching an event with a pending hold to group mode', async () => {
     const { ctx, input, eventTypeId } = await setup()
     await createPaymentHold(ctx, input)

@@ -10,7 +10,9 @@ it makes no Stripe network calls. See the [operator note](https://hourmere.com/d
 
 Internal creation supports personal, individual event types with one host only. It rejects
 team, collective, round-robin and group events, guests, waitlist conversion and automatic
-conference or phone locations. One-time-link checkout is not exposed. The server reads
+conference or phone locations. The location rule applies to the invitee's chosen location
+option, or the default when the choice is omitted; a hold stores that option's snapshot and
+resolved location exactly as a confirmed booking would. One-time-link checkout is not exposed. The server reads
 `PAID_BOOKINGS_ENABLED` (default false); a future trusted adapter must pass that setting to
 `createPaymentHold`. This environment setting is reserved and has no runtime effect in
 this release; setting it to true does not permit hold creation. Internal tests opt in
