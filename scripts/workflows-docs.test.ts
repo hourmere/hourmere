@@ -453,9 +453,10 @@ describe('workflow design numeric contracts', () => {
     expect(counts.length).toBeGreaterThanOrEqual(4)
     for (const [, from, to] of counts)
       expect([Number(from), Number(to)]).toEqual([current, extended])
-    // Any other digit count of kinds, or a "1 to N" cardinality, is the current or extended set.
+    // Any other digit count, with up to two words before kinds, events or event types or in the
+    // hyphenated "6-kind" form, or a "1 to N" cardinality, is the current or extended set.
     for (const [phrase, count] of text.matchAll(
-      /\b(\d+) (?:allowed |current |webhook |booking )?(?:event )?(?:kinds|events|event types)\b/g,
+      /\b(\d+)(?:-| (?:[a-z]+ ){0,2})(?:kinds?|events|event types)\b/g,
     ))
       expect([current, extended], phrase).toContain(Number(count))
     for (const [phrase, upper] of text.matchAll(/cardinality[^.]*?\b1 ?(?:to|–|-) ?(\d+)\b/g))
@@ -486,15 +487,21 @@ describe('workflow design numeric contracts', () => {
     expect(text).toContain(
       `\`UNIQUE NULLS NOT DISTINCT (${columns})\`, which ${key.number} added and ${subscription.number} left unchanged`,
     )
+    expect(text).toContain(`the delivery key is still the one ${key.number} added`)
     const requestColumn = latest(/ALTER TABLE webhook_deliveries ADD COLUMN (request_id) uuid;/g)
     expect(text).toContain(`follows ${requestColumn.number}'s \`request_id\` pattern`)
-    // Every migration number written next to a webhook CHECK or the delivery key is main's.
-    for (const [phrase, number] of text.matchAll(
-      /\b(\d{4})(?:'s)? `?(?:webhooks_events_check|webhooks\.events|webhook_deliveries(?:\.event_type|_event_type_check)|event_type CHECK)/g,
+    // Migration numbers in these spellings must be main's: "NNNN's `webhooks.events` CHECK",
+    // "the NNNN event_type/delivery/subscription CHECK", "NNNN's `webhooks_events_check`" or
+    // "`webhook_deliveries_event_type_check`", and for the key "NNNN's NULLS NOT DISTINCT",
+    // "NNNN's delivery key" or "the delivery key is still the one NNNN added".
+    for (const [phrase, checkNumber, constraintNumber] of text.matchAll(
+      /\b(\d{4})(?:'s)? `?(?:webhooks_events_check|webhooks\.events|webhook_deliveries(?:\.event_type|_event_type_check)|event_type|delivery|subscription)`? CHECK|\b(\d{4})(?:'s)? `(?:webhooks_events_check|webhook_deliveries_event_type_check)`/g,
     ))
-      expect(number, phrase).toBe(subscription.number)
-    for (const [phrase, number] of text.matchAll(/\b(\d{4})(?:'s)? NULLS NOT DISTINCT/g))
-      expect(number, phrase).toBe(key.number)
+      expect(checkNumber ?? constraintNumber, phrase).toBe(subscription.number)
+    for (const [phrase, keyNumber, addedNumber] of text.matchAll(
+      /\b(\d{4})(?:'s)? (?:NULLS NOT DISTINCT|delivery key)|\bdelivery key is still the one (\d{4}) added/g,
+    ))
+      expect(keyNumber ?? addedNumber, phrase).toBe(key.number)
     expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns}, workflow_run_id)\``)
     expect(text).toContain('No existing row is rewritten or backfilled')
     // Attendance rows store a fresh per-change receipt in request_id, as the baseline says.
@@ -510,7 +517,7 @@ describe('workflow design numeric contracts', () => {
       /\.max\(3\)/,
       /\.max\(\d+\)/,
       // Counts of kinds are written as digits, which the checks above derive from main.
-      /\b(?:one|two|three|four|five|six|seven|eight|nine|ten) (?:allowed |current |webhook |booking )?(?:event )?(?:kinds|events|event types)\b/i,
+      /\b(?:one|two|three|four|five|six|seven|eight|nine|ten)(?:-| (?:[a-z]+ ){0,2})(?:kinds?|events|event types)\b/i,
       /from three to four/i,
       /\b1[–-]4\b/,
       /\(4\), matching/,
@@ -621,7 +628,11 @@ describe('workflow design numeric contracts', () => {
       .sort()
     const subscribers = ['packages', 'apps']
       .flatMap((directory) => files(directory, testFile))
-      .filter((file) => read(file).includes('events: [...WEBHOOK_EVENTS]'))
+      .filter((file) =>
+        /events:\s*(?:\[\s*\.\.\.WEBHOOK_EVENTS\s*\]|Array\.from\(\s*WEBHOOK_EVENTS\s*\)|WEBHOOK_EVENTS(?:\.slice\(\))?\b)/.test(
+          read(file),
+        ),
+      )
       .sort()
     expect(binders.length).toBeGreaterThan(0)
     expect(subscribers.length).toBeGreaterThan(0)
@@ -648,8 +659,13 @@ describe('workflow design numeric contracts', () => {
 
     // Guides that say webhook management has no MCP/CLI operation are rewritten by step 13a,
     // the first step that adds one.
-    const restOnly = ['docs', 'apps/site/src/content', 'tools']
-      .flatMap((directory) => files(directory, /\.md$/))
+    const restOnly = [
+      'README.md',
+      ...files('packages', /^README\.md$/),
+      ...['docs', 'apps/site/src/content', 'tools'].flatMap((directory) =>
+        files(directory, /\.md$/),
+      ),
+    ]
       .filter((file) => file !== 'docs/workflows.md')
       .filter((file) => read(file).replace(/\s+/g, ' ').includes('Webhook management is REST-only'))
       .sort()
@@ -658,7 +674,7 @@ describe('workflow design numeric contracts', () => {
       restOnly,
     )
     expect(step('13a')).toContain('"Webhook management is REST-only" sentence')
-  })
+  }, 30_000) // Reads every test and Markdown file it scans; a cold file cache can be slow.
 
   it('decides every BookingNotifier event kind on main for workflow capture', () => {
     const context = read('packages/scheduling/src/context.ts')
