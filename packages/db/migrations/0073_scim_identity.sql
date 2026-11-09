@@ -286,10 +286,14 @@ CREATE TRIGGER scim_account_delete_links BEFORE DELETE ON auth.user
 -- Invitations and resources both cascade from an organization. Remove claim rows
 -- first so invitation SET NULL cannot recheck a resource already being deleted.
 -- Ordinary invitation deletion still retains its claim intent and history.
+-- Tokens and connections also both cascade from the organization, in RI trigger name
+-- order that follows object creation; the NO ACTION binding FK must not observe a
+-- connection deleted before its tokens, so bindings are removed first as well.
 CREATE FUNCTION scim_clear_deleted_organization_claims() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
 BEGIN
   DELETE FROM scim_user_claims WHERE organization_id = OLD.id;
+  DELETE FROM scim_token_connections WHERE organization_id = OLD.id;
   RETURN OLD;
 END;
 $$;

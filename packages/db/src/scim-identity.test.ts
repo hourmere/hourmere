@@ -1145,6 +1145,39 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       })
     }
   })
+  it('whole-organization deletion does not depend on FK cascade order; removing the binding cleanup fails under the adverse order', async () => {
+    // PostgreSQL fires an organization's referential actions in RI trigger name order,
+    // which follows object creation and can place the connection cascade before the token
+    // cascade (CI reproduced this). Recreate the token cascade after 0073 to force that
+    // order deterministically: the NO ACTION binding FK must then already be satisfied.
+    const adverse = `${source}
+      ALTER TABLE scim_provisioning_tokens DROP CONSTRAINT scim_provisioning_tokens_organization_id_fkey;
+      ALTER TABLE scim_provisioning_tokens ADD CONSTRAINT scim_provisioning_tokens_organization_id_fkey
+        FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE;`
+    const verify = async (client: pg.PoolClient) => {
+      await succeeds(client, `DELETE FROM auth.organization WHERE id='${org}'`)
+      expect(
+        (
+          await client.query(
+            `SELECT count(*)::integer AS bindings FROM scim_token_connections WHERE organization_id='${org}'`,
+          )
+        ).rows,
+      ).toEqual([{ bindings: 0 }])
+      expect((await client.query(`SELECT token_id FROM scim_token_connections`)).rows).toEqual([
+        { token_id: otherToken },
+      ])
+    }
+    await transaction(adverse, verify)
+    const mutant = adverse.replace(
+      'DELETE FROM scim_token_connections WHERE organization_id = OLD.id;\n',
+      '',
+    )
+    expect(mutant).not.toBe(adverse)
+    await transaction(mutant, async (client) => {
+      await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
   const primaryKeys = [
     {
       table: 'scim_connections',
