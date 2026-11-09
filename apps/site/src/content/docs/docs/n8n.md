@@ -215,8 +215,8 @@ disabled and takes precedence over registries set in `.npmrc` files or the envir
 An explicit `--registry` option on the command line overrides it, so do not pass one to
 get past the placeholder. `prepublishOnly` refuses to publish unless
 `HOURMERE_N8N_PUBLISH=1` is set, but only when lifecycle scripts run. The package
-directory's `.npmrc` turns them off, so `npm publish` there skips that check unless run
-with `--ignore-scripts=false`.
+directory's `.npmrc` turns them off, so `npm publish` there skips that check unless
+scripts are turned back on, for example with `--ignore-scripts=false`.
 
 A dry-run's exit code says nothing about where a publication would go. Without
 `--offline`, `npm publish --dry-run` queries the target registry for existing versions,

@@ -44,7 +44,7 @@ overrides it, so never pass `--registry` to get past the placeholder: the approv
 publication change must remove it in a reviewed commit. The `prepublishOnly` guard refuses
 publication unless `HOURMERE_N8N_PUBLISH=1` is set, but only when lifecycle scripts run.
 This directory's `.npmrc` turns them off, so `npm publish` here skips that guard unless
-run with `--ignore-scripts=false`.
+scripts are turned back on, for example with `--ignore-scripts=false`.
 
 A dry-run's exit code says nothing about where a publication would go. Without
 `--offline`, `npm publish --dry-run` queries the target registry for existing versions,
