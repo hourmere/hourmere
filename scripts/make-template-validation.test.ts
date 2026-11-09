@@ -131,27 +131,41 @@ const attendance = webhookAttendeeNoShowNotifier(queue, settings)
 const start = Temporal.Instant.from('2026-11-16T10:00:00Z')
 const marked = { noShowMarkedAt: now.toString(), noShowMarkedBy: ids.user }
 const unmarked = { noShowMarkedAt: null, noShowMarkedBy: null }
-// Each change with the booking status it has when the notifier runs: cancellation updates
-// the row first, and the other changes (including attendance) apply to confirmed bookings.
-const changes: [string, string, (trx: Db) => Promise<void>][] = [
+// Meeting times relative to now (12:00Z) that a booking can have when a notifier runs.
+const meetings = {
+  upcoming: ['2026-11-16T10:00:00Z', '2026-11-16T10:30:00Z'],
+  'in progress': ['2026-11-09T11:45:00Z', '2026-11-09T12:15:00Z'],
+  ended: ['2026-11-09T11:00:00Z', '2026-11-09T11:30:00Z'],
+} as const
+type Timing = keyof typeof meetings
+// Each change with the booking status and meeting times it can have when the notifier runs:
+// cancellation updates the row first, and the other changes apply to confirmed bookings.
+// Booking changes need an upcoming meeting, attendance needs a started one, and a reschedule
+// request can expire before, during or after the meeting because its expiry is capped at the
+// start but processed later.
+const changes: [string, string, Timing[], (trx: Db) => Promise<void>][] = [
   [
     'created',
     'confirmed',
+    ['upcoming'],
     (trx) => lifecycle(trx, { type: 'created', bookingId: ids.booking, start }, now),
   ],
   [
     'rescheduled',
     'confirmed',
+    ['upcoming'],
     (trx) => lifecycle(trx, { type: 'rescheduled', bookingId: ids.booking, start }, now),
   ],
   [
     'cancelled',
     'cancelled',
+    ['upcoming'],
     (trx) => lifecycle(trx, { type: 'cancelled', bookingId: ids.booking }, now),
   ],
   [
     'reschedule requested',
     'confirmed',
+    ['upcoming'],
     (trx) =>
       lifecycle(
         trx,
@@ -162,6 +176,7 @@ const changes: [string, string, (trx: Db) => Promise<void>][] = [
   [
     'reschedule request expired',
     'confirmed',
+    ['upcoming', 'in progress', 'ended'],
     (trx) =>
       lifecycle(
         trx,
@@ -172,44 +187,47 @@ const changes: [string, string, (trx: Db) => Promise<void>][] = [
   [
     'no-show marked',
     'confirmed',
+    ['in progress', 'ended'],
     (trx) => attendance(trx, { bookingId: ids.booking, attendeeId: ids.attendee, ...marked }, now),
   ],
   [
     'no-show unmarked',
     'confirmed',
+    ['in progress', 'ended'],
     (trx) =>
       attendance(trx, { bookingId: ids.booking, attendeeId: ids.attendee, ...unmarked }, now),
   ],
 ]
 // Every source a webhook can carry (bookings_source_check; imported chains never emit), with
-// and without a predecessor and an event type.
+// and without a predecessor and an event type, at each meeting time the change allows.
 const sources = ['web', 'embed', 'api', 'mcp']
 const captured: Record<string, { cell: string; fields: string[]; payload: string }[]> = {}
-for (const [change, status, notify] of changes)
-  for (const source of sources)
-    for (const predecessor of [null, ids.predecessor])
-      for (const eventType of [null, ids.eventType]) {
-        const delivery = await captureDelivery(
-          {
-            id: ids.booking,
-            organization_id: ids.organization,
-            event_type_id: eventType,
-            start_at: new Date('2026-11-16T10:00:00Z'),
-            end_at: new Date('2026-11-16T10:30:00Z'),
-            status,
-            source,
-            rescheduled_from_id: predecessor,
-          },
-          notify,
-        )
-        const cell = `${change}, ${source}, predecessor ${predecessor ? 'set' : 'null'}, event type ${eventType ? 'set' : 'null'}`
-        captured[delivery.event_type] ??= []
-        captured[delivery.event_type]?.push({
-          cell,
-          fields: fieldPaths(JSON.parse(delivery.payload)),
-          payload: delivery.payload,
-        })
-      }
+for (const [change, status, timings, notify] of changes)
+  for (const timing of timings)
+    for (const source of sources)
+      for (const predecessor of [null, ids.predecessor])
+        for (const eventType of [null, ids.eventType]) {
+          const delivery = await captureDelivery(
+            {
+              id: ids.booking,
+              organization_id: ids.organization,
+              event_type_id: eventType,
+              start_at: new Date(meetings[timing][0]),
+              end_at: new Date(meetings[timing][1]),
+              status,
+              source,
+              rescheduled_from_id: predecessor,
+            },
+            notify,
+          )
+          const cell = `${change}, ${timing}, ${source}, predecessor ${predecessor ? 'set' : 'null'}, event type ${eventType ? 'set' : 'null'}`
+          captured[delivery.event_type] ??= []
+          captured[delivery.event_type]?.push({
+            cell,
+            fields: fieldPaths(JSON.parse(delivery.payload)),
+            payload: delivery.payload,
+          })
+        }
 // Headers come from one real delivery attempt through a capturing transport.
 async function deliveryHeaders(eventType: string, payload: string) {
   const encryptionKey = Buffer.alloc(32, 7).toString('base64')
@@ -546,9 +564,10 @@ describe('Make manual recipe artifacts', () => {
       expect(fields, event).toEqual(expect.arrayContaining(['id', 'type', 'data.bookingId']))
     expect(Object.keys(recipes).sort()).toEqual(['booking.cancelled', 'booking.created'])
   })
-  it('derives the same payload fields in every booking state of an event', () => {
-    // Fields that depend on booking data (status, source, predecessor, event type or an
-    // unmarked attendee) would otherwise be missing from, or wrongly promised by, the docs.
+  it('derives the same payload fields in every sampled booking state of an event', () => {
+    // Fields that depend on booking data (status, source, predecessor, event type, meeting
+    // time or an unmarked attendee) would otherwise be missing from, or wrongly promised by,
+    // the docs.
     for (const [event, cells] of Object.entries(captured)) {
       expect(cells.length, event).toBeGreaterThanOrEqual(16)
       for (const { cell, fields } of cells)
