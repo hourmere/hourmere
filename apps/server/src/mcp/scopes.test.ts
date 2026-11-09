@@ -30,6 +30,8 @@ const all = [
   'get_event_type',
   'set_event_type_notifications',
   'list_schedules',
+  'get_schedule_availability',
+  'save_schedule_availability',
   'get_schedule',
   'get_branding',
   'set_branding',
@@ -50,6 +52,7 @@ const all = [
 ]
 const configurationWrites = new Set([
   'set_branding',
+  'save_schedule_availability',
   'create_event_type',
   'update_event_type',
   'set_event_type_notifications',
@@ -75,6 +78,7 @@ const otherReads = new Set([
   'export_bookings',
   'list_schedules',
   'get_schedule',
+  'get_schedule_availability',
   'list_calendar_connections',
   'list_conference_connections',
   'get_event_type_waitlist',
@@ -390,6 +394,8 @@ describe('CLI scope parity', () => {
     ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
+    ['schedule-availability', 'get_schedule_availability'],
+    ['save-availability', 'save_schedule_availability'],
     ['slots', 'find_available_slots'],
     ['book', 'create_booking'],
     ['list', 'list_bookings'],

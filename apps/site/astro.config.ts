@@ -85,9 +85,11 @@ export default defineConfig({
         {
           label: 'Scheduling',
           items: [
+            { label: 'Availability', link: '/docs/availability' },
             { label: 'Round-robin scheduling', link: '/docs/round-robin-scheduling' },
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
+            { label: 'Meeting location choices', link: '/docs/location-choices' },
             { label: 'Booking limits', link: '/docs/booking-limits' },
             { label: 'One-time booking links', link: '/docs/one-time-links' },
             { label: 'Booking waitlists', link: '/docs/booking-waitlist' },

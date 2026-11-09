@@ -29,6 +29,8 @@ export const COMMANDS = {
   'resend-waitlist-verification': 'resend_waitlist_verification',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
+  'schedule-availability': 'get_schedule_availability',
+  'save-availability': 'save_schedule_availability',
   slots: 'find_available_slots',
   'open-time-snippet': 'generate_open_time_snippet',
   book: 'create_booking',
@@ -55,6 +57,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
 
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
+          schedule-availability, save-availability,
           book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
@@ -62,6 +65,8 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
+Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
+           book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.
 After booking: create-event/update-event accept --success-redirect-url URL,

@@ -1,6 +1,6 @@
 import { createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
 import {
@@ -24,6 +24,17 @@ import {
   schedule,
 } from '../../test/fixtures.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
+
+// Warm the exercised lazy modules before UI assertions: this suite tests editor behavior,
+// not cold module transformation time on a shared test runner.
+beforeAll(async () => {
+  await Promise.all([
+    import('./EventTypeEditor.tsx'),
+    import('./EventTypes.tsx'),
+    import('../bookings/Bookings.tsx'),
+    import('../Settings.tsx'),
+  ])
+})
 
 const location = () => screen.getByTestId('location').textContent
 const field = (name: string | RegExp) => screen.getByLabelText<HTMLInputElement>(name)
@@ -1799,4 +1810,25 @@ it('keeps the event type editor inside the app shell while its skeleton loads', 
   expect(answered).not.toHaveBeenCalled()
   await loading.answer(json(200, eventType()))
   expect(screen.getByRole('heading', { name: 'Edit “Intro call”', level: 1 })).toBeDefined()
+})
+
+it('shows configured location options and preserves them when saving the legacy editor', async () => {
+  const locations = [
+    { id: 'office', kind: 'in_person' as const, address: '1 Main Street' },
+    { id: 'call', kind: 'phone' as const, askInvitee: true as const },
+  ]
+  const api = eventTypeServer([
+    eventType({ location: { kind: 'in_person', address: '1 Main Street' }, locations }),
+  ])
+  const user = userEvent.setup()
+  renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+  await screen.findByText(
+    '2 location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
+  )
+  await user.type(screen.getByLabelText('Title'), ' updated')
+  await user.click(screen.getByRole('button', { name: 'Save changes' }))
+  await screen.findByText('Saved.')
+  const body = api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
+  expect(body).not.toHaveProperty('location')
+  expect(body).not.toHaveProperty('locations')
 })

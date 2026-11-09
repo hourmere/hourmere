@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { setImmediate } from 'node:timers/promises'
 import { createRoute, z } from '@hono/zod-openapi'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import * as calendars from '@hourmere/calendars'
@@ -23,7 +24,7 @@ import {
 } from '@hourmere/scheduling/testing'
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, type TestContext } from 'vitest'
 import * as availability from '../../../packages/scheduling/src/availability.ts'
 import * as bookingPage from '../../../packages/scheduling/src/booking-page.ts'
 import * as conferences from '../../../packages/scheduling/src/conferences.ts'
@@ -121,6 +122,10 @@ describe.skipIf(!bootstrap)(
     let auth: ReturnType<typeof createAuth>
     let jobs: ReturnType<typeof createJobs>
     let app: ReturnType<typeof createApp>
+    let testContext: TestContext
+    beforeEach((context) => {
+      testContext = context
+    })
     const sent: MailMessage[] = []
     const mail = () =>
       bookingNotificationJob({
@@ -316,51 +321,51 @@ describe.skipIf(!bootstrap)(
         memberIdOrEmail: f.memberId,
       })
 
-    // Polling observes a real blocking edge; elapsed time never decides who writes first.
-    async function waiter(blocker: number, query: string) {
-      let pid = 0
-      await expect
-        .poll(
-          async () => {
-            const result = await owned.pool.query<{ pid: number }>(
-              `SELECT pid FROM pg_stat_activity
-             WHERE datname = current_database()
-               AND $1 = ANY(pg_blocking_pids(pid)) AND query LIKE $2`,
-              [blocker, query],
-            )
-            pid = result.rows[0]?.pid ?? 0
-            return pid
-          },
-          { timeout: 5000, interval: 10 },
+    // Inspect tuple locks directly: pg_stat_activity query text and pg_blocking_pids
+    // are sampled separately, so a request advancing to its next query can make them
+    // disagree. The holder keeps these tuple-lock queues stable until both arrive.
+    // Probe until the lock arrives, bounded by the test's existing abort signal,
+    // instead of imposing another five-second deadline on request scheduling.
+    async function waiter(
+      blocker: number,
+      relation: 'bookings' | 'auth.member',
+      signal: AbortSignal,
+    ) {
+      for (;;) {
+        signal.throwIfAborted()
+        const result = await owned.pool.query<{ pid: number }>(
+          `SELECT pid FROM pg_locks
+           WHERE locktype = 'tuple' AND relation = $2::regclass
+             AND $1 = ANY(pg_blocking_pids(pid))`,
+          [blocker, relation],
         )
-        .not.toBe(0)
-      return pid
+        if (result.rows[0]) return result.rows[0].pid
+        await setImmediate(undefined, { signal })
+      }
     }
 
-    async function organizationWaiter(holderPid: number, winnerPid: number) {
-      let blocked: { pid: number; organization: boolean } | undefined
-      await expect
-        .poll(
-          async () => {
-            const result = await owned.pool.query<{ pid: number; organization: boolean }>(
-              `SELECT pid, query LIKE '%"organization"%' AND
-                 $2 = ANY(pg_blocking_pids(pid)) AS organization
-             FROM pg_stat_activity
-             WHERE datname = current_database() AND pid <> $2
-               AND ($1 = ANY(pg_blocking_pids(pid)) OR $2 = ANY(pg_blocking_pids(pid)))
-               AND (query LIKE '%"organization"%' OR query LIKE '%"bookings"%')`,
-              [holderPid, winnerPid],
-            )
-            blocked = result.rows[0]
-            return blocked !== undefined
-          },
-          { timeout: 5000, interval: 10 },
+    async function organizationWaiter(holderPid: number, winnerPid: number, signal: AbortSignal) {
+      for (;;) {
+        signal.throwIfAborted()
+        const result = await owned.pool.query<{ pid: number; organization: boolean }>(
+          `SELECT pid, relation = 'auth.organization'::regclass AND
+             $2 = ANY(pg_blocking_pids(pid)) AS organization
+           FROM pg_locks
+           WHERE locktype = 'tuple' AND pid <> $2
+             AND relation IN ('auth.organization'::regclass, 'bookings'::regclass)
+             AND ($1 = ANY(pg_blocking_pids(pid)) OR $2 = ANY(pg_blocking_pids(pid)))`,
+          [holderPid, winnerPid],
         )
-        .toBe(true)
-      // A rejected lock order has its own observable SQL edge, rather than merely timing out.
-      expect(
-        blocked?.organization ? 'organization lock held' : 'booking locked before organization',
-      ).toBe('organization lock held')
+        const blocked = result.rows[0]
+        if (blocked) {
+          // A rejected lock order has an observable SQL edge, not a timer failure.
+          expect(
+            blocked.organization ? 'organization lock held' : 'booking locked before organization',
+          ).toBe('organization lock held')
+          return
+        }
+        await setImmediate(undefined, { signal })
+      }
     }
 
     async function lockedRace(
@@ -368,8 +373,16 @@ describe.skipIf(!bootstrap)(
       first: () => Promise<Response>,
       second: () => Promise<Response>,
       target: 'booking' | 'membership' = 'booking',
+      signal = testContext.signal,
     ) {
-      const holder = await owned.pool.connect()
+      const { onTestFinished } = testContext
+      signal.throwIfAborted()
+      const finished = Promise.withResolvers<void>()
+      onTestFinished(() => finished.promise)
+      const holder = await owned.pool.connect().catch((error: unknown) => {
+        finished.resolve()
+        throw error
+      })
       const requests: Promise<Response>[] = []
       try {
         await holder.query('BEGIN')
@@ -385,11 +398,12 @@ describe.skipIf(!bootstrap)(
         requests.push(first())
         const winner = await waiter(
           pid as number,
-          target === 'booking' ? '%"bookings"%' : '%"member"%',
+          target === 'booking' ? 'bookings' : 'auth.member',
+          signal,
         )
         requests.push(second())
         // The loser must wait for the winner's parent lock, before it can lock the booking.
-        await organizationWaiter(pid as number, winner)
+        await organizationWaiter(pid as number, winner, signal)
         expect(
           await db
             .selectFrom('bookings')
@@ -404,6 +418,7 @@ describe.skipIf(!bootstrap)(
         await holder.query('ROLLBACK').catch(() => {})
         holder.release()
         await Promise.allSettled(requests)
+        finished.resolve()
       }
     }
 
@@ -525,6 +540,30 @@ describe.skipIf(!bootstrap)(
       expect((await guestAction(f, action, raceApp)).status).toBe(409)
       expect(await queued(f)).toHaveLength(1)
     }
+
+    it('drains requests and releases the held row when a lock probe is aborted', async () => {
+      const f = await fixture()
+      const controller = new AbortController()
+      const started = Promise.withResolvers<void>()
+      const reason = new Error('synthetic probe cancellation')
+      const race = lockedRace(
+        f,
+        () => {
+          started.resolve()
+          return adminCancel(f)
+        },
+        () => guestAction(f, 'cancel'),
+        'booking',
+        controller.signal,
+      )
+      // Observe rejection immediately, then abort only after the request has started.
+      const rejected = expect(race).rejects.toThrow(/synthetic probe cancellation|aborted/)
+      await started.promise
+      controller.abort(reason)
+      await rejected
+      await assertEffects(f, 'cancelled', f.admin.id)
+      await owned.pool.query('SELECT id FROM bookings WHERE id=$1 FOR UPDATE NOWAIT', [f.booking])
+    })
 
     it.each(['cancel', 'reschedule'] as const)(
       'commits the administrator cancellation once while the guest %s waits',

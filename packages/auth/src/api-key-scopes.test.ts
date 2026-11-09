@@ -32,6 +32,7 @@ const restContract = {
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/schedules',
     'GET /api/v1/schedules/{id}',
+    'GET /api/v1/schedules/{id}/availability',
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
@@ -108,6 +109,7 @@ const restContract = {
   other_write: [
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
+    'PUT /api/v1/schedules/{id}/availability',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -223,6 +225,7 @@ function verifyMinimalBookingReads(allows: Allows) {
   for (const tool of [
     'list_schedules',
     'get_schedule',
+    'get_schedule_availability',
     'list_calendar_connections',
     'list_conference_connections',
   ]) {
@@ -348,6 +351,7 @@ describe('shared API-key scope policy', () => {
       full: [
         'get_branding',
         'set_branding',
+        'save_schedule_availability',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
@@ -365,6 +369,7 @@ describe('shared API-key scope policy', () => {
         'set_event_type_notifications',
         'list_schedules',
         'get_schedule',
+        'get_schedule_availability',
         'create_event_type',
         'update_event_type',
         'create_one_time_link',
@@ -391,6 +396,7 @@ describe('shared API-key scope policy', () => {
         'get_event_type',
         'list_schedules',
         'get_schedule',
+        'get_schedule_availability',
         'list_one_time_links',
         'list_calendar_connections',
         'list_conference_connections',
