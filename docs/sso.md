@@ -3,8 +3,9 @@
 Status: design only. The plugin evaluation was first run 2026-11-06 against the Better
 Auth 1.7.12 family and re-run 2026-11-09, in the Upgrade step, against the installed
 1.7.16 family that main pins since the November security upgrade. `@better-auth/sso`
-1.7.16 is a dependency of the auth workspace for that evaluation only; no source imports
-or registers it. No SSO provider, route, feature flag or migration is enabled. SSO will be
+1.7.16 is a production dependency of the auth workspace, so the audited production tree
+and the image carry the plugin and its SAML and XML stack; no shipped source imports or
+registers it. No SSO provider, route, feature flag or migration is enabled. SSO will be
 available to every instance, including self-hosted ones; there is no license,
 subscription or hosted-service requirement.
 
@@ -31,7 +32,7 @@ Official sources: [SSO docs](https://better-auth.com/docs/plugins/sso), [OIDC](h
 
 ### Recommendation
 
-Do not expose stock plugin routes or ship SSO with the 1.7.16 plugin unchanged. Reuse established protocol parsing/crypto and Better Auth's account/session integration; Hourmere owns organization/provider policy, encrypted configuration, exact identity binding, domain lifecycle, enforcement and audit. The 1.7.12 evaluation left open whether the plugin's pre-session hook could carry Hourmere's checks; the Upgrade step answered it at 1.7.16 (see Pre-session hook and plugin paths below). The hook exists, but it cannot supply OIDC nonce binding, algorithm policy, a JWKS cache or the guarded transport, and it cannot stop the SAML ACS from minting a session on the cross-site POST. Hourmere therefore keeps Better Auth for local sessions and replaces the OIDC and SAML federation paths with narrow adapters over the same maintained libraries (jose; samlify with xml-crypto and @xmldom/xmldom), writing no new cryptography or XML signature code. Merely adding a /api/v1 facade over the plugin could not supply these seams. The first SAML release rejects encrypted assertions and missing assertion or response IDs outright. Each protocol stays hard-off in code until its complete path exists and its negative protocol and egress checks have passed (see Rollout gating). An upstream patch for a missing seam (for example [12081](https://github.com/better-auth/better-auth/issues/12081) or [10625](https://github.com/better-auth/better-auth/issues/10625)) brings a plugin path back only after a new evaluation at the patched version.
+Do not expose stock plugin routes or ship SSO with the 1.7.16 plugin unchanged. Reuse established protocol parsing/crypto and Better Auth's account/session integration; Hourmere owns organization/provider policy, encrypted configuration, exact identity binding, domain lifecycle, enforcement and audit. The 1.7.12 evaluation left open whether the plugin's pre-session hook could carry Hourmere's checks; the Upgrade step answered it at 1.7.16 (see Pre-session hook and plugin paths below). The hook exists, but the plugin offers no seam for OIDC algorithm policy, a JWKS cache or the guarded transport, reaches an OIDC nonce only if Hourmere rewrites the plugin's authorization URL, and cannot stop the SAML ACS from minting a session on the cross-site POST. Hourmere therefore keeps Better Auth for local sessions and replaces the OIDC and SAML federation paths with narrow adapters over the same maintained libraries (jose; samlify with xml-crypto and @xmldom/xmldom), writing no new cryptography or XML signature code. Merely adding a /api/v1 facade over the plugin could not supply these seams. The first SAML release rejects encrypted assertions and missing assertion or response IDs outright. Each protocol stays hard-off in code until its complete path exists and its negative protocol and egress checks have passed (see Rollout gating). An upstream patch for a missing seam (for example [12081](https://github.com/better-auth/better-auth/issues/12081) or [10625](https://github.com/better-auth/better-auth/issues/10625)) brings a plugin path back only after a new evaluation at the patched version.
 
 ### Source evidence matrix
 
@@ -45,13 +46,13 @@ Do not expose stock plugin routes or ship SSO with the 1.7.16 plugin unchanged. 
 | SSRF | fetchOIDCEndpoint (544) and the native response helper (563) revalidate endpoints at fetch; redirects are manual, then rejected. Discovery uses the same helper. The DNS lookup result is not connection-pinned and lookup failures return (478–498); trustedOrigins bypasses private-host checks. No exposed custom fetch in options. | Reuse Hourmere outbound guard at actual connection for discovery/token/UserInfo/JWKS/metadata, deadlines and size limits; do not equate CORS/redirect origins to egress trust. |
 | SAML validation | samlify SP parseLoginResponse; exactly one plaintext or encrypted assertion (1203–1222); an additional namespace/ID-aware assertion signature check when wantAssertionsSigned is true (1234–1256); audience and bearer recipient binding (1466–1475); response Destination checked only when present (1458–1464); provider references locked and rechecked (2856–3046). | Require signed assertion (response may also sign), strict XML fixture tests for wrapping/duplicate IDs/external entities, fixed ACS/issuer/audience, required Destination, use authenticated subtree only. |
 | SAML timestamps | clockSkew defaults 300000 ms; requireTimestamps defaults false and a missing condition only warns (2709–2742). samlify 2.15.1 checks bearer SubjectConfirmationData NotBefore/NotOnOrAfter (`flow.js` 215–250). Nothing bounds IssueInstant. | Require valid bounded NotBefore AND NotOnOrAfter and SubjectConfirmationData expiry; the acceptance deadline and limits are pinned below, and the SAML verifier and SAML timing and replay steps own the signed fixtures. |
-| SAML replay | validateInResponseTo atomically consumes the verification value and checks provider/reference (1501–1545); default validation on, IdP-initiated false. Assertion reserveVerificationValue uses the assertion ID, expires at NotOnOrAfter + skew, fallback TTL if absent (2966–2991). A missing extracted assertion ID only warns (2992); the response ID is not checked. | Keep correlation on; require assertion and response IDs and strict expiry, database atomic uniqueness across replicas, reject missing ID and expired request. |
+| SAML replay | validateInResponseTo atomically consumes the verification value and checks provider/reference (1501–1545); default validation on, IdP-initiated false. Assertion reserveVerificationValue uses the assertion ID, expires at NotOnOrAfter + skew, fallback TTL if absent (2966–2991). A missing extracted assertion ID only warns (2992) unless signed assertions are required, when the signature check refuses it first (1246–1247); the response ID is not checked. | Keep correlation on; require assertion and response IDs and strict expiry, database atomic uniqueness across replicas, reject missing ID and expired request. |
 | RelayState/browser binding | Generated generic server state with provider reference (2653–2678); parse skips the state cookie check because cross-site POST drops Lax cookies (2690). Invalid supplied RelayState rejected but absent RelayState can use InResponseTo. The ACS sets the session cookie in its response to the cross-site POST (3122). | Require issued opaque RelayState and browser-bound pending login completion; do not treat request correlation alone as browser binding. A same-site completion hop with original browser nonce is a defensible design. |
 | Encryption | createSP wires encPrivateKey and encrypted-assertion settings (1694–1729); binding content decrypted for validation (2822–2826). Registration config/private keys serialized as JSON text. | Supported in dependency, but Hourmere rejects encrypted assertions until a fixture-tested algorithm allowlist and signed-decrypted-node validation exist; envelope-encrypt client secrets/private keys at rest, decrypt only transiently. Never set trustEmailVerified globally. |
 | SAML metadata/rotation | Imported XML or explicit entity/cert (1771–1799); generated SP metadata; cert arrays; custom SP metadata cannot weaken assertion-signing policy. Imported XML overrides manual cert, no automatic refresh. | Guard optional metadata download; pin entity ID and validated keys, explicit reviewed refresh/version change, overlap rotation tests incl no KeyInfo. |
 | DNS | Plugin challenge checks every comma-separated domain with DNS TXT (2583–2648); one domainVerified boolean; already-verified returns 409; no periodic re-verification. Provider domain changes reset boolean. DefaultSSO can count verified without DNS. | Own exact-domain records and re-verification/suspension; no wildcard/subdomain expansion or code-config trust bypass. |
 | Linking | Resolver receives verified OIDC token claims/provider SAML attributes and exact accountKey issuer/sub-or-NameID; native transactional support enforced (1600–1649); exact account binding only with resolveUser. Default domain trust can implicitly link verified local email and includes subdomains (86–115, 3977). | Exact org/provider/issuer/subject binding in Hourmere's own transaction, no implicit email claim-based takeover. Require current existing-account proof for first linking. |
-| Provisioning | Default org assignment after authentication, member role by default (283); provisionUser/getRole hooks; the plugin's after hook assigns by verified domain after social callbacks too (4564); pending invitation suppresses autojoin. disableImplicitSignUp can be overridden by OIDC requestSignUp (4025). | No stock organization provisioning; transactional JIT/invitation policy in Hourmere's admission step, re-checked every login; never use disableImplicitSignUp alone as invitation-only protection. |
+| Provisioning | Default org assignment after authentication (283), member role by default (263–268); provisionUser/getRole hooks; the plugin's after hook assigns by verified domain after social callbacks too (4564); pending invitation suppresses autojoin. disableImplicitSignUp can be overridden by OIDC requestSignUp (4025). | No stock organization provisioning; transactional JIT/invitation policy in Hourmere's admission step, re-checked every login; never use disableImplicitSignUp alone as invitation-only protection. |
 
 The inspected samlify 2.15.1 verifySignature uses absolute XPaths, rejects wrapping descendants, requires message KeyInfo cert to match pinned metadata, checks signed references and signed root/ID/namespace. This supports reuse but is not proof all malicious XML cases are safe; test actual locked versions. SAML secret storage and browser-binding limitations cannot be repaired by documentation alone.
 
@@ -66,29 +67,40 @@ plugin's pre-session hook. On every OIDC and SAML sign-in it runs inside
 `runWithTransaction`, after the provider row lock and the provider-reference recheck and
 before `handleOAuthUserInfo` writes the user, account and session (OIDC 3985–4044, SAML
 3040–3089; the session is created at `better-auth/dist/oauth2/link-account.mjs` 358). A
-`{action: "reject"}` decision throws `FORBIDDEN` and rolls the transaction back; a thrown
-error or an invalid decision becomes `SSO_USER_RESOLUTION_FAILED` (1600–1612). With a
+`{action: "reject"}` decision throws `FORBIDDEN` (OIDC 4001–4004, SAML 3055–3058) and rolls
+the transaction back; a thrown error or an invalid decision becomes
+`SSO_USER_RESOLUTION_FAILED` (1600–1612). With a
 resolver the plugin also requires an ID token (3933) and exact account binding, defers
 non-database writes, and refuses adapters without native transactions, secondary-storage
 sessions without a database fallback and missing async context (1614–1649). The
 resolver receives the verified ID-token claims (OIDC) or the IdP entity ID, NameID and
-assertion attributes (SAML), the account key and the provider reference.
+assertion attributes (SAML), the account key and the provider reference. Through
+`getCurrentAuthEndpointContext()` (`@better-auth/core/context`) it can also read the raw
+request, but nothing the plugin has verified beyond those inputs.
 
-**What it cannot carry.** Each row is a design requirement the hook would have to enforce
-before a session exists:
+**What it cannot carry.** Each row is a design requirement that must hold before a session
+exists. "Re-parse" means reading the raw `SAMLResponse` from the endpoint context again,
+outside the subtree the plugin verified; Hourmere does not adopt that, because a second
+parser over unauthenticated XML is the signature-wrapping risk the design rules out.
 
-| Requirement | Plugin behaviour at 1.7.16 | Enforceable in `resolveUser`? |
+| Requirement | Plugin behaviour at 1.7.16 | Enforceable before the session? |
 |---|---|---|
-| OIDC nonce bound to the attempt | Never generated or sent; core drops `nonce` from `additionalParams` as reserved; `validateOIDCIdToken` passes no nonce (580–589) | No: the binding starts in the authorization request |
-| OIDC algorithm allowlist (RS256) | No `algorithms` passed (582–586) | No: the resolver gets the payload, not the header |
+| OIDC nonce bound to the attempt | Never generated or sent; core drops `nonce` from `additionalParams` as reserved (`create-authorization-url.mjs` 9–18, 54–56); `validateOIDCIdToken` passes no nonce (580–589) | Not by the resolver alone: it sees the claim, but the nonce would first have to be added to the plugin's `/sign-in/sso` URL by an after hook. Not adopted: Hourmere would be rewriting the plugin's protocol output |
+| OIDC algorithm allowlist (RS256) | No `algorithms` passed (582–586) | No: the resolver gets the payload, not the header, and the token is not in the request |
 | OIDC `iat` age and future `iat`, `auth_time` | Not checked: no `maxTokenAge` | Yes: the claims are passed |
-| Bounded JWKS cache | `createRemoteJWKSet` on every callback (581) | No |
-| Pinned outbound transport | Global fetch after one unpinned DNS lookup (478–571); no fetch option ([10625](https://github.com/better-auth/better-auth/issues/10625)) | No |
-| No session on the SAML cross-site POST | The ACS mints the session and sets its cookie in that response (3059, 3122) | No: the resolver can only allow that or reject, which rolls back any pending result written in the transaction |
-| SAML assertion and response IDs required | A missing assertion ID only warns (2992); the response ID is not checked | No: neither ID is in the resolver input |
-| SAML `IssueInstant` + `maximumSamlAssertionLifetime` deadline | Conditions (2709–2742) and bearer SubjectConfirmationData (samlify) only | No: `IssueInstant` is not in the resolver input |
-| SAML response Destination required | Checked only when present (1458–1464) | No |
-| Encrypted SAML assertions refused | Decrypted when present (2822–2826) | No: the resolver cannot tell |
+| Bounded JWKS cache | `createRemoteJWKSet` on every callback (581) | No plugin seam; a process-wide fetch dispatcher would change every outbound request |
+| Pinned outbound transport | Global fetch after one unpinned DNS lookup (478–571); no fetch option ([10625](https://github.com/better-auth/better-auth/issues/10625)) | No plugin seam; same as the JWKS cache |
+| No session on the SAML cross-site POST | The ACS mints the session and sets its cookie in that response (3059, 3122) | No: an allow mints the session in the POST response; after a reject the plugin does no account or session work, so the completion hop would be Hourmere code anyway |
+| SAML assertion ID required | A missing assertion ID only warns (2992) | Yes, by configuration: with `wantAssertionsSigned: true` the signature check refuses an assertion without an ID (1246–1247) |
+| SAML response ID required | Not checked | Only by re-parse |
+| SAML `IssueInstant` + `maximumSamlAssertionLifetime` deadline | Conditions (2709–2742) and bearer SubjectConfirmationData (samlify) only | Only by re-parse: `IssueInstant` is not in the resolver input |
+| SAML response Destination required | Checked only when present (1458–1464) | Only by re-parse |
+| Encrypted SAML assertions refused with a clear result | Decrypted when a key is configured (2822–2826) | Partly, by configuration: without a decryption key the response fails as invalid (2884–2892, 2916–2931), and `saml.algorithms` with empty encryption allow-lists refuses it (1126–1148); neither gives a clear unsupported result |
+
+The decision rests on the rows with no seam at all (algorithm policy, JWKS cache, pinned
+transport, the session minted in the SAML POST). The OIDC adapter replaces the whole
+callback anyway, and the SAML adapter replaces the ACS, so the partial answers above are
+not used.
 
 **Retained and replaced paths.** Hourmere keeps Better Auth for local sessions and
 accounts and does not register the `sso()` plugin; the Off tests fail if any shipped
@@ -103,12 +115,13 @@ source imports `@better-auth/sso`.
   `createRemoteJWKSet` takes `cacheMaxAge`, `cooldownDuration`, `timeoutDuration` and a
   `[customFetch]` hook for Hourmere's pinned transport (`jose/dist/webapi/jwks/remote.js`
   39–80). Nonce and state live in Hourmere's pending attempts. The SAML verifier step builds
-  the SAML adapter on samlify 2.15.1 with xml-crypto and @xmldom/xmldom, whose response flow
-  checks the signature, bearer SubjectConfirmationData and that the signed and outer
-  InResponseTo agree (`samlify/build/src/flow.js` 203–300). The plugin's
-  hardened single-assertion (1203–1222), assertion-signature (1234–1256) and
-  audience/recipient (1466–1475) checks are not exported, so that step reimplements them on
-  samlify with the plugin source as the reference; exported pure helpers
+  the SAML adapter on samlify 2.15.1 with xml-crypto and @xmldom/xmldom. samlify's response
+  flow (`samlify/build/src/flow.js` 703–825) verifies the signature, issuer, audience,
+  recipient and a present Destination, that the signed and outer InResponseTo agree, and
+  bearer SubjectConfirmationData; its optional replay cache (435–467) requires an assertion
+  ID. The plugin's hardened single-assertion (1203–1222) and assertion-signature (1234–1256)
+  checks are not exported, so that step reimplements them on samlify with the plugin source
+  as the reference; exported pure helpers
   (`validateDiscoveryDocument`, `computeDiscoveryUrl`, `deriveSAMLServiceProviderPolicy`)
   may be reused. Neither adapter writes cryptography or XML signature code.
 - Retained: Better Auth's session and account machinery (`internalAdapter.createSession`,
@@ -928,9 +941,11 @@ which the route inventory sees only as the single `/api/auth/*` mount: the real
 that never connects, and every `auth.api` endpoint path is checked; the suite also
 confirms that every endpoint path of the installed SSO plugin would be caught. As a
 backstop for a surface no inventory sees, every string literal that begins with `/` in
-the shipped sources of the apps, packages and tools workspaces is checked too, leaving out
-only an explicit list of test-support and generated files, and no shipped source may
-import `@better-auth/sso`.
+the `src` directory of each apps, packages and tools workspace is checked too, leaving out
+only an explicit list of test-support and generated files, and no such source may import
+`@better-auth/sso`. These checks are by name: a neutrally named relying-party endpoint, a
+path assembled from pieces, or shipped code outside a `src` directory (the web service
+worker, the site worker, Astro page routes) is not seen.
 Names match `saml`, `oidc` and `openid` anywhere, `sso` as a word (after splitting
 camelCase, separators, digits, the plural or version suffix — `ssos`, `SSOv2`,
 `listSSOs` — and a short list of words run together with it: `ssoconfig`,
@@ -1078,8 +1093,8 @@ behaviour keeps available stay available.
 ## Out of scope and remaining decisions
 
 No product implementation or migration lands with this design. The Upgrade step adds one
-dependency, `@better-auth/sso` at the pinned family version, which nothing imports or
-registers.
+dependency, `@better-auth/sso` at the pinned family version, which no shipped source
+imports or registers.
 SCIM, IdP group role mapping, service accounts, IdP-initiated SAML, SAML SLO, encrypted
 assertions, automatic domain transfers, wildcard domain claims, a separate
 recovery-owner withdrawal operation and global forced SSO
@@ -1088,7 +1103,7 @@ proof expiry bounds that delay. Private IdP reachability remains operator-contro
 A successful provider test does not prove all accounts have valid immutable identifiers.
 
 The Upgrade step found that the upgraded plugin's pre-session hook cannot carry the
-OIDC nonce, algorithm, JWKS and transport requirements or the SAML completion hop (see
+OIDC algorithm, JWKS and transport requirements or the SAML completion hop (see
 Pre-session hook and plugin paths). Better Auth is retained for local sessions, and the
 OIDC and SAML federation paths are replaced by maintained-library adapters; the OIDC
 verifier and SAML verifier steps record their negative tests before either protocol

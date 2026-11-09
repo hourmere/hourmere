@@ -160,9 +160,13 @@ function authEndpointPaths(api: object) {
 
 // A pool that never opens a connection: createAuth's startup work (Better Auth's schema check
 // and the OAuth provider's resource seeding) asks for one and is refused at once, with no
-// network access. Better Auth logs both refusals.
+// network access. Better Auth logs both refusals. pool.query uses the callback form.
 function neverConnecting(pool: pg.Pool) {
-  pool.connect = (() => Promise.reject(new Error('This pool never connects'))) as pg.Pool['connect']
+  const refusal = () => new Error('This pool never connects')
+  pool.connect = ((callback?: (error: Error) => void) => {
+    if (!callback) return Promise.reject(refusal())
+    queueMicrotask(() => callback(refusal()))
+  }) as pg.Pool['connect']
   return pool
 }
 
