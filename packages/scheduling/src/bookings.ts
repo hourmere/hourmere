@@ -2372,7 +2372,15 @@ export async function requestReschedule(
   if (!UUID.test(id)) throw bookingNotFound()
   if (!UUID.test(input.idempotencyKey))
     throw new DomainError('invalid', 'invalid_idempotency_key', 'Idempotency key must be a UUID')
-  if (input.note !== undefined) z.object({ note: RescheduleRequestNoteSchema }).parse(input)
+  if (input.note !== undefined) {
+    const parsed = z.object({ note: RescheduleRequestNoteSchema }).safeParse(input)
+    if (!parsed.success)
+      throw new DomainError(
+        'invalid',
+        'invalid_request',
+        parsed.error.issues.map((issue) => `note: ${issue.message}`).join('; '),
+      )
+  }
   const note =
     input.note === undefined
       ? null

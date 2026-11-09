@@ -1505,6 +1505,9 @@ Migration 0064 adds `booking_reschedule_requests`. A host of a confirmed future 
 may ask its booker to choose another time, optionally including a plain-text note.
 Imported read-only records and group-seat bookings refuse this action. Authorization is
 identical to host rescheduling; being a team administrator alone does not grant it.
+Booking responses expose optional `isGroupSeat: true` for group-seat bookings and omit
+it otherwise. REST, MCP and CLI clients can use the flag to skip unsupported requests;
+its absence does not bypass the other booking and authorization rules.
 
 Pending reschedule is an overlay (`Booking.pendingReschedule`), not a new booking status:
 the booking remains `confirmed`, its original time remains blocked, and calendar entries,

@@ -197,17 +197,17 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Upgrade notes
 
-- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
-  and worker process before applying the migration, then restart every role with the new
-  code. The webhook delivery uniqueness constraint changes to include the request identity;
-  old booking writers cannot use it after migration. Do not run mixed application versions.
-
 These notes apply to existing installations of the development source tree. Back up the
 full database (`auth`, `public` and `pgboss`), deployment configuration and original secrets
 before upgrading. Review [self-hosting recovery guidance](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore);
 schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
+
+- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
+  and worker process before applying the migration, then restart every role with the new
+  code. The webhook delivery uniqueness constraint changes to include the request identity;
+  old booking writers cannot use it after migration. Do not run mixed application versions.
 
 - **Coordinate the mail-budget upgrade (migration 0040).** Build the new application,
   stop every old `web`, `all` and `worker` process, including any on other hosts, then

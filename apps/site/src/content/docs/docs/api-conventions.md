@@ -202,10 +202,11 @@ Every error response has the same shape:
 `error` is a stable, machine-readable snake_case code that clients may branch on; `message`
 is optional and may change. The HTTP status carries the category and the code names the
 specific case, e.g. 404 `event_type_not_found`, 409 `slot_taken`. These codes are reserved
-for the generic cases in the table below (services cannot use them): `invalid_request`,
+for the generic cases in the table below: `invalid_request`,
 `unauthorized`, `forbidden`, `not_found` (unknown endpoint), `method_not_allowed`,
 `payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
-renamed within `/api/v1`.
+renamed within `/api/v1`. Services cannot use these codes except `invalid_request` with
+an invalid-input error when enforcing the same schema validation as the transports.
 
 An optional `field` string identifies a stable validation field name. Known values are
 `successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
@@ -238,7 +239,7 @@ See [Zoom connections](/docs/zoom-connections) for callback replay and recovery 
 
 | Status | Meaning |
 |---|---|
-| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
+| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes, except shared request-schema validation |
 | 401 `unauthorized` | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer` |
 | 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
 | 403 `insufficient_scope` | The API key is valid, but its immutable scope does not allow this operation; use an appropriate replacement key |
