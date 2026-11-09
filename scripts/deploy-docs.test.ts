@@ -251,14 +251,17 @@ describe('documented deployment operations', () => {
     if (!command || block.index === undefined)
       throw new Error('Image conversion must include a runnable version check')
     // The check must run while HOURMERE_VERSION is still set and before anything is edited,
-    // and the prose must tell the operator to stop on failure.
+    // and the prose must tell the operator to stop on failure before any editing step.
+    let previous = block.index
     for (const step of [
       'Stop if the check fails',
       'remove only',
       'Unset `HOURMERE_VERSION`',
       'source rebuild',
     ]) {
-      expect(section.indexOf(step), step).toBeGreaterThan(block.index)
+      const position = section.indexOf(step)
+      expect(position, step).toBeGreaterThan(previous)
+      previous = position
     }
     // The stub reports its arguments: only the release-tag pattern may satisfy the check.
     const result = spawnSync(

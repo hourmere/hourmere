@@ -62,6 +62,20 @@ function harness(active = false, worker = source) {
       },
     },
   }
+  // Worker globals include DOMException; storage APIs reject with it (for example
+  // QuotaExceededError from Cache.put). Define it on the worker realm's own Error.
+  runInNewContext(
+    `globalThis.DOMException = class DOMException extends Error {
+      constructor(message = '', name = 'Error') {
+        super(message)
+        this.name = name
+      }
+      get code() {
+        return { QuotaExceededError: 22, SecurityError: 18 }[this.name] ?? 0
+      }
+    }`,
+    context,
+  )
   runInNewContext(worker, context)
   // Browsers reject fetch() and cache writes with errors from the worker's own realm. Build
   // injected failures with the context's constructors so `instanceof` behaves as in production.
@@ -69,6 +83,7 @@ function harness(active = false, worker = source) {
     `({
       Error,
       TypeError,
+      DOMException,
       isError: (error) => error instanceof Error,
       isTypeError: (error) => error instanceof TypeError,
     })`,
@@ -76,9 +91,11 @@ function harness(active = false, worker = source) {
   ) as {
     Error: ErrorConstructor
     TypeError: TypeErrorConstructor
+    DOMException: new (message?: string, name?: string) => Error & { code: number }
     isError: (error: unknown) => boolean
     isTypeError: (error: unknown) => boolean
   }
+  const global = runInNewContext('globalThis', context) as Record<string, unknown>
   async function lifecycle(name: string) {
     let promise: Promise<unknown> | undefined
     listeners[name]?.({
@@ -115,6 +132,7 @@ function harness(active = false, worker = source) {
     postMessage,
     listeners,
     realm,
+    global,
   }
 }
 
@@ -211,7 +229,7 @@ describe('offline shell routing', () => {
 
   it('keeps online navigation and static files working when storage is unavailable', async () => {
     const sw = harness()
-    sw.caches.open.mockRejectedValue(new sw.realm.Error('storage denied'))
+    sw.caches.open.mockRejectedValue(new sw.realm.DOMException('storage denied', 'SecurityError'))
     expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('static')
     expect(await (await sw.request('/assets/main-abc123.js'))?.text()).toBe('static')
     expect(sw.fetch).toHaveBeenCalledTimes(2)
@@ -423,7 +441,11 @@ const asset = '/assets/main-abc123.js'
 function arrangeReuse(sw: ReturnType<typeof harness>, failure: ReuseState) {
   const cached = new Response('previous')
   if (failure !== 'none') sw.oldStore.set(asset, cached)
-  const error = new sw.realm.Error('old cache unavailable')
+  // Copying fails like a full cache; listing, opening and matching fail like a broken backend.
+  const error = new sw.realm.DOMException(
+    'old cache unavailable',
+    failure === 'copy' ? 'QuotaExceededError' : 'UnknownError',
+  )
   if (failure === 'list') sw.caches.keys.mockRejectedValue(error)
   if (failure === 'open' || failure === 'match') {
     const open = sw.caches.open.getMockImplementation()
@@ -481,7 +503,10 @@ it.each([false, true])(
   async (reuseFails) => {
     const sw = harness()
     sw.oldStore.set(asset, new Response('previous'))
-    if (reuseFails) sw.caches.keys.mockRejectedValue(new sw.realm.Error('old cache unavailable'))
+    if (reuseFails)
+      sw.caches.keys.mockRejectedValue(
+        new sw.realm.DOMException('old cache unavailable', 'UnknownError'),
+      )
     sw.fetch.mockImplementation(async (request) => {
       if (new URL(request.url).pathname === '/app/icon-192.png')
         throw new sw.realm.TypeError('offline')
@@ -494,17 +519,34 @@ it.each([false, true])(
   },
 )
 
-it('injects failures as worker realm errors, which the worker sees as browsers would', () => {
+it('injects failures as worker realm errors, which the worker sees as browsers would', async () => {
   const sw = harness()
+  // The realm objects are the worker's own globals, not those of some other context.
+  expect(sw.realm.Error).toBe(sw.global.Error)
+  expect(sw.realm.TypeError).toBe(sw.global.TypeError)
+  expect(sw.realm.DOMException).toBe(sw.global.DOMException)
   const network = new sw.realm.TypeError('offline')
-  const storage = new sw.realm.Error('storage full')
+  const storage = new sw.realm.DOMException('storage full', 'QuotaExceededError')
   expect(sw.realm.isTypeError(network)).toBe(true)
   expect(sw.realm.isError(network)).toBe(true)
   expect(sw.realm.isError(storage)).toBe(true)
   expect(sw.realm.isTypeError(storage)).toBe(false)
-  // The harness shares no constructors: test realm errors stay foreign to the worker.
+  expect(storage).toBeInstanceOf(sw.realm.DOMException)
+  expect(storage.name).toBe('QuotaExceededError')
+  expect(storage.code).toBe(22)
+  expect(new sw.realm.DOMException('denied', 'SecurityError').code).toBe(18)
+  // An error the worker itself throws shares the realm of the injected ones.
+  sw.fetch.mockResolvedValue(new Response('secret', { headers: { 'Cache-Control': 'no-store' } }))
+  const thrown: unknown = await sw.lifecycle('install').then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  expect(thrown).toBeInstanceOf(sw.realm.Error)
+  expect(Object.getPrototypeOf(thrown)).toBe(sw.realm.Error.prototype)
+  // The harness shares no error constructors: test realm errors stay foreign to the worker.
   expect(sw.realm.isTypeError(new TypeError('offline'))).toBe(false)
   expect(sw.realm.isError(new Error('offline'))).toBe(false)
+  expect(sw.realm.isError(new DOMException('storage full', 'QuotaExceededError'))).toBe(false)
 })
 
 // No active worker: a tolerated failure would install an incomplete cache and skip waiting.
@@ -561,10 +603,23 @@ it('fails installation when fetching the offline notice rejects', async () => {
   expect(sw.skipWaiting).not.toHaveBeenCalled()
 })
 
+it('fails installation when the new shell cache cannot be opened', async () => {
+  const sw = harness()
+  sw.caches.open.mockRejectedValue(new sw.realm.DOMException('storage full', 'QuotaExceededError'))
+  await expect(sw.lifecycle('install')).rejects.toThrow('storage full')
+  expect(sw.fetch).not.toHaveBeenCalled()
+  expect(sw.cache.put).not.toHaveBeenCalled()
+  expect(sw.store.size).toBe(0)
+  expect(sw.skipWaiting).not.toHaveBeenCalled()
+})
+
 it('still rejects installation when fresh asset storage fails after reuse fails', async () => {
   const sw = harness(true)
-  sw.caches.keys.mockRejectedValue(new sw.realm.Error('old cache unavailable'))
-  sw.cache.put.mockRejectedValue(new sw.realm.Error('storage full'))
+  sw.caches.keys.mockRejectedValue(
+    new sw.realm.DOMException('old cache unavailable', 'UnknownError'),
+  )
+  // Browsers reject Cache.put over quota with a QuotaExceededError DOMException.
+  sw.cache.put.mockRejectedValue(new sw.realm.DOMException('storage full', 'QuotaExceededError'))
   await expect(sw.lifecycle('install')).rejects.toThrow('storage full')
   expect(sw.fetch).toHaveBeenCalledOnce()
   expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
@@ -610,7 +665,7 @@ it('ships a disabled-build worker that immediately retires installed workers wit
     await verifyDisabled(worker)
     expect(existsSync(join(root, 'dist/app/offline.html'))).toBe(false)
     const sw = harness(true, worker)
-    sw.caches.keys.mockRejectedValue(new sw.realm.Error('storage denied'))
+    sw.caches.keys.mockRejectedValue(new sw.realm.DOMException('storage denied', 'SecurityError'))
     await expect(sw.lifecycle('activate')).rejects.toThrow('storage denied')
     expect(sw.unregister).toHaveBeenCalledOnce()
   } finally {
