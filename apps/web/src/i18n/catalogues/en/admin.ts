@@ -68,6 +68,8 @@ export const admin = {
   'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
   'Could not download CSV. Check the booking range and try again shortly.':
     'Could not download CSV. Check the booking range and try again shortly.',
+  'An export is already running for your account. Wait for it to finish and try again.':
+    'An export is already running for your account. Wait for it to finish and try again.',
   'Download CSV': 'Download CSV',
 
   Imported: 'Imported',

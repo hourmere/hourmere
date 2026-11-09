@@ -60,7 +60,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Branding settings](/docs/branding) store a logo and primary colour per space; public
   booking pages and emails do not apply them yet.
 - [CSV exports](/docs/booking-export) require a range of at most 366 elapsed days and
-  permit one active export per organization. Files contain personal data; there is no
+  permit one active export per organization. Each process also permits one export per
+  user and two exports total by default (`export_user_in_progress` / `export_busy`);
+  these concurrency limits are per process, not cluster-wide. Files contain personal data; there is no
   scheduled export or automatic delivery. Answers use a JSON column.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;

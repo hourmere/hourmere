@@ -45,6 +45,9 @@ const timeoutSeconds = (name: string, defaultMs: number) => {
   )
 }
 
+const BOOKING_EXPORT_LIMIT_FORMAT =
+  'BOOKING_EXPORT_MAX_CONCURRENT must be a whole number from 1 to 8'
+
 const HSTS_MAX_AGE_FORMAT = 'HSTS_MAX_AGE must be a whole number of seconds (0 or more)'
 
 const SMTP_URL_FORMAT =
@@ -175,6 +178,15 @@ const schema = z
     ),
     FOLLOW_UP_HOST_NOTES_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value !== 'false',
+    ),
+    BOOKING_EXPORT_MAX_CONCURRENT: z.preprocess(
+      (value) => (value === '' ? undefined : value),
+      z.coerce
+        .number({ error: BOOKING_EXPORT_LIMIT_FORMAT })
+        .int({ error: BOOKING_EXPORT_LIMIT_FORMAT })
+        .min(1, { error: BOOKING_EXPORT_LIMIT_FORMAT })
+        .max(8, { error: BOOKING_EXPORT_LIMIT_FORMAT })
+        .default(2),
     ),
     BOOKING_MAX_INVITEE_RESCHEDULES: emailLimit('BOOKING_MAX_INVITEE_RESCHEDULES', 5, 0),
     MAIL_RECIPIENT_MAX_PER_HOUR: emailLimit('MAIL_RECIPIENT_MAX_PER_HOUR', 5, 1),

@@ -253,10 +253,11 @@ the app, or the proxy may reuse a connection the app has just closed and answer 
 default is above the usual ones: nginx's upstream keepalive and AWS ALB 60 s, Traefik 90 s,
 Caddy 120 s.
 CSV exports reserve at most two database connections per server process by default.
-`BOOKING_EXPORT_MAX_CONCURRENT` accepts 1–8 (invalid values use 2); keep this below
+`BOOKING_EXPORT_MAX_CONCURRENT` accepts 1–8 (empty means unset; invalid values prevent startup); keep this below
 the database pool capacity, with headroom for ordinary traffic. Excess requests fail
 before acquiring a connection with HTTP 409 `export_busy`. Each stream closes after
-30 seconds without reader progress, or after five minutes overall. These limits apply
+30 seconds without reader progress, or after five minutes overall. Each user may run only one export per process across personal and team spaces
+(`409 export_user_in_progress`). The user and process caps are not cluster-wide. These limits apply
 in addition to the one-export-per-organization database lease.
 
 

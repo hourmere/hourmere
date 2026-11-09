@@ -184,3 +184,22 @@ it.each([true, false])('blocks a stale or disabled download (disabled=%s)', (dis
   expect(screen.queryByRole('link', { name: 'Download CSV' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Download CSV' }).hasAttribute('disabled')).toBe(true)
 })
+
+it.each(['en', 'zh-CN'] as const)('explains the account export limit in %s', async (language) => {
+  setup()
+  await range()
+  chooseLanguage(language)
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    Response.json({ error: 'export_user_in_progress' }, { status: 409 }),
+  )
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  fireEvent.click(
+    await screen.findByRole('button', { name: language === 'en' ? 'Download CSV' : '下载 CSV' }),
+  )
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    language === 'en'
+      ? 'An export is already running for your account. Wait for it to finish and try again.'
+      : '你的账户已有导出正在进行。请等待导出完成后重试。',
+  )
+  expect(click).not.toHaveBeenCalled()
+})

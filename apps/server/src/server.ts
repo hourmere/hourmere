@@ -135,6 +135,7 @@ export function productRoutes({
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
+  bookingExportMaxConcurrent,
   hostedSignupUrl,
   privacyPolicyUrl,
   termsUrl,
@@ -151,6 +152,7 @@ export function productRoutes({
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
+  bookingExportMaxConcurrent?: number | undefined
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -228,7 +230,14 @@ export function productRoutes({
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
-    bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
+    bookingRoutes({
+      db,
+      notify,
+      automaticMeet,
+      automaticZoom,
+      bookingMaxInviteeReschedules,
+      bookingExportMaxConcurrent,
+    }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
@@ -684,6 +693,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
         successRedirectPolicy,
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
+        bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,
         privacyPolicyUrl: config.PRIVACY_POLICY_URL,
         termsUrl: config.TERMS_URL,
