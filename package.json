@@ -10,7 +10,9 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "tools/*"
+    "tools/api-types",
+    "tools/cli",
+    "tools/e2e"
   ],
   "scripts": {
     "version": "node scripts/sync-version.ts && biome format --write server.json",

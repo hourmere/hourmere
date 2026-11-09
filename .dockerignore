@@ -10,4 +10,5 @@ temp
 !.env.example
 .DS_Store
 coverage
+tools/zapier-hourmere
 .claude
