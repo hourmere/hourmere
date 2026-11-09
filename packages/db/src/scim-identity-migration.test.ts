@@ -454,12 +454,28 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
 
   // The bound must precede every lock the migration takes. The lock set is derived from
   // the migration source, so a lock added later needs a case here before the test passes.
+  // The derivation is total: with whole-line comments removed, every LOCK keyword must
+  // belong to a one-line `LOCK TABLE … IN … MODE;` statement. A lock in any other form
+  // PostgreSQL accepts (without TABLE, in the default mode, across lines, in other case,
+  // with a trailing comment) fails here instead of escaping the per-table cases.
+  const code = (sql: string) => sql.replace(/^[ \t]*--[^\n]*$/gm, '')
   function lockedTables(sql: string): string[] {
-    return [...sql.matchAll(/^LOCK TABLE (.+) IN [A-Z ]+ MODE;$/gm)].flatMap((match) =>
+    const statements = [...code(sql).matchAll(/^LOCK TABLE (.+) IN [A-Z ]+ MODE;$/gm)]
+    expect(
+      code(sql).match(/\block\b/gi)?.length ?? 0,
+      'every LOCK statement is a one-line LOCK TABLE … IN … MODE;',
+    ).toBe(statements.length)
+    return statements.flatMap((match) =>
       (match[1] as string).split(',').map((table) => table.trim()),
     )
   }
-  const bound = "SET LOCAL lock_timeout = '5s';\n"
+  const firstStatement = (sql: string) =>
+    code(sql)
+      .split(';')
+      .map((statement) => statement.replace(/\s+/g, ' ').trim())
+      .find(Boolean)
+  const boundStatement = "SET LOCAL lock_timeout = '5s'"
+  const bound = `${boundStatement};\n`
   // Move the bound below the statement that locks `table`: that wait and every earlier
   // one become unbounded again.
   const boundAfter = (table: string) => (source: string) => {
@@ -510,6 +526,30 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
       await attempt.catch(() => {})
     }
   }
+
+  // Nothing runs before the bound, so no explicit LOCK and no implicit lock taken by DDL can
+  // wait unbounded, and nothing later in the file changes it.
+  it('sets the lock-wait bound as the first statement and sets lock_timeout nowhere else', async () => {
+    const source = await readFile(join(migrationsDir, migration), 'utf8')
+    expect(firstStatement(source)).toBe(boundStatement)
+    expect(code(source).match(/\block_timeout\b/gi)?.length ?? 0).toBe(1)
+  })
+
+  it.each([
+    { form: 'without TABLE', lock: 'LOCK auth.session IN SHARE MODE;\n' },
+    { form: 'across two lines', lock: 'LOCK TABLE auth.session\n  IN SHARE MODE;\n' },
+  ])(
+    'lock-form control: a lock $form before the bound fails the derivation and the bound check',
+    async ({ lock }) => {
+      const source = await readFile(join(migrationsDir, migration), 'utf8')
+      const mutant = source.replace(bound, `${lock}${bound}`)
+      expect(mutant).not.toBe(source)
+      expect(() => lockedTables(source)).not.toThrow()
+      expect(firstStatement(source)).toBe(boundStatement)
+      expect(() => lockedTables(mutant)).toThrow('every LOCK statement is a one-line')
+      expect(firstStatement(mutant)).not.toBe(boundStatement)
+    },
+  )
 
   it('bounds every lock wait: each table the migration locks, held by a writer, fails it with 55P03 within 10 s and records nothing, and the next start applies it', async () => {
     const source = await readFile(join(migrationsDir, migration), 'utf8')
