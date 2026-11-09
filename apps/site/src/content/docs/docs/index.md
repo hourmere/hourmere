@@ -45,6 +45,12 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
+  Users, Groups, discovery and IdP synchronization are not available yet.
+- Organization OIDC/SAML SSO is in design and is not available yet. The
+  [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
+  self-hosting, linking, enforcement and the planned implementation sequence.
+  Planned SSO is available to every instance without a paid-plan requirement.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.

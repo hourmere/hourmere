@@ -31,6 +31,10 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
+The [SCIM design and provisioning-token foundation](scim.md) describes organization-scoped
+credential storage and the planned user lifecycle and Groups-to-teams mapping. Only token
+administration is implemented; SCIM resources remain unavailable.
+
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
 available in this foundation release.
@@ -805,7 +809,7 @@ routing tables or public feature are installed yet.
 | Weeks 5–8 | Better Auth teams (sub-groups for round-robin pools) |
 | With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
 | After launch | Better Auth `two-factor` |
-| Year 2 (enterprise) | Better Auth `sso`; `audit_events` |
+| Planned, all instances | Organization SSO (OIDC/SAML): [evaluation and design](sso.md); audit integration |
 
 Background jobs (notification emails, reminders, calendar synchronization and webhook
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and

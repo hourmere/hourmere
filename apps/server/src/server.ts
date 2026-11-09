@@ -103,6 +103,7 @@ import { oneTimeBookingRoutes } from './routes/one-time-bookings.ts'
 import { oneTimeLinkRoutes } from './routes/one-time-links.ts'
 import { openTimeSnippetRoutes } from './routes/open-time-snippets.ts'
 import { profileRoutes } from './routes/profile.ts'
+import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
@@ -138,6 +139,7 @@ export function productRoutes({
   automaticZoom = false,
   followUpHostNotesEnabled = true,
   embedAllowedOrigins,
+  scimProvisioningEnabled = false,
   slotSnippetsEnabled = false,
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
@@ -154,6 +156,7 @@ export function productRoutes({
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
   embedAllowedOrigins?: readonly string[]
+  scimProvisioningEnabled?: boolean
   slotSnippetsEnabled?: boolean
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -184,6 +187,7 @@ export function productRoutes({
     instanceRoutes({
       publicUrl,
       socialProviders,
+      scimProvisioningEnabled,
       automaticMeet,
       automaticZoom,
       followUpHostNotesEnabled,
@@ -206,6 +210,7 @@ export function productRoutes({
       secretToken: zoomWebhookSecretToken,
       clientId: zoomWebhookClientId,
     }),
+    provisioningTokenRoutes({ db, enabled: scimProvisioningEnabled }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
@@ -676,6 +681,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     })
     fetch = createApp({
       checkDb,
+      scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: config.PUBLIC_URL,
@@ -689,6 +695,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       },
       // db is closed below.
       routes: productRoutes({
+        scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
         mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
         publicUrl: config.PUBLIC_URL,
         db,

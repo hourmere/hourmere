@@ -125,10 +125,10 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Operation group | `full` | `read` | `bookings` |
 | --- | --- | --- | --- |
 | Other account reads | Allowed | Allowed | — |
+| Browser session operations | — | — | — |
 | Account settings and configuration writes | Allowed | — | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
 | Booking actions and repairs | Allowed | — | Allowed |
-| Browser session operations | — | — | — |
 | Public instance and API metadata | Allowed | Allowed | Allowed |
 
 ### REST operations
@@ -136,6 +136,10 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
+| `GET /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
+| `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
+| `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Browser session only | — |
+| `DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}` | Browser session only | — |
 | `GET /api/v1/branding` | Session or API key | `full, read` |
 | `GET /api/v1/branding/logo/{hash}` | Session or API key | `full, read` |
 | `PATCH /api/v1/branding` | Session or API key | `full` |
