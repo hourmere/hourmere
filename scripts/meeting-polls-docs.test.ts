@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PUBLIC_RATE_LIMITS, type RateLimit } from '../apps/server/src/rate-limit.ts'
 import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
+import {
+  MEETING_POLL_LIMITS,
+  MEETING_POLL_RETENTION,
+} from '../packages/scheduling/src/meeting-poll-policy.ts'
 
 const document = readFileSync(new URL('../docs/meeting-polls.md', import.meta.url), 'utf8')
 
@@ -519,6 +523,12 @@ function verifyPlan(source: string) {
   expect(acceptance('A2')).toMatch(
     /Voter-dependent results, removal and privacy cascades belong to A4a and A4b/,
   )
+  expect(acceptance('A2')).toContain(
+    'service-only invariants: immutable event, duration, deadline, admission mode, visibility and settings snapshot/fingerprint; no reopening of closed or canceled polls; public-link polls retain a public token except during deletion',
+  )
+  expect(acceptance('A2')).toContain(
+    'A1 validates candidate duration and start-after-deadline only on slot writes, not parent updates',
+  )
   expect(acceptance('A3a')).toContain('Enroll/invite/verify/recover/resend')
   expect(acceptance('A3b')).toContain(
     'Submit/replace full ballots, withdraw/reactivate and opt-out',
@@ -561,6 +571,16 @@ describe('meeting poll day-sized implementation plan', () => {
   })
 
   it.each([
+    [
+      'service-owned invariants',
+      'service-only invariants: immutable event',
+      'database invariants: immutable event',
+    ],
+    [
+      'slot-only enforcement',
+      'only on slot writes, not parent updates',
+      'on slot writes and parent updates',
+    ],
     ['enrollment split', '| A3a Storage', '| A3 Storage'],
     ['ballot split', '| A3b Storage', '| A3 Storage'],
     ['host creation split', '| D4a Agent', '| D4 Agent'],
@@ -663,6 +683,9 @@ function verifyRevisionContract(source: string) {
   expect(text).toContain(
     'Bulk removal retains mailbox tombstones/counters and uses the same poll lock and `expectedHostRevision`, so voter activity cannot make any of these remedies fail.',
   )
+  expect(text).toContain(
+    'These operations use current authority, `expectedHostRevision` and the common poll lock',
+  )
   expect(source).not.toMatch(/\bexpectedRevision\b/)
   for (const [resource, revisions] of contractRevisions) {
     expect(
@@ -697,6 +720,11 @@ describe('meeting poll exact revision contract', () => {
       'bulk-removal prose',
       '`expectedHostRevision`, so voter activity',
       '`expectedResultsRevision`, so voter activity',
+    ],
+    [
+      'lifecycle authority sentence',
+      'These operations use current authority, `expectedHostRevision`',
+      'These operations use current authority, `expectedResultsRevision`',
     ],
     ['legacy revision field', 'Require `expectedBallotRevision`', 'Require `expectedRevision`'],
   ])('rejects a source-copy regression of %s', (_name, before, after) => {
@@ -776,5 +804,103 @@ describe('meeting poll invitation outcome contract', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
     verifyInvitationOutcomes(document)
+  })
+})
+
+const migration = readFileSync(
+  new URL('../packages/db/migrations/0071_meeting_polls.sql', import.meta.url),
+  'utf8',
+)
+
+function verifyStoragePolicy(sql: string, docs: string) {
+  const limits = MEETING_POLL_LIMITS
+  const retention = MEETING_POLL_RETENTION
+  const rows = [
+    ['Candidates per poll', `${limits.minCandidates}–${limits.maxCandidates}`],
+    ['Enrollments per poll', `0–${limits.maxEnrollments}`],
+    ['Attendees per booking', `${limits.minAttendees}–${limits.maxAttendees}`],
+    ['Pending enrollment expiry', `${limits.pendingExpirySeconds / 3600} hour`],
+    ['Public pending reservations per IP/poll', `${limits.maxPendingPerIp}`],
+    [
+      'Deadline after creation',
+      `${limits.minDeadlineSeconds / 3600} hour–${limits.maxDeadlineSeconds / 86400} days`,
+    ],
+    ['Reminder lead time', `${limits.reminderLeadSeconds / 3600} hours`],
+    ['Invitation resend cooldown', `${limits.resendCooldownSeconds / 60} minutes`],
+    ['Invitation resend cap', `${limits.maxResendsPerMailbox} per poll/mailbox`],
+    ['Recovery delivery cooldown', `${limits.recoveryCooldownSeconds / 60} minutes`],
+    ['Recovery delivery cap', `${limits.maxRecoveriesPerCredential} per mailbox credential`],
+  ] as const
+  for (const [label, value] of rows) verifyLimit(docs, label, value)
+  for (const fragment of [
+    `position BETWEEN 0 AND ${limits.maxCandidates - 1}`,
+    `total NOT BETWEEN ${limits.minCandidates} AND ${limits.maxCandidates}`,
+    `IF total>=${limits.maxEnrollments} THEN`,
+    `IF total>=${limits.maxPendingPerIp} THEN`,
+    `deadline_at BETWEEN created_at+interval '${limits.minDeadlineSeconds / 3600} hour' AND created_at+interval '${limits.maxDeadlineSeconds / 3600} hours'`,
+    `pending_expires_at<=created_at+interval '${limits.pendingExpirySeconds / 3600} hour'`,
+    `resend_count BETWEEN 0 AND ${limits.maxResendsPerMailbox}`,
+    `recovery_count BETWEEN 0 AND ${limits.maxRecoveriesPerCredential}`,
+    `attempts BETWEEN 0 AND ${retention.deliveryMaxAttempts}`,
+    `purge_at=clock_timestamp()+interval '${retention.deletedReceiptDays} days'`,
+  ])
+    expect(sql, fragment).toContain(fragment)
+  const text = docs.replace(/\s+/g, ' ')
+  expect(retention.sweepSeconds).toBe(3600)
+  expect(text).toContain(`run hourly, in batches of at most ${retention.batchSize} rows`)
+  expect(text).toContain(`replay digests for ${retention.deletedReceiptDays} days from deletion`)
+  expect(text).toContain(
+    `at most ${retention.deliveryMaxAttempts} attempts with a ${retention.deliveryLeaseSeconds / 60}-minute lease`,
+  )
+  expect(limits.admissionRequestsPerWindow).toBe(PUBLIC_RATE_LIMITS.book.limit)
+  expect(limits.readRequestsPerWindow).toBe(PUBLIC_RATE_LIMITS.page.limit)
+  expect(limits.ballotRequestsPerWindow).toBe(PUBLIC_RATE_LIMITS.manage.limit)
+  for (const bucket of ['book', 'page', 'manage'] as const) {
+    expect(limits.requestWindowSeconds).toBe(PUBLIC_RATE_LIMITS[bucket].windowSeconds)
+  }
+  verifyRateLimits(docs, PUBLIC_RATE_LIMITS)
+}
+
+describe('meeting poll shared SQL, TypeScript and documentation policy', () => {
+  it('binds storage limits, cleanup bounds and public request buckets to the shared constants', () => {
+    verifyStoragePolicy(migration, document)
+  })
+
+  it.each([
+    ['candidate position', 'position BETWEEN 0 AND 19', 'position BETWEEN 0 AND 24'],
+    ['candidate count', 'total NOT BETWEEN 2 AND 20', 'total NOT BETWEEN 2 AND 25'],
+    ['enrollments', 'IF total>=40 THEN', 'IF total>=41 THEN'],
+    ['pending IP cap', 'IF total>=3 THEN', 'IF total>=4 THEN'],
+    ['deadline minimum', "created_at+interval '1 hour' AND", "created_at+interval '1 minute' AND"],
+    ['deadline maximum', "interval '720 hours'", "interval '744 hours'"],
+    [
+      'pending expiry',
+      "pending_expires_at<=created_at+interval '1 hour'",
+      "pending_expires_at<=created_at+interval '2 hours'",
+    ],
+    ['resends', 'resend_count BETWEEN 0 AND 3', 'resend_count BETWEEN 0 AND 4'],
+    ['recovery', 'recovery_count BETWEEN 0 AND 3', 'recovery_count BETWEEN 0 AND 4'],
+    ['attempts', 'attempts BETWEEN 0 AND 5', 'attempts BETWEEN 0 AND 6'],
+    ['receipt retention', "interval '90 days'", "interval '91 days'"],
+  ])('rejects a SQL source-copy change to %s', (_name, before, after) => {
+    const mutated = migration.replace(before, after)
+    expect(mutated).not.toBe(migration)
+    expect(() => verifyStoragePolicy(mutated, document)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  it.each([
+    ['sweep cadence', 'run hourly, in batches', 'run daily, in batches'],
+    ['batch size', 'at most 500 rows', 'at most 501 rows'],
+    ['receipt retention', 'digests for 90 days from deletion', 'digests for 91 days from deletion'],
+    ['attempt cap', 'at most 5 attempts', 'at most 6 attempts'],
+    ['lease duration', 'with a 5-minute lease', 'with a 6-minute lease'],
+  ])('rejects a cleanup documentation source-copy change to %s', (_name, before, after) => {
+    const mutated = document.replace(before, after)
+    expect(mutated).not.toBe(document)
+    expect(() => verifyStoragePolicy(migration, mutated)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 })

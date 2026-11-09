@@ -83,7 +83,7 @@ poll lifetime so removing/recreating voters cannot reset mail budgets, reminder 
 or opt-outs. Counters' `purge_at` is unset until the parent is due for retention deletion;
 poll deletion cascades them. Delivery ciphertext is cleared immediately at terminal
 sent/suppressed/skipped state; retries have at most 5 attempts and 5-minute leases.
-Operation receipts lose poll/booking references and result metadata on poll deletion,
+Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion,
 then retain only non-personal replay digests for 90 days before the hourly purge.
 Organization deletion removes them immediately. Poll deletion preserves the booking;
 linked-booking deletion first deletes poll history and clears receipt references.

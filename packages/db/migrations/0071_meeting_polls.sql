@@ -27,6 +27,7 @@ CREATE TABLE meeting_polls (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organization_id,id),
+  CONSTRAINT meeting_polls_source_api_key_check CHECK (api_key_id IS NULL OR source IN ('api','mcp')),
   CONSTRAINT meeting_polls_event_fk FOREIGN KEY(event_type_id,organization_id)
     REFERENCES event_types(id,organization_id) ON DELETE CASCADE,
   CONSTRAINT meeting_polls_booking_fk FOREIGN KEY(organization_id,booking_id)
@@ -43,6 +44,7 @@ CREATE TABLE meeting_polls (
   CHECK (admission_mode<>'invited' OR public_token_digest IS NULL)
 );
 CREATE INDEX meeting_polls_page ON meeting_polls(organization_id,created_at,id);
+CREATE INDEX meeting_polls_creator_idx ON meeting_polls(created_by_user_id);
 CREATE INDEX meeting_polls_deadline ON meeting_polls(deadline_at,id) WHERE status='open';
 CREATE TABLE meeting_poll_slots (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -218,6 +220,7 @@ CREATE UNIQUE INDEX meeting_poll_deliveries_voter_identity ON meeting_poll_deliv
 CREATE UNIQUE INDEX meeting_poll_deliveries_host_identity ON meeting_poll_deliveries(poll_id,host_user_id,kind,generation) WHERE host_user_id IS NOT NULL;
 CREATE INDEX meeting_poll_deliveries_due ON meeting_poll_deliveries(due_at,id) WHERE state='pending';
 CREATE INDEX meeting_poll_deliveries_claims ON meeting_poll_deliveries(lease_until,id) WHERE state='processing';
+CREATE INDEX meeting_poll_deliveries_host_idx ON meeting_poll_deliveries(host_user_id);
 
 -- Child writers serialize their cross-row bounds on the common parent row.
 CREATE FUNCTION guard_meeting_poll_slot() RETURNS trigger

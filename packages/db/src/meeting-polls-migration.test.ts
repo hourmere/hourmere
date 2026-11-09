@@ -278,6 +278,268 @@ const protections: Record<
   string,
   { assert: (f: Fixture) => Promise<void>; mutation: string | ((source: string) => string) }
 > = {
+  'deadline lower bound': {
+    assert: async (f) => {
+      await f.pool.query(
+        "UPDATE meeting_polls SET deadline_at=created_at+interval '1 hour' WHERE id=$1",
+        [f.poll],
+      )
+      await expect(
+        f.pool.query(
+          "UPDATE meeting_polls SET deadline_at=created_at+interval '1 hour'-interval '1 millisecond' WHERE id=$1",
+          [f.poll],
+        ),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_polls_deadline_cap' })
+    },
+    mutation: (source) =>
+      source.replace(
+        "deadline_at BETWEEN created_at+interval '1 hour'",
+        "deadline_at BETWEEN created_at+interval '1 minute'",
+      ),
+  },
+  'deadline upper bound': {
+    assert: async (f) => {
+      await f.pool.query(
+        "UPDATE meeting_polls SET deadline_at=created_at+interval '720 hours' WHERE id=$1",
+        [f.poll],
+      )
+      await expect(
+        f.pool.query(
+          "UPDATE meeting_polls SET deadline_at=created_at+interval '720 hours'+interval '1 millisecond' WHERE id=$1",
+          [f.poll],
+        ),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_polls_deadline_cap' })
+    },
+    mutation: (source) =>
+      source.replace("created_at+interval '720 hours'", "created_at+interval '1000 hours'"),
+  },
+  'mailbox uniqueness': {
+    assert: async (f) => {
+      await insert(f.pool, 'meeting_poll_voters', { ...f.voterValues, poll_id: f.second.poll })
+      await expect(insert(f.pool, 'meeting_poll_voters', f.voterValues)).rejects.toMatchObject({
+        code: '23505',
+      })
+    },
+    mutation:
+      'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_poll_id_email_key_key;',
+  },
+  'withdrawn privacy': {
+    assert: async (f) => {
+      for (const fields of [
+        'responses=\'{"answer":"private"}\'::jsonb',
+        'join_consent_at=clock_timestamp()',
+      ])
+        await expect(
+          f.pool.query(
+            `UPDATE meeting_poll_voters SET withdrawn_at=clock_timestamp(),${fields} WHERE id=$1`,
+            [f.voter],
+          ),
+        ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_withdrawn_pair' })
+      // The pending/IP pair also forbids retaining a digest after withdrawal.
+      await expect(
+        f.pool.query(
+          'UPDATE meeting_poll_voters SET withdrawn_at=clock_timestamp(),admission_ip_digest=$1 WHERE id=$2',
+          [digest(), f.voter],
+        ),
+      ).rejects.toMatchObject(checkViolation)
+      await f.pool.query(
+        'UPDATE meeting_poll_voters SET withdrawn_at=clock_timestamp() WHERE id=$1',
+        [f.voter],
+      )
+      expect(
+        (
+          await f.pool.query(
+            'SELECT responses,join_consent_at,admission_ip_digest,ballot_submitted_at FROM meeting_poll_voters WHERE id=$1',
+            [f.voter],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          responses: {},
+          join_consent_at: null,
+          admission_ip_digest: null,
+          ballot_submitted_at: null,
+        },
+      ])
+    },
+    mutation: 'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_withdrawn_pair;',
+  },
+  'creator deletion preserves team polls': {
+    assert: async (f) => {
+      await f.pool.query('DELETE FROM auth."user" WHERE id=$1', [f.user])
+      expect(
+        (await f.pool.query('SELECT created_by_user_id FROM meeting_polls WHERE id=$1', [f.poll]))
+          .rows,
+      ).toEqual([{ created_by_user_id: null }])
+      expect(
+        (await f.pool.query('SELECT id FROM meeting_poll_slots WHERE poll_id=$1', [f.poll]))
+          .rowCount,
+      ).toBe(2)
+    },
+    mutation: (source) =>
+      source.replace(
+        'created_by_user_id uuid REFERENCES auth."user"(id) ON DELETE SET NULL',
+        'created_by_user_id uuid REFERENCES auth."user"(id) ON DELETE CASCADE',
+      ),
+  },
+  'scoped candidate foreign key': {
+    assert: async (f) => {
+      await expect(
+        insert(f.pool, 'meeting_poll_slots', {
+          organization_id: f.otherOrganization,
+          poll_id: f.poll,
+          position: 2,
+          start_at: new Date(new Date(f.start).getTime() + 7200_000),
+          end_at: new Date(new Date(f.end).getTime() + 7200_000),
+        }),
+      ).rejects.toMatchObject({ code: '23503', constraint: 'meeting_poll_slots_poll_fk' })
+    },
+    mutation: (source) =>
+      source.replace(
+        'CONSTRAINT meeting_poll_slots_poll_fk FOREIGN KEY(organization_id,poll_id)\n    REFERENCES meeting_polls(organization_id,id)',
+        'CONSTRAINT meeting_poll_slots_poll_fk FOREIGN KEY(poll_id)\n    REFERENCES meeting_polls(id)',
+      ),
+  },
+  'pending IP pair': {
+    assert: async (f) => {
+      await expect(
+        insert(f.pool, 'meeting_poll_voters', {
+          ...f.voterValues,
+          email_key: digest(),
+          invited_at: null,
+          created_at: f.created,
+          pending_expires_at: new Date(new Date(f.created).getTime() + 3600_000),
+        }),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_pending_pair' })
+      await expect(
+        f.pool.query(
+          'UPDATE meeting_poll_voters SET verified_at=clock_timestamp(),admission_ip_digest=$1 WHERE id=$2',
+          [digest(), f.voter],
+        ),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_pending_pair' })
+    },
+    mutation: (source) =>
+      source.replace('AND (pending_expires_at IS NULL)=(admission_ip_digest IS NULL)', ''),
+  },
+  'ballot verification and consent': {
+    assert: async (f) => {
+      for (const fields of ['join_consent_at=clock_timestamp()', 'verified_at=clock_timestamp()'])
+        await expect(
+          f.pool.query(
+            `UPDATE meeting_poll_voters SET ballot_submitted_at=clock_timestamp(),${fields} WHERE id=$1`,
+            [f.voter],
+          ),
+        ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_voters_ballot_pair' })
+      await f.pool.query(
+        'UPDATE meeting_poll_voters SET ballot_submitted_at=clock_timestamp(),verified_at=clock_timestamp(),join_consent_at=clock_timestamp() WHERE id=$1',
+        [f.voter],
+      )
+    },
+    mutation: 'ALTER TABLE meeting_poll_voters DROP CONSTRAINT meeting_poll_voters_ballot_pair;',
+  },
+  'invited poll token privacy': {
+    assert: async (f) => {
+      await f.makePoll({ admission_mode: 'invited' })
+      await expect(
+        f.makePoll({ admission_mode: 'invited', public_token_digest: digest() }),
+      ).rejects.toMatchObject(checkViolation)
+    },
+    mutation: (source) =>
+      source.replace(
+        "CHECK (admission_mode<>'invited' OR public_token_digest IS NULL)",
+        'CHECK (true)',
+      ),
+  },
+  'unique booking link': {
+    assert: async (f) => {
+      const schedule = (poll: string, slot: string) =>
+        f.pool.query(
+          "UPDATE meeting_polls SET status='scheduled',scheduled_at=clock_timestamp(),chosen_slot_id=$1,booking_id=$2 WHERE id=$3",
+          [slot, f.booking, poll],
+        )
+      await schedule(f.poll, f.slots[0] as string)
+      await expect(schedule(f.second.poll, f.second.slots[0] as string)).rejects.toMatchObject({
+        code: '23505',
+      })
+    },
+    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_booking_id_key;',
+  },
+  'verification expiry respects pending expiry': {
+    assert: async (f) => {
+      const expiry = new Date(new Date(f.created).getTime() + 3600_000)
+      const voter = await insert(f.pool, 'meeting_poll_voters', {
+        ...f.voterValues,
+        email_key: digest(),
+        invited_at: null,
+        created_at: f.created,
+        pending_expires_at: expiry,
+        admission_ip_digest: digest(),
+      })
+      const values = {
+        organization_id: f.organization,
+        poll_id: f.poll,
+        voter_id: voter,
+        purpose: 'verification',
+        created_at: f.created,
+      }
+      await insert(f.pool, 'meeting_poll_capabilities', {
+        ...values,
+        token_digest: digest(),
+        expires_at: expiry,
+      })
+      await expect(
+        insert(f.pool, 'meeting_poll_capabilities', {
+          ...values,
+          token_digest: digest(),
+          expires_at: new Date(expiry.getTime() + 1),
+        }),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'meeting_poll_capabilities_expiry_cap' })
+    },
+    mutation: (source) =>
+      source.replace('pending IS NULL OR NEW.expires_at>pending', 'pending IS NULL'),
+  },
+  'vote value': {
+    assert: async (f) => {
+      await expect(
+        insert(f.pool, 'meeting_poll_votes', {
+          organization_id: f.organization,
+          poll_id: f.poll,
+          voter_id: f.voter,
+          slot_id: f.slots[0],
+          value: 'maybe',
+        }),
+      ).rejects.toMatchObject(checkViolation)
+    },
+    mutation: 'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_value_check;',
+  },
+  'unique vote cell': {
+    assert: async (f) => {
+      const vote = {
+        organization_id: f.organization,
+        poll_id: f.poll,
+        voter_id: f.voter,
+        slot_id: f.slots[0],
+        value: 'yes',
+      }
+      await insert(f.pool, 'meeting_poll_votes', vote)
+      await expect(
+        insert(f.pool, 'meeting_poll_votes', { ...vote, value: 'no' }),
+      ).rejects.toMatchObject({ code: '23505' })
+    },
+    mutation:
+      'ALTER TABLE meeting_poll_votes DROP CONSTRAINT meeting_poll_votes_poll_id_voter_id_slot_id_key;',
+  },
+  'source API key attribution': {
+    assert: async (f) => {
+      for (const source of ['web', 'api', 'mcp']) await f.makePoll({ source })
+      for (const source of ['api', 'mcp']) await f.makePoll({ source, api_key_id: randomUUID() })
+      await expect(f.makePoll({ source: 'web', api_key_id: randomUUID() })).rejects.toMatchObject({
+        code: '23514',
+        constraint: 'meeting_polls_source_api_key_check',
+      })
+    },
+    mutation: 'ALTER TABLE meeting_polls DROP CONSTRAINT meeting_polls_source_api_key_check;',
+  },
   'enrollment serialization': {
     assert: (f) => raceAtCapacity(f, false),
     mutation: (source) =>
@@ -501,6 +763,24 @@ describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
       fresh = await createTestDatabase(serverUrl as string, directory)
       const schema = await snapshotSchema(upgraded.pool)
       expect(await snapshotSchema(fresh.pool)).toEqual(schema)
+      expect(
+        (
+          await upgraded.pool.query(
+            "SELECT indexname,indexdef FROM pg_indexes WHERE indexname IN ('meeting_polls_creator_idx','meeting_poll_deliveries_host_idx') ORDER BY indexname",
+          )
+        ).rows,
+      ).toEqual([
+        {
+          indexname: 'meeting_poll_deliveries_host_idx',
+          indexdef:
+            'CREATE INDEX meeting_poll_deliveries_host_idx ON public.meeting_poll_deliveries USING btree (host_user_id)',
+        },
+        {
+          indexname: 'meeting_polls_creator_idx',
+          indexdef:
+            'CREATE INDEX meeting_polls_creator_idx ON public.meeting_polls USING btree (created_by_user_id)',
+        },
+      ])
       const finalLedger = (
         await upgraded.pool.query('SELECT * FROM schema_migrations ORDER BY name')
       ).rows
@@ -652,7 +932,9 @@ describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
         (await f.pool.query('SELECT status,booking_id FROM meeting_polls WHERE id=$1', [f.poll]))
           .rows,
       ).toEqual([{ status: 'scheduled', booking_id: f.booking }])
-      await f.pool.query('DELETE FROM meeting_polls WHERE id=$1', [f.poll])
+      await expect(
+        f.pool.query('DELETE FROM meeting_polls WHERE id=$1', [f.poll]),
+      ).resolves.toMatchObject({ rowCount: 1 })
       expect(
         (await f.pool.query('SELECT id FROM bookings WHERE id=$1', [f.booking])).rowCount,
       ).toBe(1)
@@ -870,7 +1152,9 @@ describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
           [counter],
         )
       ).rows
-      await f.pool.query('DELETE FROM meeting_poll_voters WHERE id=$1', [f.voter])
+      await expect(
+        f.pool.query('DELETE FROM meeting_poll_voters WHERE id=$1', [f.voter]),
+      ).resolves.toMatchObject({ rowCount: 1 })
       for (const table of [
         'meeting_poll_votes',
         'meeting_poll_capabilities',
@@ -896,7 +1180,9 @@ describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
           )
         ).rows,
       ).toEqual(before)
-      await f.pool.query('DELETE FROM auth.organization WHERE id=$1', [f.organization])
+      await expect(
+        f.pool.query('DELETE FROM auth.organization WHERE id=$1', [f.organization]),
+      ).resolves.toMatchObject({ rowCount: 1 })
       for (const table of [
         'meeting_polls',
         'meeting_poll_slots',
@@ -971,7 +1257,9 @@ describe.skipIf(!serverUrl)('meeting poll storage migration', () => {
       await expect(insert(f.pool, 'meeting_poll_operations', receipt)).rejects.toMatchObject({
         code: '23505',
       })
-      await f.pool.query('DELETE FROM bookings WHERE id=$1', [f.booking])
+      await expect(
+        f.pool.query('DELETE FROM bookings WHERE id=$1', [f.booking]),
+      ).resolves.toMatchObject({ rowCount: 1 })
       expect(
         (await f.pool.query('SELECT id FROM meeting_polls WHERE id=$1', [f.poll])).rows,
       ).toEqual([])
