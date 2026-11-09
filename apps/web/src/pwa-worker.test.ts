@@ -275,17 +275,6 @@ describe('offline shell routing', () => {
     expect(await (await slow)?.text()).toBe('offline notice')
   })
 
-  it.each(errorKinds)(
-    'keeps online navigation and static files working when storage is unavailable (%s)',
-    async (_kind, make) => {
-      const sw = harness()
-      sw.caches.open.mockRejectedValue(make(sw, 'storage denied'))
-      expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('static')
-      expect(await (await sw.request('/assets/main-abc123.js'))?.text()).toBe('static')
-      expect(sw.fetch).toHaveBeenCalledTimes(2)
-    },
-  )
-
   it('preserves server denial responses instead of substituting an offline page', async () => {
     const sw = harness()
     sw.fetch.mockResolvedValue(new Response('denied', { status: 403 }))
@@ -358,18 +347,6 @@ describe('offline shell installation and updates', () => {
     expect(sw.caches.delete.mock.calls).toEqual([['hourmere-shell-old']])
     expect(sw.claim).not.toHaveBeenCalled()
   })
-
-  it.each(errorKinds)(
-    'fails activation when deleting an old shell cache fails (%s)',
-    async (_kind, make) => {
-      const sw = harness()
-      const error = make(sw, 'delete failed')
-      sw.caches.delete.mockRejectedValue(error)
-      await expect(sw.lifecycle('activate')).rejects.toBe(error)
-      expect(sw.caches.delete.mock.calls).toEqual([['hourmere-shell-old']])
-      expect(sw.claim).not.toHaveBeenCalled()
-    },
-  )
 })
 
 describe('build precache selection', () => {
@@ -552,12 +529,267 @@ async function verifyReuseFailure(failure: ReuseFailure, worker = source, make =
 
 const reuseFailures: ReuseFailure[] = ['list', 'open', 'match', 'copy']
 
-it.each<[ReuseFailure, string, ErrorKind[1]]>(
-  reuseFailures.flatMap((failure) =>
-    errorKinds.map(([kind, make]): [ReuseFailure, string, ErrorKind[1]] => [failure, kind, make]),
+// Rejects the request for `target` only; every other request succeeds.
+function rejectRequest(sw: Harness, target: string, error: Error) {
+  sw.fetch.mockImplementation(async (request) => {
+    if (new URL(request.url).pathname === target) throw error
+    return new Response('static')
+  })
+}
+
+// Rejects the write of `target` only; every other write succeeds.
+function rejectWrite(sw: Harness, target: string, error: Error) {
+  const put = sw.cache.put.getMockImplementation()
+  if (!put) throw new Error('Missing cache put fixture')
+  sw.cache.put.mockImplementation(async (path, response) => {
+    if (path === target) throw error
+    return put(path, response)
+  })
+}
+
+// The install must fail with the very error, leave `target` out and discard the partial cache.
+async function expectInstallFailure(sw: Harness, error: Error, target: string) {
+  await expect(sw.lifecycle('install')).rejects.toBe(error)
+  expect(sw.store.has(target)).toBe(false)
+  expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+  expect(sw.skipWaiting).not.toHaveBeenCalled()
+}
+
+type FailurePoint = {
+  // `<context>:<callee>` as the worker.js source scan below reports it.
+  site: string
+  behaviour: string
+  drive: (make: ErrorKind[1]) => Promise<void>
+}
+
+// Every call in worker.js whose promise can reject, what a rejection must do, and the check
+// that drives it. The scan test below keeps this table complete.
+const failurePoints: FailurePoint[] = [
+  {
+    site: 'install:caches.open',
+    behaviour: 'install fails before any request or write; nothing to discard; no skipWaiting',
+    drive: async (make) => {
+      const sw = harness()
+      const error = make(sw, 'storage unavailable')
+      sw.caches.open.mockRejectedValue(error)
+      await expect(sw.lifecycle('install')).rejects.toBe(error)
+      expect(sw.fetch).not.toHaveBeenCalled()
+      expect(sw.cache.put).not.toHaveBeenCalled()
+      expect(sw.store.size).toBe(0)
+      expect(sw.skipWaiting).not.toHaveBeenCalled()
+    },
+  },
+  ...reuseFailures.map(
+    (failure): FailurePoint => ({
+      site: `reuse:${
+        { list: 'caches.keys', open: 'caches.open', match: 'cache.match', copy: 'cache.put' }[
+          failure
+        ]
+      }`,
+      behaviour: 'reuse is skipped; every path is fetched fresh with safe options and installed',
+      drive: (make) => verifyReuseFailure(failure, source, make),
+    }),
   ),
-)('fetches fresh assets when previous cache %s fails (%s)', async (failure, _kind, make) => {
-  await verifyReuseFailure(failure, source, make)
+  {
+    site: 'fresh:fetch',
+    behaviour: 'install fails for every precache path, discarding the partial cache',
+    drive: async (make) => {
+      for (const target of paths) {
+        const sw = harness()
+        const error = make(sw, 'offline')
+        rejectRequest(sw, target, error)
+        await expectInstallFailure(sw, error, target)
+      }
+    },
+  },
+  {
+    site: 'fresh:cache.put',
+    behaviour: 'install fails for every precache path, discarding the partial cache',
+    drive: async (make) => {
+      for (const target of paths) {
+        const sw = harness()
+        const error = make(sw, 'storage full')
+        rejectWrite(sw, target, error)
+        await expectInstallFailure(sw, error, target)
+      }
+    },
+  },
+  {
+    site: 'cleanup:caches.delete',
+    behaviour: 'a failing discard still fails the install (either error); no skipWaiting',
+    drive: async (make) => {
+      const sw = harness()
+      const error = make(sw, 'storage full')
+      const cleanup = make(sw, 'cleanup failed')
+      sw.cache.put.mockRejectedValue(error)
+      sw.caches.delete.mockRejectedValue(cleanup)
+      const outcome: unknown = await sw.lifecycle('install').then(
+        () => 'resolved',
+        (reason: unknown) => reason,
+      )
+      expect([error, cleanup]).toContain(outcome)
+      expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+      expect(sw.skipWaiting).not.toHaveBeenCalled()
+    },
+  },
+  {
+    site: 'activate:caches.keys',
+    behaviour: 'activation fails with the error; nothing deleted; no clients.claim',
+    drive: async (make) => {
+      const sw = harness()
+      const error = make(sw, 'list failed')
+      sw.caches.keys.mockRejectedValue(error)
+      await expect(sw.lifecycle('activate')).rejects.toBe(error)
+      expect(sw.caches.delete).not.toHaveBeenCalled()
+      expect(sw.claim).not.toHaveBeenCalled()
+    },
+  },
+  {
+    site: 'activate:caches.delete',
+    behaviour: 'activation fails with the error after the one deletion; no clients.claim',
+    drive: async (make) => {
+      const sw = harness()
+      const error = make(sw, 'delete failed')
+      sw.caches.delete.mockRejectedValue(error)
+      await expect(sw.lifecycle('activate')).rejects.toBe(error)
+      expect(sw.caches.delete.mock.calls).toEqual([['hourmere-shell-old']])
+      expect(sw.claim).not.toHaveBeenCalled()
+    },
+  },
+  {
+    site: 'navigation:caches.open',
+    behaviour: 'online navigation is served from the network',
+    drive: async (make) => {
+      const sw = harness()
+      sw.caches.open.mockRejectedValue(make(sw, 'storage denied'))
+      expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('static')
+      expect(sw.fetch).toHaveBeenCalledOnce()
+    },
+  },
+  {
+    site: 'navigation:cache.match',
+    behaviour: 'online navigation is served from the network',
+    drive: async (make) => {
+      const sw = harness()
+      sw.cache.match.mockRejectedValue(make(sw, 'lookup failed'))
+      expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('static')
+      expect(sw.fetch).toHaveBeenCalledOnce()
+    },
+  },
+  {
+    site: 'navigation:fetch',
+    behaviour: 'the cached offline notice is served, whatever the rejection',
+    drive: async (make) => {
+      const sw = harness()
+      sw.store.set('/app/offline.html', new Response('offline notice'))
+      sw.fetch.mockRejectedValue(make(sw, 'offline'))
+      expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('offline notice')
+    },
+  },
+  {
+    site: 'static:caches.open',
+    behaviour: 'the static file is served from the network',
+    drive: async (make) => {
+      const sw = harness()
+      sw.caches.open.mockRejectedValue(make(sw, 'storage denied'))
+      expect(await (await sw.request(asset))?.text()).toBe('static')
+      expect(sw.fetch).toHaveBeenCalledOnce()
+    },
+  },
+  {
+    site: 'static:cache.match',
+    behaviour: 'the static file is served from the network',
+    drive: async (make) => {
+      const sw = harness()
+      sw.cache.match.mockRejectedValue(make(sw, 'lookup failed'))
+      expect(await (await sw.request(asset))?.text()).toBe('static')
+      expect(sw.fetch).toHaveBeenCalledOnce()
+    },
+  },
+  {
+    site: 'static:fetch',
+    behaviour: 'the network failure is passed through unchanged',
+    drive: async (make) => {
+      const sw = harness()
+      const error = make(sw, 'offline')
+      sw.fetch.mockRejectedValue(error)
+      await expect(sw.request(asset)).rejects.toBe(error)
+    },
+  },
+]
+
+// Every rejectable call in worker.js as `<context>:<callee>`: fetch(), caches.<method>() and
+// cache.<method>() (including `(await caches.open(name)).match(path)`). The context is the
+// listener, split into the install's reuse, fresh and cleanup steps and the fetch route's
+// navigation and static branches. Comments are ignored.
+function rejectableCallSites(code: string) {
+  const text = code.replace(/\/\/.*$/gm, '')
+  const markers: [string, string][] = [
+    ["self.addEventListener('install'", 'install'],
+    ['const previous =', 'reuse'],
+    ['if (reused) continue', 'fresh'],
+    ['} catch (error) {', 'cleanup'],
+    ["self.addEventListener('message'", 'message'],
+    ["self.addEventListener('activate'", 'activate'],
+    ["self.addEventListener('fetch'", 'navigation'],
+    ['if (!staticRequest(request)) return', 'static'],
+  ]
+  const regions = markers
+    .map(([marker, region]) => [text.indexOf(marker), region] as const)
+    .filter(([at]) => at >= 0)
+  const contextAt = (offset: number) =>
+    regions.filter(([at]) => at <= offset).sort((a, b) => b[0] - a[0])[0]?.[1] ?? 'module'
+  const sites: string[] = []
+  const patterns: [RegExp, (match: RegExpExecArray) => string][] = [
+    [/\bfetch\s*\(/g, () => 'fetch'],
+    [/\bcaches\s*\.\s*(open|keys|delete|match|has)\s*\(/g, (match) => `caches.${match[1]}`],
+    [/\bcache\s*\.\s*(match|put|add|addAll|delete|keys)\s*\(/g, (match) => `cache.${match[1]}`],
+    [/\)\s*\.\s*(match|put|add|addAll|delete|keys)\s*\(/g, (match) => `cache.${match[1]}`],
+  ]
+  for (const [pattern, callee] of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      sites.push(`${contextAt(match.index)}:${callee(match)}`)
+    }
+  }
+  return sites.sort()
+}
+
+it('lists every rejectable fetch, caches and cache call in worker.js exactly once', () => {
+  // The regions the scan splits worker.js into must all still exist.
+  for (const marker of [
+    "self.addEventListener('install'",
+    'const previous =',
+    'if (reused) continue',
+    '} catch (error) {',
+    "self.addEventListener('activate'",
+    "self.addEventListener('fetch'",
+    'if (!staticRequest(request)) return',
+  ])
+    expect(source).toContain(marker)
+  const listed = failurePoints.map((point) => point.site)
+  expect(new Set(listed).size).toBe(listed.length)
+  expect(rejectableCallSites(source)).toEqual([...listed].sort())
+  // The scan sees through comments and chained calls.
+  expect(rejectableCallSites("// fetch(x)\nself.addEventListener('fetch', () => {})")).toEqual([])
+  expect(
+    rejectableCallSites(
+      "self.addEventListener('install', async () => {\n  await (await caches.open('a')).match('b')\n})",
+    ),
+  ).toEqual(['install:cache.match', 'install:caches.open'])
+})
+
+it.each(
+  failurePoints.flatMap((point) =>
+    errorKinds.map(([kind, make]) => ({
+      site: point.site,
+      kind,
+      behaviour: point.behaviour,
+      point,
+      make,
+    })),
+  ),
+)('$site rejecting with $kind: $behaviour', async ({ point, make }) => {
+  await point.drive(make)
 })
 
 it.each([false, true])(
@@ -602,6 +834,25 @@ it('injects failures as worker realm errors, which the worker sees as browsers w
   expect(quota.code).toBe(22)
   expect([quota.quota, quota.requested]).toEqual([null, null])
   for (const [, make] of errorKinds) expect(sw.realm.isError(make(sw, 'any kind'))).toBe(true)
+  // Each kind is exactly the class and name its label says.
+  const classes = [
+    sw.realm.QuotaExceededError,
+    sw.realm.DOMException,
+    sw.realm.TypeError,
+    sw.realm.Error,
+  ]
+  const describeKind = (error: Error) =>
+    `${classes.find((type) => Object.getPrototypeOf(error) === type.prototype)?.name} ${error.name}`
+  expect(errorKinds.map(([, make]) => describeKind(make(sw, 'any kind')))).toEqual([
+    'TypeError TypeError',
+    'DOMException UnknownError',
+    'DOMException QuotaExceededError',
+    'DOMException InvalidStateError',
+    'DOMException NotFoundError',
+    'DOMException SecurityError',
+    'QuotaExceededError QuotaExceededError',
+    'Error Error',
+  ])
   // An error the worker itself throws shares the realm of the injected ones.
   sw.fetch.mockResolvedValue(new Response('secret', { headers: { 'Cache-Control': 'no-store' } }))
   const thrown: unknown = await sw.lifecycle('install').then(
@@ -660,45 +911,6 @@ it.each<[ReuseFailure, string, ResponseInit]>(
     answerAsset(sw, () => new Response('unsafe', init))
     await expect(sw.lifecycle('install')).rejects.toThrow('Unsafe precache response')
     expect(sw.store.has(asset)).toBe(false)
-    expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
-    expect(sw.skipWaiting).not.toHaveBeenCalled()
-  },
-)
-
-it('fails installation when fetching the offline notice rejects', async () => {
-  const sw = harness()
-  sw.fetch
-    .mockResolvedValueOnce(new Response('static'))
-    .mockRejectedValueOnce(new sw.realm.TypeError('offline'))
-  await expect(sw.lifecycle('install')).rejects.toThrow('offline')
-  expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
-  expect(sw.skipWaiting).not.toHaveBeenCalled()
-})
-
-it.each(errorKinds)(
-  'fails installation when the new shell cache cannot be opened (%s)',
-  async (_kind, make) => {
-    const sw = harness()
-    const error = make(sw, 'storage unavailable')
-    sw.caches.open.mockRejectedValue(error)
-    await expect(sw.lifecycle('install')).rejects.toBe(error)
-    expect(sw.fetch).not.toHaveBeenCalled()
-    expect(sw.cache.put).not.toHaveBeenCalled()
-    expect(sw.store.size).toBe(0)
-    expect(sw.skipWaiting).not.toHaveBeenCalled()
-  },
-)
-
-it.each(errorKinds)(
-  'fails installation when storing a fresh asset fails after reuse fails (%s)',
-  async (_kind, make) => {
-    const sw = harness()
-    sw.caches.keys.mockRejectedValue(make(sw, 'old cache unavailable'))
-    const error = make(sw, 'storage full')
-    sw.cache.put.mockRejectedValue(error)
-    await expect(sw.lifecycle('install')).rejects.toBe(error)
-    expect(sw.fetch).toHaveBeenCalledOnce()
-    expect(sw.store.size).toBe(0)
     expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
     expect(sw.skipWaiting).not.toHaveBeenCalled()
   },
