@@ -116,6 +116,7 @@ import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
+import { configuredSmsJobs } from './sms.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -732,6 +733,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }),
       waitlistEmailJob(runWaitlistEmail),
       oneTimeBookingLinksRetentionJob(db),
+      ...configuredSmsJobs(config, db),
       paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({

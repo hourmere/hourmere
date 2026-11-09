@@ -1083,3 +1083,10 @@ and defaults to `https://hourmere.com`, independently of your instance's `PUBLIC
 the hosted sign-up page URL when available. The links send no booking details or tracking
 parameters, and suppress the referrer. Removing attribution may become an
 enterprise-license entitlement later; it is outside the current configuration.
+
+## SMS foundation
+
+An optional [operator-configured Twilio provider](/docs/sms-provider) supplies internal
+SMS sending with durable per-number, instance and organization limits. Costs are billed
+to your Twilio account. There are no user-facing SMS reminders or workflow actions yet;
+no SMS sending jobs or status callback endpoint are enabled by configuration.
