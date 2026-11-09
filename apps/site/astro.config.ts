@@ -85,6 +85,7 @@ export default defineConfig({
         {
           label: 'Scheduling',
           items: [
+            { label: 'Availability', link: '/docs/availability' },
             { label: 'Round-robin scheduling', link: '/docs/round-robin-scheduling' },
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
