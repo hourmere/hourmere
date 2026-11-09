@@ -396,6 +396,76 @@ it('reuses unchanged hashed URLs from an older Hourmere cache but refreshes muta
   await verifyReuseIsolation()
 })
 
+type ReuseFailure = 'list' | 'open' | 'match' | 'copy'
+
+async function verifyReuseFailure(failure: ReuseFailure, worker = source) {
+  const sw = harness(true, worker)
+  const asset = '/assets/main-abc123.js'
+  const cached = new Response('previous')
+  sw.oldStore.set(asset, cached)
+  const error = new Error('old cache unavailable')
+  if (failure === 'list') sw.caches.keys.mockRejectedValue(error)
+  if (failure === 'open' || failure === 'match') {
+    const open = sw.caches.open.getMockImplementation()
+    if (!open) throw new Error('Missing cache open fixture')
+    sw.caches.open.mockImplementation(async (name) => {
+      if (name === 'hourmere-shell-old') {
+        if (failure === 'open') throw error
+        return { ...sw.cache, match: vi.fn().mockRejectedValue(error) }
+      }
+      return open(name)
+    })
+  }
+  if (failure === 'copy') {
+    const put = sw.cache.put.getMockImplementation()
+    if (!put) throw new Error('Missing cache put fixture')
+    sw.cache.put.mockImplementation(async (path, response) => {
+      if (response === cached) throw error
+      return put(path, response)
+    })
+  }
+  await expect(sw.lifecycle('install')).resolves.toBeUndefined()
+  expect(sw.fetch.mock.calls.map(([request]) => new URL(request.url).pathname)).toEqual(paths)
+  expect(await sw.store.get(asset)?.text()).toBe('static')
+  expect(sw.store.size).toBe(paths.length)
+  expect(sw.caches.delete).not.toHaveBeenCalled()
+  expect(sw.skipWaiting).not.toHaveBeenCalled()
+}
+
+it.each<ReuseFailure>(['list', 'open', 'match', 'copy'])(
+  'fetches fresh assets when previous cache %s fails',
+  async (failure) => {
+    await verifyReuseFailure(failure)
+  },
+)
+
+it('still rejects installation when fresh asset storage fails after reuse fails', async () => {
+  const sw = harness(true)
+  sw.caches.keys.mockRejectedValue(new Error('old cache unavailable'))
+  sw.cache.put.mockRejectedValue(new Error('storage full'))
+  await expect(sw.lifecycle('install')).rejects.toThrow('storage full')
+  expect(sw.fetch).toHaveBeenCalledOnce()
+  expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
+  expect(sw.skipWaiting).not.toHaveBeenCalled()
+})
+
+it('detects source-copy mutations that make cache reuse errors abort installation', async () => {
+  const listGuard = 'caches.keys().catch(() => [])'
+  expect(source).toContain(listGuard)
+  await expect(
+    verifyReuseFailure('list', source.replace(listGuard, 'caches.keys()')),
+  ).rejects.toThrow(/promise rejected/)
+  const copyGuard = '} catch {\n                // Reuse is optional:'
+  expect(source).toContain(copyGuard)
+  const mutation = source.replace(
+    copyGuard,
+    '} catch (error) {\n                throw error\n                // Reuse is optional:',
+  )
+  for (const failure of ['open', 'match', 'copy'] as const) {
+    await expect(verifyReuseFailure(failure, mutation)).rejects.toThrow(/promise rejected/)
+  }
+})
+
 async function verifyDisabled(worker: string) {
   const sw = harness(true, worker)
   await sw.lifecycle('install')

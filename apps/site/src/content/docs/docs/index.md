@@ -47,6 +47,10 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- Prebuilt image installs have no runtime switch to disable app installation or the
+  offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
+  the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
+
 - [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
   Users, Groups, discovery and IdP synchronization are not available yet.
 - Organization OIDC/SAML SSO is in design and is not available yet. The
