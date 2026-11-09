@@ -237,25 +237,26 @@ describe('Hourmere trigger lifecycle', () => {
     // A restarted worker can restore the persisted receipt independently.
     expect(createReceiptCoordinator()(structuredClone(h.data), id)).toBe('duplicate')
   })
-  it.each(['booking.reschedule_requested', 'booking.reschedule_request_expired'])(
-    'offers and registers %s',
-    async (event) => {
-      const options = node.description.properties.find(
-        (property) => property.name === 'events',
-      )?.options
-      expect(options).toContainEqual(expect.objectContaining({ value: event }))
-      const h = hook()
-      h.context.getNodeParameter = () => [event]
-      h.request.mockResolvedValue({ webhook: { id: randomUUID() }, secret })
-      expect(await node.webhookMethods.default.create.call(h.context)).toBe(true)
-      expect(h.request).toHaveBeenCalledWith(
-        'hourmereApi',
-        expect.objectContaining({
-          body: expect.objectContaining({ events: [event] }),
-        }),
-      )
-    },
-  )
+  it.each([
+    'booking.reschedule_requested',
+    'booking.reschedule_request_expired',
+    'booking.attendee_no_show_changed',
+  ])('offers and registers %s', async (event) => {
+    const options = node.description.properties.find(
+      (property) => property.name === 'events',
+    )?.options
+    expect(options).toContainEqual(expect.objectContaining({ value: event }))
+    const h = hook()
+    h.context.getNodeParameter = () => [event]
+    h.request.mockResolvedValue({ webhook: { id: randomUUID() }, secret })
+    expect(await node.webhookMethods.default.create.call(h.context)).toBe(true)
+    expect(h.request).toHaveBeenCalledWith(
+      'hourmereApi',
+      expect.objectContaining({
+        body: expect.objectContaining({ events: [event] }),
+      }),
+    )
+  })
   it.each(['replace', 'missing', 'already deleted'])(
     'clears stale registration receipts on %s',
     async (operation) => {
@@ -339,6 +340,26 @@ describe('Hourmere trigger delivery and replay', () => {
     expect(result.workflowData).toEqual([[{ json: original }]])
     expect(d.request.readRawBody).toHaveBeenCalledOnce()
     expect(d.response.status).not.toHaveBeenCalled()
+  })
+  it.each(['marked', 'unmarked'])('emits a signed attendee no-show %s snapshot', async (state) => {
+    const original = payload('booking.attendee_no_show_changed')
+    const attendance = {
+      ...original,
+      data: {
+        ...original.data,
+        attendeeId: '33333333-3333-4333-8333-333333333333',
+        noShowMarkedAt: state === 'marked' ? '2027-03-14T10:35:00Z' : null,
+        noShowMarkedBy: state === 'marked' ? '44444444-4444-4444-8444-444444444444' : null,
+      },
+    }
+    const d = delivery(undefined, Buffer.from(JSON.stringify(attendance)))
+    const result = await node.webhook.call(d.context)
+    expect(result.workflowData).toEqual([[{ json: attendance }]])
+    expect(d.request.readRawBody).toHaveBeenCalledOnce()
+    expect(d.response.status).not.toHaveBeenCalled()
+    expect(
+      node.description.properties.find((property) => property.name === 'events')?.options,
+    ).toContainEqual({ name: 'Attendee No-Show Changed', value: attendance.type })
   })
   it('rejects unsigned requests with HTTP 401 without claiming or emitting', async () => {
     const d = delivery()

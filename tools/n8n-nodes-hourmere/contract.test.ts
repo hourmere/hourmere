@@ -1,5 +1,6 @@
 import { beforeAll, expect, it } from 'vitest'
 import { openApiDocument } from '../../apps/server/src/openapi-document.ts'
+import { WEBHOOK_EVENTS } from '../../packages/webhooks/src/service.ts'
 import { EVENTS } from './nodes/HourmereTrigger/signature'
 
 type Schema = {
@@ -80,6 +81,9 @@ it('keeps all action and credential endpoints and consumed fields in generated O
       'guests.[].email',
     ])
   }
+})
+it('matches the server webhook event source of truth', () => {
+  expect([...EVENTS]).toEqual([...WEBHOOK_EVENTS])
 })
 it('keeps trigger registration and lifecycle contracts in generated OpenAPI', () => {
   const list = operation('/webhooks', 'get')

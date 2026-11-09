@@ -133,6 +133,7 @@ uses one of Hourmere's ten webhook endpoints per organization. Supported events 
 - `booking.rescheduled`
 - `booking.reschedule_requested`
 - `booking.reschedule_request_expired`
+- `booking.attendee_no_show_changed` (**Attendee No-Show Changed**)
 
 Every delivery must have a valid HMAC-SHA256 signature over the exact raw body and a
 signed timestamp within five minutes of n8n's clock. Unsigned, tampered and stale requests
@@ -164,9 +165,19 @@ management links. Get the booking with an authorized action if your workflow nee
 data. Events can arrive out of order. A reschedule carries the new booking ID and
 `rescheduledFromId`; it does not produce a second cancellation event for its predecessor.
 
+**Attendee No-Show Changed** fires when an attendee is marked or unmarked as a no-show.
+Its `data` includes `bookingId`, `attendeeId`, `noShowMarkedAt` and `noShowMarkedBy`
+alongside the usual booking fields. Both marker fields are null when the mark is cleared;
+`data.requestId` is absent. Match attendance records by booking ID and attendee ID,
+not by an email address. Existing workflows must explicitly select this event to receive it.
+
 ## Examples
 
-**Keep another system in sync:** activate a trigger for all five events. Use the event
+Select **Attendee No-Show Changed** to update attendance in another system. Use the event
+`id` for deduplication and `data.attendeeId` to identify the changed attendee. A null
+`data.noShowMarkedAt` clears the no-show state; it does not cancel or reschedule the booking.
+
+**Keep another system in sync:** activate a trigger for all six events. Use the event
 `id` as your downstream deduplication key. Match records using `data.bookingId`; for a
 reschedule, link the successor to `data.rescheduledFromId`. Reconcile the latest booking
 state before applying an older event.

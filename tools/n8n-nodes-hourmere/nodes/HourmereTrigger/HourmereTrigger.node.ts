@@ -86,6 +86,7 @@ export class HourmereTrigger implements INodeType {
         type: 'multiOptions',
         required: true,
         options: [
+          { name: 'Attendee No-Show Changed', value: 'booking.attendee_no_show_changed' },
           { name: 'Booking Cancelled', value: 'booking.cancelled' },
           { name: 'Booking Created', value: 'booking.created' },
           {

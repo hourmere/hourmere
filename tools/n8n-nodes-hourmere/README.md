@@ -84,8 +84,11 @@ history. Restrict execution-data access/retention or drop that field before reta
 or forwarding results. Dropping it in a later node does not erase the create node’s
 saved output; restrict or disable execution-data storage as appropriate.
 
-**Hourmere Trigger:** booking created, cancelled, rescheduled, reschedule requested and
-reschedule request expired. Activation registers a
+**Hourmere Trigger:** booking created, cancelled, rescheduled, reschedule requested,
+reschedule request expired, and **Attendee No-Show Changed**
+(`booking.attendee_no_show_changed`). Attendance changes include `data.attendeeId`,
+`data.noShowMarkedAt` and `data.noShowMarkedBy`; both marker fields are null when
+a host unmarks a no-show. Activation registers a
 REST webhook; deactivation attempts to delete it. If Hourmere is unreachable, deactivation
 returns false and retains registration details for recovery. Remove the leftover endpoint
 in Hourmere’s webhook settings (or with `DELETE /api/v1/webhooks/{id}`); it continues

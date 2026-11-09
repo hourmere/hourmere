@@ -7,6 +7,7 @@ export const EVENTS = [
   'booking.cancelled',
   'booking.reschedule_requested',
   'booking.reschedule_request_expired',
+  'booking.attendee_no_show_changed',
 ] as const
 export const TIMESTAMP_TOLERANCE_SECONDS = 300
 export const RECEIPT_RETENTION_MS = 2 * TIMESTAMP_TOLERANCE_SECONDS * 1000
