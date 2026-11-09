@@ -31,6 +31,21 @@ const claimInsert = (extra = '', values = '') =>
   `INSERT INTO scim_user_claims (organization_id,connection_id,scim_user_id,work_email,expires_at${extra}) VALUES ('${org}','${connection}','${user}','claim@example.test',now()+interval '1 hour'${values})`
 const blockInsert = (extra = '', values = '', source = 'local', kind = 'suspension') =>
   `INSERT INTO scim_membership_blocks (organization_id,user_id,source,kind${extra}) VALUES ('${org}','${account}','${source}','${kind}'${values})`
+// A captured tombstone: the account is gone and only the normalized mailbox identifies it.
+const tombstoneInsert = (extra = '', values = '', kind = 'removal', mailbox = 'one@example.test') =>
+  `INSERT INTO scim_membership_blocks (organization_id,user_id,identity_email,source,kind${extra}) VALUES ('${org}',NULL,'${mailbox}','local','${kind}'${values})`
+const accountInsert = (accountId: string, email: string) =>
+  `INSERT INTO auth."user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES ('${accountId}','X',${email},true,now(),now())`
+const blockFor = (accountId: string, kind = 'removal', extra = '', values = '') =>
+  `INSERT INTO scim_membership_blocks (organization_id,user_id,source,kind${extra}) VALUES ('${org}','${accountId}','local','${kind}'${values})`
+// Replace only the named column inside the tombstone trigger's decision tuple comparison.
+function dropTupleColumn(source: string, column: string): string {
+  const start = source.indexOf('CREATE FUNCTION scim_preserve_block_identity()')
+  const end = source.indexOf('$$;', start)
+  expect(start).toBeGreaterThan(0)
+  const body = source.slice(start, end).replace(new RegExp(`(NEW|OLD)\\.${column}\\b`, 'g'), 'NULL')
+  return source.slice(0, start) + body + source.slice(end)
+}
 
 async function seed(client: pg.PoolClient) {
   await client.query(`
@@ -144,8 +159,17 @@ const protections: Protection[] = [
     blockInsert(',connection_id,scim_user_id', `,'${connection}','${otherUser}'`, 'scim'),
   ),
   unique('scim_blocks_live_authority', blockInsert(), blockInsert()),
+  unique('scim_blocks_live_identity', tombstoneInsert(), tombstoneInsert()),
   {
     ...check('scim_users_preserve_identity', `DELETE FROM scim_users WHERE id='${user}'`),
+    mutation: 'trigger',
+  },
+  {
+    ...check(
+      'scim_blocks_preserve_identity',
+      `DELETE FROM scim_membership_blocks WHERE id='${block}'`,
+      tombstoneInsert(',id', `,'${block}'`),
+    ),
     mutation: 'trigger',
   },
 ]
@@ -442,15 +466,15 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       name: 'cleared removal permits a fresh removal',
       setup: blockInsert(',cleared_at', ',now()', 'local', 'removal'),
       sql: blockInsert('', '', 'local', 'removal'),
-      from: 'WHERE cleared_at IS NULL;',
-      to: ';',
+      from: '(organization_id, user_id, source, kind)\n  WHERE cleared_at IS NULL;',
+      to: '(organization_id, user_id, source, kind);',
     },
     {
       name: 'cleared removal is excluded even when suspension predicate remains',
       setup: blockInsert(',cleared_at', ',now()', 'local', 'removal'),
       sql: blockInsert('', '', 'local', 'removal'),
-      from: 'WHERE cleared_at IS NULL;',
-      to: "WHERE cleared_at IS NULL OR kind = 'removal';",
+      from: '(organization_id, user_id, source, kind)\n  WHERE cleared_at IS NULL;',
+      to: "(organization_id, user_id, source, kind)\n  WHERE cleared_at IS NULL OR kind = 'removal';",
     },
     {
       name: 'one authority may independently suspend and remove an account',
@@ -458,6 +482,20 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       sql: blockInsert('', '', 'local', 'removal'),
       from: '(organization_id, user_id, source, kind)',
       to: '(organization_id, user_id, source)',
+    },
+    {
+      name: 'cleared mailbox tombstone permits a fresh tombstone for that mailbox',
+      setup: tombstoneInsert(',cleared_at', ',now()'),
+      sql: tombstoneInsert(),
+      from: '(organization_id, identity_email, source, kind)\n  WHERE cleared_at IS NULL;',
+      to: '(organization_id, identity_email, source, kind);',
+    },
+    {
+      name: 'one mailbox may carry independent suspension and removal tombstones',
+      setup: tombstoneInsert('', '', 'suspension'),
+      sql: tombstoneInsert(),
+      from: '(organization_id, identity_email, source, kind)',
+      to: '(organization_id, identity_email, source)',
     },
   ])('$name and source-copy predicate mutation fails the success assertion', async (entry) => {
     const verify = async (client: pg.PoolClient) => {
@@ -493,22 +531,34 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     })
   })
 
+  // Padded values keep the trimmed value short, so only the raw bound decides the outcome.
   it.each([
-    ['user_name', 256, userInsert('', '', `${' '.repeat(100000)}pad`)],
+    ['user_name', 256, (length: number) => userInsert('', '', `${' '.repeat(length - 3)}pad`)],
     [
       'work_email',
       320,
-      `INSERT INTO scim_user_claims(organization_id,connection_id,scim_user_id,work_email,expires_at) VALUES ('${org}','${connection}','${user}',repeat(' ',100000)||'pad',now()+interval '1 hour')`,
+      (length: number) =>
+        `INSERT INTO scim_user_claims(organization_id,connection_id,scim_user_id,work_email,expires_at) VALUES ('${org}','${connection}','${user}',repeat(' ',${length - 3})||'a@b',now()+interval '1 hour')`,
     ],
-  ] as const)('%s raw length remains bounded before trimming', async (column, limit, sql) => {
-    const protection = check(`${column} raw length`, sql)
-    await transaction(source, (client) => rejected(client, protection))
-    const mutant = source.replace(`char_length(${column}) <= ${limit}`, 'true')
-    expect(mutant).not.toBe(source)
-    await transaction(mutant, async (client) => {
-      await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
-    })
-  })
+  ] as const)(
+    '%s raw length accepts exactly %i padded characters and rejects one more; removing or loosening the bound fails',
+    async (column, limit, insert) => {
+      const protection = check(`${column} raw length`, insert(limit + 1))
+      const verify = async (client: pg.PoolClient) => {
+        await rejected(client, protection)
+        await succeeds(client, insert(limit))
+      }
+      await transaction(source, verify)
+      const clause = `char_length(${column}) <= ${limit}`
+      for (const replacement of ['true', `char_length(${column}) <= ${limit * 4}`]) {
+        const mutant = source.replace(clause, replacement)
+        expect(mutant).not.toBe(source)
+        await transaction(mutant, async (client) => {
+          await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+        })
+      }
+    },
+  )
 
   it.each([
     ['display_name', "'changed'"],
@@ -604,15 +654,266 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       ).toEqual([{ user_id: null, kind: 'removal' }])
     }
     await transaction(source, verify)
+    // Capture that also rewrites an already captured mailbox with the current address.
+    const mutant = source.replace(' AND b.identity_email IS NULL AND (', ' AND (')
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it.each([
+    {
+      clause: 'lower()',
+      value: "'Mixed@example.test'",
+      from: '(identity_email = lower(btrim(identity_email)) AND',
+      to: '(identity_email = btrim(identity_email) AND',
+    },
+    {
+      clause: 'btrim() for leading whitespace',
+      value: "' mixed@example.test'",
+      from: '(identity_email = lower(btrim(identity_email)) AND',
+      to: '(identity_email = lower(identity_email) AND',
+    },
+    {
+      clause: 'btrim() for trailing whitespace',
+      value: "'mixed@example.test '",
+      from: '(identity_email = lower(btrim(identity_email)) AND',
+      to: '(identity_email = lower(identity_email) AND',
+    },
+    {
+      clause: '<= 320',
+      value: "repeat('x',321)",
+      from: 'char_length(identity_email) BETWEEN 1 AND 320)),',
+      to: 'char_length(identity_email) >= 1)),',
+    },
+    {
+      clause: '>= 1',
+      value: "''",
+      from: 'char_length(identity_email) BETWEEN 1 AND 320)),',
+      to: 'char_length(identity_email) <= 320)),',
+    },
+  ])(
+    'scim_blocks_identity_email $clause rejects $value and dropping only that clause fails the assertion',
+    async (entry) => {
+      const protection = check(
+        `scim_blocks_identity_email ${entry.clause}`,
+        blockInsert(',identity_email', `,${entry.value}`),
+      )
+      await transaction(source, async (client) => {
+        await rejected(client, protection)
+        // Exactly 320 normalized characters remain storable.
+        await succeeds(
+          client,
+          blockInsert(',identity_email', ",repeat('x',307)||'@example.test'", 'local', 'removal'),
+        )
+      })
+      const mutant = source.replace(entry.from, entry.to)
+      expect(mutant).not.toBe(source)
+      await transaction(mutant, async (client) => {
+        await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    },
+  )
+
+  it.each([
+    ['id', `'${id(99)}'`],
+    ['source', "'scim'"],
+    ['kind', "'suspension'"],
+    ['connection_id', `'${connection}'`],
+    ['scim_user_id', `'${user}'`],
+    ['created_at', "now()-interval '9 years'"],
+  ])(
+    'captured tombstone %s is immutable while clearing stays possible; removing only its comparison fails',
+    async (column, value) => {
+      const protection = check(
+        `captured ${column}`,
+        `UPDATE scim_membership_blocks SET ${column}=${value} WHERE id='${block}'`,
+        tombstoneInsert(',id', `,'${block}'`),
+      )
+      // The resource-shape CHECK would mask a lone authority or resource change. Drop it
+      // only in this private fixture to isolate each column of the decision tuple.
+      const fixture = `${source}\nALTER TABLE scim_membership_blocks DROP CONSTRAINT scim_blocks_resource;`
+      await transaction(fixture, async (client) => {
+        await rejected(client, protection)
+        await succeeds(
+          client,
+          `UPDATE scim_membership_blocks SET cleared_at=now() WHERE id='${block}'`,
+        )
+      })
+      const mutant = dropTupleColumn(fixture, column)
+      expect(mutant).not.toBe(fixture)
+      await transaction(mutant, async (client) => {
+        await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    },
+  )
+
+  it.each([
+    ['NULL', 'uncleared again'],
+    ["cleared_at+interval '1 second'", 'moved'],
+  ])('a captured tombstone cleared once cannot be %s; removing the clause fails', async (value) => {
+    const protection = check(
+      'cleared_at once',
+      `UPDATE scim_membership_blocks SET cleared_at=${value} WHERE id='${block}'`,
+      `${tombstoneInsert(',id', `,'${block}'`)}; UPDATE scim_membership_blocks SET cleared_at=now() WHERE id='${block}'`,
+    )
+    await transaction(source, (client) => rejected(client, protection))
     const mutant = source.replace(
-      'coalesce(identity_email, lower(btrim(OLD.email)))',
-      'lower(btrim(OLD.email))',
+      '(OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS DISTINCT FROM OLD.cleared_at)',
+      'false',
+    )
+    expect(mutant).not.toBe(source)
+    await transaction(mutant, async (client) => {
+      await expect(rejected(client, protection)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  it('captured tombstones, live or cleared, cannot be deleted while their organization exists; disabling the guard fails', async () => {
+    const live = check(
+      'live tombstone delete',
+      `DELETE FROM scim_membership_blocks WHERE id='${block}'`,
+      tombstoneInsert(',id', `,'${block}'`),
+    )
+    const cleared = check(
+      'cleared tombstone delete',
+      `DELETE FROM scim_membership_blocks WHERE id='${id(17)}'`,
+      tombstoneInsert(',id,cleared_at', `,'${id(17)}',now()`, 'suspension'),
+    )
+    const verify = async (client: pg.PoolClient) => {
+      await rejected(client, live)
+      await rejected(client, cleared)
+      // An uncaptured blocker of a live account is not a tombstone yet.
+      await client.query(blockInsert(',id', `,'${id(18)}'`))
+      await succeeds(client, `DELETE FROM scim_membership_blocks WHERE id='${id(18)}'`)
+    }
+    await transaction(source, verify)
+    for (const mutant of [
+      source.replace(
+        'IF OLD.identity_email IS NOT NULL AND\n       EXISTS (SELECT 1 FROM auth.organization WHERE id = OLD.organization_id) THEN',
+        'IF false THEN',
+      ),
+      source.replace(
+        'BEFORE UPDATE OR DELETE ON scim_membership_blocks',
+        'BEFORE UPDATE ON scim_membership_blocks',
+      ),
+    ]) {
+      expect(mutant).not.toBe(source)
+      await transaction(mutant, async (client) => {
+        await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    }
+  })
+
+  it('a blocker detaches from its account only through account deletion; removing the check fails', async () => {
+    const protection = check(
+      'detach live account',
+      `UPDATE scim_membership_blocks SET user_id=NULL WHERE id='${block}'`,
+      blockInsert(',id,identity_email', `,'${block}','one@example.test'`, 'local', 'removal'),
+    )
+    const verify = async (client: pg.PoolClient) => {
+      await rejected(client, protection)
+      await succeeds(client, `DELETE FROM auth."user" WHERE id='${account}'`)
+      expect(
+        (
+          await client.query(
+            `SELECT user_id,identity_email FROM scim_membership_blocks WHERE id='${block}'`,
+          )
+        ).rows,
+      ).toEqual([{ user_id: null, identity_email: 'one@example.test' }])
+    }
+    await transaction(source, verify)
+    const mutant = source.replace(
+      'IF OLD.user_id IS NOT NULL AND NEW.user_id IS NULL AND\n     EXISTS (SELECT 1 FROM auth."user" WHERE id = OLD.user_id) THEN',
+      'IF false THEN',
     )
     expect(mutant).not.toBe(source)
     await transaction(mutant, async (client) => {
       await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
     })
   })
+
+  it('account deletion is never refused by an unstorable or duplicate tombstone mailbox; removing the tolerance fails', async () => {
+    const verify = async (client: pg.PoolClient) => {
+      // 321 normalized characters: longer than the tombstone bound.
+      await client.query(accountInsert(id(61), "repeat('x',309)||'@example.test'"))
+      await client.query(blockFor(id(61)))
+      await client.query(
+        blockFor(
+          id(61),
+          'suspension',
+          ',connection_id,scim_user_id',
+          `,'${connection}','${user}'`,
+        ).replace("'local'", "'scim'"),
+      )
+      // Empty mailbox.
+      await client.query(accountInsert(id(62), "''"))
+      await client.query(blockFor(id(62)))
+      // Mixed case and padding are normalized on capture.
+      await client.query(accountInsert(id(63), "'  Mixed.Case@Example.TEST '"))
+      await client.query(blockFor(id(63)))
+      // The same decision already lives as a tombstone for this mailbox.
+      await client.query(tombstoneInsert(',id', `,'${block}'`))
+      await client.query(blockInsert('', '', 'local', 'removal'))
+      await client.query(blockInsert(',cleared_at', ',now()', 'local', 'removal'))
+      await client.query(blockInsert())
+      for (const deleted of [id(61), id(62), id(63), account])
+        await succeeds(client, `DELETE FROM auth."user" WHERE id='${deleted}'`)
+      expect(
+        (
+          await client.query(
+            `SELECT id,identity_email,source,kind,cleared_at IS NOT NULL AS cleared FROM scim_membership_blocks WHERE organization_id='${org}' ORDER BY identity_email,kind,cleared`,
+          )
+        ).rows,
+      ).toEqual([
+        {
+          id: expect.any(String),
+          identity_email: 'mixed.case@example.test',
+          source: 'local',
+          kind: 'removal',
+          cleared: false,
+        },
+        {
+          id: block,
+          identity_email: 'one@example.test',
+          source: 'local',
+          kind: 'removal',
+          cleared: false,
+        },
+        {
+          id: expect.any(String),
+          identity_email: 'one@example.test',
+          source: 'local',
+          kind: 'removal',
+          cleared: true,
+        },
+        {
+          id: expect.any(String),
+          identity_email: 'one@example.test',
+          source: 'local',
+          kind: 'suspension',
+          cleared: false,
+        },
+      ])
+    }
+    await transaction(source, verify)
+    for (const mutant of [
+      source.replace(
+        'DELETE FROM scim_membership_blocks WHERE user_id = OLD.id AND identity_email IS NULL;\n',
+        '',
+      ),
+      source.replace('IF char_length(mailbox) BETWEEN 1 AND 320 THEN', 'IF true THEN'),
+      source.replace(
+        'b.identity_email IS NULL AND (b.cleared_at IS NOT NULL OR',
+        'b.identity_email IS NULL AND (true OR',
+      ),
+    ]) {
+      expect(mutant).not.toBe(source)
+      await transaction(mutant, async (client) => {
+        await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+      })
+    }
+  }, 30_000)
 
   it.each([
     ['scim_token_connections_connection_idx', 'organization_id, connection_id'],
@@ -739,10 +1040,25 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     for (const mutant of [
       source.replace(/CREATE TRIGGER scim_account_delete_links\b[^;]+;/, ''),
       source.replace('WHERE linked_user_id = OLD.id;', ';'),
-      source.replace('WHERE user_id = OLD.id;', ';'),
+      // Capture unscoped to every block in the instance.
       source.replace(
-        /UPDATE scim_membership_blocks SET identity_email[\s\S]*?WHERE user_id = OLD.id;/,
+        'WHERE b.user_id = OLD.id AND b.identity_email IS NULL',
+        'WHERE b.identity_email IS NULL',
+      ),
+      // Capture removed entirely: every blocker of the account is dropped.
+      source.replace(
+        / {2}IF char_length\(mailbox\) BETWEEN 1 AND 320 THEN[\s\S]*? {2}END IF;\n/,
         '',
+      ),
+      // Capture limited to live blockers: cleared history loses its identity and is dropped.
+      source.replace(
+        'WHERE b.user_id = OLD.id AND b.identity_email IS NULL',
+        'WHERE b.user_id = OLD.id AND b.identity_email IS NULL AND b.cleared_at IS NULL',
+      ),
+      // Drop unscoped to every uncaptured block in the instance.
+      source.replace(
+        'DELETE FROM scim_membership_blocks WHERE user_id = OLD.id AND identity_email IS NULL;',
+        'DELETE FROM scim_membership_blocks WHERE identity_email IS NULL;',
       ),
       source.replace(
         '\n  user_id uuid REFERENCES auth.user(id) ON DELETE SET NULL',
@@ -771,6 +1087,9 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       await client.query(
         blockInsert(',connection_id,scim_user_id', `,'${connection}','${user}'`, 'scim'),
       )
+      // Captured tombstones refuse direct deletion but cascade with their organization.
+      await client.query(tombstoneInsert())
+      await client.query(tombstoneInsert(',cleared_at', ',now()', 'suspension'))
       await client.query('SAVEPOINT organization_delete')
       let code: string | undefined
       try {

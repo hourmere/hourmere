@@ -208,7 +208,13 @@ the account-deletion trigger first captures the account's normalized mailbox in
 shared with the SSO design, not an additional SSO-only tombstone store. It identifies a
 removal decision, never an account link or authentication proof. Captured mailbox identity
 is immutable and cannot be redirected or attached to another account; explicit reinstatement
-clears the appropriate blocker rather than deleting or rewriting its identity.
+clears the appropriate blocker rather than deleting or rewriting its identity. The database
+also freezes the captured decision itself: its authority, kind, resource reference and
+creation time cannot change, `cleared_at` moves from null to a timestamp exactly once, the
+row cannot be deleted while its organization exists (whole-organization deletion still
+cascades), and the account reference may only become null once that account no longer
+exists. One live tombstone exists per organization, normalized mailbox, authority and
+kind, mirroring the per-account rule for live blockers.
 
 The later shared SSO/SCIM admission service must check live blockers by both current
 account ID and proven normalized mailbox under the organization lock. A newly registered
@@ -228,11 +234,31 @@ resource. Stored userName and claim mailbox values are bounded before trimming a
 as checked for nonblank normalized values. Referencing-column indexes cover cleanup and
 FK checks over live rows and history.
 
-Migration 0073 takes a transaction-scoped `SHARE ROW EXCLUSIVE` lock on provisioning
-tokens before reading either backfill. Token writers wait until the connection backfill,
-credential binding backfill and INSERT trigger have committed together. A concurrent token
-therefore belongs either to the backfill snapshot or to the installed trigger, closing the
-new-organization token creation window without locking organization rows.
+Migration 0073 takes transaction-scoped table locks before it reads anything, in the
+[documented lock order](data-model.md#team-membership-and-host-lock-order): first
+`auth."user"` and then `auth.organization` in `SHARE ROW EXCLUSIVE` mode (reads and
+`FOR UPDATE`/`FOR SHARE` row locks continue; inserts, updates and deletes wait), then
+`auth.member` and `auth.invitation` in `ACCESS EXCLUSIVE` mode, then
+`scim_provisioning_tokens` in `ACCESS EXCLUSIVE` mode. Each lock is taken directly in the
+mode the migration's DDL needs, never upgraded, and held to commit. The connection
+backfill runs before the organization foreign key is added, so the migration takes no
+organization row locks and never waits behind a team-administration transaction that
+holds its organization row `FOR UPDATE`. Token writers that already hold a share lock on
+the token table finish first; every other sign-up, team-creation, team-administration or
+token-administration transaction either commits before the migration or starts after it.
+A concurrent token therefore belongs either to the backfill snapshot or to the installed
+trigger, closing the new-organization token creation window. The regression test drives
+these writer shapes against the migration and against each weakened lock order.
+
+## Known limitations
+
+- Account deletion is the privacy path and is never refused by admission storage. A
+  blocker whose mailbox cannot be stored as a tombstone (empty, or longer than 320
+  characters after lower-casing and trimming) is dropped with the account instead of being
+  captured, so that removal decision is not retained. The same applies to a blocker whose
+  decision is already recorded as a live tombstone for the same organization, mailbox,
+  authority and kind; the existing tombstone remains. Sign-up and sign-in do not yet cap
+  account mailbox length; invitations cap it at 254 characters.
 
 
 ## Groups to teams: required schema decision

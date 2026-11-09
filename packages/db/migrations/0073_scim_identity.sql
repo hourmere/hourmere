@@ -1,19 +1,31 @@
 -- Storage only: no SCIM resource handler is registered by this migration.
+-- Lock order follows docs/data-model.md: account and organization tables before member
+-- and invitation tables, then the provisioning-token resource. Every table lock is taken
+-- directly in its final mode (no upgrade) and held to commit, so concurrent sign-up, team
+-- creation, team administration and token administration either run before the migration
+-- or after it, never interleaved with the backfill. SHARE ROW EXCLUSIVE lets row share
+-- locks (FOR UPDATE/FOR SHARE) and reads continue while writes to those tables wait.
+LOCK TABLE auth."user" IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE auth.organization IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE auth.member, auth.invitation IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE scim_provisioning_tokens IN ACCESS EXCLUSIVE MODE;
+
 CREATE TABLE scim_connections (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
-  organization_id uuid NOT NULL REFERENCES auth.organization(id) ON DELETE CASCADE,
+  organization_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT scim_connections_one_per_organization UNIQUE (organization_id),
   CONSTRAINT scim_connections_scope UNIQUE (organization_id, id)
 );
 
--- Hold token writers until both backfills and the INSERT trigger are installed.
--- This transaction-scoped lock closes the new-organization token creation window.
-LOCK TABLE scim_provisioning_tokens IN SHARE ROW EXCLUSIVE MODE;
-
 -- Preserve every credential field, including revoked history and actor attribution.
+-- The organization FK is added after the backfill: FK checks on existing rows would take
+-- row locks on organizations that team administration may hold FOR UPDATE while it waits
+-- for the member lock above. The organization table lock already excludes deletions.
 INSERT INTO scim_connections (organization_id)
 SELECT DISTINCT organization_id FROM scim_provisioning_tokens;
+ALTER TABLE scim_connections ADD CONSTRAINT scim_connections_organization_id_fkey
+  FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE;
 ALTER TABLE scim_provisioning_tokens ADD CONSTRAINT scim_tokens_scope
   UNIQUE (organization_id, id);
 CREATE TABLE scim_token_connections (
@@ -164,6 +176,8 @@ CREATE TABLE scim_membership_blocks (
 );
 CREATE UNIQUE INDEX scim_blocks_live_authority ON scim_membership_blocks (organization_id, user_id, source, kind)
   WHERE cleared_at IS NULL;
+CREATE UNIQUE INDEX scim_blocks_live_identity ON scim_membership_blocks (organization_id, identity_email, source, kind)
+  WHERE cleared_at IS NULL;
 
 -- Index referencing columns for FK checks and deletion cleanup, including history.
 CREATE INDEX scim_token_connections_connection_idx ON scim_token_connections (organization_id, connection_id);
@@ -176,21 +190,38 @@ CREATE INDEX scim_blocks_user_idx ON scim_membership_blocks (user_id);
 CREATE INDEX scim_blocks_resource_idx ON scim_membership_blocks (organization_id, connection_id, scim_user_id);
 CREATE INDEX scim_blocks_identity_idx ON scim_membership_blocks (organization_id, identity_email);
 
--- A captured identity cannot be redirected to a different mailbox or account.
+-- A captured identity cannot be redirected to a different mailbox or account, and the
+-- captured decision itself is frozen: authority, kind, resource reference and creation
+-- time are immutable, clearing happens once, the row survives while its organization
+-- exists, and the account reference may only disappear once the account itself is gone.
 CREATE FUNCTION scim_preserve_block_identity() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.identity_email IS NOT NULL AND
+       EXISTS (SELECT 1 FROM auth.organization WHERE id = OLD.organization_id) THEN
+      RAISE EXCEPTION 'Admission tombstone must be retained' USING ERRCODE = '23514';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF OLD.user_id IS NOT NULL AND NEW.user_id IS NULL AND
+     EXISTS (SELECT 1 FROM auth."user" WHERE id = OLD.user_id) THEN
+    RAISE EXCEPTION 'Admission blocker detaches only from a deleted account' USING ERRCODE = '23514';
+  END IF;
   IF OLD.identity_email IS NOT NULL AND (
     NEW.identity_email IS DISTINCT FROM OLD.identity_email OR
     NEW.organization_id IS DISTINCT FROM OLD.organization_id OR
-    (NEW.user_id IS DISTINCT FROM OLD.user_id AND NEW.user_id IS NOT NULL)
+    (NEW.user_id IS DISTINCT FROM OLD.user_id AND NEW.user_id IS NOT NULL) OR
+    (NEW.id, NEW.source, NEW.kind, NEW.connection_id, NEW.scim_user_id, NEW.created_at) IS DISTINCT FROM
+    (OLD.id, OLD.source, OLD.kind, OLD.connection_id, OLD.scim_user_id, OLD.created_at) OR
+    (OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS DISTINCT FROM OLD.cleared_at)
   ) THEN
     RAISE EXCEPTION 'Admission tombstone identity is immutable' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END;
 $$;
-CREATE TRIGGER scim_blocks_preserve_identity BEFORE UPDATE ON scim_membership_blocks
+CREATE TRIGGER scim_blocks_preserve_identity BEFORE UPDATE OR DELETE ON scim_membership_blocks
   FOR EACH ROW EXECUTE FUNCTION scim_preserve_block_identity();
 
 -- Keep resource identity and retirement durable. Whole-organization deletion may cascade;
@@ -228,10 +259,22 @@ CREATE TRIGGER scim_users_preserve_identity BEFORE UPDATE OR DELETE ON scim_user
 -- references before native account deletion so the paired-link check remains true.
 CREATE FUNCTION scim_clear_deleted_account_links() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
+DECLARE
+  mailbox text := lower(btrim(OLD.email));
 BEGIN
   -- Preserve admission decisions without retaining a foreign key to the deleted account.
-  UPDATE scim_membership_blocks SET identity_email = coalesce(identity_email, lower(btrim(OLD.email)))
-    WHERE user_id = OLD.id;
+  -- A mailbox is captured only when it is storable (1-320 normalized characters) and no
+  -- live tombstone already records the same organization, mailbox, authority and kind.
+  IF char_length(mailbox) BETWEEN 1 AND 320 THEN
+    UPDATE scim_membership_blocks b SET identity_email = mailbox
+      WHERE b.user_id = OLD.id AND b.identity_email IS NULL AND (b.cleared_at IS NOT NULL OR
+        NOT EXISTS (SELECT 1 FROM scim_membership_blocks t
+          WHERE t.organization_id = b.organization_id AND t.identity_email = mailbox AND
+            t.source = b.source AND t.kind = b.kind AND t.cleared_at IS NULL));
+  END IF;
+  -- Account deletion is the privacy path and is never refused: a blocker left without a
+  -- mailbox would identify nobody (or duplicate a live tombstone), so it is dropped.
+  DELETE FROM scim_membership_blocks WHERE user_id = OLD.id AND identity_email IS NULL;
   UPDATE scim_users SET linked_user_id = NULL, linked_member_id = NULL
     WHERE linked_user_id = OLD.id;
   RETURN OLD;

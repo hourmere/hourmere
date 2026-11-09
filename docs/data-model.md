@@ -52,7 +52,11 @@ managers, membership links and invitation claims to their organization and conne
 accounts or verifying mailboxes. `scim_membership_blocks` stores separate local and SCIM
 suspension/removal records that survive membership and account deletion. Account deletion
 nulls the account reference and retains an immutable normalized mailbox tombstone for the
-shared SSO/SCIM admission checks described in [the SCIM design](scim.md). These tables provide storage
+shared SSO/SCIM admission checks described in [the SCIM design](scim.md); the captured
+decision is frozen, cleared at most once, undeletable while its organization exists and
+unique per organization, mailbox, authority and kind. A blocker whose mailbox cannot be
+stored, or whose decision is already a live tombstone, is dropped so that account deletion
+is never refused. These tables provide storage
 for later claim and authorization work; this migration does not enforce new admission,
 suspension or revocation behavior in application services. Users, Groups and discovery
 handlers remain unregistered in production.

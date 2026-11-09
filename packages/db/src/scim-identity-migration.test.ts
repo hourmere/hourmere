@@ -143,7 +143,7 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
             VALUES ('Concurrent team','concurrent-team',now()) RETURNING id`)
         ).rows[0].id
         const sql = mutated
-          ? source.replace('LOCK TABLE scim_provisioning_tokens IN SHARE ROW EXCLUSIVE MODE;', '')
+          ? source.replace('LOCK TABLE scim_provisioning_tokens IN ACCESS EXCLUSIVE MODE;', '')
           : source
         const boundary = sql.indexOf('INSERT INTO scim_connections (organization_id)')
         expect(boundary).toBeGreaterThan(0)
@@ -184,6 +184,273 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
       }
     }
   }, 30_000)
+
+  // Concurrent writer shapes from packages/auth and docs/data-model.md, each run against
+  // the real migration with lock probes (pg_blocking_pids) instead of sleeps:
+  //   B  token administration that already counted tokens (access share) before inserting;
+  //   C  token administration holding user → organization → member locks before counting;
+  //   C2 the same writer that has locked the organization row but not yet its member row;
+  //   A2 the first token of an organization without one, under the same locks;
+  //   A3 a bare member share lock without an organization lock, then counting;
+  //   D  team creation inserting an organization and then its owner membership;
+  //   E  sign-up inserting an account, then its organization and membership.
+  // Each must commit on both sides, serialized by the migration's locks, without 40P01.
+  const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  const tokenOrg = uuid(1),
+    freshOrg = uuid(2),
+    tokenMember = uuid(3),
+    freshMember = uuid(4),
+    createdOrg = uuid(5),
+    createdMember = uuid(6),
+    signedUpUser = uuid(7),
+    signedUpOrg = uuid(8),
+    signedUpMember = uuid(9),
+    actor = uuid(10)
+  const countTokens = (organization: string) =>
+    `SELECT count(*) FROM scim_provisioning_tokens WHERE organization_id='${organization}' AND revoked_at IS NULL`
+  const insertToken = (organization: string) =>
+    `INSERT INTO scim_provisioning_tokens (organization_id,name,token_hash) VALUES ('${organization}','Concurrent',repeat('z',43))`
+  const actorLocks = (organization: string, memberRow?: string) => [
+    `SELECT id FROM auth."user" WHERE id='${actor}' FOR SHARE`,
+    `SELECT id FROM auth.organization WHERE id='${organization}' FOR UPDATE`,
+    ...(memberRow ? [`SELECT id FROM auth.member WHERE id='${memberRow}' FOR SHARE`] : []),
+  ]
+  interface Writer {
+    name: string
+    before: string[]
+    after: string[]
+    /** Which side the other one's locks hold back once the migration has started. */
+    blocked: 'migrator' | 'writer'
+    tokens: boolean
+  }
+  const writers: Writer[] = [
+    {
+      name: 'B',
+      before: [countTokens(tokenOrg)],
+      after: [insertToken(tokenOrg)],
+      blocked: 'migrator',
+      tokens: true,
+    },
+    {
+      name: 'C',
+      before: actorLocks(tokenOrg, tokenMember),
+      after: [countTokens(tokenOrg), insertToken(tokenOrg)],
+      blocked: 'migrator',
+      tokens: true,
+    },
+    {
+      name: 'C2',
+      before: actorLocks(tokenOrg),
+      after: [
+        `SELECT id FROM auth.member WHERE id='${tokenMember}' FOR SHARE`,
+        countTokens(tokenOrg),
+        insertToken(tokenOrg),
+      ],
+      blocked: 'writer',
+      tokens: true,
+    },
+    {
+      name: 'A2',
+      before: actorLocks(freshOrg, freshMember),
+      after: [countTokens(freshOrg), insertToken(freshOrg)],
+      blocked: 'migrator',
+      tokens: true,
+    },
+    {
+      name: 'A3',
+      before: [`SELECT id FROM auth.member WHERE id='${tokenMember}' FOR SHARE`],
+      after: [countTokens(tokenOrg), insertToken(tokenOrg)],
+      blocked: 'migrator',
+      tokens: true,
+    },
+    {
+      name: 'D',
+      before: [
+        `INSERT INTO auth.organization (id,name,slug,"createdAt") VALUES ('${createdOrg}','Created team','created-team',now())`,
+      ],
+      after: [
+        `INSERT INTO auth.member (id,"organizationId","userId",role,"createdAt") VALUES ('${createdMember}','${createdOrg}','${actor}','owner',now())`,
+      ],
+      blocked: 'migrator',
+      tokens: false,
+    },
+    {
+      name: 'E',
+      before: [
+        `INSERT INTO auth."user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES ('${signedUpUser}','Signed up','signed-up@example.test',true,now(),now())`,
+      ],
+      after: [
+        `INSERT INTO auth.organization (id,name,slug,"createdAt") VALUES ('${signedUpOrg}','Signed-up team','signed-up-team',now())`,
+        `INSERT INTO auth.member (id,"organizationId","userId",role,"createdAt") VALUES ('${signedUpMember}','${signedUpOrg}','${signedUpUser}','owner',now())`,
+      ],
+      blocked: 'migrator',
+      tokens: false,
+    },
+  ]
+
+  async function untilBlocked(probe: pg.PoolClient, waiting: number, holder: number) {
+    const deadline = Date.now() + 15_000
+    for (;;) {
+      const { rows } = await probe.query<{ blocked: boolean }>(
+        'SELECT $1 = ANY(pg_blocking_pids($2)) AS blocked',
+        [holder, waiting],
+      )
+      if (rows[0]?.blocked) return
+      if (Date.now() > deadline) throw new Error('lock probe: expected wait never started')
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+  }
+
+  async function raceMigration(sql: string, writer: Writer) {
+    const { directory, database } = await predecessor()
+    const migrator = await database.pool.connect()
+    const client = await database.pool.connect()
+    const probe = await database.pool.connect()
+    try {
+      await database.pool.query(`
+        INSERT INTO auth.organization (id,name,slug,"createdAt") VALUES
+          ('${tokenOrg}','Token team','token-team',now()),('${freshOrg}','Fresh team','fresh-team',now());
+        INSERT INTO auth."user" (id,name,email,"emailVerified","createdAt","updatedAt")
+          VALUES ('${actor}','Actor','actor@example.test',true,now(),now());
+        INSERT INTO auth.member (id,"organizationId","userId",role,"createdAt") VALUES
+          ('${tokenMember}','${tokenOrg}','${actor}','owner',now()),('${freshMember}','${freshOrg}','${actor}','owner',now());
+        INSERT INTO scim_provisioning_tokens (organization_id,name,token_hash) VALUES ('${tokenOrg}','Existing',repeat('a',43));`)
+      const pid = async (c: pg.PoolClient) =>
+        (await c.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]?.pid as number
+      const [migratorPid, writerPid] = [await pid(migrator), await pid(client)]
+      const boundary = sql.indexOf('INSERT INTO scim_connections (organization_id)')
+      expect(boundary).toBeGreaterThan(0)
+      await client.query('BEGIN')
+      for (const statement of writer.before) await client.query(statement)
+      await migrator.query('BEGIN')
+      const head = migrator.query(sql.slice(0, boundary))
+      head.catch(() => {})
+      const finishWriter = async () => {
+        for (const statement of writer.after) await client.query(statement)
+        await client.query('COMMIT')
+      }
+      const finishMigrator = async () => {
+        await head
+        await migrator.query(sql.slice(boundary))
+        await migrator.query('COMMIT')
+      }
+      let outcomes: PromiseSettledResult<void>[]
+      if (writer.blocked === 'migrator') {
+        // A mutant that no longer waits here lets the head finish; the race then plays out below.
+        await Promise.race([untilBlocked(probe, migratorPid, writerPid), head])
+        outcomes = await Promise.allSettled([finishWriter(), finishMigrator()])
+      } else {
+        await head
+        const pending = finishWriter()
+        pending.catch(() => {})
+        await untilBlocked(probe, writerPid, migratorPid)
+        outcomes = await Promise.allSettled([pending, finishMigrator()])
+      }
+      const failure = outcomes.find((outcome) => outcome.status === 'rejected')
+      if (failure) throw failure.reason
+      if (writer.tokens) {
+        expect(
+          (
+            await probe.query(
+              `SELECT count(*)::integer AS total, count(*) FILTER (WHERE b.token_id IS NULL)::integer AS unbound
+               FROM scim_provisioning_tokens t LEFT JOIN scim_token_connections b ON b.token_id=t.id`,
+            )
+          ).rows,
+        ).toEqual([{ total: 8, unbound: 0 }])
+      } else {
+        expect(
+          (
+            await probe.query(
+              `SELECT count(*)::integer AS members FROM auth.member WHERE id IN ('${createdMember}','${signedUpMember}')`,
+            )
+          ).rows,
+        ).toEqual([{ members: 1 }])
+        expect(
+          (
+            await probe.query(
+              "SELECT to_regclass('scim_membership_blocks') IS NOT NULL AS migrated",
+            )
+          ).rows,
+        ).toEqual([{ migrated: true }])
+      }
+    } finally {
+      await client.query('ROLLBACK').catch(() => {})
+      await migrator.query('ROLLBACK').catch(() => {})
+      client.release()
+      migrator.release()
+      probe.release()
+      await database.drop()
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+
+  it.each(writers)(
+    'writer shape $name commits alongside the migration without a deadlock',
+    async (writer) => {
+      const source = await readFile(join(migrationsDir, migration), 'utf8')
+      await raceMigration(source, writer)
+    },
+    60_000,
+  )
+
+  const organizationFk =
+    'ALTER TABLE scim_connections ADD CONSTRAINT scim_connections_organization_id_fkey\n  FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE;\n'
+  it.each([
+    {
+      name: 'token lock weakened to SHARE ROW EXCLUSIVE (upgrade needed later)',
+      shape: 'B',
+      mutate: (source: string) =>
+        source.replace(
+          'LOCK TABLE scim_provisioning_tokens IN ACCESS EXCLUSIVE MODE;',
+          'LOCK TABLE scim_provisioning_tokens IN SHARE ROW EXCLUSIVE MODE;',
+        ),
+    },
+    {
+      name: 'member and invitation lock removed (taken after the token lock instead)',
+      shape: 'A3',
+      mutate: (source: string) =>
+        source.replace('LOCK TABLE auth.member, auth.invitation IN ACCESS EXCLUSIVE MODE;\n', ''),
+    },
+    {
+      name: 'member and invitation lock removed, against the token administration shape',
+      shape: 'C',
+      mutate: (source: string) =>
+        source.replace('LOCK TABLE auth.member, auth.invitation IN ACCESS EXCLUSIVE MODE;\n', ''),
+    },
+    {
+      name: 'organization lock removed (taken after the member lock instead)',
+      shape: 'D',
+      mutate: (source: string) =>
+        source.replace('LOCK TABLE auth.organization IN SHARE ROW EXCLUSIVE MODE;\n', ''),
+    },
+    {
+      name: 'account lock removed (taken after the organization lock instead)',
+      shape: 'E',
+      mutate: (source: string) =>
+        source.replace('LOCK TABLE auth."user" IN SHARE ROW EXCLUSIVE MODE;\n', ''),
+    },
+    {
+      name: 'organization FK present during the backfill (organization row locks)',
+      shape: 'C2',
+      mutate: (source: string) =>
+        source
+          .replace(organizationFk, '')
+          .replace(
+            'INSERT INTO scim_connections (organization_id)\nSELECT DISTINCT',
+            `${organizationFk}INSERT INTO scim_connections (organization_id)\nSELECT DISTINCT`,
+          ),
+    },
+  ])(
+    'lock-order mutation "$name" deadlocks writer shape $shape',
+    async (entry) => {
+      const source = await readFile(join(migrationsDir, migration), 'utf8')
+      const mutant = entry.mutate(source)
+      expect(mutant).not.toBe(source)
+      const writer = writers.find((w) => w.name === entry.shape) as Writer
+      await expect(raceMigration(mutant, writer)).rejects.toMatchObject({ code: '40P01' })
+    },
+    60_000,
+  )
 
   it.each(['preservation', 'credential binding backfill'])(
     'detects %s source-copy mutation and restores the original assertion',
