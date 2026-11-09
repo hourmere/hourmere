@@ -452,71 +452,133 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
     60_000,
   )
 
-  it('bounds every lock wait: a held member write lock fails the migration with 55P03, records nothing, and the next start applies it; removing the bound fails', async () => {
+  // The bound must precede every lock the migration takes. The lock set is derived from
+  // the migration source, so a lock added later needs a case here before the test passes.
+  function lockedTables(sql: string): string[] {
+    return [...sql.matchAll(/^LOCK TABLE (.+) IN [A-Z ]+ MODE;$/gm)].flatMap((match) =>
+      (match[1] as string).split(',').map((table) => table.trim()),
+    )
+  }
+  const bound = "SET LOCAL lock_timeout = '5s';\n"
+  const lockStatement = (table: string) =>
+    new RegExp(`^LOCK TABLE [^\\n]*${table.replace(/[."]/g, '\\$&')}[^\\n]*\\n`, 'm')
+  // Move the bound below the statement that locks `table`: that wait and every earlier
+  // one become unbounded again.
+  const boundAfter = (table: string) => (source: string) => {
+    const statement = source.match(lockStatement(table))?.[0] as string
+    return source.replace(bound, '').replace(statement, `${statement}${bound}`)
+  }
+
+  async function heldLockFailsFast(
+    database: TestDatabase,
+    directory: string,
+    table: string,
+  ): Promise<void> {
+    // An in-flight write holds ROW EXCLUSIVE on its table for as long as its transaction
+    // lives; every lock mode the migration takes conflicts with it.
+    const holder = await database.pool.connect()
+    let attempt: Promise<string[]> = Promise.resolve([])
+    try {
+      await holder.query('BEGIN')
+      await holder.query(`LOCK TABLE ${table} IN ROW EXCLUSIVE MODE`)
+      const started = Date.now()
+      attempt = runMigrations(database.pool, directory)
+      attempt.catch(() => {})
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const outcome = await Promise.race([
+        attempt.then(
+          () => 'applied',
+          (error: unknown) =>
+            `failed ${(error as { cause?: { code?: string } }).cause?.code ?? 'without a code'}`,
+        ),
+        new Promise<string>((resolve) => {
+          timer = setTimeout(() => resolve('still waiting'), 10_000)
+        }),
+      ])
+      clearTimeout(timer)
+      const elapsed = Date.now() - started
+      expect({ table, outcome }).toEqual({ table, outcome: 'failed 55P03' })
+      expect(elapsed, `${table} wait`).toBeLessThan(10_000)
+      expect(
+        (await database.pool.query('SELECT name FROM schema_migrations WHERE name=$1', [migration]))
+          .rows,
+      ).toEqual([])
+    } finally {
+      await holder.query('ROLLBACK').catch(() => {})
+      holder.release()
+      // Under a mutant the attempt is still waiting; it finishes once the holder is gone.
+      await attempt.catch(() => {})
+    }
+  }
+
+  it('bounds every lock wait: each table the migration locks, held by a writer, fails it with 55P03 within 10 s and records nothing, and the next start applies it', async () => {
     const source = await readFile(join(migrationsDir, migration), 'utf8')
-    const bound = "SET LOCAL lock_timeout = '5s';\n"
-    // The real source runs first, so a missing or loosened bound fails on behaviour (the
-    // attempt is still waiting at the deadline), not on this control's own guard.
-    for (const mutated of [false, true]) {
+    const tables = lockedTables(source)
+    expect(tables).toEqual([
+      'auth."user"',
+      'auth.organization',
+      'auth.member',
+      'auth.invitation',
+      'scim_provisioning_tokens',
+    ])
+    const { directory, database } = await predecessor()
+    try {
+      await writeFile(join(directory, migration), source)
+      // Every attempt rolls back, so one predecessor database serves every held lock.
+      for (const table of tables) await heldLockFailsFast(database, directory, table)
+      expect(await runMigrations(database.pool, directory)).toEqual([migration])
+    } finally {
+      await database.drop()
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 120_000)
+
+  it.each([
+    {
+      name: 'bound removed',
+      table: 'auth."user"',
+      mutate: (source: string) => source.replace(bound, ''),
+    },
+    {
+      name: 'bound set after the account lock',
+      table: 'auth."user"',
+      mutate: boundAfter('auth."user"'),
+    },
+    {
+      name: 'bound set after the organization lock',
+      table: 'auth.organization',
+      mutate: boundAfter('auth.organization'),
+    },
+    {
+      name: 'bound set after the member and invitation lock',
+      table: 'auth.invitation',
+      mutate: boundAfter('auth.invitation'),
+    },
+    {
+      name: 'bound loosened beyond the deadline',
+      table: 'scim_provisioning_tokens',
+      mutate: (source: string) => source.replace(bound, "SET LOCAL lock_timeout = '14s';\n"),
+    },
+  ])(
+    'lock-bound mutation "$name" leaves the $table wait unbounded',
+    async (entry) => {
+      const source = await readFile(join(migrationsDir, migration), 'utf8')
+      const mutant = entry.mutate(source)
+      expect(mutant).not.toBe(source)
+      expect(lockedTables(mutant)).toEqual(lockedTables(source))
       const { directory, database } = await predecessor()
-      // An in-flight membership write holds ROW EXCLUSIVE on auth.member for as long as its
-      // transaction lives; the migration's ACCESS EXCLUSIVE lock waits behind it.
-      const holder = await database.pool.connect()
-      let attempt: Promise<string[]> = Promise.resolve([])
       try {
-        const sql = mutated ? source.replace(bound, '') : source
-        if (mutated) expect(sql).not.toBe(source)
-        await writeFile(join(directory, migration), sql)
-        await holder.query('BEGIN')
-        await holder.query('LOCK TABLE auth.member IN ROW EXCLUSIVE MODE')
-        const started = Date.now()
-        attempt = runMigrations(database.pool, directory)
-        attempt.catch(() => {})
-        const verify = async () => {
-          let timer: ReturnType<typeof setTimeout> | undefined
-          const outcome = await Promise.race([
-            attempt.then(
-              () => 'applied',
-              (error: unknown) =>
-                `failed ${(error as { cause?: { code?: string } }).cause?.code ?? 'without a code'}`,
-            ),
-            new Promise<string>((resolve) => {
-              timer = setTimeout(() => resolve('still waiting'), 15_000)
-            }),
-          ])
-          clearTimeout(timer)
-          expect(outcome).toBe('failed 55P03')
-          expect(Date.now() - started).toBeLessThan(15_000)
-          expect(
-            (
-              await database.pool.query('SELECT name FROM schema_migrations WHERE name=$1', [
-                migration,
-              ])
-            ).rows,
-          ).toEqual([])
-        }
-        if (mutated) await expect(verify()).rejects.toMatchObject({ name: 'AssertionError' })
-        else await verify()
-        // The blocking transaction ends; the next process start applies the migration.
-        await holder.query('ROLLBACK')
-        await attempt.catch(() => {})
-        if (!mutated) expect(await runMigrations(database.pool, directory)).toEqual([migration])
-        expect(
-          (
-            await database.pool.query('SELECT name FROM schema_migrations WHERE name=$1', [
-              migration,
-            ])
-          ).rows,
-        ).toEqual([{ name: migration }])
+        await writeFile(join(directory, migration), mutant)
+        await expect(heldLockFailsFast(database, directory, entry.table)).rejects.toMatchObject({
+          name: 'AssertionError',
+        })
       } finally {
-        await holder.query('ROLLBACK').catch(() => {})
-        holder.release()
-        await attempt.catch(() => {})
         await database.drop()
         await rm(directory, { recursive: true, force: true })
       }
-    }
-  }, 90_000)
+    },
+    60_000,
+  )
 
   it.each(['preservation', 'credential binding backfill'])(
     'detects %s source-copy mutation and restores the original assertion',

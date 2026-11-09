@@ -741,21 +741,35 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       // The resource-shape CHECK would mask a lone authority or resource change. Drop it
       // only in this private fixture to isolate each column of the decision tuple.
       const fixture = `${source}\nALTER TABLE scim_membership_blocks DROP CONSTRAINT scim_blocks_resource;`
+      // The statement that clears the live row cannot rewrite the decision on the way.
+      const clearing = check(
+        `clearing captured ${column}`,
+        `UPDATE scim_membership_blocks SET ${column}=${value},cleared_at=now() WHERE id='${block}'`,
+      )
       const verify = async (client: pg.PoolClient) => {
         await rejected(client, live)
         await rejected(client, cleared)
+        await rejected(client, clearing)
         await succeeds(
           client,
           `UPDATE scim_membership_blocks SET cleared_at=now() WHERE id='${block}'`,
         )
       }
       await transaction(fixture, verify)
+      const tuple =
+        '    (NEW.id, NEW.source, NEW.kind, NEW.connection_id, NEW.scim_user_id, NEW.created_at) IS DISTINCT FROM\n    (OLD.id, OLD.source, OLD.kind, OLD.connection_id, OLD.scim_user_id, OLD.created_at) OR'
+      expect(fixture.includes(tuple)).toBe(true)
       for (const mutant of [
         dropTupleColumn(fixture, column),
         // The decision tuple frozen only while the tombstone is live.
         fixture.replace(
-          '    (NEW.id, NEW.source, NEW.kind, NEW.connection_id, NEW.scim_user_id, NEW.created_at) IS DISTINCT FROM\n    (OLD.id, OLD.source, OLD.kind, OLD.connection_id, OLD.scim_user_id, OLD.created_at) OR',
+          tuple,
           '    (OLD.cleared_at IS NULL AND (NEW.id, NEW.source, NEW.kind, NEW.connection_id, NEW.scim_user_id, NEW.created_at) IS DISTINCT FROM\n    (OLD.id, OLD.source, OLD.kind, OLD.connection_id, OLD.scim_user_id, OLD.created_at)) OR',
+        ),
+        // Frozen while the row stays live and once cleared, but not in the clearing statement.
+        fixture.replace(
+          tuple,
+          '    ((OLD.cleared_at IS NOT NULL OR NEW.cleared_at IS NULL) AND (NEW.id, NEW.source, NEW.kind, NEW.connection_id, NEW.scim_user_id, NEW.created_at) IS DISTINCT FROM\n    (OLD.id, OLD.source, OLD.kind, OLD.connection_id, OLD.scim_user_id, OLD.created_at)) OR',
         ),
       ]) {
         expect(mutant).not.toBe(fixture)
@@ -986,6 +1000,99 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
       })
     }
   }, 60_000)
+
+  // The account-deletion deduplication drops a captured blocker only for a tombstone that
+  // matches on every clause below. The clause list is checked against the migration source,
+  // so a clause added to the SQL needs its own case here before the test passes.
+  const dedupMailbox = 'dedup@example.test'
+  const dedupTombstone = (
+    overrides: Partial<Record<'organization' | 'mailbox' | 'source' | 'kind' | 'cleared', string>>,
+  ) => {
+    const organization = overrides.organization ?? org
+    const source = overrides.source ?? 'local'
+    const resource = source === 'scim' ? `'${connection}','${user}'` : 'NULL,NULL'
+    return `INSERT INTO scim_membership_blocks (id,organization_id,user_id,identity_email,source,kind,connection_id,scim_user_id,cleared_at)
+      VALUES ('${id(21)}','${organization}',NULL,'${overrides.mailbox ?? dedupMailbox}','${source}','${overrides.kind ?? 'removal'}',${resource},${overrides.cleared ?? 'NULL'})`
+  }
+  const dedupClauses = [
+    {
+      clause: 't.organization_id = b.organization_id',
+      differs: 'organization',
+      overrides: { organization: otherOrg },
+    },
+    {
+      clause: 't.identity_email = mailbox',
+      differs: 'mailbox',
+      overrides: { mailbox: 'other@example.test' },
+    },
+    { clause: 't.source = b.source', differs: 'authority', overrides: { source: 'scim' } },
+    { clause: 't.kind = b.kind', differs: 'kind', overrides: { kind: 'suspension' } },
+    { clause: 't.cleared_at IS NULL', differs: 'liveness', overrides: { cleared: 'now()' } },
+  ]
+  it('the deduplication predicate is exactly the enumerated clause list', () => {
+    const predicate = source.match(
+      /NOT EXISTS \(SELECT 1 FROM scim_membership_blocks t\s+WHERE ([\s\S]*?)\)\);/,
+    )?.[1] as string
+    expect(predicate.replace(/\s+/g, ' ').split(' AND ')).toEqual(
+      dedupClauses.map((entry) => entry.clause),
+    )
+  })
+  it.each(dedupClauses)(
+    'a tombstone that differs only in $differs does not swallow the captured decision; dropping the clause "$clause" fails',
+    async (entry) => {
+      const verify = async (client: pg.PoolClient) => {
+        await client.query(accountInsert(id(70), `'${dedupMailbox}'`))
+        await client.query(blockFor(id(70)))
+        await client.query(dedupTombstone(entry.overrides))
+        await succeeds(client, `DELETE FROM auth."user" WHERE id='${id(70)}'`)
+        expect(
+          (
+            await client.query(
+              `SELECT id='${id(21)}' AS existing,organization_id,identity_email,source,kind,cleared_at IS NOT NULL AS cleared,user_id FROM scim_membership_blocks ORDER BY existing`,
+            )
+          ).rows,
+        ).toEqual([
+          {
+            existing: false,
+            organization_id: org,
+            identity_email: dedupMailbox,
+            source: 'local',
+            kind: 'removal',
+            cleared: false,
+            user_id: null,
+          },
+          {
+            existing: true,
+            organization_id: entry.overrides.organization ?? org,
+            identity_email: entry.overrides.mailbox ?? dedupMailbox,
+            source: entry.overrides.source ?? 'local',
+            kind: entry.overrides.kind ?? 'removal',
+            cleared: entry.overrides.cleared !== undefined,
+            user_id: null,
+          },
+        ])
+      }
+      await transaction(source, verify)
+      expect(source.split(entry.clause)).toHaveLength(2)
+      for (const mutant of [
+        source.replace(entry.clause, 'true'),
+        // The liveness clause removed together with its conjunction.
+        ...(entry.differs === 'liveness'
+          ? [
+              source.replace(
+                ' AND\n            t.source = b.source AND t.kind = b.kind AND t.cleared_at IS NULL));',
+                ' AND\n            t.source = b.source AND t.kind = b.kind));',
+              ),
+            ]
+          : []),
+      ]) {
+        expect(mutant).not.toBe(source)
+        await transaction(mutant, async (client) => {
+          await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+        })
+      }
+    },
+  )
 
   it.each([
     ['scim_token_connections_connection_idx', 'organization_id, connection_id'],

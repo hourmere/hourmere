@@ -5,10 +5,12 @@
 -- row share locks (FOR UPDATE/FOR SHARE) and reads continue while writes to those tables
 -- wait. Token administration, team creation, sign-up, personal-organization creation and
 -- invitation creation serialize against this lock set: each commits before the migration
--- or starts after it. Team writers that read member or invitation rows before writing the
--- organization (team-settings updates, invitation acceptance) can still form a deadlock
--- with it; PostgreSQL then aborts one side with 40P01, and an aborted migration rolls back
--- whole and is reapplied on the next start. This migration is meant to run with the
+-- or starts after it. Three team writers can still form a deadlock with it: a writer that
+-- locks member rows and then writes the organization row (team-settings update), and
+-- writers that read an invitation row before their member access (invitation acceptance,
+-- invitation cancellation from the team page). PostgreSQL then aborts one side with
+-- 40P01, and an aborted migration rolls back whole and is reapplied on the next start.
+-- Every lock wait is bounded (lock_timeout below). This migration is meant to run with the
 -- application stopped, which the documented Compose upgrade does. Every lock wait is
 -- bounded: while the migration waits for the member, invitation or token lock it already
 -- holds the account and organization locks, so sign-up and team writes would stall behind

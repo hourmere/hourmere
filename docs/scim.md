@@ -252,13 +252,17 @@ migration or starts after it: token administration (a writer that already counte
 tokens, one holding the user, organization and member locks, one caught between its
 organization and member locks, and the first token of an organization), team creation,
 sign-up, personal-organization creation and invitation creation. It does not serialize
-every team write. A writer that reads member or invitation rows before it writes the
-organization can still form a deadlock with the migration: the team-settings update
+every team write. Two mechanisms still form a deadlock with the migration. A writer that
+locks member rows and then writes the organization row: the team-settings update
 (`/organization/update` locks the user, organization and member rows, then updates the
 organization row while the migration holds the organization table lock and waits for the
-member lock) and invitation acceptance (a plain invitation read before the organization
-and invitation row locks, then member reads, while the migration holds the member lock
-and waits for the invitation lock). PostgreSQL resolves such a cycle after
+member lock). And a writer that reads an invitation row before its member access, while
+the migration holds the member lock and waits for the invitation lock: invitation
+acceptance (a plain invitation read, then the organization and invitation row locks and
+member reads) and invitation cancellation from the team page
+(`/organization/cancel-invitation` from a session reads the invitation to find its
+organization, then takes the user, organization and member locks; the REST route takes
+those locks first and serializes). PostgreSQL resolves such a cycle after
 `deadlock_timeout` by aborting one side with `40P01`: either that request fails, or the
 migration rolls back whole, is not recorded, and is reapplied on the next start.
 
@@ -271,7 +275,8 @@ verification and team writes would otherwise stall behind it for as long as the 
 transaction lives. After the timeout the migration fails with `55P03`, records nothing,
 and the process start fails; the restarted process retries it. The regression tests drive
 the serialized writer shapes against the migration and against each weakened lock order,
-and drive a held member lock against the bounded wait and its retry.
+and hold a conflicting lock on each table the migration locks (derived from the migration
+source) against the bounded wait and its retry.
 
 ## Known limitations
 
