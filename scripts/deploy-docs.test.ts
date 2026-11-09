@@ -250,8 +250,14 @@ describe('documented deployment operations', () => {
     const command = block?.[1]
     if (!command || block.index === undefined)
       throw new Error('Image conversion must include a runnable version check')
-    // The check must run while HOURMERE_VERSION is still set and before anything is edited.
-    for (const step of ['remove only', 'Unset `HOURMERE_VERSION`', 'source rebuild']) {
+    // The check must run while HOURMERE_VERSION is still set and before anything is edited,
+    // and the prose must tell the operator to stop on failure.
+    for (const step of [
+      'Stop if the check fails',
+      'remove only',
+      'Unset `HOURMERE_VERSION`',
+      'source rebuild',
+    ]) {
       expect(section.indexOf(step), step).toBeGreaterThan(block.index)
     }
     // The stub reports its arguments: only the release-tag pattern may satisfy the check.
@@ -271,7 +277,12 @@ describe('documented deployment operations', () => {
         },
       },
     )
-    expect(result.stderr.trim()).toBe('git describe --tags --exact-match --match v[0-9]*')
+    const [gitCall, ...messages] = result.stderr.trim().split('\n')
+    expect(gitCall).toBe('git describe --tags --exact-match --match v[0-9]*')
+    // A failed check must say so where a pasting operator sees it; a passed check stays quiet.
+    expect(messages).toEqual(
+      scenario.expectedStatus === 0 ? [] : [expect.stringMatching(/^Stop: /)],
+    )
     expect(result.status).toBe(scenario.expectedStatus)
   })
 

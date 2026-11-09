@@ -136,7 +136,8 @@ exact version of the currently running image (without the tag's leading `v`) and
 that the checkout is at that release tag:
 
 ```sh
-test "$(git describe --tags --exact-match --match 'v[0-9]*')" = "v$HOURMERE_VERSION"
+test "$(git describe --tags --exact-match --match 'v[0-9]*')" = "v$HOURMERE_VERSION" ||
+  { echo 'Stop: the checkout is not at the running release tag.' >&2; false; }
 ```
 
 Stop if the check fails: older code must not run against a newer database schema.

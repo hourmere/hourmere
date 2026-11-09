@@ -50,9 +50,6 @@ function harness(active = false, worker = source) {
     Request,
     Response,
     Set,
-    // Browsers reject fetch() with the worker realm's TypeError; share it so that
-    // `error instanceof TypeError` inside the worker behaves as in production.
-    TypeError,
     fetch,
     caches,
     self: {
@@ -66,9 +63,22 @@ function harness(active = false, worker = source) {
     },
   }
   runInNewContext(worker, context)
-  const isWorkerTypeError = runInNewContext('(error) => error instanceof TypeError', context) as (
-    error: unknown,
-  ) => boolean
+  // Browsers reject fetch() and cache writes with errors from the worker's own realm. Build
+  // injected failures with the context's constructors so `instanceof` behaves as in production.
+  const realm = runInNewContext(
+    `({
+      Error,
+      TypeError,
+      isError: (error) => error instanceof Error,
+      isTypeError: (error) => error instanceof TypeError,
+    })`,
+    context,
+  ) as {
+    Error: ErrorConstructor
+    TypeError: TypeErrorConstructor
+    isError: (error: unknown) => boolean
+    isTypeError: (error: unknown) => boolean
+  }
   async function lifecycle(name: string) {
     let promise: Promise<unknown> | undefined
     listeners[name]?.({
@@ -104,7 +114,7 @@ function harness(active = false, worker = source) {
     unregister,
     postMessage,
     listeners,
-    isWorkerTypeError,
+    realm,
   }
 }
 
@@ -161,7 +171,7 @@ describe('offline shell routing', () => {
     sw.fetch.mockResolvedValueOnce(new Response('fresh navigation'))
     expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('fresh navigation')
     expect(sw.cache.put).not.toHaveBeenCalled()
-    sw.fetch.mockRejectedValueOnce(new TypeError('offline'))
+    sw.fetch.mockRejectedValueOnce(new sw.realm.TypeError('offline'))
     expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('offline notice')
     expect(sw.request('/manage/token', {}, true)).toBeUndefined()
     expect(sw.request('/alice/intro', {}, true)).toBeUndefined()
@@ -170,7 +180,7 @@ describe('offline shell routing', () => {
   it('obtains the offline response before update activation can delete the old cache', async () => {
     const sw = harness(true)
     sw.store.set('/app/offline.html', new Response('offline notice'))
-    sw.fetch.mockRejectedValue(new TypeError('offline'))
+    sw.fetch.mockRejectedValue(new sw.realm.TypeError('offline'))
     sw.postMessage.mockImplementation(() => sw.store.clear())
     expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('offline notice')
     expect(sw.postMessage).toHaveBeenCalledOnce()
@@ -195,13 +205,13 @@ describe('offline shell routing', () => {
     await ready
     sw.postMessage.mockImplementation(() => sw.store.clear())
     await sw.request('/app/settings', {}, true)
-    rejectSlow?.(new TypeError('offline'))
+    rejectSlow?.(new sw.realm.TypeError('offline'))
     expect(await (await slow)?.text()).toBe('offline notice')
   })
 
   it('keeps online navigation and static files working when storage is unavailable', async () => {
     const sw = harness()
-    sw.caches.open.mockRejectedValue(new Error('storage denied'))
+    sw.caches.open.mockRejectedValue(new sw.realm.Error('storage denied'))
     expect(await (await sw.request('/app/bookings', {}, true))?.text()).toBe('static')
     expect(await (await sw.request('/assets/main-abc123.js'))?.text()).toBe('static')
     expect(sw.fetch).toHaveBeenCalledTimes(2)
@@ -413,7 +423,7 @@ const asset = '/assets/main-abc123.js'
 function arrangeReuse(sw: ReturnType<typeof harness>, failure: ReuseState) {
   const cached = new Response('previous')
   if (failure !== 'none') sw.oldStore.set(asset, cached)
-  const error = new Error('old cache unavailable')
+  const error = new sw.realm.Error('old cache unavailable')
   if (failure === 'list') sw.caches.keys.mockRejectedValue(error)
   if (failure === 'open' || failure === 'match') {
     const open = sw.caches.open.getMockImplementation()
@@ -471,9 +481,10 @@ it.each([false, true])(
   async (reuseFails) => {
     const sw = harness()
     sw.oldStore.set(asset, new Response('previous'))
-    if (reuseFails) sw.caches.keys.mockRejectedValue(new Error('old cache unavailable'))
+    if (reuseFails) sw.caches.keys.mockRejectedValue(new sw.realm.Error('old cache unavailable'))
     sw.fetch.mockImplementation(async (request) => {
-      if (new URL(request.url).pathname === '/app/icon-192.png') throw new TypeError('offline')
+      if (new URL(request.url).pathname === '/app/icon-192.png')
+        throw new sw.realm.TypeError('offline')
       return new Response('static')
     })
     await expect(sw.lifecycle('install')).rejects.toThrow('offline')
@@ -483,10 +494,17 @@ it.each([false, true])(
   },
 )
 
-it('rejects network failures with the worker realm TypeError, as browsers do', () => {
+it('injects failures as worker realm errors, which the worker sees as browsers would', () => {
   const sw = harness()
-  expect(sw.isWorkerTypeError(new TypeError('offline'))).toBe(true)
-  expect(sw.isWorkerTypeError(new Error('offline'))).toBe(false)
+  const network = new sw.realm.TypeError('offline')
+  const storage = new sw.realm.Error('storage full')
+  expect(sw.realm.isTypeError(network)).toBe(true)
+  expect(sw.realm.isError(network)).toBe(true)
+  expect(sw.realm.isError(storage)).toBe(true)
+  expect(sw.realm.isTypeError(storage)).toBe(false)
+  // The harness shares no constructors: test realm errors stay foreign to the worker.
+  expect(sw.realm.isTypeError(new TypeError('offline'))).toBe(false)
+  expect(sw.realm.isError(new Error('offline'))).toBe(false)
 })
 
 // No active worker: a tolerated failure would install an incomplete cache and skip waiting.
@@ -496,7 +514,7 @@ it.each<ReuseState>(['none', 'list', 'open', 'match', 'copy'])(
     const sw = harness()
     arrangeReuse(sw, failure)
     answerAsset(sw, () => {
-      throw new TypeError('offline')
+      throw new sw.realm.TypeError('offline')
     })
     await expect(sw.lifecycle('install')).rejects.toThrow('offline')
     expect(sw.store.has(asset)).toBe(false)
@@ -505,17 +523,22 @@ it.each<ReuseState>(['none', 'list', 'open', 'match', 'copy'])(
   },
 )
 
-it.each<[ReuseFailure, string, ResponseInit]>([
-  ['open', 'private', { headers: { 'cache-control': 'private' } }],
-  ['open', '404', { status: 404 }],
-  ['open', '500', { status: 500 }],
-  ['match', 'private', { headers: { 'cache-control': 'private' } }],
-  ['match', '404', { status: 404 }],
-  ['match', '500', { status: 500 }],
-  ['copy', 'private', { headers: { 'cache-control': 'private' } }],
-  ['copy', '404', { status: 404 }],
-  ['copy', '500', { status: 500 }],
-])(
+const unsafeResponses: [string, ResponseInit][] = [
+  ['private', { headers: { 'cache-control': 'private' } }],
+  ['no-store', { headers: { 'cache-control': 'no-store' } }],
+  ['404', { status: 404 }],
+  ['500', { status: 500 }],
+]
+
+it.each<[ReuseFailure, string, ResponseInit]>(
+  (['open', 'match', 'copy'] as const).flatMap((failure) =>
+    unsafeResponses.map(([label, init]): [ReuseFailure, string, ResponseInit] => [
+      failure,
+      label,
+      init,
+    ]),
+  ),
+)(
   'validates the fallback fetch after reuse %s fails (%s response)',
   async (failure, _label, init) => {
     const sw = harness()
@@ -532,7 +555,7 @@ it('fails installation when fetching the offline notice rejects', async () => {
   const sw = harness()
   sw.fetch
     .mockResolvedValueOnce(new Response('static'))
-    .mockRejectedValueOnce(new TypeError('offline'))
+    .mockRejectedValueOnce(new sw.realm.TypeError('offline'))
   await expect(sw.lifecycle('install')).rejects.toThrow('offline')
   expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
   expect(sw.skipWaiting).not.toHaveBeenCalled()
@@ -540,8 +563,8 @@ it('fails installation when fetching the offline notice rejects', async () => {
 
 it('still rejects installation when fresh asset storage fails after reuse fails', async () => {
   const sw = harness(true)
-  sw.caches.keys.mockRejectedValue(new Error('old cache unavailable'))
-  sw.cache.put.mockRejectedValue(new Error('storage full'))
+  sw.caches.keys.mockRejectedValue(new sw.realm.Error('old cache unavailable'))
+  sw.cache.put.mockRejectedValue(new sw.realm.Error('storage full'))
   await expect(sw.lifecycle('install')).rejects.toThrow('storage full')
   expect(sw.fetch).toHaveBeenCalledOnce()
   expect(sw.caches.delete).toHaveBeenCalledWith('hourmere-shell-current')
@@ -587,7 +610,7 @@ it('ships a disabled-build worker that immediately retires installed workers wit
     await verifyDisabled(worker)
     expect(existsSync(join(root, 'dist/app/offline.html'))).toBe(false)
     const sw = harness(true, worker)
-    sw.caches.keys.mockRejectedValue(new Error('storage denied'))
+    sw.caches.keys.mockRejectedValue(new sw.realm.Error('storage denied'))
     await expect(sw.lifecycle('activate')).rejects.toThrow('storage denied')
     expect(sw.unregister).toHaveBeenCalledOnce()
   } finally {
