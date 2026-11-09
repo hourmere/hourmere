@@ -12,3 +12,4 @@ temp
 coverage
 tools/zapier-hourmere
 .claude
+tools/n8n-nodes-hourmere

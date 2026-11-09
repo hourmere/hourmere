@@ -113,7 +113,7 @@ describe.skipIf(!serverUrl)('server embed capability configuration', () => {
 
   it('detects dropping normalized embed origins from server configuration', async () => {
     const copy = await sourceCopy([
-      '        embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,\n',
+      '      embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,\n',
       '',
     ])
     await expect(verify(configured, copy.startServer)).rejects.toMatchObject({

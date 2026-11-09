@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "declaration": true,
+    "types": ["node"]
+  },
+  "include": ["nodes/**/*.ts", "nodes/**/*.json", "credentials/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["**/*.test.ts"]
+}
