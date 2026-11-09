@@ -460,12 +460,12 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
     )
   }
   const bound = "SET LOCAL lock_timeout = '5s';\n"
-  const lockStatement = (table: string) =>
-    new RegExp(`^LOCK TABLE [^\\n]*${table.replace(/[."]/g, '\\$&')}[^\\n]*\\n`, 'm')
   // Move the bound below the statement that locks `table`: that wait and every earlier
   // one become unbounded again.
   const boundAfter = (table: string) => (source: string) => {
-    const statement = source.match(lockStatement(table))?.[0] as string
+    const statement = `${source
+      .split('\n')
+      .find((line) => line.startsWith('LOCK TABLE ') && line.includes(table))}\n`
     return source.replace(bound, '').replace(statement, `${statement}${bound}`)
   }
 
