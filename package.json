@@ -38,6 +38,7 @@
     "screenshots": "node scripts/screenshots.ts"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.9",
     "@biomejs/biome": "2.6.2",
     "@types/node": "26.6.5",
     "ajv": "8.20.0",

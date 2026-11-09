@@ -3,7 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import { createDb, createPool } from '@hourmere/db'
 import { createTestDatabase } from '@hourmere/db/testing'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { json, type RouteModule } from './openapi.ts'
 import * as server from './server.ts'
@@ -22,6 +22,14 @@ async function sourceCopy<T>(file: string, mutation?: [string, string]): Promise
       `${prefix}'${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
   return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
+}
+
+afterEach(() => vi.unstubAllEnvs())
+
+function stubSsoEnvironment() {
+  for (const name of ['SSO_OIDC_ENABLED', 'SSO_SAML_ENABLED', 'ssoOidcEnabled', 'ssoSamlEnabled']) {
+    vi.stubEnv(name, 'true')
+  }
 }
 
 const publicUrl = 'https://sso-test.example'
@@ -63,7 +71,9 @@ async function verifyInstance(factory = server.productRoutes) {
       expect(await response.json()).toMatchObject(
         flags ?? { ssoOidcEnabled: false, ssoSamlEnabled: false },
       )
-      expect((await app.request('/api/v1/test-only-sso/known')).status).toBe(404)
+      const unknown = await app.request('/api/v1/test-only-sso/known')
+      expect(unknown.status).toBe(404)
+      expect(await unknown.json()).toEqual({ error: 'not_found' })
     }
   } finally {
     await db.destroy()
@@ -89,11 +99,49 @@ it.each(['ssoOidcEnabled', 'ssoSamlEnabled'])(
   },
 )
 
+it('detects direct process environment reads in instance responses', async () => {
+  stubSsoEnvironment()
+  const control = await sourceCopy<typeof import('./routes/instance.ts')>('./routes/instance.ts')
+  await verifyInstance((options) => [control.instanceRoutes({ publicUrl, ...options })])
+  const mutant = await sourceCopy<typeof import('./routes/instance.ts')>('./routes/instance.ts', [
+    '    ssoOidcEnabled,',
+    "    ssoOidcEnabled: process.env.SSO_OIDC_ENABLED === 'true',",
+  ])
+  await expect(
+    verifyInstance((options) => [mutant.instanceRoutes({ publicUrl, ...options })]),
+  ).rejects.toMatchObject({ name: 'AssertionError' })
+})
+
+it('detects a disabled test route accidentally registered in production', async () => {
+  const control = await sourceCopy<typeof server>('./server.ts')
+  await verifyInstance(control.productRoutes)
+  const mutant = await sourceCopy<typeof server>('./server.ts', [
+    'return [',
+    `return [({ app }) => {
+      app.get('/api/v1/test-only-sso/:id', (c) => c.json({ error: 'sso_disabled' }, 404))
+    },`,
+  ])
+  await expect(verifyInstance(mutant.productRoutes)).rejects.toMatchObject({
+    name: 'AssertionError',
+  })
+})
+
 async function verifyGuard(guard = requireSsoEnabled, appFactory = createApp) {
   for (const ssoOidcEnabled of [false, true]) {
     for (const ssoSamlEnabled of [false, true]) {
       const flags: SsoCapabilities = { ssoOidcEnabled, ssoSamlEnabled }
-      for (const protocol of [undefined, 'oidc', 'saml'] as const) {
+      for (const protocol of [
+        undefined,
+        'oidc',
+        'saml',
+        '',
+        'OIDC',
+        'oauth',
+        null,
+        false,
+        0,
+        {},
+      ] as const) {
         const effects = vi.fn()
         // This route is deliberately defined only in the test, never in productRoutes.
         const route: RouteModule = ({ app }) => {
@@ -106,7 +154,8 @@ async function verifyGuard(guard = requireSsoEnabled, appFactory = createApp) {
               },
             }),
             (c) => {
-              guard(flags, protocol)
+              // Runtime callers can pass unvalidated input despite the TypeScript signature.
+              guard(flags, protocol as Parameters<typeof guard>[1])
               effects() // Stands for lookup, rate-limit counting and writes, all after the guard.
               return c.json({ ok: true }, 200)
             },
@@ -118,7 +167,7 @@ async function verifyGuard(guard = requireSsoEnabled, appFactory = createApp) {
             ? ssoOidcEnabled
             : protocol === 'saml'
               ? ssoSamlEnabled
-              : ssoOidcEnabled || ssoSamlEnabled
+              : protocol === undefined && (ssoOidcEnabled || ssoSamlEnabled)
         for (const id of ['known', 'unknown']) {
           const response = await app.request(`/api/v1/test-only-sso/${id}`)
           expect(response.status).toBe(enabled ? 200 : 404)
@@ -141,6 +190,7 @@ it('detects guard bypass and protocol cross-enablement using real HTTP assertion
   await verifyGuard(control.requireSsoEnabled, nativeApp.createApp)
   for (const mutation of [
     ["throw new DomainError('not_found', 'sso_disabled')", 'return'],
+    ['protocol === undefined &&', 'true &&'],
     ['? capabilities.ssoOidcEnabled', '? capabilities.ssoSamlEnabled'],
     ['? capabilities.ssoSamlEnabled', '? capabilities.ssoOidcEnabled'],
     [
@@ -157,6 +207,7 @@ it('detects guard bypass and protocol cross-enablement using real HTTP assertion
 
 describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', () => {
   it('ignores environment settings and never exposes the test route', async () => {
+    stubSsoEnvironment()
     const owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
       tag: 'sso_off',
     })
@@ -180,7 +231,9 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', ()
           ssoOidcEnabled: false,
           ssoSamlEnabled: false,
         })
-        expect((await fetch(`${origin}/api/v1/test-only-sso/known`)).status).toBe(404)
+        const unknown = await fetch(`${origin}/api/v1/test-only-sso/known`)
+        expect(unknown.status).toBe(404)
+        expect(await unknown.json()).toEqual({ error: 'not_found' })
       } finally {
         await running.close()
       }
