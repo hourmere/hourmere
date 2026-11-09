@@ -115,7 +115,7 @@ describe('open-time snippet documentation facts', () => {
       'cli',
       [
         'exits 1',
-        '{"error":"slot_snippets_disabled"}',
+        '{ "error": "slot_snippets_disabled" }',
         'stderr',
         'empty stdout',
         'without outcomeMayBeUnknown',
@@ -130,6 +130,44 @@ describe('open-time snippet documentation facts', () => {
     for (const fact of required) {
       expect(() => checkDisabled(source.replaceAll(fact, 'changed response'))).toThrow(assertion)
     }
+  })
+
+  it.each([
+    'apps/site/src/content/docs/docs/cli.md',
+    'apps/site/src/content/docs/docs/open-time-snippets.md',
+    'tools/cli/README.md',
+  ])('%s quotes CLI stderr formatting and older-server recovery', (path) => {
+    const source = read(path)
+    const checkCli = (text: string) => {
+      expect(text).toContain(`\`\`\`json
+${JSON.stringify({ error: 'slot_snippets_disabled' }, null, 2)}
+\`\`\``)
+      expect(prose(text)).toContain(
+        'predates open-time snippets returns the same unknown-tool response',
+      )
+      expect(prose(text)).toContain('upgrade that server before enabling')
+      expect(prose(text)).toContain('without outcomeMayBeUnknown')
+    }
+    checkCli(source)
+    for (const [before, after] of [
+      ['  "error": "slot_snippets_disabled"', '"error":"slot_snippets_disabled"'],
+      ['predates open-time snippets', 'supports open-time snippets'],
+      ['upgrade that server before enabling', 'enable'],
+      ['without `outcomeMayBeUnknown`', 'with `outcomeMayBeUnknown`'],
+    ] as const) {
+      expect(() => checkCli(source.replaceAll(before, after))).toThrow(assertion)
+    }
+  })
+
+  it('documents the snippets exception in general failure recovery', () => {
+    const source =
+      read('apps/site/src/content/docs/docs/cli.md').split('## Failures and recovery')[1] ?? ''
+    const sentence =
+      'except slot_snippets_disabled from open-time-snippet, which is a definite failure'
+    expect(prose(source)).toContain(sentence)
+    expect(() =>
+      expect(prose(source.replace('except\n', 'including\n'))).toContain(sentence),
+    ).toThrow(assertion)
   })
 
   it('keeps the repository MCP guide explicit about hidden tools', () => {

@@ -277,9 +277,11 @@ export async function runCli(options: {
   let output: Awaited<ReturnType<typeof open>> | undefined
   let exportOutputPath: string | undefined
   let called = false
+  let command: string | undefined
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
     const args = parse(options.argv)
+    command = args.command
     const url = endpoint(args.url ?? options.env.HOURMERE_URL)
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
@@ -404,7 +406,10 @@ export async function runCli(options: {
             error.retryAfterSeconds !== undefined && {
               retryAfterSeconds: error.retryAfterSeconds,
             }),
-          ...(called && code !== 'slot_snippets_disabled' && { outcomeMayBeUnknown: true }),
+          ...(called &&
+            !(command === 'open-time-snippet' && code === 'slot_snippets_disabled') && {
+              outcomeMayBeUnknown: true,
+            }),
         },
         secrets,
       ),

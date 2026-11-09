@@ -100,9 +100,9 @@ async function verifyDisabled(runner = runCli, reply: unknown = hiddenTool) {
   expect(stdout).toBe('')
   expect(JSON.parse(stderr)).toEqual({ error: 'slot_snippets_disabled' })
 }
-function clientCopy(change?: [string, string]): typeof client.callTool {
+function clientCopy(...changes: [string, string][]): typeof client.callTool {
   let source = readFileSync('tools/cli/src/client.ts', 'utf8')
-  if (change) {
+  for (const change of changes) {
     expect(source).toContain(change[0])
     source = source.replace(...change)
   }
@@ -131,7 +131,10 @@ it('reports hidden and explicitly disabled snippets as a definite client error',
 })
 it('does not mistake other tools or malformed protocol replies for disabled snippets', async () => {
   for (const [tool, reply] of [
-    ['create_booking', hiddenTool],
+    [
+      'create_booking',
+      { ...hiddenTool, error: { ...hiddenTool.error, message: 'Tool create_booking not found' } },
+    ],
     ['generate_open_time_snippet', { ...hiddenTool, id: 2 }],
     ['generate_open_time_snippet', { ...hiddenTool, jsonrpc: '1.0' }],
     ['generate_open_time_snippet', { ...hiddenTool, error: { ...hiddenTool.error, code: -32603 } }],
@@ -165,6 +168,82 @@ it('kills removed disabled mapping and restored outcome ambiguity in source copi
     ),
   ).rejects.toMatchObject({ name: 'AssertionError' })
   await expect(
-    verifyDisabled(copy(["called && code !== 'slot_snippets_disabled'", 'called'])),
+    verifyDisabled(
+      copy(["!(command === 'open-time-snippet' && code === 'slot_snippets_disabled')", 'true']),
+    ),
+  ).rejects.toMatchObject({ name: 'AssertionError' })
+})
+
+async function verifyOtherCommand(runner = runCli, explicitDisabled = false) {
+  let stdout = ''
+  let stderr = ''
+  const fetcher = vi.fn<typeof fetch>(async () =>
+    Response.json(
+      explicitDisabled
+        ? {
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              isError: true,
+              content: [
+                { type: 'text', text: JSON.stringify({ error: 'slot_snippets_disabled' }) },
+              ],
+            },
+          }
+        : {
+            ...hiddenTool,
+            error: { ...hiddenTool.error, message: 'Tool create_one_time_link not found' },
+          },
+    ),
+  )
+  const code = await runner({
+    argv: ['one-time-links', 'create', '--json', '--input', '-'],
+    env: { HOURMERE_URL: 'https://example.test', HOURMERE_API_KEY: 'hm_test' },
+    stdin: (async function* () {
+      yield JSON.stringify({ eventTypeId: 'event', idempotencyKey: 'test-create' })
+    })(),
+    stdout: (text) => {
+      stdout += text
+    },
+    stderr: (text) => {
+      stderr += text
+    },
+    fetch: fetcher,
+  })
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).params.name).toBe(
+    'create_one_time_link',
+  )
+  expect(code).toBe(1)
+  expect(stdout).toBe('')
+  expect(JSON.parse(stderr)).toEqual({
+    error: explicitDisabled ? 'slot_snippets_disabled' : 'invalid_response',
+    outcomeMayBeUnknown: true,
+  })
+}
+it('keeps other unknown tools ambiguous with invalid_response and exit 1', () =>
+  verifyOtherCommand())
+it('keeps other commands ambiguous even when they return the snippets error code', () =>
+  verifyOtherCommand(runCli, true))
+it('kills mapping every tool not-found reply and exempting every command in source copies', async () => {
+  await verifyOtherCommand(copy(undefined, clientCopy()))
+  await verifyOtherCommand(copy(), true)
+  await expect(
+    verifyOtherCommand(
+      copy(
+        undefined,
+        clientCopy(
+          ["tool === 'generate_open_time_snippet' &&", ''],
+          [
+            "reply.error.message === 'Tool generate_open_time_snippet not found'",
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal mutated source
+            'reply.error.message === `Tool ${tool} not found`',
+          ],
+        ),
+      ),
+    ),
+  ).rejects.toMatchObject({ name: 'AssertionError' })
+  await expect(
+    verifyOtherCommand(copy(["command === 'open-time-snippet' && ", '']), true),
   ).rejects.toMatchObject({ name: 'AssertionError' })
 })

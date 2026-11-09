@@ -191,8 +191,17 @@ is supplied in JSON; omitted language and display zone use the caller's profile 
 links, `text` and `html` for your draft. Generation sends no mail and reserves no time.
 `read`, `bookings` and `full` keys work with personal-owner or team-owner/admin permission,
 when the operator enables `SLOT_SNIPPETS_ENABLED`. When off (the default), the CLI exits 1
-with `{"error":"slot_snippets_disabled"}`
-on stderr and empty stdout, without `outcomeMayBeUnknown`. See [the agent guide](/docs/open-time-snippets) for
+with empty stdout, without `outcomeMayBeUnknown`, and writes this JSON to stderr:
+
+```json
+{
+  "error": "slot_snippets_disabled"
+}
+```
+
+A server that predates open-time snippets returns the same unknown-tool response and is
+also reported as not enabled. Ask the operator to upgrade that server before enabling
+`SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for
 response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
 
 ## Configure meeting lengths
@@ -284,7 +293,8 @@ Network failures or generic HTTP transport errors exit **3**. Errors are JSON on
 with a stable `error` code, an HTTP `status` when available, and `retryAfterSeconds` when
 provided. Untrusted server messages, URLs and exception causes are not printed.
 
-A failure after the call begins includes `outcomeMayBeUnknown: true`. A reserved result
+A failure after the call begins includes `outcomeMayBeUnknown: true`, except
+`slot_snippets_disabled` from `open-time-snippet`, which is a definite failure. A reserved result
 file can remain empty or incomplete after a failed call or write: do not treat it as a
 successful booking, and retain the original request. Inspect the server before retrying.
 

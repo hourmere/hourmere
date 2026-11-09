@@ -37,11 +37,19 @@ With `SLOT_SNIPPETS_ENABLED=false` (the default), a valid authenticated request 
 |---|---|
 | REST | `POST /api/v1/open-time-snippets` returns HTTP 404 with `{"error":"slot_snippets_disabled"}`. |
 | MCP | `generate_open_time_snippet` is absent from `tools/list`. A direct `tools/call` returns JSON-RPC error `{"code":-32602,"message":"Tool generate_open_time_snippet not found"}`. |
-| CLI | `hourmere open-time-snippet --json` exits 1, writes `{"error":"slot_snippets_disabled"}` to stderr, and leaves stdout empty. |
+| CLI | `hourmere open-time-snippet --json` exits 1, writes the JSON below to stderr, and leaves stdout empty. |
+
+```json
+{
+  "error": "slot_snippets_disabled"
+}
+```
 
 The CLI maps the hidden-tool response to a client error, without `outcomeMayBeUnknown`:
 this read-only call did not generate a snippet or change anything. Ask the instance
-operator to enable the setting, then refresh MCP tool discovery and retry. Enabling it
+operator to enable the setting, then refresh MCP tool discovery and retry. A server that
+predates open-time snippets returns the same unknown-tool response and is also reported
+as not enabled; ask the operator to upgrade that server before enabling the setting. Enabling it
 makes the tool discoverable and allows all three channels to return the snippet described below,
 subject to the same permissions and availability checks.
 
