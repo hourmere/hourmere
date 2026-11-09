@@ -77,6 +77,7 @@ describe('GET /api/v1/instance', () => {
       automaticZoom: false,
       followUpHostNotesEnabled: true,
       slotSnippetsEnabled: false,
+      scimProvisioningEnabled: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
@@ -93,6 +94,7 @@ describe('GET /api/v1/instance', () => {
       automaticZoom: false,
       followUpHostNotesEnabled: true,
       slotSnippetsEnabled: false,
+      scimProvisioningEnabled: false,
       signIn: { email: true, google: true, microsoft: true },
     })
     expect(text).not.toMatch(/client/i)
@@ -105,6 +107,7 @@ describe('GET /api/v1/instance', () => {
       automaticZoom: false,
       followUpHostNotesEnabled: true,
       slotSnippetsEnabled: false,
+      scimProvisioningEnabled: false,
       signIn: { email: true, google: true, microsoft: false },
     })
   })
@@ -121,6 +124,7 @@ describe('GET /api/v1/instance', () => {
       automaticZoom: false,
       followUpHostNotesEnabled: true,
       slotSnippetsEnabled: false,
+      scimProvisioningEnabled: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })

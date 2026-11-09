@@ -122,6 +122,10 @@ const classes = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   session_only: [
+    'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
@@ -297,6 +301,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           slotSnippetsEnabled: true,
+          scimProvisioningEnabled: true,
           mcpAuth: auth,
           publicUrl,
           googleCalendar: calendar.google,
@@ -335,6 +340,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
+          .replaceAll('{organizationId}', teamId)
         const error =
           template === '/api/v1/bookings/{id}/organization'
             ? 'booking_not_found'
@@ -722,14 +728,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 110-operation contract and all 330 scope combinations', () => {
+    it('covers the exact 114-operation contract and all 342 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(110)
-      expect(new Set(ids).size).toBe(110)
+      expect(ids).toHaveLength(114)
+      expect(new Set(ids).size).toBe(114)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(330)
+      expect(cases).toHaveLength(342)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -847,6 +853,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         }
         expect(response.headers.get('cache-control')).toBe(
           operation === 'GET /api/v1/instance/embed' ||
+            operation.includes('/provisioning-tokens') ||
             (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
             ? 'private, no-store'
             : 'no-store',

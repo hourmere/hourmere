@@ -1,5 +1,32 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'SCIM provisioning tokens': 'SCIM 预配令牌',
+  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
+    '预配功能尚未开放。这些令牌用于为组织未来的 SCIM 连接做准备。',
+  'Tokens only authorize SCIM for this organization. Keep them private.':
+    '令牌仅授权访问此组织的 SCIM 服务。请妥善保管。',
+  'Could not update provisioning tokens. Check the token list before trying again.':
+    '无法更新预配令牌。请先查看令牌列表，再重试。',
+  'New provisioning token': '新预配令牌',
+  'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
+    '请立即复制此令牌。隐藏令牌或离开此视图后，将无法再次查看。',
+  'Copy token': '复制令牌',
+  'Dismiss token': '隐藏令牌',
+  'Provisioning token name': '预配令牌名称',
+  'Create provisioning token': '创建预配令牌',
+  'Loading provisioning tokens…': '正在加载预配令牌……',
+  'Could not load provisioning tokens.': '无法加载预配令牌。',
+  'No provisioning tokens.': '暂无预配令牌。',
+  'Previous token valid until: {date}': '旧令牌有效期至：{date}',
+  'Last used: {date}': '上次使用时间：{date}',
+  'Rotate token': '轮换令牌',
+  'Revoke token': '撤销令牌',
+  'Confirm token change': '确认令牌更改',
+  'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.':
+    '旧令牌将继续有效一小时。请在此期间将身份提供方中的令牌更新为新令牌。重叠有效期结束前无法再次轮换。',
+  'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.':
+    '撤销后，当前令牌及其上一版本将立即失效。此操作不可恢复。',
+
   'No-shows': '未出席记录',
   'No-show': '未出席',
   'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
@@ -145,6 +172,7 @@ export const admin = {
     '要移除此候补条目吗？联系信息将被清除，不会发送邮件。',
   'Could not remove the waitlist entry.': '无法移除此候补条目。',
   'Back to first page': '返回第一页',
+  'Previous page': '上一页',
   'Next page': '下一页',
   Refresh: '刷新',
 

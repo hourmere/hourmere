@@ -30,6 +30,10 @@ const Instance = z
     }),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
+    scimProvisioningEnabled: z.boolean().optional().openapi({
+      description:
+        'Whether administrators may manage SCIM provisioning tokens; resources are not available yet',
+    }),
     slotSnippetsEnabled: z.boolean().optional().openapi({
       description:
         'Whether hosts may copy open times; enable only after direct-slot pages are live',
@@ -63,6 +67,7 @@ export function instanceRoutes({
   automaticZoom = false,
   followUpHostNotesEnabled = true,
   embedAllowedOrigins,
+  scimProvisioningEnabled = false,
   slotSnippetsEnabled = false,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
@@ -77,6 +82,7 @@ export function instanceRoutes({
   followUpHostNotesEnabled?: boolean
   /** Normalized EMBED_ALLOWED_ORIGINS; undefined preserves unknown capability readiness. */
   embedAllowedOrigins?: readonly string[]
+  scimProvisioningEnabled?: boolean
   slotSnippetsEnabled?: boolean
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
@@ -92,6 +98,7 @@ export function instanceRoutes({
     followUpHostNotesEnabled,
     ...(embedAllowedOrigins !== undefined && { embedEnabled: embedAllowedOrigins.length > 0 }),
     slotSnippetsEnabled,
+    scimProvisioningEnabled,
     signIn: {
       email: true,
       google: socialProviders.google !== undefined,
