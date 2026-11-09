@@ -37,6 +37,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/webhooks` | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
+| `packages/workflows` | Booking workflow definition contract: strict schemas, AND conditions, ownership selectors, template variables and limits. Not available yet: a source constant keeps workflows off. See the [design](docs/workflows.md). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
