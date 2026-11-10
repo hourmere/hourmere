@@ -961,6 +961,70 @@ export interface SignInEmails {
   id: string;
 }
 
+export interface SsoDomains {
+  challenge_digest: string;
+  challenge_expires_at: Timestamp;
+  claimed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  generation: Generated<number>;
+  id: Generated<string>;
+  last_check_outcome: string | null;
+  last_checked_at: Timestamp | null;
+  name: string;
+  next_check_at: Timestamp | null;
+  organization_id: string;
+  retired_at: Timestamp | null;
+  verification_expires_at: Timestamp | null;
+  verified_at: Timestamp | null;
+}
+
+export interface SsoPolicies {
+  admission: Generated<string>;
+  created_at: Generated<Timestamp>;
+  organization_id: string;
+  policy_revision: Generated<number>;
+  require_sso: Generated<boolean>;
+  trust_generation: Generated<number>;
+}
+
+export interface SsoProviderDomains {
+  domain_id: string;
+  organization_id: string;
+  provider_id: string;
+}
+
+export interface SsoProviders {
+  client_id: string | null;
+  configuration: Buffer;
+  created_at: Generated<Timestamp>;
+  display_name: string;
+  enabled: Generated<boolean>;
+  id: Generated<string>;
+  issuer: string;
+  organization_id: string;
+  protocol: string;
+  retired_at: Timestamp | null;
+  revision: Generated<number>;
+}
+
+export interface SsoRecoveryNominations {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  member_id: string;
+  nominated_by_user_id: string;
+  organization_id: string;
+  user_id: string;
+}
+
+export interface SsoRecoveryOwners {
+  accepted_at: Generated<Timestamp>;
+  member_id: string;
+  nominated_by_user_id: string;
+  organization_id: string;
+  user_id: string;
+}
+
 export interface WaitlistCandidates {
   accepted_at: Timestamp | null;
   attempts: Generated<number>;
@@ -1190,6 +1254,12 @@ export interface DB {
   schedules: Schedules;
   scim_provisioning_tokens: ScimProvisioningTokens;
   sign_in_emails: SignInEmails;
+  sso_domains: SsoDomains;
+  sso_policies: SsoPolicies;
+  sso_provider_domains: SsoProviderDomains;
+  sso_providers: SsoProviders;
+  sso_recovery_nominations: SsoRecoveryNominations;
+  sso_recovery_owners: SsoRecoveryOwners;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

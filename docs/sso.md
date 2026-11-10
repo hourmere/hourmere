@@ -1,14 +1,16 @@
 # Organization SSO: evaluation and implementation design
 
-Status: design only. The plugin evaluation was first run 2026-11-06 against the Better
+Status: design and storage only. The plugin evaluation was first run 2026-11-06 against the Better
 Auth 1.7.12 family and re-run 2026-11-09, in the Upgrade step, against the installed
 1.7.16 family that main pins since the November security upgrade. `@better-auth/sso`
 1.7.16 is a development dependency of the auth workspace: no shipped source imports or
 registers it, and the production image does not contain it. The first plan step that
-imports it from shipped code moves it to `dependencies`. No SSO provider, route, feature
-flag or migration is enabled. SSO will be
-available to every instance, including self-hosted ones; there is no license,
-subscription or hosted-service requirement.
+imports it from shipped code moves it to `dependencies`. Migration 0074 adds the
+configuration storage of the Configuration storage step (see
+[Data model](data-model.md#sso-configuration-storage)); no production code reads or writes
+it, and no SSO provider, route or feature flag is enabled. SSO will be available to every
+instance, including self-hosted ones; there is no license, subscription or hosted-service
+requirement.
 
 ## Decision and release conditions
 
