@@ -1171,6 +1171,19 @@ export interface SignInEmails {
   id: string;
 }
 
+export interface SmsDeliveries {
+  created_at: Generated<Timestamp>;
+  key_hash: Buffer;
+  organization_id: string | null;
+  provider_message_id: string | null;
+  recipient_hash: Buffer | null;
+  recipient_mask: string | null;
+  request_hash: Buffer | null;
+  retry_not_before: Timestamp | null;
+  status: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface SsoDomains {
   challenge_digest: string;
   challenge_expires_at: Timestamp;
@@ -1477,6 +1490,7 @@ export interface DB {
   scim_user_claims: ScimUserClaims;
   scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
+  sms_deliveries: SmsDeliveries;
   sso_domains: SsoDomains;
   sso_policies: SsoPolicies;
   sso_provider_domains: SsoProviderDomains;

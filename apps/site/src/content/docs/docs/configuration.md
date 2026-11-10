@@ -27,6 +27,15 @@ on a running container cannot alter compiled files. Leave the example value empt
 follow future defaults. See [turn off app installation](/docs/self-hosting#turn-off-app-installation)
 for commands and the delayed effect on clients that are offline.
 
+All `VITE_*` values in the repository-root `.env` and `.env.*` files are public
+client configuration: Vite exposes them to client code and referenced values end up in
+the browser bundle. Never put secrets under a `VITE_` name.
+
+Prebuilt image installs have no runtime PWA off switch. `VITE_PWA_ENABLED=false` plus
+a restart cannot disable a PWA-enabled image. The image overlay also ignores `APP_IMAGE`
+and disables source builds; use the [source-build conversion steps](/docs/self-hosting#turn-off-app-installation)
+before deploying a replacement with PWA disabled.
+
 ## Server and database
 
 PostgreSQL 18+ is required because migrations use `uuidv7()`. The bundled Compose stack
@@ -450,3 +459,10 @@ for public apps; its private/development apps do not trigger those notifications
 adapter. It has no runtime effect in this release: setting it to `true` does not permit
 hold creation or enable payment collection. Existing holds expire regardless of this
 setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).
+
+## SMS provider foundation
+
+See [SMS provider foundation](/docs/sms-provider) for operator-owned Twilio credentials,
+SMS-specific secret files, durable limits and retention. It is off without `SMS_PROVIDER`;
+configuration does not enable user-facing SMS or schedule sending jobs; hourly metadata cleanup continues even when SMS is disabled. All SMS charges belong
+to the operator’s Twilio account.

@@ -1,4 +1,4 @@
-import { isReservedName } from '@hourmere/core/reserved'
+import { isClaimReservedHandle, isReservedName } from '@hourmere/core/reserved'
 import { cleanText, isSingleLineText } from '../../scheduling/src/text.ts'
 import type {
   MatchedUser,
@@ -127,7 +127,9 @@ export function parseUsers(
       if (
         typeof handle !== 'string' ||
         !/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(handle) ||
-        isReservedName(handle)
+        isReservedName(handle) ||
+        // Always a new claim: an existing profile, even a legacy `route` one, is preserved.
+        isClaimReservedHandle(handle)
       ) {
         problem(
           'user_handle_invalid',

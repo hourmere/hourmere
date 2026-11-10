@@ -19,6 +19,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
   [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
 - A source-built [Zapier app](https://hourmere.com/docs/zapier) for booking automation,
   available as a private integration until published.
+- A source-built [n8n community node](https://hourmere.com/docs/n8n) with booking actions
+  and signed triggers for self-hosted n8n, installed from source until published to npm.
 
 ## Repository layout
 
@@ -418,6 +420,11 @@ invitations and an optional ordinary Google calendar copy. Zoom is not a sign-in
 Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet) creates one conference per explicitly opted-in individual, collective or round-robin booking, with durable pending/failure state and final invitations held until its link is ready.
 
 ## Known limitations
+
+- Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
+  and restarting cannot change a compiled image. Disabling installation requires a source
+  rebuild and redeployment, including removal of the image overlay and release-version
+  setting; see [the conversion instructions](https://hourmere.com/docs/self-hosting#turn-off-app-installation).
 
 Organization owners and team admins can store a logo and primary colour through settings,
 REST, MCP and CLI. [Branding settings](https://hourmere.com/docs/branding) include safe image

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Hourmere booking actions and signed webhook triggers for n8n",
   "license": "AGPL-3.0-only",
+  "private": true,
   "keywords": [
     "n8n-community-node-package"
   ],

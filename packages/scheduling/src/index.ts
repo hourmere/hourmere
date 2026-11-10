@@ -201,9 +201,11 @@ export {
   type PaymentContext,
 } from './payments.ts'
 export {
+  findLegacyHandleCollisions,
   getProfile,
   HANDLE_MAX_LENGTH,
   HANDLE_PATTERN,
+  type LegacyHandleCollision,
   LOCALE_MAX_LENGTH,
   type Profile,
   type ProfileInput,

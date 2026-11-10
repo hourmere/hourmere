@@ -1858,3 +1858,40 @@ UNION view that resolves ordinary booking resources or a seat's shared slot reso
 the existing recipient worker; it never transfers ownership to a seat. Logistics readiness
 uses the conference's matching applied revision and ready URL, independently of calendar
 count writeback. Count failures therefore cannot revoke a ready URL or resend invitations.
+
+### Operator SMS dispatch foundation
+
+Migration `0069_sms_delivery_limits.sql` adds `sms_deliveries`, an internal ledger,
+not a reminder queue. No host or invitee SMS surface exists yet. Each logical job has
+one purpose-keyed HMAC-SHA256 key digest, globally unique across organizations. The
+transaction takes a database-local advisory fence, checks rolling recipient/hour, recipient/day,
+instance/hour and organization/day budgets using database time, and commits a
+`dispatching` reservation before HTTP. Failed and uncertain attempts consume budget.
+Provider 429 responses move to `rate_limited`, release local budgets, and store a bounded
+`retry_not_before` time (1–3600 seconds; missing/invalid Retry-After defaults to 60).
+Only those known non-sends may reserve again after that time, under the same fence,
+after checking the fingerprint and all budgets; this resets `created_at` to the database
+time of the new reservation for budget and retention accounting. A crash before dispatch
+can lose a message; a crash after dispatch cannot cause its retry to send twice.
+
+Rows contain only a purpose-keyed HMAC of the normalized destination, a last-two-digit
+mask, organization ID, a keyed request fingerprint, provider message ID, status and
+timestamps. Neither the body, full phone number nor Twilio credentials are persisted.
+Request fingerprints bind destination, body and organization so changed retries fail.
+Keep SMS_HASH_KEY stable and backed up: rotation changes job-key hashes and therefore
+defeats deduplication, as well as resetting recipient accounting. Key rotation requires
+a separate data/key migration.
+Organization IDs deliberately have no cascading foreign key: organization deletion
+must never reopen a consumed job key.
+
+After 720 elapsed hours (30 days) from the latest reserved attempt, hourly maintenance
+(registered even when SMS is disabled) and opportunistic maintenance erase all delivery
+details in batches of at most 1,000.
+Only the job-key digest, timestamps and `expired` status remain indefinitely. These
+small tombstones prevent old job retries from sending after detail retention ends.
+A stopped worker delays cleanup; resume it to process the backlog. A retained accepted
+record can return its provider ID on retry; failed records return `sms_provider_rejected`,
+while dispatching, unknown and expired records return `sms_delivery_unknown`. A rate-limited
+record returns `sms_rate_limited` and the remaining delay before its retry-not-before time.
+Status callbacks and final delivery receipts are deferred, so
+`accepted` means Twilio accepted the request, not that a handset received it.

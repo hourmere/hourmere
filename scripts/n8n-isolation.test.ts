@@ -10,7 +10,7 @@ const root = resolve(import.meta.dirname, '..')
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
 const contractFile = 'tools/n8n-nodes-hourmere/contract.test.ts'
 const forbidden =
-  /(?:^|\/)(?:n8n(?:-[^/]*)?|@n8n|@langchain|langchain|openai|isolated-vm|ssh2|eslint-plugin-n8n-nodes-base)(?:\/|$)/
+  /(?:^|\/)(?:n8n(?:-[^/]*)?|@n8n|@n8n_io|@langchain|langchain|openai|isolated-vm|ssh2|eslint-plugin-n8n-nodes-base)(?:\/|$)/
 
 it('includes the standalone n8n contract in the root node project', () => {
   expect(rootConfig.test?.projects).toEqual(
@@ -71,6 +71,14 @@ it('keeps the n8n dependency graph outside root installs', () => {
   const standalone = JSON.parse(read('tools/n8n-nodes-hourmere/package-lock.json'))
   expect(standalone.packages[''].name).toBe('n8n-nodes-hourmere')
   expect(standalone.packages['node_modules/n8n-workflow']).toBeDefined()
+})
+
+it('turns install scripts off by default in the standalone package', () => {
+  const settings = read('tools/n8n-nodes-hourmere/.npmrc')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith(';'))
+  expect(settings).toEqual(['ignore-scripts=true'])
 })
 
 it('checks the standalone package in its own CI job', () => {
