@@ -34,7 +34,7 @@ self.addEventListener('install', (event) => {
     (async () => {
       const cache = await caches.open(CACHE_NAME)
       try {
-        const previous = (await caches.keys()).filter(
+        const previous = (await caches.keys().catch(() => [])).filter(
           (name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME,
         )
         for (const path of PRECACHE) {
@@ -43,10 +43,15 @@ self.addEventListener('install', (event) => {
           if (/^\/assets\/[^/]+-[\w-]+\.(js|css|woff2?)$/.test(path)) {
             let reused = false
             for (const name of previous) {
-              const cached = await (await caches.open(name)).match(path)
-              if (!cached || !cacheable(cached)) continue
-              await cache.put(path, cached)
-              reused = true
+              try {
+                const cached = await (await caches.open(name)).match(path)
+                if (!cached || !cacheable(cached)) continue
+                await cache.put(path, cached)
+                reused = true
+              } catch {
+                // Reuse is optional: an unreadable entry or failed copy must fall
+                // through to a fresh fetch. Fresh fetch/storage errors still fail install.
+              }
               break
             }
             if (reused) continue

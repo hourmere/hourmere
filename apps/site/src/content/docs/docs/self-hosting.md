@@ -124,8 +124,31 @@ Direct web builds also read the root `.env`. To override it for one build, use
 `VITE_PWA_ENABLED=false npm run build --workspace @hourmere/web`, then deploy that output.
 A direct image build requires `docker build --build-arg VITE_PWA_ENABLED=false -t hourmere:local .`,
 then deployment of that image. A prebuilt image's setting is fixed at build time; changing
-only its runtime environment cannot disable PWA support. Build a replacement image with
-the setting disabled when needed.
+only its runtime environment cannot disable PWA support. There is no runtime off switch
+for image installs. `docker-compose.image.yml` pins the published image, ignores
+`APP_IMAGE`, and disables builds, so tagging a replacement `hourmere:local` or adding
+`--build` while keeping that overlay does not replace the served app.
+
+To convert an existing image install, first follow the backup and version-selection steps
+in [upgrade and roll back](#upgrade-and-roll-back), retaining the source checkout matching
+the deployed release. Before editing `.env`, set the shell's `HOURMERE_VERSION` to the
+exact version of the currently running image (without the tag's leading `v`) and verify
+that the checkout is at that release tag:
+
+```sh
+test "$(git describe --tags --exact-match --match 'v[0-9]*')" = "v$HOURMERE_VERSION" ||
+  { echo 'Stop: the checkout is not at the running release tag.' >&2; false; }
+```
+
+Stop if the check fails: older code must not run against a newer database schema.
+After the check succeeds, in your existing private `.env`, remove only
+`docker-compose.image.yml` from `COMPOSE_FILE`, preserving the base file, proxy, worker
+and any custom overlays. Unset `HOURMERE_VERSION` in both `.env` and the shell so a
+separate worker also uses the local image; clear any shell-exported `COMPOSE_FILE` so
+Compose reads the edited list. Set `VITE_PWA_ENABLED=false`, then use the source rebuild
+command above to deploy all roles. Do not rerun `setup.sh --source` over an existing
+installation: setup refuses to overwrite `.env`. Retain your secrets, project name and
+volumes, and use the documented backup/restore procedure if a deployment fails.
 
 The disabled build stops registering workers but keeps `/app/sw.js` available as a minimal
 retirement worker. Existing clients receive it at their next online worker update check:

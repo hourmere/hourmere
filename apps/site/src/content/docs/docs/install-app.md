@@ -39,7 +39,9 @@ normally in a tab.
 ## Offline behavior and privacy
 
 After an online visit has prepared the app, opening an account page without a connection
-shows an offline notice in English and Simplified Chinese. Reconnect and reload to continue.
+shows an offline notice in English and Simplified Chinese after a full reload or reopening
+the app. Navigation within an already open page can still show data held in memory; that
+is not data stored in the offline cache. Reconnect and reload to continue.
 There is no offline booking, calendar, event editing or account-data view. Unsaved work
 is not queued for later submission. Installation does not add push notifications or
 background calendar synchronization on your device.
@@ -80,6 +82,8 @@ Development builds do not register a service worker. To turn PWA support off, se
 direct web builds and Docker build arguments. An empty or omitted value uses the current
 default (`true`); explicit `true` and `false` are accepted, and other values fail the build.
 Changing only the running container's environment cannot change an already-built app.
+Prebuilt image installs have no runtime off switch and must convert to a source build
+as described in those instructions; the image overlay ignores locally tagged replacements.
 
 The disabled build stops registering workers and still serves `/app/sw.js` as a minimal
 retirement worker. When an existing browser next checks for an update online, it activates

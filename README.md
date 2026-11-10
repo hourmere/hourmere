@@ -421,6 +421,11 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+- Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
+  and restarting cannot change a compiled image. Disabling installation requires a source
+  rebuild and redeployment, including removal of the image overlay and release-version
+  setting; see [the conversion instructions](https://hourmere.com/docs/self-hosting#turn-off-app-installation).
+
 Organization owners and team admins can store a logo and primary colour through settings,
 REST, MCP and CLI. [Branding settings](https://hourmere.com/docs/branding) include safe image
 uploads and automatic readable button-text selection; public pages and emails do not apply
