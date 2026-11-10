@@ -14,7 +14,7 @@
     "@hourmere/db": "*",
     "@hourmere/jobs": "*",
     "@hourmere/scheduling": "*",
-    "kysely": "0.29.7",
+    "kysely": "0.29.8",
     "zod": "4.6.7"
   }
 }
