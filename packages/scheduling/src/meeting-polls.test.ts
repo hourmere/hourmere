@@ -1046,46 +1046,117 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     await verifyContextHook(Polls)
   })
 
+  /** A real, enabled API key of a personal-space user, as the caller resolver would bind it. */
+  async function apiKey(
+    s: Awaited<ReturnType<typeof personal>>,
+    scope: 'full' | 'read' | 'bookings',
+  ) {
+    const row = await db
+      .insertInto('auth.apikey')
+      .values({
+        configId: 'default',
+        referenceId: s.user.id,
+        key: createHash('sha256').update(randomUUID()).digest('hex'),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        metadata: JSON.stringify({ scope, organizationId: s.organizationId }),
+        enabled: true,
+        expiresAt: null,
+        lastRefillAt: null,
+        lastRequest: null,
+        name: null,
+        permissions: null,
+        prefix: null,
+        rateLimitEnabled: false,
+        rateLimitMax: null,
+        rateLimitTimeWindow: null,
+        refillAmount: null,
+        refillInterval: null,
+        remaining: null,
+        requestCount: null,
+        start: null,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    return {
+      id: row.id,
+      ctx: testContext(db, {
+        kind: 'api_key',
+        apiKeyId: row.id,
+        apiKeyScope: scope,
+        user: s.user.principal.user,
+        organization: s.user.principal.organization,
+      }),
+    }
+  }
+
+  /** An OAuth grant of the same user; the transport has already validated the consent. */
+  function oauthGrant(s: Awaited<ReturnType<typeof personal>>) {
+    return testContext(db, {
+      kind: 'oauth',
+      oauthConsentId: randomUUID(),
+      clientId: 'mcp-client',
+      scopes: ['mcp:tools'],
+      user: s.user.principal.user,
+      organization: s.user.principal.organization,
+    })
+  }
+
+  /**
+   * One user's API keys and OAuth grants are separate replay scopes: reusing another
+   * credential's idempotency key is a fresh operation, never that credential's replay.
+   */
+  async function verifyActorIsolation(M: PollModule) {
+    const s = await personal()
+    const actors = [
+      (await apiKey(s, 'bookings')).ctx,
+      (await apiKey(s, 'full')).ctx,
+      oauthGrant(s),
+      oauthGrant(s),
+    ]
+    const request = await input(s.eventTypeId)
+    const created: string[] = []
+    for (const ctx of actors)
+      created.push((await succeeds(() => M.createMeetingPoll(ctx, request))).poll.id)
+    expect(new Set(created).size).toBe(actors.length)
+    // Each credential still replays its own creation.
+    for (const [index, ctx] of actors.entries())
+      expect(await failure(() => M.createMeetingPoll(ctx, request))).toMatchObject({
+        code: 'poll_already_created',
+        pollId: created[index],
+      })
+
+    const id = created[0] as string
+    const rotation = { id, expectedHostRevision: 1, idempotencyKey: randomUUID() }
+    await succeeds(() => M.rotateMeetingPollLink(actors[0] as ServiceContext, rotation))
+    // The same key and request from another credential is a fresh, now stale, rotation.
+    for (const ctx of actors.slice(1))
+      expect(await failure(() => M.rotateMeetingPollLink(ctx, rotation))).toMatchObject({
+        code: 'poll_changed',
+      })
+    // With a current revision, each other credential's same key rotates the link again.
+    for (const [index, ctx] of actors.slice(1).entries()) {
+      const rotated = await succeeds(() =>
+        M.rotateMeetingPollLink(ctx, { ...rotation, expectedHostRevision: index + 2 }),
+      )
+      expect(rotated.poll.hostRevision).toBe(index + 3)
+      expect(rotated.publicToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    }
+    expect(
+      await failure(() => M.rotateMeetingPollLink(actors[0] as ServiceContext, rotation)),
+    ).toMatchObject({
+      code: 'poll_link_already_rotated',
+    })
+    expect(await receipts(id, 'rotate_link')).toHaveLength(actors.length)
+  }
+
+  it('keeps API-key and OAuth-grant receipts apart for one user', async () => {
+    await verifyActorIsolation(Polls)
+  })
+
   async function verifyApiKeys(M: PollModule) {
     const s = await personal()
-    const key = async (scope: 'full' | 'read' | 'bookings') => {
-      const row = await db
-        .insertInto('auth.apikey')
-        .values({
-          configId: 'default',
-          referenceId: s.user.id,
-          key: createHash('sha256').update(randomUUID()).digest('hex'),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          metadata: JSON.stringify({ scope, organizationId: s.organizationId }),
-          enabled: true,
-          expiresAt: null,
-          lastRefillAt: null,
-          lastRequest: null,
-          name: null,
-          permissions: null,
-          prefix: null,
-          rateLimitEnabled: false,
-          rateLimitMax: null,
-          rateLimitTimeWindow: null,
-          refillAmount: null,
-          refillInterval: null,
-          remaining: null,
-          requestCount: null,
-          start: null,
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow()
-      return {
-        id: row.id,
-        ctx: testContext(db, {
-          ...s.user.principal,
-          kind: 'api_key',
-          apiKeyId: row.id,
-          apiKeyScope: scope,
-        }),
-      }
-    }
+    const key = (scope: 'full' | 'read' | 'bookings') => apiKey(s, scope)
     const bookings = await key('bookings')
     const created = await succeeds(async () =>
       M.createMeetingPoll(bookings.ctx, await input(s.eventTypeId), { source: 'mcp' }),
@@ -1557,6 +1628,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     verifyValidation,
     verifyBounds,
     verifyCreateRace,
+    verifyActorIsolation,
   ]
 
   it('passes every protection check through the pinned-clock source copy', async () => {
@@ -1662,6 +1734,14 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       'same-key creates do not serialize on the receipt',
       verifyCreateRace,
       ['SELECT pg_advisory_xact_lock(hashtextextended(', 'SELECT abs(hashtextextended('],
+    ],
+    [
+      'receipts are scoped to the user instead of the credential',
+      verifyActorIsolation,
+      [
+        "  const actor =\n    principal.kind === 'api_key'\n      ? { kind: 'api_key', id: principal.apiKeyId.toLowerCase() }\n      : principal.kind === 'oauth'\n        ? { kind: 'oauth', id: principal.oauthConsentId.toLowerCase() }\n        : { kind: 'session', id: principal.user.id.toLowerCase() }\n",
+        "  const actor = { kind: 'user', id: principal.user.id.toLowerCase() }\n",
+      ],
     ],
     [
       'rotate checks the revision before its receipt',
