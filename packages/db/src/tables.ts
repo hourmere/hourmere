@@ -797,6 +797,147 @@ export interface McpOauthIntents {
   user_id: string;
 }
 
+export interface MeetingPollCapabilities {
+  capability_ciphertext: Buffer | null;
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  generation: Generated<number>;
+  id: Generated<string>;
+  organization_id: string;
+  poll_id: string;
+  purpose: string;
+  revoked_at: Timestamp | null;
+  token_digest: Buffer;
+  updated_at: Generated<Timestamp>;
+  voter_id: string;
+}
+
+export interface MeetingPollDeliveries {
+  attempts: Generated<number>;
+  capability_ciphertext: Buffer | null;
+  created_at: Generated<Timestamp>;
+  due_at: Generated<Timestamp>;
+  error_class: string | null;
+  generation: Generated<number>;
+  host_user_id: string | null;
+  id: Generated<string>;
+  kind: string;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  organization_id: string;
+  poll_id: string;
+  sequence: Generated<number>;
+  state: Generated<string>;
+  terminal_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+  voter_id: string | null;
+}
+
+export interface MeetingPollMailboxCounters {
+  created_at: Generated<Timestamp>;
+  email_key: Buffer;
+  id: Generated<string>;
+  last_recovery_at: Timestamp | null;
+  last_resend_at: Timestamp | null;
+  organization_id: string;
+  poll_id: string;
+  purge_at: Timestamp | null;
+  recovery_count: Generated<number>;
+  reminder_consumed_at: Timestamp | null;
+  reminder_opted_out_at: Timestamp | null;
+  removed_at: Timestamp | null;
+  resend_count: Generated<number>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MeetingPollOperations {
+  actor_scope_digest: Buffer;
+  booking_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  idempotency_key_digest: Buffer;
+  operation: string;
+  organization_id: string;
+  poll_id: string | null;
+  purge_at: Timestamp | null;
+  request_fingerprint: Buffer;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MeetingPolls {
+  admission_mode: string;
+  api_key_id: string | null;
+  booking_id: string | null;
+  canceled_at: Timestamp | null;
+  chosen_slot_id: string | null;
+  closed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  deadline_at: Timestamp;
+  display_time_zone: string;
+  duration_minutes: number;
+  event_type_id: string;
+  host_revision: Generated<number>;
+  id: Generated<string>;
+  organization_id: string;
+  public_token_digest: Buffer | null;
+  results_revision: Generated<number>;
+  scheduled_at: Timestamp | null;
+  settings_fingerprint: Buffer;
+  settings_snapshot: Json;
+  source: Generated<string>;
+  status: Generated<string>;
+  title: string;
+  updated_at: Generated<Timestamp>;
+  visibility: Generated<string>;
+}
+
+export interface MeetingPollSlots {
+  created_at: Generated<Timestamp>;
+  end_at: Timestamp;
+  id: Generated<string>;
+  organization_id: string;
+  poll_id: string;
+  position: number;
+  start_at: Timestamp;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MeetingPollVoters {
+  admission_ip_digest: Buffer | null;
+  ballot_revision: Generated<number>;
+  ballot_submitted_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  email: string;
+  email_key: Buffer;
+  id: Generated<string>;
+  invited_at: Timestamp | null;
+  join_consent_at: Timestamp | null;
+  locale: string;
+  name: string;
+  organization_id: string;
+  pending_expires_at: Timestamp | null;
+  poll_id: string;
+  responses: Generated<Json>;
+  selected_booking_role: string | null;
+  time_zone: string;
+  updated_at: Generated<Timestamp>;
+  verified_at: Timestamp | null;
+  withdrawn_at: Timestamp | null;
+}
+
+export interface MeetingPollVotes {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  organization_id: string;
+  poll_id: string;
+  slot_id: string;
+  updated_at: Generated<Timestamp>;
+  value: string;
+  voter_id: string;
+}
+
 export interface NotificationEmailSends {
   recipient_hash: Buffer | null;
   sent_at: Timestamp;
@@ -939,6 +1080,25 @@ export interface Schedules {
   weekly_hours: Json;
 }
 
+export interface ScimConnections {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  organization_id: string;
+}
+
+export interface ScimMembershipBlocks {
+  cleared_at: Timestamp | null;
+  connection_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  identity_email: string | null;
+  kind: string;
+  organization_id: string;
+  scim_user_id: string | null;
+  source: string;
+  user_id: string | null;
+}
+
 export interface ScimProvisioningTokens {
   created_at: Generated<Timestamp>;
   created_by_user_id: string | null;
@@ -952,6 +1112,56 @@ export interface ScimProvisioningTokens {
   rotated_at: Timestamp | null;
   rotated_by_user_id: string | null;
   token_hash: string | null;
+}
+
+export interface ScimTokenConnections {
+  connection_id: string;
+  organization_id: string;
+  token_id: string;
+}
+
+export interface ScimUserClaims {
+  completed_at: Timestamp | null;
+  connection_id: string;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  invalidated_at: Timestamp | null;
+  invitation_id: string | null;
+  organization_id: string;
+  scim_user_id: string;
+  work_email: string;
+}
+
+export interface ScimUsers {
+  active: Generated<boolean>;
+  connection_id: string;
+  cost_center: string | null;
+  created_at: Generated<Timestamp>;
+  department: string | null;
+  display_name: string | null;
+  division: string | null;
+  employee_number: string | null;
+  enterprise_organization: string | null;
+  external_id: string | null;
+  family_name: string | null;
+  formatted_name: string | null;
+  given_name: string | null;
+  id: Generated<string>;
+  linked_member_id: string | null;
+  linked_user_id: string | null;
+  locale: string | null;
+  manager_id: string | null;
+  nick_name: string | null;
+  normalized_user_name: Generated<string | null>;
+  organization_id: string;
+  retired_at: Timestamp | null;
+  timezone: string | null;
+  title: string | null;
+  updated_at: Generated<Timestamp>;
+  user_name: string;
+  user_type: string | null;
+  work_email: string | null;
 }
 
 export interface SignInEmails {
@@ -1174,6 +1384,14 @@ export interface DB {
   mcp_oauth_client_activity: McpOauthClientActivity;
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;
+  meeting_poll_capabilities: MeetingPollCapabilities;
+  meeting_poll_deliveries: MeetingPollDeliveries;
+  meeting_poll_mailbox_counters: MeetingPollMailboxCounters;
+  meeting_poll_operations: MeetingPollOperations;
+  meeting_poll_slots: MeetingPollSlots;
+  meeting_poll_voters: MeetingPollVoters;
+  meeting_poll_votes: MeetingPollVotes;
+  meeting_polls: MeetingPolls;
   notification_email_sends: NotificationEmailSends;
   one_time_booking_links: OneTimeBookingLinks;
   organization_brand_logos: OrganizationBrandLogos;
@@ -1188,7 +1406,12 @@ export interface DB {
   routing_target_dependencies: RoutingTargetDependencies;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
+  scim_connections: ScimConnections;
+  scim_membership_blocks: ScimMembershipBlocks;
   scim_provisioning_tokens: ScimProvisioningTokens;
+  scim_token_connections: ScimTokenConnections;
+  scim_user_claims: ScimUserClaims;
+  scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;

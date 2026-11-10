@@ -32,8 +32,34 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
 The [SCIM design and provisioning-token foundation](scim.md) describes organization-scoped
-credential storage and the planned user lifecycle and Groups-to-teams mapping. Only token
-administration is implemented; SCIM resources remain unavailable.
+credential storage and the planned user lifecycle and Groups-to-teams mapping. Token
+administration and connection/User storage are implemented; SCIM resources remain unavailable.
+
+Migration `0073_scim_identity.sql` adds one stable `scim_connections` identity per
+organization and separate `scim_token_connections` bindings. Existing credentials,
+including revoked history, are bound without rewriting their fields. New token inserts
+receive the same organization connection; rotation retains that binding.
+
+`scim_users` stores organization-local mapped attributes, desired active state and
+nullable account/membership links. Its generated trimmed, lowercase user name and
+case-sensitive external ID are unique within a connection while the resource is live,
+including inactive entries. A linked account can have only one live resource per
+connection. Retirement preserves the opaque resource ID permanently while allowing a
+new resource to reuse the retired identifiers. Composite foreign keys bind resources,
+managers, membership links and invitation claims to their organization and connection.
+
+`scim_user_claims` stores expiring, deduplicated invitation intents, without creating
+accounts or verifying mailboxes. `scim_membership_blocks` stores separate local and SCIM
+suspension/removal records that survive membership and account deletion. Account deletion
+nulls the account reference and retains an immutable normalized mailbox tombstone for the
+shared SSO/SCIM admission checks described in [the SCIM design](scim.md); the captured
+decision is frozen, cleared at most once, undeletable while its organization exists and
+unique per organization, mailbox, authority and kind. A blocker whose mailbox cannot be
+stored, or whose decision is already a live tombstone, is dropped so that account deletion
+is never refused. These tables provide storage
+for later claim and authorization work; this migration does not enforce new admission,
+suspension or revocation behavior in application services. Users, Groups and discovery
+handlers remain unregistered in production.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -63,12 +89,36 @@ available in this foundation release.
   host's schedule zone. Wall-clock rules (working hours) retain their IANA time zone.
   Temporal handles DST when these dates and rules become instants.
 
-## Meeting polls (proposal)
+## Meeting poll storage
 
-[Meeting polls: data model and flow design](meeting-polls.md) proposes scoped polls,
-candidate slots, voters and votes, with atomic finalization through the booking service.
-These tables and interfaces are not implemented; the document defines the later tasks
-and their acceptance checks.
+Migration `0071_meeting_polls.sql` adds organization-scoped polls, candidate slots,
+voters, votes, purpose-bound capabilities, mailbox counters, operation receipts and
+recipient deliveries. Generated database interfaces and selectable row types describe
+storage only; no poll service admission, transport, worker, flag or UI is enabled.
+See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
+capacity bounds and the remaining implementation steps. Numeric admission and cleanup
+constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
+
+The chosen cleanup schedule is hourly, at most 500 rows per transaction. It persists
+closure for abandoned open polls at their deadline, deletes expired public pending
+voters and their dependent personal data, and clears expired capability ciphertext.
+Capacity and voting expiry are synchronous database-clock decisions, never dependent on
+worker punctuality. Normal terminal poll history follows the installation's booking-data
+retention policy from its terminal transition (deadline for automatic closure); with no
+such policy, the current repository retains booking and terminal poll history until
+explicit deletion. This storage step does not install the later cleanup worker.
+
+Mailbox digest counters and terminal delivery receipts remain for the entire retained
+poll lifetime so removing/recreating voters cannot reset mail budgets, reminder receipts
+or opt-outs. Counters' `purge_at` is unset until the parent is due for retention deletion;
+poll deletion cascades them. Delivery ciphertext is cleared immediately at terminal
+sent/suppressed/skipped state; retries have at most 5 attempts and 5-minute leases.
+Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion,
+then retain only non-personal replay digests for 90 days before the hourly purge.
+Organization deletion removes them immediately. Poll deletion preserves the booking;
+linked-booking deletion first deletes poll history and clears receipt references.
+See [the full cleanup contract](meeting-polls.md#storage-policy-and-cleanup-schedule)
+for the later workers and installation retention integration.
 
 ## Tables
 
