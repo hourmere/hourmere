@@ -74,6 +74,47 @@ export const admin = {
   White: 'White',
   'Branding saved. Booking pages and emails are unchanged.':
     'Branding saved. Booking pages and emails are unchanged.',
+  'Event type filter': 'Event type filter',
+  'All event types': 'All event types',
+  'Saved event type — details unavailable': 'Saved event type — details unavailable',
+  'Loading event type choices…': 'Loading event type choices…',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    'Could not load event type choices. Your saved filter is unchanged.',
+
+  Integrations: 'Integrations',
+  'Slack booking notifications': 'Slack booking notifications',
+  'Booking created': 'Booking created',
+  'Booking cancelled': 'Booking cancelled',
+  'Booking rescheduled': 'Booking rescheduled',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.',
+  'Loading Slack notifications…': 'Loading Slack notifications…',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    'Could not load Slack notifications. Only organization owners and admins can manage them.',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    'Could not update Slack notifications. Check your access and settings, then try again.',
+  'No Slack destination yet.': 'No Slack destination yet.',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.',
+  'Slack notifications are paused.': 'Slack notifications are paused.',
+  'Slack destination saved.': 'Slack destination saved.',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack test message queued. This does not confirm delivery.',
+  'Send test message': 'Send test message',
+  'Delete this Slack destination and its delivery history?':
+    'Delete this Slack destination and its delivery history?',
+  'Delete Slack destination': 'Delete Slack destination',
+  'Slack destination deleted.': 'Slack destination deleted.',
+  'Configure Slack notifications': 'Configure Slack notifications',
+  'Enter a Slack webhook URL and choose at least one event.':
+    'Enter a Slack webhook URL and choose at least one event.',
+  'Replacement Slack webhook URL': 'Replacement Slack webhook URL',
+  'Slack incoming-webhook URL': 'Slack incoming-webhook URL',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.',
+  'Events to post': 'Events to post',
+  'Enable Slack notifications': 'Enable Slack notifications',
+  'Save Slack destination': 'Save Slack destination',
   'Group-seat bookings do not support reschedule requests.':
     'Group-seat bookings do not support reschedule requests.',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':

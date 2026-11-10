@@ -619,6 +619,7 @@ describe('routing forms are storage only', () => {
             enabled: config.WEBHOOKS_ENABLED,
             encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
           },
+          webhookQueue: { enqueue: async () => null },
           notify: async () => {},
           notifyAttendeeNoShow: async () => {},
           // The optional clients currently register no client-gated route: their OAuth

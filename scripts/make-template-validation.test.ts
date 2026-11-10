@@ -104,7 +104,9 @@ async function captureDelivery(row: BookingRow, notify: (trx: Db) => Promise<voi
         )
       return [row]
     }
-    if (/^select "id" from "webhooks" where /.test(sql)) return [{ id: ids.endpoint }]
+    // Capture selects every subscribed destination kind; Make receives the signed webhook.
+    if (/^select "id", "destination_kind" from "webhooks" where /.test(sql))
+      return [{ id: ids.endpoint, destination_kind: 'webhook' }]
     const insert = sql.match(/^insert into "webhook_deliveries" \(([^)]+)\) values \(([^)]+)\)/)
     if (insert) {
       const columns = (insert[1] ?? '').split(', ').map((column) => column.replaceAll('"', ''))
@@ -233,13 +235,19 @@ async function deliveryHeaders(eventType: string, payload: string) {
   const encryptionKey = Buffer.alloc(32, 7).toString('base64')
   let sent: Readonly<Record<string, string>> | undefined
   const db = syntheticDb(({ sql }) => {
-    if (/^select "webhook_id" from "webhook_deliveries" where "id" = \$1$/.test(sql))
-      return [{ webhook_id: ids.endpoint }]
+    if (
+      /^select "webhook_id", "destination_kind" from "webhook_deliveries" inner join "webhooks" on "webhooks"\."id" = "webhook_deliveries"\."webhook_id" where "webhook_deliveries"\."id" = \$1$/.test(
+        sql,
+      )
+    )
+      return [{ webhook_id: ids.endpoint, destination_kind: 'webhook' }]
     if (/^select \* from "webhooks" where "id" = \$1 for share$/.test(sql))
       return [
         {
           id: ids.endpoint,
           organization_id: ids.organization,
+          destination_kind: 'webhook',
+          event_type_id: null,
           url: 'https://receiver.example.com/hourmere',
           is_active: true,
           events: [eventType],

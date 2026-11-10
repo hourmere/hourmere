@@ -125,7 +125,7 @@ describe('CLI transport and arguments', () => {
     'kills removed waitlist capability privacy in privateFile=%s',
     async (privateFile) => {
       const change: readonly [string, string] = privateFile
-        ? ['[key, oneTimeToken, waitlistToken]', '[key, oneTimeToken]']
+        ? ['[key, oneTimeToken, waitlistToken, slackUrl]', '[key, oneTimeToken, slackUrl]']
         : ['secrets.push(input.waitlistToken)', '']
       await verifyWaitlistPrivacy(sourceCopy(), privateFile)
       await expect(verifyWaitlistPrivacy(sourceCopy(change), privateFile)).rejects.toMatchObject({
@@ -197,7 +197,7 @@ describe('CLI transport and arguments', () => {
     ['stdout capability redaction', ['secrets.push(input.oneTimeToken)', ''], verifyOneTimePrivacy],
     [
       'private file capability redaction',
-      ['[key, oneTimeToken, waitlistToken]', '[key, waitlistToken]'],
+      ['[key, oneTimeToken, waitlistToken, slackUrl]', '[key, waitlistToken, slackUrl]'],
       (runner) => verifyOneTimePrivacy(runner, true),
     ],
     [

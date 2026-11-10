@@ -16,7 +16,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 - [CSV booking exports](https://hourmere.com/docs/booking-export) for personal owners and
   team administrators, with bounded streaming and spreadsheet formula protection.
 - [Booking emails](https://hourmere.com/docs/notifications), optional signed
-  [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
+  [webhooks](https://hourmere.com/docs/webhooks), [Slack notifications](https://hourmere.com/docs/slack) and first-party [booking activity](https://hourmere.com/docs/analytics).
 - A source-built [Zapier app](https://hourmere.com/docs/zapier) for booking automation,
   available as a private integration until published.
 - A source-built [n8n community node](https://hourmere.com/docs/n8n) with booking actions
@@ -37,7 +37,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/conferences` | Independent Zoom connections and single-host automatic meetings; see [automatic Zoom](https://hourmere.com/docs/automatic-zoom), separate from sign-in. |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
-| `packages/webhooks` | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
+| `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |

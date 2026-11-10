@@ -1,12 +1,13 @@
+import { randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { createDb, runMigrations } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createFixtures, createTestUser, testContext } from '@hourmere/scheduling/testing'
+import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
 import { expect, it } from 'vitest'
-import { createWebhook } from './service.ts'
+import { encryptWebhookSecret } from './crypto.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0028_webhook_interrupted_deliveries.sql'
@@ -33,14 +34,22 @@ it.skipIf(!serverUrl)(
       const db = createDb(pool)
       const user = await createTestUser(db)
       const key = Buffer.alloc(32, 9).toString('base64')
-      const { webhook } = await createWebhook(
-        testContext(db, user.principal),
-        {
-          enabled: true,
-          encryptionKey: key,
-        },
-        { url: 'https://hooks.example.com/bookings', events: ['booking.created'] },
-      )
+      const webhook = { id: randomUUID(), organizationId: user.principal.organization.id }
+      await db
+        .insertInto('webhooks')
+        .values({
+          id: webhook.id,
+          organization_id: webhook.organizationId,
+          url: 'https://hooks.example.com/bookings',
+          events: ['booking.created'],
+          secret_ciphertext: encryptWebhookSecret(
+            'synthetic',
+            key,
+            webhook.id,
+            webhook.organizationId,
+          ),
+        })
+        .execute()
       const f = createFixtures(db)
       for (const [i, error] of [
         null,

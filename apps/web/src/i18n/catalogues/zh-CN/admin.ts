@@ -74,6 +74,46 @@ export const admin = {
   White: '白色',
   'Branding saved. Booking pages and emails are unchanged.':
     '品牌设置已保存。预约页面和邮件暂不受影响。',
+  'Event type filter': '按活动类型筛选',
+  'All event types': '所有活动类型',
+  'Saved event type — details unavailable': '已保存的活动类型（详情暂不可用）',
+  'Loading event type choices…': '正在加载活动类型选项……',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    '无法加载活动类型选项。已保存的筛选条件保持不变。',
+
+  Integrations: '集成',
+  'Slack booking notifications': 'Slack 预约通知',
+  'Booking created': '预约已创建',
+  'Booking cancelled': '预约已取消',
+  'Booking rescheduled': '预约已改期',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    '向 Slack 发送活动标题、预约编号、时间、状态和后台链接。个人接收地址还包含受邀人姓名，不包含邮箱、自定义答案或会议链接。',
+  'Loading Slack notifications…': '正在加载 Slack 通知……',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    '无法加载 Slack 通知。只有组织所有者和管理员可以管理通知。',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    '无法更新 Slack 通知。请检查权限和设置，然后重试。',
+  'No Slack destination yet.': '尚未设置 Slack 接收地址。',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack 拒绝了此 Webhook 地址，通知已暂停。请先更换地址，再启用通知。',
+  'Slack notifications are paused.': 'Slack 通知已暂停。',
+  'Slack destination saved.': '已保存 Slack 接收地址。',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack 测试消息已加入发送队列。这不代表消息已送达。',
+  'Send test message': '发送测试消息',
+  'Delete this Slack destination and its delivery history?': '删除此 Slack 接收地址及其发送记录？',
+  'Delete Slack destination': '删除 Slack 接收地址',
+  'Slack destination deleted.': '已删除 Slack 接收地址。',
+  'Configure Slack notifications': '配置 Slack 通知',
+  'Enter a Slack webhook URL and choose at least one event.':
+    '请输入 Slack Webhook 地址，并至少选择一种事件。',
+  'Replacement Slack webhook URL': '新的 Slack Webhook 地址',
+  'Slack incoming-webhook URL': 'Slack 传入 Webhook 地址',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    '请使用 hooks.slack.com 的 HTTPS 传入 Webhook 地址，并妥善保密。无需更换时，请将新地址留空。',
+  'Events to post': '要发送的事件',
+  'Enable Slack notifications': '启用 Slack 通知',
+  'Save Slack destination': '保存 Slack 接收地址',
   'Group-seat bookings do not support reschedule requests.': '团体席位预约不支持请求改期。',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
     '请使用最多 2000 个字符的纯文本，不可包含制表符和控制字符。',
