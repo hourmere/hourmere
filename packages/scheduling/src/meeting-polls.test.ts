@@ -22,6 +22,11 @@ import {
 const serverUrl = process.env.DATABASE_URL
 type PollModule = typeof Polls
 type Input = Polls.CreateMeetingPollInput
+/** Lets a test pin the creation instant through globalThis; unset, the database clock rules. */
+const PIN_CLOCK = [
+  'const createdAt = await clock(trx)',
+  'const createdAt = (globalThis as { meetingPollClock?: string }).meetingPollClock ?? (await clock(trx))',
+] as const
 
 /** Imports an isolated copy; the production file is never overwritten. */
 async function sourceCopy(...replacements: (readonly [string, string])[]): Promise<PollModule> {
@@ -45,9 +50,19 @@ async function failure(fn: () => Promise<unknown>) {
     () => null,
     (caught: unknown) => caught,
   )
-  if (!(error instanceof Error)) throw new Error('expected the operation to fail')
+  if (!(error instanceof Error)) expect.unreachable('expected the operation to fail')
   const domain = error as Partial<DomainError> & { pollId?: string | null }
   return { name: error.name, kind: domain.kind, code: domain.code, pollId: domain.pollId }
+}
+
+/** Expected success, reported as an assertion so that a throwing mutant is not a crash. */
+async function succeeds<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (error) {
+    const { name, code } = error as { name?: string; code?: string }
+    return expect.unreachable(`expected success, got ${name} ${code}`)
+  }
 }
 
 function session(principal: Principal): Principal {
@@ -186,7 +201,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       .execute()
   }
 
-  /** Row counts of every table, to prove that creation writes only poll storage. */
+  /** A checksum of every row of every table, so that an UPDATE is noticed as well as an INSERT. */
   async function tableCounts() {
     const { rows: tables } = await sql<{ name: string }>`
       SELECT format('%I.%I', n.nspname, c.relname) AS name FROM pg_class c
@@ -194,14 +209,14 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema')
         AND n.nspname NOT LIKE 'pg_toast%'
       ORDER BY 1`.execute(db)
-    const counts: Record<string, number> = {}
-    for (const { name } of tables) {
-      const { rows } = await sql<{
-        count: string
-      }>`SELECT count(*)::text AS count FROM ${sql.raw(name)}`.execute(db)
-      counts[name] = Number(rows[0]?.count)
-    }
-    return counts
+    const { rows } = await sql<{ name: string; checksum: string }>`${sql.join(
+      tables.map(
+        ({ name }) =>
+          sql`SELECT ${name}::text AS name, (SELECT md5(coalesce(string_agg(t::text, ',' ORDER BY t::text), '')) FROM ${sql.raw(name)} AS t) AS checksum`,
+      ),
+      sql` UNION ALL `,
+    )}`.execute(db)
+    return Object.fromEntries(rows.map((row) => [row.name, row.checksum]))
   }
 
   async function scheduled(s: Awaited<ReturnType<typeof team>>, pollId: string) {
@@ -346,9 +361,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       ),
     ).toBe(true)
 
-    const invited = await M.createMeetingPoll(
-      s.ctx,
-      await input(s.eventTypeId, { admissionMode: 'invited' }),
+    const invited = await succeeds(async () =>
+      M.createMeetingPoll(s.ctx, await input(s.eventTypeId, { admissionMode: 'invited' })),
     )
     expect(invited.publicToken).toBeNull()
     expect((await stored(invited.poll.id))?.public_token_digest).toBeNull()
@@ -485,8 +499,12 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     const seen: (string | undefined)[][] = []
     const lost: ServiceContext = {
       ...s.ctx,
-      authorizeOrganizationWrite: async (_trx, organizationId, targetId) => {
-        seen.push([organizationId, targetId])
+      authorizeOrganizationWrite: async (trx, organizationId, targetId) => {
+        // Row locks assign a transaction ID; none may be held before the hook runs.
+        const { rows } = await sql<{
+          unlocked: boolean
+        }>`SELECT pg_current_xact_id_if_assigned() IS NULL AS unlocked`.execute(trx)
+        seen.push([organizationId, targetId, rows[0]?.unlocked ? 'first' : 'after locks'])
         throw new DomainError('conflict', 'organization_context_changed')
       },
     }
@@ -508,11 +526,11 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     for (const call of calls)
       expect(await failure(call)).toMatchObject({ code: 'organization_context_changed' })
     expect(seen).toEqual([
-      [s.organizationId, s.eventTypeId],
-      [s.organizationId, undefined],
-      [s.organizationId, undefined],
-      [s.organizationId, undefined],
-      [s.organizationId, undefined],
+      [s.organizationId, s.eventTypeId, 'first'],
+      [s.organizationId, undefined, 'first'],
+      [s.organizationId, undefined, 'first'],
+      [s.organizationId, undefined, 'first'],
+      [s.organizationId, undefined, 'first'],
     ])
     expect(await stored(poll.id)).toEqual(before)
     expect(await tableCounts()).toEqual(counts)
@@ -564,11 +582,11 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   }
 
   async function verifyNoHolds(M: PollModule) {
-    const s = await team()
-    // Busy time and booking limits exist, yet a proposal reserves nothing.
-    await fixtures.calendarBusy(s.member.id, [['2020-01-01T00:00:00Z', '2099-01-01T00:00:00Z']])
+    const s = await team({ maxBookingsPerDay: 1 })
     const before = await tableCounts()
-    const { poll } = await M.createMeetingPoll(s.ctx, await input(s.eventTypeId))
+    const { poll } = await succeeds(async () =>
+      M.createMeetingPoll(s.ctx, await input(s.eventTypeId)),
+    )
     const after = await tableCounts()
     const changedTables = Object.keys(after).filter((name) => after[name] !== before[name])
     expect(changedTables.sort()).toEqual([
@@ -576,9 +594,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       'public.meeting_poll_slots',
       'public.meeting_polls',
     ])
-    expect(after['public.meeting_polls']).toBe((before['public.meeting_polls'] ?? 0) + 1)
-    expect(after['public.meeting_poll_slots']).toBe((before['public.meeting_poll_slots'] ?? 0) + 2)
     expect(poll.status).toBe('open')
+    expect(await receipts(poll.id)).toHaveLength(1)
   }
 
   // --- Behaviour --------------------------------------------------------------------------
@@ -695,13 +712,13 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     expect((await stored(agent.poll.id))?.api_key_id).toBeNull()
   })
 
-  it('validates candidates, deadlines, durations and unsupported event modes before writing', async () => {
+  async function verifyValidation(M: PollModule) {
     const s = await personal({ minimumNoticeMinutes: 120 })
     // Unrounded: creation reads the database clock later, so elapsed time only shrinks.
     const now = await databaseNow()
     const deadline = now.add({ hours: 24 })
     const at = (hours: number) => deadline.add({ hours }).toString()
-    const counts = await tableCounts()
+    const state = await tableCounts()
     const cases: [Partial<Input>, string][] = [
       [{ candidateStarts: [at(3)] }, 'invalid_poll'],
       [{ candidateStarts: Array.from({ length: 21 }, (_, i) => at(3 + i)) }, 'poll_limit_exceeded'],
@@ -716,6 +733,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       [{ candidateStarts: [at(1), at(3)] }, 'invalid_poll'],
       [{ candidateStarts: [at(0), at(3)] }, 'invalid_poll'],
       [{ candidateStarts: [at(-1), at(3)] }, 'invalid_poll'],
+      [{ candidateStarts: [at(3), '9999-12-31T23:59:59.9999995Z'] }, 'invalid_poll'],
       [
         { deadlineAt: now.add({ minutes: 59 }).toString(), candidateStarts: [at(3), at(4)] },
         'invalid_poll',
@@ -746,30 +764,24 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
         ...override,
       }
       expect(
-        await failure(() => Polls.createMeetingPoll(s.ctx, request)),
+        await failure(() => M.createMeetingPoll(s.ctx, request)),
         JSON.stringify(override),
-      ).toMatchObject({
-        code,
-      })
+      ).toMatchObject({ code })
     }
-    expect(await tableCounts()).toEqual(counts)
-
-    // Both deadline bounds are inclusive elapsed time from the database creation instant.
-    const accepted = [
-      {
-        deadlineAt: now.add({ hours: 1, minutes: 1 }).toString(),
-        candidateStarts: [now.add({ hours: 4 }).toString(), now.add({ hours: 5 }).toString()],
-      },
-      {
-        deadlineAt: now.add({ hours: 720 }).toString(),
-        candidateStarts: [now.add({ hours: 723 }).toString(), now.add({ hours: 724 }).toString()],
-      },
-      { deadlineAt: deadline.toString(), candidateStarts: [at(2), at(3)] },
-    ]
-    for (const override of accepted)
-      expect(
-        (await Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId, override))).poll.status,
-      ).toBe('open')
+    expect(await tableCounts()).toEqual(state)
+    expect(
+      (
+        await succeeds(async () =>
+          M.createMeetingPoll(
+            s.ctx,
+            await input(s.eventTypeId, {
+              deadlineAt: deadline.toString(),
+              candidateStarts: [at(2), at(3)],
+            }),
+          ),
+        )
+      ).poll.status,
+    ).toBe('open')
 
     await db
       .updateTable('event_types')
@@ -777,7 +789,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       .where('id', '=', s.eventTypeId)
       .execute()
     expect(
-      await failure(async () => Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId))),
+      await failure(async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId))),
     ).toMatchObject({
       code: 'event_type_inactive',
     })
@@ -787,7 +799,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       .where('id', '=', s.eventTypeId)
       .execute()
     expect(
-      await failure(async () => Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId))),
+      await failure(async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId))),
     ).toMatchObject({
       code: 'event_type_not_found',
     })
@@ -798,10 +810,69 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       .where('id', '=', group.eventTypeId)
       .execute()
     expect(
-      await failure(async () => Polls.createMeetingPoll(group.ctx, await input(group.eventTypeId))),
+      await failure(async () => M.createMeetingPoll(group.ctx, await input(group.eventTypeId))),
     ).toMatchObject({
       code: 'poll_event_unsupported',
     })
+  }
+
+  /**
+   * Exact inclusive bounds, through a source copy whose only change lets the test pin the
+   * creation instant (every other copy in this file carries the same pin).
+   */
+  async function verifyBounds(M: PollModule) {
+    const noticed = await personal({ minimumNoticeMinutes: 120 })
+    const immediate = await personal()
+    const pinned = (await databaseNow()).round({ smallestUnit: 'second', roundingMode: 'floor' })
+    const clock = globalThis as { meetingPollClock?: string }
+    clock.meetingPollClock = pinned.toString()
+    try {
+      const µs = { microseconds: 1 }
+      const attempt = async (
+        s: Awaited<ReturnType<typeof personal>>,
+        deadline: Temporal.Instant,
+        earliest: Temporal.Instant,
+      ) =>
+        M.createMeetingPoll(s.ctx, {
+          ...(await input(s.eventTypeId)),
+          deadlineAt: deadline.toString(),
+          candidateStarts: [earliest.toString(), earliest.add({ hours: 1 }).toString()],
+        })
+      const min = pinned.add({ hours: 1 })
+      const max = pinned.add({ hours: 720 })
+      const accepted: [Awaited<ReturnType<typeof personal>>, Temporal.Instant, Temporal.Instant][] =
+        [
+          [noticed, min, min.add({ hours: 2 })],
+          [noticed, max, max.add({ hours: 2 })],
+          [immediate, min, min.add(µs)],
+        ]
+      for (const [s, deadline, earliest] of accepted) {
+        const { poll } = await succeeds(() => attempt(s, deadline, earliest))
+        expect(poll.createdAt).toBe(pinned.toString())
+        expect(poll.deadlineAt).toBe(deadline.toString())
+      }
+      const rejected: [Awaited<ReturnType<typeof personal>>, Temporal.Instant, Temporal.Instant][] =
+        [
+          [noticed, min.subtract(µs), min.add({ hours: 2 })],
+          [noticed, max.add(µs), max.add({ hours: 2 })],
+          [noticed, min, min.add({ hours: 2 }).subtract(µs)],
+          [immediate, min, min],
+        ]
+      for (const [s, deadline, earliest] of rejected)
+        expect(await failure(() => attempt(s, deadline, earliest))).toMatchObject({
+          code: 'invalid_poll',
+        })
+    } finally {
+      delete clock.meetingPollClock
+    }
+  }
+
+  it('validates candidates, deadlines, durations and unsupported event modes before writing', async () => {
+    await verifyValidation(Polls)
+  })
+
+  it('accepts both inclusive deadline bounds and the exact minimum notice, and nothing beyond', async () => {
+    await verifyBounds(await sourceCopy(PIN_CLOCK))
   })
 
   it('normalizes instants to database microseconds before storing and fingerprinting', async () => {
@@ -894,26 +965,29 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     await verifyRoleAuthority(Polls)
   })
 
-  it('rechecks role, membership and verification on every read, write and replay', async () => {
+  async function verifyAuthorityLoss(M: PollModule) {
     const s = await team()
     const request = await input(s.eventTypeId)
-    const { poll } = await Polls.createMeetingPoll(s.ctx, request)
+    const { poll } = await succeeds(() => M.createMeetingPoll(s.ctx, request))
+    const rotation = { id: poll.id, expectedHostRevision: 1, idempotencyKey: randomUUID() }
+    await succeeds(() => M.rotateMeetingPollLink(s.ctx, rotation))
     const operations = (ctx: ServiceContext): (() => Promise<unknown>)[] => [
-      () => Polls.createMeetingPoll(ctx, request),
-      () => Polls.getMeetingPoll(ctx, poll.id),
-      () => Polls.listMeetingPolls(ctx),
-      () => Polls.closeMeetingPoll(ctx, { id: poll.id, expectedHostRevision: 1 }),
-      () => Polls.cancelMeetingPoll(ctx, { id: poll.id, expectedHostRevision: 1 }),
-      () => Polls.deleteMeetingPoll(ctx, { id: poll.id, expectedHostRevision: 1 }),
+      () => M.createMeetingPoll(ctx, request),
+      () => M.rotateMeetingPollLink(ctx, rotation),
+      () => M.getMeetingPoll(ctx, poll.id),
+      () => M.listMeetingPolls(ctx),
+      () => M.closeMeetingPoll(ctx, { id: poll.id, expectedHostRevision: 2 }),
+      () => M.cancelMeetingPoll(ctx, { id: poll.id, expectedHostRevision: 2 }),
+      () => M.deleteMeetingPoll(ctx, { id: poll.id, expectedHostRevision: 2 }),
       () =>
-        Polls.rotateMeetingPollLink(ctx, {
-          id: poll.id,
-          expectedHostRevision: 1,
+        M.rotateMeetingPollLink(ctx, {
+          ...rotation,
+          expectedHostRevision: 2,
           idempotencyKey: randomUUID(),
         }),
     ]
     const denied = { kind: 'forbidden', code: 'team_management_access_denied' }
-    // Demotion: the creator's attribution is not enduring authority, even for its replay.
+    // Demotion: the creator's attribution is not enduring authority, even for its replays.
     await db
       .updateTable('auth.member')
       .set({ role: 'member' })
@@ -928,29 +1002,51 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       .where('userId', '=', s.admin.id)
       .execute()
     for (const call of operations(s.ctx)) expect(await failure(call)).toMatchObject(denied)
-    // An owner who lost mailbox verification.
+    // A current owner who lost mailbox verification.
     await db
       .updateTable('auth.user')
       .set({ emailVerified: false })
       .where('id', '=', s.owner.id)
       .execute()
     for (const call of operations(s.ownerCtx)) expect(await failure(call)).toMatchObject(denied)
-    // A principal claiming somebody else's personal space.
+    // A member row planted in somebody else's personal space grants nothing there.
     const stranger = await personal()
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: stranger.organizationId,
+        userId: s.member.id,
+        role: 'owner',
+        createdAt: new Date(),
+      })
+      .execute()
     const intruder = testContext(
       db,
       session({ ...s.member.principal, organization: stranger.user.principal.organization }),
     )
-    for (const call of operations(intruder)) expect(await failure(call)).toMatchObject(denied)
-    expect((await stored(poll.id))?.host_revision).toBe(1)
-    expect(await receipts(poll.id)).toHaveLength(1)
+    const theirs = await succeeds(async () =>
+      M.createMeetingPoll(stranger.ctx, await input(stranger.eventTypeId)),
+    )
+    for (const call of [
+      ...operations(intruder),
+      async () => M.createMeetingPoll(intruder, await input(stranger.eventTypeId)),
+      () => M.getMeetingPoll(intruder, theirs.poll.id),
+    ])
+      expect(await failure(call)).toMatchObject(denied)
+    const row = await stored(poll.id)
+    expect(row?.host_revision).toBe(2)
+    expect(await receipts(poll.id)).toHaveLength(2)
+  }
+
+  it('rechecks role, membership and verification on every read, write and replay', async () => {
+    await verifyAuthorityLoss(Polls)
   })
 
   it('runs the organization context hook first and writes nothing when the context changed', async () => {
     await verifyContextHook(Polls)
   })
 
-  it('enforces API-key scope and live key state', async () => {
+  async function verifyApiKeys(M: PollModule) {
     const s = await personal()
     const key = async (scope: 'full' | 'read' | 'bookings') => {
       const row = await db
@@ -991,20 +1087,22 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       }
     }
     const bookings = await key('bookings')
-    const created = await Polls.createMeetingPoll(bookings.ctx, await input(s.eventTypeId), {
-      source: 'mcp',
-    })
+    const created = await succeeds(async () =>
+      M.createMeetingPoll(bookings.ctx, await input(s.eventTypeId), { source: 'mcp' }),
+    )
     expect(created.poll.source).toBe('mcp')
     expect((await stored(created.poll.id))?.api_key_id).toBe(bookings.id)
     const read = await key('read')
-    expect((await Polls.getMeetingPoll(read.ctx, created.poll.id)).id).toBe(created.poll.id)
+    expect((await succeeds(() => M.getMeetingPoll(read.ctx, created.poll.id))).id).toBe(
+      created.poll.id,
+    )
     const writes: (() => Promise<unknown>)[] = [
-      async () => Polls.createMeetingPoll(read.ctx, await input(s.eventTypeId)),
-      () => Polls.closeMeetingPoll(read.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
-      () => Polls.cancelMeetingPoll(read.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
-      () => Polls.deleteMeetingPoll(read.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
+      async () => M.createMeetingPoll(read.ctx, await input(s.eventTypeId)),
+      () => M.closeMeetingPoll(read.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
+      () => M.cancelMeetingPoll(read.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
+      () => M.deleteMeetingPoll(read.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
       () =>
-        Polls.rotateMeetingPollLink(read.ctx, {
+        M.rotateMeetingPollLink(read.ctx, {
           id: created.poll.id,
           expectedHostRevision: 1,
           idempotencyKey: randomUUID(),
@@ -1016,23 +1114,31 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       .set({ enabled: false })
       .where('id', '=', bookings.id)
       .execute()
-    expect((await failure(() => Polls.getMeetingPoll(bookings.ctx, created.poll.id))).name).toBe(
+    expect((await failure(() => M.getMeetingPoll(bookings.ctx, created.poll.id))).name).toBe(
       'InvalidApiKeyError',
     )
     expect(
       (
         await failure(() =>
-          Polls.closeMeetingPoll(bookings.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
+          M.closeMeetingPoll(bookings.ctx, { id: created.poll.id, expectedHostRevision: 1 }),
         )
       ).name,
     ).toBe('InvalidApiKeyError')
     expect((await stored(created.poll.id))?.host_revision).toBe(1)
+  }
+
+  it('enforces API-key scope and live key state', async () => {
+    await verifyApiKeys(Polls)
   })
 
-  it('closes, cancels and deletes with idempotent repeats and current state', async () => {
+  async function verifyRepeats(M: PollModule) {
     const s = await team()
-    const { poll } = await Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId))
-    const closed = await Polls.closeMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 })
+    const { poll } = await succeeds(async () =>
+      M.createMeetingPoll(s.ctx, await input(s.eventTypeId)),
+    )
+    const closed = await succeeds(() =>
+      M.closeMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 }),
+    )
     expect(closed).toMatchObject({
       status: 'closed',
       hostRevision: 2,
@@ -1041,25 +1147,29 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     expect(closed.updatedAt).toBe(closed.closedAt)
     // A repeat returns the current state before the revision check and writes nothing.
     const before = await stored(poll.id)
-    expect(await Polls.closeMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 })).toEqual(
-      closed,
-    )
+    expect(
+      await succeeds(() => M.closeMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 })),
+    ).toEqual(closed)
     expect(await stored(poll.id)).toEqual(before)
-    const canceled = await Polls.cancelMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 2 })
+    const canceled = await succeeds(() =>
+      M.cancelMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 2 }),
+    )
     expect(canceled).toMatchObject({
       status: 'canceled',
       hostRevision: 3,
       closedAt: closed.closedAt,
     })
     const afterCancel = await stored(poll.id)
-    expect(await Polls.cancelMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 })).toEqual(
-      canceled,
-    )
+    expect(
+      await succeeds(() => M.cancelMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 })),
+    ).toEqual(canceled)
     expect(await stored(poll.id)).toEqual(afterCancel)
 
-    const open = (await Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId))).poll
+    const open = (
+      await succeeds(async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId)))
+    ).poll
     expect(
-      await Polls.cancelMeetingPoll(s.ctx, { id: open.id, expectedHostRevision: 1 }),
+      await succeeds(() => M.cancelMeetingPoll(s.ctx, { id: open.id, expectedHostRevision: 1 })),
     ).toMatchObject({
       status: 'canceled',
       closedAt: null,
@@ -1068,10 +1178,12 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
 
     for (const expectedHostRevision of [0, 1.5, Number.NaN, '1' as never])
       expect(
-        await failure(() => Polls.closeMeetingPoll(s.ctx, { id: open.id, expectedHostRevision })),
-      ).toMatchObject({ code: 'invalid_poll' })
+        await failure(() => M.closeMeetingPoll(s.ctx, { id: open.id, expectedHostRevision })),
+      ).toMatchObject({
+        code: 'invalid_poll',
+      })
 
-    await Polls.deleteMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 3 })
+    await succeeds(() => M.deleteMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 3 }))
     expect(await stored(poll.id)).toBeUndefined()
     expect(
       await db
@@ -1081,13 +1193,21 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
         .execute(),
     ).toEqual([])
     expect(
-      await failure(() => Polls.deleteMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 3 })),
-    ).toMatchObject({ code: 'poll_not_found' })
+      await failure(() => M.deleteMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 3 })),
+    ).toMatchObject({
+      code: 'poll_not_found',
+    })
+  }
+
+  it('closes, cancels and deletes with idempotent repeats and current state', async () => {
+    await verifyRepeats(Polls)
   })
 
-  it('derives deadline closure from the database clock without a host revision change', async () => {
+  async function verifyDeadlineClosure(M: PollModule) {
     const s = await team()
-    const { poll } = await Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId))
+    const { poll } = await succeeds(async () =>
+      M.createMeetingPoll(s.ctx, await input(s.eventTypeId)),
+    )
     await sql`UPDATE meeting_polls SET created_at = clock_timestamp() - interval '3 hours',
       deadline_at = date_trunc('second', clock_timestamp()) - interval '1 hour' WHERE id = ${poll.id}`.execute(
       db,
@@ -1100,25 +1220,33 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       .where('id', '=', poll.id)
       .executeTakeFirstOrThrow()
     const expected = Temporal.Instant.from(deadline.at).toString()
-    const read = await Polls.getMeetingPoll(s.ctx, poll.id)
+    const read = await succeeds(() => M.getMeetingPoll(s.ctx, poll.id))
     expect(read).toMatchObject({
       status: 'closed',
       closedAt: expected,
       deadlineAt: expected,
       hostRevision: 1,
     })
-    expect((await Polls.listMeetingPolls(s.ctx)).data[0]).toEqual(read)
+    expect((await succeeds(() => M.listMeetingPolls(s.ctx))).data[0]).toEqual(read)
     // Closing again is a repeat: no write, no revision check.
-    expect(await Polls.closeMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 7 })).toEqual(
-      read,
-    )
+    expect(
+      await succeeds(() => M.closeMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 7 })),
+    ).toEqual(read)
     expect(await stored(poll.id)).toMatchObject({
       status: 'open',
       closed_at: null,
       host_revision: 1,
     })
-    const canceled = await Polls.cancelMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 })
-    expect(canceled).toMatchObject({ status: 'canceled', hostRevision: 2, closedAt: null })
+    // Cancellation records the closure that already happened at the deadline.
+    const canceled = await succeeds(() =>
+      M.cancelMeetingPoll(s.ctx, { id: poll.id, expectedHostRevision: 1 }),
+    )
+    expect(canceled).toMatchObject({ status: 'canceled', hostRevision: 2, closedAt: expected })
+    expect((await stored(poll.id))?.closed_at?.toISOString()).toBe(new Date(expected).toISOString())
+  }
+
+  it('derives deadline closure from the database clock without a host revision change', async () => {
+    await verifyDeadlineClosure(Polls)
   })
 
   it('never reopens closed, canceled or scheduled polls', async () => {
@@ -1206,19 +1334,30 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     ).toMatchObject({ code: 'idempotency_key_reused' })
   })
 
-  it('serializes two concurrent creations with one key into one poll', async () => {
+  async function verifyCreateRace(M: PollModule) {
     const s = await team()
     const request = await input(s.eventTypeId)
-    const results = await Promise.allSettled([
-      Polls.createMeetingPoll(s.ctx, request),
-      Polls.createMeetingPoll(s.as(s.admin), request),
-    ])
+    // Both creators pass authority and then queue on the event row together.
+    const results = await queuedBehind(
+      (trx) =>
+        trx
+          .selectFrom('event_types')
+          .select('id')
+          .where('id', '=', s.eventTypeId)
+          .forUpdate()
+          .execute(),
+      () => M.createMeetingPoll(s.ctx, request),
+      () => M.createMeetingPoll(s.as(s.admin), request),
+    )
     const created = results.flatMap((result) =>
       result.status === 'fulfilled' ? [result.value.poll.id] : [],
     )
     expect(created).toHaveLength(1)
-    const rejected = results.find((result) => result.status === 'rejected') as PromiseRejectedResult
-    expect(rejected.reason).toMatchObject({ code: 'poll_already_created', pollId: created[0] })
+    const loser = results.find((result) => result.status === 'rejected') as PromiseRejectedResult
+    expect({ code: loser?.reason?.code, pollId: loser?.reason?.pollId }).toEqual({
+      code: 'poll_already_created',
+      pollId: created[0],
+    })
     expect(
       await db
         .selectFrom('meeting_polls')
@@ -1226,6 +1365,10 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
         .where('event_type_id', '=', s.eventTypeId)
         .execute(),
     ).toHaveLength(1)
+  }
+
+  it('serializes two concurrent creations with one key into one poll', async () => {
+    await verifyCreateRace(Polls)
   })
 
   it('replays rotation as a safe conflict and conflicts on a changed request', async () => {
@@ -1235,16 +1378,25 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   // --- Concurrency ------------------------------------------------------------------------
 
   /** Hold the poll row, queue `first` then `second` on it, then release them in that order. */
-  async function queued<A, B>(pollId: string, first: () => Promise<A>, second: () => Promise<B>) {
+  function queued<A, B>(pollId: string, first: () => Promise<A>, second: () => Promise<B>) {
+    return queuedBehind(
+      (trx) =>
+        trx.selectFrom('meeting_polls').select('id').where('id', '=', pollId).forUpdate().execute(),
+      first,
+      second,
+    )
+  }
+
+  /** Hold a lock, queue `first` then `second` behind it, then release them. */
+  async function queuedBehind<A, B>(
+    hold: (trx: Db) => Promise<unknown>,
+    first: () => Promise<A>,
+    second: () => Promise<B>,
+  ) {
     const locked = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
     const blocker = db.transaction().execute(async (trx) => {
-      await trx
-        .selectFrom('meeting_polls')
-        .select('id')
-        .where('id', '=', pollId)
-        .forUpdate()
-        .execute()
+      await hold(trx)
       locked.resolve()
       await release.promise
     })
@@ -1386,195 +1538,359 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
 
   // --- Mutation checks --------------------------------------------------------------------
 
-  it('passes every protection check through an unmodified source copy', async () => {
-    const copy = await sourceCopy()
-    for (const verify of [
-      verifyStaleRevision,
-      verifyRevisionAdvances,
-      verifyNoReopening,
-      verifyPublicToken,
-      verifyCreateReplay,
-      verifyRotateReplay,
-      verifyRoleAuthority,
-      verifyTenant,
-      verifyContextHook,
-      verifyFixedSettings,
-      verifyNoHolds,
-    ])
-      await verify(copy)
+  const verifications = [
+    verifyStaleRevision,
+    verifyRevisionAdvances,
+    verifyNoReopening,
+    verifyPublicToken,
+    verifyCreateReplay,
+    verifyRotateReplay,
+    verifyRoleAuthority,
+    verifyAuthorityLoss,
+    verifyApiKeys,
+    verifyTenant,
+    verifyContextHook,
+    verifyFixedSettings,
+    verifyNoHolds,
+    verifyRepeats,
+    verifyDeadlineClosure,
+    verifyValidation,
+    verifyBounds,
+    verifyCreateRace,
+  ]
+
+  it('passes every protection check through the pinned-clock source copy', async () => {
+    const copy = await sourceCopy(PIN_CLOCK)
+    for (const verify of verifications) await verify(copy)
   })
 
-  const mutations: [string, (M: PollModule) => Promise<void>, ...(readonly [string, string])[]][] =
+  type Mutation = [string, (M: PollModule) => Promise<void>, ...(readonly [string, string])[]]
+  const mutations: Mutation[] = [
     [
+      'close ignores expectedHostRevision',
+      verifyStaleRevision,
       [
-        'close ignores expectedHostRevision',
-        verifyStaleRevision,
-        [
-          "if (poll.status === 'scheduled') throw alreadyScheduled()\n    requireHostRevision(poll, request.expectedHostRevision)\n    await hostWrite(trx, poll, { status: 'closed'",
-          "if (poll.status === 'scheduled') throw alreadyScheduled()\n    await hostWrite(trx, poll, { status: 'closed'",
-        ],
+        "if (poll.status === 'scheduled') throw alreadyScheduled()\n    requireHostRevision(poll, request.expectedHostRevision)\n    await hostWrite(trx, poll, { status: 'closed'",
+        "if (poll.status === 'scheduled') throw alreadyScheduled()\n    await hostWrite(trx, poll, { status: 'closed'",
       ],
+    ],
+    [
+      'cancel ignores expectedHostRevision',
+      verifyStaleRevision,
       [
-        'cancel ignores expectedHostRevision',
-        verifyStaleRevision,
-        [
-          "requireHostRevision(poll, request.expectedHostRevision)\n    await hostWrite(trx, poll, { status: 'canceled'",
-          "await hostWrite(trx, poll, { status: 'canceled'",
-        ],
+        'requireHostRevision(poll, request.expectedHostRevision)\n    // Voting already closed',
+        '// Voting already closed',
       ],
+    ],
+    [
+      'delete ignores expectedHostRevision',
+      verifyStaleRevision,
       [
-        'delete ignores expectedHostRevision',
-        verifyStaleRevision,
-        [
-          'requireHostRevision(poll, request.expectedHostRevision)\n    const deleted',
-          'const deleted',
-        ],
+        'requireHostRevision(poll, request.expectedHostRevision)\n    const deleted',
+        'const deleted',
       ],
+    ],
+    [
+      'rotate-link ignores expectedHostRevision',
+      verifyStaleRevision,
       [
-        'rotate-link ignores expectedHostRevision',
-        verifyStaleRevision,
-        [
-          'requireHostRevision(poll, request.expectedHostRevision)\n    const publicToken',
-          'const publicToken',
-        ],
+        'requireHostRevision(poll, request.expectedHostRevision)\n    const publicToken',
+        'const publicToken',
       ],
+    ],
+    [
+      'host writes keep the old revision',
+      verifyRevisionAdvances,
+      ['host_revision: poll.host_revision + 1,', 'host_revision: poll.host_revision,'],
+    ],
+    [
+      'close accepts a canceled poll',
+      verifyNoReopening,
       [
-        'host writes keep the old revision',
-        verifyRevisionAdvances,
-        ['host_revision: poll.host_revision + 1,', 'host_revision: poll.host_revision,'],
+        "if (poll.status === 'canceled')\n      throw new DomainError('conflict', 'poll_canceled', 'This poll was canceled')",
+        '',
       ],
+    ],
+    [
+      'reads derive status from the deadline alone',
+      verifyNoReopening,
       [
-        'close accepts a canceled poll',
-        verifyNoReopening,
-        [
-          "if (poll.status === 'canceled')\n      throw new DomainError('conflict', 'poll_canceled', 'This poll was canceled')",
-          '',
-        ],
+        "status: row.deadlinePassed ? 'closed' : (row.status as MeetingPollStatus),",
+        "status: row.deadlinePassed ? 'closed' : ('open' as MeetingPollStatus),",
       ],
+    ],
+    [
+      'cancel retires the public link',
+      verifyPublicToken,
       [
-        'reads derive status from the deadline alone',
-        verifyNoReopening,
-        [
-          "status: row.deadlinePassed ? 'closed' : (row.status as MeetingPollStatus),",
-          "status: row.deadlinePassed ? 'closed' : ('open' as MeetingPollStatus),",
-        ],
+        '      canceled_at: poll.at,\n      ...(deadlineClosed',
+        '      canceled_at: poll.at,\n      public_token_digest: null as never,\n      ...(deadlineClosed',
       ],
+    ],
+    [
+      'rotation keeps the old capability',
+      verifyPublicToken,
+      ['{ public_token_digest: meetingPollPublicTokenDigest(publicToken) }', '{}'],
+    ],
+    [
+      'invited polls get a public capability',
+      verifyPublicToken,
+      ["request.admissionMode === 'public_link' ? randomBytes(32)", 'true ? randomBytes(32)'],
+    ],
+    [
+      'create replay ignores the request fingerprint',
+      verifyCreateReplay,
       [
-        'cancel retires the public link',
-        verifyPublicToken,
-        [
-          "{ status: 'canceled', canceled_at: poll.at }",
-          "{ status: 'canceled', canceled_at: poll.at, public_token_digest: null as never }",
-        ],
+        'if (!previous.request_fingerprint.equals(receipt.fingerprint)) throw keyReused()\n      throw new MeetingPollAlreadyCreatedError',
+        'throw new MeetingPollAlreadyCreatedError',
       ],
+    ],
+    [
+      'create skips its receipt lookup',
+      verifyCreateReplay,
       [
-        'rotation keeps the old capability',
-        verifyPublicToken,
-        ['{ public_token_digest: meetingPollPublicTokenDigest(publicToken) }', '{}'],
+        'const previous = await lockedReceipt(trx, receipt)\n    if (previous) {\n      if',
+        'const previous = undefined as any\n    if (previous) {\n      if',
       ],
+    ],
+    [
+      'create fingerprints candidates in request order',
+      verifyCreateReplay,
+      ['      candidateStarts: starts,\n', '      candidateStarts: request.candidates,\n'],
+    ],
+    [
+      'same-key creates do not serialize on the receipt',
+      verifyCreateRace,
+      ['SELECT pg_advisory_xact_lock(hashtextextended(', 'SELECT abs(hashtextextended('],
+    ],
+    [
+      'rotate checks the revision before its receipt',
+      verifyRotateReplay,
       [
-        'invited polls get a public capability',
-        verifyPublicToken,
-        ["request.admissionMode === 'public_link' ? randomBytes(32)", 'true ? randomBytes(32)'],
+        '    // A lost successful response stays recoverable after the revision has advanced.\n',
+        '    requireHostRevision(poll, request.expectedHostRevision)\n',
       ],
+    ],
+    [
+      'rotate replay ignores the request fingerprint',
+      verifyRotateReplay,
       [
-        'create replay ignores the request fingerprint',
-        verifyCreateReplay,
-        [
-          'if (!previous.request_fingerprint.equals(receipt.fingerprint)) throw keyReused()\n      throw new MeetingPollAlreadyCreatedError',
-          'throw new MeetingPollAlreadyCreatedError',
-        ],
+        "if (!previous.request_fingerprint.equals(receipt.fingerprint)) throw keyReused()\n      throw new DomainError(\n        'conflict',\n        'poll_link_already_rotated'",
+        "throw new DomainError(\n        'conflict',\n        'poll_link_already_rotated'",
       ],
+    ],
+    [
+      'team members manage polls',
+      verifyRoleAuthority,
+      ["if (!personal && !roles.includes('owner') && !roles.includes('admin')) throw denied()", ''],
+    ],
+    [
+      'unverified actors keep authority',
+      verifyAuthorityLoss,
+      ['if (!actor?.emailVerified) throw denied()', ''],
+    ],
+    [
+      'departed members keep authority',
+      verifyAuthorityLoss,
       [
-        'create skips its receipt lookup',
-        verifyCreateReplay,
-        [
-          'const previous = await lockedReceipt(trx, receipt)\n    if (previous) {\n      if',
-          'const previous = undefined as any\n    if (previous) {\n      if',
-        ],
+        'if (!membership) throw denied()\n  const roles = membership.role',
+        "const roles = (membership?.role ?? 'owner')",
       ],
+    ],
+    [
+      'a member row in another personal space grants authority',
+      verifyAuthorityLoss,
+      ['if (personal && personal.user_id !== principal.user.id) throw denied()', ''],
+    ],
+    [
+      'create replays before authorization',
+      verifyAuthorityLoss,
       [
-        'create fingerprints candidates in request order',
-        verifyCreateReplay,
-        ['      candidateStarts: starts,\n', '      candidateStarts: request.candidates,\n'],
+        '    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)\n',
+        "    const early = await trx.selectFrom('meeting_poll_operations').select('poll_id').where('organization_id', '=', ctx.principal.organization.id).where('operation', '=', 'create').where('idempotency_key_digest', '=', sha256('idempotency-key', request.idempotencyKey)).executeTakeFirst()\n    if (early) throw new MeetingPollAlreadyCreatedError(early.poll_id)\n    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)\n",
       ],
+    ],
+    [
+      'rotate replays before authorization',
+      verifyAuthorityLoss,
       [
-        'rotate checks the revision before its receipt',
-        verifyRotateReplay,
-        [
-          '    // A lost successful response stays recoverable after the revision has advanced.\n',
-          '    requireHostRevision(poll, request.expectedHostRevision)\n',
-        ],
+        '    const poll = await lockManagedPoll(trx, ctx, request.id)\n    const receipt',
+        "    const early = await trx.selectFrom('meeting_poll_operations').select('poll_id').where('operation', '=', 'rotate_link').where('idempotency_key_digest', '=', sha256('idempotency-key', key)).executeTakeFirst()\n    if (early) throw new DomainError('conflict', 'poll_link_already_rotated')\n    const poll = await lockManagedPoll(trx, ctx, request.id)\n    const receipt",
       ],
+    ],
+    [
+      'read-scope keys write',
+      verifyApiKeys,
       [
-        'rotate replay ignores the request fingerprint',
-        verifyRotateReplay,
-        [
-          "if (!previous.request_fingerprint.equals(receipt.fingerprint)) throw keyReused()\n      throw new DomainError(\n        'conflict',\n        'poll_link_already_rotated'",
-          "throw new DomainError(\n        'conflict',\n        'poll_link_already_rotated'",
-        ],
+        "if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope === 'read')\n    throw new ApiKeyScopeError()",
+        '',
       ],
+    ],
+    [
+      'disabled keys keep working',
+      verifyApiKeys,
+      ["if (principal.kind === 'api_key') await requireActiveApiKey(db, principal, Date.now)", ''],
+    ],
+    [
+      'host writes are not scoped to the organization',
+      verifyTenant,
       [
-        'team members manage polls',
-        verifyRoleAuthority,
-        [
-          "if (!personal && !roles.includes('owner') && !roles.includes('admin')) throw denied()",
-          '',
-        ],
+        ".where('id', '=', id)\n    .where('organization_id', '=', ctx.principal.organization.id)\n    .forUpdate()",
+        ".where('id', '=', id)\n    .forUpdate()",
       ],
+    ],
+    [
+      'host writes skip the organization context hook',
+      verifyContextHook,
+      ['  await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)\n', ''],
+    ],
+    [
+      'create skips the organization context hook',
+      verifyContextHook,
       [
-        'host writes are not scoped to the organization',
-        verifyTenant,
-        [
-          ".where('id', '=', id)\n    .where('organization_id', '=', ctx.principal.organization.id)\n    .forUpdate()",
-          ".where('id', '=', id)\n    .forUpdate()",
-        ],
+        '    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)\n',
+        '',
       ],
+    ],
+    [
+      'host writes run the context hook after taking locks',
+      verifyContextHook,
       [
-        'host writes skip the organization context hook',
-        verifyContextHook,
-        ['  await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)\n', ''],
+        '  await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)\n  const authority = await lockAuthority(trx, ctx)\n',
+        '  const authority = await lockAuthority(trx, ctx)\n  await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)\n',
       ],
+    ],
+    [
+      'create runs the context hook after taking locks',
+      verifyContextHook,
       [
-        'create skips the organization context hook',
-        verifyContextHook,
-        [
-          '    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)\n',
-          '',
-        ],
+        '    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)\n    const authority = await lockAuthority(trx, ctx)\n',
+        '    const authority = await lockAuthority(trx, ctx)\n    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)\n',
       ],
+    ],
+    [
+      'host writes refresh the title from the event',
+      verifyFixedSettings,
       [
-        'host writes refresh the title from the event',
-        verifyFixedSettings,
-        [
-          '.set({ ...changes, host_revision',
-          '.set({ ...changes, title: sql`(SELECT title FROM event_types WHERE id = meeting_polls.event_type_id)`, host_revision',
-        ],
+        '.set({ ...changes, host_revision',
+        '.set({ ...changes, title: sql`(SELECT title FROM event_types WHERE id = meeting_polls.event_type_id)`, host_revision',
       ],
+    ],
+    [
+      'rotation re-snapshots current event settings',
+      verifyFixedSettings,
       [
-        'rotation re-snapshots current event settings',
-        verifyFixedSettings,
-        [
-          "const publicToken = randomBytes(32).toString('base64url')\n    await hostWrite(",
-          "const publicToken = randomBytes(32).toString('base64url')\n    const current = await meetingPollEventSettings(trx, (await trx.selectFrom('meeting_polls').select('event_type_id').where('id', '=', poll.id).executeTakeFirstOrThrow()).event_type_id, 30)\n    await trx.updateTable('meeting_polls').set({ settings_snapshot: JSON.stringify(current.snapshot), settings_fingerprint: current.fingerprint }).where('id', '=', poll.id).execute()\n    await hostWrite(",
-        ],
+        "const publicToken = randomBytes(32).toString('base64url')\n    await hostWrite(",
+        "const publicToken = randomBytes(32).toString('base64url')\n    const current = await meetingPollEventSettings(trx, (await trx.selectFrom('meeting_polls').select('event_type_id').where('id', '=', poll.id).executeTakeFirstOrThrow()).event_type_id, 30)\n    await trx.updateTable('meeting_polls').set({ settings_snapshot: JSON.stringify(current.snapshot), settings_fingerprint: current.fingerprint }).where('id', '=', poll.id).execute()\n    await hostWrite(",
       ],
+    ],
+    [
+      'create places a booking hold',
+      verifyNoHolds,
       [
-        'create places a booking hold',
-        verifyNoHolds,
-        [
-          '    await insertReceipt(trx, receipt, poll.id, createdAt)\n    return',
-          "    await insertReceipt(trx, receipt, poll.id, createdAt)\n    await trx.insertInto('bookings').values({ organization_id: ctx.principal.organization.id, event_type_id: event.id, status: 'confirmed', start_at: starts[0], end_at: Temporal.Instant.from(starts[0]).add({ minutes: durationMinutes }).toString(), title: 'hold', manage_token_hash: randomBytes(32), source }).execute()\n    return",
-        ],
+        '    await insertReceipt(trx, receipt, poll.id, createdAt)\n    return',
+        "    await insertReceipt(trx, receipt, poll.id, createdAt)\n    await trx.insertInto('bookings').values({ organization_id: ctx.principal.organization.id, event_type_id: event.id, status: 'confirmed', start_at: starts[0], end_at: Temporal.Instant.from(starts[0]).add({ minutes: durationMinutes }).toString(), title: 'hold', manage_token_hash: randomBytes(32), source }).execute()\n    return",
       ],
-    ]
+    ],
+    [
+      'create consumes an event booking limit',
+      verifyNoHolds,
+      [
+        '    await insertReceipt(trx, receipt, poll.id, createdAt)\n    return',
+        "    await insertReceipt(trx, receipt, poll.id, createdAt)\n    await trx.updateTable('event_types').set({ max_bookings_per_day: 0 }).where('id', '=', event.id).execute()\n    return",
+      ],
+    ],
+    [
+      'close checks the revision before its repeat',
+      verifyRepeats,
+      [
+        "    if (poll.effectiveStatus === 'closed') return loadPoll(trx, ctx, poll.id)\n",
+        "    requireHostRevision(poll, request.expectedHostRevision)\n    if (poll.effectiveStatus === 'closed') return loadPoll(trx, ctx, poll.id)\n",
+      ],
+    ],
+    [
+      'cancel checks the revision before its repeat',
+      verifyRepeats,
+      [
+        "    if (poll.status === 'canceled') return loadPoll(trx, ctx, poll.id)\n",
+        "    requireHostRevision(poll, request.expectedHostRevision)\n    if (poll.status === 'canceled') return loadPoll(trx, ctx, poll.id)\n",
+      ],
+    ],
+    [
+      'host writes ignore a passed deadline',
+      verifyDeadlineClosure,
+      [
+        "poll.status === 'open' && deadlinePassed ? 'closed' : (poll.status as MeetingPollStatus)",
+        '(poll.status as MeetingPollStatus)',
+      ],
+    ],
+    [
+      'reads ignore a passed deadline',
+      verifyDeadlineClosure,
+      [
+        "status: row.deadlinePassed ? 'closed' : (row.status as MeetingPollStatus),",
+        'status: row.status as MeetingPollStatus,',
+      ],
+    ],
+    [
+      'cancel forgets the deadline closure',
+      verifyDeadlineClosure,
+      ['      ...(deadlineClosed ? { closed_at: poll.deadline } : {}),\n', ''],
+    ],
+    [
+      'duplicate candidates reach storage',
+      verifyValidation,
+      [
+        "    if (starts.length !== request.candidates.length)\n      throw invalidPoll('candidateStarts must not contain the same instant twice')\n",
+        '',
+      ],
+    ],
+    [
+      'group seat events are accepted',
+      verifyValidation,
+      ["if (event.booking_mode !== 'individual')", 'if (false)'],
+    ],
+    [
+      'capability fields are treated as unknown fields',
+      verifyValidation,
+      ['if (TOKEN_FIELDS.has(field))', 'if (false)'],
+    ],
+    [
+      'the minimum notice is ignored',
+      verifyValidation,
+      ['if (earliest <= deadline || earliest - deadline < notice)', 'if (earliest <= deadline)'],
+    ],
+    [
+      'the one-hour deadline bound is exclusive',
+      verifyBounds,
+      [
+        'elapsed < BigInt(MEETING_POLL_LIMITS.minDeadlineSeconds)',
+        'elapsed <= BigInt(MEETING_POLL_LIMITS.minDeadlineSeconds)',
+      ],
+    ],
+    [
+      'the 30-day deadline bound is exclusive',
+      verifyBounds,
+      [
+        'elapsed > BigInt(MEETING_POLL_LIMITS.maxDeadlineSeconds)',
+        'elapsed >= BigInt(MEETING_POLL_LIMITS.maxDeadlineSeconds)',
+      ],
+    ],
+    [
+      'the minimum notice is exclusive',
+      verifyBounds,
+      ['earliest - deadline < notice', 'earliest - deadline <= notice'],
+    ],
+    [
+      'a candidate may start at the deadline',
+      verifyBounds,
+      ['if (earliest <= deadline ||', 'if (earliest < deadline ||'],
+    ],
+  ]
 
+  // Only a failed assertion counts: a mutant that crashes or cannot load is not a detection.
   it.each(mutations)('detects the mutation: %s', async (_name, verify, ...replacements) => {
-    const mutated = await sourceCopy(...replacements)
-    const outcome = await verify(mutated).then(
-      () => 'survived',
-      () => 'killed',
-    )
-    expect(outcome).toBe('killed')
+    const mutated = await sourceCopy(PIN_CLOCK, ...replacements)
+    await expect(verify(mutated)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 })

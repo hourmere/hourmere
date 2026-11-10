@@ -88,7 +88,7 @@ export class MeetingPollAlreadyCreatedError extends DomainError {
     super(
       'conflict',
       'poll_already_created',
-      'This poll was already created. Its public link was shown once; rotate the link to get a new one.',
+      'This poll was already created. Read it by its ID; a link or capability is never shown again.',
     )
     this.pollId = pollId
   }
@@ -110,7 +110,8 @@ const CREATE_FIELDS = new Set([
 const TOKEN_FIELDS = new Set(['token', 'oneTimeToken', 'oneTimeLinkToken', 'publicToken'])
 const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
 const EARLIEST = -62135596800000 // 0001-01-01T00:00:00Z
-const LATEST = 253402300799999 // 9999-12-31T23:59:59.999Z
+// A day short of year 10000, so database microsecond rounding can never leave year 9999.
+const LATEST = 253402214400000 // 9999-12-31T00:00:00Z
 const MINUTE_NS = 60_000_000_000n
 const SECOND_NS = 1_000_000_000n
 /** Lifecycle writes may set only these columns; everything else is fixed at creation. */
@@ -134,11 +135,12 @@ const keyReused = () =>
     'This Idempotency-Key was already used for a different request.',
   )
 
+const UTC_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
 const utc = (ref: string) =>
-  sql<string>`to_char(${sql.ref(ref)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+  sql<string>`to_char(${sql.ref(ref)} AT TIME ZONE 'UTC', ${sql.lit(UTC_FORMAT)})`
 const utcNullable = (ref: string) =>
-  sql<string | null>`to_char(${sql.ref(ref)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
-const databaseClock = sql<string>`to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+  sql<string | null>`to_char(${sql.ref(ref)} AT TIME ZONE 'UTC', ${sql.lit(UTC_FORMAT)})`
+const databaseClock = sql<string>`to_char(clock_timestamp() AT TIME ZONE 'UTC', ${sql.lit(UTC_FORMAT)})`
 /** Microsecond database text as RFC 3339 UTC, without trailing zero fractions. */
 const rfc3339 = (value: string) => Temporal.Instant.from(value).toString()
 const sha256 = (domain: string, value: string) =>
@@ -417,7 +419,13 @@ export async function cancelMeetingPoll(
     if (poll.status === 'canceled') return loadPoll(trx, ctx, poll.id)
     if (poll.status === 'scheduled') throw alreadyScheduled()
     requireHostRevision(poll, request.expectedHostRevision)
-    await hostWrite(trx, poll, { status: 'canceled', canceled_at: poll.at })
+    // Voting already closed at the deadline, whether or not a worker recorded it.
+    const deadlineClosed = poll.status === 'open' && poll.effectiveStatus === 'closed'
+    await hostWrite(trx, poll, {
+      status: 'canceled',
+      canceled_at: poll.at,
+      ...(deadlineClosed ? { closed_at: poll.deadline } : {}),
+    })
     return loadPoll(trx, ctx, poll.id)
   })
 }
@@ -552,6 +560,7 @@ interface LockedPoll {
   effectiveStatus: MeetingPollStatus
   admission_mode: string
   host_revision: number
+  deadline: string
   /** Database clock captured once after the poll and event locks. */
   at: string
 }
@@ -577,14 +586,15 @@ async function lockManagedPoll(trx: Db, ctx: ServiceContext, id: string): Promis
     .forShare()
     .executeTakeFirst()
   if (!event || !manages(authority, event.owner_user_id)) throw pollNotFound()
-  const { at, deadlinePassed } = await trx
-    .selectFrom('meeting_polls')
-    .select([
-      databaseClock.as('at'),
-      sql<boolean>`deadline_at <= clock_timestamp()`.as('deadlinePassed'),
-    ])
-    .where('id', '=', poll.id)
-    .executeTakeFirstOrThrow()
+  // One clock reading decides the deadline and timestamps this write.
+  const { rows } = await sql<{ at: string; deadline: string; deadlinePassed: boolean }>`
+    WITH decision AS MATERIALIZED (SELECT clock_timestamp() AS t)
+    SELECT to_char(decision.t AT TIME ZONE 'UTC', ${sql.lit(UTC_FORMAT)}) AS at,
+      to_char(poll.deadline_at AT TIME ZONE 'UTC', ${sql.lit(UTC_FORMAT)}) AS deadline,
+      poll.deadline_at <= decision.t AS "deadlinePassed"
+    FROM meeting_polls AS poll CROSS JOIN decision
+    WHERE poll.id = ${poll.id}`.execute(trx)
+  const { at, deadline, deadlinePassed } = rows[0] as (typeof rows)[number]
   return {
     id: poll.id,
     organization_id: poll.organization_id,
@@ -593,6 +603,7 @@ async function lockManagedPoll(trx: Db, ctx: ServiceContext, id: string): Promis
       poll.status === 'open' && deadlinePassed ? 'closed' : (poll.status as MeetingPollStatus),
     admission_mode: poll.admission_mode,
     host_revision: poll.host_revision,
+    deadline,
     at,
   }
 }
@@ -796,10 +807,14 @@ function instantText(value: unknown, field: string): string {
 /** Round to stored microseconds in the database itself, so fingerprints match storage. */
 async function normalizeInstants(trx: Db, values: readonly string[]): Promise<string[]> {
   const rows = await sql<{ value: string }>`
-    SELECT to_char(input.value::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS value
+    SELECT to_char(input.value::timestamptz AT TIME ZONE 'UTC', ${sql.lit(UTC_FORMAT)}) AS value
     FROM unnest(${values}::text[]) WITH ORDINALITY AS input(value, ordinal)
     ORDER BY input.ordinal`.execute(trx)
-  return rows.rows.map((row) => rfc3339(row.value))
+  try {
+    return rows.rows.map((row) => rfc3339(row.value))
+  } catch {
+    throw invalidPoll('Instants must fall within years 0001 to 9999')
+  }
 }
 
 async function clock(trx: Db): Promise<string> {
@@ -868,7 +883,11 @@ async function loadPoll(trx: Db, ctx: ServiceContext, id: string): Promise<Meeti
 async function loadPolls(trx: Db, ctx: ServiceContext, ids: string[]): Promise<MeetingPoll[]> {
   if (ids.length === 0) return []
   const rows = await trx
-    .selectFrom('meeting_polls')
+    .with(
+      (cte) => cte('poll_clock').materialized(),
+      (db) => db.selectNoFrom(sql<Date>`clock_timestamp()`.as('t')),
+    )
+    .selectFrom(['meeting_polls', 'poll_clock'])
     .select([
       'id',
       'organization_id',
@@ -889,10 +908,11 @@ async function loadPolls(trx: Db, ctx: ServiceContext, ids: string[]): Promise<M
       utcNullable('scheduled_at').as('scheduled'),
       utc('created_at').as('created'),
       utc('updated_at').as('updated'),
-      // Reads derive deadline closure from the database clock, even before a worker runs.
-      sql<boolean>`status = 'open' AND deadline_at <= clock_timestamp()`.as('deadlinePassed'),
-      sql<string | null>`to_char(CASE WHEN status = 'open' AND deadline_at <= clock_timestamp()
-        THEN deadline_at ELSE closed_at END AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
+      // Reads derive deadline closure from one database clock reading, even before a
+      // worker persists it.
+      sql<boolean>`status = 'open' AND deadline_at <= poll_clock.t`.as('deadlinePassed'),
+      sql<string | null>`to_char(CASE WHEN status = 'open' AND deadline_at <= poll_clock.t
+        THEN deadline_at ELSE closed_at END AT TIME ZONE 'UTC', ${sql.lit(UTC_FORMAT)})`.as(
         'closed',
       ),
     ])
