@@ -68,7 +68,10 @@ available in this foundation release.
 Migration `0071_meeting_polls.sql` adds organization-scoped polls, candidate slots,
 voters, votes, purpose-bound capabilities, mailbox counters, operation receipts and
 recipient deliveries. Generated database interfaces and selectable row types describe
-storage only; no poll service admission, transport, worker, flag or UI is enabled.
+storage. The internal host lifecycle service in `packages/scheduling/src/meeting-polls.ts`
+creates, reads, closes, cancels and deletes polls and rotates public links; it fixes every
+creation setting, never reopens a closed or canceled poll, and adds no transport. No voter
+admission, worker, flag or UI is enabled.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.

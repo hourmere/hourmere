@@ -1,7 +1,9 @@
 # Meeting polls: data model and flow proposal
 
-Status: storage foundation implemented by migration `0071_meeting_polls.sql`;
-service, transport, workers and UI remain proposed. Competitor research was checked
+Status: storage foundation implemented by migration `0071_meeting_polls.sql`, and the
+internal host lifecycle service (create, read, close, cancel, delete and link rotation) by
+`packages/scheduling/src/meeting-polls.ts`; voter services, transport, workers and UI
+remain proposed. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
