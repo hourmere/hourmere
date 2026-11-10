@@ -4,6 +4,7 @@ import { createDb } from '@hourmere/db'
 import { createTestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
 import { describe, expect, it, vi } from 'vitest'
+import { callTool } from '../../../tools/cli/src/client.ts'
 import { type RunningServer, startServer } from './server.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -17,6 +18,7 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
     )
     let running: RunningServer | undefined
     const syntheticUrl = 'https://hooks.slack.com/services/TTEST/BTEST/syntheticCompositionOnly'
+    const replacementUrl = 'https://hooks.slack.com/services/TTEST/BTEST/syntheticMcpReplacement'
     try {
       const user = await createTestUser(db)
       const fixtures = createFixtures(db)
@@ -86,6 +88,16 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
       const sample = await request(`/slack-destinations/${destination.id}/test`, 'POST')
       expect(sample.status).toBe(202)
       await sample.body?.cancel()
+      // MCP is served from the same production app options: replacing the URL needs the
+      // configured webhook encryption key there.
+      const replaced = await callTool({
+        url: new URL('/mcp', `http://127.0.0.1:${running.port}`),
+        key: apiKey,
+        tool: 'update_slack_destination',
+        input: { id: destination.id, url: replacementUrl },
+      })
+      expect(replaced).toMatchObject({ id: destination.id, isActive: true })
+      expect(JSON.stringify(replaced)).not.toContain(replacementUrl)
 
       // Second Sunday in March: 01:30 EST + 30 elapsed minutes ends at 03:00 EDT.
       const year = Temporal.Now.plainDateISO('America/New_York').year + 1
@@ -138,7 +150,13 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
       ).toEqual(['booking.cancelled', 'booking.created', 'booking.rescheduled'])
       expect(deliveries.every((row) => row.status === 'pending' && row.attempts === 0)).toBe(true)
       const payloads = deliveries.map((row) => row.payload).join('\n')
-      for (const value of ['@here', '@channel', 'private-slack@example.com', syntheticUrl])
+      for (const value of [
+        '@here',
+        '@channel',
+        'private-slack@example.com',
+        syntheticUrl,
+        replacementUrl,
+      ])
         expect(payloads.includes(value)).toBe(false)
       expect(payloads).toContain(
         start.toZonedDateTimeISO('America/New_York').toString({ smallestUnit: 'minute' }),
@@ -170,7 +188,9 @@ describe.skipIf(!serverUrl)('Slack composition across server roles', () => {
         },
         { timeout: 8000, interval: 50 },
       )
-      for (const spy of spies) expect(JSON.stringify(spy.mock.calls)).not.toContain(syntheticUrl)
+      for (const spy of spies)
+        for (const value of [syntheticUrl, replacementUrl])
+          expect(JSON.stringify(spy.mock.calls)).not.toContain(value)
     } finally {
       await running?.close()
       await owned.drop()
