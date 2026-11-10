@@ -43,7 +43,6 @@ import {
 } from './audit-data.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
-import { startProbe } from './probe.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
 
 export interface FixtureApp {
@@ -1421,32 +1420,7 @@ async function waitUntilAtRest(target: Locator, page: Page) {
     )
     .toBeGreaterThanOrEqual(2)
 }
-
-// TEMPORARY probe variant: wait until the time is at rest in the top-level viewport.
-async function probeSettle(target: Locator, page: Page) {
-  await target.waitFor()
-  let previous = ''
-  let unchanged = 0
-  await expect
-    .poll(
-      async () => {
-        await page.evaluate(
-          () =>
-            new Promise<void>((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-            ),
-        )
-        const box = JSON.stringify(await target.boundingBox())
-        unchanged = box === previous ? unchanged + 1 : 0
-        previous = box
-        return unchanged
-      },
-      { intervals: [0] },
-    )
-    .toBeGreaterThanOrEqual(2)
-}
 export async function pickSlot(scope: Page | Locator | FrameLocator, page: Page) {
-  const probe = process.env.HOURMERE_E2E_PROBE ? await startProbe(page) : undefined
   for (let month = 0; month < 4; month++) {
     await expect(scope.locator('.calendar-month')).toBeVisible()
     await expect(scope.locator('.calendar-grid[aria-busy="true"]')).toHaveCount(0)
@@ -1459,20 +1433,7 @@ export async function pickSlot(scope: Page | Locator | FrameLocator, page: Page)
         await day.click()
         const slot = scope.locator('.slots button').first()
         await waitUntilAtRest(slot, page)
-        if (process.env.HOURMERE_E2E_PICK_MODE === 'settle') await probeSettle(slot, page)
-        const delay = Number(process.env.HOURMERE_E2E_PICK_DELAY ?? 0)
-        await slot.click(delay ? { delay } : undefined)
-        if (probe) {
-          const shown = await scope
-            .locator('#details-heading')
-            .waitFor({ timeout: 3000 })
-            .then(
-              () => true,
-              () => false,
-            )
-          await probe.finish(shown)
-          if (!shown) throw new Error('PROBE: the time slot click did not open the details form')
-        }
+        await slot.click()
         return
       }
     }
