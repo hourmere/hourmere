@@ -8,17 +8,16 @@ import { WEBHOOK_DELIVERY_JOB, type WebhookQueue } from './delivery.ts'
 import {
   lockAuthorizationParents,
   requireAdmin,
-  WEBHOOK_EVENTS,
   type WebhookServiceContext,
   type WebhookSettings,
   type WebhookView,
 } from './service.ts'
-import { slackPayload, slackUrl } from './slack-format.ts'
+import { SLACK_EVENTS, slackPayload, slackUrl } from './slack-format.ts'
 
 const events = z
-  .array(z.enum(WEBHOOK_EVENTS))
+  .array(z.enum(SLACK_EVENTS))
   .min(1)
-  .max(WEBHOOK_EVENTS.length)
+  .max(SLACK_EVENTS.length)
   .refine((v) => new Set(v).size === v.length)
 export const SlackCreateInput = z.strictObject({
   url: z.string(),

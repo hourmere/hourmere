@@ -9,8 +9,8 @@ only its masked form crosses the service/API response boundary. Never log input 
 network error text or Slack response bodies. Use fixed safe failure codes.
 
 Booking changes enqueue Slack work in their existing transaction when
-`WEBHOOKS_ENABLED=true`. Slack accepts the same event types as signed webhooks
-(`WEBHOOK_EVENTS`); the settings page offers the first three and keeps the others on save:
+`WEBHOOKS_ENABLED=true`. Slack accepts these signed-webhook event types (`SLACK_EVENTS`);
+the settings page offers the first three and keeps the others on save:
 
 <!-- slack-events:start -->
 - `booking.created`
@@ -20,7 +20,10 @@ Booking changes enqueue Slack work in their existing transaction when
 - `booking.reschedule_request_expired`
 <!-- slack-events:end -->
 
-All of them use one message layout whose first line names the event type. This switch controls Slack and generic webhooks.
+All of them use one message layout whose first line names the event type. The private
+attendee no-show change (`booking.attendee_no_show_changed`) is a signed-webhook event
+only: Slack destinations cannot subscribe to it and capture never queues it for Slack.
+This switch controls Slack and generic webhooks.
 Delivery uses the same bounded retries, stable delivery identifiers and failure tracking. It revalidates exact
 Slack host/path policy and public DNS on every attempt, with no private-target exception
 and no redirects. Only `hooks.slack.com` is accepted;

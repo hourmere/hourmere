@@ -1475,7 +1475,9 @@ Slack captures immutable Block Kit payloads in the booking transaction and reuse
 outbox retries and terminal state tracking. The minimum projection contains booking ID,
 event kind, event-type title, zoned start/end with UTC offset, status and an authenticated
 admin booking link; personal payloads add the invitee name. Team-wide payloads exclude
-free-text booking titles, answers, attendee details, meeting links and reschedule-chain identifiers. Both capture and delivery check the
+free-text booking titles, answers, attendee details, meeting links and reschedule-chain identifiers. Slack accepts the
+five lifecycle and reschedule-request events only: migration 0070's attendee no-show event is
+for signed webhooks, and capture never queues it for Slack. Both capture and delivery check the
 current event-type filter. Synthetic test deliveries have a nullable booking ID and bypass
 only that filter; active/subscribed checks still apply. One pending test per destination
 is enforced under its row lock. A test delivery stores its own event ID in `request_id`:

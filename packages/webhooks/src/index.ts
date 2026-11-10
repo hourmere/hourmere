@@ -38,4 +38,5 @@ export {
   testSlackDestination,
   updateSlackDestination,
 } from './slack.ts'
+export { SLACK_EVENTS } from './slack-format.ts'
 export { isPublicAddress, sendWebhook, type WebhookTransport, webhookUrl } from './transport.ts'

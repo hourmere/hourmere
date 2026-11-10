@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
@@ -8,7 +9,11 @@ import {
 } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { encryptWebhookSecret } from './crypto.ts'
-import { deliverWebhook, webhookBookingNotifier } from './delivery.ts'
+import {
+  deliverWebhook,
+  webhookAttendeeNoShowNotifier,
+  webhookBookingNotifier,
+} from './delivery.ts'
 import { deleteWebhook, listWebhooks, rotateWebhookSecret, updateWebhook } from './service.ts'
 import {
   createSlackDestination,
@@ -164,6 +169,57 @@ describe.skipIf(!process.env.DATABASE_URL)(
       ).rejects.toMatchObject({
         code: 'slack_destination_disabled',
       })
+    })
+    it('keeps attendee no-show changes off Slack, even for a row widened outside the service', async () => {
+      const { ctx, destination, bookingId } = await fixture()
+      const noShow = 'booking.attendee_no_show_changed'
+      for (const op of [
+        () => createSlackDestination(ctx, settings, { url, events: [noShow] }),
+        () =>
+          updateSlackDestination(
+            ctx,
+            destination.id,
+            { events: ['booking.created', noShow] },
+            settings,
+          ),
+      ])
+        await expect(op()).rejects.toMatchObject({ code: 'invalid_slack_destination' })
+      // 0070's events check accepts the kind on every row; capture must still skip Slack.
+      await db
+        .updateTable('webhooks')
+        .set({ events: ['booking.created', noShow] })
+        .where('id', '=', destination.id)
+        .execute()
+      const enqueue = vi.fn(async () => null)
+      const change = {
+        bookingId,
+        attendeeId: randomUUID(),
+        noShowMarkedAt: now.toString(),
+        noShowMarkedBy: ctx.principal.user.id,
+      }
+      await db
+        .transaction()
+        .execute((trx) => webhookAttendeeNoShowNotifier({ enqueue }, settings)(trx, change, now))
+      const rows = () =>
+        db
+          .selectFrom('webhook_deliveries')
+          .select('event_type')
+          .where('webhook_id', '=', destination.id)
+          .execute()
+      expect(await rows()).toEqual([])
+      expect(enqueue).not.toHaveBeenCalled()
+      // The same destination still receives its lifecycle events.
+      await db
+        .transaction()
+        .execute((trx) =>
+          webhookBookingNotifier({ enqueue }, settings)(
+            trx,
+            { type: 'created', bookingId, start: now },
+            now,
+          ),
+        )
+      expect(await rows()).toEqual([{ event_type: 'booking.created' }])
+      expect(enqueue).toHaveBeenCalledTimes(1)
     })
     it('queues samples atomically, retries safely, gives up, rechecks URL and omits signature and private exceptions', async () => {
       const { ctx, destination } = await fixture()

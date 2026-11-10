@@ -6,7 +6,7 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { decryptWebhookSecret, webhookSignature } from './crypto.ts'
 import type { WebhookEventType, WebhookSettings } from './service.ts'
-import { slackPayload, slackUrl } from './slack-format.ts'
+import { SLACK_EVENTS, slackPayload, slackUrl } from './slack-format.ts'
 import { sendWebhook, type WebhookTransport } from './transport.ts'
 
 export const WEBHOOK_DELIVERY_JOB = 'webhook-delivery'
@@ -92,14 +92,16 @@ async function captureBookingWebhook(
               ? 'booking.attendee_no_show_changed'
               : 'booking.cancelled'
   // Share locks serialize opt-out/deletion with capture, and are always taken by ID.
-  // The switch above covers both kinds.
+  // The switch above covers both kinds. Slack posts only SLACK_EVENTS: attendance changes
+  // stay signed-webhook events.
+  const slackEvent = (SLACK_EVENTS as readonly WebhookEventType[]).includes(eventType)
   const endpoints = await trx
     .selectFrom('webhooks')
     .select(['id', 'destination_kind'])
     .where((eb) =>
       eb.or([
         eb('destination_kind', '=', 'webhook'),
-        ...(settings.encryptionKey ? [eb('destination_kind', '=', 'slack')] : []),
+        ...(settings.encryptionKey && slackEvent ? [eb('destination_kind', '=', 'slack')] : []),
       ]),
     )
     .where((eb) =>

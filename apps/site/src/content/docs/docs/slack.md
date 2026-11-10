@@ -70,6 +70,8 @@ Every Slack event type uses the same message layout. The first line names the ev
 
 The remaining lines are the same for every event type. Request events keep the booking's
 current times and `confirmed` status. They do not include the request ID or its message.
+Attendee no-show changes are not sent to Slack; they are available only through
+[signed webhooks](/docs/webhooks).
 
 Times use the personal organization owner’s public profile time zone, including the UTC
 offset at the booking instant. There is no team organization time-zone setting; team
@@ -159,6 +161,8 @@ validates an Hourmere HMAC signature.
   invitee name into a clickable link. Mentions, formatting and labelled links are blocked.
 - The settings page lists three of the five event types; manage the reschedule-request
   events through REST, MCP or the CLI.
+- Attendee no-show changes are not posted to Slack; subscribe a
+  [signed webhook](/docs/webhooks) to receive them.
 - Delivery is at least once. A worker interrupted after Slack accepts a message can retry
   it, and Slack incoming webhooks do not deduplicate Hourmere delivery IDs. Duplicate
   messages are possible. There is no exactly-once or ordering guarantee.

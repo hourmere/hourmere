@@ -1,4 +1,17 @@
+import type { WebhookEventType } from './service.ts'
 import { webhookUrl } from './transport.ts'
+
+/**
+ * The booking events Slack destinations accept and post (docs/slack.md). The private
+ * attendee no-show change is a signed-webhook event only: it never posts to Slack.
+ */
+export const SLACK_EVENTS = [
+  'booking.created',
+  'booking.rescheduled',
+  'booking.cancelled',
+  'booking.reschedule_requested',
+  'booking.reschedule_request_expired',
+] as const satisfies readonly WebhookEventType[]
 
 /** Only Slack's documented commercial incoming-webhook endpoint. */
 export function slackUrl(value: unknown): string | undefined {
