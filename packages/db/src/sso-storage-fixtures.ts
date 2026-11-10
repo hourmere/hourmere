@@ -49,43 +49,68 @@ export interface SsoFixture {
   personalMember: string
 }
 
-/** A synthetic database error, or undefined; the statement runs in its own savepoint. */
-export async function failure(
+interface StatementOptions {
+  /**
+   * Disables triggers and foreign keys for this statement only, so that a column's NOT NULL
+   * constraint is what answers, not a guard that runs first. Its rows never stay.
+   */
+  withoutTriggers?: boolean
+}
+type Expected = { code: string; constraint?: string; column?: string }
+
+// Each statement runs in its own savepoint of the caller's transaction, and every outcome is
+// asserted with `rejects`/`resolves` on the database's own error, as constraint coverage
+// requires: a missing rejection is a resolved promise, never an undefined error.
+async function inSavepoint<T>(
   db: pg.PoolClient,
-  sql: string,
-  params: unknown[] = [],
-  options: { withoutTriggers?: boolean } = {},
-): Promise<(Error & { code?: string; constraint?: string; column?: string }) | undefined> {
+  options: StatementOptions,
+  body: () => Promise<T>,
+  keep: boolean,
+): Promise<T> {
   await db.query('SAVEPOINT sso_statement')
+  let kept = false
   try {
-    // Disables triggers and foreign keys for this statement only, so that a column's NOT
-    // NULL constraint is what answers, not a guard that runs first.
     if (options.withoutTriggers) await db.query('SET LOCAL session_replication_role = replica')
-    await db.query(sql, params)
-    // Rows written without triggers never stay, and the setting ends with the savepoint.
-    if (options.withoutTriggers) await db.query('ROLLBACK TO SAVEPOINT sso_statement')
+    const result = await body()
+    kept = keep && !options.withoutTriggers
+    return result
+  } finally {
+    if (!kept) await db.query('ROLLBACK TO SAVEPOINT sso_statement')
     await db.query('RELEASE SAVEPOINT sso_statement')
-    return undefined
-  } catch (error) {
-    await db.query('ROLLBACK TO SAVEPOINT sso_statement')
-    await db.query('RELEASE SAVEPOINT sso_statement')
-    return error as Error
   }
 }
 
-export async function refused(
+export function refused(
   db: pg.PoolClient,
   sql: string,
   params: unknown[],
-  expected: { code: string; constraint?: string; column?: string },
-  options: { withoutTriggers?: boolean } = {},
+  expected: Expected,
+  options: StatementOptions = {},
 ) {
-  expect(await failure(db, sql, params, options), sql).toMatchObject(expected)
+  return inSavepoint(
+    db,
+    options,
+    () => expect(db.query(sql, params), sql).rejects.toMatchObject(expected),
+    false,
+  )
 }
 
-export async function accepted(db: pg.PoolClient, sql: string, params: unknown[] = []) {
-  const error = await failure(db, sql, params)
-  expect(error?.message, sql).toBeUndefined()
+export function accepted(
+  db: pg.PoolClient,
+  sql: string,
+  params: unknown[] = [],
+  options: StatementOptions = {},
+): Promise<pg.QueryResult<Record<string, unknown>>> {
+  return inSavepoint(
+    db,
+    options,
+    async () => {
+      const result = db.query<Record<string, unknown>>(sql, params)
+      await expect(result, sql).resolves.toBeDefined()
+      return result
+    },
+    true,
+  )
 }
 
 function insertSql(table: string, values: Record<string, unknown>) {
@@ -112,30 +137,15 @@ export async function insertedRow(
   values: Record<string, unknown>,
 ) {
   const { sql, params } = insertSql(table, values)
-  await db.query('SAVEPOINT sso_statement')
-  try {
-    const row = (await db.query<Record<string, unknown>>(`${sql} RETURNING *`, params)).rows[0]
-    await db.query('RELEASE SAVEPOINT sso_statement')
-    return row as Record<string, unknown>
-  } catch (error) {
-    await db.query('ROLLBACK TO SAVEPOINT sso_statement')
-    await db.query('RELEASE SAVEPOINT sso_statement')
-    expect((error as Error).message, sql).toBeUndefined()
-    throw error
-  }
-}
-
-export function tryInsert(db: pg.PoolClient, table: string, values: Record<string, unknown>) {
-  const { sql, params } = insertSql(table, values)
-  return failure(db, sql, params)
+  return (await accepted(db, `${sql} RETURNING *`, params)).rows[0] as Record<string, unknown>
 }
 
 export function insertRefused(
   db: pg.PoolClient,
   table: string,
   values: Record<string, unknown>,
-  expected: { code: string; constraint?: string; column?: string },
-  options: { withoutTriggers?: boolean } = {},
+  expected: Expected,
+  options: StatementOptions = {},
 ) {
   const { sql, params } = insertSql(table, values)
   return refused(db, sql, params, expected, options)
@@ -145,9 +155,10 @@ export async function insertAccepted(
   db: pg.PoolClient,
   table: string,
   values: Record<string, unknown>,
+  options: StatementOptions = {},
 ) {
   const { sql, params } = insertSql(table, values)
-  await accepted(db, sql, params)
+  await accepted(db, sql, params, options)
 }
 
 function updateSql(table: string, where: Record<string, unknown>, values: Record<string, unknown>) {
@@ -160,22 +171,12 @@ function updateSql(table: string, where: Record<string, unknown>, values: Record
   }
 }
 
-export function tryUpdate(
-  db: pg.PoolClient,
-  table: string,
-  where: Record<string, unknown>,
-  values: Record<string, unknown>,
-) {
-  const { sql, params } = updateSql(table, where, values)
-  return failure(db, sql, params)
-}
-
 export async function updateRefused(
   db: pg.PoolClient,
   table: string,
   where: Record<string, unknown>,
   values: Record<string, unknown>,
-  expected: { code: string; constraint?: string },
+  expected: Expected,
 ) {
   const { sql, params } = updateSql(table, where, values)
   await refused(db, sql, params, expected)
@@ -207,7 +208,11 @@ export async function count(db: pg.PoolClient, table: string, where: Record<stri
 /** Version 1, a random 96-bit IV, a 128-bit tag and ciphertext, as the helpers write it. */
 export const sealed = () => Buffer.concat([Buffer.from([1]), randomBytes(12 + 16 + 40)])
 export const digest = () => createHash('sha256').update(randomBytes(32)).digest('hex')
-export const at = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString()
+// Expiry is judged by PostgreSQL's clock, so fixture times follow the database's
+// clock_timestamp(), read when a fixture is created, not Node's (which test-clock offsets).
+let databaseClockOffsetMs = 0
+export const at = (seconds: number) =>
+  new Date(Date.now() + databaseClockOffsetMs + seconds * 1000).toISOString()
 const DAY = 86_400
 
 export const policyValues = (organization: string) => ({ organization_id: organization })
@@ -287,6 +292,10 @@ export const recoveryOwnerValues = (
 
 /** Two teams, a personal organization and members of every role, in the open transaction. */
 export async function ssoFixture(db: pg.PoolClient): Promise<SsoFixture> {
+  const clock = await db.query<{ ms: number }>(
+    'SELECT (extract(epoch FROM clock_timestamp()) * 1000)::float8 AS ms',
+  )
+  databaseClockOffsetMs = Number(clock.rows[0]?.ms) - Date.now()
   const users = (
     await db.query<{ id: string }>(
       `INSERT INTO auth."user" (name,email,"emailVerified")

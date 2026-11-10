@@ -39,6 +39,21 @@ function expectBound(module: Module) {
       sealed,
     ),
   ).toBe(plaintext)
+  // Another SSO purpose (a later SP signing key) for the same revision never opens as this.
+  const otherPurpose = encryptCredential(
+    key,
+    JSON.stringify([
+      'hourmere-sso-v1',
+      'sp-private-key',
+      at.organizationId,
+      at.providerId,
+      at.revision,
+    ]),
+    plaintext,
+  )
+  expect(() => module.openSsoProviderConfiguration(key, at, otherPurpose)).toThrow(
+    'SSO provider configuration could not be decrypted',
+  )
   for (const moved of [
     { ...at, organizationId: randomUUID() },
     { ...at, providerId: randomUUID() },
@@ -97,18 +112,9 @@ describe('SSO provider configuration encryption', () => {
     ['organization', '    organizationId.toLowerCase(),\n', ''],
     ['provider', '    providerId.toLowerCase(),\n', ''],
     ['revision', '    revision,\n  ])', '  ])'],
-    ['purpose', "'provider-configuration',", "'calendar-tokens',"],
-  ])('detects authenticated data without the %s', async (_, search, replacement) => {
+    ['purpose', "'provider-configuration',", "'sp-private-key',"],
+  ])('detects authenticated data without its own %s', async (_, search, replacement) => {
     const mutant = await sourceCopy([search, replacement])
-    if (_ === 'purpose') {
-      // A different purpose label must not open this purpose's ciphertext.
-      const at = { organizationId: randomUUID(), providerId: randomUUID(), revision: 1 }
-      const sealed = configuration.sealSsoProviderConfiguration(key, at, plaintext)
-      expect(() => mutant.openSsoProviderConfiguration(key, at, sealed)).toThrow(
-        'SSO provider configuration could not be decrypted',
-      )
-      return
-    }
     expect(() => expectBound(mutant)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
 })

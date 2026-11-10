@@ -1,9 +1,11 @@
-// Every constraint, unique index, trigger and trigger rule of migration 0074, each with a
-// check that passes on the migration as written and the source-copy mutations that remove
-// or weaken it. sso-storage.test.ts runs every check against the real schema and requires
-// the table to name every object the migration creates; sso-storage-mutations.test.ts
-// applies each mutation to the predecessor schema and requires its check to fail.
+// Every constraint, index, trigger and trigger rule of migration 0074, each with a check
+// that passes on the migration as written and the source-copy mutations that remove or
+// weaken it. sso-storage.test.ts runs every check against the real schema and requires the
+// table to name every object the migration creates; sso-storage-mutations.test.ts applies
+// each mutation to the predecessor schema and requires its check to fail; and
+// sso-storage-coverage.test.ts drops each object through checkConstraintCoverage.
 import { randomUUID } from 'node:crypto'
+import type pg from 'pg'
 import { expect } from 'vitest'
 import {
   accepted,
@@ -12,7 +14,7 @@ import {
   count,
   digest,
   domainName,
-  failure,
+  inRolledBackTransaction,
   insert,
   insertAccepted,
   insertedRow,
@@ -23,13 +25,16 @@ import {
   pendingDomainValues,
   policyValues,
   recoveryOwnerValues,
+  refused,
   type SsoFixture,
   type SsoTable,
   samlProviderValues,
   sealed,
+  ssoFixture,
   updateAccepted,
   updateRefused,
 } from './sso-storage-fixtures.ts'
+import { checkActiveClaimRace } from './sso-storage-races.ts'
 
 export interface SsoMutant {
   name: string
@@ -506,27 +511,31 @@ const providerProtections: Record<string, SsoProtection> = {
         'sso_provider_domains',
         link(f.otherTeam, other.id, otherDomain.id),
       )
-      // Deleting either side deletes the link.
-      await accepted(f.db, 'DELETE FROM sso_providers WHERE id=$1', [own.id])
-      expect(await count(f.db, 'sso_provider_domains', { domain_id: ownDomain.id })).toBe(0)
-      await accepted(f.db, 'DELETE FROM sso_domains WHERE id=$1', [otherDomain.id])
-      expect(await count(f.db, 'sso_provider_domains', { provider_id: other.id })).toBe(0)
+      // Providers and claims go only with their team, and their links with them.
+      await accepted(f.db, 'DELETE FROM auth.organization WHERE id=$1', [f.team])
+      expect(await count(f.db, 'sso_provider_domains', { organization_id: f.team })).toBe(0)
+      expect(await count(f.db, 'sso_provider_domains', { organization_id: f.otherTeam })).toBe(1)
     },
     mutants: [
       dropConstraint('sso_providers', 'sso_providers_organization_id_id', true),
       dropConstraint('sso_domains', 'sso_domains_organization_id_id', true),
       dropConstraint('sso_provider_domains', 'sso_provider_domains_provider'),
       dropConstraint('sso_provider_domains', 'sso_provider_domains_domain'),
-      edit(
-        'the provider link does not cascade',
-        'REFERENCES sso_providers (organization_id, id) ON DELETE CASCADE',
-        'REFERENCES sso_providers (organization_id, id)',
-      ),
-      edit(
-        'the domain link does not cascade',
-        'REFERENCES sso_domains (organization_id, id) ON DELETE CASCADE',
-        'REFERENCES sso_domains (organization_id, id)',
-      ),
+      // One cascade alone still removes the links when the team goes: each side is deleted
+      // only with the organization. Both missing blocks the team's deletion.
+      {
+        name: 'the links do not cascade',
+        apply: (source: string) =>
+          source
+            .replace(
+              'REFERENCES sso_providers (organization_id, id) ON DELETE CASCADE',
+              'REFERENCES sso_providers (organization_id, id)',
+            )
+            .replace(
+              'REFERENCES sso_domains (organization_id, id) ON DELETE CASCADE',
+              'REFERENCES sso_domains (organization_id, id)',
+            ),
+      },
     ],
   },
   'a domain is linked to a provider once': {
@@ -1437,6 +1446,83 @@ const teamProtections: Record<string, SsoProtection> = {
   },
 }
 
+const retainedCheck =
+  (table: SsoTable, constraint: string, row: (f: SsoFixture) => Promise<Record<string, unknown>>) =>
+  async (f: SsoFixture) => {
+    const kept = await row(f)
+    const where = table === 'sso_policies' ? 'organization_id=$1' : 'id=$1'
+    const key = table === 'sso_policies' ? kept.organization_id : kept.id
+    await refused(f.db, `DELETE FROM ${table} WHERE ${where}`, [key], violation(constraint))
+    expect(await count(f.db, table, { organization_id: f.team })).toBe(1)
+    // The organization's deletion still removes it.
+    await accepted(f.db, 'DELETE FROM auth.organization WHERE id=$1', [f.team])
+    expect(await count(f.db, table, { organization_id: f.team })).toBe(0)
+  }
+const keptWhileTeamExists = (fn: string, name: string) =>
+  editFunction(
+    fn,
+    name,
+    'IF EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id) THEN',
+    'IF false THEN',
+  )
+
+const retainedProtections: Record<string, SsoProtection> = {
+  'a policy is kept while its team exists': {
+    objects: ['sso_policies_retained'],
+    check: retainedCheck('sso_policies', 'sso_policies_retained', async (f) =>
+      insert(f.db, 'sso_policies', { ...policyValues(f.team), trust_generation: 3 }),
+    ),
+    mutants: [keptWhileTeamExists('guard_sso_policy', 'policies may be deleted and reset')],
+  },
+  'a provider is retired, not deleted': {
+    objects: ['sso_providers_retained'],
+    check: retainedCheck('sso_providers', 'sso_providers_retained', async (f) =>
+      insert(f.db, 'sso_providers', { ...oidcProviderValues(f.team), retired_at: at(-60) }),
+    ),
+    mutants: [keptWhileTeamExists('guard_sso_provider', 'providers may be deleted and reused')],
+  },
+  'a domain claim is retired, not deleted': {
+    objects: ['sso_domains_retained'],
+    check: retainedCheck('sso_domains', 'sso_domains_retained', async (f) =>
+      insert(f.db, 'sso_domains', lapsedDomainValues(f.team)),
+    ),
+    mutants: [keptWhileTeamExists('guard_sso_domain', 'lapsed claims may be deleted and revived')],
+  },
+}
+
+const indexProtections: Record<string, SsoProtection> = {
+  'membership and domain lookups for cascades are indexed': {
+    objects: [
+      'sso_provider_domains_domain_id',
+      'sso_recovery_nominations_member_id',
+      'sso_recovery_owners_member_id',
+    ],
+    check: async (f) => {
+      const { rows } = await f.db.query<{ indexdef: string }>(
+        `SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND indexname = ANY($1)
+        ORDER BY indexname`,
+        [
+          [
+            'sso_provider_domains_domain_id',
+            'sso_recovery_nominations_member_id',
+            'sso_recovery_owners_member_id',
+          ],
+        ],
+      )
+      expect(rows.map(({ indexdef }) => indexdef)).toEqual([
+        'CREATE INDEX sso_provider_domains_domain_id ON public.sso_provider_domains USING btree (domain_id)',
+        'CREATE INDEX sso_recovery_nominations_member_id ON public.sso_recovery_nominations USING btree (member_id)',
+        'CREATE INDEX sso_recovery_owners_member_id ON public.sso_recovery_owners USING btree (member_id)',
+      ])
+    },
+    mutants: [
+      dropIndex('sso_provider_domains_domain_id'),
+      dropIndex('sso_recovery_nominations_member_id'),
+      dropIndex('sso_recovery_owners_member_id'),
+    ],
+  },
+}
+
 /** Every NOT NULL column outside a primary key, with a complete row for its table. */
 const requiredColumns: Record<SsoTable, string[]> = {
   sso_policies: ['require_sso', 'admission', 'policy_revision', 'trust_generation', 'created_at'],
@@ -1502,14 +1588,14 @@ const notNullProtections: Record<string, SsoProtection> = Object.fromEntries(
         check: async (f: SsoFixture) => {
           const row = completeRow(f, table as SsoTable)
           // The complete row is valid; with the column missing only NOT NULL refuses it.
-          expect(
-            await failureWithoutTriggers(f, table, row),
-            `${table} complete row`,
-          ).toBeUndefined()
-          expect(await failureWithoutTriggers(f, table, { ...row, [column]: null })).toMatchObject({
-            code: '23502',
-            column,
-          })
+          await insertAccepted(f.db, table, row, { withoutTriggers: true })
+          await insertRefused(
+            f.db,
+            table,
+            { ...row, [column]: null },
+            { code: '23502', column },
+            { withoutTriggers: true },
+          )
         },
         mutants: [
           append(
@@ -1521,15 +1607,6 @@ const notNullProtections: Record<string, SsoProtection> = Object.fromEntries(
     ]),
   ),
 )
-function failureWithoutTriggers(f: SsoFixture, table: string, values: Record<string, unknown>) {
-  const fields = Object.keys(values)
-  return failure(
-    f.db,
-    `INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map((_, i) => `$${i + 1}`).join(',')})`,
-    Object.values(values),
-    { withoutTriggers: true },
-  )
-}
 
 export const ssoProtections: Record<string, SsoProtection> = {
   ...policyProtections,
@@ -1537,5 +1614,18 @@ export const ssoProtections: Record<string, SsoProtection> = {
   ...domainProtections,
   ...recoveryProtections,
   ...teamProtections,
+  ...retainedProtections,
+  ...indexProtections,
   ...notNullProtections,
+}
+
+/**
+ * The whole suite on one database, for checkConstraintCoverage: every check in its own
+ * rolled-back transaction, then the concurrent-claim race (which commits its own teams).
+ * Throws on the first failing assertion.
+ */
+export async function assertSsoProtections(pool: pg.Pool) {
+  for (const protection of Object.values(ssoProtections))
+    await inRolledBackTransaction(pool, async (db) => protection.check(await ssoFixture(db)))
+  await checkActiveClaimRace(pool)
 }

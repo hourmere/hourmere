@@ -869,7 +869,10 @@ or writes them yet: there is no route, worker, read path or setting, and OIDC an
 hard-off. A test keeps every production module outside the storage layer from naming them.
 
 All six belong to a team: a personal organization's rows are refused, and deleting the
-organization deletes them.
+organization deletes them. Policies, providers and domain claims are deleted only with
+their organization; providers and claims are retired instead, so a trust generation is
+never reset, a provider ID never reused and a claim generation never revived by deleting
+and inserting a row again.
 
 - **Policy** (one row per team): `require_sso`, `admission` (`invitation_only` or `jit`),
   `policy_revision` and `trust_generation`, both positive and never decreasing. A change of
@@ -889,17 +892,24 @@ organization deletes them.
   recheck times, and the latest recheck outcome (`positive`, `failed` or `unknown`). A
   pending challenge reserves nothing. From its first verification until retirement a claim
   is the one active claim for its name on the instance, expired or not. Each new generation
-  has a new, unverified challenge. A generation's verification can be renewed only while it
-  is unexpired; after a lapse only a new generation can be verified, so the proofs and
+  has a new, unverified challenge. A verified generation keeps its verification time; its
+  expiry can be renewed, including by a positive recheck of a frozen claim, only while it
+  is unexpired. After a lapse only a new generation can be verified, so the proofs and
   delegations that recorded the old generation never revive. Retirement is permanent.
-- **Provider domains** link a provider to its team's own domain claims only.
-- **Recovery nominations and recovery owners** belong to a current owner's membership
-  (including `owner` among several roles): deleting the membership, by leaving, removal or
-  the user's deletion, deletes them, and re-joining restores nothing. Both are immutable. A
-  team has at most one pending nomination per owner, and one recovery record per owner.
+- **Provider domains** link a provider to its team's own domain claims only; the claims
+  may be pending or retired, which the services check.
+- **Recovery nominations and recovery owners** are written only for a current owner's
+  membership (including `owner` among several roles), checked on insert. Deleting the
+  membership, by leaving, removal or the user's deletion, deletes them, and re-joining
+  restores nothing. Deleting them on demotion, with its audit event, belongs to the Recovery
+  enrollment step. Both are immutable. A team has at most one pending nomination per owner,
+  and one recovery record per owner.
 
-Every constraint, unique index and trigger rule has a check and source-copy mutations
-(`packages/db/src/sso-storage-protections.ts`) run against the predecessor schema. The
+`sso-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0074_sso_configuration.json`), and every check and
+trigger rule also has source-copy mutations that remove or weaken it
+(`packages/db/src/sso-storage-protections.ts`), run against the predecessor schema. The
 upgrade test preserves a populated predecessor down to row versions and compares fresh and
 upgraded schemas. The operator key that seals provider configuration is configured by the
 first step that writes it.

@@ -15,7 +15,7 @@ import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
-/** Constraints, unique indexes and triggers the migration creates, by name. */
+/** Constraints, standalone indexes and triggers the migration creates, by name. */
 async function catalogObjects(pool: pg.Pool) {
   const tables = [...ssoTables]
   const constraints = (
@@ -25,10 +25,10 @@ async function catalogObjects(pool: pg.Pool) {
       [tables],
     )
   ).rows.map(({ name }) => name)
-  const uniqueIndexes = (
+  const indexes = (
     await pool.query<{ name: string }>(
       `SELECT c.relname AS name FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
-      WHERE i.indisunique AND i.indrelid = ANY(SELECT oid FROM pg_class WHERE relname = ANY($1) AND relnamespace='public'::regnamespace)
+      WHERE i.indrelid = ANY(SELECT oid FROM pg_class WHERE relname = ANY($1) AND relnamespace='public'::regnamespace)
         AND NOT EXISTS (SELECT FROM pg_constraint k WHERE k.conindid = i.indexrelid)`,
       [tables],
     )
@@ -40,7 +40,7 @@ async function catalogObjects(pool: pg.Pool) {
       [tables],
     )
   ).rows.map(({ name }) => name)
-  return { constraints, uniqueIndexes: uniqueIndexes.sort(), triggers }
+  return { constraints, indexes: indexes.sort(), triggers }
 }
 
 describe.skipIf(!serverUrl)('SSO configuration storage', () => {
@@ -53,16 +53,22 @@ describe.skipIf(!serverUrl)('SSO configuration storage', () => {
     await owned?.drop()
   })
 
-  it('names every constraint, unique index, trigger and trigger rule in a protection', async () => {
-    const { constraints, uniqueIndexes, triggers } = await catalogObjects(owned.pool)
+  it('names every constraint, index, trigger and trigger rule in a protection', async () => {
+    const { constraints, indexes, triggers } = await catalogObjects(owned.pool)
     const source = await readFile(join(migrationsDir, ssoMigration), 'utf8')
     // Every rule a guard raises names itself as the error's constraint.
     const rules = [...source.matchAll(/CONSTRAINT = '([a-z_]+)'/g)].map(([, rule]) => rule)
-    const objects = [...new Set([...constraints, ...uniqueIndexes, ...triggers, ...rules])].sort()
+    const objects = [...new Set([...constraints, ...indexes, ...triggers, ...rules])].sort()
     expect(constraints.length).toBeGreaterThan(60)
-    expect(uniqueIndexes).toEqual(['sso_domains_active_name', 'sso_domains_organization_name'])
+    expect(indexes).toEqual([
+      'sso_domains_active_name',
+      'sso_domains_organization_name',
+      'sso_provider_domains_domain_id',
+      'sso_recovery_nominations_member_id',
+      'sso_recovery_owners_member_id',
+    ])
     expect(triggers).toHaveLength(5)
-    expect(new Set(rules).size).toBe(19)
+    expect(new Set(rules).size).toBe(22)
     const covered = [...new Set(Object.values(ssoProtections).flatMap(({ objects }) => objects))]
     expect(covered.sort()).toEqual(objects)
     for (const [name, { mutants }] of Object.entries(ssoProtections))

@@ -1,7 +1,10 @@
 -- SSO configuration storage only (docs/sso.md, Configuration storage). No route, worker,
 -- read path or setting uses these tables yet, and OIDC and SAML stay hard-off.
 
--- SSO configuration belongs to teams; a personal organization never has any.
+-- SSO configuration belongs to teams; a personal organization never has any. Policies,
+-- providers and domain claims are deleted only with their organization: deleting and
+-- inserting one again would reset a trust generation, reuse a provider ID or revive a
+-- lapsed claim generation. Providers and claims are retired instead.
 CREATE FUNCTION sso_team_organization(organization uuid) RETURNS void
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
@@ -28,6 +31,13 @@ CREATE TABLE sso_policies (
 CREATE FUNCTION guard_sso_policy() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id) THEN
+      RAISE EXCEPTION 'an SSO policy is kept while its team exists'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_policies_retained';
+    END IF;
+    RETURN OLD;
+  END IF;
   IF TG_OP = 'INSERT' THEN
     PERFORM public.sso_team_organization(NEW.organization_id);
     RETURN NEW;
@@ -52,7 +62,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER sso_policies_guard BEFORE INSERT OR UPDATE ON sso_policies
+CREATE TRIGGER sso_policies_guard BEFORE INSERT OR UPDATE OR DELETE ON sso_policies
   FOR EACH ROW EXECUTE FUNCTION guard_sso_policy();
 
 -- Providers. The identity (protocol, OIDC issuer and client ID, or the SAML IdP entity ID
@@ -88,6 +98,13 @@ CREATE TABLE sso_providers (
 CREATE FUNCTION guard_sso_provider() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id) THEN
+      RAISE EXCEPTION 'an SSO provider is retired, not deleted'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_providers_retained';
+    END IF;
+    RETURN OLD;
+  END IF;
   IF TG_OP = 'INSERT' THEN
     PERFORM public.sso_team_organization(NEW.organization_id);
     RETURN NEW;
@@ -113,15 +130,16 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER sso_providers_guard BEFORE INSERT OR UPDATE ON sso_providers
+CREATE TRIGGER sso_providers_guard BEFORE INSERT OR UPDATE OR DELETE ON sso_providers
   FOR EACH ROW EXECUTE FUNCTION guard_sso_provider();
 
 -- Domain claims. A claim is pending until its first verification and reserves nothing.
 -- From then until explicit retirement it is exclusive for its exact name, expired or not.
 -- Each generation has its own challenge (only a SHA-256 digest is stored) and starts
 -- unverified. Proofs and delegations record the claim and generation they relied on, so a
--- generation's verification can be renewed only while it is unexpired: after a lapse,
--- only a new generation can be verified, and nothing that relied on the old one revives.
+-- generation keeps its verification time and its expiry can be renewed (including by a
+-- positive recheck of a frozen claim) only while it is unexpired: after a lapse, only a
+-- new generation can be verified, and nothing that relied on the old one revives.
 CREATE TABLE sso_domains (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
   organization_id uuid NOT NULL REFERENCES auth.organization (id) ON DELETE CASCADE,
@@ -162,6 +180,13 @@ CREATE UNIQUE INDEX sso_domains_organization_name ON sso_domains (organization_i
 CREATE FUNCTION guard_sso_domain() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id) THEN
+      RAISE EXCEPTION 'an SSO domain claim is retired, not deleted'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_domains_retained';
+    END IF;
+    RETURN OLD;
+  END IF;
   IF TG_OP = 'INSERT' THEN
     PERFORM public.sso_team_organization(NEW.organization_id);
   ELSE
@@ -198,7 +223,7 @@ BEGIN
            OR (NEW.verification_expires_at IS DISTINCT FROM OLD.verification_expires_at
                AND OLD.verification_expires_at <= clock_timestamp())
          ) THEN
-        RAISE EXCEPTION 'a verified SSO domain generation can only be renewed before it lapses'
+        RAISE EXCEPTION 'a verified SSO domain generation keeps its verification time and is renewed only before it lapses'
           USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_domains_generation_lapse';
       END IF;
     END IF;
@@ -210,10 +235,10 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER sso_domains_guard BEFORE INSERT OR UPDATE ON sso_domains
+CREATE TRIGGER sso_domains_guard BEFORE INSERT OR UPDATE OR DELETE ON sso_domains
   FOR EACH ROW EXECUTE FUNCTION guard_sso_domain();
 
--- The verified domains a provider serves, always within the provider's own team.
+-- The domain claims a provider serves, always within the provider's own team.
 CREATE TABLE sso_provider_domains (
   organization_id uuid NOT NULL,
   provider_id uuid NOT NULL,

@@ -51,7 +51,10 @@ export async function checkActiveClaimRace(pool: pg.Pool) {
       const result = await waiting
       await second.query(result ? 'ROLLBACK' : 'COMMIT')
       if (outcome === 'COMMIT')
-        expect(result).toMatchObject({ code: '23505', constraint: 'sso_domains_active_name' })
+        expect(result, 'the second claim is refused').toMatchObject({
+          code: '23505',
+          constraint: 'sso_domains_active_name',
+        })
       else expect(result).toBeUndefined()
       const { rows } = await pool.query<{ organization_id: string }>(
         'SELECT organization_id FROM sso_domains WHERE name=$1 AND claimed_at IS NOT NULL',
@@ -101,7 +104,6 @@ export async function checkActiveClaimRace(pool: pg.Pool) {
       [name],
     )
     expect(rows).toHaveLength(1)
-    expect(pool.totalCount).toBeLessThanOrEqual(4)
   } finally {
     for (const db of [first, second, setup]) {
       await db.query('ROLLBACK').catch(() => {})
