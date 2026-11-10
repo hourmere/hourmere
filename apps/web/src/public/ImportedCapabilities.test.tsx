@@ -24,6 +24,7 @@ import * as translate from '../i18n/translate.ts'
 import * as limits from '../limits.ts'
 import * as bookingFormat from '../pages/bookings/booking-format.ts'
 import * as calendarCopy from '../pages/bookings/CalendarCopyNotice.tsx'
+import * as noShow from '../pages/bookings/NoShowAttendees.tsx'
 import * as reschedule from '../pages/bookings/RescheduleBooking.tsx'
 import * as paths from '../paths.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
@@ -75,6 +76,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     './CalendarCopyNotice.tsx': calendarCopy,
     './booking-format.ts': bookingFormat,
     './RescheduleBooking.tsx': reschedule,
+    './NoShowAttendees.tsx': noShow,
     '@hourmere/core/conference-url': conferenceUrl,
     '../api/booking-policy.ts': policy,
     '../../api/booking-policy.ts': policy,

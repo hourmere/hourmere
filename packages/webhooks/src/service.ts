@@ -18,6 +18,7 @@ export const WEBHOOK_EVENTS = [
   'booking.cancelled',
   'booking.reschedule_requested',
   'booking.reschedule_request_expired',
+  'booking.attendee_no_show_changed',
 ] as const
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number]
 export const WebhookCreateInput = z.strictObject({

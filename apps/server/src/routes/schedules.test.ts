@@ -1,4 +1,6 @@
+import '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
+import { MAX_SCHEDULE_OVERRIDES } from '@hourmere/scheduling'
 import { createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SCHEDULE_BODY_LIMIT, SCHEDULE_OVERRIDE_BODY_LIMIT } from './schedules.ts'
@@ -18,6 +20,7 @@ const ROUTES = {
   '/api/v1/schedules': ['get', 'post'],
   '/api/v1/schedules/default': ['post'],
   '/api/v1/schedules/{id}': ['get', 'patch', 'delete'],
+  '/api/v1/schedules/{id}/availability': ['get', 'put'],
   '/api/v1/schedules/{id}/overrides': ['get'],
   '/api/v1/schedules/{id}/overrides/{date}': ['put', 'delete'],
 }
@@ -75,6 +78,76 @@ describe.skipIf(!serverUrl)('schedule routes', () => {
     ...overrides,
   })
   const api = (user: TestUser) => t.as(user.principal)
+
+  it('saves one complete snapshot, rejects stale tabs and keeps invalid replacements atomic', async () => {
+    const user = await createTestUser(t.db)
+    const client = api(user)
+    const { id } = (await client.post('/api/v1/schedules', body())).body as { id: string }
+    const path = `/api/v1/schedules/${id}/availability`
+    const initial = (await client.get(path)).body as { version: string }
+    const input = {
+      ...body(),
+      name: 'Combined',
+      overrides: [{ date: '2026-12-24', intervals: [] }],
+      expectedVersion: initial.version,
+    }
+    const saved = await client.put(path, input)
+    expect(saved).toMatchObject({
+      status: 200,
+      body: { schedule: { name: 'Combined' }, overrides: input.overrides },
+    })
+    expect(await client.put(path, { ...input, name: 'Stale tab' })).toMatchObject({
+      status: 409,
+      body: { error: 'schedule_conflict' },
+    })
+    expect(
+      await client.put(path, {
+        ...input,
+        name: 'Must not persist',
+        expectedVersion: (saved.body as { version: string }).version,
+        overrides: [{ date: '2026-02-30', intervals: [] }],
+      }),
+    ).toMatchObject({ status: 400, body: { error: 'invalid_date' } })
+    expect(await client.get(path)).toEqual(saved)
+    expect(
+      await client.raw(
+        'PUT',
+        path,
+        JSON.stringify({ ...input, name: 'x'.repeat(SCHEDULE_BODY_LIMIT) }),
+      ),
+    ).toMatchObject({ status: 413, body: { error: 'payload_too_large' } })
+    expect(await api(await createTestUser(t.db)).get(path)).toMatchObject({ status: 404 })
+    expect(await client.put(path, { ...input, accidental: true })).toMatchObject({
+      status: 400,
+      body: { error: 'invalid_request' },
+    })
+  })
+
+  it('enforces count and exact body-size boundaries before changing availability', async () => {
+    const client = api(await createTestUser(t.db))
+    const { id } = (await client.post('/api/v1/schedules', body())).body as { id: string }
+    const path = `/api/v1/schedules/${id}/availability`
+    const initial = (await client.get(path)).body as { version: string }
+    const input = { ...body(), overrides: [], expectedVersion: initial.version }
+    expect(
+      await client.put(path, {
+        ...input,
+        overrides: Array.from({ length: MAX_SCHEDULE_OVERRIDES + 1 }, () => ({
+          date: '2030-01-01',
+          intervals: [],
+        })),
+      }),
+    ).toMatchObject({ status: 400, body: { error: 'too_many_overrides' } })
+    expect((await client.get(path)).body).toEqual(initial)
+    const json = JSON.stringify(input)
+    const atLimit = json + ' '.repeat(SCHEDULE_BODY_LIMIT - Buffer.byteLength(json))
+    expect(await client.raw('PUT', path, `${atLimit} `)).toMatchObject({
+      status: 413,
+      body: { error: 'payload_too_large' },
+    })
+    expect((await client.get(path)).body).toEqual(initial)
+    expect(await client.raw('PUT', path, atLimit)).toMatchObject({ status: 200 })
+  })
 
   it('requires a caller', async () => {
     expect((await t.anonymous.get('/api/v1/schedules')).status).toBe(401)

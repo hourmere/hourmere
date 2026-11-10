@@ -5,6 +5,7 @@ export {
   WebhookDeliveryPayload,
   type WebhookDeps,
   type WebhookQueue,
+  webhookAttendeeNoShowNotifier,
   webhookBookingNotifier,
   webhookCleanupJob,
   webhookDeliveryJob,

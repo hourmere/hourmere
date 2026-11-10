@@ -821,6 +821,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
             'durationMinutes',
             'host',
             'location',
+            'locations',
             'questions',
             ...(mode === 'team address' ? ['team'] : []),
             'title',

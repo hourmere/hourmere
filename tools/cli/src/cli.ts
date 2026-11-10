@@ -29,6 +29,8 @@ export const COMMANDS = {
   'resend-waitlist-verification': 'resend_waitlist_verification',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
+  'schedule-availability': 'get_schedule_availability',
+  'save-availability': 'save_schedule_availability',
   slots: 'find_available_slots',
   'open-time-snippet': 'generate_open_time_snippet',
   book: 'create_booking',
@@ -37,6 +39,8 @@ export const COMMANDS = {
   reschedule: 'reschedule_booking',
   'request-reschedule': 'request_reschedule',
   cancel: 'cancel_booking',
+  'set-no-show': 'set_attendee_no_show',
+  'booking-attendees': 'get_booking_attendees',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
   'slack list': 'list_slack_destinations',
@@ -64,13 +68,17 @@ Slack events: booking.created, booking.rescheduled, booking.cancelled,
   booking.reschedule_requested, booking.reschedule_request_expired.
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
-          book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy
+          schedule-availability, save-availability,
+          book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees,
+          retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
+Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
+           book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.
 After booking: create-event/update-event accept --success-redirect-url URL,
@@ -89,7 +97,7 @@ book requires an explicit random idempotencyKey in its input. Calls are never re
 request-reschedule requires bookingId, an explicit idempotencyKey and optional plain-text note.
 The original slot remains booked until the invitee moves or cancels; expiry keeps it booked.
 Imported bookings remain read-only in the original system (managementPolicy=local_only_read_only).
-Cancel, reschedule and retry commands refuse them with imported_booking_read_only.
+Cancel, reschedule, set-no-show and retry commands refuse them with imported_booking_read_only.
 For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.
 one-time-links create requires bookings or full scope, eventTypeId and an explicit idempotencyKey.
 Its secret URL is printed once to stdout; --output is refused and nothing is stored.

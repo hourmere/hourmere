@@ -39,6 +39,19 @@ function verifyPhone(api: ErrorFunctions) {
     expect(translateMessage(locale as keyof typeof translations, message)).toBe(translated)
 }
 
+/** Slot loads and booking attempts never show the server's English location detail. */
+function verifyUnavailable(api: ErrorFunctions) {
+  expect(Object.keys(translations)).toEqual(Object.keys(localeRegistry))
+  const message = api.errorMessage(
+    api.requestError(409, {
+      error: 'location_unavailable',
+      message: 'The chosen location is unavailable.',
+    }),
+  )
+  for (const [locale, translated] of Object.entries(translations))
+    expect(translateMessage(locale as keyof typeof translations, message)).toBe(translated)
+}
+
 function sourceCopy(code?: string): ErrorFunctions {
   const original = readFileSync('apps/web/src/api/errors.ts', 'utf8')
   let source = original
@@ -59,9 +72,11 @@ describe('location errors in the current interfaces', () => {
   it('localizes legacy option conflicts for administrators', () => verifyConflict(errors))
   it('uses neutral translated guidance in every public language until phone collection ships', () =>
     verifyPhone(errors))
+  it('translates an unavailable location in every public language', () => verifyUnavailable(errors))
   it.each([
     ['location_options_conflict', verifyConflict],
     ['invalid_invitee_phone', verifyPhone],
+    ['location_unavailable', verifyUnavailable],
   ] as const)('detects removal of the %s localization in a source copy', (code, verify) => {
     verify(sourceCopy())
     expect(() => verify(sourceCopy(code))).toThrowError(

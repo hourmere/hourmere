@@ -31,8 +31,8 @@ const cases = scenarios.flatMap((scenario) =>
 function withoutMcpPolicy(): Promise<typeof import('./server.ts')> {
   const location = new URL('./server.ts', import.meta.url)
   const source = readFileSync(location, 'utf8')
-  const property = '          successRedirectPolicy,\n'
-  const anchor = `        tools: productTools({\n          webhooks: webhookSettings,\n          webhookQueue: jobs,\n          db,\n          slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,\n          waitlistSecret: config.BETTER_AUTH_SECRET,\n          publicUrl: config.PUBLIC_URL,\n          followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,\n${property}`
+  const property = '        successRedirectPolicy,\n'
+  const anchor = `      tools: productTools({\n        db,\n        slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,\n        waitlistSecret: config.BETTER_AUTH_SECRET,\n        publicUrl: config.PUBLIC_URL,\n        followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,\n${property}`
   expect(source.includes(anchor), 'mutation matches production MCP policy wiring').toBe(true)
   // Compile a source copy so concurrent tests keep using the original production module.
   const javascript = stripTypeScriptTypes(

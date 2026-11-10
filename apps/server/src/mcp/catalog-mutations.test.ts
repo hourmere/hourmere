@@ -7,6 +7,7 @@ import * as scheduling from '@hourmere/scheduling'
 import { describe, expect, it, vi } from 'vitest'
 import type { runCli } from '../../../../tools/cli/src/cli.ts'
 import * as cliClient from '../../../../tools/cli/src/client.ts'
+import { ScheduleAvailability, ScheduleAvailabilityInput } from '../routes/schedules.ts'
 import type { catalogTools } from './catalog.ts'
 import { defineTool, type McpCaller } from './tools.ts'
 
@@ -48,6 +49,8 @@ function toolCopy(replacement?: readonly [string, string]) {
     EventType: z.object({ id: z.uuid(), notifications: scheduling.NotificationSettingsSchema }),
     Profile: z.object({}),
     Schedule: z.object({}),
+    ScheduleAvailability,
+    ScheduleAvailabilityInput,
   }
   const body = stripTypeScriptTypes(copy.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
     /^export /gm,

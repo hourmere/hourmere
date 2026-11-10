@@ -239,6 +239,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -487,6 +488,46 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}/attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read attendees and no-show markers for a booking
+         * @description Booked hosts and browser-session team owners/admins only. API keys of every scope and MCP OAuth may read only bookings they host; other bookings return booking_not_found. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.
+         */
+        get: operations["getBookingAttendees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}/attendees/{attendeeId}/no-show": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Mark or unmark one attendee as a no-show
+         * @description Only booked hosts and browser-session team owners/admins, after the scheduled start. API keys of every scope and MCP OAuth are host-only; other bookings return booking_not_found. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.
+         */
+        patch: operations["setAttendeeNoShow"];
         trace?: never;
     };
     "/api/v1/bookings/{id}/calendar-copy/retry": {
@@ -2302,6 +2343,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List provisioning token metadata
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        get: operations["listScimProvisioningTokens"];
+        put?: never;
+        /**
+         * Create a provisioning token
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        post: operations["createScimProvisioningToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Permanently revoke both token generations
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        delete: operations["revokeScimProvisioningToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a provisioning token with bounded overlap
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        post: operations["rotateScimProvisioningToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profile": {
         parameters: {
             query?: never;
@@ -2590,6 +2695,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -2824,6 +2930,7 @@ export interface paths {
                     durationMinutes?: number;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     end: string;
+                    locationOptionId?: string;
                     /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                     start: string;
                 };
@@ -3171,6 +3278,27 @@ export interface paths {
         head?: never;
         /** Change a schedule */
         patch: operations["updateSchedule"];
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read weekly hours and all date overrides together */
+        get: operations["getScheduleAvailability"];
+        /**
+         * Save weekly hours and replace all date overrides atomically
+         * @description Requires the version from the complete availability snapshot. A concurrent change returns schedule_conflict without saving anything. All date overrides are replaced; omitted dates resume weekly hours. Requests are limited to 2 MiB and 10,000 overrides (including past dates), checked before saving.
+         */
+        put: operations["saveScheduleAvailability"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/schedules/{id}/overrides": {
@@ -4273,13 +4401,37 @@ export interface components {
     schemas: {
         Attendee: {
             email: string;
+            /**
+             * Format: uuid
+             * @description Authenticated reads only: attendee identifier for host actions.
+             */
+            id?: string;
             /** @description The invitee who made the booking; the others are guests they added */
             isBooker: boolean;
             /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
             locale: string | null;
             name: string;
+            /**
+             * Format: date-time
+             * @description Authenticated reads only: when this attendee was marked as a no-show.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            noShowMarkedAt?: string | null;
+            /** @description Authenticated reads only: the user who marked this attendee. */
+            noShowMarkedBy?: string | null;
             /** @description IANA time zone */
             timeZone: string;
+        };
+        AttendeeNoShow: {
+            /** Format: uuid */
+            attendeeId: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            noShowMarkedAt: string | null;
+            noShowMarkedBy: string | null;
         };
         Booking: {
             /** @description The actual round-robin winner; no private host identity or availability mapping */
@@ -4303,6 +4455,8 @@ export interface components {
              */
             cancelledAt: string | null;
             cancelReason: string | null;
+            /** @description Authenticated reads only: whether this caller can change attendee no-show markers now. */
+            canManageNoShow?: boolean;
             /** @description Authenticated host reads only: the other booked hosts’ names, with no email addresses or internal identifiers. Omitted for single-host bookings. */
             coHosts?: {
                 name: string;
@@ -4405,6 +4559,22 @@ export interface components {
                 rescheduled: number;
             };
         };
+        BookingAttendees: {
+            data: {
+                email: string;
+                /** Format: uuid */
+                id: string;
+                isBooker: boolean;
+                name: string;
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                noShowMarkedAt: string | null;
+                noShowMarkedBy: string | null;
+            }[];
+        };
         /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link) */
         BookingLocation: ({
             /** @enum {string} */
@@ -4496,6 +4666,10 @@ export interface components {
                 /** @description IANA time zone */
                 timeZone: string;
             };
+            /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
+            inviteePhone?: string;
+            /** @description An id from the public event locations. Omission selects the default or first option. */
+            locationOptionId?: string;
             responses?: components["schemas"]["Responses"];
             /**
              * @description Optional untrusted attribution hint for an embedded public booking; never grants privileges
@@ -4589,7 +4763,7 @@ export interface components {
             isActive: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4623,6 +4797,65 @@ export interface components {
                  */
                 url: string;
             } | null;
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            locations: ({
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "zoom";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "phone";
+                label?: string;
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number?: string;
+            } | {
+                address: string;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "in_person";
+                label?: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "link";
+                label?: string;
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay: number | null;
             /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
@@ -4713,7 +4946,7 @@ export interface components {
              * @default false
              */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4747,6 +4980,65 @@ export interface components {
                  */
                 url: string;
             } | null;
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            locations?: ({
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "zoom";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "phone";
+                label?: string;
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number?: string;
+            } | {
+                address: string;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "in_person";
+                label?: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "link";
+                label?: string;
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
             /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
@@ -4889,7 +5181,7 @@ export interface components {
             isActive?: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden?: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location until invitee phone collection is available. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -4923,6 +5215,65 @@ export interface components {
                  */
                 url: string;
             } | null;
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            locations?: ({
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "zoom";
+                label?: string;
+            } | {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "phone";
+                label?: string;
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number?: string;
+            } | {
+                address: string;
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "in_person";
+                label?: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "link";
+                label?: string;
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
             /** @description Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged. */
@@ -5028,6 +5379,10 @@ export interface components {
              * @description The public origin of this instance, configured by its operator
              */
             publicUrl: string;
+            /** @description Whether routing forms are enabled; absent when unknown */
+            routingFormsEnabled?: boolean;
+            /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
+            scimProvisioningEnabled?: boolean;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5037,11 +5392,19 @@ export interface components {
             };
             /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
             slotSnippetsEnabled?: boolean;
+            /** @description Whether OIDC SSO is enabled; absent when unknown */
+            ssoOidcEnabled?: boolean;
+            /** @description Whether SAML SSO is enabled; absent when unknown */
+            ssoSamlEnabled?: boolean;
             /**
              * Format: uri
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
+        };
+        IssuedScimProvisioningToken: {
+            secret: string;
+            token: components["schemas"]["ScimProvisioningToken"];
         };
         /** @description Request verification for an empty future window of at most 62 days. Nothing is reserved; the first successful ordinary booking wins. The personal event owner or authorized team owners/admins can see the submitted email, optional name and requested period. Contact details are erased on removal; separate pseudonymous abuse and exact-slot deduplication records have bounded retention. */
         JoinWaitlist: {
@@ -5126,12 +5489,19 @@ export interface components {
                 data: {
                     attendees: {
                         email: string;
+                        /** Format: uuid */
+                        id?: string;
                         isBooker: boolean;
                         name: string;
+                        /** Format: date-time */
+                        noShowMarkedAt?: string | null;
+                        /** Format: uuid */
+                        noShowMarkedBy?: string | null;
                         timeZone: string;
                     }[];
                     /** Format: date-time */
                     cancelledAt: string | null;
+                    canManageNoShow?: boolean;
                     /** Format: date-time */
                     end: string;
                     eventType: {
@@ -5215,12 +5585,19 @@ export interface components {
                 data: {
                     attendees: {
                         email: string;
+                        /** Format: uuid */
+                        id?: string;
                         isBooker: boolean;
                         name: string;
+                        /** Format: date-time */
+                        noShowMarkedAt?: string | null;
+                        /** Format: uuid */
+                        noShowMarkedBy?: string | null;
                         timeZone: string;
                     }[];
                     /** Format: date-time */
                     cancelledAt: string | null;
+                    canManageNoShow?: boolean;
                     /** Format: date-time */
                     end: string;
                     eventType: {
@@ -5316,6 +5693,17 @@ export interface components {
                 /** @enum {string} */
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
             } | null;
+            /** @description Ordered location choices; private host details are disclosed only after booking. */
+            locations: {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                label?: string;
+            }[] | null;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -5414,6 +5802,17 @@ export interface components {
                 /** @enum {string} */
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
             } | null;
+            /** @description Ordered location choices; private host details are disclosed only after booking. */
+            locations: {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                label?: string;
+            }[] | null;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -5519,6 +5918,34 @@ export interface components {
             updatedAt: string;
             weeklyHours: components["schemas"]["WeeklyHours"];
         };
+        ScheduleAvailability: {
+            overrides: components["schemas"]["ScheduleOverride"][];
+            schedule: components["schemas"]["Schedule"];
+            /** @description Opaque revision for the complete availability snapshot */
+            version: string;
+        };
+        ScheduleAvailabilityInput: {
+            /** @description Version from getScheduleAvailability; stale revisions return schedule_conflict */
+            expectedVersion: string;
+            /** @description Make it the default (the previous default stops being one). The user's first schedule is always the default. */
+            isDefault?: boolean;
+            name: string;
+            /** @description Complete replacement, at most 10,000 overrides; excess returns too_many_overrides */
+            overrides: {
+                /**
+                 * Format: date
+                 * @example 2026-12-24
+                 */
+                date: string;
+                intervals: components["schemas"]["WallClockIntervalInput"][];
+            }[];
+            /**
+             * @description IANA time zone name
+             * @example Europe/Berlin
+             */
+            timeZone: string;
+            weeklyHours: components["schemas"]["WeeklyHoursInput"];
+        };
         ScheduleInput: {
             /** @description Make it the default (the previous default stops being one). The user's first schedule is always the default. */
             isDefault?: boolean;
@@ -5559,6 +5986,21 @@ export interface components {
              */
             timeZone?: string;
             weeklyHours?: components["schemas"]["WeeklyHoursInput"];
+        };
+        ScimProvisioningToken: {
+            createdAt: string;
+            createdByUserId: string | null;
+            expiresAt: string | null;
+            /** Format: uuid */
+            id: string;
+            lastUsedAt: string | null;
+            name: string;
+            /** Format: uuid */
+            organizationId: string;
+            previousValidUntil: string | null;
+            revokedAt: string | null;
+            rotatedAt: string | null;
+            rotatedByUserId: string | null;
         };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         SelfReadinessPage: {
@@ -5731,12 +6173,19 @@ export interface components {
         TeamAdminBooking: {
             attendees: {
                 email: string;
+                /** Format: uuid */
+                id?: string;
                 isBooker: boolean;
                 name: string;
+                /** Format: date-time */
+                noShowMarkedAt?: string | null;
+                /** Format: uuid */
+                noShowMarkedBy?: string | null;
                 timeZone: string;
             }[];
             /** Format: date-time */
             cancelledAt: string | null;
+            canManageNoShow?: boolean;
             /** Format: date-time */
             end: string;
             eventType: {
@@ -5917,7 +6366,7 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
-            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
             /** Format: uuid */
             id: string;
             isActive: boolean;
@@ -5938,7 +6387,7 @@ export interface components {
             /** Format: uuid */
             eventId: string;
             /** @enum {string} */
-            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired";
+            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed";
             httpStatus: number | null;
             /** Format: uuid */
             id: string;
@@ -6008,6 +6457,10 @@ export interface operations {
                         /** @description IANA time zone */
                         timeZone: string;
                     };
+                    /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
+                    inviteePhone?: string;
+                    /** @description An id from the public event locations. Omission selects the default or first option. */
+                    locationOptionId?: string;
                     responses?: components["schemas"]["Responses"];
                     /**
                      * Format: date-time
@@ -6075,7 +6528,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Slot unavailable or idempotency key reused */
+            /** @description Slot unavailable, chosen location unavailable (location_unavailable), or idempotency key reused */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6085,6 +6538,159 @@ export interface operations {
                 };
             };
             /** @description Too many requests; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBookingAttendees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attendee identifiers and attendance metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingAttendees"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setAttendeeNoShow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                attendeeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    noShow: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The current attendee no-show marker */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttendeeNoShow"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden or insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_not_found (also used for an unknown attendee) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_not_started, booking_cancelled, imported_booking_read_only or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -9277,6 +9883,340 @@ export interface operations {
             };
         };
     };
+    listScimProvisioningTokens: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Metadata only; never secrets or hashes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        nextCursor: string | null;
+                        tokens: components["schemas"]["ScimProvisioningToken"][];
+                    };
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Save this secret now; it cannot be retrieved again */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedScimProvisioningToken"];
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked metadata; revocation is idempotent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: components["schemas"]["ScimProvisioningToken"];
+                    };
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rotateScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @default 3600 */
+                    overlapSeconds?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description One-time replacement secret; previous secret accepted until previousValidUntil */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedScimProvisioningToken"];
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     updateProfile: {
         parameters: {
             query?: never;
@@ -9470,7 +10410,7 @@ export interface operations {
                     "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
-            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_location_choice`, `invalid_invitee_phone`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9506,7 +10446,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9726,7 +10666,7 @@ export interface operations {
                     "application/json": components["schemas"]["PublicBookingResult"];
                 };
             };
-            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
+            /** @description Invalid request (`invalid_request`, `invalid_duration`, `invalid_location_choice`, `invalid_invitee_phone`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9762,7 +10702,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10131,6 +11071,153 @@ export interface operations {
             };
             /** @description schedule_is_default: isDefault false on the default schedule */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getScheduleAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Consistent snapshot and opaque revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleAvailability"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    saveScheduleAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleAvailabilityInput"];
+            };
+        };
+        responses: {
+            /** @description Saved snapshot and new revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleAvailability"];
+                };
+            };
+            /** @description invalid_request, invalid_schedule, invalid_time_zone, invalid_weekly_hours, invalid_date, invalid_intervals, duplicate_override_date, invalid_schedule_version, invalid_schedule_overrides or too_many_overrides */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_not_found: no such schedule among the caller’s */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description schedule_conflict: availability changed since it was read; schedule_is_default: cannot unset the default */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11160,7 +12247,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
                     isActive?: boolean;
                     url: string;
                 };
@@ -11328,7 +12415,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
                     isActive?: boolean;
                 };
             };

@@ -100,6 +100,9 @@ describe('security headers', () => {
   beforeAll(async () => {
     dist = await mkdtemp(join(tmpdir(), 'hourmere-web-'))
     await mkdir(join(dist, 'assets'))
+    await mkdir(join(dist, 'app'))
+    await writeFile(join(dist, 'app', 'sw.js'), '// static worker')
+    await writeFile(join(dist, 'app', 'manifest.webmanifest'), '{"name":"Hourmere"}')
     await writeFile(join(dist, 'index.html'), '<!doctype html><title>Hourmere</title>')
     await writeFile(join(dist, 'assets', 'app-abc123.js'), 'console.log(1)')
     await writeFile(join(dist, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
@@ -174,6 +177,8 @@ describe('security headers', () => {
       "img-src 'self' data:",
       "font-src 'self'",
       "connect-src 'self'",
+      "worker-src 'self'",
+      "manifest-src 'self'",
       "object-src 'none'",
       "base-uri 'none'",
       "frame-ancestors 'none'",
@@ -189,6 +194,26 @@ describe('security headers', () => {
       expect(securityHeadersOf(res), path).toEqual(APP_PAGE)
       // Still revalidated on every load.
       expect(res.headers.get('cache-control'), path).toBe('no-cache')
+    }
+  })
+
+  it('serves PWA resources with their exact types and limited worker scope', async () => {
+    const worker = await app.request('/app/sw.js')
+    expect(worker.status).toBe(200)
+    expect(worker.headers.get('content-type')).toBe('text/javascript; charset=utf-8')
+    expect(worker.headers.get('cache-control')).toBe('no-cache')
+    expect(worker.headers.get('service-worker-allowed')).toBe('/app/')
+    expect(securityHeadersOf(worker)).toEqual(NOT_HTML)
+    const manifest = await app.request('/app/manifest.webmanifest')
+    expect(manifest.status).toBe(200)
+    expect(manifest.headers.get('content-type')).toBe('application/manifest+json; charset=utf-8')
+    expect(manifest.headers.get('cache-control')).toBe('no-cache')
+    expect(manifest.headers.get('service-worker-allowed')).toBeNull()
+    const absent = createApp(deps({ webDist: join(dist, 'assets') }))
+    for (const path of ['/app/sw.js', '/app/manifest.webmanifest']) {
+      const response = await absent.request(path)
+      expect(response.status).toBe(404)
+      expect(await response.text()).toBe('Not found')
     }
   })
 

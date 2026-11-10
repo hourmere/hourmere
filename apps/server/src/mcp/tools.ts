@@ -86,6 +86,14 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   privateValidationMessage?: string
   /** Omit arbitrary exception details for requests containing private contact information. */
   privateDiagnostics?: boolean
+  /**
+   * The switch of the feature the tool belongs to, set only by that feature's registration
+   * helper (routingFormTools in ../routing-forms.ts). While it throws, the tool is left out
+   * of tools/list, and a direct call answers the thrown DomainError's code before the
+   * API-key scope check, argument checks or the handler: the same result for every caller
+   * and every argument.
+   */
+  requireEnabled?(): void
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
   run(args: z.output<I>, call: ToolCall): Promise<z.input<O>>
 }
@@ -153,11 +161,46 @@ function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
 /** Logs one line about a failed call; the endpoint escapes it (see endpoint.ts). */
 export type ToolErrorLog = (label: string, detail: unknown) => void
 
+/** Runs a tool's feature switch, which must answer synchronously: a return value is off. */
+function checkFeature(tool: Tool) {
+  const result: unknown = tool.requireEnabled?.()
+  if (result === undefined) return
+  // A promise's rejection would otherwise go unhandled; its outcome is never waited for.
+  if (result instanceof Promise) result.catch(() => {})
+  throw new Error(`${tool.name}: a feature switch must be synchronous`)
+}
+
+/** Whether the tool's feature is on (see Tool.requireEnabled); anything thrown means off. */
+function featureEnabled(tool: Tool): boolean {
+  try {
+    checkFeature(tool)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
- * Runs one tool call: checks the arguments (text guard, then the zod schema), runs the
- * handler and checks its result against the output schema. Failures the caller can act on
- * become error results with the REST API's codes; anything else is logged and answered
- * with an opaque `internal_error`.
+ * The answer for a tool whose feature is off, before anything reads the call: the switch's
+ * DomainError code alone. An unexpected throw is logged and answered `internal_error`.
+ */
+function disabledResult(tool: Tool, logError: ToolErrorLog): CallToolResult | undefined {
+  try {
+    checkFeature(tool)
+    return undefined
+  } catch (err) {
+    if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind))
+      return errorResult({ error: err.code })
+    logError(`${tool.name}: `, err)
+    return errorResult({ error: 'internal_error' })
+  }
+}
+
+/**
+ * Runs one tool call: checks the tool's feature switch, the caller's scope and the arguments
+ * (text guard, then the zod schema), runs the handler and checks its result against the
+ * output schema. Failures the caller can act on become error results with the REST API's
+ * codes; anything else is logged and answered with an opaque `internal_error`.
  */
 export async function runTool(
   tool: Tool,
@@ -165,6 +208,8 @@ export async function runTool(
   call: ToolCall,
   logError: ToolErrorLog,
 ): Promise<CallToolResult> {
+  const disabled = disabledResult(tool, logError)
+  if (disabled) return disabled
   const privateInput = tool.privateInput?.(args) === true
   const diagnostic = (detail: unknown) =>
     tool.privateDiagnostics
@@ -343,7 +388,7 @@ export function registerTools(
   const visible = new Map<string, PreparedTool>()
   for (const prepared of tools) {
     const { tool, inputSchema, outputSchema } = prepared
-    if (!apiKeyAllows(caller, `mcp:${tool.name}`)) continue
+    if (!featureEnabled(tool) || !apiKeyAllows(caller, `mcp:${tool.name}`)) continue
     visible.set(tool.name, prepared)
     server.registerTool(
       tool.name,
@@ -358,12 +403,13 @@ export function registerTools(
     )
   }
   // Use the SDK's public dispatch seam: protocol/envelope validation still happens in
-  // Server before this callback, while a hidden catalog tool is checked before lookup in
-  // the SDK's visible registry. Unknown names retain its native protocol error.
+  // Server before this callback, while a hidden catalog tool (switched off, or outside the
+  // key's scope) is answered by runTool before lookup in the SDK's visible registry. Unknown
+  // names retain its native protocol error.
   const catalog = new Map(tools.map((prepared) => [prepared.tool.name, prepared]))
   server.server.setRequestHandler('tools/call', async (request) => {
     const known = catalog.get(request.params.name)
-    if (known && !apiKeyAllows(caller, `mcp:${known.tool.name}`))
+    if (known && !visible.has(known.tool.name))
       return runTool(known.tool, request.params.arguments, call, logError)
     const prepared = visible.get(request.params.name)
     if (!prepared)

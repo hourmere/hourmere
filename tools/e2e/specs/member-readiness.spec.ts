@@ -69,8 +69,21 @@ for (const language of ['en', 'zh-CN'] as const) {
     const privateName = 'Synthetic personal default schedule'
     await page.getByRole('textbox', { name: /^(Name|名称)$/ }).fill(privateName)
     await page.getByRole('button', { name: /^(Create schedule|创建日程)$/ }).click()
-    await page.getByRole('button', { name: /^(Make default|设为默认)$/ }).click()
-    await expect(page.locator('.default-status .badge')).toContainText(/Default|默认/)
+    await expect(page.getByRole('heading', { name: new RegExp(privateName) })).toBeVisible()
+    await page
+      .getByRole('checkbox', { name: /^(Make this my default schedule|设为我的默认日程)$/ })
+      .check()
+    const savedDefault = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' && response.url().endsWith('/availability'),
+    )
+    await page.getByRole('button', { name: /^(Save changes|保存更改)$/ }).click()
+    const savedAvailability = await savedDefault
+    expect(savedAvailability.status()).toBe(200)
+    expect((await savedAvailability.json()).schedule.isDefault).toBe(true)
+    await expect(
+      page.getByRole('checkbox', { name: /^(Make this my default schedule|设为我的默认日程)$/ }),
+    ).toHaveCount(0)
     const returned = page.waitForResponse((response) =>
       new URL(response.url()).pathname.endsWith('/member-readiness'),
     )

@@ -52,7 +52,7 @@ export const applyMessages = {
     guarantee:
       'Zero external side effects: no mail, ICS, calendar writes, conferences, webhooks, reminders or repair jobs. Imported bookings remain read-only and managed in the old system.',
     review:
-      'Review losses, address changes, identity conflicts, time zones, option mappings, overlaps, buffers and daily limits in the private plan. Reconnect providers separately and enable drafts only after review.',
+      'Review losses, address changes, identity conflicts, time zones, option mappings, overlaps, group-slot occupancy, buffers and daily, weekly and monthly limits in the private plan. Limit warnings preserve historical bookings during apply. Reconnect providers separately and enable drafts only after review.',
     rerun:
       'Before apply, freeze source changes in an operator-managed cutover window. Apply re-extracts and compares hashes. Errors roll back the complete batch; a lost response can be retried using the same plan. Rollback requires a separately reviewed local cleanup; never delete source or existing target data.',
     blocked: 'Blocked: no rows may be applied from this plan.',
@@ -61,7 +61,7 @@ export const applyMessages = {
     identities: 'Source identities (masked emails)',
     times: 'Booking UTC and local times',
     addresses: 'Old and proposed addresses',
-    impacts: 'Overlap, buffer, schedule and daily-limit impact',
+    impacts: 'Overlap, group-slot, buffer, schedule and daily/weekly/monthly limit impact',
     writes: 'Proposed table writes',
     losses: 'Losses and exclusions',
     private: 'Authorized private report',
@@ -75,7 +75,7 @@ export const applyMessages = {
     guarantee:
       '保证零外部副作用：不发送邮件、不生成 ICS、不写入日历、不创建会议、不触发 Webhook、不发送提醒、不创建修复任务。导入预约保持只读，由原系统管理。',
     review:
-      '请在私有计划中核对损失、地址变化、身份冲突、时区、选项映射、重叠、缓冲和每日限额。请单独重新连接服务，审核后再启用草稿。',
+      '请在私有计划中核对损失、地址变化、身份冲突、时区、选项映射、重叠、群组时段占用、缓冲，以及每日、每周和每月限额。限额警告不会阻止执行时保留历史预约。请单独重新连接服务，审核后再启用草稿。',
     rerun:
       '执行前，请由操作者安排切换窗口，暂停源端变更。执行会重新提取并比较哈希。错误将回滚整个批次；提交后响应丢失时，可使用同一计划重试。回退须另行审核本地清理方案，不得删除源记录或既有目标数据。',
     blocked: '已阻断：此计划不得写入任何数据行。',
@@ -84,7 +84,7 @@ export const applyMessages = {
     identities: '来源身份（邮箱已掩码）',
     times: '预约 UTC 及当地时间',
     addresses: '原地址与拟用地址',
-    impacts: '重叠、缓冲、日程及每日限额影响',
+    impacts: '重叠、群组时段、缓冲、日程及每日／每周／每月限额影响',
     writes: '拟写入的表及行数',
     losses: '损失与排除项',
     private: '已授权私有报告',
