@@ -10,11 +10,11 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "pg-boss": "12.38.0",
+    "pg-boss": "12.38.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@hourmere/db": "*",
-    "kysely": "0.29.7"
+    "kysely": "0.29.8"
   }
 }

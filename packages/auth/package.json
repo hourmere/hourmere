@@ -10,22 +10,22 @@
     "schema:sql": "auth generate --config src/schema-cli.ts --output auth-schema.generated.sql --yes"
   },
   "devDependencies": {
-    "@better-auth/sso": "1.7.16",
+    "@better-auth/sso": "1.7.18",
     "@types/pg": "8.23.1",
-    "auth": "1.7.16"
+    "auth": "1.7.18"
   },
   "dependencies": {
-    "@better-auth/api-key": "1.7.16",
-    "@better-auth/cimd": "1.7.16",
-    "@better-auth/core": "1.7.16",
-    "@better-auth/kysely-adapter": "1.7.16",
-    "@better-auth/mcp": "1.7.16",
-    "@better-auth/oauth-provider": "1.7.16",
+    "@better-auth/api-key": "1.7.18",
+    "@better-auth/cimd": "1.7.18",
+    "@better-auth/core": "1.7.18",
+    "@better-auth/kysely-adapter": "1.7.18",
+    "@better-auth/mcp": "1.7.18",
+    "@better-auth/oauth-provider": "1.7.18",
     "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/mail": "*",
-    "better-auth": "1.7.16",
-    "kysely": "0.29.7",
+    "better-auth": "1.7.18",
+    "kysely": "0.29.8",
     "pg": "8.23.1",
     "pg-connection-string": "2.14.1",
     "zod": "4.6.7"
