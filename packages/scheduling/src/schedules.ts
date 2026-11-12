@@ -1,6 +1,7 @@
 // The caller's schedules (working hours) and their per-date overrides. They belong to the
 // user and follow them across organizations; each user has at most one default schedule,
 // which event types use unless a host names another.
+import { createHash } from 'node:crypto'
 import {
   validateDate,
   validateDayIntervals,
@@ -19,15 +20,7 @@ import {
 } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
-import {
-  engineValidation,
-  isConstraintViolation,
-  isUuid,
-  jsonb,
-  SQLSTATE,
-  timestamp,
-  validTimeZone,
-} from './internal.ts'
+import { engineValidation, isUuid, jsonb, timestamp, validTimeZone } from './internal.ts'
 import { cleanText } from './text.ts'
 
 export interface Schedule {
@@ -56,6 +49,138 @@ export interface ScheduleOverride {
   /** `YYYY-MM-DD` in the schedule's time zone. */
   date: string
   intervals: WallClockInterval[]
+}
+
+/** A consistent editor snapshot and opaque optimistic concurrency token. */
+export interface ScheduleAvailability {
+  schedule: Schedule
+  overrides: ScheduleOverride[]
+  version: string
+}
+
+export interface ScheduleAvailabilityInput extends ScheduleInput {
+  /** Token returned by getScheduleAvailability; stale writes fail without changing either part. */
+  expectedVersion: string
+  /** Complete replacement, including past dates. Omitted dates revert to weekly hours. */
+  overrides: ScheduleOverride[]
+}
+
+/** Read both parts under the same lock used by every schedule writer. */
+export async function getScheduleAvailability(
+  ctx: ServiceContext,
+  id: string,
+): Promise<ScheduleAvailability> {
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockSchedulesOf(trx, ctx.principal.user.id)
+    return availabilitySnapshot(trx, ctx, id)
+  })
+}
+
+// Keep the three-parameter-per-row insert safely below PostgreSQL’s bind limit.
+export const MAX_SCHEDULE_OVERRIDES = 10_000
+
+/** Save the entire editor in one transaction, refusing stale or replayed snapshots. */
+export async function saveScheduleAvailability(
+  ctx: ServiceContext,
+  id: string,
+  input: ScheduleAvailabilityInput,
+): Promise<ScheduleAvailability> {
+  if (Array.isArray(input.overrides) && input.overrides.length > MAX_SCHEDULE_OVERRIDES) {
+    throw new DomainError('invalid', 'too_many_overrides')
+  }
+  const name = validName(input.name)
+  const timeZone = validTimeZone(input.timeZone)
+  const weeklyHours = validWeeklyHours(input.weeklyHours)
+  const isDefault = validIsDefault(input.isDefault)
+  if (typeof input.expectedVersion !== 'string' || !/^[a-f0-9]{64}$/.test(input.expectedVersion)) {
+    throw new DomainError('invalid', 'invalid_schedule_version')
+  }
+  if (!Array.isArray(input.overrides)) {
+    throw new DomainError('invalid', 'invalid_schedule_overrides')
+  }
+  const dates = new Set<string>()
+  const overrides = input.overrides.map((override) => {
+    const date = validDate(override?.date, 'date')
+    if (dates.has(date)) throw new DomainError('invalid', 'duplicate_override_date')
+    dates.add(date)
+    return { date, intervals: validIntervals(override.intervals, 'intervals') }
+  })
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockSchedulesOf(trx, ctx.principal.user.id)
+    const current = await availabilitySnapshot(trx, ctx, id)
+    if (current.version !== input.expectedVersion) {
+      throw new DomainError(
+        'conflict',
+        'schedule_conflict',
+        'Availability changed; reload before saving',
+      )
+    }
+    if (isDefault === false && current.schedule.isDefault) {
+      throw new DomainError(
+        'conflict',
+        'schedule_is_default',
+        'Make another schedule the default instead',
+      )
+    }
+    if (isDefault === true && !current.schedule.isDefault) {
+      await unsetDefault(trx, ctx.principal.user.id)
+    }
+    await trx
+      .updateTable('schedules')
+      .set({
+        name,
+        time_zone: timeZone,
+        weekly_hours: jsonb(weeklyHours),
+        ...(isDefault !== undefined && { is_default: isDefault }),
+      })
+      .where('id', '=', id)
+      .execute()
+    await trx.deleteFrom('schedule_overrides').where('schedule_id', '=', id).execute()
+    if (overrides.length > 0) {
+      await trx
+        .insertInto('schedule_overrides')
+        .values(
+          overrides.map((override) => ({
+            schedule_id: id,
+            date: override.date,
+            intervals: jsonb(override.intervals),
+          })),
+        )
+        .execute()
+    }
+    return availabilitySnapshot(trx, ctx, id)
+  })
+}
+
+async function availabilitySnapshot(
+  db: Db,
+  ctx: ServiceContext,
+  id: string,
+): Promise<ScheduleAvailability> {
+  const row = await ownSchedule(db, ctx, id)
+  // Keep PostgreSQL's full timestamp precision; JS Date would lose microseconds.
+  // xmin also changes for same-content updates, preventing replay and change/revert ABA.
+  const revision = await db
+    .selectFrom('schedules')
+    .select([
+      sql<string>`updated_at::text`.as('updated'),
+      sql<string>`xmin::text`.as('transaction'),
+    ])
+    .where('id', '=', row.id)
+    .executeTakeFirstOrThrow()
+  const overrides = (
+    await db
+      .selectFrom('schedule_overrides')
+      .select(['date', 'intervals'])
+      .where('schedule_id', '=', row.id)
+      .orderBy('date')
+      .execute()
+  ).map(toOverride)
+  const schedule = toSchedule(row)
+  const version = createHash('sha256')
+    .update(JSON.stringify({ schedule, overrides, revision }))
+    .digest('hex')
+  return { schedule, overrides, version }
 }
 
 export const SCHEDULE_NAME_MAX_LENGTH = 100
@@ -300,43 +425,18 @@ export async function putScheduleOverride(
 ): Promise<{ override: ScheduleOverride; created: boolean }> {
   const day = validDate(date, 'date')
   const hours = jsonb(validIntervals(intervals, 'intervals'))
-  if (!isUuid(scheduleId)) throw notFound()
-  let row: { date: string; intervals: Json; created: boolean } | undefined
-  try {
-    // One statement: the override is written only if the schedule is the caller's.
-    row = await ctx.db
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockSchedulesOf(trx, ctx.principal.user.id)
+    const schedule = await ownSchedule(trx, ctx, scheduleId)
+    const row = await trx
       .insertInto('schedule_overrides')
-      .columns(['schedule_id', 'date', 'intervals'])
-      .expression((eb) =>
-        eb
-          .selectFrom('schedules')
-          .select(['id', sql<string>`${day}::date`.as('date'), sql<Json>`${hours}::jsonb`.as('j')])
-          .where('id', '=', scheduleId)
-          .where('user_id', '=', ctx.principal.user.id),
-      )
-      .onConflict((oc) =>
-        oc
-          .columns(['schedule_id', 'date'])
-          .doUpdateSet((eb) => ({ intervals: eb.ref('excluded.intervals') })),
-      )
-      // PostgreSQL 18: `old` is NULL for a row the statement inserted.
+      .values({ schedule_id: schedule.id, date: day, intervals: hours })
+      .onConflict((oc) => oc.columns(['schedule_id', 'date']).doUpdateSet({ intervals: hours }))
       .returning(['date', 'intervals', sql<boolean>`old.schedule_id IS NULL`.as('created')])
-      .executeTakeFirst()
-  } catch (error) {
-    // The schedule was deleted between the SELECT and the insert.
-    if (
-      isConstraintViolation(
-        error,
-        SQLSTATE.foreignKeyViolation,
-        'schedule_overrides_schedule_id_fkey',
-      )
-    ) {
-      throw new DomainError('not_found', 'schedule_not_found', undefined, { cause: error })
-    }
-    throw error
-  }
-  if (!row) throw notFound()
-  return { override: toOverride(row), created: row.created }
+      .executeTakeFirstOrThrow()
+    await touchSchedule(trx, schedule.id)
+    return { override: toOverride(row), created: row.created }
+  })
 }
 
 /** Removes the override of one date, so the weekly hours apply again. */
@@ -346,15 +446,24 @@ export async function deleteScheduleOverride(
   date: string,
 ): Promise<void> {
   const day = validDate(date, 'date')
-  const schedule = await ownSchedule(ctx.db, ctx, scheduleId)
-  const result = await ctx.db
-    .deleteFrom('schedule_overrides')
-    .where('schedule_id', '=', schedule.id)
-    .where('date', '=', day)
-    .executeTakeFirst()
-  if (result.numDeletedRows === 0n) {
-    throw new DomainError('not_found', 'schedule_override_not_found')
-  }
+  await ctx.db.transaction().execute(async (trx) => {
+    await lockSchedulesOf(trx, ctx.principal.user.id)
+    const schedule = await ownSchedule(trx, ctx, scheduleId)
+    const result = await trx
+      .deleteFrom('schedule_overrides')
+      .where('schedule_id', '=', schedule.id)
+      .where('date', '=', day)
+      .executeTakeFirst()
+    if (result.numDeletedRows === 0n) {
+      throw new DomainError('not_found', 'schedule_override_not_found')
+    }
+    await touchSchedule(trx, schedule.id)
+  })
+}
+
+// The existing updated_at trigger advances the parent revision for legacy override writes.
+async function touchSchedule(db: Db, id: string) {
+  await db.updateTable('schedules').set({ updated_at: sql`now()` }).where('id', '=', id).execute()
 }
 
 type ScheduleRow = Awaited<ReturnType<typeof ownSchedule>>

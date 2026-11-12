@@ -504,3 +504,15 @@ export function createAuth({
 }
 
 export type Auth = ReturnType<typeof createAuth>
+
+export {
+  authenticateScimToken,
+  createScimToken,
+  listScimTokens,
+  revokeScimToken,
+  rotateScimToken,
+  SCIM_MAX_OVERLAP_SECONDS,
+  SCIM_TOKEN_PREFIX,
+  type ScimTokenActor,
+  ScimTokenError,
+} from './scim-tokens.ts'

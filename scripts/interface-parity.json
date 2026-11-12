@@ -1,5 +1,8 @@
 {
-  "generateOpenTimeSnippet": { "mcp": "generate_open_time_snippet", "cli": "open-time-snippet" },
+  "generateOpenTimeSnippet": {
+    "mcp": "generate_open_time_snippet",
+    "cli": "open-time-snippet"
+  },
   "authorizeConferenceConnectionMeetings": {
     "exemption": "browser-session-only",
     "reason": "Authorizing meeting permissions on an existing Zoom connection requires live browser consent."
@@ -132,9 +135,17 @@
     "mcp": "revoke_one_time_link",
     "cli": "one-time-links revoke"
   },
+  "saveScheduleAvailability": {
+    "mcp": "save_schedule_availability",
+    "cli": "save-availability"
+  },
   "selectMcpOAuthOrganization": {
     "exemption": "browser-session-only",
     "reason": "Selecting an MCP OAuth grant's organization requires the user's browser consent flow."
+  },
+  "setAttendeeNoShow": {
+    "mcp": "set_attendee_no_show",
+    "cli": "set-no-show"
   },
   "setBranding": {
     "mcp": "set_branding",
@@ -156,9 +167,37 @@
     "mcp": "update_event_type",
     "cli": "update-event"
   },
+  "createScimProvisioningToken": {
+    "exemption": "browser-session-only",
+    "reason": "Provisioning credential creation requires a verified organization owner browser session without Authorization, like API key management."
+  },
+  "rotateScimProvisioningToken": {
+    "exemption": "browser-session-only",
+    "reason": "Provisioning credential rotation requires a verified organization owner browser session without Authorization, like API key management."
+  },
+  "revokeScimProvisioningToken": {
+    "exemption": "browser-session-only",
+    "reason": "Provisioning credential management requires a verified organization owner/admin browser session without Authorization, like API key management."
+  },
   "uploadBrandLogo": {
     "mcpReference": "set_branding",
     "cliUpload": "branding upload",
     "reason": "Binary images use REST upload; MCP sets the validated reference returned by the upload."
+  },
+  "createSlackDestination": {
+    "mcp": "create_slack_destination",
+    "cli": "slack create"
+  },
+  "updateSlackDestination": {
+    "mcp": "update_slack_destination",
+    "cli": "slack update"
+  },
+  "deleteSlackDestination": {
+    "mcp": "delete_slack_destination",
+    "cli": "slack delete"
+  },
+  "testSlackDestination": {
+    "mcp": "test_slack_destination",
+    "cli": "slack test"
   }
 }

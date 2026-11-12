@@ -19,6 +19,7 @@ export const WEBHOOK_EVENTS = [
   'booking.cancelled',
   'booking.reschedule_requested',
   'booking.reschedule_request_expired',
+  'booking.attendee_no_show_changed',
 ] as const
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number]
 export const WebhookCreateInput = z.strictObject({
@@ -32,6 +33,7 @@ export const WebhookUpdateInput = z.strictObject({
 })
 export interface WebhookSettings {
   enabled: boolean
+  publicUrl?: string | undefined
   encryptionKey?: string | undefined
   privateTargets?: readonly WebhookPrivateTarget[] | undefined
 }
@@ -64,7 +66,7 @@ const insufficientRole = () =>
   )
 
 /** Check current verified membership; a stale resolver principal cannot retain admin rights. */
-async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
+export async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
   let query = db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
@@ -86,7 +88,7 @@ async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
  * Membership is deliberately locked/rechecked AFTER waiting for the organization and
  * endpoint: a demotion or removal already committed during that wait must win.
  */
-async function lockAuthorizationParents(
+export async function lockAuthorizationParents(
   trx: Db,
   ctx: ServiceContext,
   exclusiveOrganization = false,
@@ -168,6 +170,7 @@ export async function listWebhooks(ctx: ServiceContext): Promise<WebhookView[]> 
   return (
     await ctx.db
       .selectFrom('webhooks')
+      .where('destination_kind', '=', 'webhook')
       .select(visibleColumns)
       .where('organization_id', '=', ctx.principal.organization.id)
       .orderBy('id')
@@ -197,6 +200,7 @@ export async function createWebhook(
     await requireAdmin(trx, ctx, true)
     const rows = await trx
       .selectFrom('webhooks')
+      .where('destination_kind', '=', 'webhook')
       .select('id')
       .where('organization_id', '=', ctx.principal.organization.id)
       .limit(10)
@@ -239,6 +243,7 @@ async function lockedWebhook(trx: Db, ctx: WebhookServiceContext, id: unknown) {
   await lockAuthorizationParents(trx, ctx)
   const row = await trx
     .selectFrom('webhooks')
+    .where('destination_kind', '=', 'webhook')
     .select(visibleColumns)
     .where('id', '=', id)
     .where('organization_id', '=', ctx.principal.organization.id)
@@ -328,6 +333,7 @@ export async function listWebhookDeliveries(ctx: ServiceContext, id: unknown, af
   if (!uuid(id)) throw missing()
   const endpoint = await ctx.db
     .selectFrom('webhooks')
+    .where('destination_kind', '=', 'webhook')
     .select('id')
     .where('id', '=', id)
     .where('organization_id', '=', ctx.principal.organization.id)

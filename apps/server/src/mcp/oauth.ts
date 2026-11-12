@@ -140,8 +140,8 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
           : clientId.slice(0, 200),
     }
   }
-  async function organizations(p: Session) {
-    return db
+  async function organizations(client: Db, p: Session) {
+    return client
       .selectFrom('auth.member as m')
       .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
       .innerJoin('auth.user as u', 'u.id', 'm.userId')
@@ -151,8 +151,8 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       .orderBy('o.name')
       .execute()
   }
-  async function current(p: Session) {
-    const row = await db
+  async function current(client: Db, p: Session) {
+    const row = await client
       .selectFrom('auth.session')
       .select('id')
       .where('id', '=', p.sessionId)
@@ -178,8 +178,8 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
     )
       throw expired()
     await lock(trx, p.user.id, row.organization_id, q.get('client_id') as string)
-    await current(p)
-    const orgs = await organizations(p)
+    await current(trx, p)
+    const orgs = await organizations(trx, p)
     if (!orgs.some((o) => o.id === row.organization_id)) throw forbidden()
     const grant = await trx
       .selectFrom('mcp_oauth_grants')
@@ -210,8 +210,8 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
     ) {
       const p = session(principal),
         v = await validated(oauthQuery, headers, clientIp)
-      await current(p)
-      const orgs = await organizations(p)
+      await current(db, p)
+      const orgs = await organizations(db, p)
       const selected = intentId
         ? await db.transaction().execute(async (trx) => {
             const row = await bound(trx, p, intentId, v.q)
@@ -238,8 +238,8 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
         v = await validated(oauthQuery, headers, clientIp)
       return db.transaction().execute(async (trx) => {
         await lock(trx, p.user.id, organizationId, v.clientId)
-        await current(p)
-        if (!(await organizations(p)).some((o) => o.id === organizationId)) throw forbidden()
+        await current(trx, p)
+        if (!(await organizations(trx, p)).some((o) => o.id === organizationId)) throw forbidden()
         const previous = await trx
           .selectFrom('mcp_oauth_grants as g')
           .innerJoin('auth.oauthConsent as c', (j) =>
@@ -300,6 +300,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
             grantId: grant.id,
           },
           () => native('continue', { postLogin: true, oauth_query: oauthQuery }, headers, clientIp),
+          trx,
         )
         const result = redirect(nativeResult.value, intent.id)
         if (!result.consent) {
@@ -334,6 +335,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
             grantId: row.grant_id,
           },
           () => native('consent', { accept, oauth_query: oauthQuery }, headers, clientIp),
+          trx,
         )
         const result = redirect(nativeResult.value, intentId)
         if (result.consent) throw invalid()

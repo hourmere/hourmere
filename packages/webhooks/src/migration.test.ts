@@ -34,7 +34,7 @@ it.skipIf(!serverUrl)(
       const db = createDb(pool)
       const user = await createTestUser(db)
       const key = Buffer.alloc(32, 9).toString('base64')
-      // Seed the historical schema directly: current services also write the later audit table.
+      // Seed the historical schema directly: current services also write later columns and tables.
       const webhook = { id: randomUUID(), organizationId: user.principal.organization.id }
       await db
         .insertInto('webhooks')
@@ -43,9 +43,8 @@ it.skipIf(!serverUrl)(
           organization_id: webhook.organizationId,
           url: 'https://hooks.example.com/bookings',
           events: ['booking.created'],
-          is_active: true,
           secret_ciphertext: encryptWebhookSecret(
-            'synthetic-webhook-secret',
+            'synthetic',
             key,
             webhook.id,
             webhook.organizationId,

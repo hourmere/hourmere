@@ -53,6 +53,14 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Instance capabilities
+
+`GET /api/v1/instance` includes additive `ssoOidcEnabled` and `ssoSamlEnabled`
+booleans. Both are currently `false`: organization SSO is unavailable, including on
+self-hosted instances, and no environment setting enables it yet. Older servers may
+omit these fields; clients should treat absence as unknown, keep SSO entry points hidden and
+tolerate unknown response fields. No SSO operations are exposed in this release.
+
 ## Configure meeting lengths
 
 Create an event type with `POST /api/v1/event-types` or edit it with
@@ -292,6 +300,17 @@ weekly limit. Event-type reads return all three settings. API keys need `full` s
 for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
 CLI examples, host schedule time zones, Monday-based weeks, calendar months and
 counting rules. Lowering a ceiling does not cancel existing bookings.
+
+## Record attendee no-shows
+
+[Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
+scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
+MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
+`noShow`. API keys require `bookings` or `full` plus booked-host authority. API keys
+of every scope and MCP OAuth can read or mark attendees only on bookings the caller
+hosts in the current organization. Non-host team owners/admins need a browser session;
+agent credentials receive `booking_not_found`, just as for a missing booking.
+Invitee pages and messages are unchanged, including scheduled follow-ups.
 
 ## Booking waitlists
 

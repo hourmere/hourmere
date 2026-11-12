@@ -2,6 +2,7 @@ import { createRoute, z } from '@hono/zod-openapi'
 import { retryBookingConference, retryConferenceMirror } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
 import {
+  type AttendeeNoShowNotifier,
   type BookingNotifier,
   cancelHostBooking,
   cancelManagedBooking,
@@ -9,6 +10,7 @@ import {
   getHostBooking,
   getManagedBookingDetails,
   LOCATION_KINDS,
+  listBookingAttendeeNoShows,
   listHostBookingSlots,
   listHostBookings,
   listManagedSlots,
@@ -22,6 +24,7 @@ import {
   rescheduleManagedBooking,
   resolveBookingOrganization,
   type ServiceContext,
+  setAttendeeNoShow,
 } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
@@ -84,6 +87,18 @@ export const BookingLocation = z.looseObject({ kind: LocationKind }).openapi('Bo
 
 const Attendee = z
   .object({
+    id: z
+      .uuid()
+      .optional()
+      .openapi({ description: 'Authenticated reads only: attendee identifier for host actions.' }),
+    noShowMarkedAt: Instant.nullable().optional().openapi({
+      description: 'Authenticated reads only: when this attendee was marked as a no-show.',
+    }),
+    noShowMarkedBy: z
+      .string()
+      .nullable()
+      .optional()
+      .openapi({ description: 'Authenticated reads only: the user who marked this attendee.' }),
     name: z.string(),
     email: z.string(),
     timeZone: z.string().openapi({ description: 'IANA time zone' }),
@@ -156,6 +171,10 @@ export const Booking = z
       description:
         'Authenticated host reads only: the imported booking’s original question definitions, including preserved notes.',
     }),
+    canManageNoShow: z.boolean().optional().openapi({
+      description:
+        'Authenticated reads only: whether this caller can change attendee no-show markers now.',
+    }),
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
     coHosts: z
       .array(z.object({ name: z.string() }))
@@ -219,6 +238,29 @@ export const BookingWithToken = z
     }),
   })
   .openapi('BookingWithToken')
+
+export const BookingAttendees = z
+  .object({
+    data: z.array(
+      z.object({
+        id: z.uuid(),
+        name: z.string(),
+        email: z.string(),
+        isBooker: z.boolean(),
+        noShowMarkedAt: Instant.nullable(),
+        noShowMarkedBy: z.string().nullable(),
+      }),
+    ),
+  })
+  .openapi('BookingAttendees')
+
+export const AttendeeNoShow = z
+  .object({
+    attendeeId: z.uuid(),
+    noShowMarkedAt: Instant.nullable(),
+    noShowMarkedBy: z.string().nullable(),
+  })
+  .openapi('AttendeeNoShow')
 
 export const CancelBody = z
   .strictObject({ reason: z.string().max(1000).optional() })
@@ -320,6 +362,7 @@ export interface BookingRoutesDeps {
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change; none are sent without it. */
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   notify?: BookingNotifier | undefined
   /** Replaces PUBLIC_RATE_LIMITS.manage (and .slots for the reschedule slots), e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
@@ -337,6 +380,7 @@ export function bookingRoutes({
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
+  notifyAttendeeNoShow,
   automaticMeet,
   automaticZoom,
   rateLimits = {},
@@ -381,6 +425,7 @@ export function bookingRoutes({
     ): ServiceContext => ({
       db,
       principal,
+      notifyAttendeeNoShow,
       now,
       notify,
       automaticMeet,
@@ -388,6 +433,90 @@ export function bookingRoutes({
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
 
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/{id}/attendees',
+        operationId: 'getBookingAttendees',
+        security: authenticated,
+        middleware: caller,
+        tags: ['Bookings'],
+        summary: 'Read attendees and no-show markers for a booking',
+        description:
+          'Booked hosts and browser-session team owners/admins only. API keys of every scope and MCP OAuth may read only bookings they host; other bookings return booking_not_found. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.',
+        request: { params: z.object({ id: z.uuid() }) },
+        responses: {
+          200: {
+            description: 'Attendee identifiers and attendance metadata',
+            content: json(BookingAttendees),
+          },
+          400: invalidId,
+          401: unauthorized,
+          403: error('insufficient_scope'),
+          404: hostNotFound,
+          429: keyRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          {
+            data: await listBookingAttendeeNoShows(
+              context(c.var.principal),
+              c.req.valid('param').id,
+            ),
+          },
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        method: 'patch',
+        path: '/api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
+        operationId: 'setAttendeeNoShow',
+        security: authenticated,
+        middleware: hostManage,
+        tags: ['Bookings'],
+        summary: 'Mark or unmark one attendee as a no-show',
+        description:
+          'Only booked hosts and browser-session team owners/admins, after the scheduled start. API keys of every scope and MCP OAuth are host-only; other bookings return booking_not_found. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.',
+        request: {
+          params: z.object({ id: z.uuid(), attendeeId: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
+          body: { required: true, content: json(z.strictObject({ noShow: z.boolean() })) },
+        },
+        responses: {
+          200: {
+            description: 'The current attendee no-show marker',
+            content: json(AttendeeNoShow),
+          },
+          400: invalidId,
+          401: unauthorized,
+          403: error('Forbidden or insufficient_scope'),
+          404: error('booking_not_found (also used for an unknown attendee)'),
+          409: error(
+            'booking_not_started, booking_cancelled, imported_booking_read_only or organization_context_changed',
+          ),
+          429: hostRateLimited,
+        },
+      }),
+      async (c) => {
+        if (
+          c.req.header('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !==
+          'application/json'
+        )
+          return c.json({ error: 'invalid_request' }, 400)
+        const { id, attendeeId } = c.req.valid('param')
+        return c.json(
+          await setAttendeeNoShow(
+            context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            id,
+            attendeeId,
+            c.req.valid('json').noShow,
+          ),
+          200,
+        )
+      },
+    )
     app.openapi(
       createRoute({
         method: 'post',

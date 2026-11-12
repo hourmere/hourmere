@@ -717,6 +717,7 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
     expect(row).toBeDefined()
     expect(Object.keys(row as object).sort()).toEqual([
       'attendees',
+      'canManageNoShow',
       'cancelledAt',
       'end',
       'eventType',

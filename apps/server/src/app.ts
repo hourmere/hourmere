@@ -11,6 +11,7 @@ import {
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
   redactLogDetails,
+  ScimTokenError,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
 import { withAuditRequest } from '@hourmere/db/audit'
@@ -37,8 +38,10 @@ import {
   redactOneTimeLogDetails,
 } from './one-time-link-privacy.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
+import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
+import { mountScim, type ScimOptions } from './scim.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
   securityHeaders,
@@ -56,6 +59,7 @@ import { registerWaitlistConfirmation } from './waitlist-confirm.ts'
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
   checkDb: () => Promise<void>
+  scim?: ScimOptions | undefined
   /** Minimal confirmation transports for emailed waitlist capabilities. */
   waitlist?:
     | {
@@ -134,6 +138,11 @@ const httpErrorCodes: Record<number, string> = {
   429: 'rate_limited',
 }
 
+/** Slack URLs are bearer secrets; suppress validation echoes and diagnostics. */
+function isSlackDestinationPath(path: string): boolean {
+  return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
+}
+
 /** Admission bodies carry private contacts and arbitrary keys can themselves contain PII. */
 function isWaitlistAdmissionPath(path: string): boolean {
   let decoded = path
@@ -154,7 +163,9 @@ function isWaitlistEntryPath(path: string): boolean {
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
-  if (isOneTimeLinkPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
+  if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
+    return c.json({ error: 'invalid_request' }, 400)
+  if (c.req.path.includes('/provisioning-tokens')) return c.json({ error: 'invalid_request' }, 400)
   const message = result.error.issues
     .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
     .join('; ')
@@ -328,13 +339,21 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
 // URL logger, including malformed tokens and refused embed attempts.
 const requestLogger = createMiddleware(async (c, next) => {
   if (isOneTimeCapabilityPath(c.req.path)) return next()
-  if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)
+  if (c.req.path.includes('/provisioning-tokens')) {
+    await next()
+    const managementRoute = routePath(c)
+    console.log(escapeControlCharacters(`--> ${c.req.method} ${managementRoute} ${c.res.status}`))
+    return
+  }
+  if (!isOneTimeLinkPath(c.req.path) && !isSlackDestinationPath(c.req.path))
+    return ordinaryRequestLogger(c, next)
   await next()
   console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
 })
 
 export function createApp({
   checkDb,
+  scim,
   authHandler,
   resolveCaller,
   publicUrl,
@@ -356,16 +375,19 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
-    const text =
-      isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
+    const text = isSlackDestinationPath(c.req.path)
+      ? '[private Slack diagnostic omitted]'
+      : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
         ? 'private waitlist request failed'
         : detail
     const path = isOneTimeCapabilityPath(c.req.path)
       ? '/book/[redacted]'
-      : isOneTimeLinkPath(c.req.path)
+      : isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path)
         ? routePath(c)
         : c.req.path
-    const message = `${c.req.method} ${path}: ${text}`
+    const message = c.req.path.includes('/provisioning-tokens')
+      ? 'Provisioning credential request failed'
+      : `${c.req.method} ${path}: ${text}`
     const write = level === 'ERROR' ? console.error : console.warn
     write(
       `${new Date().toISOString()} ${level} ${
@@ -376,7 +398,13 @@ export function createApp({
     )
   }
   const logError = (c: Context, label: string, detail: unknown) =>
-    logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
+    logLine(
+      c,
+      'ERROR',
+      isSlackDestinationPath(c.req.path)
+        ? '[private Slack diagnostic omitted]'
+        : `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+    )
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
   // with an opaque 500; only failures the caller can act on get a specific code.
@@ -397,12 +425,17 @@ export function createApp({
       if (err.res) return err.getResponse()
       const error = httpErrorCodes[err.status] ?? 'invalid_request'
       return c.json(
-        err.message && !isOneTimeLinkPath(c.req.path) && !isWaitlistAdmissionPath(c.req.path)
+        err.message &&
+          !isOneTimeLinkPath(c.req.path) &&
+          !isWaitlistAdmissionPath(c.req.path) &&
+          !isSlackDestinationPath(c.req.path)
           ? { error, message: err.message }
           : { error },
         err.status,
       )
     }
+    if (err instanceof ScimTokenError)
+      return c.json({ error: `scim_token_${err.code}` }, err.status)
     if (err instanceof ApiKeyScopeError) {
       return c.json({ error: err.error, message: err.message }, 403)
     }
@@ -427,7 +460,8 @@ export function createApp({
             message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
           }),
       }
-      if (isWaitlistAdmissionPath(c.req.path)) delete body.message
+      if (isWaitlistAdmissionPath(c.req.path) || isSlackDestinationPath(c.req.path))
+        delete body.message
       return c.json(body, domainStatus[err.kind])
     }
     logError(c, '', err)
@@ -438,6 +472,18 @@ export function createApp({
     '*',
     securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge), embedOrigins }),
   )
+  // Provisioning credentials never fall back to a browser cookie on another surface.
+  app.use('*', async (c, next) => {
+    if (
+      /^Bearer[ \t]+scim_/i.test(c.req.header('authorization') ?? '') &&
+      !c.req.path.startsWith('/scim/v2/')
+    ) {
+      c.header('Cache-Control', 'no-store')
+      c.header('WWW-Authenticate', 'Bearer')
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    await next()
+  })
   app.use('/embed/*', async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
@@ -548,6 +594,7 @@ export function createApp({
 
   for (const register of routes) register({ app, caller })
   mcp?.mount({ app, resolveCaller, publicUrl })
+  mountScim(app, scim, trustedProxies)
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
   // /api/health is operational and stays unversioned. doc31 renders schemas the 3.1 way:
@@ -570,6 +617,7 @@ export function createApp({
   if (webDist) {
     // serveStatic resolves paths against the working directory.
     const root = relative(process.cwd(), webDist) || '.'
+    app.on('GET', ['/app/sw.js', '/app/manifest.webmanifest'], pwaStatic(root))
     // Vite's hashed bundles never change, so cache them for a year. A missing bundle (an old
     // tab asking for a file from the previous deploy) is a real 404, not the app's HTML.
     app.use('/assets/*', async (c, next) => {
