@@ -400,7 +400,14 @@ const linkProtections: Record<string, IdentityProtection> = {
   "a link repeats its provider's issuer": {
     objects: ['sso_identity_links_issuer'],
     check: async (f) => {
-      for (const issuer of [f.otherProvider.issuer, `${f.provider.issuer}/`])
+      // Issuers compare exactly, as OIDC requires: a trailing slash or another case is
+      // another issuer.
+      const issuers = [
+        f.otherProvider.issuer,
+        `${f.provider.issuer}/`,
+        (f.provider.issuer as string).toUpperCase(),
+      ]
+      for (const issuer of issuers)
         await insertRefused(
           f.db,
           links,
@@ -408,7 +415,14 @@ const linkProtections: Record<string, IdentityProtection> = {
           violation('sso_identity_links_issuer'),
         )
     },
-    mutants: [silence('sso_identity_links_issuer')],
+    mutants: [
+      silence('sso_identity_links_issuer'),
+      edit(
+        'issuers compare without case',
+        'AND issuer <> NEW.issuer) THEN',
+        'AND lower(issuer) <> lower(NEW.issuer)) THEN',
+      ),
+    ],
   },
   'a retired link is permanent': {
     objects: ['sso_identity_links_retired_permanent'],
