@@ -154,14 +154,14 @@ When SSO uses an entry, the host's DNS answers are checked again on every reques
 must all be eligible private or loopback space. An entry whose hostname has public syntax,
 a dotted name without a special-use suffix, may instead have them all public. That is how a
 public identity provider on a non-default port, such as `idp.example.com:8443`, is reached;
-list it by hostname, since public IP entries are refused. A single-label or special-use
-entry, such as `keycloak:8443`, `idp.internal:8443` or `localhost:8443`, or a name under
-`.local`, `.home.arpa`, `.test`, `.example`, `.invalid` or `.onion`, accepts only private
-or loopback answers. If a search domain or wildcard DNS expands the name of a missing
-internal service to a public address, the request is refused before any connection. Answers
-that mix the two, or include metadata, link-local or other reserved addresses, are refused,
-and the checked address is pinned to the socket. A hostname that is not listed keeps the default rules:
-public addresses only, on port 443 only.
+list it by hostname, since public IP entries are refused. A single-label entry such as
+`keycloak:8443` or `localhost:8443`, or one under `.local`, `.internal`, `.localhost`,
+`.home.arpa`, `.test`, `.example`, `.invalid` or `.onion` such as `idp.internal:8443`,
+accepts only private or loopback answers. So if a search domain or wildcard DNS expands
+such a name to a public address, the request is refused before any connection. Answers that
+mix the two, or include metadata, link-local or other reserved addresses, are refused, and
+the checked address is pinned to the socket. A hostname that is not listed keeps the
+default rules: public addresses only, on port 443 only.
 
 The setting permits these exact destinations, not plain HTTP: identity providers still need
 HTTPS with a certificate for their hostname that the server process trusts, and

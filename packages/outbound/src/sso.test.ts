@@ -758,6 +758,7 @@ describe('a listed name without public syntax', () => {
       network.lookup.mockResolvedValue(addresses.map(answer))
       expect(await refusal(sendSsoRequest(request(host)))).toBe('destination_refused')
     }
+    expect(network.lookup).toHaveBeenCalledTimes(3)
     expect(network.request).not.toHaveBeenCalled()
   })
 
