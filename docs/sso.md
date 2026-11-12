@@ -591,7 +591,7 @@ revision; `trustGeneration` stays, so browser proofs and delegations (which reco
 provider revision) and enforcement already on are unaffected. An envelope version that
 names its key would still need the new revision.
 
-SSO audit uses the `audit_events` journal being built separately in
+SSO audit uses the `audit_events` [journal](audit-log.md) added in
 [PR #246](https://github.com/hourmere/hourmere/pull/246): an append-only table written by one
 INSERT in the same transaction as the change it records, with a closed actor/credential
 set and per-action detail allow-lists enforced by the application and the database.

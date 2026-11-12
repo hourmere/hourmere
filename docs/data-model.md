@@ -1984,3 +1984,9 @@ while dispatching, unknown and expired records return `sms_delivery_unknown`. A 
 record returns `sms_rate_limited` and the remaining delay before its retry-not-before time.
 Status callbacks and final delivery receipts are deferred, so
 `accepted` means Twilio accepted the request, not that a handset received it.
+
+## Audit events
+
+`audit_events` is the append-only management journal available to every instance.
+See [Audit event journal](audit-log.md) for fields, actions, privacy, transaction
+boundaries, indexes and future retention. Events are recorded but not yet viewable.

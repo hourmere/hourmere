@@ -25,6 +25,24 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface AuditEvents {
+  action: string;
+  actor_id: string | null;
+  actor_type: string;
+  credential_id: string | null;
+  credential_scope: string | null;
+  credential_type: string;
+  details: Generated<Json>;
+  id: Generated<Int8>;
+  oauth_client_id: string | null;
+  oauth_grant_id: string | null;
+  occurred_at: Generated<Timestamp>;
+  organization_id: string | null;
+  request_id: string | null;
+  target_id: string;
+  target_type: string;
+}
+
 export interface AuthAccount {
   accessToken: string | null;
   accessTokenExpiresAt: Timestamp | null;
@@ -1503,6 +1521,7 @@ export interface Webhooks {
 }
 
 export interface DB {
+  audit_events: AuditEvents;
   "auth.account": AuthAccount;
   "auth.apikey": AuthApikey;
   "auth.invitation": AuthInvitation;

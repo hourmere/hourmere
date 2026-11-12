@@ -184,6 +184,8 @@ export function teamBookingRoutes(
               deps.now ?? Temporal.Now.instant,
               {
                 expectedOrganizationId,
+                sessionId:
+                  c.var.principal.kind === 'session' ? c.var.principal.sessionId : undefined,
                 reason,
                 notify,
               },

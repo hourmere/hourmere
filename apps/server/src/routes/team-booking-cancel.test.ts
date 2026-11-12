@@ -334,6 +334,21 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
       expect(await operations(f.booking)).toMatchObject([
         { actor_user_id: f.manager.id, organization_id: f.team.id, source: 'web' },
       ])
+      expect(
+        await db
+          .selectFrom('audit_events')
+          .selectAll()
+          .where('target_id', '=', f.booking)
+          .where('action', '=', 'booking.cancelled')
+          .execute(),
+      ).toEqual([
+        expect.objectContaining({
+          actor_type: 'user',
+          actor_id: f.manager.id,
+          credential_type: 'session',
+          credential_id: f.sessionId,
+        }),
+      ])
       expect((await queued(f.booking)).map((row) => row.data)).toEqual([
         { bookingId: f.booking, kind: 'cancelled' },
       ])
