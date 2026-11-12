@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { type AddressInfo, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
@@ -678,22 +679,34 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
     )
   }, 120_000)
 
-  it('aborts when a non-integrity error is recorded even though the suite passes', async () => {
-    await writeExpectation()
-    let calls = 0
-    await expect(
-      coverage({
-        concurrency: 1,
-        assertions: async (pool) => {
-          calls += 1
-          if (calls === 1) await caught(pool)
-          await fullSuite(pool)
-        },
-      }),
-    ).rejects.toThrow(
-      /could not evaluate the (second )?baseline: the database reported 1 error\(s\).*code 57014.*; the suite passed anyway/,
-    )
-  }, 120_000)
+  // Injected by clone request, not call order, so each case hits the same baseline every time.
+  it.each([
+    ['the baseline', 1],
+    ['the second baseline', 2],
+  ] as const)(
+    'aborts when a non-integrity error is recorded on %s even though the suite passes',
+    async (label, injected) => {
+      await writeExpectation()
+      const runs: (number | undefined)[] = []
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            const request = cloneRequest(pool)
+            runs.push(request)
+            if (request === injected) await caught(pool)
+            await fullSuite(pool)
+          },
+        }),
+      ).rejects.toThrow(
+        new RegExp(
+          `^Constraint coverage could not evaluate ${label}: the database reported 1 error\\(s\\).*code 57014.*; the suite passed anyway$`,
+        ),
+      )
+      expect([...runs].sort()).toEqual([1, 2])
+    },
+    120_000,
+  )
 
   // Shapes with no database error behind them: the walk over the thrown failure must abort.
   it.each<[name: string, failing: (pool: pg.Pool) => Promise<void>, reason: RegExp]>([
@@ -891,6 +904,49 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
     )
   }, 120_000)
 
+  it('records a refused connection whose error has no code', async () => {
+    await writeExpectation()
+    // A server that reads the startup message and then closes the connection cleanly: pg
+    // rejects connect() with an error that carries no code at all (a reset would carry
+    // ECONNRESET).
+    const server = createServer((socket) => {
+      socket.once('data', () => socket.end())
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    try {
+      let calls = 0
+      await expect(
+        coverage({
+          concurrency: 1,
+          assertions: async (pool) => {
+            calls += 1
+            if (calls > 2) {
+              const related = openRelatedPool(pool, `postgres://coverage@127.0.0.1:${port}/none`)
+              try {
+                const failure = await related.connect().then(
+                  (client) => {
+                    client.release()
+                    return undefined
+                  },
+                  (error: unknown) => error as { code?: unknown },
+                )
+                expect(failure?.code).toBe('23514')
+              } finally {
+                await related.end()
+              }
+            }
+            await fullSuite(pool)
+          },
+        }),
+      ).rejects.toThrow(
+        /could not evaluate constraint public\.child\.child_amount_check: the database reported 1 error\(s\) that are not integrity rejections: an error without SQLSTATE: Connection terminated unexpectedly/,
+      )
+    } finally {
+      await new Promise((resolve) => server.close(resolve))
+    }
+  }, 120_000)
+
   it('keeps one ledger per copy when copies run concurrently', async () => {
     await writeExpectation()
     let calls = 0
@@ -969,12 +1025,49 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
             ;(pool.connect as unknown as (callback: Callback) => void)((error) => resolve(error))
           }),
       ],
+      [
+        'pool.query(sql, values, callback)',
+        (pool) =>
+          new Promise((resolve) => {
+            ;(
+              pool.query as unknown as (text: string, values: unknown[], callback: Callback) => void
+            )(missing, [], (error) => resolve((error as { code?: string } | null)?.code))
+          }),
+      ],
+      [
+        'pool.query({ text, callback })',
+        (pool) =>
+          new Promise((resolve) => {
+            ;(pool.query as unknown as (config: { text: string; callback: Callback }) => void)({
+              text: missing,
+              callback: (error) => resolve((error as { code?: string } | null)?.code),
+            })
+          }),
+      ],
+      [
+        'client.query({ text, callback })',
+        async (pool) => {
+          const client = await pool.connect()
+          try {
+            return await new Promise((resolve) => {
+              ;(client.query as unknown as (config: { text: string; callback: Callback }) => void)({
+                text: missing,
+                callback: (error) => resolve((error as { code?: string } | null)?.code),
+              })
+            })
+          } finally {
+            client.release()
+          }
+        },
+      ],
     ]
     for (const [name, use] of uses) {
       let calls = 0
       await expect(
         coverage({
           concurrency: 1,
+          // A form that slips past the refusal hangs until this budget, so keep it short.
+          timeoutMs: 30_000,
           assertions: async (pool) => {
             calls += 1
             if (calls > 2) expect(await use(pool)).toBe('23514')
@@ -986,5 +1079,5 @@ describe.skipIf(!serverUrl)('constraint coverage helper', () => {
         /could not evaluate constraint public\.child\.child_amount_check: .*got TypeError: .*promise form of (query|connect)/,
       )
     }
-  }, 240_000)
+  }, 360_000)
 })
