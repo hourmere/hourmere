@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noImplicitAny": false,
+    "lib": ["es2024"]
+  },
+  "include": ["index.js", "lib.js", "hooks.js"]
+}

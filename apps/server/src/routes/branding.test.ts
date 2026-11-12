@@ -82,6 +82,22 @@ describe.skipIf(!process.env.DATABASE_URL)('branding REST', () => {
     })
     expect(uploaded.status).toBe(200)
     const view = (await uploaded.json()) as { brandLogo: string }
+    // Refused uploads record nothing; the accepted one is attributed to the exact key.
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select(['action', 'actor_type', 'credential_id', 'details', 'request_id'])
+        .where('organization_id', '=', user.principal.organization.id)
+        .execute(),
+    ).toEqual([
+      {
+        action: 'organization.branding_updated',
+        actor_type: 'api_key',
+        credential_id: user.principal.kind === 'api_key' ? user.principal.apiKeyId : '',
+        details: { logo: 'uploaded' },
+        request_id: expect.any(String),
+      },
+    ])
     const result = await app.request(`/api/v1/branding/logo/${view.brandLogo}`, { headers })
     expect(result.status).toBe(200)
     expect(result.headers.get('content-type')).toBe('image/png')

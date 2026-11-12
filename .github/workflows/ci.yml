@@ -80,6 +80,24 @@ jobs:
       - name: Validate the draft MCP Registry metadata against the official schema
         run: npm run mcp:registry:validate
 
+  n8n-compatibility:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/n8n-nodes-hourmere
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: tools/n8n-nodes-hourmere/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
   cli-compatibility:
     runs-on: ubuntu-latest
     strategy:
@@ -96,6 +114,30 @@ jobs:
         run: npm run cli:pack-smoke
       - name: Run CLI unit tests without PostgreSQL
         run: npm test -- tools/cli/src/cli.test.ts tools/cli/src/package.test.ts --maxWorkers=2
+
+  zapier-compatibility:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/zapier-hourmere
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: tools/zapier-hourmere/.node-version
+          cache: npm
+          cache-dependency-path: tools/zapier-hourmere/package-lock.json
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - name: Test the Zapier runtime and deployment protections with mocked HTTP on Node 22
+        run: npm test
+      - run: npm run build
+      - run: npm run typecheck
+      - name: Validate locally without a Zapier account or network checks
+        run: npm run validate
+      - name: Verify the CLI build artifact against its committed dependency lock
+        run: npm run build:verify
+      - name: Confirm the verification build left nothing to upload
+        run: test ! -e build/build.zip && test ! -e build/source.zip
 
   docker:
     runs-on: ubuntu-latest
@@ -142,9 +184,13 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.worker.yml down --remove-orphans
 
-  e2e:
+  e2e-shard:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgres:18-alpine
@@ -187,5 +233,18 @@ jobs:
           writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
           NODE
           npm run build --workspace @hourmere/site
-          npm run test:e2e
+          npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/4
       - run: npm run test:e2e:privacy
+
+  # Keep the branch-protection and merge-queue check name stable. A skipped or
+  # cancelled shard must not turn this required check into a successful skip.
+  e2e:
+    needs: e2e-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      SHARD_RESULT: ${{ needs.e2e-shard.result }}
+    steps:
+      - name: Require every browser shard to succeed
+        run: test "$SHARD_RESULT" = success

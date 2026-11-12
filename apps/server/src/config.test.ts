@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { parseSsoPrivateTargets } from '@hourmere/outbound/sso-private-targets'
 import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from './config.ts'
@@ -219,6 +220,42 @@ describe('loadConfig', () => {
     }
     expect(() =>
       loadConfig({ ...base, WEBHOOK_PRIVATE_TARGETS: 'untrusted-private-value' }),
+    ).not.toThrow(/untrusted-private-value/)
+  })
+  it('reads SSO_PRIVATE_TARGETS on its own, empty by default, and validates it in every role', () => {
+    expect(loadConfig(base).SSO_PRIVATE_TARGETS).toEqual([])
+    expect(loadConfig({ ...base, SSO_PRIVATE_TARGETS: '' }).SSO_PRIVATE_TARGETS).toEqual([])
+    const value = 'keycloak.internal:8443,10.0.0.5:9443,[fd12::5]:443'
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const config = loadConfig({
+        ...base,
+        HOURMERE_ROLE,
+        SSO_PRIVATE_TARGETS: value,
+        SSO_OIDC_ENABLED: 'true',
+        SSO_SAML_ENABLED: 'true',
+      })
+      expect(config.SSO_PRIVATE_TARGETS).toEqual(parseSsoPrivateTargets(value))
+      // Never the webhook allowlist, in either direction.
+      expect(config.WEBHOOK_PRIVATE_TARGETS).toEqual([])
+      expect(
+        loadConfig({ ...base, HOURMERE_ROLE, WEBHOOK_PRIVATE_TARGETS: 'keycloak.internal:8443' })
+          .SSO_PRIVATE_TARGETS,
+      ).toEqual([])
+      for (const SSO_PRIVATE_TARGETS of [
+        'keycloak.internal',
+        'keycloak.internal:8443-8444',
+        '10.0.0.0/8:443',
+        '8.8.8.8:443',
+        '169.254.169.254:80',
+        '[fd00:ec2::254]:80',
+        Array.from({ length: 33 }, (_, i) => `synthetic${i}:8443`).join(','),
+      ])
+        expect(() => loadConfig({ ...base, HOURMERE_ROLE, SSO_PRIVATE_TARGETS })).toThrow(
+          /SSO_PRIVATE_TARGETS/,
+        )
+    }
+    expect(() =>
+      loadConfig({ ...base, SSO_PRIVATE_TARGETS: 'untrusted-private-value' }),
     ).not.toThrow(/untrusted-private-value/)
   })
   it('requires calendar encryption to be independent of authentication and webhook keys', () => {

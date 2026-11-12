@@ -302,7 +302,7 @@ describe('one-time capability privacy source-copy controls', () => {
   })
   it('detects skipping administration request logs', async () => {
     const module = await copy([
-      'if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)',
+      'if (!isOneTimeLinkPath(c.req.path) && !isSlackDestinationPath(c.req.path))\n    return ordinaryRequestLogger(c, next)',
       'if (isOneTimeLinkPath(c.req.path)) return next()',
     ])
     await expect(verifyAdminRequestLogs(module)).rejects.toMatchObject({ name: 'AssertionError' })
@@ -356,13 +356,16 @@ describe('one-time capability privacy source-copy controls', () => {
     await expect(verifyResponse(module, 'domain')).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects reflected HTTP error messages', async () => {
-    const module = await copy(['err.message && !isOneTimeLinkPath(c.req.path)', 'err.message'])
+    const module = await copy([
+      'err.message &&\n          !isOneTimeLinkPath(c.req.path) &&',
+      'err.message &&',
+    ])
     await expect(verifyResponse(module, 'http')).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects reflected validation input', async () => {
     const module = await copy([
-      "if (isOneTimeLinkPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)",
-      "if (false) return c.json({ error: 'invalid_request' }, 400)",
+      "if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))\n    return c.json({ error: 'invalid_request' }, 400)",
+      "if (isSlackDestinationPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)",
     ])
     await expect(verifyResponse(module, 'validate')).rejects.toMatchObject({
       name: 'AssertionError',

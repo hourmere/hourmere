@@ -70,6 +70,9 @@ function scratchRepo() {
     execFileSync('git', args, {
       cwd: dir,
       input,
+      // A child reading a piped stdin can miss end of input on macOS; fail instead of hanging.
+      timeout: 30_000,
+      killSignal: 'SIGKILL',
       encoding: 'utf8',
       env: {
         ...process.env,

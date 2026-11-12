@@ -83,7 +83,7 @@ function compile<T>(
     ...Object.values(bindings),
   ) as T
 }
-function factory(change?: Change) {
+function factory(change?: Change, routeChange?: Change) {
   const create = vi.fn(async () => ({ ...link, token: TOKEN }))
   const list = vi.fn(async () => ({
     data: [{ ...link, token: TOKEN, token_hash: HASH, url: `${PUBLIC_URL}/book/${TOKEN}` }],
@@ -103,6 +103,16 @@ function factory(change?: Change) {
       z,
       ...scheduling,
       ...schemas,
+      ...(routeChange
+        ? {
+            CreateOneTimeLink: compile<typeof schemas.CreateOneTimeLink>(
+              'apps/server/src/routes/one-time-links.ts',
+              'CreateOneTimeLink',
+              { z, ...scheduling, CROSS_ORIGIN_WRITE: 'cross_origin_write' },
+              routeChange,
+            ),
+          }
+        : {}),
       defineTool,
       createOneTimeBookingLink: create,
       listOneTimeBookingLinks: list,
@@ -230,13 +240,23 @@ function verifyStrictInputs(change?: Change) {
 }
 function verifyListBounds(change?: Change) {
   const tool = factory(change).tools[1] as Tool
-  for (const limit of [0, 101, 1.5, '2'])
+  for (const limit of [
+    scheduling.ONE_TIME_LINK_PAGE_MIN - 1,
+    scheduling.ONE_TIME_LINK_PAGE_MAX + 1,
+    1.5,
+    '2',
+  ])
     expect(tool.input.safeParse({ eventTypeId: link.eventTypeId, limit }).success).toBe(false)
-  expect(tool.input.safeParse({ eventTypeId: link.eventTypeId, limit: 100 }).success).toBe(true)
+  expect(
+    tool.input.safeParse({
+      eventTypeId: link.eventTypeId,
+      limit: scheduling.ONE_TIME_LINK_PAGE_MAX,
+    }).success,
+  ).toBe(true)
   expect(z.toJSONSchema(tool.input, { io: 'input' }).properties?.limit).toMatchObject({
     type: 'integer',
-    minimum: 1,
-    maximum: 100,
+    minimum: scheduling.ONE_TIME_LINK_PAGE_MIN,
+    maximum: scheduling.ONE_TIME_LINK_PAGE_MAX,
   })
 }
 async function verifyDiscovery(register = registerTools) {
@@ -320,6 +340,29 @@ describe('one-time link MCP adapters and security mutations', () => {
     ])
       expect(create.input.safeParse(input).success).toBe(false)
   })
+  function verifyPrefillDiscovery(routeChange?: Change) {
+    const prepared = prepareTools(factory(undefined, routeChange).tools)[0]
+    const input = prepared?.inputSchema['~standard'].jsonSchema.input({ target: 'draft-2020-12' })
+    expect(input).toMatchObject({
+      properties: {
+        prefill: {
+          properties: {
+            name: { maxLength: scheduling.ONE_TIME_LINK_PREFILL_NAME_MAX },
+            email: { maxLength: scheduling.ONE_TIME_LINK_PREFILL_EMAIL_MAX },
+          },
+        },
+      },
+    })
+  }
+  it('advertises service prefill maxima in MCP discovery', () => verifyPrefillDiscovery())
+  it.each(['NAME', 'EMAIL'])(
+    'kills removal of scoped %s prefill metadata from MCP discovery',
+    (field) => {
+      expect(() =>
+        verifyPrefillDiscovery([`.meta({ maxLength: ONE_TIME_LINK_PREFILL_${field}_MAX })`, '']),
+      ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    },
+  )
   it('exercises unchanged source copies', async () => {
     await verifyForwarding()
     await verifyOAuth(framework<typeof runTool>('runTool'))
@@ -393,8 +436,8 @@ describe('one-time link MCP adapters and security mutations', () => {
     [
       'list',
       [
-        'limit: z.number().int().min(1).max(100).optional(),\n      }).strict()',
-        'limit: z.number().int().min(1).max(100).optional(),\n      }).strip()',
+        'limit: z.number().int().min(ONE_TIME_LINK_PAGE_MIN).max(ONE_TIME_LINK_PAGE_MAX).optional(),\n      }).strict()',
+        'limit: z.number().int().min(ONE_TIME_LINK_PAGE_MIN).max(ONE_TIME_LINK_PAGE_MAX).optional(),\n      }).strip()',
       ],
     ],
     [
@@ -411,20 +454,19 @@ describe('one-time link MCP adapters and security mutations', () => {
   })
   it('kills removal of bounded list pages', () => {
     expect(() =>
-      verifyListBounds(['.int().min(1).max(100).optional()', '.int().min(1).optional()']),
+      verifyListBounds([
+        '.int().min(ONE_TIME_LINK_PAGE_MIN).max(ONE_TIME_LINK_PAGE_MAX).optional()',
+        '.int().min(1).optional()',
+      ]),
     ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
   it.each([
     [
       'discovery',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation
-      ['if (!apiKeyAllows(caller, `mcp:${tool.name}`)) continue', 'if (false) continue'],
+      ['|| !apiKeyAllows(caller, `mcp:${tool.name}`)) continue', '|| false) continue'],
     ],
-    [
-      'hidden known dispatch',
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation
-      ['if (known && !apiKeyAllows(caller, `mcp:${known.tool.name}`))', 'if (false)'],
-    ],
+    ['hidden known dispatch', ['if (known && !visible.has(known.tool.name))', 'if (false)']],
   ] as const)('kills bypassing scope %s filtering', async (_name, change) => {
     await expect(
       verifyDiscovery(framework<typeof registerTools>('registerTools', change)),
@@ -518,6 +560,37 @@ describe.skipIf(!bootstrap)('one-time link MCP and CLI with PostgreSQL', () => {
     )
     return message.result as Awaited<ReturnType<typeof runTool>>
   }
+  it('accepts service maxima and rejects maximum plus one for pages and prefill', async () => {
+    for (const extra of [0, 1]) {
+      const result = await rpc('list_one_time_links', {
+        eventTypeId,
+        limit: scheduling.ONE_TIME_LINK_PAGE_MAX + extra,
+      })
+      expect(Boolean(result.isError)).toBe(extra === 1)
+    }
+    for (const [field, maximum] of [
+      ['name', scheduling.ONE_TIME_LINK_PREFILL_NAME_MAX],
+      ['email', scheduling.ONE_TIME_LINK_PREFILL_EMAIL_MAX],
+    ] as const) {
+      for (const extra of [0, 1]) {
+        const value =
+          field === 'name'
+            ? 'n'.repeat(maximum + extra)
+            : `${'e'.repeat(maximum + extra - '@example.test'.length)}@example.test`
+        const result = await rpc('create_one_time_link', {
+          eventTypeId,
+          idempotencyKey: randomUUID(),
+          prefill: { [field]: value },
+        })
+        expect(Boolean(result.isError)).toBe(extra === 1)
+        if (extra === 0) {
+          const created = result.structuredContent as scheduling.OneTimeBookingLink
+          await rpc('revoke_one_time_link', { eventTypeId, id: created.id })
+          await db.deleteFrom('one_time_booking_links').where('id', '=', created.id).execute()
+        }
+      }
+    }
+  })
   it('creates once, lists metadata without capabilities, and revokes idempotently', async () => {
     const input = {
       eventTypeId,

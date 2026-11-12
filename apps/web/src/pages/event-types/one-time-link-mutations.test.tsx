@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen } from '@testing-library/react'
 import * as react from 'react'
@@ -10,6 +9,7 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { Field } from '../../components/forms.tsx'
 import { spaceCjkBoundaries } from '../../i18n/formatting.ts'
 import type { translate } from '../../i18n/translate.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { type oneTimeLinkError, oneTimeLinkMetadata } from './OneTimeLinks.tsx'
@@ -37,15 +37,12 @@ function UnsafeConfirmAction({
 
 /** Mutate only an in-memory copy of production code, then assert its rendered outcome. */
 function copy<T>(code: string, name: string, dependencies: Record<string, unknown> = {}): T {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: code.replace(/^export /gm, ''), encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(name, code.replace(/^export /gm, ''), {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   return new Function('reactRuntime', ...Object.keys(dependencies), `${compiled}; return ${name}`)(
     react,
     ...Object.values(dependencies),

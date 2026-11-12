@@ -28,6 +28,35 @@ updates:
       - dependency-name: typescript
         update-types: [version-update:semver-major]
 
+  # Standalone packages outside the root workspaces, each with its own package-lock.json.
+  - package-ecosystem: npm
+    directory: /tools/n8n-nodes-hourmere
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # The packaging test and README name the exact n8n-workflow development pin, so a bot
+      # bump would fail n8n-compatibility and hold back its whole group. Bump it by hand.
+      - dependency-name: n8n-workflow
+      # As at the root, TypeScript majors are upgraded by hand: the n8n lint rules run on
+      # TypeScript's JavaScript API.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /tools/zapier-hourmere
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
   # Actions in .github/workflows, pinned to commit SHAs with the version in a comment.
   - package-ecosystem: github-actions
     directory: /

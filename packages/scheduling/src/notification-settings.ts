@@ -24,6 +24,15 @@ export interface NotificationSnapshot {
   notifications: NotificationSettings
 }
 
+/**
+ * No reminder when it would go out this soon or sooner after the booking or reschedule. Shared by
+ * the default 24-hour reminder, configured reminders and before-start workflow timers, and pinned
+ * by the public docs test. It lives here, beside the reminder rules, so the pure workflow timer
+ * rules can share it without importing the notifications or jobs packages. They import the
+ * scheduling root, which still loads the mail package (through the auth package).
+ */
+export const REMINDER_MIN_GAP = { hours: 1 } as const
+
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   reminders: [
     {

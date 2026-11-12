@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { FOLLOW_UP_HOST_NOTE_MAX_LENGTH } from '@hourmere/core/follow-up-note'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { DomainError } from './errors.ts'
 import {
   createNotificationSnapshot,
@@ -33,12 +34,13 @@ function sourceCopy(replacement?: Replacement): SettingsModule {
     source = source.replace(...replacement)
   }
   source = stripTypeScriptTypes(source.replace(/^import .*\n/gm, '')).replace(/\bexport /g, '')
-  return new Function(
+  const copy = new Function(
     'z',
     'DomainError',
     'FOLLOW_UP_HOST_NOTE_MAX_LENGTH',
     `${source}; return { validateNotifications, createNotificationSnapshot, notificationSnapshot, isLegacyDefault, parseNotifications }`,
   )(z, DomainError, FOLLOW_UP_HOST_NOTE_MAX_LENGTH) as SettingsModule
+  return guardCopy(copy)
 }
 
 function rule(id = 'rule-1', offsetMinutes = 60) {
@@ -362,9 +364,9 @@ describe('notification settings contract', () => {
         'throw invalid(path, `must not contain control characters other than LF: ${followUp.hostNote}`)',
       ],
     ],
-  ])('detects loss of %s with a source-copy assertion failure', (_, replacement) => {
+  ])('detects loss of %s with a source-copy assertion failure', async (_, replacement) => {
     const copy = sourceCopy(replacement)
-    expect(() => verifyDetails(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    await expectKilled(copy, verifyDetails)
   })
 
   it('excludes follow-up notes from reminder rules structurally at the type level', () => {
@@ -391,11 +393,12 @@ describe('notification settings contract', () => {
       'const notifications = parseNotifications(value)',
       'const notifications = validateNotifications(value)',
     ],
-  ])('detects revalidating historical notes on read with a real assertion failure', (from, to) => {
-    expect(() => verifyStoredHostNotes(sourceCopy([from, to]))).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
-  })
+  ])(
+    'detects revalidating historical notes on read with a real assertion failure',
+    async (from, to) => {
+      await expectKilled(sourceCopy([from, to]), verifyStoredHostNotes)
+    },
+  )
 
   it('stores optional plain-text follow-up notes with bounded well-formed Unicode, rejects notes on reminders', () => {
     verifyHostNotes({
@@ -430,10 +433,8 @@ describe('notification settings contract', () => {
     ['operator host-note switch', ['options.followUpHostNotesEnabled === false', 'false']],
     ['follow-up-only host note', ['reminders: z.array(rule)', 'reminders: z.array(followUpRule)']],
     ['strict follow-up fields', ['const rule = z.strictObject(', 'const rule = z.object(']],
-  ])('detects broken %s using host note assertions', (_, replacement) => {
-    expect(() => verifyHostNotes(sourceCopy(replacement))).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+  ])('detects broken %s using host note assertions', async (_, replacement) => {
+    await expectKilled(sourceCopy(replacement), verifyHostNotes)
   })
   it.each(malformed)('rejects %s as a shape error', (_, value) => {
     expect(() => validateNotifications(value)).toThrow(z.ZodError)
@@ -509,12 +510,12 @@ describe('notification settings contract', () => {
       'strict settings fields',
       ['NotificationSettingsSchema = z.strictObject(', 'NotificationSettingsSchema = z.object('],
     ],
-  ])('detects broken %s with a real assertion failure', (_, replacement) => {
+  ])('detects broken %s with a real assertion failure', async (_, replacement) => {
     const copy = sourceCopy(replacement)
-    expect(() => {
+    await expectKilled(copy, (module) => {
       for (const [label, value] of malformed)
-        expect(() => copy.validateNotifications(value), label).toThrow(z.ZodError)
-    }).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+        expect(() => module.validateNotifications(value), label).toThrow(z.ZodError)
+    })
   })
 
   it.each<[string, Replacement]>([
@@ -528,9 +529,9 @@ describe('notification settings contract', () => {
     ['maximum offsets', ['item.offsetMinutes > 43200', 'false']],
     ['per-category offset uniqueness', ['offsets.has(item.offsetMinutes)', 'false']],
     ['nonempty recipient selection', ['!Object.values(item.recipients).some(Boolean)', 'false']],
-  ])('detects removal of %s with a real assertion failure', (_, replacement) => {
+  ])('detects removal of %s with a real assertion failure', async (_, replacement) => {
     const copy = sourceCopy(replacement)
-    expect(() => verifySemantic(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    await expectKilled(copy, verifySemantic)
   })
 
   it.each<[string, Replacement]>([
@@ -542,9 +543,9 @@ describe('notification settings contract', () => {
       'follow-up canonical ordering',
       ['a.offsetMinutes - b.offsetMinutes', 'b.offsetMinutes - a.offsetMinutes'],
     ],
-  ])('detects broken %s with a real assertion failure', (_, replacement) => {
+  ])('detects broken %s with a real assertion failure', async (_, replacement) => {
     const copy = sourceCopy(replacement)
-    expect(() => verifyCanonical(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    await expectKilled(copy, verifyCanonical)
   })
 
   it.each<[string, Replacement]>([
@@ -559,8 +560,8 @@ describe('notification settings contract', () => {
         'if (value === null) return createNotificationSnapshot({ reminders: [], followUps: [] })',
       ],
     ],
-  ])('detects broken %s with a real assertion failure', (_, replacement) => {
+  ])('detects broken %s with a real assertion failure', async (_, replacement) => {
     const copy = sourceCopy(replacement)
-    expect(() => verifyModes(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    await expectKilled(copy, verifyModes)
   })
 })

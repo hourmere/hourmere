@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
-    "./test-database-registry": "./src/test-database-registry.ts"
+    "./test-database-registry": "./src/test-database-registry.ts",
+    "./audit": "./src/audit.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

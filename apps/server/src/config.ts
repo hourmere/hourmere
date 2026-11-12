@@ -2,12 +2,14 @@ import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
 import { calendarEncryptionKey } from '@hourmere/calendars'
 import { conferenceEncryptionKey } from '@hourmere/conferences'
 import { embedOrigin } from '@hourmere/core/embed'
+import { parseSsoPrivateTargets } from '@hourmere/outbound/sso-private-targets'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
 import { DEFAULT_HSTS_MAX_AGE } from './security-headers.ts'
+import { resolveSmsSecretFiles, smsConfigSchema, validateSmsConfig } from './sms-config.ts'
 
 // docker compose passes unset optional variables as empty strings.
 const optional = <T extends z.ZodType>(schema: T) =>
@@ -71,6 +73,7 @@ const policyUrl = (name: string) =>
 
 const schema = z
   .object({
+    ...smsConfigSchema.shape,
     DATABASE_URL: z
       .string()
       .min(1, 'DATABASE_URL is required')
@@ -109,6 +112,20 @@ const schema = z
         return z.NEVER
       }
     }),
+    // Reserved for SSO, which is not available yet: parsed and validated at startup, read by
+    // nothing else, so it routes nothing. Never the webhook allowlist, never team-editable.
+    SSO_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
+      try {
+        return parseSsoPrivateTargets(value)
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'SSO_PRIVATE_TARGETS must contain at most 32 exact host:port entries (one port each, no CIDR or ranges); IPv6 requires brackets; an IP must be private or loopback, never metadata or link-local',
+        })
+        return z.NEVER
+      }
+    }),
     WEBHOOK_ENCRYPTION_KEY: optional(
       z.string().refine(
         (value) => {
@@ -117,6 +134,9 @@ const schema = z
         },
         { error: 'WEBHOOK_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
       ),
+    ),
+    SCIM_PROVISIONING_ENABLED: optional(z.enum(['true', 'false'])).transform(
+      (value) => value === 'true',
     ),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.preprocess(
@@ -330,6 +350,26 @@ const schema = z
     ).transform((v) => v ?? 'all'),
   })
   .superRefine((c, ctx) => {
+    validateSmsConfig(c, ctx)
+    if (
+      c.SMS_HASH_KEY &&
+      [
+        c.BETTER_AUTH_SECRET,
+        c.CALENDAR_ENCRYPTION_KEY,
+        c.CONFERENCE_ENCRYPTION_KEY,
+        c.WEBHOOK_ENCRYPTION_KEY,
+      ].some(
+        (key) =>
+          key === c.SMS_HASH_KEY ||
+          (key && Buffer.from(c.SMS_HASH_KEY ?? '', 'base64').equals(Buffer.from(key))),
+      )
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SMS_HASH_KEY'],
+        message:
+          'Use an independent SMS_HASH_KEY, separate from authentication and encryption keys',
+      })
     if (c.PORT === 0 && !c.PUBLIC_URL)
       ctx.addIssue({
         code: 'custom',
@@ -550,7 +590,7 @@ function oauthClient(clientId?: string, clientSecret?: string): OAuthClient | un
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const parsed = schema.safeParse(env)
+  const parsed = schema.safeParse(resolveSmsSecretFiles(env))
   if (!parsed.success) {
     throw new Error(`invalid configuration: ${z.prettifyError(parsed.error)}`)
   }

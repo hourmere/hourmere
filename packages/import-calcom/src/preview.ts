@@ -10,6 +10,7 @@ import {
   readTargetIdentities,
   readTargetState,
   TargetRefusal,
+  type TargetRow,
   type TargetState,
   targetUsers,
 } from './target.ts'
@@ -147,12 +148,37 @@ export async function registerImportSource(
   )
   return result.rows[0]?.id as string
 }
+// A tiny analyzed auth."user" beside never-analyzed profile/organization tables can price
+// the sub-millisecond identity read past every JIT threshold, so it would compile on each
+// call. JIT never changes a result; SET LOCAL keeps the pooled session's own setting.
+async function readIdentitiesWithoutJit(
+  pool: pg.Pool,
+  authorization: ImportAuthorization,
+): Promise<TargetRow[]> {
+  const client = await pool.connect()
+  let discard = false
+  try {
+    await client.query('BEGIN READ ONLY')
+    await client.query('SET LOCAL jit = off')
+    const identities = await readTargetIdentities(client, authorization)
+    await client.query('COMMIT')
+    return identities
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {
+      discard = true
+    })
+    throw error
+  } finally {
+    // A session whose rollback failed may still be inside the transaction; never pool it.
+    client.release(discard)
+  }
+}
 export async function extractForPreview(
   pool: pg.Pool,
   input: SourceInput,
   cutoff: string,
 ): Promise<SourceSnapshot> {
-  const identities = await readTargetIdentities(pool, input.authorization)
+  const identities = await readIdentitiesWithoutJit(pool, input.authorization)
   return extractSource({
     connectionString: input.connectionString,
     sourceVersion: input.sourceVersion,
@@ -168,6 +194,8 @@ export async function previewImport(pool: pg.Pool, input: SourceInput): Promise<
   const client = await pool.connect()
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
+    // The target state includes the same identity read as extraction above.
+    await client.query('SET LOCAL jit = off')
     const state = await readTargetState(client, input.sourceId, input.authorization, cutoff)
     const { connectionString: _connectionString, ...options } = input
     const preview = buildPreview(snapshot, state, options)
@@ -270,7 +298,16 @@ export function buildPreview(
       sourceFingerprint,
       kind,
       id,
-      payload,
+      // Preserve hashes written before optional weekly/monthly proposals existed.
+      payload:
+        kind === 'event_type'
+          ? Object.fromEntries(
+              Object.entries(payload as Record<string, unknown>).filter(
+                ([key, value]) =>
+                  !(['maxBookingsPerWeek', 'maxBookingsPerMonth'].includes(key) && value == null),
+              ),
+            )
+          : payload,
       decisions: options.bookingDecisions,
       resolutions: options.resolutions ?? {},
     })
@@ -420,6 +457,18 @@ export function buildPreview(
     const user = plan.users.find((u) => u.sourceId === b.userId)
     if (!user || b.status !== 'accepted' || !validInstant(b.startTime) || !validInstant(b.endTime))
       continue
+    for (const slot of state.groupOccupancy) {
+      if (
+        slot.user_id === user.targetUserId &&
+        Date.parse(b.startTime as string) < Date.parse(slot.end_at) &&
+        Date.parse(b.endTime as string) > Date.parse(slot.start_at)
+      )
+        impacts.push({
+          code: 'target_overlap',
+          sourceBookingId: b.id as number,
+          relatedId: slot.group_slot_id,
+        })
+    }
     for (const t of state.bookings) {
       if (
         t.status === 'cancelled' ||
@@ -464,6 +513,16 @@ export function buildPreview(
     const start = Date.parse(b.start),
       end = Date.parse(b.end)
     const related = [
+      ...state.groupOccupancy
+        .filter((slot) => slot.user_id === b.targetUserId)
+        .map((slot) => ({
+          id: slot.group_slot_id,
+          start: slot.start_at,
+          end: slot.end_at,
+          before: slot.buffer_before_minutes,
+          after: slot.buffer_after_minutes,
+          sameEvent: false,
+        })),
       ...state.bookings
         .filter(
           (t) =>
@@ -526,6 +585,26 @@ export function buildPreview(
       count: daily,
       ...(event.maxBookingsPerDay != null ? { limit: event.maxBookingsPerDay } : {}),
     })
+    const localDate = (value: string) =>
+      Temporal.Instant.from(value).toZonedDateTimeISO(zone).toPlainDate()
+    const week = (value: string) => {
+      const date = localDate(value)
+      return date.subtract({ days: date.dayOfWeek - 1 }).toString()
+    }
+    const month = (value: string) => localDate(value).with({ day: 1 }).toString()
+    for (const [period, key, limit] of [
+      ['weekly', week, event.maxBookingsPerWeek],
+      ['monthly', month, event.maxBookingsPerMonth],
+    ] as const) {
+      const count = 1 + related.filter((r) => r.sameEvent && key(r.start) === key(b.start)).length
+      impacts.push({
+        code: limit != null && count > limit ? `${period}_limit_exceeded` : `${period}_count`,
+        sourceBookingId: b.sourceId,
+        relatedId: b.eventSourceId,
+        count,
+        ...(limit != null ? { limit } : {}),
+      })
+    }
     impacts.push({
       code: 'historical_time_preserved_review_schedule',
       sourceBookingId: b.sourceId,
