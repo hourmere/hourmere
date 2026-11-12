@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { relative } from 'node:path'
 import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -13,6 +14,7 @@ import {
   ScimTokenError,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
+import { withAuditRequest } from '@hourmere/db/audit'
 import {
   DomainError,
   type DomainErrorKind,
@@ -364,6 +366,8 @@ export function createApp({
   waitlist,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
+  // Generate correlation IDs locally; caller headers may contain private or forged values.
+  app.use('*', async (_c, next) => withAuditRequest(randomUUID(), next))
   const apiNotFound = (c: Context) => c.json({ error: 'not_found' }, 404)
   const unclassifiedScopeGuard = installRestApiKeyScopes(app, resolveCaller, apiNotFound)
   // Logs one line with control characters escaped: error text can carry request input
@@ -590,7 +594,7 @@ export function createApp({
 
   for (const register of routes) register({ app, caller })
   mcp?.mount({ app, resolveCaller, publicUrl })
-  mountScim(app, scim, trustedProxies)
+  mountScim(app, scim, trustedProxies, publicUrl)
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
   // /api/health is operational and stays unversioned. doc31 renders schemas the 3.1 way:

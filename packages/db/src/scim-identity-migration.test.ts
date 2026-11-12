@@ -457,8 +457,10 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
   // The derivation is total: with whole-line comments removed, every LOCK keyword must
   // belong to a one-line `LOCK TABLE … IN … MODE;` statement. A lock in any other form
   // PostgreSQL accepts (without TABLE, in the default mode, across lines, in other case,
-  // with a trailing comment) fails here instead of escaping the per-table cases.
-  const code = (sql: string) => sql.replace(/^[ \t]*--[^\n]*$/gm, '')
+  // with a trailing comment) fails here instead of escaping the per-table cases. As in
+  // PostgreSQL, a `--` comment ends at a line feed or a carriage return, so text after a
+  // lone carriage return is code.
+  const code = (sql: string) => sql.replace(/^[ \t]*--[^\n\r]*/gm, '')
   function lockedTables(sql: string): string[] {
     const statements = [...code(sql).matchAll(/^LOCK TABLE (.+) IN [A-Z ]+ MODE;$/gm)]
     expect(
@@ -538,6 +540,10 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
   it.each([
     { form: 'without TABLE', lock: 'LOCK auth.session IN SHARE MODE;\n' },
     { form: 'across two lines', lock: 'LOCK TABLE auth.session\n  IN SHARE MODE;\n' },
+    {
+      form: 'after a comment ended by a lone carriage return',
+      lock: '-- ended by a carriage return\rLOCK auth.session IN SHARE MODE;\n',
+    },
   ])(
     'lock-form control: a lock $form before the bound fails the derivation and the bound check',
     async ({ lock }) => {

@@ -8,6 +8,7 @@ import { z } from '@hono/zod-openapi'
 import * as auth from '@hourmere/auth'
 import * as calendars from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import * as scheduling from '@hourmere/scheduling'
 import { describe, expect, it, vi } from 'vitest'
 import { hasUnsafeJsonText } from '../app.ts'
@@ -87,6 +88,7 @@ function factory(change?: Change, service = vi.fn(async () => booked)) {
     'apps/server/src/mcp/bookings.ts',
     'bookingTools',
     {
+      auditActor,
       z,
       ...calendars,
       ...scheduling,
@@ -144,6 +146,10 @@ async function verifyForwarding(change?: Change) {
     apiKeyId: caller.apiKeyId,
     oauthConsentId: null,
     actorUserId: caller.user.id,
+    audit: {
+      actor: { type: 'api_key', id: caller.apiKeyId },
+      credential: { type: 'api_key', id: caller.apiKeyId, scope: 'bookings' },
+    },
   })
   expect(JSON.stringify(result).includes(TOKEN)).toBe(false)
 }

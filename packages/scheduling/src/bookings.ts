@@ -2,6 +2,7 @@
 // listed, rescheduled and cancelled by hosts. Availability is always recomputed inside the transaction
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
+import { parsePersistedApiKeyMetadata } from '@hourmere/auth'
 import {
   type Database,
   type Db,
@@ -9,6 +10,7 @@ import {
   isImportedBooking,
   type Json,
 } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql, type Transaction } from 'kysely'
 import { z } from 'zod'
 import {
@@ -1098,6 +1100,10 @@ async function cancelLocked(
       occurred_at: now.toString(),
     })
     .execute()
+  await auditBooking(db, row.organization_id, row.id, 'booking.cancelled', {
+    ...origin,
+    actorUserId: origin.actorUserId ?? actorUserId,
+  })
   await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
@@ -1156,6 +1162,8 @@ export interface CreateBookingInput {
  * The booking page is web without a key; agents pass api or mcp with the key they used.
  */
 export interface BookingOrigin {
+  audit?: ReturnType<typeof auditActor> | undefined
+  requestId?: string | undefined
   source: Exclude<BookingSource, 'import'>
   /** The caller's API key. Idempotency keys are scoped to it; null shares one scope. */
   apiKeyId: string | null
@@ -1536,6 +1544,10 @@ async function publicBooking(
           now: ctx.now,
         })
       }
+      await auditBooking(trx, current.organizationId, id, 'booking.created', {
+        ...origin,
+        requestId: origin.requestId ?? ctx.requestId,
+      })
       await prepareChosenBookingConference(
         ctx,
         trx,
@@ -1850,6 +1862,10 @@ async function rescheduleLocked(
   await skipScheduledMessages(trx, old.id, 'booking_replaced')
   // In this transaction: the new booking's emails. The old booking's queued ones find it
   // cancelled and replaced when they run, and send nothing.
+  await auditBooking(trx, old.organization_id, id, 'booking.rescheduled', {
+    ...origin,
+    requestId: origin.requestId ?? ctx.requestId,
+  })
   await prepareBookingConference(ctx, trx, id)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
   return { booking: await loadBooking(trx, id), manageToken }
@@ -2126,6 +2142,10 @@ async function rescheduleGroupLocked(
   })
   await skipScheduledMessages(trx, old.id, 'booking_replaced')
   await cancelBookingConference(trx, old.id, now)
+  await auditBooking(trx, old.organization_id, result.id, 'booking.rescheduled', {
+    ...origin,
+    requestId: origin.requestId ?? ctx.requestId,
+  })
   await prepareBookingConference(ctx, trx, result.id)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: result.id, start }, now)
   return { booking: await loadBooking(trx, result.id), manageToken: result.manageToken }
@@ -2246,11 +2266,19 @@ export async function rescheduleHostBooking(
       trx,
       old,
       { start, durationMinutes, idempotencyKey, expectedGroupSlotId },
-      origin ?? {
-        source:
-          ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
-        apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
-        oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      {
+        ...(origin ?? {
+          source:
+            ctx.principal.kind === 'api_key'
+              ? 'api'
+              : ctx.principal.kind === 'oauth'
+                ? 'mcp'
+                : 'web',
+          apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+          oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+        }),
+        audit: auditActor(ctx.principal),
+        requestId: ctx.requestId,
       },
       true,
       {
@@ -2303,11 +2331,19 @@ export async function cancelHostBooking(
       ctx.now(),
       cancelReason,
       ctx.notify,
-      origin ?? {
-        source:
-          ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
-        apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
-        oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      {
+        ...(origin ?? {
+          source:
+            ctx.principal.kind === 'api_key'
+              ? 'api'
+              : ctx.principal.kind === 'oauth'
+                ? 'mcp'
+                : 'web',
+          apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+          oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+        }),
+        audit: auditActor(ctx.principal),
+        requestId: ctx.requestId,
       },
       ctx.principal.user.id,
     )
@@ -2326,7 +2362,11 @@ export async function cancelTeamBookingInTransaction(
   actor: { userId: string; organizationId: string },
   id: string,
   now: () => Temporal.Instant,
-  options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
+  options: {
+    reason?: string | undefined
+    notify?: BookingNotifier | undefined
+    sessionId?: string | undefined
+  } = {},
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
   if (!UUID.test(id)) throw bookingNotFound()
@@ -2345,9 +2385,119 @@ export async function cancelTeamBookingInTransaction(
     now(),
     normalizeReason(options.reason),
     options.notify,
-    BOOKING_PAGE,
+    {
+      ...BOOKING_PAGE,
+      audit: {
+        actor: { type: 'user', id: actor.userId },
+        credential: { type: 'session', ...(options.sessionId ? { id: options.sessionId } : {}) },
+      },
+    },
     actor.userId,
   )
+}
+
+/** Stored UUIDs are lowercase; metadata and requests may use any UUID spelling. */
+const sameUuid = (left: unknown, right: unknown) =>
+  typeof left === 'string' &&
+  typeof right === 'string' &&
+  left.toLowerCase() === right.toLowerCase()
+
+async function auditBooking(
+  trx: Db,
+  organizationId: string,
+  targetId: string,
+  action:
+    | 'booking.created'
+    | 'booking.rescheduled'
+    | 'booking.cancelled'
+    | 'booking.reschedule_requested',
+  origin: BookingOrigin,
+) {
+  const auditKeyId =
+    origin.audit?.credential.type === 'api_key' ? origin.audit.credential.id : origin.apiKeyId
+  const key = auditKeyId
+    ? await trx
+        .selectFrom('auth.apikey')
+        .select(['metadata', 'referenceId'])
+        .where('id', '=', auditKeyId)
+        .executeTakeFirst()
+    : undefined
+  const auditGrantId =
+    origin.audit?.credential.type === 'oauth'
+      ? origin.audit.credential.grantId
+      : origin.audit
+        ? undefined
+        : origin.oauthConsentId
+  const grant = auditGrantId
+    ? await trx
+        .selectFrom('mcp_oauth_grants')
+        .select(['client_id', 'user_id', 'organization_id'])
+        .where('id', '=', auditGrantId)
+        .executeTakeFirst()
+    : undefined
+  if (!origin.audit && origin.oauthConsentId && !grant)
+    throw new Error('Missing OAuth audit identity')
+  const keyMetadata = parsePersistedApiKeyMetadata(key?.metadata ?? null)
+  const keyOrganizationId = auditKeyId
+    ? (keyMetadata?.organizationId ??
+      (key
+        ? (
+            await trx
+              .selectFrom('personal_organizations')
+              .select('organization_id')
+              .where('user_id', '=', key.referenceId)
+              .executeTakeFirst()
+          )?.organization_id
+        : undefined))
+    : undefined
+  // A caller authorized for another organization (or whose credential can no longer be
+  // resolved to this one) is recorded without its key, user, client or grant identifiers.
+  const identity =
+    auditKeyId && !sameUuid(keyOrganizationId, organizationId)
+      ? { actor: { type: 'external_api_key' as const }, credential: { type: 'none' as const } }
+      : auditGrantId && !sameUuid(grant?.organization_id, organizationId)
+        ? {
+            actor: { type: 'external_oauth_client' as const },
+            credential: { type: 'none' as const },
+          }
+        : (origin.audit ??
+          (origin.apiKeyId
+            ? {
+                actor: { type: 'api_key' as const, id: origin.apiKeyId },
+                credential: {
+                  type: 'api_key' as const,
+                  id: origin.apiKeyId,
+                  ...(parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope
+                    ? { scope: parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope }
+                    : {}),
+                },
+              }
+            : origin.oauthConsentId
+              ? {
+                  actor: {
+                    type: 'user' as const,
+                    id: grant?.user_id as string,
+                  },
+                  credential: {
+                    type: 'oauth' as const,
+                    grantId: origin.oauthConsentId,
+                    ...(grant ? { clientId: grant.client_id } : {}),
+                  },
+                }
+              : origin.actorUserId
+                ? {
+                    actor: { type: 'user' as const, id: origin.actorUserId },
+                    credential: { type: 'session' as const },
+                  }
+                : { actor: { type: 'anonymous' as const }, credential: { type: 'none' as const } }))
+  await writeAuditEvent(trx, {
+    organizationId,
+    ...identity,
+    action,
+    targetType: 'booking',
+    targetId,
+    requestId: origin.requestId,
+  })
 }
 
 /** Requests expire after 48 hours, or at the original start, whichever comes first. */
@@ -2489,6 +2639,14 @@ export async function requestReschedule(
       })
       .returning('id')
       .executeTakeFirstOrThrow()
+    await auditBooking(trx, row.organization_id, row.id, 'booking.reschedule_requested', {
+      source:
+        ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
+      apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+      oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      audit: auditActor(ctx.principal),
+      requestId: ctx.requestId,
+    })
     await ctx.notify?.(
       trx,
       { type: 'reschedule_requested', bookingId: id, requestId: request.id },
