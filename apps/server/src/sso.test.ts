@@ -248,6 +248,8 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', ()
         SSO_SAML_ENABLED: 'true',
         ssoOidcEnabled: 'true',
         ssoSamlEnabled: 'true',
+        // A populated private allowlist routes nothing and turns nothing on.
+        SSO_PRIVATE_TARGETS: 'keycloak.internal:8443',
       })
       try {
         const origin = `http://127.0.0.1:${running.port}`
@@ -293,6 +295,7 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO hard-off startup', ()
       SSO_SAML_ENABLED: 'true',
       ssoOidcEnabled: 'true',
       ssoSamlEnabled: 'true',
+      SSO_PRIVATE_TARGETS: 'keycloak.internal:8443',
     })
     const child = spawn(process.execPath, [fileURLToPath(new URL('./index.ts', import.meta.url))], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)),

@@ -293,6 +293,25 @@ other members: these return `booking_not_found`, just as missing bookings do. No
 team administration requires a browser session. Reads are available before the start
 and after cancellation.
 
+## Organization branding
+
+```sh
+hourmere branding get
+printf '%s' '{"brandPrimaryColor":"#123456"}' | hourmere branding set --input -
+hourmere branding upload --file logo.png --content-type image/png
+```
+
+Reads require `read` or `full` API key scope; writes require `full`. The personal owner
+or team owner/admin must own the key. `branding set` accepts an uploaded `brandLogo`
+SHA-256 reference and/or `brandPrimaryColor` (`#RRGGBB`); omission preserves a field,
+and `null` clears it. Black or white button text is chosen for readable contrast.
+
+`branding upload` sends raw bytes over REST, immediately attaches the image and prints
+the saved settings. PNG, JPEG and WebP are accepted, at most 512 KiB and 2048 pixels per
+side; images are decoded and re-encoded as PNG. SVG and animation are rejected. The
+server enforces all limits. These settings are stored only; public booking pages and
+emails do not yet apply the theme.
+
 ## License
 
 GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
@@ -317,21 +336,3 @@ team owner/admin permissions. The MCP call returns a small pointer; the CLI stre
 its same-instance authenticated REST download without buffering the CSV in memory.
 Files contain attendee personal data; store and share them privately. See
 [CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
-## Organization branding
-
-```sh
-hourmere branding get
-printf '%s' '{"brandPrimaryColor":"#123456"}' | hourmere branding set --input -
-hourmere branding upload --file logo.png --content-type image/png
-```
-
-Reads require `read` or `full` API key scope; writes require `full`. The personal owner
-or team owner/admin must own the key. `branding set` accepts an uploaded `brandLogo`
-SHA-256 reference and/or `brandPrimaryColor` (`#RRGGBB`); omission preserves a field,
-and `null` clears it. Black or white button text is chosen for readable contrast.
-
-`branding upload` sends raw bytes over REST, immediately attaches the image and prints
-the saved settings. PNG, JPEG and WebP are accepted, at most 512 KiB and 2048 pixels per
-side; images are decoded and re-encoded as PNG. SVG and animation are rejected. The
-server enforces all limits. These settings are stored only; public booking pages and
-emails do not yet apply the theme.

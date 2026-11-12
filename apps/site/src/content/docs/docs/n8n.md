@@ -209,9 +209,19 @@ manual replay or exactly-once delivery guarantee. Protect and retain downstream 
 when effects must survive retries, concurrent workers or restarts.
 
 Publishing remains a separate owner-approved step; packing does not publish. The
-package manifest sets `"private": true`, so npm refuses every real publication with
-`EPRIVATE` before contacting any registry, whatever `--registry`, `--ignore-scripts` or
-`--force` options are used. Dry-runs never reach that check.
+package manifest sets `"private": true`, so npm refuses every real publication, whatever
+`--registry`, `--ignore-scripts` or `--force` options are used, and nothing is published.
+npm checks `private` only at its last step, though, so it can contact servers first:
+
+1. In a CI job that offers an OIDC ID token, such as GitHub Actions with
+   `id-token: write`, npm obtains that token from the CI provider and exchanges it at the
+   target registry. `--force` and `--offline` do not skip this.
+2. Without credentials for the target registry, npm then stops with `ENEEDAUTH`.
+3. Without `--force` or `--offline`, npm then reads the package's published versions from
+   the target registry, sending your npm token for that registry.
+4. Only then does npm refuse with `EPRIVATE`.
+
+Dry-runs never reach that check.
 
 `publishConfig.registry` also points to `https://registry.invalid/`, an unresolvable
 placeholder. It applies with scripts disabled and takes precedence over registries set in
@@ -222,16 +232,20 @@ package directory's `.npmrc` turns them off, so `npm publish` there skips that c
 unless scripts are turned back on, for example with `--ignore-scripts=false`.
 
 The reviewed change that approves publication removes `private` and the placeholder
-registry together. The release then runs in the package directory as
-`HOURMERE_N8N_PUBLISH=1 npm publish --ignore-scripts=false`, so the approval check runs.
+registry together. `dist` is not committed and no publish script builds it, so build it
+first: in the package directory, run `npm ci --ignore-scripts` and `npm run build`, then
+run the release as `HOURMERE_N8N_PUBLISH=1 npm publish --ignore-scripts=false`, so the
+approval check runs.
 
 A dry-run's exit code says nothing about where a publication would go. Without
 `--offline`, `npm publish --dry-run` queries the target registry for existing versions,
 ignores the failure and still exits 0, even for the unreachable placeholder. What counts
 is the `npm notice Publishing to <registry> … (dry-run)` line in its output.
-`npm publish --dry-run --ignore-scripts --offline` prints it without network access, and
+Outside CI, `npm publish --dry-run --ignore-scripts --offline` prints it without network
+access (in CI with an ID token, the OIDC exchange still runs), and
 the package's tests assert that it names `https://registry.invalid/`. They also aim a
-non-dry-run publish at a local sink and require `EPRIVATE` with no connection.
+non-dry-run publish with `--force` and `--offline`, outside CI, at a local sink and require
+`EPRIVATE` with no connection to it.
 
 The workflow peer range is `*`, with an exact development pin for builds/tests.
 Contributors must install with `npm install --ignore-scripts` or

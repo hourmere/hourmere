@@ -195,6 +195,15 @@ addresses, or authorize sending passwords to another origin. Use a certificate t
 by the process; there is no “ignore certificate errors” option. Apply narrow egress
 rules and, when configuration is introduced, keep web and worker policy consistent.
 
+## Private identity providers (reserved)
+
+Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for private
+identity providers and is empty by default; leave it empty unless you prepare for a later
+release. It accepts only exact `host:port` entries, permits private routing but never plain
+HTTP, and is separate from `WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid
+one changes nothing yet. See the
+[configuration reference](/docs/configuration#private-identity-providers).
+
 ## Proxy behavior and an existing proxy
 
 The HTTPS override publishes TCP **80 and 443** and UDP **443** (HTTP/3), on Caddy's `proxy` service. Neither

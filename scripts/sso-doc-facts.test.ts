@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
 
 const source = readFileSync(new URL('../docs/sso.md', import.meta.url), 'utf8')
 const limits = {
@@ -18,7 +19,8 @@ const limits = {
 } as const
 
 function assertLimits(document: string) {
-  const table = document.split('## Pinned operational limits')[1]?.split('\n## ')[0] ?? ''
+  const table =
+    document.split('## Pinned operational limits')[1]?.split('\n## ')[0]?.split('\n### ')[0] ?? ''
   const entries = [...table.matchAll(/^\| `([^`]+)` \| (\d+) \| seconds \|$/gm)].map(
     ([, name, value]) => [name, Number(value)],
   )
@@ -44,6 +46,79 @@ describe('SSO design numeric commitments (not runtime verification)', () => {
     expect(() => assertLimits(source.replace(row, ''))).toThrow()
     expect(() => assertLimits(source.replace(row, `${row}\n${row}`))).toThrow()
     assertLimits(source)
+  })
+})
+
+// The SSO transport limits are runtime constants: the table is bound to the profile's own
+// object, so changing either side alone fails.
+const transportUnits: Record<keyof typeof SSO_TRANSPORT_LIMITS, string> = {
+  ssoConnectTimeout: 'milliseconds',
+  ssoResponseTimeout: 'milliseconds',
+  ssoMaximumResponseBytes: 'bytes',
+  ssoMaximumHeaderBytes: 'bytes',
+  ssoMaximumUrlBytes: 'bytes',
+  ssoMaximumDnsAnswers: 'answers',
+  ssoMaximumConcurrentRequests: 'requests',
+  ssoMaximumConcurrentRequestsPerOrigin: 'requests',
+  ssoMaximumPrivateTargets: 'entries',
+}
+
+function assertTransportLimits(
+  document: string,
+  limits: Readonly<Record<string, number>> = SSO_TRANSPORT_LIMITS,
+) {
+  const section = document.split('## Pinned operational limits')[1]?.split('\n## ')[0] ?? ''
+  const table = section.split('\n### Transport limits\n')[1]?.split('\n### ')[0] ?? ''
+  const rows = table.split('\n').filter((line) => line.startsWith('| `'))
+  const entries = rows.map((line) => {
+    const match = /^\| `([A-Za-z]+)` \| (\d+) \| ([a-z]+) \|$/.exec(line)
+    expect(match, line).not.toBeNull()
+    return [match?.[1], `${match?.[2]} ${match?.[3]}`]
+  })
+  expect(entries).toHaveLength(Object.keys(limits).length)
+  expect(Object.fromEntries(entries)).toEqual(
+    Object.fromEntries(
+      Object.entries(limits).map(([name, value]) => [
+        name,
+        `${value} ${transportUnits[name as keyof typeof transportUnits]}`,
+      ]),
+    ),
+  )
+}
+
+describe('SSO transport limits (bound to the runtime constants)', () => {
+  it('documents exactly the profile constants with their units', () => {
+    expect(Object.keys(transportUnits).sort()).toEqual(Object.keys(SSO_TRANSPORT_LIMITS).sort())
+    assertTransportLimits(source)
+  })
+
+  it.each(Object.entries(SSO_TRANSPORT_LIMITS))(
+    'rejects a source-copy change to %s on either side',
+    (name, value) => {
+      const unit = transportUnits[name as keyof typeof transportUnits]
+      const row = `| \`${name}\` | ${value} | ${unit} |`
+      expect(source).toContain(row)
+      expect(() =>
+        assertTransportLimits(source.replace(row, `| \`${name}\` | ${value + 1} | ${unit} |`)),
+      ).toThrow()
+      expect(() =>
+        assertTransportLimits(source.replace(row, `| \`${name}\` | ${value} | seconds |`)),
+      ).toThrow()
+      expect(() =>
+        assertTransportLimits(source, { ...SSO_TRANSPORT_LIMITS, [name]: value + 1 }),
+      ).toThrow()
+      assertTransportLimits(source)
+    },
+  )
+
+  it('rejects a removed or duplicated transport limit row', () => {
+    const row = '| `ssoConnectTimeout` | 5000 | milliseconds |'
+    expect(() => assertTransportLimits(source.replace(row, ''))).toThrow()
+    expect(() => assertTransportLimits(source.replace(row, `${row}\n${row}`))).toThrow()
+    expect(() =>
+      assertTransportLimits(source.replace('### Transport limits\n', '### Other limits\n')),
+    ).toThrow()
+    assertTransportLimits(source)
   })
 })
 

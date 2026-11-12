@@ -38,6 +38,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
+| `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks send through it; CalDAV reuses its address and private-target policy; the SSO transport profile is built on it and has no caller yet. |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `packages/workflows` | Booking workflow definition contract: strict schemas, AND conditions, ownership selectors, template variables and limits. Not available yet: a source constant keeps workflows off. See the [design](docs/workflows.md). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
