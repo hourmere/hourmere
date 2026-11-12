@@ -1,4 +1,4 @@
-// Booking workflows: the pure definition contract behind the hard-off constant
+// Booking workflows: the pure definition contract and timer rules behind the hard-off constant
 // (docs/workflows.md). Nothing here touches the database, mail or webhooks yet, and no
 // interface is registered; later plan steps add storage, operations and execution.
 
@@ -62,6 +62,16 @@ export {
   type WorkflowWebhookFacts,
   workflowOwnerSelector,
 } from './ownership.ts'
+export {
+  type WorkflowBookingInstants,
+  type WorkflowCaptureSkipReason,
+  type WorkflowDispatchWindow,
+  type WorkflowRunTiming,
+  type WorkflowTimer,
+  workflowDispatchWindow,
+  workflowRunTiming,
+  workflowTimerDueAt,
+} from './timers.ts'
 export {
   templatePlaceholders,
   templateVariableProblem,

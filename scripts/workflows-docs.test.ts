@@ -17,6 +17,7 @@ import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
 import { hasValidHostShape } from '../packages/scheduling/src/hosts.ts'
 import {
   DEFAULT_NOTIFICATIONS,
+  REMINDER_MIN_GAP as SHARED_REMINDER_MIN_GAP,
   validateNotifications,
 } from '../packages/scheduling/src/notification-settings.ts'
 import { type WebhookDeps, webhookDeliveryJob } from '../packages/webhooks/src/delivery.ts'
@@ -33,6 +34,11 @@ import {
 import { WORKFLOWS_IMPLEMENTED } from '../packages/workflows/src/hard-off.ts'
 import { WORKFLOW_LIMITS } from '../packages/workflows/src/limits.ts'
 import { WORKFLOW_BOOKING_SOURCES } from '../packages/workflows/src/ownership.ts'
+import {
+  workflowDispatchWindow,
+  workflowRunTiming,
+  workflowTimerDueAt,
+} from '../packages/workflows/src/timers.ts'
 import {
   templateVariableProblem,
   WORKFLOW_ANSWER_VARIABLE_PREFIX,
@@ -261,6 +267,63 @@ describe('workflow design numeric contracts', () => {
       'The following limits are source constants in `packages/workflows/src/limits.ts`',
     )
     expect(text).not.toMatch(/proposed limits|not existing runtime constants/)
+  })
+
+  it('binds the timer rules to the documented gap, late bound and offsets', () => {
+    // Before-start workflow timers share the reminder gap itself, not a copy of its value.
+    expect(REMINDER_MIN_GAP).toBe(SHARED_REMINDER_MIN_GAP)
+    const gap = { hours: number('REMINDER_MIN_GAP_HOURS') }
+    const late = { minutes: number('WORKFLOW_MAX_LATE_MINUTES') }
+    const nanosecond = { nanoseconds: 1 }
+    const start = Temporal.Instant.from('2027-06-01T10:00:00Z')
+    const booking = { start, end: start.add({ hours: 1 }) }
+    const dayBefore = { type: 'before_start', offsetMinutes: 1440 } as const
+    const due = start.subtract({ minutes: 1440 })
+
+    expect(text).toContain(
+      'All due times are UTC instants computed with `Temporal.Instant` elapsed-minute arithmetic.',
+    )
+    expect(text).toContain(
+      'At or before that gap, record `minimum_gap`; at or before capture time record `offset_not_future`.',
+    )
+    const skip = (capturedAt: Temporal.Instant) =>
+      workflowRunTiming(dayBefore, booking, capturedAt).skipReason
+    expect(skip(due.subtract(gap).subtract(nanosecond))).toBeUndefined()
+    expect(skip(due.subtract(gap))).toBe('minimum_gap')
+    expect(skip(due)).toBe('offset_not_future')
+    const afterEnd = { type: 'after_end', offsetMinutes: 1440 } as const
+    const afterDue = booking.end.add({ minutes: 1440 })
+    expect(workflowRunTiming(afterEnd, booking, afterDue.subtract(gap)).skipReason).toBeUndefined()
+    expect(workflowRunTiming(afterEnd, booking, afterDue).skipReason).toBe('offset_not_future')
+
+    expect(text).toContain(
+      'dispatch only while `now < due + WORKFLOW_MAX_LATE_MINUTES`; before-start also requires `now < start`. At equality or beyond, skip permanently as `expired`.',
+    )
+    const timing = workflowRunTiming(dayBefore, booking, due.subtract({ hours: 48 }))
+    expect(workflowDispatchWindow(timing, due.add(late).subtract(nanosecond))).toBe('open')
+    expect(workflowDispatchWindow(timing, due.add(late))).toBe('expired')
+    const closest = workflowRunTiming(
+      { type: 'before_start', offsetMinutes: number('WORKFLOW_MIN_TIMER_OFFSET_MINUTES') },
+      booking,
+      due,
+    )
+    expect(workflowDispatchWindow(closest, start.subtract(nanosecond))).toBe('open')
+    expect(workflowDispatchWindow(closest, start)).toBe('expired')
+
+    expect(text).toContain('zero means immediately eligible after commit')
+    const created = workflowRunTiming({ type: 'booking.created', delayMinutes: 0 }, booking, due)
+    expect(created).toEqual({ dueAt: due, expiresAt: due.add(late), skipReason: undefined })
+    expect(workflowDispatchWindow(created, due)).toBe('open')
+
+    for (const anchor of ['start', 'end'] as const)
+      for (const direction of ['before', 'after'] as const) {
+        const dueAt = (offsetMinutes: number) =>
+          workflowTimerDueAt({ anchor, direction, offsetMinutes }, booking)
+        expect(() => dueAt(number('WORKFLOW_MIN_TIMER_OFFSET_MINUTES'))).not.toThrow()
+        expect(() => dueAt(number('WORKFLOW_MAX_OFFSET_MINUTES'))).not.toThrow()
+        expect(() => dueAt(number('WORKFLOW_MIN_TIMER_OFFSET_MINUTES') - 1)).toThrow(RangeError)
+        expect(() => dueAt(number('WORKFLOW_MAX_OFFSET_MINUTES') + 1)).toThrow(RangeError)
+      }
   })
 
   it('binds the trigger, condition, variable and audit catalogs to the definition contract', () => {
