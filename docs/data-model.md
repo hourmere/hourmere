@@ -889,6 +889,20 @@ receipts. Dependency identity (organization, version, rule and event type) is im
 only health metadata changes, with `health_code` restricted to `ok`, `unavailable` or `unknown`. Receipt issuance bindings and nonnull answer ciphertext cannot change; ciphertext can
 only be erased. A null ciphertext also permits expiry purge without consuming a receipt.
 Consumed receipt evidence cannot be rebound or revived.
+
+Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
+publication requests that carry a client `requestId`. A record holds the organization, the
+operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
+`oauth`) and UUID (the session's user, the API key or the OAuth grant; historical, with no
+foreign key, so deleting a key or grant never lets a retained request write again), the
+request UUID, a 32-byte SHA-256 fingerprint of the canonical validated input alone and the
+result: the form, plus the version exactly for a publication. The request key is unique per
+organization and credential kind and ID across both operations. The
+result is unique with nulls not distinct, so a form has at most one creation record and a
+version at most one publication record. Composite organization foreign keys keep the form and
+version in the record's organization and cascade, so a record goes with its form (and
+organization) or its version and never blocks version cleanup; retention is therefore bounded
+by the form and version quotas, with no purge job of its own. Records reject every update.
 Question/rule/target semantics remain the future shared validator's responsibility.
 Unconsumed receipt indexes support bounded expiry cleanup and form/instance admission
 counts; receipt lifetime, encryption and admission services land in later steps.
@@ -1479,7 +1493,15 @@ The phases within that organization boundary are:
   actor and member share locks. Creation next takes the form-admission advisory lock;
   publication share-locks its target event types in ID order; each write then locks the
   form row. Publication therefore waits for membership management and event-type edits
-  instead of deadlocking with them. Preview takes no lock and runs read-only.
+  instead of deadlocking with them. Preview takes no lock and runs read-only. A create or
+  publish that carries a `requestId` takes the transaction advisory lock
+  `hashtextextended('hourmere.routing-form-request:<organizationId>:<actorKind>:<actorId>:<requestId>', 0)`,
+  with the UUIDs in lowercase (creation after form admission, publication right after the
+  actor, member and API-key checks, both before any event-type or form row lock), and then
+  share-locks its existing `routing_form_operations` record, so a version cleanup deleting
+  that record finishes first. Only routing takes that lock, always after the
+  organization and before event types, so it adds no cycle; concurrent retries of one key
+  queue on it, and each finds the record the first one committed.
 - SCIM User creation takes the organization update lock first, like membership management,
   then a key share lock on its provisioning token row (revocation and rotation take the
   organization lock before their token update lock), then the shared invitation service's
