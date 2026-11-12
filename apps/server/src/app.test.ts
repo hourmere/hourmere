@@ -306,6 +306,12 @@ describe('route modules and errors', () => {
         const fail = c.req.valid('query').fail
         if (fail === 'conflict')
           throw new DomainError('conflict', 'slot_taken', 'Someone booked this time first')
+        if (fail === 'invalid_request')
+          throw new DomainError(
+            'invalid',
+            'invalid_request',
+            'note: must not contain control characters other than LF',
+          )
         if (fail === 'empty') throw new DomainError('invalid', 'bad_thing', '')
         if (fail?.startsWith('alias:')) throw new DomainError('conflict', fail.slice(6))
         if (fail === 'zoom_busy' || fail === 'zoom_busy_without_detail')
@@ -378,6 +384,15 @@ describe('route modules and errors', () => {
     const res = await post(`?fail=${kind}`, valid)
     expect(res.status).toBe(status)
     expect(await res.json()).toEqual({ error: `thing_${kind}` })
+  })
+
+  it('maps service request validation to 400 with the public message', async () => {
+    const res = await post('?fail=invalid_request', valid)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'invalid_request',
+      message: 'note: must not contain control characters other than LF',
+    })
   })
 
   it('includes the message only when one was given', async () => {
@@ -601,8 +616,11 @@ describe('route modules and errors', () => {
     expect(bug.headers.get('cache-control')).toBe('no-store')
   })
 
-  it('refuses reserved codes for DomainError', () => {
-    expect(() => new DomainError('invalid', 'invalid_request')).toThrow(/reserved/)
+  it('allows invalid_request only for invalid input and refuses other reserved DomainError codes', () => {
+    expect(new DomainError('invalid', 'invalid_request').kind).toBe('invalid')
+    for (const kind of ['not_found', 'forbidden', 'conflict'] as const)
+      expect(() => new DomainError(kind, 'invalid_request')).toThrow(/reserved/)
+    expect(() => new DomainError('invalid', 'unauthorized')).toThrow(/reserved/)
     expect(() => new DomainError('not_found', 'not_found')).toThrow(/reserved/)
     expect(new DomainError('not_found', 'event_type_not_found').code).toBe('event_type_not_found')
   })
