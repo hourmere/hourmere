@@ -7,8 +7,10 @@ Auth 1.7.12 family and re-run 2026-11-09, in the Upgrade step, against the insta
 registers it, and the production image does not contain it. The first plan step that
 imports it from shipped code moves it to `dependencies`. Migration 0074 adds the
 configuration storage of the Configuration storage step (see
-[Data model](data-model.md#sso-configuration-storage)); no production code reads or writes
-it, and no SSO provider, route or feature flag is enabled. SSO will be available to every
+[Data model](data-model.md#sso-configuration-storage)) and migration 0075 the identity
+storage of the Identity storage step (see
+[Data model](data-model.md#sso-identity-storage)); no production code reads or writes
+either, and no SSO provider, route or feature flag is enabled. SSO will be available to every
 instance, including self-hosted ones; there is no license, subscription or hosted-service
 requirement.
 
@@ -180,7 +182,10 @@ with an opaque, never-reused ID. Multiple providers may coexist for migration;
 selection is explicit by team and provider, not a global email-domain redirect.
 Changing issuer, client identity or SAML entity ID creates a replacement provider
 and requires a fresh test and explicit relinking. It cannot inherit another
-provider's external-subject bindings. Deletion retires an ID permanently.
+provider's external-subject bindings. Deletion retires an ID permanently: deleting a
+provider, domain claim or identity link keeps its row as retired, and every proof,
+delegation, link and inventory check treats a retired provider, claim or link exactly as a
+deleted one.
 
 Domain claims are separate from users and providers. Normalize an exact DNS name
 using IDNA ASCII and lowercase; reject public suffixes, IPs and wildcard claims.
@@ -217,9 +222,10 @@ missing configuration. A failed or unknown latest recheck freezes new links, JIT
 provider activation and enabling enforcement until a positive recheck, even before
 expiry; expiry suspends new SSO proofs and team access under enforcement.
 It never silently disables the organization's enforcement policy. Browser proofs and
-delegations record the domain claim they relied on and check on every use that it still
-exists and is unexpired, so deleting or expiring the domain ends them; a delegation also
-needs a rebind after a lapse, as specified below. Recovery remains usable.
+delegations record the domain claim and claim generation they relied on and check on every
+use that the claim is not retired, is still at that generation and is unexpired, so deleting
+(which retires the claim) or expiring the domain ends them; a delegation also needs a rebind
+after a lapse, as specified below. Recovery remains usable.
 
 A matching domain never moves a personal organization, changes ownership, joins a
 team, locks a personal account or gives an administrator its data. Existing people
@@ -576,7 +582,14 @@ not retain plaintext secrets. Reads return only `hasClientSecret`/key identifier
 writes accept replacement secrets, omission preserves them, and null cannot silently
 clear a required secret. Do not log tokens, assertions, XML, discovery bodies, DNS
 challenge values or provider error descriptions. Audit encrypted-key rotation and
-support operator key backup/restore without printing material.
+support operator key backup/restore without printing material. The sealed configuration
+binds its provider revision, and the database changes a revision only together with its
+ciphertext, so rotating the operator key re-seals every provider at a new revision, even
+when its trust configuration is unchanged. That ends the tests and pending attempts bound
+to the old revision, so enabling enforcement again needs a fresh owner test of the new
+revision; `trustGeneration` stays, so browser proofs and delegations (which record no
+provider revision) and enforcement already on are unaffected. An envelope version that
+names its key would still need the new revision.
 
 SSO audit uses the `audit_events` journal being built separately in
 [PR #246](https://github.com/hourmere/hourmere/pull/246): an append-only table written by one
@@ -877,7 +890,8 @@ the exact ACS and the stable entity ID published by the SP metadata endpoint. De
 all URLs from configured PUBLIC_URL, never request Host. Keep SAML entity ID stable
 across certificate rotation. Rotate provider secrets through the browser after testing
 a new revision. Back up encrypted configuration and the operator encryption key
-separately; key loss prevents login and requires recovery/reconfiguration.
+separately; key loss prevents login and requires recovery/reconfiguration. Rotating that
+key re-seals every provider at a new revision (see Fetching, credentials and audit).
 
 The six Keycloak fixture, linking and acceptance steps use an owned local Keycloak
 container/realm, synthetic users, their own disposable database/volumes and free ports
@@ -1086,7 +1100,7 @@ behaviour keeps available stay available.
 | OIDC admission | Pending results for unlinked subjects; extend the callback/completion resolver and existing explicit invitation acceptance; no new operations | OIDC self-link | OIDC hard-off; SAML hard-off | Generic outcome identical in status, shape, timing class and email for every combination of existing account and `email_verified`; after proof an existing account gets only the link path; admission-intent completion refuses a wrong browser, an expired result and a second completion; no duplicate user/automatic linking; signup/first-user transaction, invitation role/expiry/inviter, JIT capacity under a seeded JIT policy and JIT frozen while the domain recheck has failed, removal races/tombstones. Off: extended endpoints still `sso_disabled` |
 | Identity recovery | `unlinkSsoAccount`, `removeSsoIdentityLink`; no MCP/CLI writes; extend own/provider summaries with scoped opaque link IDs | OIDC admission | OIDC hard-off; SAML hard-off | Self-only with independent mailbox proof; admin mailbox fresh administration and team boundary; admins retire only member/admin links and an owner's link needs another owner; exact generation race; that person's browser proofs revoked and other members' untouched; conflict retirement then explicit re-link; refusal without a remaining independent sign-in method; audit/notify. Off: `sso_disabled` |
 | OIDC step-up | `intent: "step_up"` on sign-in initiation with `prompt=login`/`max_age=0`, signed `auth_time` check, binding to the pending attempt and mailbox fallback; enables the fresh-proof gate's enforced-team mode for OIDC; no new operations | Identity recovery | OIDC hard-off; SAML hard-off | On a seeded enforced team, provider, domain, test and link-removal writes accept OIDC step-up and refuse mailbox-only proof; missing `auth_time` (Entra default) adds `mailbox`; stale/future `auth_time`, silent SSO, other user/subject/provider/team, expired/consumed attempt and changed retry input refused; no session, proof or link created. Off: `step_up` `sso_disabled` |
-| Team enforcement | Proof check service (membership, `trustGeneration`, link generation, domain claim, deadline) on every team-scoped `/api/v1` read and the enrollment exceptions, including the existing `/me` own summary; no new write operations | OIDC step-up | OIDC hard-off; SAML hard-off | Seeded `requireSso` policy: personal isolation; proof expiry, `trustGeneration`, link-generation and domain-claim checks, so deleting the domain ends dependent proofs; other members' proofs survive invitations, JIT admissions, departures and role changes; the enrollment exceptions built so far (`/me`, auth initiation, mailbox proof, link and unlink) expose no team data. Off: without a stored policy team reads behave as today; a seeded policy is enforced even with the constant false |
+| Team enforcement | Proof check service (membership, `trustGeneration`, link generation, domain claim, deadline) on every team-scoped `/api/v1` read and the enrollment exceptions, including the existing `/me` own summary; no new write operations | OIDC step-up | OIDC hard-off; SAML hard-off | Seeded `requireSso` policy: personal isolation; proof expiry, `trustGeneration`, link-generation and domain-claim checks (a retired claim counts as deleted), so deleting the domain ends dependent proofs; other members' proofs survive invitations, JIT admissions, departures and role changes; the enrollment exceptions built so far (`/me`, auth initiation, mailbox proof, link and unlink) expose no team data. Off: without a stored policy team reads behave as today; a seeded policy is enforced even with the constant false |
 | Team write enforcement | The same proof check on every team-scoped `/api/v1` write, rechecked in the committing transaction; no new write operations | Team enforcement | OIDC hard-off; SAML hard-off | Seeded `requireSso` policy: every team write family refuses without a live proof; proof ended between request and commit refused; conflict retirement then explicit re-link under enforcement. Off: without a stored policy team writes behave as today; a seeded policy is enforced even with the constant false |
 | Native enforcement | Native Better Auth team routes, trusted calls, shared services, transactions and queued work; no new operations | Team write enforcement | OIDC hard-off; SAML hard-off | Native/trusted-call bypass negatives, transaction-time removal checks, queued work rechecked before acting, booking lifecycle unchanged. Off: as Team enforcement |
 | Delegation binding | `bindSsoDelegation`, `revokeSsoDelegation`; additive owned key/grant summaries; no MCP/CLI writes | Native enforcement | OIDC hard-off; SAML hard-off | Own same-team credential only; SSO step-up required and mailbox-only refused; 30-day ceiling independent of browser expiry and capped by credential expiry; domain renewal keeps and lapse ends the lease; unlink or link removal revokes that member's delegations only; revoke and binding races; on a seeded enforced team revocation works without a live proof and exposes no team data. Off: `sso_disabled` |

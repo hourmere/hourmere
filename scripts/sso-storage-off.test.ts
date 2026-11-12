@@ -1,10 +1,10 @@
-// SSO configuration storage is tables only (docs/sso.md, Configuration storage): migration
-// 0074, the generated table types and the storage test support exist, and no production
-// module imports or queries the new tables, so no route, worker or read path uses them.
-// OIDC and SAML stay hard-off (apps/server/src/sso.test.ts and sso-catalogues.test.ts).
-// The scan is limited to the new table names; it never compares whole catalogues. The
-// first step that reads or writes this storage from service code narrows it to the
-// modules that own SSO data access.
+// SSO configuration and identity storage are tables only (docs/sso.md, Configuration storage
+// and Identity storage): migrations 0074 and 0075, the generated table types and the storage
+// test support exist, and no production module imports or queries the new tables, so no
+// route, worker or read path uses them. OIDC and SAML stay hard-off
+// (apps/server/src/sso.test.ts and sso-catalogues.test.ts). The scan is limited to the new
+// table names; it never compares whole catalogues. The first step that reads or writes this
+// storage from service code narrows it to the modules that own SSO data access.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,13 +13,43 @@ import { describe, expect, it } from 'vitest'
 const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 
-// The storage layer: the migration, the generated table types and the storage test support.
-const STORAGE_LAYER = /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/sso-storage-[^/]+\.ts$)/
+// The storage layer: the migrations, the generated table types and the storage test support.
+const STORAGE_LAYER =
+  /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/sso-(storage|identity)-[^/]+\.ts$)/
 // A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
 // its generated row type, or the storage test support. `sso_providers_guard` or
 // `listSsoProviders` is not one.
-const STORAGE_NAMES =
-  /sso-storage|(?<![A-Za-z0-9_])(?:sso_policies|sso_providers|sso_domains|sso_provider_domains|sso_recovery_nominations|sso_recovery_owners|SsoPolicies|SsoProviders|SsoDomains|SsoProviderDomains|SsoRecoveryNominations|SsoRecoveryOwners)(?![A-Za-z0-9_])/i
+const STORAGE_NAMES = new RegExp(
+  `sso-storage|sso-identity-|(?<![A-Za-z0-9_])(?:${[
+    // Configuration storage (0074).
+    'sso_policies',
+    'sso_providers',
+    'sso_domains',
+    'sso_provider_domains',
+    'sso_recovery_nominations',
+    'sso_recovery_owners',
+    'SsoPolicies',
+    'SsoProviders',
+    'SsoDomains',
+    'SsoProviderDomains',
+    'SsoRecoveryNominations',
+    'SsoRecoveryOwners',
+    // Identity storage (0075).
+    'sso_identity_links',
+    'sso_attempts',
+    'sso_mailbox_tokens',
+    'sso_replay_cache',
+    'sso_browser_proofs',
+    'sso_delegation_bindings',
+    'SsoIdentityLinks',
+    'SsoAttempts',
+    'SsoMailboxTokens',
+    'SsoReplayCache',
+    'SsoBrowserProofs',
+    'SsoDelegationBindings',
+  ].join('|')})(?![A-Za-z0-9_])`,
+  'i',
+)
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -45,7 +75,7 @@ function productionSources(): string[] {
   return files.sort()
 }
 
-describe('SSO configuration storage is tables only', () => {
+describe('SSO configuration and identity storage are tables only', () => {
   it('recognises the new tables as whole identifiers, in any case', () => {
     for (const source of [
       "selectFrom('sso_providers')",
@@ -56,6 +86,14 @@ describe('SSO configuration storage is tables only', () => {
       'JOIN sso_provider_domains d',
       "import type { SsoProviders } from '@hourmere/db'",
       "import { ssoFixture } from './sso-storage-fixtures.ts'",
+      "selectFrom('sso_identity_links')",
+      'INSERT INTO SSO_ATTEMPTS',
+      'DELETE FROM "sso_mailbox_tokens"',
+      'from Sso_Replay_Cache',
+      "updateTable('sso_browser_proofs')",
+      'JOIN sso_delegation_bindings b',
+      "import type { SsoDelegationBindings } from '@hourmere/db'",
+      "import { identityFixture } from './sso-identity-fixtures.ts'",
     ])
       expect(STORAGE_NAMES.test(source), source).toBe(true)
     for (const source of [
@@ -66,6 +104,11 @@ describe('SSO configuration storage is tables only', () => {
       'ssoOidcEnabled',
       'SSO_OIDC_ENABLED',
       '/api/v1/team/sso/providers',
+      'sso_identity_links_guard',
+      'linkSsoAccount',
+      'bindSsoDelegation',
+      'sso_attempts_kind',
+      'ssoDelegationLifetime',
     ])
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
@@ -83,11 +126,13 @@ describe('SSO configuration storage is tables only', () => {
       expect.arrayContaining([
         'packages/db/src/tables.ts',
         'packages/db/src/sso-storage-fixtures.ts',
+        'packages/db/src/sso-identity-fixtures.ts',
+        'packages/db/src/sso-identity-races.ts',
       ]),
     )
-    expect(readFileSync(new URL('packages/db/src/tables.ts', root), 'utf8')).toMatch(
-      /^ {2}sso_recovery_owners: SsoRecoveryOwners;$/m,
-    )
+    const tables = readFileSync(new URL('packages/db/src/tables.ts', root), 'utf8')
+    expect(tables).toMatch(/^ {2}sso_recovery_owners: SsoRecoveryOwners;$/m)
+    expect(tables).toMatch(/^ {2}sso_delegation_bindings: SsoDelegationBindings;$/m)
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
