@@ -60,25 +60,56 @@ interface Attribute {
 
 type Schema = { readonly id: string; readonly attributes: readonly Attribute[] }
 
+/**
+ * Every attribute RFC 7643 defines for a resource type, mapped or not, by schema URN:
+ * attribute name → its sub-attribute names.
+ */
+export type ScimStandardNames = Readonly<
+  Record<string, Readonly<Record<string, readonly string[]>>>
+>
+
 /** What a resource type lets a list filter and a projection name; see scimQueryResource. */
 export interface ScimQueryResource {
   /** The core schema first, then its extensions, as /Schemas serves them. */
   schemas: readonly Schema[]
   /** Attributes a filter may compare with eq, in standard attribute notation. */
   filters: readonly string[]
+  /**
+   * The same schemas with every attribute RFC 7643 defines for them. A projection may name
+   * one that is not mapped; it is never returned.
+   */
+  standard: readonly Schema[]
 }
 
+const standardAttribute = (name: string, subAttributes?: readonly string[]): Attribute => ({
+  name,
+  returned: 'default',
+  caseExact: true,
+  ...(subAttributes?.length
+    ? { subAttributes: subAttributes.map((sub) => standardAttribute(sub)) }
+    : {}),
+})
+
 /**
- * Projection protects attributes returned "always" at the top level of a representation,
- * where RFC 7643 puts them for Users and Groups. A schema that marks a sub-attribute or an
- * extension attribute "always" is refused here, when its module loads, rather than left
- * unprotected.
+ * Projection handles attributes returned "always" or by default, and protects those returned
+ * "always" at the top level of a representation, where RFC 7643 puts them for Users and
+ * Groups. A schema with any other returned value, or that marks a sub-attribute or an
+ * extension attribute "always", is refused here, when its module loads, rather than
+ * projected wrongly.
  */
 export function scimQueryResource(
   schemas: readonly Schema[],
   filters: readonly string[],
+  standard: ScimStandardNames,
 ): ScimQueryResource {
   const [core, ...extensions] = schemas
+  const every = schemas.flatMap((schema) =>
+    schema.attributes.flatMap((attribute) => [attribute, ...(attribute.subAttributes ?? [])]),
+  )
+  if (
+    every.some((attribute) => attribute.returned !== 'always' && attribute.returned !== 'default')
+  )
+    throw new Error('Projection handles only attributes returned always or by default.')
   const nested = [
     ...(core?.attributes ?? []).flatMap((attribute) => attribute.subAttributes ?? []),
     ...extensions.flatMap((extension) =>
@@ -87,11 +118,71 @@ export function scimQueryResource(
   ]
   if (nested.some((attribute) => attribute.returned === 'always'))
     throw new Error('Only top-level core attributes can be returned always.')
-  return { schemas, filters }
+  return {
+    schemas,
+    filters,
+    standard: schemas.map(({ id }) => ({
+      id,
+      attributes: Object.entries(standard[id] ?? {}).map(([name, subs]) =>
+        standardAttribute(name, subs),
+      ),
+    })),
+  }
+}
+
+// RFC 7643 section 2.4: the sub-attributes a multi-valued attribute may have.
+const multiValued = ['type', 'primary', 'display', 'value', '$ref']
+/** RFC 7643 sections 4.1 and 4.3: every User and enterprise User attribute. */
+const rfc7643User: ScimStandardNames = {
+  [SCIM_URN.user]: {
+    userName: [],
+    name: [
+      'formatted',
+      'familyName',
+      'givenName',
+      'middleName',
+      'honorificPrefix',
+      'honorificSuffix',
+    ],
+    displayName: [],
+    nickName: [],
+    profileUrl: [],
+    title: [],
+    userType: [],
+    preferredLanguage: [],
+    locale: [],
+    timezone: [],
+    active: [],
+    password: [],
+    emails: multiValued,
+    phoneNumbers: multiValued,
+    ims: multiValued,
+    photos: multiValued,
+    addresses: [
+      ...multiValued,
+      ...['formatted', 'streetAddress', 'locality', 'region', 'postalCode', 'country'],
+    ],
+    groups: multiValued,
+    entitlements: multiValued,
+    roles: multiValued,
+    x509Certificates: multiValued,
+  },
+  [SCIM_URN.enterpriseUser]: {
+    employeeNumber: [],
+    costCenter: [],
+    organization: [],
+    division: [],
+    department: [],
+    manager: ['value', '$ref', 'displayName'],
+  },
 }
 
 /** Users: `userName eq` and `externalId eq` filters over the advertised User schemas. */
-export const scimUserQuery = scimQueryResource(scimUserSchemas, ['userName', 'externalId'])
+export const scimUserQuery = scimQueryResource(
+  scimUserSchemas,
+  ['userName', 'externalId'],
+  rfc7643User,
+)
 
 // RFC 7643 sections 3 and 3.1: attributes of every resource, outside any schema. No ETags,
 // so meta has no version.
@@ -105,6 +196,11 @@ const common: Attribute[] = [
   { name: 'id', returned: 'always', caseExact: true },
   { name: 'externalId', returned: 'default', caseExact: true },
   { name: 'meta', returned: 'default', caseExact: true, subAttributes: meta },
+]
+// The same, with the meta.version that RFC 7643 section 3.1 also defines.
+const standardCommon: Attribute[] = [
+  ...common.filter((attribute) => attribute.name !== 'meta'),
+  standardAttribute('meta', [...meta.map((attribute) => attribute.name), 'version']),
 ]
 
 /** ASCII case folding: names, URNs and operators are case-insensitive, and only ASCII. */
@@ -152,11 +248,16 @@ function within(attributes: readonly Attribute[], text: string, schema?: string)
 
 /**
  * An attribute name in standard attribute notation (RFC 7644 section 3.10). Core names may
- * carry the core schema URN; extension names must be fully qualified, and the extension URN
- * alone names its whole object. Common attributes are never qualified.
+ * carry the core schema URN, and so may the common attributes id, externalId and meta, which
+ * RFC 7643 section 3.1 makes part of every base resource schema. Extension names must be
+ * fully qualified, and the extension URN alone names its whole object.
  */
-function resolve(resource: ScimQueryResource, name: string): Resolved | undefined {
-  const [core, ...extensions] = resource.schemas
+function resolveIn(
+  schemas: readonly Schema[],
+  shared: readonly Attribute[],
+  name: string,
+): Resolved | undefined {
+  const [core, ...extensions] = schemas
   if (!core) return undefined
   const folded = fold(name)
   for (const extension of extensions) {
@@ -170,9 +271,24 @@ function resolve(resource: ScimQueryResource, name: string): Resolved | undefine
     if (folded.startsWith(`${urn}:`))
       return within(extension.attributes, name.slice(urn.length + 1), extension.id)
   }
-  if (folded.startsWith(`${fold(core.id)}:`))
-    return within(core.attributes, name.slice(core.id.length + 1))
-  return within([...common, ...core.attributes], name)
+  const qualified = folded.startsWith(`${fold(core.id)}:`)
+  return within(
+    [
+      ...shared.filter((attribute) => !qualified || attribute.name !== 'schemas'),
+      ...core.attributes,
+    ],
+    qualified ? name.slice(core.id.length + 1) : name,
+  )
+}
+
+/**
+ * A mapped attribute, null for one RFC 7643 defines for the resource but Hourmere does not
+ * map (it is never returned), or undefined for an unknown name.
+ */
+function resolve(resource: ScimQueryResource, name: string): Resolved | null | undefined {
+  const mapped = resolveIn(resource.schemas, common, name)
+  if (mapped) return mapped
+  return resolveIn(resource.standard, standardCommon, name) ? null : undefined
 }
 
 const escapes = new Map([
@@ -270,8 +386,10 @@ export function parseScimProjection(
   const paths: string[][] = []
   for (const name of names) {
     const resolved = resolve(resource, name)
-    if (!resolved) return refuse('attributesUnknown')
-    paths.push(resolved.path)
+    if (resolved === undefined) return refuse('attributesUnknown')
+    // An unmapped standard attribute is never returned: excluding it changes nothing, and
+    // requesting it adds nothing.
+    if (resolved) paths.push(resolved.path)
   }
   return {
     ok: true,
