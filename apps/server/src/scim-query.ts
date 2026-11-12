@@ -12,7 +12,7 @@ import { SCIM_URN, scimUserSchemas } from './scim-discovery.ts'
 export const SCIM_PAGE_SIZE = 100
 /** Longest filter read, in UTF-16 code units; one comparison needs far less. */
 export const SCIM_MAX_FILTER_LENGTH = 4096
-/** Longest attributes or excludedAttributes value, and the most names it may list. */
+/** Longest attributes or excludedAttributes value (UTF-16 code units) and most names in it. */
 export const SCIM_MAX_ATTRIBUTE_LIST_LENGTH = 4096
 export const SCIM_MAX_ATTRIBUTE_LIST_NAMES = 64
 /** Longest startIndex or count text; larger magnitudes are clamped or refused below. */
@@ -20,12 +20,14 @@ const MAX_INTEGER_LENGTH = 32
 
 /** Every refusal: RFC 7644 section 3.12 keyword and a detail that echoes nothing. */
 export const SCIM_QUERY_ERRORS = {
+  filterSpelling: ['invalidFilter', 'Query parameter names are case-sensitive.'],
   filterRepeated: ['invalidFilter', 'Send at most one filter.'],
   filterTooLong: ['invalidFilter', 'The filter is too long.'],
   filterForm: ['invalidFilter', 'A filter must be one comparison: attribute eq "value".'],
   filterAttribute: ['invalidFilter', 'This attribute cannot be used in a filter.'],
   filterOperator: ['invalidFilter', 'Only the eq operator is supported.'],
   filterValue: ['invalidFilter', 'The comparison value must be a valid quoted string.'],
+  parameterSpelling: ['invalidValue', 'Query parameter names are case-sensitive.'],
   attributesRepeated: ['invalidValue', 'Send at most one attributes or excludedAttributes list.'],
   attributesExclusive: ['invalidValue', 'attributes and excludedAttributes cannot be combined.'],
   attributesTooLong: ['invalidValue', 'The attribute list is too long.'],
@@ -56,19 +58,40 @@ interface Attribute {
   readonly subAttributes?: readonly Attribute[]
 }
 
-/** What a resource type lets a list filter and a projection name. */
+type Schema = { readonly id: string; readonly attributes: readonly Attribute[] }
+
+/** What a resource type lets a list filter and a projection name; see scimQueryResource. */
 export interface ScimQueryResource {
   /** The core schema first, then its extensions, as /Schemas serves them. */
-  schemas: readonly { readonly id: string; readonly attributes: readonly Attribute[] }[]
+  schemas: readonly Schema[]
   /** Attributes a filter may compare with eq, in standard attribute notation. */
   filters: readonly string[]
 }
 
-/** Users: `userName eq` and `externalId eq` filters over the advertised User schemas. */
-export const scimUserQuery: ScimQueryResource = {
-  schemas: scimUserSchemas,
-  filters: ['userName', 'externalId'],
+/**
+ * Projection protects attributes returned "always" at the top level of a representation,
+ * where RFC 7643 puts them for Users and Groups. A schema that marks a sub-attribute or an
+ * extension attribute "always" is refused here, when its module loads, rather than left
+ * unprotected.
+ */
+export function scimQueryResource(
+  schemas: readonly Schema[],
+  filters: readonly string[],
+): ScimQueryResource {
+  const [core, ...extensions] = schemas
+  const nested = [
+    ...(core?.attributes ?? []).flatMap((attribute) => attribute.subAttributes ?? []),
+    ...extensions.flatMap((extension) =>
+      extension.attributes.flatMap((attribute) => [attribute, ...(attribute.subAttributes ?? [])]),
+    ),
+  ]
+  if (nested.some((attribute) => attribute.returned === 'always'))
+    throw new Error('Only top-level core attributes can be returned always.')
+  return { schemas, filters }
 }
+
+/** Users: `userName eq` and `externalId eq` filters over the advertised User schemas. */
+export const scimUserQuery = scimQueryResource(scimUserSchemas, ['userName', 'externalId'])
 
 // RFC 7643 sections 3 and 3.1: attributes of every resource, outside any schema. No ETags,
 // so meta has no version.
@@ -86,6 +109,19 @@ const common: Attribute[] = [
 
 /** ASCII case folding: names, URNs and operators are case-insensitive, and only ASCII. */
 const fold = (text: string) => text.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+/**
+ * Query parameter names are case-sensitive. A known name spelled in another case is refused,
+ * because ignoring it would turn a filtered request into an unfiltered list.
+ */
+function misspelled(query: URLSearchParams, names: readonly string[]) {
+  for (const name of query.keys()) {
+    const known = names.find((candidate) => fold(candidate) === fold(name))
+    if (known !== undefined && known !== name)
+      return refuse(known === 'filter' ? 'filterSpelling' : 'parameterSpelling')
+  }
+  return undefined
+}
 const named = (attributes: readonly Attribute[], name: string) =>
   attributes.find((attribute) => fold(attribute.name) === fold(name))
 
@@ -220,6 +256,8 @@ export function parseScimProjection(
   query: URLSearchParams,
   resource: ScimQueryResource,
 ): ScimQueryResult<ScimProjection | undefined> {
+  const spelling = misspelled(query, ['attributes', 'excludedAttributes'])
+  if (spelling) return spelling
   const included = query.getAll('attributes')
   const excluded = query.getAll('excludedAttributes')
   if (included.length > 1 || excluded.length > 1) return refuse('attributesRepeated')
@@ -283,6 +321,14 @@ export function parseScimListQuery(
   query: URLSearchParams,
   resource: ScimQueryResource,
 ): ScimQueryResult<ScimListQuery> {
+  const spelling = misspelled(query, [
+    'filter',
+    'attributes',
+    'excludedAttributes',
+    'startIndex',
+    'count',
+  ])
+  if (spelling) return spelling
   const filters = query.getAll('filter')
   if (filters.length > 1) return refuse('filterRepeated')
   let filter: ScimFilter | undefined
@@ -321,25 +367,18 @@ export function scimListResponse(page: ScimPage, totalResults: number, resources
 type Json = Record<string, unknown>
 const isObject = (value: unknown): value is Json =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
-const key = (path: string[]) => JSON.stringify(path)
 
-function alwaysReturned(resource: ScimQueryResource) {
-  const [core, ...extensions] = resource.schemas
-  const found = new Set<string>()
-  const walk = (attributes: readonly Attribute[], at: string[]) => {
-    for (const attribute of attributes) {
-      if (attribute.returned === 'always') found.add(key([...at, attribute.name]))
-      walk(attribute.subAttributes ?? [], [...at, attribute.name])
-    }
-  }
-  walk([...common, ...(core?.attributes ?? [])], [])
-  for (const extension of extensions) walk(extension.attributes, [extension.id])
-  return found
-}
+// Top-level attributes returned "always"; scimQueryResource refuses any deeper.
+const alwaysReturned = (resource: ScimQueryResource) =>
+  new Set(
+    [...common, ...(resource.schemas[0]?.attributes ?? [])]
+      .filter((attribute) => attribute.returned === 'always')
+      .map((attribute) => attribute.name),
+  )
 
 type Visit = (node: unknown, paths: string[][], at: string[]) => unknown
 
-// Both walks keep an attribute returned "always" whatever the projection names.
+// Both walks keep a top-level attribute returned "always" whatever the projection names.
 function walker(always: Set<string>, mode: ScimProjection['mode']): Visit {
   const visit: Visit = (node, paths, at) => {
     if (paths.some((path) => path.length === 0)) return mode === 'attributes' ? node : undefined
@@ -353,7 +392,8 @@ function walker(always: Set<string>, mode: ScimProjection['mode']): Visit {
       const path = [...at, name]
       const below = paths.filter(([head]) => head === name).map((rest) => rest.slice(1))
       const value =
-        always.has(key(path)) || (mode === 'excludedAttributes' && below.length === 0)
+        (at.length === 0 && always.has(name)) ||
+        (mode === 'excludedAttributes' && below.length === 0)
           ? child
           : below.length > 0
             ? visit(child, below, path)

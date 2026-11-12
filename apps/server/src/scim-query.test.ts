@@ -14,21 +14,22 @@ type Json = Record<string, unknown>
 const design = readFileSync(new URL('../../../docs/scim.md', import.meta.url), 'utf8')
 const core = SCIM_URN.user
 const enterprise = SCIM_URN.enterpriseUser
-// A sentence of the design, however its lines wrap.
-const says = (sentence: string) =>
-  new RegExp(sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll(' ', '\\s+')).test(design)
-const number = (pattern: RegExp) => {
-  const text = pattern.exec(design)?.[1]
-  expect(text, String(pattern)).toMatch(/^[\d,]+$/)
+// Design sentences are matched however their lines wrap.
+const words = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll(' ', '\\s+')
+const says = (sentence: string) => new RegExp(words(sentence)).test(design)
+// The number between two phrases of one design sentence.
+const number = (before: string, after: string) => {
+  const text = new RegExp(`${words(before)}\\s+([\\d,]*\\d)\\s*${words(after)}`).exec(design)?.[1]
+  expect(text, `${before} … ${after}`).toMatch(/^[\d,]+$/)
   return Number(text?.replaceAll(',', ''))
 }
 const bounds = {
-  pageDefault: number(/Offset pagination starts at 1, defaults to ([\d,]+), caps at/),
-  pageCap: number(/Offset pagination starts at 1, defaults to [\d,]+, caps at ([\d,]+)/),
-  filter: number(/A filter is at most ([\d,]+) characters and exactly\s+one comparison/),
-  names: number(/An attribute list names at most ([\d,]+) attributes in at\s+most/),
-  list: number(/attributes in at\s+most ([\d,]+) characters, in standard attribute notation/),
-  integer: number(/is not a decimal integer of at most ([\d,]+) characters/),
+  pageDefault: number('Offset pagination starts at 1, defaults to', ', caps at'),
+  pageCap: number(', caps at', ', uses stable resource-ID ordering'),
+  filter: number('A filter is at most', 'UTF-16 code units and exactly one comparison'),
+  names: number('An attribute list names at most', 'attributes in at most'),
+  list: number('attributes in at most', 'UTF-16 code units, in standard attribute notation'),
+  integer: number('is not a decimal integer of at most', 'characters'),
 }
 
 async function sourceCopy(...mutations: [string, string][]): Promise<Query> {
@@ -335,6 +336,12 @@ function verifyProjection(m: Query) {
       { ...minimal, name: { familyName: 'Liddell', givenName: 'Alice' } },
     ],
     [[['attributes', 'emails']], { ...minimal, emails: alice.emails }],
+    // A parent and its own sub-attribute: the parent wins, whole.
+    [[['attributes', 'name,name.givenName']], { ...minimal, name: alice.name }],
+    [[['attributes', 'name.givenName,name']], { ...minimal, name: alice.name }],
+    [[['attributes', 'emails.value,emails']], { ...minimal, emails: alice.emails }],
+    [[['excludedAttributes', 'name,name.givenName']], without(alice, 'name')],
+    [[['excludedAttributes', 'name.givenName,name']], without(alice, 'name')],
     [[['attributes', 'emails.value']], { ...minimal, emails: [{ value: 'alice@example.com' }] }],
     [
       [['attributes', 'externalId,meta.location']],
@@ -453,6 +460,18 @@ function verifyProjection(m: Query) {
   )
 }
 
+// The value at representation keys, through multi-valued attributes.
+function valueAt(value: unknown, path: string[]): unknown {
+  if (path.length === 0) return value
+  if (Array.isArray(value)) {
+    const items = value.map((item) => valueAt(item, path)).filter((item) => item !== undefined)
+    return items.length > 0 ? items : undefined
+  }
+  if (typeof value !== 'object' || value === null) return undefined
+  const [head = '', ...rest] = path
+  return valueAt((value as Json)[head], rest)
+}
+
 // A deep subset: every value present in the projection is the original's.
 function within(part: unknown, whole: unknown): boolean {
   if (Array.isArray(part))
@@ -494,6 +513,113 @@ function verifyProjectionProperties(m: Query) {
     expect(projected, label).toMatchObject(identity)
     expect((projected as Json).schemas, label).toContain(core)
     expect(within(projected, alice), label).toBe(true)
+    // Exact: everything named is returned whole, or nothing named survives except the
+    // attributes returned always.
+    const parsed = real.parseScimProjection(
+      new URLSearchParams([[mode, chosen.join(',')]]),
+      real.scimUserQuery,
+    )
+    expect(parsed.ok, label).toBe(true)
+    // schemas is pruned to the schemas whose attributes remain.
+    for (const path of parsed.ok ? (parsed.value?.paths ?? []) : [])
+      if (mode === 'attributes' && path[0] !== 'schemas')
+        expect(valueAt(projected, path), `${label}: ${path}`).toEqual(valueAt(alice, path))
+      else if (
+        mode === 'excludedAttributes' &&
+        (path.length > 1 || !['schemas', 'id', 'userName'].includes(path[0] ?? ''))
+      )
+        expect(valueAt(projected, path), `${label}: ${path}`).toBeUndefined()
+  }
+}
+
+function verifySpelling(m: Query) {
+  // Ignoring a known name in another case would turn a filtered request into a full list.
+  const refused: [[string, string][], ErrorKey][] = [
+    [[['Filter', 'userName eq "x"']], 'filterSpelling'],
+    [[['FILTER', 'userName eq "x"']], 'filterSpelling'],
+    [
+      [
+        ['filter', 'userName eq "x"'],
+        ['fIlter', 'userName eq "y"'],
+      ],
+      'filterSpelling',
+    ],
+    [[['Count', '5']], 'parameterSpelling'],
+    [[['startindex', '2']], 'parameterSpelling'],
+    [[['Attributes', 'userName']], 'parameterSpelling'],
+    [[['EXCLUDEDATTRIBUTES', 'name']], 'parameterSpelling'],
+  ]
+  for (const [entries, error] of refused)
+    expect(list(m, entries), JSON.stringify(entries)).toEqual(refusal(error))
+  for (const name of ['Attributes', 'excludedattributes'])
+    expect(
+      m.parseScimProjection(new URLSearchParams([[name, 'name']]), m.scimUserQuery),
+      name,
+    ).toEqual(refusal('parameterSpelling'))
+  // A read takes only the projection parameters; other parameters are not its own.
+  expect(m.parseScimProjection(new URLSearchParams([['Filter', 'x']]), m.scimUserQuery)).toEqual({
+    ok: true,
+    value: undefined,
+  })
+  // Unknown names stay ignored, as RFC 7644 leaves them.
+  expect(
+    list(m, [
+      ['sortBy', 'userName'],
+      ['filters', 'x'],
+      ['fİlter', 'x'],
+    ]),
+  ).toEqual({ ok: true, value: { filter: undefined, projection: undefined, ...page } })
+}
+
+function verifyResources(m: Query) {
+  expect(m.scimQueryResource(scimUserSchemas, ['userName'])).toEqual({
+    schemas: scimUserSchemas,
+    filters: ['userName'],
+  })
+  type Synthetic = {
+    name: string
+    returned: string
+    caseExact: boolean
+    subAttributes?: Synthetic[]
+  }
+  const attribute = (name: string, returned: string, subAttributes?: Synthetic[]): Synthetic => ({
+    name,
+    returned,
+    caseExact: false,
+    ...(subAttributes ? { subAttributes } : {}),
+  })
+  // Only top-level core attributes may be returned always; anything deeper is refused at once.
+  for (const schemas of [
+    [{ id: core, attributes: [attribute('name', 'default', [attribute('familyName', 'always')])] }],
+    [
+      { id: core, attributes: [] },
+      { id: enterprise, attributes: [attribute('badge', 'always')] },
+    ],
+    [
+      { id: core, attributes: [] },
+      {
+        id: enterprise,
+        attributes: [attribute('manager', 'default', [attribute('value', 'always')])],
+      },
+    ],
+  ] as Parameters<Query['scimQueryResource']>[0][])
+    expect(() => m.scimQueryResource(schemas, []), JSON.stringify(schemas)).toThrow(
+      'Only top-level core attributes can be returned always.',
+    )
+  // A top-level attribute returned always survives both projections.
+  const badged = m.scimQueryResource(
+    [{ id: core, attributes: [attribute('badge', 'always'), attribute('title', 'default')] }],
+    [],
+  )
+  const representation = { schemas: [core], id, badge: 'b', title: 't' }
+  for (const [mode, expected] of [
+    ['attributes', { schemas: [core], id, badge: 'b' }],
+    ['excludedAttributes', representation],
+  ] as const) {
+    const parsed = m.parseScimProjection(new URLSearchParams([[mode, 'badge,id']]), badged)
+    expect(parsed.ok, mode).toBe(true)
+    if (parsed.ok)
+      expect(m.projectScimResource(badged, representation, parsed.value), mode).toEqual(expected)
   }
 }
 
@@ -605,6 +731,8 @@ function verifyWindows(m: Query) {
 }
 
 const examples: Record<ErrorKey, [string, string][]> = {
+  filterSpelling: [['Filter', 'userName eq "x"']],
+  parameterSpelling: [['COUNT', '1']],
   filterRepeated: [
     ['filter', 'userName eq "a"'],
     ['filter', 'externalId eq "b"'],
@@ -709,6 +837,8 @@ const verifiers = {
   windows: verifyWindows,
   errors: verifyErrors,
   total: verifyTotal,
+  spelling: verifySpelling,
+  resources: verifyResources,
 }
 
 describe('SCIM query parser', () => {
@@ -762,6 +892,9 @@ describe('SCIM query parser', () => {
   it('refuses with every SCIM error and status it defines', () => verifyErrors(real))
   it('never throws and refuses only with its own SCIM errors on hostile input', () =>
     verifyTotal(real))
+  it('refuses known parameter names spelled in another case', () => verifySpelling(real))
+  it('protects top-level attributes returned always and refuses deeper ones', () =>
+    verifyResources(real))
 
   it('detects each weakened protection in a source copy', async () => {
     const control = await sourceCopy()
@@ -798,8 +931,22 @@ describe('SCIM query parser', () => {
       ['filters', ["if (filters.length > 1) return refuse('filterRepeated')", '']],
       ['filters', ['text.replace(/[A-Z]/g, (letter) => letter.toLowerCase())', 'text']],
       // Projection.
-      ['projection', ['always.has(key(path)) || ', '']],
-      ['projection', ["if (attribute.returned === 'always')", "if (attribute.name === 'id')"]],
+      ['projection', ['(at.length === 0 && always.has(name)) ||', 'false ||']],
+      [
+        'projection',
+        [
+          ".filter((attribute) => attribute.returned === 'always')",
+          ".filter((attribute) => attribute.name === 'id')",
+        ],
+      ],
+      [
+        'projection',
+        ['paths.some((path) => path.length === 0)', 'paths.every((path) => path.length === 0)'],
+      ],
+      [
+        'projectionProperties',
+        ['paths.some((path) => path.length === 0)', 'paths.every((path) => path.length === 0)'],
+      ],
       [
         'projection',
         [
@@ -821,7 +968,15 @@ describe('SCIM query parser', () => {
       ['projection', ['if (parts.length > 2) return undefined', '']],
       ['projection', ['uri === resource.schemas[0]?.id || Object.hasOwn(projected, uri)', 'true']],
       ['projection', ['names.length > SCIM_MAX_ATTRIBUTE_LIST_NAMES', 'false']],
-      ['projectionProperties', ['always.has(key(path)) || ', '']],
+      ['projectionProperties', ['(at.length === 0 && always.has(name)) ||', 'false ||']],
+      // Top-level always only, refused deeper; parameter spelling.
+      [
+        'resources',
+        ["throw new Error('Only top-level core attributes can be returned always.')", 'void 0'],
+      ],
+      ['resources', ['(at.length === 0 && always.has(name)) ||', 'false ||']],
+      ['spelling', ['if (known !== undefined && known !== name)', 'if (false)']],
+      ['spelling', ['fold(candidate) === fold(name)', 'candidate === name']],
       // Pagination.
       ['windows', ['offset: startIndex - 1', 'offset: startIndex']],
       ['windows', ['itemsPerPage: returned.length', 'itemsPerPage: page.count']],

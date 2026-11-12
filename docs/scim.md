@@ -97,20 +97,25 @@ snapshot: concurrent additions/removals may affect later pages. Support
 projection for mapped attributes. Never let projection hide mandatory identity fields.
 
 One shared query parser implements this subset; its refusals are 400 SCIM Errors whose detail
-is fixed text that never echoes the request. A filter is at most 4,096 characters and exactly
-one comparison, `attribute eq "value"` with single spaces: names and the operator are ASCII
-case-insensitive, a core attribute may carry the core schema URN, and the value is a JSON
-string decoded exactly as RFC 7159 specifies, except that a lone surrogate or U+0000 is
-refused because no stored identifier can hold it. Every other form (`and`, `or`, `not`,
-grouping, value paths, `pr`, another operator, an unquoted value, an unlisted attribute or a
-second `filter`) gets `invalidFilter`. An attribute list names at most 64 attributes in at
-most 4,096 characters, in standard attribute notation: extension attributes must be fully
-qualified, the extension URN alone names its whole object, and the common attributes `id`,
-`externalId` and `meta` are never qualified. `schemas`, `id` and `userName` are always
-returned. An unknown or unmapped name, both lists at once or a repeated list gets
-`invalidValue`, the keyword RFC 7644 assigns to GET. So does a `startIndex` or `count` that
-is not a decimal integer of at most 32 characters, is repeated, or is a startIndex above
-2^53 − 1.
+is fixed text that never echoes the request. A filter is at most 4,096 UTF-16 code units and
+exactly one comparison, `attribute eq "value"` with single spaces: names and the operator are
+ASCII case-insensitive, a core attribute may carry the core schema URN, and the value is a
+JSON string decoded exactly as RFC 7159 specifies, except that a lone surrogate or U+0000 is
+refused because no stored identifier can hold it. Every other filter (a longer one, `and`,
+`or`, `not`, grouping, value paths, `pr`, another operator, an unquoted value, an unlisted
+attribute or a second `filter`) gets `invalidFilter`. An attribute list names at most 64
+attributes in at most 4,096 UTF-16 code units, in standard attribute notation: extension
+attributes must be fully qualified, the extension URN alone names its whole object, and the
+common attributes `id`, `externalId` and `meta` are never qualified. Projection always keeps
+`schemas`, `id` and `userName`, omits a complex or multi-valued attribute left empty, and
+names in `schemas` only the core schema and the extensions whose objects remain; only
+top-level attributes may be returned always. An unknown or unmapped name, a longer list,
+both lists at once or a repeated list gets `invalidValue`, the keyword RFC 7644 assigns to
+GET. So does a `startIndex` or `count` that is not a decimal integer of at most 32
+characters, is repeated, or is a startIndex above 2^53 − 1. Parameter names are
+case-sensitive: a known name in another case, such as `Filter`, is refused (with
+`invalidFilter` for the filter) rather than ignored, so a filtered request never becomes an
+unfiltered list.
 
 No ETags or `meta.version` in the first release; advertise `etag.supported=false`.
 Reject conditional writes with 412 rather than pretend to honor If-Match. Serialize
