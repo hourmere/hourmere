@@ -305,8 +305,8 @@ export function createTeamRolePolicy(
       await sql<{ active: boolean; now: string }>`SELECT
         ${stored.expiresAt}::timestamptz > clock.at AS active, clock.at::text AS now
         FROM (SELECT clock_timestamp() AS at) AS clock`.execute(trx)
-    ).rows[0]
-    if (!validity?.active) throw teamRoleDenied()
+    ).rows[0] as { active: boolean; now: string }
+    if (!validity.active) throw teamRoleDenied()
     const personal = await trx
       .selectFrom('personal_organizations')
       .select('organization_id')
