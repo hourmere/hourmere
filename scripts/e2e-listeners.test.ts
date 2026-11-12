@@ -13,6 +13,7 @@ import { getRequestListener } from '@hono/node-server'
 import { describe, expect, it, vi } from 'vitest'
 import { closeServer, DEFAULT_SHUTDOWN_TIMING } from '../apps/server/src/shutdown.ts'
 import { listenOwned, trackOwned } from '../tools/e2e/listeners.ts'
+import { expectKilled, guardCopy } from './source-copy-guard.ts'
 
 type Helpers = { listenOwned: typeof listenOwned; trackOwned: typeof trackOwned }
 function sourceCopy(replacement: [string, string]): Helpers {
@@ -20,14 +21,16 @@ function sourceCopy(replacement: [string, string]): Helpers {
   expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
   source = source.replace(...replacement).replace(/^import[\s\S]*? from ['"].+?['"]\n/gm, '')
   source = stripTypeScriptTypes(source).replace(/\bexport (?=(?:async )?function)/g, '')
-  return new Function(
-    'assert',
-    'createConnection',
-    'HttpServer',
-    'closeServer',
-    'DEFAULT_SHUTDOWN_TIMING',
-    `${source}; return { listenOwned, trackOwned }`,
-  )(assert, createConnection, HttpServer, closeServer, DEFAULT_SHUTDOWN_TIMING) as Helpers
+  return guardCopy(
+    new Function(
+      'assert',
+      'createConnection',
+      'HttpServer',
+      'closeServer',
+      'DEFAULT_SHUTDOWN_TIMING',
+      `${source}; return { listenOwned, trackOwned }`,
+    )(assert, createConnection, HttpServer, closeServer, DEFAULT_SHUTDOWN_TIMING),
+  ) as Helpers
 }
 
 async function verifyLiveHandoff(bind = listenOwned) {
@@ -291,11 +294,15 @@ describe('source-copy negative controls', () => {
       'if (!shutdown && !(server instanceof HttpServer)) disconnect()',
       'if (!shutdown) disconnect()',
     ])
-    await expect(verifyHttpDrain(copy.trackOwned)).rejects.toThrow('Active HTTP requests')
+    await expectKilled(copy, (helpers) => verifyHttpDrain(helpers.trackOwned), {
+      outcome: { message: expect.stringContaining('Active HTTP requests') },
+    })
   })
   it('detects removal of the upgraded-socket cutoff', async () => {
     const copy = sourceCopy(['else cutoff = setTimeout(disconnect, timing.cutoffMs)', ''])
-    await expect(verifyUpgradeCutoff(copy.trackOwned)).rejects.toThrow('cutoff must disconnect')
+    await expectKilled(copy, (helpers) => verifyUpgradeCutoff(helpers.trackOwned), {
+      outcome: { message: expect.stringContaining('cutoff must disconnect') },
+    })
   })
   it('deterministically detects restoring the old port-based teardown probe', async () => {
     const copy = sourceCopy([
@@ -313,25 +320,29 @@ describe('source-copy negative controls', () => {
         }
       }`,
     ])
-    await expect(verifyPortReuse(copy.listenOwned)).rejects.toThrow('helper-owned listener')
+    await expectKilled(copy, (helpers) => verifyPortReuse(helpers.listenOwned), {
+      outcome: { message: expect.stringContaining('helper-owned listener') },
+    })
   })
   it('detects releasing a port before handing it to a consumer', async () => {
     const copy = sourceCopy([
       'return { ...owned, port:',
       'await owned.close(); return { ...owned, port:',
     ])
-    await expect(verifyLiveHandoff(copy.listenOwned)).rejects.toThrow('EADDRINUSE')
+    await expectKilled(copy, (helpers) => verifyLiveHandoff(helpers.listenOwned), {
+      outcome: { message: expect.stringContaining('EADDRINUSE') },
+    })
   })
   it('detects removal of the forbidden-port protection', async () => {
     const copy = sourceCopy([
       "assert(![3000, 3998].includes(address.port), 'Forbidden fixture port')",
       '',
     ])
-    await expect(verifyExcluded(copy.listenOwned)).rejects.toThrow()
+    await expectKilled(copy, (helpers) => verifyExcluded(helpers.listenOwned))
   })
   it('detects swallowing close callback errors', async () => {
     const copy = sourceCopy(['(error ? reject(error) : resolve())', 'resolve()'])
-    await expect(verifyCloseError(copy.trackOwned)).rejects.toThrow()
+    await expectKilled(copy, (helpers) => verifyCloseError(helpers.trackOwned))
   })
   it.each([
     [
@@ -357,6 +368,6 @@ describe('source-copy negative controls', () => {
     ],
   ] as const)('detects removal of the %s invariant', async (state, guard) => {
     const copy = sourceCopy([guard, ''])
-    await expect(verifyInvariant(state, copy.trackOwned)).rejects.toThrow()
+    await expectKilled(copy, (helpers) => verifyInvariant(state, helpers.trackOwned))
   })
 })

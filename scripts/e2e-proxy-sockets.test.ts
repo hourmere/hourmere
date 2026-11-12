@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { closeServer } from '../apps/server/src/shutdown.ts'
 import { startFixtureServer } from '../tools/e2e/fixture-server.ts'
 import { listenOwned, trackOwned } from '../tools/e2e/listeners.ts'
+import { expectKilled, guardCopy } from './source-copy-guard.ts'
 
 type Start = typeof startFixtureServer
 type Replacement = [string, string]
@@ -26,15 +27,17 @@ function sourceCopy(
     /\bexport (?=(?:async )?function)/g,
     '',
   )
-  return new Function(
-    'AsyncLocalStorage',
-    'tracingChannel',
-    'HttpServer',
-    'createConnection',
-    'trackOwned',
-    'startServer',
-    `${source}; return startFixtureServer`,
-  )(AsyncLocalStorage, tracingChannel, HttpServer, connect, track, undefined) as Start
+  return guardCopy(
+    new Function(
+      'AsyncLocalStorage',
+      'tracingChannel',
+      'HttpServer',
+      'createConnection',
+      'trackOwned',
+      'startServer',
+      `${source}; return startFixtureServer`,
+    )(AsyncLocalStorage, tracingChannel, HttpServer, connect, track, undefined),
+  ) as Start
 }
 
 async function fixture(
@@ -86,6 +89,7 @@ async function exerciseActive(
   replacements: Replacement[] = [],
   residual = false,
   leaveOpen = false,
+  check = (start: Start, verify: (start: Start) => Promise<void>) => verify(start),
 ) {
   let outbound: Socket | undefined,
     closeObserved = false
@@ -118,49 +122,51 @@ async function exerciseActive(
   const active = new Promise<void>((resolve) => {
     received = resolve
   })
-  const owned = await fixture(
-    start,
-    (socket) => socket.once('data', received),
-    () =>
-      expect(outbound?.destroyed, 'Production shutdown must begin before proxy destruction').toBe(
-        false,
-      ),
-    leaveOpen,
-  )
-  const client = createConnection({
-    host: '127.0.0.1',
-    port: owned.listener.port,
-    allowHalfOpen: true,
+  await check(start, async (copy) => {
+    const owned = await fixture(
+      copy,
+      (socket) => socket.once('data', received),
+      () =>
+        expect(outbound?.destroyed, 'Production shutdown must begin before proxy destruction').toBe(
+          false,
+        ),
+      leaveOpen,
+    )
+    const client = createConnection({
+      host: '127.0.0.1',
+      port: owned.listener.port,
+      allowHalfOpen: true,
+    })
+    client.on('error', () => {})
+    let closing: Promise<void> | undefined
+    try {
+      await once(client, 'connect')
+      client.write('active connection')
+      await active
+      expect(outbound?.destroyed).toBe(false)
+      closing = owned.app.close()
+      void closing.catch(() => {})
+      if (!leaveOpen) {
+        await cleanupReady
+        await Promise.resolve()
+        expect(outbound?.destroyed, 'Shutdown must destroy the owned outbound socket').toBe(true)
+      }
+      if (residual) await expect(closing).rejects.toThrow('release its outbound proxy connections')
+      else if (leaveOpen) {
+        await expect(closing).rejects.toThrow('emit close')
+        expect(owned.backend.listening).toBe(true)
+      } else {
+        await expect(closing).resolves.toBeUndefined()
+        expect(closeObserved).toBe(true)
+        expect(owned.backend.listening).toBe(false)
+      }
+    } finally {
+      outbound?.destroy()
+      client.destroy()
+      await Promise.allSettled([closing])
+      await owned.cleanup()
+    }
   })
-  client.on('error', () => {})
-  let closing: Promise<void> | undefined
-  try {
-    await once(client, 'connect')
-    client.write('active connection')
-    await active
-    expect(outbound?.destroyed).toBe(false)
-    closing = owned.app.close()
-    void closing.catch(() => {})
-    if (!leaveOpen) {
-      await cleanupReady
-      await Promise.resolve()
-      expect(outbound?.destroyed, 'Shutdown must destroy the owned outbound socket').toBe(true)
-    }
-    if (residual) await expect(closing).rejects.toThrow('release its outbound proxy connections')
-    else if (leaveOpen) {
-      await expect(closing).rejects.toThrow('emit close')
-      expect(owned.backend.listening).toBe(true)
-    } else {
-      await closing
-      expect(closeObserved).toBe(true)
-      expect(owned.backend.listening).toBe(false)
-    }
-  } finally {
-    outbound?.destroy()
-    client.destroy()
-    await Promise.allSettled([closing])
-    await owned.cleanup()
-  }
 }
 
 async function exerciseDeferredRequest(start: Start = startFixtureServer) {
@@ -295,28 +301,30 @@ describe('fixture proxy source-copy negative controls', () => {
     ['outbound removal', 'outbound.delete(socket)', ''],
     ['pending-close removal', 'pendingClose.delete(closed)', ''],
   ])('detects removal of %s', async (_name, before, after) => {
-    await expect(exerciseActive([[before, after]])).rejects.toThrow()
+    await exerciseActive([[before, after]], false, false, expectKilled)
   })
   it.each(['outbound', 'pendingClose'])('detects removal of the residual %s guard', async (set) => {
     const stale: Replacement =
       set === 'outbound' ? ['outbound.delete(socket)', ''] : ['pendingClose.delete(closed)', '']
     await exerciseActive([stale], true)
-    await expect(
-      exerciseActive(
+    await exerciseActive(
+      [
+        stale,
         [
-          stale,
-          [
-            'outbound.size || pendingClose.size',
-            set === 'outbound' ? 'pendingClose.size' : 'outbound.size',
-          ],
+          'outbound.size || pendingClose.size',
+          set === 'outbound' ? 'pendingClose.size' : 'outbound.size',
         ],
-        true,
-      ),
-    ).rejects.toThrow()
+      ],
+      true,
+      false,
+      expectKilled,
+    )
   })
   it('detects loss of the outbound half-close protection', async () => {
     const copy = sourceCopy([['allowHalfOpen: true,', 'allowHalfOpen: false,']])
-    await expect(exerciseHalfClose(copy, 'backend')).rejects.toThrow('after FIN')
+    await expectKilled(copy, (start) => exerciseHalfClose(start, 'backend'), {
+      outcome: { message: expect.stringContaining('after FIN') },
+    })
   })
   it('detects destroying proxy sockets before in-flight HTTP handlers finish', async () => {
     const copy = sourceCopy([
@@ -325,6 +333,8 @@ describe('fixture proxy source-copy negative controls', () => {
         '        try {\n          for (const socket of outbound) socket.destroy()\n          await backend.close(() => running.close())',
       ],
     ])
-    await expect(exerciseDeferredRequest(copy)).rejects.toThrow('response must settle')
+    await expectKilled(copy, (start) => exerciseDeferredRequest(start), {
+      outcome: { message: expect.stringContaining('response must settle') },
+    })
   })
 })

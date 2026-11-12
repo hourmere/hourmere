@@ -71,9 +71,11 @@ function sourceCopy(replacement?: Replacement): Remove {
   )
 }
 
+/** `partOf`: the guarded removal copy this policy copy calls, so they share faults. */
 function policySourceCopy(
   replacement?: Replacement,
   remove: Remove = removeTeamMember,
+  partOf?: object,
 ): typeof createTeamRolePolicy {
   let source = readFileSync('packages/auth/src/team-role-policy.ts', 'utf8')
   if (replacement) {
@@ -105,9 +107,12 @@ function policySourceCopy(
     removeTeamMember: remove,
     teamMemberRemovalTarget,
   }
-  return new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(
-    ...Object.values(bindings),
-  ) as typeof createTeamRolePolicy
+  return guardCopy(
+    new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(
+      ...Object.values(bindings),
+    ) as typeof createTeamRolePolicy,
+    { partOf },
+  )
 }
 
 async function sourceExportCopy(reexportTransactionHelper = false) {
@@ -272,8 +277,8 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     )
   }
 
-  function copiedNativePolicy(replacement?: Replacement, remove: Remove = removeTeamMember) {
-    const policy = policySourceCopy(replacement, remove)(db)
+  function copiedNativePolicy(createPolicy = policySourceCopy()) {
+    const policy = createPolicy(db)
     // Use the real pinned native endpoint, auth adapter transaction and recorder. Only
     // the policy is a source copy; the removed protection must fail a behavior assertion.
     const copiedAuth = betterAuth({
@@ -450,8 +455,9 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
       "if (!ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {",
       "if (true || !ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {",
     ]
-    const handler = copiedNativePolicy(mutation)
-    await expect(verifyNativeBoundary(handler)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(policySourceCopy(mutation), (copy) =>
+      verifyNativeBoundary(copiedNativePolicy(copy)),
+    )
   })
 
   async function verifyNativeRecheck(
@@ -517,29 +523,27 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   it.each(['role', 'context'] as const)(
     'detects missing locked native %s rechecks with a real assertion',
     async (change) => {
-      await expect(
-        verifyNativeRecheck(
-          change,
-          copiedNativePolicy(
-            [
-              `const { actor, member, principal, expectedOrganizationId } = await removal(
+      const remove = sourceCopy([
+        'checkTeamManagementAccess(trx, principal, input.teamId, true, {',
+        'checkTeamManagementAccess(trx, principal, input.teamId, false, {',
+      ])
+      const policy = policySourceCopy(
+        [
+          `const { actor, member, principal, expectedOrganizationId } = await removal(
               ctx,
               trx,
               true,
             )`,
-              `const { actor, member, principal, expectedOrganizationId } = await removal(
+          `const { actor, member, principal, expectedOrganizationId } = await removal(
               ctx,
               trx,
               false,
             )`,
-            ],
-            sourceCopy([
-              'checkTeamManagementAccess(trx, principal, input.teamId, true, {',
-              'checkTeamManagementAccess(trx, principal, input.teamId, false, {',
-            ]),
-          ),
-        ),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+        ],
+        remove,
+        remove,
+      )
+      await expectKilled(policy, (copy) => verifyNativeRecheck(change, copiedNativePolicy(copy)))
     },
   )
 
