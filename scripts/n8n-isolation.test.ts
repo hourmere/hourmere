@@ -81,6 +81,11 @@ it('turns install scripts off by default in the standalone package', () => {
   expect(settings).toEqual(['ignore-scripts=true'])
 })
 
+it('keeps the standalone package private', () => {
+  // The publication tests run only in n8n-compatibility; this keeps the guard in a required job.
+  expect(JSON.parse(read('tools/n8n-nodes-hourmere/package.json')).private).toBe(true)
+})
+
 it('checks the standalone package in its own CI job', () => {
   const ci = parse(read('.github/workflows/ci.yml'))
   const job = ci.jobs['n8n-compatibility']
