@@ -14,6 +14,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as EventTypes from './event-types.ts'
 import { leaveTeamMember } from './member-leave.ts'
 import * as Service from './routing-form-service.ts'
@@ -35,8 +36,14 @@ const EVENT_TYPES = new URL('./event-types.ts', import.meta.url)
 const SERVICE = new URL('./routing-form-service.ts', import.meta.url)
 const REMOVAL = new URL('../../auth/src/team-member-removal.ts', import.meta.url)
 
-/** Imports an isolated copy with exactly-once replacements; the shipped file is untouched. */
-async function importCopy<T>(location: URL, ...replacements: (readonly [string, string])[]) {
+/**
+ * Imports an isolated, guarded copy with exactly-once replacements; the shipped file is
+ * untouched. The guard makes a broken copy fail as a harness error, never as a kill.
+ */
+async function importCopy<T extends object>(
+  location: URL,
+  ...replacements: (readonly [string, string])[]
+): Promise<T> {
   let source = readFileSync(location, 'utf8')
   for (const [from, to] of replacements) {
     expect(source.split(from), `mutation must match once: ${from}`).toHaveLength(2)
@@ -47,9 +54,9 @@ async function importCopy<T>(location: URL, ...replacements: (readonly [string, 
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(
-    `data:text/javascript;base64,${Buffer.from(module).toString('base64')}`
-  ) as Promise<T>
+  return guardCopy(
+    (await import(`data:text/javascript;base64,${Buffer.from(module).toString('base64')}`)) as T,
+  )
 }
 
 // Exact source text that the off comparison and the mutation controls remove or replace.
@@ -861,9 +868,11 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
    * copy is made first, so a replacement that no longer matches fails the test instead of
    * counting as a kill.
    */
-  async function killed<T>(copy: Promise<T>, scenario: (module: T) => Promise<unknown>) {
-    const module = await copy
-    await expect(scenario(module)).rejects.toMatchObject({ name: 'AssertionError' })
+  async function killed<T extends object>(
+    copy: Promise<T>,
+    scenario: (module: T) => Promise<unknown>,
+  ) {
+    await expectKilled(await copy, scenario)
   }
 
   it('fails when deletion is blocked by a form targeting the event type', () =>

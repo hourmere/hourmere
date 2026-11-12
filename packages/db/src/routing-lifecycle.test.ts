@@ -9,6 +9,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { Kysely, PostgresDialect } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { createDb, type Db } from './index.ts'
 import * as Lifecycle from './routing-lifecycle.ts'
 import type { DB } from './tables.ts'
@@ -18,7 +19,10 @@ const serverUrl = process.env.DATABASE_URL
 type LifecycleModule = typeof Lifecycle
 const LIFECYCLE = new URL('./routing-lifecycle.ts', import.meta.url)
 
-/** Imports an isolated copy with exactly-once replacements; the shipped file is untouched. */
+/**
+ * Imports an isolated, guarded copy with exactly-once replacements; the shipped file is
+ * untouched. The guard makes a broken copy fail as a harness error, never as a kill.
+ */
 async function importCopy(...replacements: (readonly [string, string])[]) {
   let source = readFileSync(LIFECYCLE, 'utf8')
   for (const [from, to] of replacements) {
@@ -30,9 +34,11 @@ async function importCopy(...replacements: (readonly [string, string])[]) {
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, LIFECYCLE).href : import.meta.resolve(specifier)}'`,
   )
-  return import(
-    `data:text/javascript;base64,${Buffer.from(module).toString('base64')}`
-  ) as Promise<LifecycleModule>
+  return guardCopy(
+    (await import(
+      `data:text/javascript;base64,${Buffer.from(module).toString('base64')}`
+    )) as LifecycleModule,
+  )
 }
 
 /** Expected success, reported as an assertion so that a throwing mutant is not a crash. */
@@ -668,8 +674,7 @@ describe.skipIf(!serverUrl)('routing lifecycle storage', () => {
     replacements: (readonly [string, string])[],
     scenario: (L: LifecycleModule) => Promise<unknown>,
   ) {
-    const copy = await importCopy(...replacements)
-    await expect(scenario(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await importCopy(...replacements), scenario)
   }
 
   it('fails when marking skips the fallback', () =>

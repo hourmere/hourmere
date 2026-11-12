@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { expect, it, vi } from 'vitest'
 import { z } from 'zod'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { defineJob } from './index.ts'
 import {
   ROUTING_RETENTION_CRON,
@@ -12,13 +13,18 @@ import {
 
 type Factory = typeof routingRetentionJob
 
-/** An isolated copy with one exactly-once replacement; the shipped file is untouched. */
+/** An isolated, guarded copy with one exactly-once replacement; the shipped file is untouched. */
 function sourceCopy(before: string, after: string): Factory {
   let source = readFileSync(new URL('./routing-retention.ts', import.meta.url), 'utf8')
   expect(source.split(before), `mutation must match once: ${before}`).toHaveLength(2)
   source = source.replace(before, after)
   source = stripTypeScriptTypes(source.replace(/^import .*\n/gm, '')).replace(/\bexport /g, '')
-  return new Function('z', 'defineJob', `${source}; return routingRetentionJob`)(z, defineJob)
+  return guardCopy(
+    new Function('z', 'defineJob', `${source}; return routingRetentionJob`)(
+      z,
+      defineJob,
+    ) as Factory,
+  )
 }
 
 const run = { id: 'test', attempt: 1, signal: new AbortController().signal }
@@ -131,7 +137,5 @@ it.each([
   ],
   ['refuse payload fields', 'payload: z.strictObject(', 'payload: z.looseObject('],
 ])('detects source-copy removal of retention protection: %s', async (_name, before, after) => {
-  await expect(verifyRetention(sourceCopy(before, after))).rejects.toMatchObject({
-    name: 'AssertionError',
-  })
+  await expectKilled(sourceCopy(before, after), verifyRetention)
 })
