@@ -7,9 +7,17 @@ import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 
 export const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error'
 
-/** A SCIM Error message (RFC 7644 section 3.12): the status is a string. */
-export function scimError(status: number, detail: string) {
-  return { schemas: [SCIM_ERROR_SCHEMA], status: String(status), detail }
+/**
+ * A SCIM Error message (RFC 7644 section 3.12): the status is a string, and a 400 may name
+ * its scimType keyword.
+ */
+export function scimError(status: number, detail: string, scimType?: string) {
+  return {
+    schemas: [SCIM_ERROR_SCHEMA],
+    status: String(status),
+    ...(scimType === undefined ? {} : { scimType }),
+    detail,
+  }
 }
 
 /** One request a provisioning token authenticated, below its organization base URL. */
@@ -28,7 +36,7 @@ export interface ScimResourceRequest {
 }
 
 export interface ScimReply {
-  status: 200 | 403 | 404 | 501
+  status: 200 | 400 | 403 | 404 | 501
   body: unknown
 }
 
@@ -56,7 +64,7 @@ export function mountScim(
   if (options?.resources && !publicUrl) throw new Error('SCIM resources need the public URL')
   const origin = publicUrl ? new URL(publicUrl).origin : ''
   const limit = createRateLimiter({ limit: 120, windowSeconds: 60 })
-  const send = (c: Context, status: 200 | 401 | 403 | 404 | 429 | 500 | 501, body: unknown) => {
+  const send = (c: Context, status: ScimReply['status'] | 401 | 429 | 500, body: unknown) => {
     c.header('Content-Type', 'application/scim+json')
     return c.body(JSON.stringify(body), status)
   }
