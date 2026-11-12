@@ -77,10 +77,11 @@ Discovery follows RFC 7644 section 4. `/Schemas` and `/ResourceTypes` answer wit
 colons percent-encoded). Paging, sorting and projection parameters are ignored there; a
 `filter` parameter is refused with 403, any method other than GET or HEAD with 501, and an
 unknown resource type or schema ID with 404. Schemas lists the User schema and the enterprise
-extension with exactly the fields of the mapping table below; `id`, `externalId` and `meta`
-are common attributes, not schema fields. `userName` is the one required field and is
-returned always; derived `manager.displayName` is read-only. ResourceTypes lists User only,
-with the enterprise extension optional, until Groups ship. Discovery representations carry
+extension with exactly the mapped fields of the table below, without the deferred `groups` or
+the refused `roles`, `entitlements` and `password`; `id`, `externalId` and `meta` are common
+attributes, not schema fields. `userName` is the one required field and is returned always;
+derived `manager.displayName` is read-only. ResourceTypes lists User only, with the
+enterprise extension optional, until Groups ship. Discovery representations carry
 `meta.resourceType` and an absolute `meta.location`, without `created`, `lastModified` or
 `version`.
 

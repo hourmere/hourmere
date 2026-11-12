@@ -173,6 +173,12 @@ const leaves = (attributes: Attribute[], prefix = ''): Attribute[] =>
       ? leaves(attribute.subAttributes, `${prefix}${attribute.name}.`)
       : [{ ...attribute, name: `${prefix}${attribute.name}` }],
   )
+// Every attribute, complex parents included, named by its path.
+const nodes = (attributes: Attribute[], prefix = ''): Attribute[] =>
+  attributes.flatMap((attribute) => [
+    { ...attribute, name: `${prefix}${attribute.name}` },
+    ...nodes(attribute.subAttributes ?? [], `${prefix}${attribute.name}.`),
+  ])
 const names = (attributes: Attribute[]): string[] =>
   attributes.flatMap((attribute) => [attribute.name, ...names(attribute.subAttributes ?? [])])
 
@@ -244,17 +250,18 @@ async function verifySchemas(resources: ScimResources) {
   expect(userLeaves.map((leaf) => leaf.name).sort()).toEqual(fields.core)
   expect(extensionLeaves.map((leaf) => leaf.name).sort()).toEqual(fields.enterprise)
   const every = [...userLeaves, ...extensionLeaves]
-  // Only the derived fields are read-only; everything else is a mapped, writable field.
-  expect(every.filter((leaf) => leaf.mutability !== 'readWrite').map((leaf) => leaf.name)).toEqual(
+  const all = [...nodes(user?.attributes ?? []), ...nodes(extension?.attributes ?? [])]
+  // Only the derived fields are read-only; every other field and parent is mapped and writable.
+  expect(all.filter((node) => node.mutability !== 'readWrite').map((node) => node.name)).toEqual(
     fields.derived,
   )
   // userName is the one required identity field: normalized (case-insensitive) uniqueness
   // within the connection, and projection never hides it.
   expect(design).toContain('Normalize userName consistently for uniqueness')
   expect(design).toContain('Never let projection hide mandatory identity fields.')
-  const special = every.filter(
-    (leaf) =>
-      leaf.required || leaf.caseExact || leaf.uniqueness !== 'none' || leaf.returned !== 'default',
+  const special = all.filter(
+    (node) =>
+      node.required || node.caseExact || node.uniqueness !== 'none' || node.returned !== 'default',
   )
   expect(special).toEqual([
     expect.objectContaining({
@@ -274,13 +281,8 @@ async function verifySchemas(resources: ScimResources) {
         .map((leaf) => [leaf.name, leaf.type]),
     ),
   ).toEqual({ active: 'boolean', 'emails.primary': 'boolean' })
-  const emails = user?.attributes.find((attribute) => attribute.name === 'emails')
-  expect(emails?.multiValued).toBe(true)
-  expect(
-    [...(user?.attributes ?? []), ...(extension?.attributes ?? [])]
-      .filter((attribute) => attribute.multiValued)
-      .map((attribute) => attribute.name),
-  ).toEqual(['emails'])
+  // The one work address list; nothing else, at any level, is multi-valued.
+  expect(all.filter((node) => node.multiValued).map((node) => node.name)).toEqual(['emails'])
 }
 
 async function verifyResourceTypes(resources: ScimResources) {
@@ -352,6 +354,10 @@ function verifyProtocol(resources: ScimResources) {
       status: 404,
       body: scimError(404, 'Resource not found.'),
     })
+  // HEAD is GET without a body; Hono drops the body.
+  expect(discover('/ServiceProviderConfig', { resources, method: 'HEAD' })).toEqual(
+    discover('/ServiceProviderConfig', { resources }),
+  )
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'])
     for (const path of ['/ServiceProviderConfig', '/ResourceTypes', '/Schemas/x'])
       expect(discover(path, { resources, method })).toEqual({
@@ -419,6 +425,15 @@ describe('SCIM discovery representations', () => {
       ["    returned: 'always',\n", ''],
       ["    uniqueness: 'server',\n", ''],
       ["canonicalValues: ['work']", "canonicalValues: ['work', 'home']"],
+      ['    multiValued: true,\n', '    multiValued: true,\n    required: true,\n'],
+      [
+        "attribute('manager', 'Another User of the same provisioning connection.', {",
+        "attribute('manager', 'Another User of the same provisioning connection.', {\n    mutability: 'readOnly',",
+      ],
+      [
+        "attribute('givenName', 'Given name.')",
+        "attribute('givenName', 'Given name.', { multiValued: true })",
+      ],
     ] as [string, string][]) {
       const mutant = await sourceCopy<typeof import('./scim-discovery.ts')>(
         './scim-discovery.ts',
@@ -449,6 +464,7 @@ describe('SCIM discovery representations', () => {
     for (const mutation of [
       ["if (query.has('filter'))", 'if (false)'],
       ["if (method !== 'GET' && method !== 'HEAD')", 'if (false)'],
+      ["method !== 'GET' && method !== 'HEAD'", "method !== 'GET'"],
       ['decoded = decodeURIComponent(id)', 'decoded = id'],
       ['startIndex: 1,', 'startIndex: 0,'],
       ["(endpoint === 'ServiceProviderConfig' && id !== undefined)", 'false'],
@@ -714,7 +730,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
   })
 
   // The production assembly, as startServer builds it, with the operator switch on.
-  async function verifyProductionOff(options = productionAppOptions) {
+  async function productionAnswers(options = productionAppOptions) {
     const issued = await issue()
     const config = loadConfig({
       DATABASE_URL: owned.url,
@@ -746,7 +762,9 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
         enqueueCalendarWritebackRecovery: unavailable,
       }),
     )
-    // Only SCIM-specific names: the unavailable handler is mounted, discovery is not.
+    // Only SCIM-specific names: the unavailable handler is mounted and no discovery route or
+    // OpenAPI path sits beside it. Handlers would be dispatched inside /scim/*, so the
+    // answers below are what actually prove discovery absent.
     const paths = application.routes.map((route) => route.path)
     expect(paths).toContain('/scim/*')
     expect(
@@ -756,17 +774,26 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
       paths: Record<string, unknown>
     }
     expect(Object.keys(document.paths).filter((path) => path.includes('scim/v2'))).toEqual([])
+    const answers = []
     for (const resource of discovery) {
       const response = await scim(application, organizationId, resource, bearer(issued.secret))
-      expect({ resource, status: response.status }).toEqual({ resource, status: 404 })
       expect(response.headers.get('content-type')).toBe('application/scim+json')
-      expect(await response.json()).toEqual(scimError(404, 'SCIM resources are not available yet.'))
+      answers.push({ resource, status: response.status, body: await response.json() })
     }
+    return answers
   }
+  const unavailableAnswers = discovery.map((resource) => ({
+    resource,
+    status: 404,
+    body: scimError(404, 'SCIM resources are not available yet.'),
+  }))
 
   it('keeps discovery unregistered in the production assembly with SCIM enabled', async () => {
-    await verifyProductionOff()
-    // The control: the same token reads discovery through the harness.
+    expect(await productionAnswers()).toEqual(unavailableAnswers)
+    // Controls: an unmutated copy of the assembly answers the same, and the same token
+    // reads discovery through the harness.
+    const control = await sourceCopy<typeof import('./server.ts')>('./server.ts')
+    expect(await productionAnswers(control.productionAppOptions)).toEqual(unavailableAnswers)
     const issued = await issue()
     expect(
       (await scim(harness(), organizationId, 'ServiceProviderConfig', bearer(issued.secret)))
@@ -783,9 +810,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
         'scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED, resources: scimDiscovery },',
       ],
     )
-    await expect(verifyProductionOff(mutant.productionAppOptions)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    // Registered in production, every discovery path would answer.
+    expect(
+      (await productionAnswers(mutant.productionAppOptions)).map(({ resource, status }) => ({
+        resource,
+        status,
+      })),
+    ).toEqual(discovery.map((resource) => ({ resource, status: 200 })))
   })
 
   it('advertises only fields the connection identity storage holds', async () => {
