@@ -111,6 +111,57 @@ describe('allowlisted webhook HTTP over an owned loopback socket', () => {
       expect(dns.lookup).toHaveBeenCalledTimes(host === 'n8n' ? 1 : 0)
     },
   )
+  it('puts the signed headers first and the fixed headers after them on the wire', async () => {
+    let raw: string[] = []
+    receiver = (req, res) => {
+      raw = req.rawHeaders
+      req.resume()
+      req.on('end', () => res.writeHead(204).end())
+    }
+    const request = input()
+    await expect(sendWebhook(request)).resolves.toBe(204)
+    expect(raw).toEqual([
+      'webhook-id',
+      request.headers['webhook-id'],
+      'webhook-timestamp',
+      request.headers['webhook-timestamp'],
+      'webhook-signature',
+      request.headers['webhook-signature'],
+      'content-type',
+      'application/json',
+      'content-length',
+      String(Buffer.byteLength(request.body)),
+      'user-agent',
+      'Hourmere-Webhooks/1',
+      'Host',
+      `127.0.0.1:${port}`,
+      'Connection',
+      'close',
+    ])
+  })
+  it('keeps the fixed content type and user agent when a caller sends them in another case', async () => {
+    let seen: IncomingMessage | undefined
+    receiver = (req, res) => {
+      seen = req
+      req.resume()
+      req.on('end', () => res.writeHead(204).end())
+    }
+    const request = input()
+    await expect(
+      sendWebhook({
+        ...request,
+        headers: {
+          ...request.headers,
+          'Content-Type': 'text/plain',
+          'User-Agent': 'synthetic-caller/1',
+        },
+      }),
+    ).resolves.toBe(204)
+    expect(seen?.headers['content-type']).toBe('application/json')
+    expect(seen?.headers['user-agent']).toBe('Hourmere-Webhooks/1')
+    const names = (seen?.rawHeaders ?? []).filter((_, index) => index % 2 === 0)
+    expect(names.filter((name) => /^(content-type|user-agent)$/i.test(name))).toHaveLength(2)
+  })
   it('returns a redirect without sending a request to its location', async () => {
     receiver = (_req, res) =>
       res.writeHead(302, { location: `http://127.0.0.1:${port}/redirected` }).end()
