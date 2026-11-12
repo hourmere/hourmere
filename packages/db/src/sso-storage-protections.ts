@@ -1522,6 +1522,7 @@ const retainedProtections: Record<string, SsoProtection> = {
       await insert(f.db, 'sso_domains', lapsedDomainValues(f.team)),
       await insert(f.db, 'sso_domains', claimedDomainValues(f.team)),
       await insert(f.db, 'sso_domains', pendingDomainValues(f.team)),
+      await insert(f.db, 'sso_domains', { ...lapsedDomainValues(f.team), retired_at: at(-60) }),
     ]),
     mutants: [
       keptWhileTeamExists('guard_sso_domain', 'lapsed claims may be deleted and revived'),
@@ -1540,6 +1541,7 @@ const retainedProtections: Record<string, SsoProtection> = {
         'pending claims may be deleted',
         'OLD.claimed_at IS NOT NULL',
       ),
+      keptOnlyWhen('guard_sso_domain', 'retired claims may be deleted', 'OLD.retired_at IS NULL'),
     ],
   },
 }
