@@ -30,8 +30,21 @@ import {
 import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
-import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
-import { createJobs, oneTimeBookingLinksRetentionJob, paymentHoldsExpiryJob } from '@hourmere/jobs'
+import {
+  createDb,
+  createPool,
+  type Db,
+  deleteUnreferencedRoutingVersions,
+  purgeExpiredRoutingReceipts,
+  ROUTING_RECEIPT_PURGE_BATCH,
+  runMigrations,
+} from '@hourmere/db'
+import {
+  createJobs,
+  oneTimeBookingLinksRetentionJob,
+  paymentHoldsExpiryJob,
+  routingRetentionJob,
+} from '@hourmere/jobs'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -751,6 +764,15 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }),
       waitlistEmailJob(runWaitlistEmail),
       oneTimeBookingLinksRetentionJob(db),
+      // Routing receipt and version cleanup runs whether or not routing is enabled.
+      routingRetentionJob({
+        purgeReceipts: async () => ({
+          more: (await purgeExpiredRoutingReceipts(db)) === ROUTING_RECEIPT_PURGE_BATCH,
+        }),
+        cleanupVersions: (after) => deleteUnreferencedRoutingVersions(db, { after }),
+        continueRetention: (payload): Promise<string | null> =>
+          jobs.enqueue('routing-retention-v1', payload, { singletonKey: 'continuation' }),
+      }),
       ...configuredSmsJobs(config, db),
       paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),

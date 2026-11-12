@@ -3,7 +3,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, setRoutingTargetHealth } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
@@ -62,6 +62,7 @@ function sourceCopy(replacement?: Replacement): Remove {
     personalOwner,
     teamManagementDenied,
     teamRoles,
+    setRoutingTargetHealth,
   }
   return new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
     ...Object.values(bindings),

@@ -1,7 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_BODY_LIMIT } from '../apps/server/src/body-limit.ts'
+import {
+  ROUTING_RECEIPT_PURGE_BATCH,
+  ROUTING_VERSION_CLEANUP_BATCH,
+  ROUTING_VERSION_SCAN_BATCH,
+} from '../packages/db/src/routing-lifecycle.ts'
 import { assertRoutingStorageLimits } from '../packages/db/src/routing-storage-limits.ts'
+import {
+  ROUTING_RETENTION_CRON,
+  ROUTING_RETENTION_RUN,
+} from '../packages/jobs/src/routing-retention.ts'
 
 const document = readFileSync(new URL('../docs/routing-forms.md', import.meta.url), 'utf8')
 // Prose checks ignore line wrapping.
@@ -126,5 +135,46 @@ describe('routing design numeric contract', () => {
     const removed = document.replace(anchor, `| removed_${key} | ${value} |`)
     expect(() => verifyLimits(removed)).toThrow()
     verifyLimits(document)
+  })
+})
+
+// Step a4's cleanup bounds, stated in the design and pinned to the code that applies them.
+function verifyRetention(source: string) {
+  const text = source.replaceAll(/\s+/g, ' ')
+  const minutes = Number(text.match(/Cleanup runs every (\d+) minutes/)?.[1])
+  expect(ROUTING_RETENTION_CRON).toBe(`*/${minutes} * * * *`)
+  // The purge never lags expiry by more than the documented grace, backlog aside.
+  expect(minutes).toBeLessThanOrEqual(limits.purge_grace_hours * 60)
+  expect(Number(text.match(/deletes at most (\d+) receipts that expired unconsumed/)?.[1])).toBe(
+    ROUTING_RECEIPT_PURGE_BATCH,
+  )
+  const versions = text.match(/examines at most (\d+) versions and deletes at most (\d+)/)
+  expect(Number(versions?.[1])).toBe(ROUTING_VERSION_SCAN_BATCH)
+  expect(Number(versions?.[2])).toBe(ROUTING_VERSION_CLEANUP_BATCH)
+  const run = text.match(/A run stops after (\d+) transactions or (\d+) seconds/)
+  expect(Number(run?.[1])).toBe(ROUTING_RETENTION_RUN.transactions)
+  expect(Number(run?.[2]) * 1000).toBe(ROUTING_RETENTION_RUN.budgetMs)
+}
+
+describe('routing retention bounds', () => {
+  it('states the cleanup cadence and batch sizes the code uses', () => {
+    expect(ROUTING_RECEIPT_PURGE_BATCH).toBe(500)
+    expect(ROUTING_VERSION_SCAN_BATCH).toBe(1000)
+    expect(ROUTING_VERSION_CLEANUP_BATCH).toBe(100)
+    expect(ROUTING_RETENTION_RUN).toEqual({ transactions: 100, budgetMs: 45_000 })
+    verifyRetention(document)
+  })
+
+  it.each([
+    ['cadence', 'Cleanup runs every 15 minutes', 'Cleanup runs every 30 minutes'],
+    ['receipt batch', 'deletes at most 500', 'deletes at most 5000'],
+    ['version scan', 'examines at most 1000', 'examines at most 100'],
+    ['version batch', 'deletes at most 100 that', 'deletes at most 1000 that'],
+    ['run bound', 'after 100 transactions', 'after 1000 transactions'],
+    ['run budget', 'or 45 seconds', 'or 55 seconds'],
+  ])('rejects source-copy drift of the %s', (_name, from, to) => {
+    expect(prose.split(from)).toHaveLength(2)
+    expect(() => verifyRetention(prose.replace(from, to))).toThrow()
+    verifyRetention(prose)
   })
 })

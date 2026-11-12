@@ -14,11 +14,14 @@
 //   c4 (`resolve_routing_continuation`, `find_routed_slots`). Those steps list the tools only
 //   while `routingFormsEnabled` is true, so this assertion then moves into their off checks.
 // - CLI commands: b1 onward add `routing-forms …` commands to the static command table.
-// - Storage imports: a3's configuration services (CONFIGURATION_SERVICES) are the first
-//   service code to name the storage; nothing else outside the storage layer may.
-// - Shared services: step a2's validation, evaluation and target checks and a3's
-//   configuration services (SHARED_SERVICES) stay unloaded until a transport step (b1
-//   onward) first calls them.
+// - Storage imports: a3's configuration services and a4's lifecycle storage
+//   (STORAGE_SERVICES) are the service code that names the storage; nothing else outside the
+//   storage layer may.
+// - Shared services: a3's configuration services (SHARED_SERVICES) stay unloaded until a
+//   transport step (b1 onward) first calls them. Step a4 is not a surface: its target
+//   invalidation runs inside the existing event-type and member-removal mutations and its
+//   cleanup in a background job, so production loads its lifecycle modules (LIFECYCLE) and,
+//   through them, step a2's target checks; with no routing form they find nothing to do.
 // The web route table is asserted by apps/web/src/routing-forms-off.test.tsx (jsdom
 // project), which c3, c6 and d1 narrow when they mount routing pages.
 // The Hono routes are read from the app as startServer assembles it (productionAppOptions),
@@ -92,16 +95,21 @@ const STORAGE_LAYER =
 // `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
   /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
-// Step a3's configuration and publication services, the only service code that names the
-// routing tables so far.
+// Step a3's configuration and publication services, which no production entry point loads yet.
 const CONFIGURATION_SERVICES = ['packages/scheduling/src/routing-form-service.ts']
-// Step a2's shared validation, evaluation and target services and step a3's configuration
-// services, which no production entry point loads yet.
-const SHARED_SERVICES = [
-  'packages/scheduling/src/routing-form-config.ts',
+// Step a4's target invalidation and retention, loaded by event-type updates and deletion,
+// member removal and the worker.
+const LIFECYCLE = [
+  'packages/db/src/routing-lifecycle.ts',
+  'packages/scheduling/src/routing-target-lifecycle.ts',
+  // Step a2's target checks and the configuration types they need, for invalidation.
   'packages/scheduling/src/routing-form-targets.ts',
-  ...CONFIGURATION_SERVICES,
+  'packages/scheduling/src/routing-form-config.ts',
 ]
+// The only service code that names the routing tables: a4's lifecycle storage and a3's
+// configuration services.
+const STORAGE_SERVICES = ['packages/db/src/routing-lifecycle.ts', ...CONFIGURATION_SERVICES]
+const SHARED_SERVICES = CONFIGURATION_SERVICES
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -871,6 +879,8 @@ describe('routing forms are storage only', () => {
     // Their own dependencies are loaded, so the graph does reach the package.
     expect(reached).toContain('packages/scheduling/src/text.ts')
     for (const file of SHARED_SERVICES) expect(reached).not.toContain(file)
+    // Step a4's lifecycle is loaded, through the mutations and the worker that run it.
+    for (const file of LIFECYCLE) expect(reached, file).toContain(file)
   }, 30_000)
 
   it('keeps the routing storage unreferenced outside the storage layer and its services', () => {
@@ -887,8 +897,8 @@ describe('routing forms are storage only', () => {
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
-    // The configuration services name the tables (so the matcher sees them), and no other
-    // source does; whether a production entry point loads them is asserted above.
-    expect(referencing).toEqual(CONFIGURATION_SERVICES)
+    // The lifecycle storage and the configuration services name the tables (so the matcher
+    // sees them), and no other source does; which of them production loads is asserted above.
+    expect([...referencing].sort()).toEqual([...STORAGE_SERVICES].sort())
   })
 })
