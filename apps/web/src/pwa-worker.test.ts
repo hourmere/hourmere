@@ -767,6 +767,13 @@ const disabledRegions: RegionMarkers = [
 // split into the install's reuse, fresh and cleanup steps and the fetch route's navigation
 // and static branches. Only whole-line comments are ignored, so a `//` inside a string does
 // not hide the rest of its line.
+// This is a text scan, and it deliberately does not try to see calls made through an
+// indirection: destructured methods (`const { put } = cache`), `Reflect.apply(cache.put, …)`,
+// computed keys (`cache['put'](`, `caches['open'](`), optional calls (`cache.put?.(`),
+// `.bind` and method references (`caches.open.bind(caches)`, `.map(caches.delete, caches)`),
+// `fetch.call(`, an alias of `caches` (`const c = caches; c.open(`), a Cache held in a variable
+// that shadows `caches`, and code after a block comment that ends on a line starting with `//`
+// (that whole line is dropped as a comment). Write worker calls in the plain forms above.
 function rejectableCallSites(code: string, markers: RegionMarkers = workerRegions) {
   const text = code.replace(/^\s*\/\/.*$/gm, '')
   const regions = markers
@@ -825,8 +832,12 @@ it('lists every rejectable fetch, caches and cache call in worker.js exactly onc
     ),
   ).toEqual(['install:cache.delete', 'install:caches.open'])
   expect(rejectableCallSites(inInstall("await caches?.has('x')"))).toEqual(['install:caches.has'])
+  // A `//` inside a string that comes before a call on the same line must not hide the call,
+  // and a trailing comment after the call must not hide it either.
   expect(
-    rejectableCallSites(inInstall("await caches.has('https://cdn.example/a') // trailing")),
+    rejectableCallSites(
+      inInstall("await Promise.all(['https://cdn.example/a'].map((u) => caches.has(u))) // x"),
+    ),
   ).toEqual(['install:caches.has'])
 })
 
