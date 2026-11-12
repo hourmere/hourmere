@@ -4,10 +4,8 @@ import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
-const targetKey = (references: string) =>
-  `FK target of ${references}; it cannot be dropped while that FK exists`
-const impliedOrganization = (via: string) =>
-  `Redundant with ${via}, which pins the same organization and cascades from it; no write or deletion behaves differently without it`
+const targetKey = (...fks: string[]) =>
+  `Referenced by ${fks.join(', ')}: DROP CONSTRAINT fails with 2BP01 while ${fks.length > 1 ? 'those FKs depend' : 'that FK depends'} on its index, so it cannot be removed alone; the primary key already makes it unique`
 
 /** Objects that are not protections on their own; every other object must fail an assertion. */
 const allowList: Record<string, string> = {
@@ -19,19 +17,9 @@ const allowList: Record<string, string> = {
   ),
   'constraint public.routing_form_versions.routing_form_versions_organization_id_form_id_id_key':
     targetKey(
-      'routing_forms_published_version_fk and routing_receipts_organization_id_form_id_version_id_fkey',
+      'routing_forms_published_version_fk',
+      'routing_receipts_organization_id_form_id_version_id_fkey',
     ),
-  'constraint public.routing_form_versions.routing_form_versions_organization_id_fkey':
-    impliedOrganization(
-      'routing_form_versions_organization_id_form_id_fkey (forms cascade from their organization)',
-    ),
-  'constraint public.routing_target_dependencies.routing_target_dependencies_organization_id_fkey':
-    impliedOrganization(
-      'routing_target_dependencies_organization_id_version_id_fkey (versions cascade from their form)',
-    ),
-  'constraint public.booking_routing.booking_routing_organization_id_fkey': impliedOrganization(
-    'booking_routing_booking_id_organization_id_fkey (bookings cascade from their organization)',
-  ),
 }
 
 describe.skipIf(!serverUrl)('routing form constraint coverage', () => {

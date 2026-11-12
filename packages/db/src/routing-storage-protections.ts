@@ -1117,6 +1117,62 @@ routingProtections['form updates refresh updated_at'] = {
   break: noTrigger('routing_forms', 'routing_forms_updated_at'),
 }
 
+// The composite FKs already keep these rows in their parent's organization. The organization
+// FK also makes the insert lock the organization row (FOR KEY SHARE), so an organization
+// deletion that starts during the inserting transaction waits for it. Without that lock the
+// deletion removes the organization row and waits in its cascade on the parent row, and the
+// transaction's next write that checks the organization deadlocks with it (40P01).
+const organizationLocks: [
+  name: string,
+  table: string,
+  constraint: string,
+  row: (f: RoutingFixture) => Record<string, unknown>,
+][] = [
+  [
+    'version insert locks its organization',
+    'routing_form_versions',
+    'routing_form_versions_organization_id_fkey',
+    (f) => ({ ...versionValues(f), version_number: 2 }),
+  ],
+  [
+    'dependency insert locks its organization',
+    'routing_target_dependencies',
+    'routing_target_dependencies_organization_id_fkey',
+    dependencyValues,
+  ],
+  [
+    'snapshot insert locks its organization',
+    'booking_routing',
+    'booking_routing_organization_id_fkey',
+    bookingRoutingValues,
+  ],
+]
+for (const [name, table, constraint, row] of organizationLocks)
+  routingProtections[name] = {
+    check: async (f) => {
+      const writer = await f.pool.connect()
+      try {
+        await writer.query('BEGIN')
+        await insertRow(writer, table, row(f))
+        // FOR UPDATE conflicts with FOR KEY SHARE, and SKIP LOCKED returns no row instead of
+        // waiting, so a missing lock is a plain value mismatch.
+        expect(
+          (
+            await f.pool.query(
+              'SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE SKIP LOCKED',
+              [f.organization],
+            )
+          ).rows,
+          `${table} insert leaves its organization row unlocked`,
+        ).toEqual([])
+      } finally {
+        await writer.query('ROLLBACK').catch(() => {})
+        writer.release()
+      }
+    },
+    break: drop(table, constraint),
+  }
+
 interface PlanNode {
   'Node Type': string
   'Relation Name'?: string
