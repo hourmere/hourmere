@@ -62,8 +62,10 @@ type ManageApi = {
 }
 
 /**
- * Engine errors that only a broken copy raises: an unbound name, code that does not parse, or
- * a binding of the wrong kind. They never show that a mutation changed behaviour.
+ * Engine errors that a broken copy raises: an unbound name, code that does not parse, or a
+ * binding of the wrong kind. A mutation can raise one too (Temporal throws a TypeError for an
+ * undefined duration); its control then fails as a harness error rather than passing, and needs
+ * a mutation that fails an assertion instead.
  */
 const BROKEN_COPY_ERRORS = [ReferenceError, SyntaxError, TypeError]
 const copyFaults = new WeakMap<object, unknown[]>()
@@ -90,7 +92,9 @@ function guardCopy<T extends object>(copy: T): T {
       (...args: unknown[]) => {
         try {
           const result = run(...args)
-          return result instanceof Promise ? result.catch(record) : result
+          return typeof (result as PromiseLike<unknown> | undefined)?.then === 'function'
+            ? Promise.resolve(result).catch(record)
+            : result
         } catch (error) {
           return record(error)
         }
@@ -215,6 +219,60 @@ const BROKEN_COPY_FAILURE = {
   message: expect.stringContaining('unboundInSourceCopy is not defined'),
   cause: expect.any(ReferenceError),
 }
+
+// Pure checks of the broken-copy guard itself; they need no database.
+describe('source copy guard', () => {
+  // A verifier like the duration ones: `.resolves` turns any rejection into an AssertionError.
+  const verifyResolves = async (copy: { run: () => unknown }) => {
+    await expect(Promise.resolve().then(() => copy.run())).resolves.toBeDefined()
+  }
+
+  it.each<[string, () => unknown]>([
+    [
+      'a synchronous TypeError',
+      () => {
+        throw new TypeError('bindings.select is not a function')
+      },
+    ],
+    [
+      'a SyntaxError',
+      async () => {
+        throw new SyntaxError('Unexpected token')
+      },
+    ],
+    [
+      'a ReferenceError wrapped as a cause',
+      async () => {
+        throw new Error('Could not book', { cause: new ReferenceError('unbound is not defined') })
+      },
+    ],
+    [
+      'a rejected thenable',
+      () => ({
+        // biome-ignore lint/suspicious/noThenProperty: a non-native thenable on purpose
+        then: (_: unknown, reject: (error: unknown) => void) =>
+          reject(new ReferenceError('unbound is not defined')),
+      }),
+    ],
+  ])('reports %s from the copy as a broken copy', async (_, run) => {
+    await expect(expectKilled(guardCopy({ run }), verifyResolves)).rejects.toMatchObject({
+      name: 'BrokenSourceCopyError',
+    })
+  })
+
+  it('counts an assertion failure over a working copy as a kill', async () => {
+    const run = async () => {
+      throw new Error('This time is not available')
+    }
+    await expect(expectKilled(guardCopy({ run }), verifyResolves)).resolves.toBeUndefined()
+  })
+
+  it('refuses a copy that was not guarded', async () => {
+    await expect(expectKilled({ run: () => 1 }, verifyResolves)).rejects.toThrow(
+      'expectKilled needs a copy',
+    )
+  })
+})
 
 describe.skipIf(!serverUrl)('multiple duration bookings', () => {
   let owned: TestDatabase
