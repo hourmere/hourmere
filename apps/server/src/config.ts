@@ -2,6 +2,7 @@ import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
 import { calendarEncryptionKey } from '@hourmere/calendars'
 import { conferenceEncryptionKey } from '@hourmere/conferences'
 import { embedOrigin } from '@hourmere/core/embed'
+import { parseSsoPrivateTargets } from '@hourmere/outbound/sso-private-targets'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { z } from 'zod'
@@ -104,6 +105,20 @@ const schema = z
           code: 'custom',
           message:
             'WEBHOOK_PRIVATE_TARGETS must contain at most 32 exact private host:port or IP/CIDR:port[-port] entries; IPv6 requires brackets; public, metadata and link-local addresses are forbidden',
+        })
+        return z.NEVER
+      }
+    }),
+    // Reserved for SSO, which is not available yet: parsed and validated at startup, read by
+    // nothing else, so it routes nothing. Never the webhook allowlist, never team-editable.
+    SSO_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
+      try {
+        return parseSsoPrivateTargets(value)
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'SSO_PRIVATE_TARGETS must contain at most 32 exact host:port entries (one port each, no CIDR or ranges); IPv6 requires brackets; an IP must be private or loopback, never metadata or link-local',
         })
         return z.NEVER
       }
