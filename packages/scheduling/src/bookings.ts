@@ -178,6 +178,15 @@ export interface InviteeInput extends PersonInput {
   locale?: string | undefined
 }
 
+/**
+ * The invitee email rule: one trimmed line of at most MAX_EMAIL characters with the address
+ * shape. Returns the trimmed address, or undefined when the value fails the rule.
+ */
+export function cleanInviteeEmail(value: unknown): string | undefined {
+  const email = cleanText(value, { max: MAX_EMAIL })
+  return email !== undefined && EMAIL.test(email) ? email : undefined
+}
+
 function person(input: PersonInput, code: 'invalid_invitee' | 'invalid_guests', what: string) {
   const name = cleanText(input.name, { max: MAX_NAME })
   if (name === undefined) {
@@ -187,8 +196,8 @@ function person(input: PersonInput, code: 'invalid_invitee' | 'invalid_guests', 
       `${what} needs a name of 1 to ${MAX_NAME} characters on one line, without control characters`,
     )
   }
-  const email = cleanText(input.email, { max: MAX_EMAIL })
-  if (email === undefined || !EMAIL.test(email)) {
+  const email = cleanInviteeEmail(input.email)
+  if (email === undefined) {
     throw new DomainError('invalid', code, `${what} needs a valid email address`)
   }
   return { name, email }

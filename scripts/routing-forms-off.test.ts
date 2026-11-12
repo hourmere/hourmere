@@ -16,6 +16,8 @@
 // - CLI commands: b1 onward add `routing-forms …` commands to the static command table.
 // - Storage imports: a3 (configuration services) first imports the storage from service
 //   code; the scan then narrows to the packages that may own routing data access.
+// - Shared services: step a2's validation, evaluation and target checks
+//   (SHARED_SERVICES) stay unloaded until a3's configuration services first import them.
 // The web route table is asserted by apps/web/src/routing-forms-off.test.tsx (jsdom
 // project), which c3, c6 and d1 narrow when they mount routing pages.
 // The Hono routes are read from the app as startServer assembles it (productionAppOptions),
@@ -89,6 +91,11 @@ const STORAGE_LAYER =
 // `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
   /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
+// Step a2's shared validation, evaluation and target services, which no caller loads yet.
+const SHARED_SERVICES = [
+  'packages/scheduling/src/routing-form-config.ts',
+  'packages/scheduling/src/routing-form-targets.ts',
+]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -851,6 +858,14 @@ describe('routing forms are storage only', () => {
     for (const command of CLI_COMMANDS) expect(names).not.toContain(command)
     expect(names.filter(isRoutingName)).toEqual([])
   })
+
+  it('loads no shared routing service from a production entry point', () => {
+    for (const file of SHARED_SERVICES) expect(existsSync(new URL(file, root)), file).toBe(true)
+    const reached = runtimeGraph(ENTRY_POINTS)
+    // Their own dependencies are loaded, so the graph does reach the package.
+    expect(reached).toContain('packages/scheduling/src/bookings.ts')
+    for (const file of SHARED_SERVICES) expect(reached).not.toContain(file)
+  }, 30_000)
 
   it('keeps the routing storage unreferenced outside the storage layer', () => {
     const sources = productionSources()

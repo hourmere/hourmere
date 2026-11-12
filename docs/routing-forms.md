@@ -1,7 +1,9 @@
 # Routing forms — proposed design
 
 Status: storage foundation only; no routing form is available yet. Migration 0072 adds
-the five storage tables; no routes, UI, execution path or plan checks exist. The eventual
+the five storage tables; no routes, UI, execution path or plan checks exist. The shared
+validator, evaluator and target checks (step a2) exist as internal functions that no
+service or transport calls yet. The eventual
 feature is free on self-hosted and Cloud alike,
 and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),
@@ -139,6 +141,25 @@ An invalid draft cannot publish: reject dangling questions/options, mismatched o
 invalid mappings/targets and duplicate IDs/positions. Preview uses exactly the shared
 validator/evaluator, returns author-only matched-rule explanations, persists no answers
 and creates no route receipt, booking or analytics event.
+
+The shared validator (step a2, `packages/scheduling/src/routing-form-config.ts` and
+`routing-form-targets.ts`) fixes the JSON that later steps store and accept. A version is
+`{ questions, rules, fallback }`. A question is `{ id, type, label, required }` plus, for
+select only, `options` of `{ id, label }` with distinct labels. A rule is
+`{ id, conditions, target }`; a condition is `{ questionId, operator: 'equals', value }`
+or `{ questionId, operator: 'one_of', values }`, where select values are option IDs. A
+target is `{ kind: 'message', message }` or `{ kind: 'event', eventTypeId, mappings }`, with
+no member, host, URL or redirect field. A mapping is `{ questionId, destination, options }`:
+`destination` is `{ kind: 'inviteeName' }`, `{ kind: 'inviteeEmail' }` or
+`{ kind: 'question', questionId }`, and `options`, for a select source only, maps every
+source option ID to a destination option. IDs are lowercase UUIDs, distinct across a
+version's questions, options and rules. Unknown fields are rejected at every level. Errors
+name a `field` path such as `rules.2.target`; target errors add a `reason`: `not_found`
+(a missing event and another organization's event alike), `deleted`, `disabled`,
+`group_booking`, `unsupported_mode`, `payment_required`, `unsupported_target`,
+`invalid_message`, `invalid_mapping`, `unknown_destination`, `incompatible_mapping` or
+`incompatible_options`. Event types have no price setting yet, so a stored event projects
+no payment requirement; any other projected value fails closed as `payment_required`.
 
 Publishing atomically inserts an immutable version (questions, order, rules, targets,
 mappings and labels) and switches the pointer. Versions have monotonically increasing
