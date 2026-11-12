@@ -1114,6 +1114,18 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
         name: 'AssertionError',
       })
     })
+    // The skip itself: with the optional FK gone the helper resolves, it does not throw a setup error.
+    await transaction(source, async (client) => {
+      await client.query(
+        'ALTER TABLE scim_connections DROP CONSTRAINT scim_connections_organization_id_fkey',
+      )
+      await expect(
+        fireCascadesInOrder(client, [
+          ['auth.invitation', 'invitation_organizationId_fkey'],
+          ['scim_connections', 'scim_connections_organization_id_fkey', { optional: true }],
+        ]),
+      ).resolves.toBeUndefined()
+    })
     // Optional only where marked: the binding cleanup order requires the same FK.
     await transaction(source, async (client) => {
       await client.query(
