@@ -78,6 +78,13 @@ async function refusal(promise: Promise<unknown>): Promise<string> {
   throw new Error('expected the SSO transport to refuse')
 }
 
+/** A request over the limits fails at once; one that waits for a slot would still be pending. */
+const immediately = (promise: Promise<unknown>) =>
+  Promise.race([
+    refusal(promise),
+    new Promise<string>((resolve) => setTimeout(() => resolve('still pending'), 200)),
+  ])
+
 let consoleCalls: unknown[][]
 beforeEach(() => {
   consoleCalls = []
@@ -603,14 +610,14 @@ describe('SSO transport concurrency', () => {
     const origin = (n: number) => `https://idp${n}.example.com/`
     const started = Array.from({ length: each }, () => sendSsoRequest(publicRequest(origin(0))))
     await vi.waitFor(() => expect(pending).toHaveLength(each))
-    expect(await refusal(sendSsoRequest(publicRequest(origin(0))))).toBe('busy')
+    expect(await immediately(sendSsoRequest(publicRequest(origin(0))))).toBe('busy')
     expect(network.lookup).toHaveBeenCalledTimes(each)
     // Other origins still proceed until the process-wide limit.
     for (let n = 1; started.length < total; n += 1)
       for (let i = 0; i < each && started.length < total; i += 1)
         started.push(sendSsoRequest(publicRequest(origin(n))))
     await vi.waitFor(() => expect(pending).toHaveLength(total))
-    expect(await refusal(sendSsoRequest(publicRequest(origin(99))))).toBe('busy')
+    expect(await immediately(sendSsoRequest(publicRequest(origin(99))))).toBe('busy')
     for (const release of pending.splice(0)) release()
     await Promise.all(started)
     // Completed requests free their slots.
