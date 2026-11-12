@@ -10,6 +10,7 @@ import {
   readTargetIdentities,
   readTargetState,
   TargetRefusal,
+  type TargetRow,
   type TargetState,
   targetUsers,
 } from './target.ts'
@@ -147,12 +148,37 @@ export async function registerImportSource(
   )
   return result.rows[0]?.id as string
 }
+// A tiny analyzed auth."user" beside never-analyzed profile/organization tables can price
+// the sub-millisecond identity read past every JIT threshold, so it would compile on each
+// call. JIT never changes a result; SET LOCAL keeps the pooled session's own setting.
+async function readIdentitiesWithoutJit(
+  pool: pg.Pool,
+  authorization: ImportAuthorization,
+): Promise<TargetRow[]> {
+  const client = await pool.connect()
+  let discard = false
+  try {
+    await client.query('BEGIN READ ONLY')
+    await client.query('SET LOCAL jit = off')
+    const identities = await readTargetIdentities(client, authorization)
+    await client.query('COMMIT')
+    return identities
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {
+      discard = true
+    })
+    throw error
+  } finally {
+    // A session whose rollback failed may still be inside the transaction; never pool it.
+    client.release(discard)
+  }
+}
 export async function extractForPreview(
   pool: pg.Pool,
   input: SourceInput,
   cutoff: string,
 ): Promise<SourceSnapshot> {
-  const identities = await readTargetIdentities(pool, input.authorization)
+  const identities = await readIdentitiesWithoutJit(pool, input.authorization)
   return extractSource({
     connectionString: input.connectionString,
     sourceVersion: input.sourceVersion,
@@ -168,6 +194,8 @@ export async function previewImport(pool: pg.Pool, input: SourceInput): Promise<
   const client = await pool.connect()
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
+    // The target state includes the same identity read as extraction above.
+    await client.query('SET LOCAL jit = off')
     const state = await readTargetState(client, input.sourceId, input.authorization, cutoff)
     const { connectionString: _connectionString, ...options } = input
     const preview = buildPreview(snapshot, state, options)

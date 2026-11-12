@@ -166,6 +166,9 @@ export async function applyExtractedImport(
     inTransaction = true
     await client.query("SET LOCAL statement_timeout='30s'")
     await client.query("SET LOCAL lock_timeout='5s'")
+    // Planner statistics can price the sub-millisecond identity read past the JIT
+    // thresholds; compiling it would then stretch the time the write barrier is held.
+    await client.query('SET LOCAL jit = off')
     // A migration-only write barrier covers hash predicates as well as existing rows.
     // Ordinary profile/schedule writers do not all share one advisory-lock protocol.
     // Acquire every barrier before the first target snapshot; waiting writers resume
