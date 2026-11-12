@@ -6,10 +6,10 @@ import { migrationsDir } from '../migrate.ts'
 
 // Migrations that predate the constraint-coverage requirement (constraint-coverage.ts): every
 // migration on main when this list was written, all numbered below 0071. It includes
-// 0067-0070, which the earlier number-based guard exempted; 0067_audit_events merged without
-// coverage. The list is frozen: never add an entry, and remove one only in the change that
-// gives its migration an expectation file and coverage test. Every other migration, whatever
-// its number, ships both in the same change.
+// 0068-0070, which the earlier number-based guard exempted; 0067_audit_events left it when
+// audit-events-coverage.test.ts covered it. The list is frozen: never add an entry, and remove
+// one only in the change that gives its migration an expectation file and coverage test.
+// Every other migration, whatever its number, ships both in the same change.
 const legacyMigrations = new Set([
   '0001_auth',
   '0002_scheduling',
@@ -74,7 +74,6 @@ const legacyMigrations = new Set([
   '0064_reschedule_requests',
   '0065_payment_holds',
   '0066_scim_provisioning_tokens',
-  '0067_audit_events',
   '0068_slack_destinations',
   '0069_sms_delivery_limits',
   '0070_attendee_no_show',
