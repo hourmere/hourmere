@@ -4,12 +4,11 @@ description: Management events recorded for every Hourmere instance.
 ---
 
 Hourmere records audit events for account, membership, API-key, OAuth, booking
-management, webhook, event-type and branding changes on every self-hosted and Cloud
-instance.
+management, [no-show mark](/docs/no-shows), webhook, event-type and branding changes on
+every self-hosted and Cloud instance.
 There is no enterprise-plan requirement. Only those changes are recorded: SCIM
-provisioning tokens, [Slack notification](/docs/slack) destinations and
-[no-show marks](/docs/no-shows) are not recorded yet, and neither are schedules,
-one-time links or calendar connections.
+provisioning tokens and [Slack notification](/docs/slack) destinations are not recorded
+yet, and neither are schedules, one-time links or calendar connections.
 
 **The audit log is recorded but not yet viewable.** The query UI, REST, MCP and CLI
 read APIs, export and retention settings are planned separately. No automatic
@@ -24,4 +23,6 @@ or session IDs. Events and the recorded change share a database transaction:
 if the event cannot be written, the change fails too.
 
 The journal does not copy secrets, tokens, passwords, raw emails, invitee answers,
-logo images, colours, IP addresses or user agents. Public invitee actions retain entity IDs only.
+attendee names or email addresses, logo images, colours, IP addresses or user agents.
+Public invitee actions retain entity IDs only. A no-show change keeps the attendee ID and
+whether it marked or unmarked them.

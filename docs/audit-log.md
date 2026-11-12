@@ -55,10 +55,12 @@ The application and database reject extra detail keys. Role changes allow only
 only `scope`; all webhook actions allow only `events` (the subscribed event list);
 OAuth token revocation allows only `familySize` (see below). Branding updates allow
 only `logo` (`uploaded`, `selected` or `removed`) and `primaryColor` (`set` or
-`cleared`), at least one of them; the database also checks these values. Every other
-action requires an empty object. No key names, webhook URLs, secrets, images, logo
-hashes or colours are recorded. New detail keys require deliberate schema and
-documentation review.
+`cleared`), at least one of them; the database also checks these values. Attendee
+no-show changes require exactly `attendeeId` (the attendee's stored ID, a lowercase
+UUID) and `noShow` (`marked` or `unmarked`); the database checks both values. Every
+other action requires an empty object. No key names, webhook URLs, secrets, images,
+logo hashes, colours, attendee names, email addresses or free text are recorded. New
+detail keys require deliberate schema and documentation review.
 
 | Area | Actions |
 | --- | --- |
@@ -68,7 +70,7 @@ documentation review.
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
-| Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested` |
+| Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
 
 `organization.ownership_transferred` and `api_key.rotated` are reserved action
@@ -129,6 +131,15 @@ nothing. The invitee's response is the ordinary `booking.rescheduled` or
 `booking.cancelled` through the manage link. A request that times out is resolved by
 the system and not recorded.
 
+Marking or unmarking an attendee as a [no-show](../apps/site/src/content/docs/docs/no-shows.md)
+through REST, MCP `set_attendee_no_show` or CLI `set-no-show` records
+`booking.attendee_no_show_changed` on the booking, attributed to the caller's
+credential, with the attendee's ID and `noShow: marked` or `unmarked`. The event is
+written in the transaction that changes the marker, so a change that rolls back
+records nothing. Repeating the current state (an exact replay, or a concurrent request
+that loses the race) changes nothing and records nothing; refused requests record
+nothing.
+
 Webhook updates that change the active state record `webhook.paused` or
 `webhook.resumed`. A change to the subscribed events, or an update that changes
 neither, records `webhook.updated`; one request that resumes and edits records both.
@@ -172,10 +183,9 @@ already issued for it. This automatic replay response is not recorded: it concer
 the one connection whose code was replayed, and Better Auth ignores its failures, so
 making it depend on the journal could leave those tokens valid.
 Areas added after this journal was designed are not recorded yet: SCIM provisioning
-token creation, rotation and revocation; Slack destination creation, updates, deletion
-and test messages, and the automatic pause after Slack rejects a destination URL; and
-attendee no-show marking and unmarking (the attendee row keeps only the current marker
-and time). Routing forms, meeting polls, organization SSO configuration and booking
+token creation, rotation and revocation; and Slack destination creation, updates,
+deletion and test messages, and the automatic pause after Slack rejects a destination
+URL. Routing forms, meeting polls, organization SSO configuration and booking
 workflows have no reachable management operation yet and record nothing.
 Paid-booking holds (creating, confirming and cancelling a payment hold) are service
 functions that no route reaches yet; wiring them to a route must add booking audit

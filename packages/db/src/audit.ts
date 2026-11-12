@@ -36,6 +36,7 @@ export const auditDetails = {
   'booking.rescheduled': [],
   'booking.cancelled': [],
   'booking.reschedule_requested': [],
+  'booking.attendee_no_show_changed': ['attendeeId', 'noShow'],
   'event_type.created': [],
   'event_type.updated': [],
   'event_type.deleted': [],
