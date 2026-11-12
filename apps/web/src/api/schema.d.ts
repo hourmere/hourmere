@@ -818,7 +818,7 @@ export interface paths {
         };
         /**
          * Download bookings as CSV
-         * @description Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.
+         * @description Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization across processes, one export per user per process, and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.
          */
         get: operations["exportBookingsCsv"];
         put?: never;
@@ -4395,6 +4395,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the booking workflows of the owner the caller acts as
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
+         */
+        get: operations["listWorkflows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workflows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one booking workflow
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
+         */
+        get: operations["getWorkflow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -5402,6 +5442,8 @@ export interface components {
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
+            /** @description Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers */
+            workflowsEnabled?: boolean;
         };
         IssuedScimProvisioningToken: {
             secret: string;
@@ -6418,6 +6460,134 @@ export interface components {
             tuesday?: components["schemas"]["WallClockIntervalInput"][];
             wednesday?: components["schemas"]["WallClockIntervalInput"][];
         };
+        /** @description A booking workflow: its current revision's definition and its live enabled flag */
+        Workflow: {
+            actions: components["schemas"]["WorkflowAction"][];
+            conditions: components["schemas"]["WorkflowCondition"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Whether the workflow runs for new bookings */
+            enabled: boolean;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            owner: components["schemas"]["WorkflowOwner"];
+            /** @description The current revision; later updates name it as their expected revision */
+            revision: number;
+            scope: components["schemas"]["WorkflowScope"];
+            trigger: components["schemas"]["WorkflowTrigger"];
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        WorkflowAction: {
+            /** @description Custom subject and body per locale; other locales use the built-in template */
+            content?: {
+                de?: {
+                    body: string;
+                    subject: string;
+                };
+                en?: {
+                    body: string;
+                    subject: string;
+                };
+                es?: {
+                    body: string;
+                    subject: string;
+                };
+                fr?: {
+                    body: string;
+                    subject: string;
+                };
+                "pt-BR"?: {
+                    body: string;
+                    subject: string;
+                };
+                "zh-CN"?: {
+                    body: string;
+                    subject: string;
+                };
+            };
+            recipients: ("booker" | "guests" | "hosts")[];
+            /** @enum {string} */
+            type: "email";
+        } | {
+            /** @enum {string} */
+            type: "webhook";
+            /** Format: uuid */
+            webhookId: string;
+        };
+        /** @description A predicate; all conditions must hold */
+        WorkflowCondition: {
+            /** @enum {string} */
+            field: "event_type";
+            /** @enum {string} */
+            operator: "equals";
+            /** Format: uuid */
+            value: string;
+        } | {
+            /** @enum {string} */
+            field: "booking_source";
+            /** @enum {string} */
+            operator: "equals";
+            /** @enum {string} */
+            value: "web" | "embed" | "api" | "mcp";
+        } | {
+            /** @enum {string} */
+            field: "answer";
+            /** @enum {string} */
+            operator: "equals";
+            questionId: string;
+            value: string | boolean;
+        } | {
+            /** @enum {string} */
+            field: "location_kind";
+            /** @enum {string} */
+            operator: "equals";
+            /** @enum {string} */
+            value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+        } | {
+            /** @enum {string} */
+            field: "guest_count";
+            /** @enum {string} */
+            operator: "equals" | "at_least" | "at_most";
+            value: number;
+        };
+        /** @description Who owns the workflow: a person in their personal organization, or a team */
+        WorkflowOwner: {
+            /**
+             * Format: uuid
+             * @description The user for a personal owner; the team organization for a team
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "personal" | "team";
+        };
+        WorkflowPage: {
+            data: components["schemas"]["Workflow"][];
+            /** @description Pass as `cursor`, with the same owner, for the next page; null on the last page */
+            nextCursor: string | null;
+        };
+        /** @description One of the owner's event types, or all of its current and future event types */
+        WorkflowScope: {
+            /** @enum {string} */
+            type: "all_event_types";
+        } | {
+            /** Format: uuid */
+            eventTypeId: string;
+            /** @enum {string} */
+            type: "event_type";
+        };
+        WorkflowTrigger: {
+            /** @description Minutes after the booking change; 0 runs right after it commits */
+            delayMinutes: number;
+            /** @enum {string} */
+            type: "booking.created" | "booking.cancelled" | "booking.rescheduled";
+        } | {
+            /** @description Minutes before the start or after the end */
+            offsetMinutes: number;
+            /** @enum {string} */
+            type: "before_start" | "after_end";
+        };
     };
     responses: never;
     parameters: never;
@@ -7157,7 +7327,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed */
+            /** @description export_user_in_progress when this user already has an export in this process, export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12635,6 +12805,137 @@ export interface operations {
             };
             /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listWorkflows: {
+        parameters: {
+            query: {
+                cursor?: string;
+                /** @description Page size, 1–100 (default 50) */
+                limit?: number;
+                /** @description Your user ID (personal) or the team organization ID (team): the owner the caller acts as in its current organization */
+                ownerId: string;
+                /** @description personal for your own workflows, team for a team you own or administer */
+                ownerKind: "personal" | "team";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The owner's workflows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowPage"];
+                };
+            };
+            /** @description invalid_request or invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: the owner is not the personal owner or a team the caller owns or administers in the organization it acts in. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled: workflows are not available on this instance */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workflow */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workflow"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled: workflows are not available on this instance; workflow_not_found: no such workflow of the owner the caller acts as */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

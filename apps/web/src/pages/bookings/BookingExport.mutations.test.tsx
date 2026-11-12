@@ -90,3 +90,32 @@ it('keeps the actual checkbox at least 24px and detects removal of its size rule
   )
   verifySize(styles)
 })
+
+it('kills removal of the account-specific export feedback', async () => {
+  async function verifyBusy(Component: typeof BookingExport) {
+    cleanup()
+    render(
+      <Component
+        filters={{ from: '2030-03-01T00:00:00Z', to: '2030-04-01T00:00:00Z' }}
+        timeZone="UTC"
+        expectedOrganizationId={ME.organization.id}
+      />,
+    )
+    screen.getByText('Export bookings as CSV').closest('details')?.setAttribute('open', '')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'export_user_in_progress' }, { status: 409 })),
+    )
+    const button = screen.getByRole('button', { name: 'Download CSV' })
+    fireEvent.click(button)
+    await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false))
+    expect(screen.queryByRole('alert')?.textContent).toBe(
+      'An export is already running for your account. Wait for it to finish and try again.',
+    )
+  }
+  await verifyBusy(component())
+  await expect(
+    verifyBusy(component(['setUserBusy(true)', 'setUserBusy(false)'])),
+  ).rejects.toMatchObject({ name: 'AssertionError' })
+  await verifyBusy(component())
+})

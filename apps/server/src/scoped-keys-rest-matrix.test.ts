@@ -93,6 +93,8 @@ const classes = {
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
+    'GET /api/v1/workflows',
+    'GET /api/v1/workflows/{id}',
   ],
   other_write: [
     'PATCH /api/v1/branding',
@@ -693,6 +695,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
         }
         if (method === 'PATCH') payload = { isActive: false }
         if (method === 'DELETE') expectedStatus = 204
+      } else if (template.startsWith('/api/v1/workflows')) {
+        // Booking workflows are hard-off: an allowed key gets 404 workflows_disabled.
+        if (template === '/api/v1/workflows') path += `?ownerKind=team&ownerId=${teamId}`
+        id = randomUUID()
+        expectedStatus = 404
       } else if (operation === 'GET /api/v1/analytics/bookings')
         path += `?startDate=${date}&endDate=${date}&timeZone=UTC`
       else if (operation === 'PUT /api/v1/profile')
@@ -757,14 +764,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 119-operation contract and all 357 scope combinations', () => {
+    it('covers the exact 121-operation contract and all 363 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(119)
-      expect(new Set(ids).size).toBe(119)
+      expect(ids).toHaveLength(121)
+      expect(new Set(ids).size).toBe(121)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(357)
+      expect(cases).toHaveLength(363)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -819,6 +826,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
           } else if (operation === 'GET /api/v1/bookings/export.csv') {
             expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
+          } else if (operation.startsWith('GET /api/v1/workflows')) {
+            expect(await response.json()).toEqual({ error: 'workflows_disabled' })
           } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')

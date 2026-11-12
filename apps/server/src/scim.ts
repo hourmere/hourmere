@@ -33,11 +33,68 @@ export interface ScimResourceRequest {
   principal: { tokenId: string; organizationId: string }
   /** `<PUBLIC_URL>/scim/v2/{organizationId}` for the token's organization. */
   base: string
+  /**
+   * Reads the JSON request body, at most SCIM_BODY_LIMIT bytes of UTF-8. Only a handler that
+   * needs the body calls it, after authentication; nothing is read before.
+   */
+  body?: (() => Promise<ScimBody>) | undefined
 }
 
+/** A parsed JSON body, or the SCIM Error that refuses it. */
+export type ScimBody = { ok: true; value: unknown } | { ok: false; reply: ScimReply }
+
 export interface ScimReply {
-  status: 200 | 400 | 403 | 404 | 501
+  status: 200 | 201 | 400 | 401 | 403 | 404 | 409 | 413 | 429 | 501
   body: unknown
+  /** Response headers such as Location or Retry-After; the content type is always SCIM's. */
+  headers?: Record<string, string> | undefined
+}
+
+/** The largest request body a resource handler reads, as on /api/v1. */
+export const SCIM_BODY_LIMIT = 64 * 1024
+
+/**
+ * Reads a body of at most SCIM_BODY_LIMIT bytes: a larger Content-Length is refused before
+ * reading, and any other body is counted as it is read, so a body longer than its
+ * Content-Length is refused too. Invalid UTF-8 or JSON is invalidSyntax; nothing is echoed.
+ */
+export async function readScimBody(request: Request): Promise<ScimBody> {
+  const tooLarge: ScimBody = {
+    ok: false,
+    reply: { status: 413, body: scimError(413, 'The request body is too large.') },
+  }
+  const invalid: ScimBody = {
+    ok: false,
+    reply: {
+      status: 400,
+      body: scimError(400, 'The request body is not valid JSON.', 'invalidSyntax'),
+    },
+  }
+  const declared = Number.parseInt(request.headers.get('content-length') ?? '', 10)
+  if (!request.headers.has('transfer-encoding') && declared > SCIM_BODY_LIMIT) return tooLarge
+  const chunks: Uint8Array[] = []
+  let size = 0
+  if (request.body) {
+    const reader = request.body.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > SCIM_BODY_LIMIT) {
+        await reader.cancel().catch(() => {})
+        return tooLarge
+      }
+      chunks.push(value)
+    }
+  }
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))),
+    }
+  } catch {
+    return invalid
+  }
 }
 
 /**
@@ -104,8 +161,12 @@ export function mountScim(
         query: new URL(c.req.url).searchParams,
         principal,
         base: `${origin}/scim/v2/${principal.organizationId}`,
+        body: () => readScimBody(c.req.raw),
       })
-      if (reply) return send(c, reply.status, reply.body)
+      if (reply) {
+        for (const [name, value] of Object.entries(reply.headers ?? {})) c.header(name, value)
+        return send(c, reply.status, reply.body)
+      }
       return respond(c, 404, 'SCIM resources are not available yet.')
     } catch {
       // Never pass credentials, paths or driver diagnostics to a logger.

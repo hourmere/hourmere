@@ -182,7 +182,9 @@ function shapeError(value: unknown, issue: core.$ZodIssue): DomainError {
 /**
  * The strict request shape alone, with the create defaults (disabled, no conditions, no
  * delay). It is not a reader for stored revisions: those keep the canonical form
- * validateWorkflowDefinition returns, and a later step reads them without defaults.
+ * validateWorkflowDefinition returns. The definition reads (reads.ts) check a stored revision
+ * against WorkflowDefinitionSchema, where no default applies because storage requires every
+ * key; a later change that tightens a request limit must keep stored revisions readable.
  */
 export function parseWorkflowDefinition(value: unknown): WorkflowDefinition {
   const result = WorkflowDefinitionSchema.safeParse(value)

@@ -106,6 +106,7 @@ import { slackDestinationTools } from './mcp/slack-destinations.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
+import { workflowTools } from './mcp/workflows.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
@@ -130,6 +131,7 @@ import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
+import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs } from './sms.ts'
@@ -178,6 +180,7 @@ export function productRoutes({
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
+  bookingExportMaxConcurrent,
   hostedSignupUrl,
   privacyPolicyUrl,
   termsUrl,
@@ -201,6 +204,7 @@ export function productRoutes({
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
+  bookingExportMaxConcurrent?: number | undefined
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -293,6 +297,7 @@ export function productRoutes({
       automaticMeet,
       automaticZoom,
       bookingMaxInviteeReschedules,
+      bookingExportMaxConcurrent,
     }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
@@ -301,6 +306,8 @@ export function productRoutes({
     memberLeaveRoutes({ db }),
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
+    // Registered while hard-off: every operation answers 404 workflows_disabled.
+    workflowRoutes({ db }),
   ]
 }
 
@@ -371,6 +378,8 @@ export function productTools({
       conference: { db, zoom: zoomConference },
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
+    // Always in the catalog; hidden from tools/list and refused while workflows are off.
+    ...workflowTools({ db }),
   ]
 }
 
@@ -457,6 +466,7 @@ export function productionAppOptions({
       slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
       successRedirectPolicy,
       bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
+      bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
       hostedSignupUrl: config.HOSTED_SIGNUP_URL,
       privacyPolicyUrl: config.PRIVACY_POLICY_URL,
       termsUrl: config.TERMS_URL,

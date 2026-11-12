@@ -108,8 +108,15 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `list_workflows` | — | `workflows list` | `full, read` |
+| `get_workflow` | — | `workflows get` | `full, read` |
 
 <!-- api-key-scope-table:end -->
+
+`list_workflows` and `get_workflow` are listed before booking workflows are available:
+until they are enabled, `tools/list` omits them and a direct call by a `read` or `full` key
+returns `isError: true` with `workflows_disabled` (a `bookings` key still gets
+`insufficient_scope`). `workflows list` and `workflows get` report the same codes.
 
 Your existing organization, host and ownership permissions still apply. `read` includes
 broader account data than `bookings`, while `bookings` can create, move, cancel and repair

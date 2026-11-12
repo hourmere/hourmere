@@ -23,6 +23,7 @@ export const auditDetails = {
   'scim_token.created': [],
   'scim_token.rotated': [],
   'scim_token.revoked': [],
+  'scim_user.created': [],
   'webhook.created': ['events'],
   'webhook.updated': ['events'],
   'webhook.deleted': ['events'],
@@ -64,6 +65,8 @@ export interface AuditActor {
     | 'external_api_key'
     | 'external_oauth_client'
     | 'external_user'
+    /** A SCIM provisioning token (its ID); the credential is then `none`. */
+    | 'scim_token'
   id?: string
 }
 export interface AuditCredential {
