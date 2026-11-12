@@ -455,7 +455,61 @@ export async function accountDeletionClearsLinks(client: pg.PoolClient) {
   )
 }
 
+/**
+ * Fires the referential actions of the given foreign keys, which share one referenced table,
+ * in this order.
+ *
+ * PostgreSQL fires a table's referential actions in RI trigger name order. The names embed
+ * the trigger OID (RI_ConstraintTrigger_a_<oid>) and compare bytewise, so a later trigger
+ * sorts first once its OID has more digits ('..._a_100002' < '..._a_99998'). The natural
+ * order therefore depends on where the cluster's OID counter stood while the migrations ran.
+ * This re-creates the foreign keys consecutively, each from its own definition (only the
+ * trigger OIDs change), checks the order PostgreSQL uses (bytewise, COLLATE "C") and redoes
+ * them while an OID power of ten between them reverses it. A foreign key that does not exist
+ * is left out: the coverage run drops each object in turn, and the assertions then see the
+ * missing cascade itself.
+ */
+export async function fireCascadesInOrder(
+  client: pg.PoolClient,
+  cascades: readonly (readonly [table: string, constraint: string])[],
+) {
+  let fired: string[] = []
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const present: string[] = []
+    for (const [table, name] of cascades) {
+      const { rows } = await client.query(
+        'SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = $1::regclass AND conname = $2',
+        [table, name],
+      )
+      if (!rows[0]) continue
+      present.push(name)
+      await client.query(`ALTER TABLE ${table} DROP CONSTRAINT "${name}";
+        ALTER TABLE ${table} ADD CONSTRAINT "${name}" ${rows[0].definition}`)
+    }
+    const { rows } = await client.query(
+      `SELECT c.conname, t.tgname::text AS tgname
+         FROM pg_trigger t JOIN pg_constraint c ON c.oid = t.tgconstraint
+         JOIN pg_proc p ON p.oid = t.tgfoid
+        WHERE t.tgrelid = c.confrelid AND p.proname LIKE 'RI_FKey_%_del' AND c.conname = ANY($1)
+        ORDER BY t.tgname COLLATE "C"`,
+      [present],
+    )
+    fired = rows.map((row) => `${row.conname} (${row.tgname})`)
+    if (rows.map((row) => row.conname).join() === present.join()) return
+  }
+  // A misordered setup fails here as setup, never later as a surviving or killed mutant.
+  throw new Error(`Setup could not fire the cascades in order: ${fired.join(', ')}`)
+}
+
 export async function organizationDeletionCascades(client: pg.PoolClient) {
+  // Adverse order for the claim cleanup: the invitation SET NULL runs before the connection
+  // cascade has reached the claims, and rechecks a claim whose SCIM user is already deleted
+  // (23503) unless the cleanup trigger removed the claims first. In the opposite order the
+  // cascade deletes the claims itself and a missing cleanup would go unnoticed.
+  await fireCascadesInOrder(client, [
+    ['auth.invitation', 'invitation_organizationId_fkey'],
+    ['scim_connections', 'scim_connections_organization_id_fkey'],
+  ])
   await client.query(claimInsert(',invitation_id', `,'${invitation}'`))
   await client.query(`INSERT INTO scim_user_claims (organization_id,connection_id,scim_user_id,invitation_id,work_email,expires_at)
     VALUES ('${otherOrg}','${otherConnection}','${otherUser}','${otherInvitation}','other@example.test',now()+interval '1 hour')`)
