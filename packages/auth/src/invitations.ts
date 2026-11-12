@@ -50,7 +50,9 @@ const contextChanged = () =>
     message: 'Your team context changed. Reload this page before trying again.',
   })
 
-const lifetime = 48 * 3_600_000
+/** How long a new invitation stays pending; SCIM claims without an invitation last as long. */
+export const invitationLifetimeMs = 48 * 3_600_000
+const lifetime = invitationLifetimeMs
 const wallClock = async (db: Db) =>
   (await db.selectNoFrom(sql<Date>`clock_timestamp()`.as('now')).executeTakeFirstOrThrow()).now
 

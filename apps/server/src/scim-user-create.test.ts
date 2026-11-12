@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { serve } from '@hono/node-server'
 import type { SignupPolicy } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -44,11 +45,23 @@ const identifierTaken = errorBody(
   'A User of this connection already has this userName or externalId.',
   'uniqueness',
 )
-const mailboxTaken = errorBody(
-  409,
-  'The work email address belongs to a member of this organization or to an invitation already pending.',
-  'uniqueness',
+const noInviter = errorBody(
+  403,
+  'No owner of this organization with a verified email address can invite.',
 )
+const limited = errorBody(429, 'Invitation sending is limited right now. Retry later.')
+const noWorkAddress = errorBody(
+  400,
+  'The emails attribute holds no work address. Send a "work" email, or a primary or single email without a type.',
+  'invalidValue',
+)
+const twoPrimaries = errorBody(
+  400,
+  'The emails attribute marks more than one address as primary.',
+  'invalidValue',
+)
+// A claim without an invitation lasts as long as an invitation: 48 hours.
+const claimLifetime = 48 * 3_600_000
 const signupRefused = errorBody(
   403,
   "This instance's sign-up policy does not admit this work email address.",
@@ -87,6 +100,8 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
   const sent: MailMessage[] = []
   // 500 answers seen; a mutant must fail an assertion, not merely break a query.
   let serverErrors = 0
+  // Harnesses served on a real socket.
+  const servers: ReturnType<typeof serve>[] = []
 
   beforeAll(async () => {
     owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -114,6 +129,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       FOR EACH ROW EXECUTE FUNCTION test_refuse_audit()`.execute(db)
   })
   afterAll(async () => {
+    for (const server of servers) server.close()
     await owned?.drop()
   })
 
@@ -249,6 +265,71 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         call(application, organization.id, as, resource, method, body),
     }
   }
+  /** The same harness served by @hono/node-server on 127.0.0.1, called with fetch. */
+  async function httpClient(create: Create, organization: Team, options = deps()) {
+    const application = harness(flagged(create, options))
+    const port = await new Promise<number>((resolve) => {
+      servers.push(
+        serve({ fetch: application.fetch, port: 0, hostname: '127.0.0.1' }, (info) =>
+          resolve(info.port),
+        ),
+      )
+    })
+    const send = async (resource: string, method = 'GET', body?: unknown) => {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/scim/v2/${organization.id}/${resource}`,
+        {
+          method,
+          headers: {
+            authorization: `Bearer ${organization.secrets.first}`,
+            ...(body === undefined ? {} : { 'content-type': 'application/scim+json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        },
+      )
+      if (response.status === 500) serverErrors += 1
+      const text = await response.text()
+      return {
+        status: response.status,
+        text,
+        body: text ? (JSON.parse(text) as Json) : undefined,
+        headers: Object.fromEntries(response.headers.entries()),
+      }
+    }
+    return {
+      post: (body: unknown) => send('Users', 'POST', body),
+      get: (resource: string) => send(resource),
+    }
+  }
+  /** A signed-in session of a team member, for invitations sent from the app. */
+  async function session(userId: string, organizationId: string) {
+    return (
+      await db
+        .insertInto('auth.session')
+        .values({
+          userId,
+          token: randomBytes(24).toString('base64url'),
+          activeOrganizationId: organizationId,
+          expiresAt: new Date(Date.now() + 3_600_000),
+          updatedAt: new Date(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id
+  }
+  /** An invitation sent from the app by a team owner or administrator. */
+  const native = (userId: string, sessionId: string, organizationId: string, email: string) =>
+    manageInvitation(
+      db,
+      { userId, sessionId, activeOrganizationId: organizationId },
+      { organizationId, email },
+      {
+        reserve: (trx, input, now) => reserveInvitationEmailBudget(trx, input, roomy, now),
+        enqueue: async (payload) => {
+          enqueued.push(payload)
+        },
+      },
+    )
   const user = (userName: string, extra: Json = {}): Json => ({
     schemas: [core],
     userName,
@@ -714,34 +795,12 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
   async function verifyDeduplication(create: Create) {
     const organization = await team()
     const { post } = client(create, organization)
-    const sessionId = (
-      await db
-        .insertInto('auth.session')
-        .values({
-          userId: organization.people.owner,
-          token: randomBytes(24).toString('base64url'),
-          activeOrganizationId: organization.id,
-          expiresAt: new Date(Date.now() + 3_600_000),
-          updatedAt: new Date(),
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow()
-    ).id
-    const native = (email: string) =>
-      manageInvitation(
-        db,
-        { userId: organization.people.owner, sessionId, activeOrganizationId: organization.id },
-        { organizationId: organization.id, email },
-        {
-          reserve: (trx, input, now) => reserveInvitationEmailBudget(trx, input, roomy, now),
-          enqueue: async (payload) => {
-            enqueued.push(payload)
-          },
-        },
-      )
+    const sessionId = await session(organization.people.owner, organization.id)
+    const owner = (email: string) =>
+      native(organization.people.owner, sessionId, organization.id, email)
     // The owner invited this address in the app; the email went out.
     const invited = `invited-${unique()}@example.com`
-    const nativeInvitation = await native(invited)
+    const nativeInvitation = await owner(invited)
     await deliver()
     expect(mailTo(invited)).toBe(1)
     const queued = enqueued.length
@@ -766,44 +825,26 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(enqueued.length).toBe(queued)
     await deliver()
     expect(mailTo(invited)).toBe(1)
-    // Another entry for the same mailbox does not share that pending claim's invitation.
+    // Another entry for the same mailbox does not share that pending claim's invitation: it
+    // gets its own claim without one, and nothing is sent again.
     const before = await written(organization.id)
     const second = await post(user(`second-${unique()}`, work(invited.toUpperCase())))
-    expect(second.body).toEqual(mailboxTaken)
-    expect(await written(organization.id)).toEqual(before)
-    // A member's address, an invitation another administrator has pending and a legacy
-    // invitation get the same answer; none writes anything.
-    const adminInvited = `admin-invited-${unique()}@example.com`
-    await db
-      .insertInto('auth.invitation')
-      .values({
-        organizationId: organization.id,
-        email: adminInvited,
-        role: 'member',
-        status: 'pending',
-        inviterId: organization.people.admin,
-        expiresAt: new Date(Date.now() + 3_600_000),
-      })
-      .execute()
-    // A legacy pending invitation with another role, from the inviting owner itself.
-    const legacyInvited = `legacy-${unique()}@example.com`
-    await db
-      .insertInto('auth.invitation')
-      .values({
-        organizationId: organization.id,
-        email: legacyInvited,
-        role: 'admin',
-        status: 'pending',
-        inviterId: organization.people.owner,
-        expiresAt: new Date(Date.now() + 3_600_000),
-      })
-      .execute()
+    expect(second.status).toBe(201)
     state = await written(organization.id)
-    for (const address of [organization.memberEmail, adminInvited, legacyInvited]) {
-      const answer = await post(user(`taken-${unique()}`, work(address)))
-      expect(answer.text, address).toBe(JSON.stringify(mailboxTaken))
-    }
-    expect(await written(organization.id)).toEqual(state)
+    expect(state.claims).toEqual([
+      ...before.claims,
+      expect.objectContaining({
+        scim_user_id: second.body?.id,
+        invitation_id: null,
+        work_email: invited,
+      }),
+    ])
+    expect(state.invitations).toEqual(before.invitations)
+    expect(state.deliveries).toEqual(before.deliveries)
+    expect(state.requests).toEqual(before.requests)
+    expect(enqueued.length).toBe(queued)
+    await deliver()
+    expect(mailTo(invited)).toBe(1)
     // A creation racing an invitation in the app for the same address: the app's request
     // waits for the creation's organization lock, then finds and keeps its invitation.
     const raced = `raced-${unique()}@example.com`
@@ -811,7 +852,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     let nativeResult: Promise<{ id: string; existing: boolean }> | undefined
     const held = db.withPlugin(
       holdAfter(tokenRecheck, async () => {
-        nativeResult = native(raced)
+        nativeResult = owner(raced)
         const settled = nativeResult.then(
           () => 'settled',
           () => 'settled',
@@ -923,10 +964,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       expect(answer.body).toEqual(errorBody(500, 'SCIM request could not be processed.'))
       serverErrors = 0
     }
-    // A refusal after the event was written: a member's address.
-    expect((await post(user(`member-${unique()}`, work(organization.memberEmail)))).body).toEqual(
-      mailboxTaken,
+    // A refusal after the event was written: exhausted admission limits.
+    const refused = await client(create, organization, deps({ reserve: async () => false })).post(
+      user(`limited-${unique()}`, work(`limited-${unique()}@example.com`)),
     )
+    expect(refused.body).toEqual(limited)
     expect(await written(organization.id)).toEqual(state)
     expect(enqueued.length).toBe(queued)
   }
@@ -964,23 +1006,23 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
 
   async function verifyLimits(create: Create) {
     // Default admission limits, with a team limit of one invitation an hour.
-    const limited = await team()
+    const limitedTeam = await team()
     const options = deps({
       reserve: (trx, input, now) =>
         reserveInvitationEmailBudget(trx, input, { ...roomy, invitationTeamMaxPerHour: 1 }, now),
     })
-    const { post } = client(create, limited, options)
+    const { post } = client(create, limitedTeam, options)
     expect(
       (await post(user(`first-${unique()}`, work(`first-${unique()}@example.com`)))).status,
     ).toBe(201)
-    const state = await written(limited.id)
+    const state = await written(limitedTeam.id)
     const refused = await post(user(`second-${unique()}`, work(`second-${unique()}@example.com`)))
     expect(refused.status).toBe(429)
     expect(refused.retryAfter).toBe('3600')
-    expect(refused.body).toEqual(
-      errorBody(429, 'Invitations for this organization are limited right now. Retry later.'),
-    )
-    expect(await written(limited.id)).toEqual(state)
+    expect(refused.body).toEqual(limited)
+    expect(await written(limitedTeam.id)).toEqual(state)
+    // A member's address needs no invitation, so it is recorded while sending is limited.
+    expect((await post(user(`member-${unique()}`, work(limitedTeam.memberEmail)))).status).toBe(201)
     // The pending-invitation cap of the invitation service applies too.
     const full = await team()
     await db
@@ -1125,15 +1167,49 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         400,
         value('The emails attribute is not a valid value.'),
       ],
+      // RFC 7643 section 2.4: at most one primary value.
       [
         user(secret, {
           emails: [
-            { value: `a-${secret}@example.com`, type: 'work' },
-            { value: `b-${secret}@example.com`, type: 'work' },
+            { value: `a-${secret}@example.com`, type: 'work', primary: true },
+            { value: `b-${secret}@example.com`, type: 'home', primary: true },
           ],
         }),
         400,
-        value('The emails attribute must hold one work address.'),
+        twoPrimaries,
+      ],
+      // Addresses that none of the four rules selects are refused, never dropped.
+      [
+        user(secret, { emails: [{ value: `${secret}@example.com`, type: 'home' }] }),
+        400,
+        noWorkAddress,
+      ],
+      [
+        user(secret, { emails: [{ value: `${secret}@example.com`, type: 'home', primary: true }] }),
+        400,
+        noWorkAddress,
+      ],
+      [
+        user(secret, {
+          emails: [
+            { value: `a-${secret}@example.com`, type: 'home' },
+            { value: `b-${secret}@example.com` },
+          ],
+        }),
+        400,
+        noWorkAddress,
+      ],
+      [
+        user(secret, {
+          emails: [{ value: `a-${secret}@example.com` }, { value: `b-${secret}@example.com` }],
+        }),
+        400,
+        noWorkAddress,
+      ],
+      [
+        user(secret, { emails: [{ value: `${secret}@example.com`, type: 'other' }] }),
+        400,
+        noWorkAddress,
       ],
       [
         user(secret, work(`not-an-address-${secret}`)),
@@ -1241,10 +1317,12 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     // No owner can invite: nothing is created. An administrator never invites.
     await verify(organization.people.laterOwner, false)
     const state = await written(organization.id)
-    const refused = await post(user(`no-inviter-${unique()}`, work(`none-${unique()}@example.com`)))
-    expect(refused.body).toEqual(
-      errorBody(409, 'No owner of this organization with a verified email address can invite.'),
-    )
+    // The same refusal for a member's address, which would need no invitation.
+    for (const address of [`none-${unique()}@example.com`, organization.memberEmail]) {
+      const refused = await post(user(`no-inviter-${unique()}`, work(address)))
+      expect(refused.status, address).toBe(403)
+      expect(refused.text, address).toBe(JSON.stringify(noInviter))
+    }
     expect(await written(organization.id)).toEqual(state)
   }
 
@@ -1265,8 +1343,251 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(state.deliveries).toEqual([expect.objectContaining({ generation: 1, state: 'queued' })])
   }
 
+  // The work address, in order: the primary work email, the first work email, a primary
+  // email without type, the only email when it has no type.
+  async function verifyEmailChoice(create: Create) {
+    const organization = await team()
+    const { post } = client(create, organization)
+    const address = (label: string) => `${label}-${unique()}@example.com`
+    const cases: [string, Json[], number][] = []
+    const add = (emails: Json[], chosen: number) => cases.push([unique(), emails, chosen])
+    const [a, b, c] = [address('a'), address('b'), address('c')]
+    // 1. The primary work email, before an earlier work email and any other primary.
+    add(
+      [
+        { value: a, type: 'home' },
+        { value: b, type: 'work' },
+        { value: c, type: 'WORK', primary: true },
+      ],
+      2,
+    )
+    // 2. Any work email: the first, when none is primary, even after a primary home email
+    //    or a primary email without a type.
+    add(
+      [
+        { value: a, type: 'home', primary: true },
+        { value: b, type: 'work' },
+        { value: c, type: 'work' },
+      ],
+      1,
+    )
+    add(
+      [
+        { value: a, primary: true },
+        { value: b, type: 'Work' },
+      ],
+      1,
+    )
+    // 3. A primary email without a type, when there is no work email.
+    add([{ value: a, type: 'home' }, { value: b, primary: true }, { value: c }], 1)
+    // 4. The only email, when it has no type.
+    add([{ value: a }], 0)
+    add([{ value: b, primary: false }], 0)
+    // An empty type is no type, and a padded work type is work.
+    add([{ value: c, type: '' }], 0)
+    add(
+      [
+        { value: a, type: 'home' },
+        { value: b, type: ' Work ' },
+      ],
+      1,
+    )
+    for (const [label, emails, chosen] of cases) {
+      const answer = await post(user(`emails-${label}`, { emails }))
+      const expected = (emails[chosen] as { value: string }).value
+      expect(answer.status, JSON.stringify(emails)).toBe(201)
+      expect(answer.body?.emails, JSON.stringify(emails)).toEqual([
+        { value: expected, type: 'work', primary: true },
+      ])
+      const claim = (await written(organization.id)).claims.find(
+        (row) => row.scim_user_id === answer.body?.id,
+      )
+      expect(claim?.work_email, JSON.stringify(emails)).toBe(expected.toLowerCase())
+    }
+    // An empty list holds no address: the entry is created without a claim.
+    const empty = await post(user(`emails-empty-${unique()}`, { emails: [] }))
+    expect(empty.status).toBe(201)
+    expect(
+      (await written(organization.id)).claims.some((row) => row.scim_user_id === empty.body?.id),
+    ).toBe(false)
+  }
+
+  // Existing members and invitations go through the claim flow: the same entry, a pending
+  // claim without an invitation, no email, and the same 201 as a fresh create.
+  async function verifyHeldAddresses(create: Create) {
+    const organization = await team()
+    const scim = await httpClient(create, organization)
+    // A team that has never seen any of these addresses answers the same Users.
+    const fresh = await team()
+    const control = await httpClient(create, fresh)
+    const connection = (
+      await db
+        .selectFrom('scim_connections')
+        .select('id')
+        .where('organization_id', '=', organization.id)
+        .executeTakeFirstOrThrow()
+    ).id
+    const pending = (email: string, inviterId: string, role = 'member') =>
+      db
+        .insertInto('auth.invitation')
+        .values({
+          organizationId: organization.id,
+          email,
+          role,
+          status: 'pending',
+          inviterId,
+          expiresAt: new Date(Date.now() + 3_600_000),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    // Another administrator invited this address in the app; that email went out.
+    const otherAdmin = `other-admin-${unique()}@example.com`
+    await native(
+      organization.people.admin,
+      await session(organization.people.admin, organization.id),
+      organization.id,
+      otherAdmin,
+    )
+    await deliver()
+    expect(mailTo(otherAdmin)).toBe(1)
+    // A legacy invitation with a role SCIM never grants, from the inviting owner itself.
+    const legacy = `legacy-${unique()}@example.com`
+    await pending(legacy, organization.people.owner, 'admin')
+    // Two pending invitations for one address, from before one-per-address was enforced.
+    const duplicated = `duplicated-${unique()}@example.com`
+    await pending(duplicated, organization.people.admin)
+    await pending(duplicated, organization.people.laterOwner)
+    // An invitation whose inviter has left the team.
+    const orphaned = `orphaned-${unique()}@example.com`
+    await pending(orphaned, await account(`departed-${unique()}@example.com`))
+    // The inviting owner's pending invitation, which another entry's claim already holds,
+    // still without a delivery generation: admission would give it one, budget included.
+    const claimed = `claimed-${unique()}@example.com`
+    const held = await pending(claimed, organization.people.owner)
+    const holder = await db
+      .insertInto('scim_users')
+      .values({
+        organization_id: organization.id,
+        connection_id: connection,
+        user_name: `holder-${unique()}`,
+        work_email: claimed,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('scim_user_claims')
+      .values({
+        organization_id: organization.id,
+        connection_id: connection,
+        scim_user_id: holder.id,
+        invitation_id: held.id,
+        work_email: claimed,
+        expires_at: new Date(Date.now() + 3_600_000),
+      })
+      .execute()
+    const normalized = (answer: Awaited<ReturnType<typeof scim.post>>, organizationId: string) => {
+      const id = answer.body?.id as string
+      const created = (answer.body?.meta as Json | undefined)?.created as string
+      const blank = (text: string) =>
+        text.replaceAll(id, '<id>').replaceAll(organizationId, '<org>').replaceAll(created, '<at>')
+      const { date: _date, location, ...headers } = answer.headers
+      return { text: blank(answer.text), headers, location: blank(location ?? '') }
+    }
+    for (const [label, address] of [
+      ['member', organization.memberEmail.toUpperCase()],
+      ["another administrator's invitation", otherAdmin],
+      ['legacy invitation', legacy],
+      ['duplicated invitations', duplicated],
+      ["departed inviter's invitation", orphaned],
+      ["another entry's claimed invitation", claimed],
+    ] as const) {
+      const before = await written(organization.id)
+      const people = await accounts()
+      const queued = enqueued.length
+      const mails = mailTo(address)
+      const body = user(`held-${unique()}@example.com`, {
+        externalId: `held-${unique()}`,
+        displayName: 'Held',
+        ...work(address),
+      })
+      const answer = await scim.post(body)
+      expect(answer.status, label).toBe(201)
+      const id = answer.body?.id as string
+      // The entry and a pending claim without an invitation; nothing else is written.
+      const after = await written(organization.id)
+      expect(after.entries, label).toEqual([
+        ...before.entries,
+        expect.objectContaining({
+          id,
+          work_email: address,
+          linked_user_id: null,
+          linked_member_id: null,
+          retired_at: null,
+        }),
+      ])
+      const claim = after.claims.find((row) => row.scim_user_id === id)
+      expect(after.claims, label).toEqual([...before.claims, claim])
+      expect(claim, label).toMatchObject({
+        organization_id: organization.id,
+        connection_id: connection,
+        invitation_id: null,
+        work_email: address.toLowerCase(),
+        completed_at: null,
+        invalidated_at: null,
+      })
+      const lifetime =
+        (claim?.expires_at.getTime() ?? 0) - (claim?.created_at.getTime() ?? 0) - claimLifetime
+      expect(lifetime, label).toBeGreaterThanOrEqual(0)
+      expect(lifetime, label).toBeLessThan(60_000)
+      expect(after.invitations, label).toEqual(before.invitations)
+      expect(after.deliveries, label).toEqual(before.deliveries)
+      expect(after.requests, label).toEqual(before.requests)
+      expect(after.events, label).toEqual([
+        ...before.events,
+        expect.objectContaining({
+          action: 'scim_user.created',
+          actor_type: 'scim_token',
+          target_id: id,
+          details: {},
+        }),
+      ])
+      // No email: nothing queued, and the real sender sends nothing more to the address.
+      expect(enqueued.length, label).toBe(queued)
+      await deliver()
+      expect(mailTo(address), label).toBe(mails)
+      expect(await accounts(), label).toEqual(people)
+      // Byte for byte the answer a fresh create of the same User gets, apart from its ID,
+      // organization and timestamps.
+      const baseline = await control.post(body)
+      expect(baseline.status, label).toBe(201)
+      expect(normalized(answer, organization.id), label).toEqual(normalized(baseline, fresh.id))
+      // The identity provider's userName filter finds the entry.
+      const found = await scim.get(
+        `Users?filter=${encodeURIComponent(`userName eq "${body.userName}"`)}`,
+      )
+      expect(found.status, label).toBe(200)
+      expect(found.body, label).toMatchObject({
+        totalResults: 1,
+        Resources: [expect.objectContaining({ id, userName: body.userName })],
+      })
+      // A duplicate live identity of the connection is still the one conflict.
+      const settled = await written(organization.id)
+      for (const duplicate of [
+        body,
+        user(`other-${unique()}`, { externalId: body.externalId, ...work(address) }),
+      ]) {
+        const conflict = await scim.post(duplicate)
+        expect(conflict.status, label).toBe(409)
+        expect(conflict.body, label).toEqual(identifierTaken)
+      }
+      expect(await written(organization.id), label).toEqual(settled)
+    }
+  }
+
   const verifiers = {
     creation: verifyCreation,
+    emails: verifyEmailChoice,
+    held: verifyHeldAddresses,
     inviter: verifyInviter,
     queue: verifyQueueOutage,
     providers: verifyProviderShapes,
@@ -1287,8 +1608,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       'POST creates the provisioning entry and a bounded, deduplicated invitation intent, using the existing mail queue and admission policy.',
       'It does not set `emailVerified=true`, create a sign-in session, or bypass restricted signup.',
       'SCIM is never a signup-domain authority.',
+      'Existing same-email personal accounts receive the same claim flow and require their own current account proof.',
+      'Errors must not echo bearer values, raw requests, SQL, mailbox existence outside the connection or sensitive attribute values.',
       'User creation records one live entry in the connection the token is bound to',
-      'the earliest current owner of the organization whose email address is verified is the inviter',
+      'the earliest current owner of the organization whose email address is verified is the inviter (with no such owner the create gets 403, whatever the address)',
+      'the primary `work` email, the first `work` email, a primary email without `type`, then the only email when it has no `type`',
+      'gets the same entry and a pending claim without an invitation, nothing is sent, and the answer is the same 201 as any other create',
+      'Only a duplicate live identity of the connection gets 409.',
       'a restricted instance (`SIGNUP` set to `closed` or `first-user`) refuses a work address whose domain is not in `SIGNUP_ALLOWED_DOMAINS` with 403',
     ])
       expect(says(sentence), sentence).toBe(true)
@@ -1304,6 +1630,9 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     verifyReplayRace(scimUserCreation))
   it('reuses a pending invitation and never shares one between claims', () =>
     verifyDeduplication(scimUserCreation))
+  it('records existing members and invitations as claims without an invitation or email', () =>
+    verifyHeldAddresses(scimUserCreation))
+  it('chooses the work address in the documented order', () => verifyEmailChoice(scimUserCreation))
   it('respects a restricted sign-up policy without looking at accounts', () =>
     verifySignup(scimUserCreation))
   it('never admits, links or verifies an existing account', () =>
@@ -1360,7 +1689,31 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         ],
       ],
       // A claimed invitation shared by a second entry.
-      ['deduplication', ['            throw mailboxTaken()\n', '            void 0\n']],
+      ['deduplication', ['            admitted = undefined\n', '            void 0\n']],
+      // A member's address refused again, and the other held addresses likewise.
+      ['held', ["  'INVITATION_RECIPIENT_ALREADY_MEMBER',\n", '']],
+      ['held', ["  'INVITATION_ALREADY_PENDING',\n", '']],
+      ['held', ["  'TEAM_MANAGEMENT_ACCESS_DENIED',\n", '']],
+      ['held', ["  'INVITATION_CONFLICT',\n", '']],
+      ['held', ["  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n", '']],
+      // An admission that is not linked kept anyway (its budget and delivery generation).
+      [
+        'held',
+        [
+          '          if (!admitted) await sql`ROLLBACK TO SAVEPOINT scim_user_invitation`.execute(trx)\n',
+          '',
+        ],
+      ],
+      // No claim recorded without an invitation.
+      [
+        'held',
+        [
+          "          await trx\n            .insertInto('scim_user_claims')",
+          "          if (admitted) await trx\n            .insertInto('scim_user_claims')",
+        ],
+      ],
+      // A claim without an invitation that expires at once, or never.
+      ['held', ['invitationLifetimeMs / 1000}::double precision', '1}::double precision']],
       // The organization lock dropped: an invitation in the app is no longer serialized.
       [
         'deduplication',
@@ -1400,8 +1753,8 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       ],
       // An owner whose address is unproven chosen as the inviter.
       ['inviter', ["            .where('auth.user.emailVerified', '=', true)\n", '']],
-      // An unmapped invitation refusal turned into a server error.
-      ['deduplication', ['    if (code !== undefined) return mailboxTaken().reply\n', '']],
+      // No owner answered as a duplicate.
+      ['inviter', ["  refuse(403, 'No owner of this", "  refuse(409, 'No owner of this"]],
       // An unknown attribute sent as null accepted.
       [
         'refusals',
@@ -1426,10 +1779,24 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         ],
       ],
       ['refusals', ['  if (value.length > 0)\n', '  if (false)\n']],
-      // The work address read from the wrong entry.
+      // The work address read from the wrong entry: any type as work, the primary work
+      // email not preferred, typeless primary or single emails dropped, two primaries let
+      // through.
       [
         'creation',
-        ["    if (type?.toLowerCase() === 'work') work.push(entry)", '    work.push(entry)'],
+        ["const work = emails.filter((email) => email.type === 'work')", 'const work = emails'],
+      ],
+      ['emails', ['    work.find((email) => email.primary) ??\n', '']],
+      ['emails', ['    untyped.find((email) => email.primary) ??\n', '']],
+      ['emails', ['(emails.length === 1 ? untyped[0] : undefined)', 'undefined']],
+      ['refusals', ['  if (emails.filter((email) => email.primary).length > 1)', '  if (false)']],
+      // Limits answered with the old organization wording.
+      [
+        'limits',
+        [
+          "'Invitation sending is limited right now. Retry later.'",
+          "'Invitations for this organization are limited right now. Retry later.'",
+        ],
       ],
     ]
     // Each mutant must fail an assertion of its verifier; anything else is a survivor.

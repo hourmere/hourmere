@@ -1,6 +1,8 @@
 // SCIM User creation (RFC 7644 section 3.3): POST /Users. docs/scim.md fixes what it does: it
 // records a managed provisioning entry in the connection the token is bound to and, for its
 // work address, a pending claim whose invitation comes from the existing invitation service.
+// An address that already has its own standing in the organization (a member's, or one
+// another pending invitation holds) gets the same entry and a claim without an invitation.
 // It never creates an account, a membership or a session, never marks an address verified,
 // and admits nobody: the recipient proves the mailbox through the claim later. Production
 // registers no handler yet; see ScimResources in scim.ts.
@@ -8,6 +10,7 @@ import {
   admitInvitation,
   type EnqueueInvitationEmail,
   invitationEmailAccepted,
+  invitationLifetimeMs,
   invitationRefusalCode,
   type ReserveInvitationEmail,
   type SignupPolicy,
@@ -55,23 +58,36 @@ const unauthorized = () =>
     body: scimError(401, 'A valid provisioning token is required.'),
     headers: { 'WWW-Authenticate': 'Bearer' },
   })
-// Details are fixed text: none names a value, a member or another resource.
+// Details are fixed text: none names a value, a member or another resource. A duplicate live
+// identity of the connection is the only conflict; nothing about an address is one.
 const identifierTaken = () =>
   refuse(409, 'A User of this connection already has this userName or externalId.', 'uniqueness')
-const mailboxTaken = () =>
-  refuse(
-    409,
-    'The work email address belongs to a member of this organization or to an invitation already pending.',
-    'uniqueness',
-  )
+// An organization precondition, not a duplicate: identity providers read a create's 409 as
+// "already exists".
 const noInviter = () =>
-  refuse(409, 'No owner of this organization with a verified email address can invite.')
+  refuse(403, 'No owner of this organization with a verified email address can invite.')
+// The per-recipient limit counts every organization's invitations, so the detail names none.
 const invitationsLimited = () =>
   new Refusal({
     status: 429,
-    body: scimError(429, 'Invitations for this organization are limited right now. Retry later.'),
+    body: scimError(429, 'Invitation sending is limited right now. Retry later.'),
     headers: { 'Retry-After': '3600' },
   })
+
+/**
+ * Invitation refusals that mean the address already has its own standing in this
+ * organization: it belongs to a member, or another administrator's, a legacy (a role other
+ * than member) or a duplicated pending invitation holds it, or that invitation's inviter has
+ * left. admitInvitation refuses each before it writes anything. The claim then records the
+ * address without an invitation and nothing is sent.
+ */
+const HELD_ELSEWHERE = [
+  'INVITATION_RECIPIENT_ALREADY_MEMBER',
+  'INVITATION_ALREADY_PENDING',
+  'TEAM_MANAGEMENT_ACCESS_DENIED',
+  'INVITATION_CONFLICT',
+  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+]
 
 /** The stored columns one POST writes; everything else is server-owned. */
 interface Draft {
@@ -172,27 +188,41 @@ const ignoredCore = [
 const enterprise = SCIM_URN.enterpriseUser.toLowerCase()
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-/** The one work address: the work entry, or the primary one among several. */
+/**
+ * The one work address, chosen in this order: the primary `work` email, the first `work`
+ * email, a primary email without `type`, or the only email when it has no `type` (RFC 7643
+ * makes `type` optional). A list none of these selects is refused, never dropped silently.
+ */
 function workEmail(value: unknown): string | null {
   if (value === undefined) return null
   if (!Array.isArray(value) || value.length > 10)
     throw invalidValue('The emails attribute is not a valid value.')
-  const work: Map<string, unknown>[] = []
-  for (const item of value) {
+  const emails = value.map((item) => {
     const entry = attributes(item, 'emails')
     only(entry, ['value', 'type', 'primary', 'display'])
     const type = text(entry.get('type'), 'emails', 256)
-    if (entry.get('primary') !== undefined && typeof entry.get('primary') !== 'boolean')
+    const primary = entry.get('primary')
+    if (primary !== undefined && typeof primary !== 'boolean')
       throw invalidValue('The emails attribute is not a valid value.')
-    if (type?.toLowerCase() === 'work') work.push(entry)
-  }
-  const primary = work.filter((entry) => entry.get('primary') === true)
-  const chosen = work.length === 1 ? work[0] : primary.length === 1 ? primary[0] : undefined
-  if (!chosen) {
-    if (work.length === 0) return null
-    throw invalidValue('The emails attribute must hold one work address.')
-  }
-  const address = chosen.get('value')
+    // An empty type is no type.
+    return { entry, type: type?.trim().toLowerCase() || null, primary: primary === true }
+  })
+  if (emails.length === 0) return null
+  // RFC 7643 section 2.4: "primary" is true for at most one value.
+  if (emails.filter((email) => email.primary).length > 1)
+    throw invalidValue('The emails attribute marks more than one address as primary.')
+  const work = emails.filter((email) => email.type === 'work')
+  const untyped = emails.filter((email) => email.type === null)
+  const chosen =
+    work.find((email) => email.primary) ??
+    work[0] ??
+    untyped.find((email) => email.primary) ??
+    (emails.length === 1 ? untyped[0] : undefined)
+  if (!chosen)
+    throw invalidValue(
+      'The emails attribute holds no work address. Send a "work" email, or a primary or single email without a type.',
+    )
+  const address = chosen.entry.get('value')
   if (!invitationEmailAccepted(address))
     throw invalidValue('The work email address is not a valid value.')
   return address.trim()
@@ -413,7 +443,8 @@ async function create(
           const mailbox = entry.work_email.toLowerCase()
           // The earliest current owner with a verified address invites: the organization's
           // authority, whichever token or person set provisioning up, and one the invitation
-          // sender accepts. The update lock keeps that owner in place.
+          // sender accepts. The update lock keeps that owner in place. It is required for
+          // every work address, so this refusal never depends on the address.
           const inviter = await trx
             .selectFrom('auth.member')
             .innerJoin('auth.user', 'auth.user.id', 'auth.member.userId')
@@ -427,38 +458,55 @@ async function create(
             .orderBy('auth.member.id')
             .executeTakeFirst()
           if (!inviter) throw noInviter()
-          const admitted = await admitInvitation(
-            trx,
-            { userId: inviter.userId, audit },
-            {
-              organizationId: principal.organizationId,
-              email: mailbox,
-              resend: false,
-            },
-            { reserve: deps.reserve },
-          )
-          // A pending invitation already claimed by another entry is not shared.
+          // Whatever admission does is kept only when the claim links its invitation.
+          await sql`SAVEPOINT scim_user_invitation`.execute(trx)
+          let admitted: Awaited<ReturnType<typeof admitInvitation>> | undefined
+          try {
+            // No `current` check: the token was rechecked under the organization lock, so
+            // TEAM_MANAGEMENT_ACCESS_DENIED can only be the refusal of a legacy role.
+            admitted = await admitInvitation(
+              trx,
+              { userId: inviter.userId, audit },
+              {
+                organizationId: principal.organizationId,
+                email: mailbox,
+                resend: false,
+              },
+              { reserve: deps.reserve },
+            )
+          } catch (error) {
+            const code = invitationRefusalCode(error)
+            if (code === undefined || !HELD_ELSEWHERE.includes(code)) throw error
+          }
+          // A pending invitation another entry's claim already holds is not shared.
           if (
-            admitted.existing &&
+            admitted?.existing &&
             (await trx
               .selectFrom('scim_user_claims')
               .select('id')
               .where('invitation_id', '=', admitted.invitation.id)
               .executeTakeFirst())
           )
-            throw mailboxTaken()
+            admitted = undefined
+          if (!admitted) await sql`ROLLBACK TO SAVEPOINT scim_user_invitation`.execute(trx)
+          await sql`RELEASE SAVEPOINT scim_user_invitation`.execute(trx)
+          // The same pending claim either way. Without an invitation nothing is sent and
+          // the claim lasts as long as an invitation would; claim completion proves and
+          // links the person's own account.
           await trx
             .insertInto('scim_user_claims')
             .values({
               organization_id: principal.organizationId,
               connection_id: connection,
               scim_user_id: id,
-              invitation_id: admitted.invitation.id,
+              invitation_id: admitted?.invitation.id ?? null,
               work_email: mailbox,
-              expires_at: admitted.invitation.expiresAt,
+              expires_at:
+                admitted?.invitation.expiresAt ??
+                sql<Date>`clock_timestamp() + make_interval(secs => ${invitationLifetimeMs / 1000}::double precision)`,
             })
             .execute()
-          if (admitted.delivery.state === 'queued')
+          if (admitted?.delivery.state === 'queued')
             queued = {
               invitationId: admitted.invitation.id,
               generation: admitted.delivery.generation,
@@ -476,10 +524,8 @@ async function create(
     const code = invitationRefusalCode(error)
     if (code === 'INVITATION_RATE_LIMITED' || code === 'INVITATION_PENDING_LIMIT')
       return invitationsLimited().reply
-    // Every other refusal concerns the address's membership or invitations in this
-    // organization: a member, another administrator's or a legacy pending invitation, or
-    // one that expired or changed while the create waited.
-    if (code !== undefined) return mailboxTaken().reply
+    // Anything else, such as the inviting owner's invitation expiring while the create
+    // waited for its locks, rolls everything back as a server error the provider retries.
     throw error
   }
   // The entry and its delivery intent are committed. A queue outage leaves that generation

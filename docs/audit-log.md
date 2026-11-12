@@ -170,7 +170,9 @@ SCIM User creation (`POST /Users`, which production does not register yet) recor
 `scim_user.created` on the new resource ID, attributed to the provisioning token that made the
 request (actor `scim_token`, credential `none`), with empty details: no `userName`, address,
 name or other attribute value is recorded. The invitation it issues records
-`membership.invited` with the same attribution. Both are written in the transaction that
+`membership.invited` with the same attribution; a create whose claim records no invitation
+(a member's address, or one another pending invitation holds) records only
+`scim_user.created`. Both are written in the transaction that
 creates the entry, its claim and the invitation, so a create that fails or is refused records
 nothing.
 

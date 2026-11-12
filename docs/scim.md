@@ -147,16 +147,26 @@ conflict. Read-only and server-owned attributes (`id`, `meta`, `groups`,
 `password` included, which is never stored or recorded; an unknown attribute or extension
 gets 400 `invalidValue`, a nonempty `roles` or `entitlements` gets 403 `mutability`, and a
 `manager` must name a live entry of the same connection. `active` may only be true until the
-lifecycle step enables its writes. When the User has a work address (the one `work` entry
-of `emails`, or the primary one among several), the same transaction records a pending
-claim and issues its invitation through the existing invitation service, with the same
-address rules, member-role invitation, mail admission limits, pending cap and delivery
-queue as an invitation sent from the app: the earliest current owner of the organization
-whose email address is verified is the inviter (with no such owner the create gets 409), a
-pending invitation of that owner to the same address is reused rather than sent again, and
-its delivery generation is queued only after commit. An address that belongs to a member,
-to another administrator's or a legacy pending invitation or to another entry's claim gets
-409 `uniqueness`; exhausted admission limits get 429 with `Retry-After`. Sign-up
+lifecycle step enables its writes. The work address is chosen from `emails` in this order:
+the primary `work` email, the first `work` email, a primary email without `type`, then the
+only email when it has no `type` (an empty `type` counts as none); a nonempty `emails` that
+none of these selects, or that marks more than one address primary, gets 400 `invalidValue`
+rather than losing the address.
+When the User has a work address, the same transaction records a pending claim and issues
+its invitation through the existing invitation service, with the same address rules,
+member-role invitation, mail admission limits, pending cap and delivery queue as an
+invitation sent from the app: the earliest current owner of the organization whose email
+address is verified is the inviter (with no such owner the create gets 403, whatever the
+address), a pending invitation of that owner to the same address is reused rather than sent
+again, and its delivery generation is queued only after commit. Existing same-email accounts
+get the same claim flow: an address that already belongs to a member of the organization,
+that another administrator's, a legacy, a duplicated or a departed inviter's pending
+invitation holds, or whose pending invitation another entry's claim already holds, gets the
+same entry and a pending
+claim without an invitation, nothing is sent, and the answer is the same 201 as any other
+create; claim completion proves the person's own account and links it. Only a duplicate
+live identity of the connection gets 409. Exhausted admission limits get 429 with
+`Retry-After`. Sign-up
 policy is decided from the instance settings alone: a restricted instance (`SIGNUP` set to
 `closed` or `first-user`) refuses a work address whose domain is not in
 `SIGNUP_ALLOWED_DOMAINS` with 403, whether or not an account exists. No account, membership
@@ -381,10 +391,18 @@ source) against the bounded wait and its retry.
   synchronization of a larger organization therefore gets 429 with `Retry-After: 3600`
   until capacity returns; the pending cap only frees up as invitations are accepted or
   expire after 48 hours. The `INVITATION_*` limits can be raised.
-- User creation refuses an address that already belongs to a member of the organization
-  with 409 and stores nothing, so an identity provider's first synchronization of a team
-  that already has members reports those members as conflicts. Adopting existing members
-  needs the claim completion and linking step.
+- User creation records an existing member's address, or one that another pending
+  invitation or another entry's claim already holds, as an entry with a pending claim and no
+  invitation, and sends nothing. Until the claim completion and linking step proves and links
+  those people, their entries stay unlinked. Such a claim lasts 48 hours, as an invitation
+  does.
+- While the admission limits are exhausted, only a create whose invitation would queue an
+  email (a new invitation, or a first delivery for a legacy pending one) gets 429; one that
+  reuses a pending invitation's delivery or records a claim without an invitation still gets
+  201. A token holder can therefore tell, while the limits are exhausted, whether an address
+  needs a new invitation in the organization; the per-recipient limit also counts other
+  organizations' invitations, as it does for invitations sent from the app, and only
+  addresses that need a new invitation wait for the shared mail-budget lock.
 - When creation reuses the inviting owner's pending invitation, that invitation keeps its
   delivery state; if its email already failed, an administrator resends it from the team's
   pending invitations.
@@ -475,11 +493,16 @@ The [audit journal](audit-log.md) records token administration as `scim_token.cr
 change, never the name, secret or digest. User creation records `scim_user.created` on the
 new resource ID, with the provisioning token as actor (`scim_token`, credential `none`) and
 empty details; the invitation it issues records `membership.invited` the same way. Token
-foundation must never claim full audit coverage. Required future actions:
-scim.authentication_failed and scim.rate_limited (bounded aggregation); scim.user.update,
-claim, deactivate, reactivate, delete; scim.group.create, update, delete;
-scim.group.member.add/remove; scim.mapping.link/unlink; scim.conflict;
-scim.privileged_member_blocked; scim.last_owner_blocked; scim.membership.suspended; scim.credentials.revoked.
+foundation must never claim full audit coverage. SCIM action names follow the journal's
+one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
+check allows exactly one dot. Required future actions:
+`scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
+aggregation); `scim_user.updated`, `scim_user.claimed`, `scim_user.deactivated`,
+`scim_user.reactivated`, `scim_user.deleted`; `scim_group.created`, `scim_group.updated`,
+`scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
+`scim_mapping.linked`, `scim_mapping.unlinked`; `scim_user.conflicted`;
+`scim_user.privileged_member_blocked`; `scim_user.last_owner_blocked`;
+`scim_user.membership_suspended`; `scim_user.credentials_revoked`.
 Record organization/connection, safe credential ID or human actor, target opaque ID,
 request correlation ID, result and time; omit bearer, digest, attribute values and bodies.
 Transactional lifecycle audit integration is a release prerequisite for Users/Groups.

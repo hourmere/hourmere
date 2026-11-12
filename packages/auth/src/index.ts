@@ -82,6 +82,7 @@ export {
   type InvitationAdmission,
   type InvitationIssuer,
   invitationEmailAccepted,
+  invitationLifetimeMs,
   invitationRefusalCode,
   type ReserveInvitationEmail,
 } from './invitations.ts'
