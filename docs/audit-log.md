@@ -1,6 +1,7 @@
 # Audit event journal
 
-Every self-hosted and Cloud instance records audit events without plan gating. The
+Every self-hosted and Cloud instance records the audit events listed below without plan
+gating; actions that are not listed are not recorded (see [Not recorded](#not-recorded)). The
 journal is recorded but not yet viewable: a query UI, REST/MCP/CLI read APIs, export
 and retention controls are future work. It is separate from booking activity analytics.
 Existing changes are not backfilled. Recording starts with the upgraded application;
@@ -170,6 +171,12 @@ When an authorization code is presented a second time, Better Auth deletes the t
 already issued for it. This automatic replay response is not recorded: it concerns
 the one connection whose code was replayed, and Better Auth ignores its failures, so
 making it depend on the journal could leave those tokens valid.
+Areas added after this journal was designed are not recorded yet: SCIM provisioning
+token creation, rotation and revocation; Slack destination creation, updates, deletion
+and test messages, and the automatic pause after Slack rejects a destination URL; and
+attendee no-show marking and unmarking (the attendee row keeps only the current marker
+and time). Routing forms, meeting polls, organization SSO configuration and booking
+workflows have no reachable management operation yet and record nothing.
 Paid-booking holds (creating, confirming and cancelling a payment hold) are service
 functions that no route reaches yet; wiring them to a route must add booking audit
 events. Automatic payment-hold expiry and unpaid-hold personal-data erasure are system
@@ -180,6 +187,4 @@ operator database changes.
 This is a management journal, not an access log: reads (including CSV booking
 exports), failed attempts, ordinary sign-ins and session refreshes, third-party
 provider internals, email contents, and database changes made directly by an operator
-are not recorded. Hourmere has no
-no-show marking yet; adding it must add its audit events. Existing booking provenance
-columns remain intact.
+are not recorded. Existing booking provenance columns remain intact.
