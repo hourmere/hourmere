@@ -231,6 +231,11 @@ was created, or from the list with a read/full key. Used links remain used. Exis
 ownership and team permissions still apply. See the
 [one-time link guide](https://hourmere.com/docs/one-time-links) for limits and retention.
 
+`workflows list` (JSON `owner` as `{"kind":"personal","id":USER_ID}` or
+`{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)
+read booking workflows with a `read` or `full` key. Booking workflows are not available yet:
+until they are enabled on the instance both commands exit `1` with `workflows_disabled`.
+
 Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking list's
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.
 Exit codes: `0` success, `1` usage/input/domain/protocol error, `3` transport failure.

@@ -37,6 +37,8 @@ const restContract = {
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
+    'GET /api/v1/workflows',
+    'GET /api/v1/workflows/{id}',
   ],
   booking_read: [
     'POST /api/v1/open-time-snippets',
@@ -401,6 +403,8 @@ describe('shared API-key scope policy', () => {
         'remove_waitlist_entry',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_workflows',
+        'get_workflow',
       ],
       read: [
         'get_branding',
@@ -422,6 +426,8 @@ describe('shared API-key scope policy', () => {
         'list_conference_connections',
         'get_event_type_waitlist',
         'list_waitlist_entries',
+        'list_workflows',
+        'get_workflow',
       ],
       bookings: [
         'create_one_time_link',

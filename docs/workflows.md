@@ -3,7 +3,11 @@
 Status: proposed design, not a shipped feature. Step 1 of the plan has added the pure
 definition contract in `packages/workflows` behind the hard-off constant, step 2 the
 definition and revision tables (migration 0076) and step 3 the execution tables (migration
-0079), which nothing reads or writes yet; no interface or interface string exists yet. Decisions below are Hourmere decisions unless explicitly
+0079). Step 4 has added the definition reads (`listWorkflows`/`getWorkflow`,
+`list_workflows`/`get_workflow`, `workflows list`/`workflows get`) and `/instance`
+`workflowsEnabled`; while hard-off every read answers `404 workflows_disabled`, tools/list omits
+the tools and `workflowsEnabled` is false. Nothing writes the tables or reads the execution
+tables yet, and no web interface exists. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 ## Evidence and existing foundations
@@ -688,6 +692,21 @@ synthetic example values, returns rendered text and escaped HTML, matched/skippe
 and static budget estimates derived only from the candidate and published limits; never
 instance-wide or other-owner usage. It performs no email or webhook call. No write sends immediately.
 
+Step 4 settles the read representation and refusals. A definition reads as `id`, `owner`
+(`{kind, id}`: the user for a personal owner, the team organization for a team), the current
+`revision`, the live `enabled` flag, the current revision's `name`, `scope`, `trigger`,
+`conditions` and `actions` (the contract's canonical form), and `createdAt`/`updatedAt`. Reads
+follow the organization the caller acts in: its own personal definitions in its personal
+organization, or the team's definitions while it is a current verified owner or admin of that
+team. REST names the list owner as `ownerKind` and `ownerId`, MCP and the CLI as `owner`.
+Any other list owner, existing or not, gets the same `403 insufficient_role`; a missing,
+deleted, malformed, foreign or other-organization ID gets the same `404 workflow_not_found`.
+Lists are oldest first by time-ordered ID, with `limit` 1–100 (default 50) and an opaque
+`cursor` bound to the owner. While off, every transport answers after credential validation
+and the API-key scope check and before input validation or any lookup: REST through a route
+guard listed right after the caller, MCP through the tool's availability check
+(`Tool.requireAvailable`), which also keeps the tool out of `tools/list`.
+
 Keep OpenAPI operation IDs, generated web client types, API-key policy registry, MCP tool
 schemas, CLI help/JSON behavior and interface-parity mappings in the same change as each
 operation. [The parity script](../scripts/interface-parity.ts) covers **every** new v1
@@ -732,8 +751,9 @@ catalog/visible split in `registerTools()` (`apps/server/src/mcp/tools.ts`) with
 feature predicate. Today that split keeps a tool the API key does not allow out of the
 visible registry, but in `catalog`, so a direct call still reaches `runTool`. With the
 predicate, workflow tools also stay out of the visible registry while workflows are
-unavailable, and a direct call reaches the tool, whose service returns
-`workflows_disabled`. Scope refusals keep their existing precedence.
+unavailable, and a direct call reaches `runTool`, which answers `workflows_disabled` from the
+tool's availability check (`Tool.requireAvailable`) after the scope check and before the
+argument checks. Scope refusals keep their existing precedence.
 
 Build the parity inventory with the feature enabled in effect: registration never depends
 on the constant or the operator switch. So `loadInterfaceInventory()` in

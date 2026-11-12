@@ -250,6 +250,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `PATCH /api/v1/webhooks/{id}` | Session or API key | `full` |
 | `GET /api/v1/webhooks/{id}/deliveries` | Session or API key | `full, read` |
 | `POST /api/v1/webhooks/{id}/rotate-secret` | Session or API key | `full` |
+| `GET /api/v1/workflows` | Session or API key | `full, read` |
+| `GET /api/v1/workflows/{id}` | Session or API key | `full, read` |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
 
 ### MCP tools and CLI commands
@@ -310,6 +312,8 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `list_workflows` | — | `workflows list` | `full, read` |
+| `get_workflow` | — | `workflows get` | `full, read` |
 
 ### Native protocol boundaries
 
@@ -324,6 +328,12 @@ These routes keep their own authentication; API key scopes do not authorize them
 | `POST /api/conference/zoom/events` | Provider signature |
 
 <!-- api-key-scope-table:end -->
+
+Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id}`,
+`list_workflows`, `get_workflow`, `workflows list` and `workflows get`) are listed before the
+feature is available: until booking workflows are enabled they answer
+`404 workflows_disabled` to every key their scope allows, and `tools/list` omits the tools.
+A key whose scope does not allow them still gets `insufficient_scope` first.
 
 CSV export through API keys is limited to the owner's personal organization (`read` or
 `full`). Team-wide CSV exports retain the existing browser-session-only team-admin access

@@ -1,6 +1,6 @@
-// Booking workflows: the pure definition contract and timer rules behind the hard-off constant
-// (docs/workflows.md). Nothing here touches the database, mail or webhooks yet, and no
-// interface is registered; later plan steps add storage, operations and execution.
+// Booking workflows: the definition contract, timer rules and definition reads behind the
+// hard-off constant (docs/workflows.md). Only the guarded reads touch the database, and
+// nothing sends mail or posts webhooks yet; later plan steps add writes and execution.
 
 export {
   hardOffWorkflowAuditPort,
@@ -62,6 +62,16 @@ export {
   type WorkflowWebhookFacts,
   workflowOwnerSelector,
 } from './ownership.ts'
+export {
+  getWorkflow,
+  listWorkflows,
+  WORKFLOW_PAGE,
+  type WorkflowListInput,
+  type WorkflowPage,
+  type WorkflowReadContext,
+  type WorkflowReader,
+  type WorkflowView,
+} from './reads.ts'
 export {
   type WorkflowBookingInstants,
   type WorkflowCaptureSkipReason,
