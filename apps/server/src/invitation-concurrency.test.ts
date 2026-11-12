@@ -8,6 +8,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { manageInvitation } from '../../../packages/auth/src/invitations.ts'
 import { reserveInvitationEmailBudget } from '../../../packages/notifications/src/invitation-mail-limits.ts'
 import { invitationRecipientHash } from '../../../packages/notifications/src/mail-limits.ts'
 import { createApp } from './app.ts'
@@ -314,6 +315,118 @@ describe.skipIf(!serverUrl)('team invitation concurrency across distinct admin s
   it('serializes same-generation resends with distinct request ids from two admin sessions', async () => {
     await verifyRace('resend')
   })
+
+  /**
+   * A session that lapses while admission waits for a lock is refused at the recheck after
+   * that wait. Another connection holds the address's delivery row (an existing invitation of
+   * the same administrator) or the shared mail-budget lock; the session expires by the
+   * database clock while the request waits; then the lock is released.
+   */
+  async function verifySessionLapse(lock: 'delivery' | 'budget') {
+    const [admin] = await admins()
+    const email = `${randomUUID()}@outside.example`
+    const reserve = {
+      reserve: (
+        trx: Db,
+        input: { userId: string; organizationId: string; email: string },
+        now: Date,
+      ) => reserveInvitationEmailBudget(trx, input, { secret }, now),
+    }
+    const request = (sessionId: string) =>
+      manageInvitation(
+        db,
+        { userId: admin.userId, sessionId, activeOrganizationId: admin.organizationId },
+        { organizationId: admin.organizationId, email },
+        reserve,
+      )
+    // The administrator's own pending invitation, whose delivery row a retry locks.
+    if (lock === 'delivery') await request(admin.sessionId)
+    const rows = async () => ({
+      invitations: await db
+        .selectFrom('auth.invitation')
+        .selectAll()
+        .where('organizationId', '=', admin.organizationId)
+        .execute(),
+      deliveries: await db
+        .selectFrom('invitation_deliveries')
+        .innerJoin('auth.invitation', 'auth.invitation.id', 'invitation_deliveries.invitation_id')
+        .selectAll('invitation_deliveries')
+        .where('auth.invitation.organizationId', '=', admin.organizationId)
+        .execute(),
+      budget: await db
+        .selectFrom('invitation_email_requests')
+        .selectAll()
+        .where('organization_id', '=', admin.organizationId)
+        .execute(),
+      audit: await db
+        .selectFrom('audit_events')
+        .selectAll()
+        .where('organization_id', '=', admin.organizationId)
+        .execute(),
+    })
+    const before = await rows()
+    expect(before.invitations).toHaveLength(lock === 'delivery' ? 1 : 0)
+    const holder = await owned.pool.connect()
+    let outcome: Promise<unknown> | undefined
+    try {
+      await holder.query('BEGIN')
+      if (lock === 'delivery')
+        await holder.query(
+          `SELECT 1 FROM invitation_deliveries d JOIN auth.invitation i ON i.id = d.invitation_id
+          WHERE i."organizationId" = $1 FOR UPDATE OF d`,
+          [admin.organizationId],
+        )
+      else await holder.query('SELECT pg_advisory_xact_lock(1852798057, 1835100524)')
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+        .rows[0]?.pid as number
+      // Created once the lock is held, so the request starts at once and reaches the lock
+      // well inside the session's last two seconds.
+      const lapsing = await db
+        .insertInto('auth.session')
+        .values({
+          userId: admin.userId,
+          token: randomBytes(24).toString('base64url'),
+          expiresAt: sql<Date>`clock_timestamp() + interval '2 seconds'`,
+          updatedAt: new Date(),
+          activeOrganizationId: admin.organizationId,
+        })
+        .returning(['id', 'expiresAt'])
+        .executeTakeFirstOrThrow()
+      outcome = request(lapsing.id).then(
+        () => 'admitted',
+        (error: { body?: { code?: string } }) => error.body?.code ?? error,
+      )
+      // Waiting on the lock means the session passed its first check.
+      await blockedBy([holderPid], 1)
+      await vi.waitFor(
+        async () => {
+          const { rows } = await holder.query<{ lapsed: boolean }>(
+            'SELECT clock_timestamp() > $1 AS lapsed',
+            [lapsing.expiresAt],
+          )
+          expect(rows[0]?.lapsed).toBe(true)
+        },
+        { timeout: 10_000, interval: 50 },
+      )
+      await holder.query('COMMIT')
+    } finally {
+      await holder.query('ROLLBACK')
+      holder.release()
+    }
+    expect(await outcome, 'the lapsed session is refused after the lock wait').toBe(
+      'TEAM_MANAGEMENT_ACCESS_DENIED',
+    )
+    expect(await rows(), 'a refused admission writes nothing').toEqual(before)
+  }
+
+  // Each waits about two seconds of database time for its session to lapse.
+  it('refuses a session that lapsed while admission waited for a delivery row', async () => {
+    await verifySessionLapse('delivery')
+  }, 30_000)
+
+  it('refuses a session that lapsed while admission waited for the mail budget', async () => {
+    await verifySessionLapse('budget')
+  }, 30_000)
 
   it('runs the unchanged source copy through both cross-session invariants', async () => {
     const factory = await sourceCopy(false, false)

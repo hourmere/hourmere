@@ -50,6 +50,8 @@ export interface ServiceContext {
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  /** Per-process export capacity from validated server configuration; defaults to 2. */
+  bookingExportMaxConcurrent?: number | undefined
   principal: Principal
   /** The clock, injectable for tests. */
   now: () => Temporal.Instant

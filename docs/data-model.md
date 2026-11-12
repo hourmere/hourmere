@@ -59,7 +59,11 @@ stored, or whose decision is already a live tombstone, is dropped so that accoun
 is never refused. These tables provide storage
 for later claim and authorization work; this migration does not enforce new admission,
 suspension or revocation behavior in application services. Users, Groups and discovery
-handlers remain unregistered in production.
+handlers remain unregistered in production. The User creation handler, which only test
+harnesses register, writes a resource and, for its work address, one pending claim whose
+`invitation_id` names the invitation it issued or reused, or is null when the address
+already belongs to a member or another pending invitation holds it; it never sets an
+account or membership link.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -103,10 +107,27 @@ internal enrollment and verification service in
 re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
 invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
 resend counters under the poll lock. It queues delivery rows only; no worker, transport,
-flag or UI is enabled.
+flag or UI is enabled. The internal ballot service in
+`packages/scheduling/src/meeting-poll-ballots.ts` submits and replaces complete ballots,
+withdraws and reactivates voters and records reminder opt-outs under the same locks and
+database deadline clock. Ballots and withdrawals advance the ballot and results revisions;
+no voter write, opt-out included, moves the host revision.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
+
+Migration `0084_meeting_poll_key_state.sql` adds the installation-wide
+`meeting_poll_key_state` row: a keyed fingerprint of the meeting-poll secret that mailbox
+digests, admission IP digests and retained credential ciphertexts were written under, never
+the secret. Every voter service checks it first in its transaction
+(`packages/scheduling/src/meeting-poll-key.ts`). A secret is recorded, at first use or
+replacing another one, only while no voter row or mailbox counter exists; otherwise every
+other secret is refused (see
+[the key fence](meeting-polls.md#installation-secret-and-key-fence)). The migration writes no
+row. Its expectation file is
+`packages/db/src/testing/migration-objects/0084_meeting_poll_key_state.json`, and
+`meeting-poll-key-state-coverage.test.ts` drops each of its five objects and requires a
+protection assertion to fail.
 
 The chosen cleanup schedule is hourly, at most 500 rows per transaction. It persists
 closure for abandoned open polls at their deadline, deletes expired public pending
@@ -994,10 +1015,11 @@ upgrade test preserves a populated predecessor, including the SSO configuration 
 ## Workflow definition storage
 
 Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
-(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Nothing reads or writes
-them yet: there is no route, worker, read path or setting, and workflows stay hard-off behind
-`WORKFLOWS_IMPLEMENTED = false`. A test keeps every production module outside the storage
-layer from naming them.
+(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Only the definition
+reads of step 4 (`packages/workflows/src/reads.ts`) query them, behind the hard-off guard, so
+they answer `workflows_disabled` while workflows stay off behind
+`WORKFLOWS_IMPLEMENTED = false`; nothing writes them yet, and no worker or setting uses them.
+A test keeps every other production module outside the storage layer from naming them.
 
 - **Definitions** have an immutable ID, organization, owner and creation time. A personal
   definition belongs to its user in that user's personal organization (`owner_user_id`); a
@@ -1120,8 +1142,9 @@ ledger counts and purge unchanged on the same rows across the upgrade.
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
 email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
 Only its definition and execution storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage));
-no API, worker or runtime enablement exists yet.
+storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage)),
+with definition read operations that answer `workflows_disabled` while hard-off; no write API,
+worker or runtime enablement exists yet.
 
 | When | Change |
 |---|---|
@@ -1457,6 +1480,13 @@ The phases within that organization boundary are:
   publication share-locks its target event types in ID order; each write then locks the
   form row. Publication therefore waits for membership management and event-type edits
   instead of deadlocking with them. Preview takes no lock and runs read-only.
+- SCIM User creation takes the organization update lock first, like membership management,
+  then a key share lock on its provisioning token row (revocation and rotation take the
+  organization lock before their token update lock), then the shared invitation service's
+  locks: the address's pending invitation rows, their delivery rows and the mail-budget
+  lock, inside a savepoint that is rolled back, releasing them, when the claim records no
+  invitation. It locks no member row: the organization lock excludes membership changes while it
+  reads the earliest owner who invites.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
@@ -1912,6 +1942,9 @@ Migration 0064 adds `booking_reschedule_requests`. A host of a confirmed future 
 may ask its booker to choose another time, optionally including a plain-text note.
 Imported read-only records and group-seat bookings refuse this action. Authorization is
 identical to host rescheduling; being a team administrator alone does not grant it.
+Booking responses expose optional `isGroupSeat: true` for group-seat bookings and omit
+it otherwise. REST, MCP and CLI clients can use the flag to skip unsupported requests;
+its absence does not bypass the other booking and authorization rules.
 
 Pending reschedule is an overlay (`Booking.pendingReschedule`), not a new booking status:
 the booking remains `confirmed`, its original time remains blocked, and calendar entries,

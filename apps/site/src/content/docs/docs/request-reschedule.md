@@ -47,6 +47,11 @@ Send `POST /api/v1/bookings/{id}/request-reschedule` with a UUID `idempotencyKey
 `note`. A session write must supply the usual expected organization header. API keys need
 `bookings` or `full` scope and must belong to an authorized host.
 
+Booking responses include the optional `isGroupSeat: true` flag for group-seat bookings;
+other bookings omit it. REST, MCP and CLI clients can use this flag to skip unsupported
+reschedule requests for group seats. Its absence does not guarantee the action is allowed;
+the other booking and authorization rules still apply.
+
 MCP exposes `request_reschedule` with `bookingId`, `idempotencyKey` and optional `note`.
 CLI exposes `request-reschedule`; use `--help` for the matching options. Keep the same key
 and body when retrying a lost response. Changing the note with the same key fails;

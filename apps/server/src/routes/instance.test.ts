@@ -81,6 +81,7 @@ describe('GET /api/v1/instance', () => {
       ssoOidcEnabled: false,
       ssoSamlEnabled: false,
       routingFormsEnabled: false,
+      workflowsEnabled: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
@@ -101,6 +102,7 @@ describe('GET /api/v1/instance', () => {
       ssoOidcEnabled: false,
       ssoSamlEnabled: false,
       routingFormsEnabled: false,
+      workflowsEnabled: false,
       signIn: { email: true, google: true, microsoft: true },
     })
     expect(text).not.toMatch(/client/i)
@@ -117,6 +119,7 @@ describe('GET /api/v1/instance', () => {
       ssoOidcEnabled: false,
       ssoSamlEnabled: false,
       routingFormsEnabled: false,
+      workflowsEnabled: false,
       signIn: { email: true, google: true, microsoft: false },
     })
   })
@@ -137,6 +140,7 @@ describe('GET /api/v1/instance', () => {
       ssoOidcEnabled: false,
       ssoSamlEnabled: false,
       routingFormsEnabled: false,
+      workflowsEnabled: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })

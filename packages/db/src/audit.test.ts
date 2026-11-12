@@ -235,11 +235,33 @@ describe.skipIf(!serverUrl)('audit journal', () => {
       { actor: { type: 'external_api_key' }, credential: { type: 'session', id: 'session' } },
       { actor: { type: 'external_user', id: 'invitee' }, credential: { type: 'none' } },
       { actor: { type: 'external_user' }, credential: { type: 'session', id: 'session' } },
+      // A provisioning token is the actor and the credential at once.
+      {
+        actor: { type: 'scim_token', id: 'token' },
+        credential: { type: 'session', id: 'session' },
+      },
+      { actor: { type: 'scim_token', id: 'token' }, credential: { type: 'api_key', id: 'key' } },
+      { actor: { type: 'scim_token' }, credential: { type: 'none' } },
+      // A SCIM User event records no attribute value.
+      {
+        action: 'scim_user.created',
+        actor: { type: 'scim_token', id: 'token' },
+        credential: { type: 'none' },
+        details: { userName: 'person@example.com' },
+      },
     ]) {
       await expect(
         db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, ...bad } as AuditEvent)),
       ).rejects.toThrow()
     }
+    await db.transaction().execute((trx) =>
+      writeAuditEvent(trx, {
+        ...event,
+        action: 'scim_user.created',
+        actor: { type: 'scim_token', id: randomUUID() },
+        credential: { type: 'none' },
+      }),
+    )
     for (const type of ['external_api_key', 'external_oauth_client', 'external_user'] as const)
       await db.transaction().execute((trx) =>
         writeAuditEvent(trx, {

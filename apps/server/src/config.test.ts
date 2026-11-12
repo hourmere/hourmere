@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { parseSsoPrivateTargets } from '@hourmere/outbound/sso-private-targets'
 import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { describe, expect, it } from 'vitest'
@@ -9,6 +11,53 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  function verifyExportLimit(load: typeof loadConfig) {
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const env = { ...base, HOURMERE_ROLE }
+      for (const value of [undefined, ''])
+        expect(
+          load({ ...env, BOOKING_EXPORT_MAX_CONCURRENT: value }).BOOKING_EXPORT_MAX_CONCURRENT,
+        ).toBe(2)
+      for (const value of ['1', '2', '8'])
+        expect(
+          load({ ...env, BOOKING_EXPORT_MAX_CONCURRENT: value }).BOOKING_EXPORT_MAX_CONCURRENT,
+        ).toBe(Number(value))
+      for (const value of ['0', '-1', '9', '1.5', 'NaN', 'Infinity', 'off', ' ', '2slots'])
+        expect(() => load({ ...env, BOOKING_EXPORT_MAX_CONCURRENT: value })).toThrow(
+          /BOOKING_EXPORT_MAX_CONCURRENT must be a whole number from 1 to 8/,
+        )
+    }
+  }
+
+  it('validates CSV export capacity before startup in every process role', () => {
+    verifyExportLimit(loadConfig)
+  })
+
+  it.each([
+    ['integer check', '.int({ error: BOOKING_EXPORT_LIMIT_FORMAT })', ''],
+    ['lower bound', '.min(1, { error: BOOKING_EXPORT_LIMIT_FORMAT })', ''],
+    ['upper bound', '.max(8, { error: BOOKING_EXPORT_LIMIT_FORMAT })', ''],
+    ['invalid-value rejection', '.default(2),', '.default(2).catch(2),'],
+    ['default capacity', '.default(2),', '.default(1),'],
+  ])('detects a removed CSV export config protection: %s', async (_name, before, after) => {
+    const location = new URL('./config.ts', import.meta.url)
+    const source = readFileSync(location, 'utf8')
+    expect(source.split(before)).toHaveLength(2)
+    const javascript = stripTypeScriptTypes(source.replace(before, after)).replace(
+      /((?:from|import)\s*)'([^']+)'/g,
+      (_, prefix: string, specifier: string) => {
+        const resolved = specifier.startsWith('.')
+          ? new URL(specifier, location).href
+          : import.meta.resolve(specifier)
+        return `${prefix}'${resolved}'`
+      },
+    )
+    const mutant: typeof import('./config.ts') = await import(
+      `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+    )
+    expect(() => verifyExportLimit(mutant.loadConfig)).toThrow()
+  })
+
   it('requires explicit opt-in for paid booking foundation in every process role', () => {
     for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
       const env = { ...base, HOURMERE_ROLE }

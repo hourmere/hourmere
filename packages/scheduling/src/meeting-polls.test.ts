@@ -7,6 +7,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { canonicalJson, lockHosts } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -42,7 +43,9 @@ async function sourceCopy(...replacements: (readonly [string, string])[]): Promi
     (_, specifier: string) =>
       `from '${specifier.startsWith('node:') ? specifier : specifier.startsWith('.') ? new URL(specifier, location).href : pathToFileURL(createRequire(location).resolve(specifier)).href}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(module).toString('base64')}`)
+  return guardCopy<PollModule>(
+    await import(`data:text/javascript;base64,${Buffer.from(module).toString('base64')}`),
+  )
 }
 
 /** Source copies load their own DomainError class, so compare by name and code. */
@@ -2809,6 +2812,6 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   // Only a failed assertion counts: a mutant that crashes or cannot load is not a detection.
   it.each(mutations)('detects the mutation: %s', async (_name, verify, ...replacements) => {
     const mutated = await sourceCopy(PIN_CLOCK, ...replacements)
-    await expect(verify(mutated)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutated, verify)
   })
 })

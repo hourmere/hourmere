@@ -3,7 +3,9 @@
 // work: this source constant is. It is not read from the environment or the configuration, no
 // function changes it, and no option or parameter overrides it, in production or in tests.
 // Tests exercise the internal services behind these guards by calling them directly with
-// injected dependencies. The plan's opt-in step is the only change that may set it to true.
+// injected dependencies. The one transport test of the enabled read path replaces this module
+// in its own file with a test module mock (apps/server/src/workflows-enabled.test.ts), which no
+// production code can do. The plan's opt-in step is the only change that may set it to true.
 
 import { DomainError } from '@hourmere/scheduling/errors'
 

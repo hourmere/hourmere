@@ -3,6 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { listPublicTeamSlots } from './availability.ts'
 import { createPublicTeamBooking, insertBooking } from './bookings.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
@@ -35,10 +36,12 @@ async function copy(
     source = source.replace(match[0], '')
   }
   source = source.replace(/^export \{[^}]*\} from '[^']+'\n/gm, '')
-  return new Function(
-    ...Object.keys(bindings),
-    `${source.replace(/\bexport /g, '')}; return { ${exports} }`,
-  )(...Object.values(bindings))
+  return guardCopy(
+    new Function(
+      ...Object.keys(bindings),
+      `${source.replace(/\bexport /g, '')}; return { ${exports} }`,
+    )(...Object.values(bindings)),
+  )
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('round-robin payment hold admission', () => {
@@ -137,8 +140,8 @@ describe.skipIf(!process.env.DATABASE_URL)('round-robin payment hold admission',
       'await expirePaymentHolds({ db: trx, hostUserId })',
       '',
     )
-    await expect(
-      admission(mutant.createPublicTeamBooking as typeof createPublicTeamBooking),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      admission(copy.createPublicTeamBooking as typeof createPublicTeamBooking),
+    )
   })
 })

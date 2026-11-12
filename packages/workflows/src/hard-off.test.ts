@@ -42,6 +42,7 @@ const PACKAGE_EXPORTS = [
   'WORKFLOW_MIN_TIMER_OFFSET_MINUTES',
   'WORKFLOW_NAME_MAX_BYTES',
   'WORKFLOW_OWNER_MAIL_MAX_PER_HOUR',
+  'WORKFLOW_PAGE',
   'WORKFLOW_RECIPIENT_CLASSES',
   'WORKFLOW_RECIPIENT_EMAILS_PER_DAY',
   'WORKFLOW_RECIPIENT_EMAILS_PER_HOUR',
@@ -58,9 +59,13 @@ const PACKAGE_EXPORTS = [
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
   'evaluateConditions',
+  // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
+  'getWorkflow',
   'hardOffWorkflowAuditPort',
   'isWorkflowBooking',
   'isWorkflowEventType',
+  // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
+  'listWorkflows',
   'ownsEventType',
   'ownsWebhook',
   'parseWorkflowDefinition',
