@@ -42,6 +42,8 @@ export type AttendeeNoShowNotifier = (
 export interface ServiceContext {
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined
@@ -64,6 +66,8 @@ export interface PublicContext {
   /** Whether trusted server configuration enables SMTP; waitlist enrollment needs mail. */
   smtpConfigured?: boolean | undefined
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Shared waitlist attribution and enrollment secret, supplied only by trusted transports. */
   waitlistSecret?: string | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined

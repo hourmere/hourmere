@@ -11,6 +11,7 @@ import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-provide
 import pg from 'pg'
 import { parse } from 'pg-connection-string'
 import { API_KEY_RATE_LIMIT } from './api-keys.ts'
+import { authAuditRecords } from './audit.ts'
 import type { Principal } from './caller.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { sanitizeInitialDisplayName } from './display-name.ts'
@@ -426,6 +427,7 @@ export function createAuth({
         },
       },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
+      authAuditRecords(),
       organizationOperationRecords(),
       {
         id: 'team-role-policy',
