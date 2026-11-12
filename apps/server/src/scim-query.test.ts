@@ -203,6 +203,9 @@ function verifyFilters(m: Query) {
     ['EXTERNALID eQ "x"', 'externalId', 'x', true],
     [`${core}:userName eq "x"`, 'userName', 'x', false],
     [`${core.toUpperCase()}:USERNAME eq "x"`, 'userName', 'x', false],
+    // RFC 7643 section 3.1: common attributes are part of every base resource schema.
+    [`${core}:externalId eq "x"`, 'externalId', 'x', true],
+    [`${core.toLowerCase()}:EXTERNALID eq "x"`, 'externalId', 'x', true],
     ['userName eq ""', 'userName', '', false],
     ['userName eq "a eq b"', 'userName', 'a eq b', false],
   ]
@@ -232,8 +235,12 @@ function verifyFilters(m: Query) {
     ['emails[type eq "work"].value eq "x"', 'filterAttribute'],
     ['meta.lastModified gt "2026-01-01T00:00:00Z"', 'filterAttribute'],
     [`${enterprise}:employeeNumber eq "x"`, 'filterAttribute'],
-    [`${core}:externalId eq "x"`, 'filterAttribute'],
     [`${core}:id eq "x"`, 'filterAttribute'],
+    [`${core}:meta.created eq "x"`, 'filterAttribute'],
+    [`${core}:schemas eq "x"`, 'filterAttribute'],
+    [`${enterprise}:externalId eq "x"`, 'filterAttribute'],
+    ['groups eq "x"', 'filterAttribute'],
+    ['phoneNumbers.value eq "x"', 'filterAttribute'],
     ['urn:ietf:params:scim:schemas:core:2.0:Group:displayName eq "x"', 'filterAttribute'],
     ['userName.value eq "x"', 'filterAttribute'],
     ['userNames eq "x"', 'filterAttribute'],
@@ -397,16 +404,99 @@ function verifyProjection(m: Query) {
   expect(project(m, [['attributes', enterprise]], plain)).toEqual(minimal)
   expect(project(m, [['excludedAttributes', 'userName']], plain)).toEqual(plain)
 
+  // RFC 7643 section 3.1: the common attributes id, externalId and meta may carry the core
+  // schema URN; schemas is not one of them.
+  const qualified: [string, Json][] = [
+    [`${core}:id`, minimal],
+    [`${core}:ID`, minimal],
+    [`${core}:externalId`, { ...minimal, externalId: '00u1abc' }],
+    [`${core.toUpperCase()}:EXTERNALID`, { ...minimal, externalId: '00u1abc' }],
+    [`${core}:meta`, { ...minimal, meta: alice.meta }],
+    [
+      `${core}:meta.location,${core}:meta.created`,
+      {
+        ...minimal,
+        meta: {
+          location: (alice.meta as Json).location,
+          created: (alice.meta as Json).created,
+        },
+      },
+    ],
+  ]
+  for (const [name, expected] of qualified) {
+    expect(project(m, [['attributes', name]]), name).toEqual(expected)
+    const excluded = project(m, [['excludedAttributes', name]]) as Json
+    for (const key of Object.keys(expected).filter((key) => !(key in minimal)))
+      expect(excluded[key], `excludedAttributes=${name}`).toEqual(
+        name.endsWith('created')
+          ? { resourceType: 'User', lastModified: (alice.meta as Json).lastModified }
+          : undefined,
+      )
+  }
+
+  // Attributes RFC 7643 sections 3.1, 4.1 and 4.3 define for Users that Hourmere does not
+  // map are never returned: excluding one changes nothing and requesting one adds nothing.
+  const unmapped = [
+    'groups',
+    'phoneNumbers',
+    'addresses',
+    'ims',
+    'photos',
+    'entitlements',
+    'roles',
+    'x509Certificates',
+    'password',
+    'profileUrl',
+    'preferredLanguage',
+    'name.middleName',
+    'name.honorificPrefix',
+    'NAME.HONORIFICSUFFIX',
+    'emails.display',
+    'addresses.streetAddress',
+    'addresses.postalCode',
+    'phoneNumbers.value',
+    'groups.display',
+    'groups.$ref',
+    'meta.version',
+    `${core}:groups`,
+    `${core}:meta.version`,
+    `${core}:name.middleName`,
+    `${enterprise}:manager.$ref`,
+    `${enterprise.toLowerCase()}:MANAGER.$REF`,
+  ]
+  for (const name of unmapped) {
+    expect(project(m, [['excludedAttributes', name]]), `excludedAttributes=${name}`).toEqual(alice)
+    expect(project(m, [['attributes', name]]), `attributes=${name}`).toEqual(minimal)
+  }
+  expect(project(m, [['excludedAttributes', unmapped.join(',')]])).toEqual(alice)
+  expect(project(m, [['attributes', unmapped.join(',')]])).toEqual(minimal)
+  expect(project(m, [['attributes', 'groups,displayName,phoneNumbers']])).toEqual({
+    ...minimal,
+    displayName: 'Alice',
+  })
+  expect(project(m, [['excludedAttributes', 'addresses,displayName,roles']])).toEqual(
+    without(alice, 'displayName'),
+  )
+
+  // Names RFC 7643 does not define for Users stay refused.
   const unknown = [
     '',
-    'roles',
-    'password',
-    'groups',
-    'entitlements',
-    'emails.display',
+    'badge',
+    'members',
+    'groups.member',
+    'addresses.street',
+    'name.middle',
+    'emails.$reference',
+    'meta.versions',
     'manager',
     'department',
-    'meta.version',
+    'phoneNumbers.value.x',
+    `${core}:schemas`,
+    `${core}:department`,
+    `${core}:manager`,
+    `${enterprise}:groups`,
+    `${enterprise}:externalId`,
+    `${enterprise}:manager.middleName`,
     'name.givenName.x',
     'name.',
     '.name',
@@ -417,7 +507,6 @@ function verifyProjection(m: Query) {
     'nic\u212AName',
     core,
     `${core}:`,
-    `${core}:id`,
     `${core}:${enterprise}:department`,
     `${enterprise}:`,
     `${enterprise}x`,
@@ -502,6 +591,9 @@ function verifyProjectionProperties(m: Query) {
     ...leaves(user?.attributes ?? []).map((name) => `${core}:${name}`),
     ...leaves(extended?.attributes ?? []).map((name) => `${enterprise}:${name}`),
     enterprise,
+    ...['id', 'externalId', 'meta', 'meta.lastModified'].map((name) => `${core}:${name}`),
+    ...['groups', 'phoneNumbers.value', 'name.middleName', 'meta.version', `${core}:roles`],
+    `${enterprise}:manager.$ref`,
   ]
   const shuffle = (name: string) =>
     [...name].map((letter) => (random.next() < 0.3 ? letter.toUpperCase() : letter)).join('')
@@ -572,9 +664,29 @@ function verifySpelling(m: Query) {
 }
 
 function verifyResources(m: Query) {
-  expect(m.scimQueryResource(scimUserSchemas, ['userName'])).toEqual({
+  expect(
+    m.scimQueryResource(scimUserSchemas, ['userName'], {
+      [core]: { userName: [], groups: ['value'] },
+      'urn:example:unadvertised': { badge: [] },
+    }),
+  ).toEqual({
     schemas: scimUserSchemas,
     filters: ['userName'],
+    standard: [
+      {
+        id: core,
+        attributes: [
+          { name: 'userName', returned: 'default', caseExact: true },
+          {
+            name: 'groups',
+            returned: 'default',
+            caseExact: true,
+            subAttributes: [{ name: 'value', returned: 'default', caseExact: true }],
+          },
+        ],
+      },
+      { id: enterprise, attributes: [] },
+    ],
   })
   type Synthetic = {
     name: string
@@ -603,13 +715,36 @@ function verifyResources(m: Query) {
       },
     ],
   ] as Parameters<Query['scimQueryResource']>[0][])
-    expect(() => m.scimQueryResource(schemas, []), JSON.stringify(schemas)).toThrow(
+    expect(() => m.scimQueryResource(schemas, [], {}), JSON.stringify(schemas)).toThrow(
       'Only top-level core attributes can be returned always.',
     )
+  // RFC 7643 section 2.2 also defines "never" and "request"; projection handles neither, so
+  // any returned value but "always" and "default" is refused at once, wherever it appears.
+  for (const returned of ['never', 'request', 'Always', 'DEFAULT', ''])
+    for (const schemas of [
+      [{ id: core, attributes: [attribute('secret', returned)] }],
+      [{ id: core, attributes: [attribute('name', 'default', [attribute('hidden', returned)])] }],
+      [
+        { id: core, attributes: [] },
+        { id: enterprise, attributes: [attribute('badge', returned)] },
+      ],
+      [
+        { id: core, attributes: [] },
+        {
+          id: enterprise,
+          attributes: [attribute('manager', 'default', [attribute('hidden', returned)])],
+        },
+      ],
+    ] as Parameters<Query['scimQueryResource']>[0][])
+      expect(
+        () => m.scimQueryResource(schemas, [], {}),
+        `${returned}: ${JSON.stringify(schemas)}`,
+      ).toThrow('Projection handles only attributes returned always or by default.')
   // A top-level attribute returned always survives both projections.
   const badged = m.scimQueryResource(
     [{ id: core, attributes: [attribute('badge', 'always'), attribute('title', 'default')] }],
     [],
+    {},
   )
   const representation = { schemas: [core], id, badge: 'b', title: 't' }
   for (const [mode, expected] of [
@@ -751,7 +886,7 @@ const examples: Record<ErrorKey, [string, string][]> = {
     ['excludedAttributes', 'title'],
   ],
   attributesTooLong: [['attributes', 'x'.repeat(bounds.list + 1)]],
-  attributesUnknown: [['attributes', 'password']],
+  attributesUnknown: [['attributes', 'badge']],
   startIndexRepeated: [
     ['startIndex', '1'],
     ['startIndex', '2'],
@@ -961,8 +1096,8 @@ describe('SCIM query parser', () => {
       [
         'projection',
         [
-          'return within([...common, ...core.attributes], name)',
-          'return within([...common, ...core.attributes, ...extensions.flatMap((schema) => schema.attributes)], name)',
+          '      ...core.attributes,\n    ],',
+          '      ...core.attributes,\n      ...extensions.flatMap((schema) => schema.attributes),\n    ],',
         ],
       ],
       ['projection', ['if (parts.length > 2) return undefined', '']],
@@ -991,7 +1126,78 @@ describe('SCIM query parser', () => {
       // Errors.
       ['errors', ["filterValue: ['invalidFilter',", "filterValue: ['invalidValue',"]],
       ['strings', ['if (!/^[0-9A-Fa-f]{4}$/.test(hex)) return undefined', '']],
-      ['total', ["    if (!resolved) return refuse('attributesUnknown')\n", '']],
+      ['projection', ["    if (resolved === undefined) return refuse('attributesUnknown')\n", '']],
+      ['errors', ["    if (resolved === undefined) return refuse('attributesUnknown')\n", '']],
+      // URN-qualified common attributes and unmapped standard attributes.
+      [
+        'filters',
+        [
+          "shared.filter((attribute) => !qualified || attribute.name !== 'schemas')",
+          'shared.filter(() => !qualified)',
+        ],
+      ],
+      [
+        'projection',
+        [
+          "shared.filter((attribute) => !qualified || attribute.name !== 'schemas')",
+          'shared.filter(() => !qualified)',
+        ],
+      ],
+      ['projection', ["!qualified || attribute.name !== 'schemas'", 'true']],
+      [
+        'projection',
+        [
+          '    if (resolved) paths.push(resolved.path)\n',
+          "    if (resolved) paths.push(resolved.path)\n    else if (included.length === 0) return refuse('attributesUnknown')\n",
+        ],
+      ],
+      [
+        'projection',
+        [
+          '    if (resolved) paths.push(resolved.path)\n',
+          "    if (resolved) paths.push(resolved.path)\n    else if (included.length > 0) return refuse('attributesUnknown')\n",
+        ],
+      ],
+      [
+        'projection',
+        [
+          'return resolveIn(resource.standard, standardCommon, name) ? null : undefined',
+          'return undefined',
+        ],
+      ],
+      ['projection', ['    groups: multiValued,\n', '']],
+      [
+        'projection',
+        [
+          "const multiValued = ['type', 'primary', 'display', 'value', '$ref']",
+          "const multiValued = ['type', 'primary', 'value']",
+        ],
+      ],
+      [
+        'projection',
+        [
+          "...meta.map((attribute) => attribute.name), 'version'",
+          '...meta.map((attribute) => attribute.name)',
+        ],
+      ],
+      [
+        'projection',
+        [
+          'standard: schemas.map(({ id }) => ({',
+          'standard: schemas.slice(0, 1).map(({ id }) => ({',
+        ],
+      ],
+      [
+        'resources',
+        ["attribute.returned !== 'always' && attribute.returned !== 'default'", 'false'],
+      ],
+      [
+        'resources',
+        [
+          "attribute.returned !== 'always' && attribute.returned !== 'default'",
+          "attribute.returned === 'never'",
+        ],
+      ],
     ]
     for (const [name, mutation] of mutants) {
       const mutant = await sourceCopy(mutation)
