@@ -18,7 +18,7 @@ describe.skipIf(!serverUrl)('routing form operation constraint coverage', () => 
       allowList: {},
     })
     expect(report.problems).toEqual([])
-    expect(report.objects).toHaveLength(18)
+    expect(report.objects).toHaveLength(19)
     expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
       report.objects.length,
     )

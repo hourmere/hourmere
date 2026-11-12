@@ -871,10 +871,12 @@ Consumed receipt evidence cannot be rebound or revived.
 
 Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
 publication requests that carry a client `requestId`. A record holds the organization, the
-operation (`create` or `publish`), a 32-byte SHA-256 digest of the acting credential (session
-user, API key or OAuth grant), the request UUID, a 32-byte fingerprint of the canonical
-validated input and the result: the form, plus the version exactly for a publication. The
-request key is unique per organization and credential digest across both operations. The
+operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
+`oauth`) and UUID (the session's user, the API key or the OAuth grant; historical, with no
+foreign key, so deleting a key or grant never lets a retained request write again), the
+request UUID, a 32-byte SHA-256 fingerprint of the canonical validated input alone and the
+result: the form, plus the version exactly for a publication. The request key is unique per
+organization and credential kind and ID across both operations. The
 result is unique with nulls not distinct, so a form has at most one creation record and a
 version at most one publication record. Composite organization foreign keys keep the form and
 version in the record's organization and cascade, so a record goes with its form (and
@@ -1393,8 +1395,8 @@ The phases within that organization boundary are:
   form row. Publication therefore waits for membership management and event-type edits
   instead of deadlocking with them. Preview takes no lock and runs read-only. A create or
   publish that carries a `requestId` takes the transaction advisory lock
-  `hashtextextended('hourmere.routing-form-request:<organizationId>:<actorDigestHex>:<requestId>', 0)`,
-  with both UUIDs in lowercase (creation after form admission, publication right after the
+  `hashtextextended('hourmere.routing-form-request:<organizationId>:<actorKind>:<actorId>:<requestId>', 0)`,
+  with the UUIDs in lowercase (creation after form admission, publication right after the
   actor, member and API-key checks, both before any event-type or form row lock), and then
   share-locks its existing `routing_form_operations` record, so a version cleanup deleting
   that record finishes first. Only routing takes that lock, always after the

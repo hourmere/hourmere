@@ -887,7 +887,12 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
     },
     {
       name: 'actor scope of the key lookup',
-      replacements: [["    .where('actor_scope_digest', '=', operation.actor)\n", '']],
+      replacements: [
+        [
+          "    .where('actor_kind', '=', operation.actorKind)\n    .where('actor_id', '=', operation.actorId)\n",
+          '',
+        ],
+      ],
       scenario: keysOfOtherActorsNeverMatch,
     },
     {

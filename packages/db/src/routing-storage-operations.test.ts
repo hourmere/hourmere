@@ -59,7 +59,7 @@ describe.skipIf(!serverUrl)('routing form operation storage', () => {
     expect(indexes).toEqual([])
     expect(triggers).toEqual([`${operationsTable}_guard`])
     expect(constraints).toHaveLength(10)
-    expect(notNull).toHaveLength(7)
+    expect(notNull).toHaveLength(8)
     const objects = [...constraints, ...indexes, ...triggers, ...notNull, ...rules].sort()
     const covered = [
       ...new Set(Object.values(operationsProtections).flatMap(({ objects }) => objects)),

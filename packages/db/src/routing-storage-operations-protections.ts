@@ -128,7 +128,8 @@ export type OperationsFixture = Awaited<ReturnType<typeof operationsFixture>>
 export const createRecord = (f: OperationsFixture, overrides: Record<string, unknown> = {}) => ({
   organization_id: f.team,
   operation: 'create',
-  actor_scope_digest: randomBytes(32),
+  actor_kind: 'session',
+  actor_id: randomUUID(),
   request_id: randomUUID(),
   request_fingerprint: randomBytes(32),
   form_id: f.form,
@@ -185,7 +186,8 @@ const mutant = (name: string, before: string, after = ''): OperationsMutant => (
 const REQUIRED = [
   'organization_id',
   'operation',
-  'actor_scope_digest',
+  'actor_kind',
+  'actor_id',
   'request_id',
   'request_fingerprint',
   'form_id',
@@ -228,6 +230,7 @@ export const operationsProtections: Record<string, OperationsProtection> = {
         'request_fingerprint bytea',
       ),
       mutant('a record may lack its request key', 'request_id uuid NOT NULL,', 'request_id uuid,'),
+      mutant('a record may lack its actor', 'actor_id uuid NOT NULL,', 'actor_id uuid,'),
       mutant('a record may lack its form', 'form_id uuid NOT NULL,', 'form_id uuid,'),
       mutant(
         'records get random IDs',
@@ -289,36 +292,55 @@ export const operationsProtections: Record<string, OperationsProtection> = {
     ],
   },
 
-  'digest lengths': {
-    objects: [
-      `${operationsTable}_actor_scope_digest_check`,
-      `${operationsTable}_request_fingerprint_check`,
-    ],
+  'actor kinds': {
+    objects: [`${operationsTable}_actor_kind_check`],
     check: async (f) => {
-      for (const column of ['actor_scope_digest', 'request_fingerprint']) {
-        for (const length of [0, 16, 31, 33, 64])
-          await refused(
-            f.pool,
-            check(`${operationsTable}_${column}_check`),
-            (db) => insertRecord(db, createRecord(f, { [column]: randomBytes(length) })),
-            `${column} of ${length} bytes`,
-          )
-        await rolledBack(f.pool, (db) =>
-          accepted(insertRecord(db, createRecord(f, { [column]: randomBytes(32) })), column),
+      for (const kind of ['user', 'API_KEY', 'Session', 'oauth_grant', ''])
+        await refused(
+          f.pool,
+          check(`${operationsTable}_actor_kind_check`),
+          (db) => insertRecord(db, createRecord(f, { actor_kind: kind })),
+          kind,
         )
-      }
+      // One record of each kind, each for its own result.
+      await rolledBack(f.pool, async (db) => {
+        await accepted(insertRecord(db, createRecord(f, { actor_kind: 'session' })), 'session')
+        await accepted(insertRecord(db, publishRecord(f, { actor_kind: 'api_key' })), 'api_key')
+        await accepted(
+          insertRecord(db, createRecord(f, { actor_kind: 'oauth', form_id: f.sibling })),
+          'oauth',
+        )
+      })
     },
     mutants: [
       mutant(
-        'longer actor digests are accepted',
-        'octet_length(actor_scope_digest) = 32',
-        'octet_length(actor_scope_digest) >= 32',
+        'any actor kind is accepted',
+        "CHECK (actor_kind IN ('session', 'api_key', 'oauth'))",
+        "CHECK (actor_kind <> '')",
       ),
       mutant(
-        'shorter actor digests are accepted',
-        'octet_length(actor_scope_digest) = 32',
-        'octet_length(actor_scope_digest) <= 32',
+        'users are an actor kind',
+        "CHECK (actor_kind IN ('session', 'api_key', 'oauth'))",
+        "CHECK (actor_kind IN ('session', 'api_key', 'oauth', 'user'))",
       ),
+    ],
+  },
+
+  'fingerprint length': {
+    objects: [`${operationsTable}_request_fingerprint_check`],
+    check: async (f) => {
+      for (const length of [0, 16, 31, 33, 64])
+        await refused(
+          f.pool,
+          check(`${operationsTable}_request_fingerprint_check`),
+          (db) => insertRecord(db, createRecord(f, { request_fingerprint: randomBytes(length) })),
+          `${length} bytes`,
+        )
+      await rolledBack(f.pool, (db) =>
+        accepted(insertRecord(db, createRecord(f, { request_fingerprint: randomBytes(32) }))),
+      )
+    },
+    mutants: [
       mutant(
         'longer fingerprints are accepted',
         'octet_length(request_fingerprint) = 32',
@@ -366,9 +388,9 @@ export const operationsProtections: Record<string, OperationsProtection> = {
   'request key scope': {
     objects: [`${operationsTable}_request_key`],
     check: async (f) => {
-      const actor = randomBytes(32)
+      const actor = randomUUID()
       const requestId = randomUUID()
-      const key = { actor_scope_digest: actor, request_id: requestId }
+      const key = { actor_kind: 'session', actor_id: actor, request_id: requestId }
       await accepted(insertRecord(f.pool, createRecord(f, key)))
       // One key names one request of its credential in its organization, whatever operation.
       await refused(
@@ -389,6 +411,10 @@ export const operationsProtections: Record<string, OperationsProtection> = {
           'the same key of another credential',
         )
         await accepted(
+          insertRecord(db, createRecord(f, { ...key, actor_kind: 'api_key', form_id: f.sibling })),
+          'the same key of a credential of another kind with the same ID',
+        )
+        await accepted(
           insertRecord(
             db,
             createRecord(f, { ...key, organization_id: f.otherTeam, form_id: f.otherForm }),
@@ -400,18 +426,23 @@ export const operationsProtections: Record<string, OperationsProtection> = {
     mutants: [
       mutant(
         'keys are scoped per operation',
-        'UNIQUE (organization_id, actor_scope_digest, request_id)',
-        'UNIQUE (organization_id, operation, actor_scope_digest, request_id)',
+        'UNIQUE (organization_id, actor_kind, actor_id, request_id)',
+        'UNIQUE (organization_id, operation, actor_kind, actor_id, request_id)',
       ),
       mutant(
         'keys are shared by every credential',
-        'UNIQUE (organization_id, actor_scope_digest, request_id)',
+        'UNIQUE (organization_id, actor_kind, actor_id, request_id)',
         'UNIQUE (organization_id, request_id)',
       ),
       mutant(
+        'keys are shared by credentials of every kind',
+        'UNIQUE (organization_id, actor_kind, actor_id, request_id)',
+        'UNIQUE (organization_id, actor_id, request_id)',
+      ),
+      mutant(
         'keys are shared across organizations',
-        'UNIQUE (organization_id, actor_scope_digest, request_id)',
-        'UNIQUE (actor_scope_digest, request_id)',
+        'UNIQUE (organization_id, actor_kind, actor_id, request_id)',
+        'UNIQUE (actor_kind, actor_id, request_id)',
       ),
     ],
   },
@@ -573,7 +604,8 @@ export const operationsProtections: Record<string, OperationsProtection> = {
       for (const [label, id, assignment, values] of [
         // Every change but the last passes every other check, so only the guard refuses it.
         ['request key', created, 'request_id=$2', [randomUUID()]],
-        ['actor', created, 'actor_scope_digest=$2', [randomBytes(32)]],
+        ['actor', created, 'actor_id=$2', [randomUUID()]],
+        ['actor kind', created, 'actor_kind=$2', ['oauth']],
         ['fingerprint', published, 'request_fingerprint=$2', [randomBytes(32)]],
         ['form', created, 'form_id=$2', [f.sibling]],
         ['version', published, 'version_id=$2', [f.later]],

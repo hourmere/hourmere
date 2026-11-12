@@ -425,13 +425,12 @@ async function lockTargetEvents(db: Db, organizationId: string, ids: readonly st
 interface Operation {
   organizationId: string
   operation: 'create' | 'publish'
-  actor: Buffer
+  actorKind: 'session' | 'api_key' | 'oauth'
+  /** The session's user, the API key or the OAuth grant; an identifier, stored as it is. */
+  actorId: string
   requestId: string
   fingerprint: Buffer
 }
-
-const digest = (domain: string, value: string) =>
-  createHash('sha256').update(`hourmere.routing-form.${domain}\0${value}`, 'utf8').digest()
 
 function operationOf(
   ctx: ServiceContext,
@@ -441,19 +440,24 @@ function operationOf(
 ): Operation | undefined {
   if (requestId === undefined) return undefined
   const { principal } = ctx
-  const actor =
+  const actorId =
     principal.kind === 'api_key'
-      ? { kind: 'api_key', id: principal.apiKeyId.toLowerCase() }
+      ? principal.apiKeyId
       : principal.kind === 'oauth'
-        ? { kind: 'oauth', id: principal.oauthConsentId.toLowerCase() }
-        : { kind: 'session', id: principal.user.id.toLowerCase() }
+        ? principal.oauthConsentId
+        : principal.user.id
+  // Only the canonical input is hashed; the actor is compared by its stored kind and ID.
+  const fingerprint = createHash('sha256')
+    .update(`hourmere.routing-form.request.${operation}\0${canonicalJson(request)}`, 'utf8')
+    .digest()
   return {
-    // Lowercase, so the lock key matches however the caller spelled the ID.
+    // Lowercase, so the lock key matches however the caller spelled an ID.
     organizationId: principal.organization.id.toLowerCase(),
     operation,
-    actor: digest('actor', canonicalJson(actor)),
+    actorKind: principal.kind,
+    actorId: actorId.toLowerCase(),
     requestId,
-    fingerprint: digest(`request.${operation}`, canonicalJson(request)),
+    fingerprint,
   }
 }
 
@@ -467,13 +471,14 @@ function operationOf(
  * fingerprint's domain names the operation, so that includes another operation.
  */
 async function lockedOperation(trx: Db, operation: Operation) {
-  const key = `hourmere.routing-form-request:${operation.organizationId}:${operation.actor.toString('hex')}:${operation.requestId}`
+  const key = `hourmere.routing-form-request:${operation.organizationId}:${operation.actorKind}:${operation.actorId}:${operation.requestId}`
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`.execute(trx)
   const previous = await trx
     .selectFrom('routing_form_operations')
     .select(['request_fingerprint', 'form_id', 'version_id'])
     .where('organization_id', '=', operation.organizationId)
-    .where('actor_scope_digest', '=', operation.actor)
+    .where('actor_kind', '=', operation.actorKind)
+    .where('actor_id', '=', operation.actorId)
     .where('request_id', '=', operation.requestId)
     .forShare()
     .executeTakeFirst()
@@ -494,7 +499,8 @@ async function recordOperation(
     .values({
       organization_id: operation.organizationId,
       operation: operation.operation,
-      actor_scope_digest: operation.actor,
+      actor_kind: operation.actorKind,
+      actor_id: operation.actorId,
       request_id: operation.requestId,
       request_fingerprint: operation.fingerprint,
       form_id: formId,

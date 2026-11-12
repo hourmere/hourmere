@@ -1031,7 +1031,8 @@ export interface RoundRobinState {
 }
 
 export interface RoutingFormOperations {
-  actor_scope_digest: Buffer;
+  actor_id: string;
+  actor_kind: string;
   created_at: Generated<Timestamp>;
   form_id: string;
   id: Generated<string>;
