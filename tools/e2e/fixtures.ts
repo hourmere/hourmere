@@ -43,6 +43,7 @@ import {
 } from './audit-data.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
+import { installProbe } from './probe.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
 
 export interface FixtureApp {
@@ -129,6 +130,11 @@ export const test = base.extend<{
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
+  // TEMPORARY: popup time-click probe, removed before merge.
+  page: async ({ page }, use) => {
+    installProbe(page)
+    await use(page)
+  },
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.

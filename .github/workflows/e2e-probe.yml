@@ -1,0 +1,63 @@
+# TEMPORARY: repeats the popup booking specs in the mobile project to measure the
+# time-click race before and after the fix. Removed before the pull request merges.
+name: E2E popup time-click repetition
+
+on:
+  push:
+    branches: [codex/e2e-popup-race]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-probe-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  repeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Playwright's default press: release follows the press immediately.
+          - { delay: 0, repeat: 50, lane: 1 }
+          - { delay: 0, repeat: 50, lane: 2 }
+          - { delay: 0, repeat: 50, lane: 3 }
+          - { delay: 0, repeat: 50, lane: 4 }
+          # A human-length press (80 ms) exposes movement between press and release.
+          - { delay: 80, repeat: 30, lane: 5 }
+          - { delay: 80, repeat: 30, lane: 6 }
+    name: repeat (delay ${{ matrix.delay }}, lane ${{ matrix.lane }})
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      HOURMERE_E2E_PROBE: "1"
+      HOURMERE_E2E_PICK_DELAY: ${{ matrix.delay }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: google-chrome --version
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - run: npm run build --workspace @hourmere/web
+      - name: Repeat the popup specs in the mobile project
+        run: >-
+          npm run test --workspace @hourmere/e2e --
+          specs/round-robin.spec.ts specs/multi-host-meet.spec.ts specs/collective.spec.ts
+          --project=mobile --grep "popup|preserve public/embed privacy"
+          --repeat-each=${{ matrix.repeat }}
