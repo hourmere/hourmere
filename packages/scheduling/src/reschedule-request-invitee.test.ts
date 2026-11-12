@@ -115,6 +115,9 @@ describe.skipIf(!serverUrl)('reschedule request links for invitees', () => {
     expect(await getManagedBookingDetails(s.pub, confirmation)).not.toHaveProperty(
       'rescheduleRequest',
     )
+    // Only the request email names its request, even if another kind carried the same key.
+    const notice = await emailToken(s.created.booking.id, first, 'reschedule_request_expired')
+    expect(await getManagedBookingDetails(s.pub, notice)).not.toHaveProperty('rescheduleRequest')
 
     const second = await s.request()
     const secondLink = await emailToken(s.created.booking.id, second)
@@ -176,6 +179,56 @@ describe.skipIf(!serverUrl)('reschedule request links for invitees', () => {
       expect(cancelled.status).toBe('cancelled')
       expect(cancelled.rescheduleRequest).toEqual({ id, state: 'cancelled' })
     }
+  })
+
+  it('reports a move made after the request closed instead of the older state', async () => {
+    const expired = await setup('2026-11-06T09:00:00Z')
+    const expiredId = await expired.request()
+    const expiredLink = await emailToken(expired.created.booking.id, expiredId)
+    expired.clock.now = instant('2026-11-03T12:00:00Z')
+    await expireRescheduleRequest(expired.pub, expiredId)
+    expect(await state(expired.pub, expiredLink)).toEqual({ id: expiredId, state: 'expired' })
+    const hostMove = await rescheduleHostBooking(expired.ctx, expired.created.booking.id, {
+      start: instant('2026-11-06T10:00:00Z'),
+    })
+    const afterHostMove = await getManagedBookingDetails(expired.pub, expiredLink)
+    expect(afterHostMove.id).toBe(hostMove.booking.id)
+    expect(afterHostMove.rescheduleRequest).toEqual({ id: expiredId, state: 'rescheduled' })
+    expect(await requestRow(expiredId)).toMatchObject({ state: 'expired' })
+
+    const replaced = await setup()
+    const replacedId = await replaced.request()
+    const replacedLink = await emailToken(replaced.created.booking.id, replacedId)
+    await replaced.request()
+    // An ordinary move through the booking's own link answers the newer request.
+    const own = await rescheduleManagedBooking(
+      replaced.pub,
+      required(replaced.created.manageToken),
+      { start: instant('2026-11-02T10:00:00Z') },
+    )
+    const afterOwnMove = await getManagedBookingDetails(replaced.pub, replacedLink)
+    expect(afterOwnMove.id).toBe(own.booking.id)
+    expect(afterOwnMove.rescheduleRequest).toEqual({ id: replacedId, state: 'rescheduled' })
+  })
+
+  it('decides the pending request and the link state at one instant', async () => {
+    const s = await setup()
+    const id = await s.request()
+    const link = await emailToken(s.created.booking.id, id)
+    const deadline = instant(s.created.booking.start)
+    // Every later reading of this clock is at the deadline.
+    let first = true
+    const advancing: PublicContext = {
+      ...s.pub,
+      now: () => {
+        const at = first ? deadline.subtract({ milliseconds: 1 }) : deadline
+        first = false
+        return at
+      },
+    }
+    const details = await getManagedBookingDetails(advancing, link)
+    expect(details.pendingReschedule?.id).toBe(id)
+    expect(details.rescheduleRequest).toEqual({ id, state: 'pending' })
   })
 
   it('frees the original time, its host block and its reminders when the invitee picks', async () => {

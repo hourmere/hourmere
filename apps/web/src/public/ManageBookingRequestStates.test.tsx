@@ -111,9 +111,10 @@ describe('closed reschedule requests on the invitee page', () => {
   })
 
   it('lets the cancelled booking and the started meeting speak for an expired link', async () => {
+    // A request replaced earlier, then the booking cancelled: the cancellation is the news.
     server({
       ...managed({ status: 'cancelled', cancelledAt: '2026-11-01T04:00:00.000Z' }),
-      ...fromLink('cancelled'),
+      ...fromLink('replaced'),
     })
     const cancelled = renderApp(`/booking#token=${TOKEN}&action=reschedule`)
     expect(
@@ -171,6 +172,58 @@ describe('closed reschedule requests on the invitee page', () => {
     await selectPublicLanguage(user, 'zh-CN')
     expect(await screen.findByText(COPY['zh-CN'].replaced)).toBeDefined()
     expect(screen.queryByText(COPY['zh-CN'].generic)).toBeNull()
+  })
+
+  it('explains the request it answered, not the link’s older one', async () => {
+    const user = userEvent.setup()
+    // The link's request was replaced; the page answered the newer one, which then expired.
+    server({ ...managed({ pendingReschedule: pending(NEWER) }), ...fromLink('replaced') }, () => ({
+      ...managed(),
+      ...fromLink('replaced'),
+    }))
+    renderApp(`/booking#token=${TOKEN}`)
+    expect(await screen.findByText(COPY.en.replaced)).toBeDefined()
+    await pickAndConfirm(user)
+    expect(await screen.findByText(COPY.en.expired)).toBeDefined()
+    expect(screen.queryByText(COPY.en.replaced)).toBeNull()
+  })
+
+  it('trusts a move over an older link state after a refused answer', async () => {
+    const user = userEvent.setup()
+    server({ ...managed({ pendingReschedule: pending() }), ...fromLink('pending') }, () => ({
+      ...moved(),
+      ...fromLink('expired'),
+    }))
+    renderApp(`/booking#token=${TOKEN}`)
+    await pickAndConfirm(user)
+    expect(await screen.findByText(COPY.en.rescheduled)).toBeDefined()
+    expect(screen.queryByText(COPY.en.expired)).toBeNull()
+  })
+
+  it('forgets a refused answer’s explanation once the booking shown changes', async () => {
+    const user = userEvent.setup()
+    let step = 0
+    fakeApi({
+      'GET /api/v1/bookings/manage': () =>
+        json(
+          200,
+          step === 0 ? managed({ pendingReschedule: pending() }) : step === 1 ? managed() : moved(),
+        ),
+      'GET /api/v1/bookings/manage/slots': slotsAnswer(['2026-11-03T15:00:00Z']),
+      'POST /api/v1/bookings/manage/reschedule': () => {
+        step++
+        return step === 1
+          ? json(409, { error: 'reschedule_request_changed' })
+          : json(500, { error: 'internal_error' })
+      },
+    })
+    renderApp(`/booking#token=${TOKEN}`)
+    await pickAndConfirm(user)
+    expect(await screen.findByText(COPY.en.expired)).toBeDefined()
+    // An ordinary move whose answer is lost: the reload shows the booking at its new time.
+    await pickAndConfirm(user)
+    expect(await screen.findByText('Your booking is moved to the new time.')).toBeDefined()
+    expect(screen.queryByText(COPY.en.expired)).toBeNull()
   })
 
   it('drops the closed request notice once the invitee moves the booking here', async () => {

@@ -81,12 +81,14 @@ return `manageToken: null`; keep the existing emailed management link. Clients t
 the request identity retain ordinary management semantics and should not automatically
 retry a move. Responses are additive; ignore unknown fields and error codes.
 
-A refused answer returns 409 `reschedule_request_changed`: the request expired, was
-replaced, or the booking was already moved or cancelled. With the token from the request
-email, `GET /api/v1/bookings/manage` reports which in the optional `rescheduleRequest`:
-that request's `id` and its `state`, one of `pending`, `expired`, `replaced`,
-`rescheduled` or `cancelled`. Other manage tokens omit it. MCP and CLI have no invitee
-read of a manage token, so they see only the error code.
+An answer to a request that expired, was replaced or was already resolved by a move
+returns 409 `reschedule_request_changed`; so does a pick after the booking was cancelled,
+while repeating the cancellation returns the cancelled booking. With the token from the
+request email, `GET /api/v1/bookings/manage` reports what happened in the optional
+`rescheduleRequest`: that request's `id` and its `state`, one of `pending`, `expired`,
+`replaced`, `rescheduled` (moved since the email, by the invitee or a host) or
+`cancelled`. Other manage tokens omit it. MCP and CLI have no invitee read of a manage
+token, so they see only the error code.
 
 Webhook subscriptions can opt into `booking.reschedule_requested` and
 `booking.reschedule_request_expired`. Both include a `requestId` and leave the booking's

@@ -5490,7 +5490,7 @@ export interface components {
                 /** Format: uuid */
                 id: string;
                 /**
-                 * @description pending: still open (also in pendingReschedule). expired: its deadline passed. replaced: the host sent a newer request. rescheduled: the booking was moved, by the invitee or a host. cancelled: the booking was cancelled. Clients must accept additional values.
+                 * @description pending: still open (also in pendingReschedule). expired: its deadline passed. replaced: the host sent a newer request. rescheduled: the booking was moved after the email was sent, by the invitee or a host. cancelled: the booking was cancelled. Clients must accept additional values.
                  * @enum {string}
                  */
                 state: "pending" | "expired" | "replaced" | "rescheduled" | "cancelled";

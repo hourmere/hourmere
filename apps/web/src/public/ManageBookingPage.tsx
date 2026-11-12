@@ -273,12 +273,19 @@ function ManageView({
   const started = Date.parse(booking.start) <= observedNow
   const ended = Date.parse(booking.end) <= observedNow
   const changeable = booking.status === 'confirmed' && !started
-  // A request email's link says what became of its request; a stale answer says the same.
-  const [answerNotice, setAnswerNotice] = useState<MessageKey | undefined>(undefined)
+  // A request email's link says what became of its request; a refused stale answer says the
+  // same about the booking it reloaded, and only while that booking is the one shown.
+  const [answerNotice, setAnswerNotice] = useState<
+    { id: string; start: string; key: MessageKey } | undefined
+  >(undefined)
+  const answered =
+    answerNotice?.id === booking.id && answerNotice.start === booking.start
+      ? answerNotice.key
+      : undefined
   const requestNotice =
     booking.status === 'cancelled'
       ? undefined
-      : (answerNotice ?? closedRequestNotice(booking.rescheduleRequest?.state, started))
+      : (answered ?? closedRequestNotice(booking.rescheduleRequest?.state, started))
   // A closed request's email button explains first instead of opening the picker or form.
   const [mode, setMode] = useState<Mode>(() =>
     initialAction && changeable && !requestNotice ? { kind: initialAction } : { kind: 'view' },
@@ -333,14 +340,14 @@ function ManageView({
       return
     }
     const own = fresh.rescheduleRequest
-    setAnswerNotice(
-      (own?.id === answered ? closedRequestNotice(own?.state, false) : undefined) ??
-        (fresh.id !== booking.id || fresh.start !== booking.start
-          ? REQUEST_RESCHEDULED
-          : fresh.pendingReschedule && fresh.pendingReschedule.id !== answered
+    const key =
+      fresh.id !== booking.id || fresh.start !== booking.start
+        ? REQUEST_RESCHEDULED
+        : ((own?.id === answered ? closedRequestNotice(own?.state, false) : undefined) ??
+          (fresh.pendingReschedule && fresh.pendingReschedule.id !== answered
             ? REQUEST_REPLACED
-            : REQUEST_EXPIRED),
-    )
+            : REQUEST_EXPIRED))
+    setAnswerNotice({ id: fresh.id, start: fresh.start, key })
     setMode({ kind: 'view' })
   }
 

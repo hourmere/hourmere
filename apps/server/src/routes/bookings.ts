@@ -232,7 +232,7 @@ export const ManagedBooking = Booking.extend({
       id: z.uuid(),
       state: z.enum(['pending', 'expired', 'replaced', 'rescheduled', 'cancelled']).openapi({
         description:
-          'pending: still open (also in pendingReschedule). expired: its deadline passed. replaced: the host sent a newer request. rescheduled: the booking was moved, by the invitee or a host. cancelled: the booking was cancelled. Clients must accept additional values.',
+          'pending: still open (also in pendingReschedule). expired: its deadline passed. replaced: the host sent a newer request. rescheduled: the booking was moved after the email was sent, by the invitee or a host. cancelled: the booking was cancelled. Clients must accept additional values.',
       }),
     })
     .optional()

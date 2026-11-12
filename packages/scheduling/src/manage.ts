@@ -36,7 +36,8 @@ export async function getManagedBookingDetails(
   ctx: PublicContext,
   token: string | undefined,
 ): Promise<ManagedBooking> {
-  // One decision time, so a pending request and its link's state cannot disagree.
+  // One decision time for the request deadline in both reads (they are separate statements,
+  // so a write committing between them can still show a moment apart).
   const now = ctx.now()
   const at = { ...ctx, now: () => now }
   const booking = await getManagedBooking(at, token)
@@ -57,7 +58,7 @@ export async function getManagedBookingDetails(
       .where('bh.booking_id', '=', booking.id)
       .orderBy('bh.user_id')
       .execute(),
-    managedLinkRescheduleRequest(at, token),
+    managedLinkRescheduleRequest(at, token, booking.id),
   ])
   return {
     ...booking,

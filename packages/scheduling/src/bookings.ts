@@ -1614,16 +1614,23 @@ const CLOSED_REQUEST_STATES: Readonly<Record<string, ManagedRescheduleRequestSta
 /**
  * The request a reschedule request email's own link was sent for, and what became of it.
  * Undefined for every other manage token: only that email's token names its request, and
- * only a request of the booking the email was about.
+ * only a request of the booking the email was about. `bookingId` is the booking the token
+ * resolves to now; a closed request whose booking has since moved reports the move.
  */
 export async function managedLinkRescheduleRequest(
   ctx: PublicContext,
   token: string | undefined,
+  bookingId: string,
 ): Promise<{ id: string; state: ManagedRescheduleRequestState } | undefined> {
   const hash = manageTokenHash(token)
   if (!hash) return undefined
-  const { rows } = await sql<{ id: string; state: string; expires_at: Date }>`
-    SELECT r.id, r.state, r.expires_at
+  const { rows } = await sql<{
+    id: string
+    state: string
+    expires_at: Date
+    booking_id: string
+  }>`
+    SELECT r.id, r.state, r.expires_at, r.booking_id
       FROM booking_notifications n
       JOIN booking_reschedule_requests r
         ON r.booking_id = n.booking_id AND r.id::text = n.message_key
@@ -1638,6 +1645,10 @@ export async function managedLinkRescheduleRequest(
         ? 'pending'
         : 'expired'
       : CLOSED_REQUEST_STATES[row.state]
+  // A move after the request closed (by a host, or an ordinary invitee move) is what the
+  // invitee needs to know now; the link follows the booking to its new time.
+  if (state && state !== 'pending' && row.booking_id !== bookingId)
+    return { id: row.id, state: 'rescheduled' }
   return state && { id: row.id, state }
 }
 
