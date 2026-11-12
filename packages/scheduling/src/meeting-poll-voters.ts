@@ -1,7 +1,8 @@
 // Voter admission for meeting polls: public enrollment, mailbox verification and lost-mail
 // recovery, plus host invitations and invitation resends. Internal services only: no
 // transport, worker or mail sender (docs/meeting-polls.md). Mail is a durable delivery row
-// carrying the credential encrypted; later delivery workers send it.
+// carrying the credential encrypted; later delivery workers send it. Ballots, withdrawal and
+// reminder opt-out live in meeting-poll-ballots.ts and share the public locks below.
 //
 // Every write serializes on the poll row. Host writes keep the lifecycle order: the
 // organization-write hook, actor user, organization and membership SHARE, the poll FOR
@@ -148,6 +149,8 @@ export class MeetingPollRateLimitError extends Error {
 }
 
 type CredentialPurpose = 'verification' | 'voting'
+/** Every stored voter credential purpose; the reminder opt-out credential never votes. */
+export type MeetingPollCapabilityPurpose = CredentialPurpose | 'reminder_opt_out'
 type CredentialMailKind = 'verification' | 'invitation' | 'recovery'
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/
@@ -157,9 +160,10 @@ const INVITEE_FIELDS = new Set(['name', 'email', 'locale', 'timeZone'])
 const CREDENTIAL_MAIL: readonly CredentialMailKind[] = ['verification', 'invitation', 'recovery']
 const UTC_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
 
-const pollFull = () =>
+export const pollFull = () =>
   new DomainError('conflict', 'poll_full', 'This poll has no free places for new voters.')
-const pollClosed = () => new DomainError('conflict', 'poll_closed', 'Voting on this poll is closed')
+export const pollClosed = () =>
+  new DomainError('conflict', 'poll_closed', 'Voting on this poll is closed')
 const pollCanceled = () => new DomainError('conflict', 'poll_canceled', 'This poll was canceled')
 const invalidVoter = (message: string) => new DomainError('invalid', 'invalid_voter', message)
 const voterWithdrawn = () =>
@@ -190,7 +194,10 @@ function admissionIpDigest(secret: string, pollId: string, ip: string | undefine
 }
 
 /** Stored digest of a voter credential; the purpose is part of the digest. */
-export function meetingPollCapabilityDigest(purpose: CredentialPurpose, token: string): Buffer {
+export function meetingPollCapabilityDigest(
+  purpose: MeetingPollCapabilityPurpose,
+  token: string,
+): Buffer {
   return createHash('sha256')
     .update(`hourmere.meeting-poll.capability.${purpose}\0${token}`, 'utf8')
     .digest()
@@ -402,6 +409,10 @@ export async function verifyMeetingPollVoter(
       // Consumed by this voter's verification: a repeat returns the state and mints nothing.
       // A live unconsumed one belongs to a live reservation (its expiry bounds the credential).
       if (credential.consumed)
+        return { voter: await voterState(trx, poll, voterId), votingToken: null }
+      // Withdrawal opts out of all poll mail, so a withdrawn voter's verification mints,
+      // consumes and mails nothing and answers like a repeat.
+      if (credential.withdrawn)
         return { voter: await voterState(trx, poll, voterId), votingToken: null }
       await trx
         .updateTable('meeting_poll_voters')
@@ -707,7 +718,7 @@ export async function resendMeetingPollInvitation(
 
 // --- Locks and lifecycle ---------------------------------------------------------------------
 
-interface VoterPoll {
+export interface VoterPoll {
   id: string
   organizationId: string
   status: string
@@ -734,7 +745,7 @@ function hostPoll(poll: LockedPoll): VoterPoll {
  * Public writes: public booking's organization locks, then the poll FOR UPDATE (matching
  * `publicTokenDigest` when given) and its event FOR SHARE, then one clock reading.
  */
-async function lockPublicPoll(
+export async function lockPublicPoll(
   trx: Db,
   named: { id: string; organization_id: string },
   publicTokenDigest?: Buffer,
@@ -783,7 +794,7 @@ async function lockPublicPoll(
 }
 
 /** Voting, admission and verification need an open poll strictly before its deadline. */
-function requireVotingOpen(poll: VoterPoll, scheduled: () => DomainError) {
+export function requireVotingOpen(poll: VoterPoll, scheduled: () => DomainError) {
   if (poll.status === 'canceled') throw pollCanceled()
   if (poll.status === 'scheduled') throw scheduled()
   if (poll.status !== 'open' || poll.deadlinePassed || poll.eventDeleted) throw pollClosed()
@@ -806,7 +817,7 @@ function votingOpenOrClosedEarly(poll: VoterPoll) {
  * Places in use at `at`: active verified voters, active invitations and live public
  * reservations, once each. Withdrawn voters and expired reservations never count.
  */
-async function admissionCounts(trx: Db, pollId: string, at: string, ipDigest?: Buffer) {
+export async function admissionCounts(trx: Db, pollId: string, at: string, ipDigest?: Buffer) {
   const { rows } = await sql<{ active: string; fromIp: string; ipRetryAfter: string | null }>`
     SELECT count(*) FILTER (WHERE withdrawn_at IS NULL AND (verified_at IS NOT NULL
         OR invited_at IS NOT NULL OR pending_expires_at > ${at}::timestamptz))::text AS active,
@@ -853,7 +864,7 @@ async function deleteVoter(trx: Db, poll: VoterPoll, voterId: string) {
     .execute()
 }
 
-async function voterState(
+export async function voterState(
   trx: Db,
   poll: VoterPoll,
   voterId: string,
@@ -889,7 +900,7 @@ async function voterState(
  * Results change with admission, verification and invitation; the host revision only with
  * accepted host writes. Voter actions and recovery never move it.
  */
-async function advanceRevisions(
+export async function advanceRevisions(
   trx: Db,
   poll: VoterPoll,
   options: { host: false } | { host: true; hostRevision: number; results?: boolean },
@@ -1129,7 +1140,7 @@ function requireSecret(secret: unknown): string {
 }
 
 /** A credential of the wrong shape is indistinguishable from an unknown one. */
-function validToken(token: unknown): string {
+export function validToken(token: unknown): string {
   if (typeof token !== 'string' || !TOKEN.test(token)) throw pollNotFound()
   return token
 }
@@ -1141,16 +1152,21 @@ function validEmail(value: unknown): string {
   return email
 }
 
-function validPerson(input: { name?: unknown; email?: unknown }) {
-  const name = cleanText(input.name, { max: MAX_NAME })
+/** A voter's display name: one line of 1 to 200 characters. */
+export function validVoterName(value: unknown): string {
+  const name = cleanText(value, { max: MAX_NAME })
   if (name === undefined)
     throw invalidVoter(
       `name must be 1 to ${MAX_NAME} characters on one line, without control characters`,
     )
-  return { name, email: validEmail(input.email) }
+  return name
 }
 
-function validLocale(value: unknown): string {
+function validPerson(input: { name?: unknown; email?: unknown }) {
+  return { name: validVoterName(input.name), email: validEmail(input.email) }
+}
+
+export function validLocale(value: unknown): string {
   if (value === undefined) return 'en'
   const locale = interfaceLanguage(value)
   if (locale === undefined) throw invalidVoter('locale must be a supported language')

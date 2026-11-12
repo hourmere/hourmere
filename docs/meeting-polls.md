@@ -2,10 +2,12 @@
 
 Status: storage foundation implemented by migration `0071_meeting_polls.sql`, the
 internal host lifecycle service (create, read, close, cancel, delete and link rotation) by
-`packages/scheduling/src/meeting-polls.ts`, and the internal enrollment and verification
+`packages/scheduling/src/meeting-polls.ts`, the internal enrollment and verification
 services (enroll, invite, verify, recover and resend) by
-`packages/scheduling/src/meeting-poll-voters.ts`; ballots, results, removal, transport,
-workers and UI remain proposed. Competitor research was checked
+`packages/scheduling/src/meeting-poll-voters.ts`, and the internal ballot services (submit
+and replace ballots, withdraw, reactivate and reminder opt-out) by
+`packages/scheduling/src/meeting-poll-ballots.ts`; results, removal, transport, workers and
+UI remain proposed. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -184,6 +186,41 @@ voting authority but retains the credential solely for read-only access and expl
 reactivation; removal or host revocation invalidates it entirely. Name/zone/locale may
 be edited before closing; changing email requires a new verified enrollment. Lost links
 use rate-limited mailbox recovery with uniform responses, never a host read.
+
+The A3b ballot service implements these rules with the internal choices below; later
+transport steps map them, and the error codes stay as listed here.
+
+- Ballots, withdrawals and opt-outs take the public voter locks of A3a (a personal owner's
+  user, then the organization, `FOR SHARE`; the poll `FOR UPDATE`; the event `FOR SHARE`)
+  and read the database clock once after them. Ballots and withdrawals need an open poll,
+  an existing event and that instant strictly before the deadline: the deadline instant
+  itself is closed, and a write that waited for the poll lock while the deadline passed gets
+  409 `poll_closed` (409 `poll_canceled` on a canceled poll).
+- A ballot uses the voting credential. It answers every candidate exactly once with `yes`,
+  `if_need_be` or `no`, gives join consent and answers the booking questions of the poll's
+  settings snapshot; otherwise it gets 400 `invalid_ballot` (400 `invalid_responses` for the
+  answers, as in booking) and writes nothing. It may also edit name, zone and locale. It
+  replaces the previous ballot whole and records submission and consent at the decision
+  instant. An invitee's first ballot also confirms the mailbox.
+- Every accepted ballot, replacement, withdrawal and reactivation checks
+  `expectedBallotRevision` (0 before the first ballot; 409 `poll_changed` when stale) and
+  advances the voter's ballot revision and the results revision by one. No voter write moves
+  the host revision; opt-out moves neither.
+- Withdrawal erases the ballot, votes, answers and consent, frees the place and skips the
+  voter's queued mail; the credential and its encrypted copy stay for reactivation. A repeat
+  at the current revision writes nothing. A ballot from the withdrawn state is the
+  reactivation: it takes a place again under the 40-place cap and poll lock, or gets the same
+  409 `poll_full` as admission. Verifying a withdrawn voter mints, consumes and mails nothing
+  and answers like a repeat.
+- Verification and opt-out credentials never vote or withdraw, and voting credentials never
+  opt out: each gets the same 404 `poll_not_found` as an unknown, revoked or removed
+  voter's credential.
+- Opt-out uses the `reminder_opt_out` credential that the later mail steps mint. It records
+  the mailbox's first `reminder_opted_out_at` on the counter row and skips the voter's queued
+  reminders, without verification, ballot access or a revision. As a mail preference it is
+  honoured whatever the poll's state; a repeat writes nothing.
+- Each write returns the voter's own ballot; reading it after the deadline belongs to the
+  public read operation of the transport steps.
 
 Managers can remove a voter or revoke a pending enrollment while open or closed. Removal
 revokes capabilities and queued mail, erases answers/ballot/contact data, frees capacity

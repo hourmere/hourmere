@@ -103,7 +103,10 @@ internal enrollment and verification service in
 re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
 invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
 resend counters under the poll lock. It queues delivery rows only; no worker, transport,
-flag or UI is enabled.
+flag or UI is enabled. The internal ballot service in
+`packages/scheduling/src/meeting-poll-ballots.ts` submits and replaces complete ballots,
+withdraws and reactivates voters and records reminder opt-outs under the same locks and
+database deadline clock, advancing ballot and results revisions but never the host revision.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
