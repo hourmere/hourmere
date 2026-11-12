@@ -1224,6 +1224,7 @@ export interface SsoAttempts {
   step_up_link_id: string | null;
   step_up_proof_expires_at: Timestamp | null;
   step_up_provider_id: string | null;
+  step_up_trust_generation: number | null;
   user_id: string | null;
 }
 
