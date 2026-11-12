@@ -1224,8 +1224,11 @@ can never be a handle: every top-level path the app or the server answers (`app`
 the product itself (`support`, `security`, `pricing`, `status`, …). The list is
 `RESERVED_NAMES` in [`packages/core/src/reserved.ts`](https://github.com/hourmere/hourmere/blob/main/packages/core/src/reserved.ts), compared case-insensitively. Setting one
 as a handle (`PUT /api/v1/profile`) is refused with 400 `handle_reserved`, and personal
-organization slugs never take one (`Admin` becomes `admin-user`). A handle stored before its
-name was reserved is not served: its host page, event pages, slots and bookings answer 404 as
+organization slugs never take one (`Admin` becomes `admin-user`). `route` is refused as a new
+or changed handle too, in any letter case (400 `handle_reserved`), although it is not in that
+list: a profile that already has the handle `route` keeps it, its pages stay served, and its
+owner can keep saving the profile with it. Once changed, it cannot be set again. A handle
+stored before its name was reserved is not served: its host page, event pages, slots and bookings answer 404 as
 if it did not exist (agents' MCP tools too), so nobody keeps a page at a path the app now
 uses. Its owner keeps the profile, and must pick a new handle the next time they save it.
 Existing bookings stay reachable through their manage links, which do not involve the handle.

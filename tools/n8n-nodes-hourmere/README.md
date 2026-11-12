@@ -36,17 +36,36 @@ Docker image excludes this package. Once published, self-hosted n8n owners/admin
 install `n8n-nodes-hourmere` through Settings → Community nodes.
 See the [official manual installation guide](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation.md).
 
-Publishing is a separate owner-approved step. `publishConfig.registry` points to
-`https://registry.invalid/`, an unresolvable placeholder honored even with scripts disabled.
-The approved publication change must remove that placeholder. The `prepublishOnly` guard
-also refuses publication unless `HOURMERE_N8N_PUBLISH=1` is explicitly set; building and
-packing do not publish. npm dry-runs skip registry access: with `--ignore-scripts`, a
-dry-run can return success even though an actual publication cannot reach this registry.
+Publishing is a separate owner-approved step; building and packing do not publish.
+`package.json` sets `"private": true`, so npm refuses every real publication with
+`EPRIVATE` before contacting any registry, whatever `--registry`, `--ignore-scripts` or
+`--force` options are used. Dry-runs never reach that check.
+
+`publishConfig.registry` also points to `https://registry.invalid/`, an unresolvable
+placeholder. It applies with scripts disabled and takes precedence over registries set in
+`.npmrc` files or the environment. An explicit `--registry` option on the command line
+overrides it, so never pass `--registry` to get past the placeholder. The `prepublishOnly`
+guard refuses publication unless `HOURMERE_N8N_PUBLISH=1` is set, but only when lifecycle
+scripts run. This directory's `.npmrc` turns them off, so `npm publish` here skips that
+guard unless scripts are turned back on, for example with `--ignore-scripts=false`.
+
+The reviewed change that approves publication removes `private` and the placeholder
+registry together. Run the release from this directory as
+`HOURMERE_N8N_PUBLISH=1 npm publish --ignore-scripts=false`, so the approval guard runs.
+
+A dry-run's exit code says nothing about where a publication would go. Without
+`--offline`, `npm publish --dry-run` queries the target registry for existing versions,
+ignores the failure and still exits 0, even for the unreachable placeholder. What counts
+is the `npm notice Publishing to <registry> … (dry-run)` line in its output.
+`npm publish --dry-run --ignore-scripts --offline` prints it without network access, and
+the packaging tests assert that it names `https://registry.invalid/`. They also aim a
+non-dry-run publish at a local sink and require `EPRIVATE` with no connection.
 
 Contributors must use `npm install --ignore-scripts` (or `npm ci --ignore-scripts`):
 the official CLI requires `eslint-plugin-n8n-nodes-base`, whose preinstall otherwise
 fetches and executes an unpinned `only-allow`. Native toolchain install scripts are
-also unnecessary for this package’s build and tests.
+also unnecessary for this package’s build and tests. This directory's `.npmrc` also sets
+`ignore-scripts=true`; scripts you name, such as `npm run build` and `npm test`, still run.
 
 ## Credentials
 
@@ -95,8 +114,9 @@ through REST: find its ID with `GET /api/v1/webhooks`, then call
 `DELETE /api/v1/webhooks/{id}` using a `full` API key for an organization owner/admin.
 Webhook management is REST-only; there is no settings page or MCP/CLI operation.
 The endpoint consumes one of the organization’s ten webhook slots until removed.
-Hourmere webhooks must be enabled and its worker must reach n8n's configured callback URL. Private destinations need Hourmere's explicit
-operator allowlist; ordinary public receivers use HTTPS.
+Hourmere webhooks must be enabled and its worker must reach n8n's configured callback URL.
+Private destinations need Hourmere's explicit operator allowlist; ordinary public
+receivers use HTTPS.
 
 Every delivery verifies HMAC-SHA256 over raw bytes and a signed timestamp within five
 minutes. Missing/invalid signatures and stale requests are rejected. The signed event ID

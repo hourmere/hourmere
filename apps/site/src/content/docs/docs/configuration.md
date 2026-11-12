@@ -27,6 +27,15 @@ on a running container cannot alter compiled files. Leave the example value empt
 follow future defaults. See [turn off app installation](/docs/self-hosting#turn-off-app-installation)
 for commands and the delayed effect on clients that are offline.
 
+All `VITE_*` values in the repository-root `.env` and `.env.*` files are public
+client configuration: Vite exposes them to client code and referenced values end up in
+the browser bundle. Never put secrets under a `VITE_` name.
+
+Prebuilt image installs have no runtime PWA off switch. `VITE_PWA_ENABLED=false` plus
+a restart cannot disable a PWA-enabled image. The image overlay also ignores `APP_IMAGE`
+and disables source builds; use the [source-build conversion steps](/docs/self-hosting#turn-off-app-installation)
+before deploying a replacement with PWA disabled.
+
 ## Server and database
 
 PostgreSQL 18+ is required because migrations use `uuidv7()`. The bundled Compose stack
@@ -45,8 +54,8 @@ includes PostgreSQL 18.
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
-| `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
-| `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
+| `WEBHOOKS_ENABLED` | `false` | Capture and deliver organization booking events for outbound HTTPS webhooks and Slack. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
+| `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled or to configure [Slack notifications](/docs/slack). Encrypts signing secrets and Slack URLs; keep stable and backed up. Slack capture and delivery also require `WEBHOOKS_ENABLED=true`. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
 | `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
@@ -450,3 +459,10 @@ for public apps; its private/development apps do not trigger those notifications
 adapter. It has no runtime effect in this release: setting it to `true` does not permit
 hold creation or enable payment collection. Existing holds expire regardless of this
 setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).
+
+## SMS provider foundation
+
+See [SMS provider foundation](/docs/sms-provider) for operator-owned Twilio credentials,
+SMS-specific secret files, durable limits and retention. It is off without `SMS_PROVIDER`;
+configuration does not enable user-facing SMS or schedule sending jobs; hourly metadata cleanup continues even when SMS is disabled. All SMS charges belong
+to the operator’s Twilio account.

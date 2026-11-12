@@ -49,6 +49,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- Prebuilt image installs have no runtime switch to disable app installation or the
+  offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
+  the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
 - [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
   Users, Groups, discovery and IdP synchronization are not available yet.
 - Organization OIDC/SAML SSO is in design and is not available yet. The
@@ -70,6 +73,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
   local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
   block the batch, while daily/weekly/monthly limit differences are reported as warnings.
+- [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
+  minimal booking data and at-least-once delivery; duplicate messages are possible.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.

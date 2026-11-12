@@ -1171,6 +1171,19 @@ export interface SignInEmails {
   id: string;
 }
 
+export interface SmsDeliveries {
+  created_at: Generated<Timestamp>;
+  key_hash: Buffer;
+  organization_id: string | null;
+  provider_message_id: string | null;
+  recipient_hash: Buffer | null;
+  recipient_mask: string | null;
+  request_hash: Buffer | null;
+  retry_not_before: Timestamp | null;
+  status: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface WaitlistCandidates {
   accepted_at: Timestamp | null;
   attempts: Generated<number>;
@@ -1304,7 +1317,7 @@ export interface WaitlistVerificationRequests {
 
 export interface WebhookDeliveries {
   attempts: Generated<number>;
-  booking_id: string;
+  booking_id: string | null;
   created_at: Generated<Timestamp>;
   delivered_at: Timestamp | null;
   event_id: string;
@@ -1322,13 +1335,17 @@ export interface WebhookDeliveries {
 
 export interface Webhooks {
   created_at: Generated<Timestamp>;
+  destination_kind: Generated<string>;
+  event_type_id: string | null;
   events: string[];
   id: Generated<string>;
   is_active: Generated<boolean>;
   organization_id: string;
+  pause_reason: string | null;
   secret_ciphertext: Buffer;
   updated_at: Generated<Timestamp>;
   url: string;
+  url_ciphertext: Buffer | null;
 }
 
 export interface DB {
@@ -1413,6 +1430,7 @@ export interface DB {
   scim_user_claims: ScimUserClaims;
   scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
+  sms_deliveries: SmsDeliveries;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

@@ -111,6 +111,7 @@ function productionOptions(db: Db) {
     waitlist: { verify: unavailable, remove: unavailable },
     invitationMailLimits: { secret: 'catalogue-test-only' },
     webhookSettings: { enabled: config.WEBHOOKS_ENABLED },
+    webhookQueue: { enqueue: unavailable },
     notify: unavailable,
     notifyAttendeeNoShow: unavailable,
     googleCalendar: undefined,

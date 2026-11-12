@@ -20,6 +20,7 @@ import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 import { BrandSettings } from './BrandSettings.tsx'
 import { ProvisioningTokens } from './ProvisioningTokens.tsx'
+import { SlackIntegrations } from './SlackIntegrations.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -125,6 +126,7 @@ export function SettingsPage() {
               : null
         }
       />
+      <SlackIntegrations key={`slack-${organizationId}`} organizationId={organizationId} />
       {!personal && me.principal.kind === 'session' && (
         <ProvisioningTokens
           organizationId={organizationId}
