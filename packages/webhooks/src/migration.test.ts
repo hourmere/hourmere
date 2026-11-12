@@ -34,6 +34,7 @@ it.skipIf(!serverUrl)(
       const db = createDb(pool)
       const user = await createTestUser(db)
       const key = Buffer.alloc(32, 9).toString('base64')
+      // Seed the historical schema directly: current services also write later columns and tables.
       const webhook = { id: randomUUID(), organizationId: user.principal.organization.id }
       await db
         .insertInto('webhooks')

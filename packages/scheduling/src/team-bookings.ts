@@ -31,6 +31,7 @@ export async function cancelTeamAdminBooking(
   now: () => Temporal.Instant,
   options: {
     expectedOrganizationId: string
+    sessionId?: string | undefined
     notify: BookingNotifier
     reason?: string | undefined
   },

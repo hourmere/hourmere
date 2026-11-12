@@ -32,6 +32,7 @@ import type { CallerEnv } from '../caller.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { authenticated, ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
+import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 
 // Schemas shared with the public routes (public.ts).
@@ -733,6 +734,7 @@ export function bookingRoutes({
           publicContext,
           c.req.valid('header')['x-manage-token'],
           { reason, rescheduleRequestId },
+          publicBookingAuditOrigin(c),
         )
         return c.json(booking, 200)
       },
@@ -775,6 +777,7 @@ export function bookingRoutes({
             durationMinutes: c.req.valid('json').durationMinutes,
             rescheduleRequestId: c.req.valid('json').rescheduleRequestId,
           },
+          publicBookingAuditOrigin(c),
         )
         return c.json(result, 200)
       },

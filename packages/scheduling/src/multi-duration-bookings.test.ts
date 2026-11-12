@@ -1,7 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { parsePersistedApiKeyMetadata } from '@hourmere/auth'
 import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -97,6 +99,9 @@ function sourceCopy(change?: Change): Api {
       .replace(/^export \{[^\n]+\} from '[^']+'\n/gm, ''),
   ).replace(/\bexport /g, '')
   const bindings = {
+    auditActor,
+    writeAuditEvent,
+    parsePersistedApiKeyMetadata,
     createHash,
     randomBytes,
     importedBookingIds,
@@ -560,8 +565,8 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'host reschedule duration forwarding',
       [
-        '{ start, durationMinutes, idempotencyKey, expectedGroupSlotId },\n      origin ?? {',
-        '{ start, idempotencyKey, expectedGroupSlotId },\n      origin ?? {',
+        '{ start, durationMinutes, idempotencyKey, expectedGroupSlotId },\n      {\n        ...(origin ?? {',
+        '{ start, idempotencyKey, expectedGroupSlotId },\n      {\n        ...(origin ?? {',
       ],
       verifyRescheduleSelection,
     ],
