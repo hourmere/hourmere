@@ -384,8 +384,10 @@ application feature; trust forwarded addresses only through configured trusted p
 Ordinary access logs retain method, route and response status for token administration,
 never bearer values, bodies or secret-bearing responses.
 
-The [audit journal](audit-log.md) from [PR #246](https://github.com/hourmere/hourmere/pull/246) does not record token administration yet. Token foundation must never claim full audit
-coverage. Required future actions: token.create, token.rotate, token.revoke;
+The [audit journal](audit-log.md) records token administration as `scim_token.created`,
+`scim_token.rotated` and `scim_token.revoked`: the token ID and the session that made the
+change, never the name, secret or digest. Token foundation must never claim full audit
+coverage. Required future actions:
 scim.authentication_failed and scim.rate_limited (bounded aggregation); scim.user.create,
 update, claim, deactivate, reactivate, delete; scim.group.create, update, delete;
 scim.group.member.add/remove; scim.mapping.link/unlink; scim.conflict;

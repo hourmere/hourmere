@@ -28,7 +28,7 @@ const journal: [string, string, Record<string, unknown>][] = [
 ]
 
 describe.skipIf(!serverUrl)('audit action follow-ups migration', () => {
-  it('keeps a populated journal, equals a fresh install, reruns as a no-op and admits no-show events', async () => {
+  it('keeps a populated journal, equals a fresh install, reruns as a no-op and admits the new events', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-audit-followups-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -65,13 +65,17 @@ describe.skipIf(!serverUrl)('audit action follow-ups migration', () => {
           ],
         )
       // The predecessor refuses what 0078 admits.
-      await expect(
-        pool.query(
-          `INSERT INTO audit_events (actor_type, actor_id, credential_type, action, target_type, target_id, details)
-           VALUES ('system', 'test', 'none', 'booking.attendee_no_show_changed', 'booking', 'test', $1::jsonb)`,
-          [JSON.stringify({ attendeeId: randomUUID(), noShow: 'marked' })],
-        ),
-      ).rejects.toMatchObject({ code: '23514', constraint: 'audit_events_details_check' })
+      for (const [action, details] of [
+        ['booking.attendee_no_show_changed', { attendeeId: randomUUID(), noShow: 'marked' }],
+        ['slack_destination.created', { events: ['booking.created'] }],
+      ] as const)
+        await expect(
+          pool.query(
+            `INSERT INTO audit_events (actor_type, actor_id, credential_type, action, target_type, target_id, details)
+             VALUES ('system', 'test', 'none', $1, 'test', 'test', $2::jsonb)`,
+            [action, JSON.stringify(details)],
+          ),
+        ).rejects.toMatchObject({ code: '23514', constraint: 'audit_events_details_check' })
       const tables = (
         await pool.query<{ schema: string; name: string }>(
           `SELECT table_schema AS schema, table_name AS name FROM information_schema.tables

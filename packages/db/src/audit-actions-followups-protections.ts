@@ -25,6 +25,10 @@ export async function assertAuditDetailProtections(pool: pg.Pool): Promise<void>
     ['oauth.token_revoked', { familySize: 2 }],
     ['organization.branding_updated', { logo: 'uploaded', primaryColor: 'set' }],
     ['booking.created', {}],
+    ['slack_destination.created', { events: ['booking.created'] }],
+    ['slack_destination.paused', { events: ['booking.cancelled'] }],
+    ['slack_destination.tested', {}],
+    ['scim_token.rotated', {}],
   ]
   for (const [action, details] of accepted)
     await expect(insert(pool, action, details), action).resolves.toMatchObject({ rowCount: 1 })
@@ -42,6 +46,10 @@ export async function assertAuditDetailProtections(pool: pg.Pool): Promise<void>
     ['organization.branding_updated', {}],
     ['organization.branding_updated', { primaryColor: '#12AB34' }],
     ['booking.created', { attendeeId, noShow: 'marked' }],
+    ['slack_destination.updated', { events: [], url: 'https://hooks.slack.com/services/T/B/x' }],
+    ['slack_destination.paused', { reason: 'url_rejected' }],
+    ['scim_token.created', { name: 'IdP' }],
+    ['scim_token.revoked', { events: [] }],
   ]
   for (const [action, details] of rejected)
     await expect(

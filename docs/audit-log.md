@@ -52,22 +52,25 @@ therefore incur these snapshot reads and one audit INSERT per affected entity.
 
 The application and database reject extra detail keys. Role changes allow only
 `oldRole` and `newRole`; API key creation and the reserved rotation action allow
-only `scope`; all webhook actions allow only `events` (the subscribed event list);
-OAuth token revocation allows only `familySize` (see below). Branding updates allow
-only `logo` (`uploaded`, `selected` or `removed`) and `primaryColor` (`set` or
-`cleared`), at least one of them; the database also checks these values. Attendee
-no-show changes require exactly `attendeeId` (the attendee's stored ID, a lowercase
-UUID) and `noShow` (`marked` or `unmarked`); the database checks both values. Every
-other action requires an empty object. No key names, webhook URLs, secrets, images,
-logo hashes, colours, attendee names, email addresses or free text are recorded. New
-detail keys require deliberate schema and documentation review.
+only `scope`; all webhook and Slack destination actions allow only `events` (the
+subscribed event list); OAuth token revocation allows only `familySize` (see below).
+Branding updates allow only `logo` (`uploaded`, `selected` or `removed`) and
+`primaryColor` (`set` or `cleared`), at least one of them; the database also checks
+these values. Attendee no-show changes require exactly `attendeeId` (the attendee's
+stored ID, a lowercase UUID) and `noShow` (`marked` or `unmarked`); the database checks
+both values. Every other action, including the SCIM provisioning token actions,
+requires an empty object. No key or token names, webhook or Slack URLs, secrets,
+images, logo hashes, colours, attendee names, email addresses or free text are
+recorded. New detail keys require deliberate schema and documentation review.
 
 | Area | Actions |
 | --- | --- |
 | Membership | `membership.invited`, `membership.accepted`, `membership.invitation_rejected`, `membership.removed`, `membership.left`, `membership.role_changed`, `membership.invitation_cancelled` |
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
+| SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
+| Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed` |
@@ -144,6 +147,23 @@ Webhook updates that change the active state record `webhook.paused` or
 `webhook.resumed`. A change to the subscribed events, or an update that changes
 neither, records `webhook.updated`; one request that resumes and edits records both.
 
+[Slack destinations](../apps/site/src/content/docs/docs/slack.md) follow the same rules
+through REST, MCP and the CLI, with target type `slack_destination`: an update that
+changes the active state records `slack_destination.paused` or `slack_destination.resumed`,
+and one that replaces the URL, changes the events or the event-type filter, or changes
+nothing records `slack_destination.updated`. Queuing a test message records
+`slack_destination.tested`. When Slack answers a delivery with 404 or 410, the delivery
+worker pauses the destination and records `slack_destination.paused` with actor `system`
+(`webhook-delivery`) and credential `none`, in the same transaction; later deliveries to
+the paused destination are skipped and record nothing. No URL, masked URL or event-type
+filter is recorded.
+
+SCIM provisioning token creation, rotation and revocation record `scim_token.created`,
+`scim_token.rotated` and `scim_token.revoked` on the token ID, attributed to the owner or
+admin session that made the change, with empty details: like API keys, no token name,
+secret or digest is recorded. Revoking an already revoked token records nothing, and a
+refused rotation (a revoked token or an active overlap) records nothing.
+
 An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity by its stored ID, whatever UUID
 spelling the request used; removal events preserve those IDs after the entity
@@ -183,11 +203,10 @@ When an authorization code is presented a second time, Better Auth deletes the t
 already issued for it. This automatic replay response is not recorded: it concerns
 the one connection whose code was replayed, and Better Auth ignores its failures, so
 making it depend on the journal could leave those tokens valid.
-Areas added after this journal was designed are not recorded yet: SCIM provisioning
-token creation, rotation and revocation; and Slack destination creation, updates,
-deletion and test messages, and the automatic pause after Slack rejects a destination
-URL. Routing forms, meeting polls, organization SSO configuration and booking
-workflows have no reachable management operation yet and record nothing.
+A SCIM token's last-use time, which every authenticated provisioning request updates,
+is not a management event and is not recorded. Routing forms, meeting polls,
+organization SSO configuration and booking workflows have no reachable management
+operation yet and record nothing.
 Paid-booking holds (creating, confirming and cancelling a payment hold) are service
 functions that no route reaches yet; wiring them to a route must add booking audit
 events. Automatic payment-hold expiry and unpaid-hold personal-data erasure are system
