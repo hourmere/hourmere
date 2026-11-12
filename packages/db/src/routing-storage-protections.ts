@@ -1252,8 +1252,12 @@ routingProtections['indexed lookups'] = {
     const unindexed: string[] = []
     try {
       await client.query('BEGIN')
-      // Any index access path wins over a sequential or bitmap scan, so the plan shows
-      // whether one exists for the lookup at all, whatever the table size.
+      // This relies on the coverage run's fresh, unanalysed copies: on their small tables,
+      // with sequential and bitmap scans off, the planner answers each lookup from the index
+      // whose condition matches it, so the plan shows whether that index exists. On a large
+      // analysed table the planner may choose another index (the admission lookup can use
+      // routing_receipts_version), which fails this check on the unmodified schema: the
+      // coverage run aborts instead of reporting false coverage.
       await client.query('SET LOCAL enable_seqscan=off')
       await client.query('SET LOCAL enable_bitmapscan=off')
       for (const { lookup, table, columns, ordered, sql, params } of indexedLookups(f)) {
