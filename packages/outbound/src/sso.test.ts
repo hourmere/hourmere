@@ -14,7 +14,7 @@ import {
   ssoAnswersPermitted,
   ssoUrl,
 } from './sso.ts'
-import { parseSsoPrivateTargets } from './sso-private-targets.ts'
+import { parseSsoPrivateTargets, type SsoPrivateTarget } from './sso-private-targets.ts'
 
 type Callback = (res: PassThrough) => void
 
@@ -699,29 +699,24 @@ describe('an operator-listed IdP served publicly on a non-default port', () => {
   })
 })
 
-// The answer policy repeats the destination rules instead of relying on ssoUrl alone, so
-// each rule is checked here directly as well, including URLs that ssoUrl already refuses.
+// The answer policy checks the answers again after ssoUrl, so each rule is checked here
+// directly as well, including URLs that ssoUrl already refuses.
 describe('SSO answer policy', () => {
-  const listedPublic = { host: 'idp.example.com', port: 8443 }
-  const listedLoopback = { host: 'localhost', port: 8080 }
-  it.each<[string, string, typeof listedPublic | undefined, string[], boolean]>([
-    ['public syntax, public answers', 'https://idp.example.com/', undefined, ['8.8.8.8'], true],
-    ['public syntax, a private answer', 'https://idp.example.com/', undefined, ['10.0.0.5'], false],
+  const listedPublic = parseSsoPrivateTargets('idp.example.com:8443')
+  const listedLoopback = parseSsoPrivateTargets('localhost:8080')
+  const none = parseSsoPrivateTargets()
+  it.each<[string, string, readonly SsoPrivateTarget[], string[], boolean]>([
+    ['public syntax, public answers', 'https://idp.example.com/', none, ['8.8.8.8'], true],
+    ['public syntax, a private answer', 'https://idp.example.com/', none, ['10.0.0.5'], false],
     [
       'public syntax, mixed answers',
       'https://idp.example.com/',
-      undefined,
+      none,
       ['8.8.8.8', '10.0.0.5'],
       false,
     ],
-    [
-      'an unlisted non-default port',
-      'https://idp.example.com:8443/',
-      undefined,
-      ['8.8.8.8'],
-      false,
-    ],
-    ['unlisted plain HTTP', 'http://localhost:8080/', undefined, ['127.0.0.1'], false],
+    ['an unlisted non-default port', 'https://idp.example.com:8443/', none, ['8.8.8.8'], false],
+    ['unlisted plain HTTP', 'http://localhost:8080/', none, ['127.0.0.1'], false],
     [
       'a listed host:port, public answers',
       'https://idp.example.com:8443/',
@@ -735,6 +730,20 @@ describe('SSO answer policy', () => {
       listedPublic,
       ['10.0.0.5', 'fd12::5'],
       true,
+    ],
+    [
+      'another host than the listed one, public answers',
+      'https://other.example.com:8443/',
+      listedPublic,
+      ['8.8.8.8'],
+      false,
+    ],
+    [
+      'the listed host on another port, public answers',
+      'https://idp.example.com:9443/',
+      listedPublic,
+      ['8.8.8.8'],
+      false,
     ],
     [
       'a listed host:port, mixed answers',
@@ -785,8 +794,8 @@ describe('SSO answer policy', () => {
       ['8.8.8.8'],
       false,
     ],
-  ])('%s', (_, url, target, addresses, expected) => {
-    expect(ssoAnswersPermitted(addresses.map(answer), new URL(url), target)).toBe(expected)
+  ])('%s', (_, url, privateTargets, addresses, expected) => {
+    expect(ssoAnswersPermitted(addresses.map(answer), new URL(url), privateTargets)).toBe(expected)
   })
 })
 

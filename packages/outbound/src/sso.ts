@@ -123,21 +123,25 @@ export function ssoUrl(
 }
 
 /**
- * The DNS answer policy, applied on every request after `ssoUrl` admitted the URL, and
- * repeating its destination rules rather than relying on them:
+ * The DNS answer policy, applied on every request after `ssoUrl` admitted the URL. It looks
+ * up the exact listed target for the URL's host and port itself and checks the answers:
  * - an unlisted host needs public HTTPS syntax and only public answers;
  * - an exact listed host:port is operator-trusted for either kind: every answer ordinary
- *   private or loopback space, or every answer public;
+ *   private or loopback space, or every answer public. This deliberately widens the shared
+ *   check, where an exact-host target never falls back to public routing;
  * - answers that mix kinds, or include metadata, link-local, mapped or other reserved
  *   space, are refused;
- * - plain HTTP (the loopback trial) also needs every answer to be loopback, so public
- *   answers are only ever reached over HTTPS.
+ * - plain HTTP also needs every answer to be loopback, so public answers are only ever
+ *   reached over HTTPS.
+ * The scheme, the loopback trial and its loopback-name rule stay with `ssoUrl`, and the
+ * shape and size of the answer list with `validAnswers`.
  */
 export function ssoAnswersPermitted(
   answers: readonly DnsAnswer[],
   url: URL,
-  target: SsoPrivateTarget | undefined,
+  privateTargets: readonly SsoPrivateTarget[],
 ): boolean {
+  const target = ssoPrivateTargetFor(urlHostname(url), urlPort(url), privateTargets)
   return (
     (answersPermitted(answers, {
       publicUrl: isPublicHttpsUrl(url),
@@ -193,10 +197,9 @@ export async function sendSsoRequest(input: SsoRequest): Promise<SsoResponse> {
   if (!normalized) throw new SsoTransportError('destination_refused')
   const url = new URL(normalized)
   const hostname = urlHostname(url)
-  const target = ssoPrivateTargetFor(hostname, urlPort(url), input.privateTargets)
   const release = acquire(url.origin)
   try {
-    return await attempt(input, url, hostname, target)
+    return await attempt(input, url, hostname)
   } catch (error) {
     // Only the profile's own error leaves it, whatever failed.
     throw error instanceof SsoTransportError ? error : new SsoTransportError('transport_failed')
@@ -206,12 +209,7 @@ export async function sendSsoRequest(input: SsoRequest): Promise<SsoResponse> {
   }
 }
 
-async function attempt(
-  input: SsoRequest,
-  url: URL,
-  hostname: string,
-  target: SsoPrivateTarget | undefined,
-): Promise<SsoResponse> {
+async function attempt(input: SsoRequest, url: URL, hostname: string): Promise<SsoResponse> {
   const connecting = new AbortController()
   const connectDeadline = AbortSignal.timeout(LIMITS.ssoConnectTimeout)
   const responseDeadline = AbortSignal.timeout(LIMITS.ssoResponseTimeout)
@@ -238,7 +236,7 @@ async function attempt(
       stopped,
       failed: () => new SsoTransportError('dns_failed'),
     })
-    if (!validAnswers(answers) || !ssoAnswersPermitted(answers, url, target))
+    if (!validAnswers(answers) || !ssoAnswersPermitted(answers, url, input.privateTargets))
       throw new SsoTransportError('destination_refused')
     if (deadline.aborted) throw stopped()
     const selected = answers[0]

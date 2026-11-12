@@ -151,11 +151,12 @@ unique-local space; link-local, metadata, IPv4-mapped and public addresses are r
 startup, with the same rules as private webhook receivers. Only that exact host and port
 match: a different port, or another hostname that resolves to the same address, does not.
 When SSO uses an entry, the host's DNS answers are checked again on every request. They
-must all be eligible private or loopback space, or all be public; the second is how a
-public identity provider on a non-default port, such as `idp.example.com:8443`, is reached.
-Answers that mix the two, or include metadata, link-local or other reserved addresses, are
-refused, and the checked address is pinned to the socket. A hostname that is not listed
-keeps the default rules: public addresses only, on port 443 only.
+must all be eligible private or loopback space, or all be public. The second is how a
+public identity provider on a non-default port, such as `idp.example.com:8443`, is reached;
+list it by hostname, since public IP entries are refused. Answers that mix the two, or
+include metadata, link-local or other reserved addresses, are refused, and the checked
+address is pinned to the socket. A hostname that is not listed keeps the default rules:
+public addresses only, on port 443 only.
 
 The setting permits these exact destinations, not plain HTTP: identity providers still need
 HTTPS with a certificate for their hostname that the server process trusts, and

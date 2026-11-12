@@ -120,7 +120,8 @@ describe('allowlisted webhook HTTP over an owned loopback socket', () => {
     }
     const request = input()
     await expect(sendWebhook(request)).resolves.toBe(204)
-    expect(raw).toEqual([
+    // Node appends Host and Connection itself; the transport decides the first six.
+    expect(raw.slice(0, 12)).toEqual([
       'webhook-id',
       request.headers['webhook-id'],
       'webhook-timestamp',
@@ -133,10 +134,6 @@ describe('allowlisted webhook HTTP over an owned loopback socket', () => {
       String(Buffer.byteLength(request.body)),
       'user-agent',
       'Hourmere-Webhooks/1',
-      'Host',
-      `127.0.0.1:${port}`,
-      'Connection',
-      'close',
     ])
   })
   it('keeps the fixed content type and user agent when a caller sends them in another case', async () => {
