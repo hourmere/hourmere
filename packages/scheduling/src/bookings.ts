@@ -1595,6 +1595,52 @@ export async function getManagedBooking(
   return loadBooking(ctx.db, target.id, ctx.now())
 }
 
+/** What became of a host's request, as the invitee's request email link reports it. */
+export type ManagedRescheduleRequestState =
+  | 'pending'
+  | 'expired'
+  | 'replaced'
+  | 'rescheduled'
+  | 'cancelled'
+
+const CLOSED_REQUEST_STATES: Readonly<Record<string, ManagedRescheduleRequestState>> = {
+  expired: 'expired',
+  replaced: 'replaced',
+  // Any move resolves the request, by the invitee or by a host.
+  picked: 'rescheduled',
+  cancelled: 'cancelled',
+}
+
+/**
+ * The request a reschedule request email's own link was sent for, and what became of it.
+ * Undefined for every other manage token: only that email's token names its request, and
+ * only a request of the booking the email was about.
+ */
+export async function managedLinkRescheduleRequest(
+  ctx: PublicContext,
+  token: string | undefined,
+): Promise<{ id: string; state: ManagedRescheduleRequestState } | undefined> {
+  const hash = manageTokenHash(token)
+  if (!hash) return undefined
+  const { rows } = await sql<{ id: string; state: string; expires_at: Date }>`
+    SELECT r.id, r.state, r.expires_at
+      FROM booking_notifications n
+      JOIN booking_reschedule_requests r
+        ON r.booking_id = n.booking_id AND r.id::text = n.message_key
+     WHERE n.manage_token_hash = ${hash} AND n.outcome = 'sent'
+       AND n.kind = 'reschedule_requested'`.execute(ctx.db)
+  const row = rows[0]
+  if (!row) return undefined
+  // An expiry job can run late; the deadline alone closes the request.
+  const state =
+    row.state === 'pending'
+      ? row.expires_at.getTime() > ctx.now().epochMilliseconds
+        ? 'pending'
+        : 'expired'
+      : CLOSED_REQUEST_STATES[row.state]
+  return state && { id: row.id, state }
+}
+
 /** Cancels through a manage link: `booking_cancelled` if already cancelled, `booking_in_past` once started. */
 export async function cancelManagedBooking(
   ctx: PublicContext,

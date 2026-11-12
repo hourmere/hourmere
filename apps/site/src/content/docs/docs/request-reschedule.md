@@ -24,7 +24,24 @@ When the invitee picks a time, the normal rescheduling rules apply, including no
 booking windows, buffers, booking limits, calendar conflicts and required hosts. The
 usual calendar, conference and reminder updates run, and hosts receive the normal
 reschedule confirmation. Collective and round-robin bookings keep their ordinary
-invitee-reschedule host rules.
+invitee-reschedule host rules. The move releases the original time: it becomes bookable
+again, its calendar entries and meeting link move to the new time, and its reminders stop.
+
+## What the invitee sees
+
+The buttons in the request email open the invitee's private booking page. While the
+request is open, the page says that the host asked for a new time, and the buttons open
+the picker or the cancellation form. Once that email's request can no longer be
+answered, the page says why instead of opening them:
+
+- the request expired;
+- the host sent a newer request, which replaces it (an open newer request is still shown);
+- the booking was already moved to a new time, by the invitee or a host;
+- the booking was cancelled, or the meeting has started.
+
+A confirmed future booking can still be moved or cancelled from the same page under the
+ordinary rules. A page that stayed open while the request changed gets the same
+explanation when its answer is refused, and then shows the booking as it is now.
 
 ## Notes and delivery
 
@@ -64,6 +81,13 @@ return `manageToken: null`; keep the existing emailed management link. Clients t
 the request identity retain ordinary management semantics and should not automatically
 retry a move. Responses are additive; ignore unknown fields and error codes.
 
+A refused answer returns 409 `reschedule_request_changed`: the request expired, was
+replaced, or the booking was already moved or cancelled. With the token from the request
+email, `GET /api/v1/bookings/manage` reports which in the optional `rescheduleRequest`:
+that request's `id` and its `state`, one of `pending`, `expired`, `replaced`,
+`rescheduled` or `cancelled`. Other manage tokens omit it. MCP and CLI have no invitee
+read of a manage token, so they see only the error code.
+
 Webhook subscriptions can opt into `booking.reschedule_requested` and
 `booking.reschedule_request_expired`. Both include a `requestId` and leave the booking's
 status `confirmed`. Neither includes the note or private management link.
@@ -74,5 +98,7 @@ status `confirmed`. Neither includes the note or private management link.
 - Group-seat bookings do not support this action.
 - The timeout is fixed at 48 hours, capped by the meeting start; it is not configurable.
 - Expiry keeps the original meeting. It does not cancel the meeting or free the slot.
+- Only the request email's own link knows which request it answers. A page opened from
+  another management link explains a refused answer from the booking as it is now.
 - A request does not bypass the instance's invitee reschedule limit or unavailable hosts.
 - Email delivery can be delayed or suppressed. Pending status is not a delivery receipt.
