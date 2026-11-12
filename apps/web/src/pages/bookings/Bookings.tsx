@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { type RefObject, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, unwrap } from '../../api/client.ts'
@@ -31,6 +31,20 @@ const TABS: { tab: Tab; label: string }[] = [
   { tab: 'cancelled', label: 'Cancelled' },
 ]
 
+/**
+ * The search a text asks for, as the API takes it: control characters (a pasted tab) become
+ * spaces, then it is trimmed and cut to the bound without splitting a surrogate pair.
+ */
+export function searchText(text: string): string {
+  let bounded = text
+    .replace(/\p{Cc}+/gu, ' ')
+    .trim()
+    .slice(0, BOOKING.searchMaxLength)
+  const last = bounded.charCodeAt(bounded.length - 1)
+  if (last >= 0xd800 && last <= 0xdbff) bounded = bounded.slice(0, -1)
+  return bounded.trimEnd()
+}
+
 /** The list's address: the tab (Upcoming by default) and the search, which every tab keeps. */
 function listPath(tab: Tab, search: string): string {
   const params = new URLSearchParams()
@@ -48,8 +62,9 @@ export function BookingsPage() {
   const requested = params.get('tab')
   const tab: Tab = requested === 'past' || requested === 'cancelled' ? requested : 'upcoming'
   // The server trims and bounds the search as well; an over-long address only sends the bound.
-  const search = (params.get('q') ?? '').trim().slice(0, BOOKING.searchMaxLength)
+  const search = searchText(params.get('q') ?? '')
   const [profile, reloadProfile] = useLoad(loadProfile)
+  const searchInput = useRef<HTMLInputElement>(null)
   const [announcement, setAnnouncement] = useState<UiText>('')
   const applySearch = useCallback(
     (next: string) =>
@@ -99,7 +114,7 @@ export function BookingsPage() {
           ))}
         </ul>
       </nav>
-      <BookingSearch value={search} onSearch={applySearch} />
+      <BookingSearch value={search} onSearch={applySearch} inputRef={searchInput} />
       <p className="visually-hidden" role="status">
         {ui(announcement)}
       </p>
@@ -121,7 +136,11 @@ export function BookingsPage() {
           tab={tab}
           search={search}
           onLoaded={announce}
-          onClearSearch={() => applySearch('')}
+          onClearSearch={() => {
+            // The empty state and its button go away; continue in the search box.
+            searchInput.current?.focus()
+            applySearch('')
+          }}
           {...hostZone(profile.data)}
         />
       )}
@@ -130,29 +149,53 @@ export function BookingsPage() {
 }
 
 /**
- * The search box: it searches after a pause in typing, at once on Enter, and Escape clears it.
- * `value` is the search in effect; the box follows it when it changes elsewhere.
+ * The search box: it searches after a pause in typing (never mid-composition in an input
+ * method), at once on Enter, and Escape clears it. `value` is the search in effect; the box
+ * follows it only when it changes elsewhere (back, forward, Clear search, another link).
  */
-function BookingSearch({ value, onSearch }: { value: string; onSearch: (search: string) => void }) {
+function BookingSearch({
+  value,
+  onSearch,
+  inputRef,
+}: {
+  value: string
+  onSearch: (search: string) => void
+  inputRef: RefObject<HTMLInputElement | null>
+}) {
   const { t } = useI18n()
   const id = useId()
   const [text, setText] = useState(value)
+  const [composing, setComposing] = useState(false)
+  // The last search this box asked for: the address catches up with it after a moment, while
+  // typing goes on, so only a different value comes from elsewhere.
+  const submitted = useRef(value)
+  const submit = useCallback(
+    (next: string) => {
+      submitted.current = next
+      onSearch(next)
+    },
+    [onSearch],
+  )
 
-  // Back, forward and Clear search change the search; keep what is typed when it already matches.
-  useEffect(() => setText((current) => (current.trim() === value ? current : value)), [value])
   useEffect(() => {
-    const next = text.trim()
-    if (next === value) return
-    const timer = setTimeout(() => onSearch(next), SEARCH_DELAY_MS)
+    if (value === submitted.current) return
+    submitted.current = value
+    setText(value)
+  }, [value])
+  useEffect(() => {
+    if (composing) return
+    const next = searchText(text)
+    if (next === submitted.current) return
+    const timer = setTimeout(() => submit(next), SEARCH_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [text, value, onSearch])
+  }, [text, composing, submit])
 
   return (
     <search className="bookings-search">
       <form
         onSubmit={(event) => {
           event.preventDefault()
-          onSearch(text.trim())
+          submit(searchText(text))
         }}
       >
         <div className="field">
@@ -169,13 +212,19 @@ function BookingSearch({ value, onSearch }: { value: string; onSearch: (search: 
             spellCheck={false}
             enterKeyHint="search"
             maxLength={BOOKING.searchMaxLength}
+            ref={inputRef}
             value={text}
             onChange={(event) => setText(event.target.value)}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={(event) => {
+              setComposing(false)
+              setText(event.currentTarget.value)
+            }}
             onKeyDown={(event) => {
-              if (event.key !== 'Escape' || !text) return
+              if (event.key !== 'Escape' || !text || event.nativeEvent.isComposing) return
               event.preventDefault()
               setText('')
-              onSearch('')
+              submit('')
             }}
           />
         </div>

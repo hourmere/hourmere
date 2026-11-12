@@ -324,19 +324,34 @@ describe.skipIf(!serverUrl)('booking list cancelled view and search', () => {
     const memberOwn = await book(team.id, [member.id], '2026-11-02T15:00Z', {
       invitee: { name: 'Plain', email: 'plain@example.com' },
     })
+    // The searching host also hosts a matching booking in the team.
+    const hostTeamAda = await book(team.id, [host.userId], '2026-11-02T16:00Z', {
+      invitee: { name: 'Ada In Team', email: 'ada-team@example.com' },
+    })
+    // Fields outside the team whitelist: a deleted event's title, a guest, the stored title.
+    const retired = await f.eventType(team.id, null, {
+      title: 'Hidden retired title',
+      deletedAt: '2026-10-01T00:00:00Z',
+      hosts: [{ userId: owner.id }],
+    })
+    const hiddenFields = await book(team.id, [owner.id], '2026-11-02T17:00Z', {
+      eventTypeId: retired,
+      invitee: { name: 'Visible Invitee', email: 'visible@example.com' },
+      guests: [{ name: 'Secret Guest', email: 'secret-guest@example.com' }],
+    })
     await book(otherTeam.id, [other.id], '2026-11-02T13:00Z', {
       invitee: { name: 'Ada Lovelace', email: 'countess@analytical.example' },
     })
 
-    // The host's own list: only their personal organization's bookings.
+    // The host's own list: only their personal organization's bookings, never the team's.
     expect(await allPages(ctx, { q: 'ada' })).toEqual([ids.ada, ids.cancelledAda])
-    // The host acting in the team hosts nothing there, so a search finds nothing.
+    // Acting in the team, the host finds only what they host there.
     const hostInTeam = testContext(
       db,
       { ...ctx.principal, organization: { ...team.as(owner).organization } },
       now,
     )
-    expect(await allPages(hostInTeam, { q: 'ada' })).toEqual([])
+    expect(await allPages(hostInTeam, { q: 'ada' })).toEqual([hostTeamAda])
     // An ordinary member sees only what they host, whatever they search for.
     const memberHost = testContext(db, team.as(member), now)
     expect(await allPages(memberHost, { q: 'ada' })).toEqual([])
@@ -349,6 +364,7 @@ describe.skipIf(!serverUrl)('booking list cancelled view and search', () => {
       expect(await allPages(teamCtx, { q: 'ada' }, listTeamAdminBookings)).toEqual([
         teamAda,
         teamCancelled,
+        hostTeamAda,
       ])
       expect(
         await allPages(teamCtx, { q: 'ADA', status: 'cancelled' }, listTeamAdminBookings),
@@ -356,6 +372,12 @@ describe.skipIf(!serverUrl)('booking list cancelled view and search', () => {
       expect(await allPages(teamCtx, { q: 'team review' }, listTeamAdminBookings)).toEqual([
         teamAda,
       ])
+      // Search never reveals what the team view hides.
+      expect(await allPages(teamCtx, { q: 'visible' }, listTeamAdminBookings)).toEqual([
+        hiddenFields,
+      ])
+      for (const q of ['Hidden retired', 'Secret Guest', 'secret-guest@', 'stored-title'])
+        expect(await allPages(teamCtx, { q }, listTeamAdminBookings), q).toEqual([])
     }
     // A team member without team-management access is refused before any search runs.
     const memberTeam = await session(member, team.as(member).organization)

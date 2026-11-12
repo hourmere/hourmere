@@ -228,8 +228,48 @@ describe('the bookings search', () => {
     await user.click(screen.getByRole('button', { name: 'Clear search' }))
     await waitFor(() => expect(location()).toBe('/app/bookings?tab=cancelled'))
     await screen.findByRole('rowheader', { name: 'Call with Ada' })
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('')
+    const box = screen.getByRole<HTMLInputElement>('searchbox')
+    expect(box.value).toBe('')
+    // The button is gone with the empty state; keyboard users continue in the search box.
+    expect(document.activeElement).toBe(box)
     expect(screen.getByText('Export bookings as CSV')).toBeDefined()
+  })
+
+  it('waits for an input method to finish composing before it searches', async () => {
+    const api = server(() => ({ data: [ada], nextCursor: null }))
+    renderApp('/app/bookings')
+    await screen.findByRole('rowheader', { name: 'Call with Ada' })
+    const box = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search bookings' })
+    fireEvent.compositionStart(box)
+    fireEvent.change(box, { target: { value: 'wang' } })
+    await new Promise((resolve) => setTimeout(resolve, SEARCH_DELAY_MS + 150))
+    expect(api.to('GET /api/v1/bookings')).toHaveLength(1)
+    expect(location()).toBe('/app/bookings')
+    // Escape cancels the composition there, not the search.
+    fireEvent.keyDown(box, { key: 'Escape', isComposing: true })
+    expect(box.value).toBe('wang')
+    fireEvent.change(box, { target: { value: '王' } })
+    fireEvent.compositionEnd(box)
+    await waitFor(() => expect(location()).toBe(`/app/bookings?q=${encodeURIComponent('王')}`))
+    await waitFor(() => expect(api.to('GET /api/v1/bookings')).toHaveLength(2))
+    expect(query(api.to('GET /api/v1/bookings')[1]?.path ?? '').q).toBe('王')
+  })
+
+  it('turns pasted control characters into spaces and never splits a character', async () => {
+    const api = server(() => ({ data: [ada], nextCursor: null }))
+    // An address can hold more than the box: a cut never leaves half of a surrogate pair.
+    const emoji = '\u{1F600}'
+    renderApp(
+      `/app/bookings?q=${encodeURIComponent(`${'x'.repeat(BOOKING.searchMaxLength - 1)}${emoji}`)}`,
+    )
+    await screen.findByRole('rowheader', { name: 'Call with Ada' })
+    expect(query(api.to('GET /api/v1/bookings')[0]?.path ?? '').q).toBe(
+      'x'.repeat(BOOKING.searchMaxLength - 1),
+    )
+    const box = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search bookings' })
+    fireEvent.change(box, { target: { value: 'Ada\tLovelace\u0000' } })
+    await waitFor(() => expect(api.to('GET /api/v1/bookings')).toHaveLength(2))
+    expect(query(api.to('GET /api/v1/bookings')[1]?.path ?? '').q).toBe('Ada Lovelace')
   })
 
   it('says when more matching bookings are available and sends at most the bound', async () => {
@@ -249,7 +289,7 @@ describe('the bookings search', () => {
   it('offers the cancelled view and search in Chinese', async () => {
     chooseLanguage('zh-CN')
     const user = userEvent.setup()
-    server((q) => ({ data: q.q ? [] : [], nextCursor: null }))
+    server(() => ({ data: [], nextCursor: null }))
     renderApp('/app/bookings')
     await user.click(await screen.findByRole('link', { name: '已取消' }))
     expect(await screen.findByText('没有已取消的预约。')).toBeDefined()

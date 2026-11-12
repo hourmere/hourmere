@@ -34,7 +34,8 @@ describe.skipIf(!serverUrl)('booking search through REST, MCP and CLI', () => {
     | 'lookalike'
     | 'strangerAda'
     | 'teamAda'
-    | 'teamCancelled',
+    | 'teamCancelled'
+    | 'teamOther',
     string
   >
   let tokens: Record<'host' | 'stranger' | 'ownerKey' | 'ownerSession' | 'memberSession', string>
@@ -103,6 +104,7 @@ describe.skipIf(!serverUrl)('booking search through REST, MCP and CLI', () => {
       teamCancelled: await book(team.id, owner.id, at(5, 10), 'Ada Gone', {
         status: 'cancelled',
       }),
+      teamOther: await book(team.id, owner.id, at(5, 11), 'Someone Else'),
     }
 
     const key = (principal: Principal) => {

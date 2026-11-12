@@ -274,12 +274,14 @@ curl --fail-with-body -G "$HOURMERE_URL/api/v1/bookings" \
 - The text is trimmed and may have at most 100 characters; longer text or control
   characters return `400 invalid_request`. Blank text means no search.
 - `%`, `_` and `\` match themselves; there are no wildcards.
-- Search only narrows: it never adds bookings you do not host, bookings from another
-  organization or, on the team list, bookings from another team. The team list
-  (`GET /api/v1/team/bookings`) accepts the same `status` and `q`.
+- Search only narrows the list you already see. It never adds bookings outside it: on the
+  host list, bookings you do not host or from another organization; on the team list
+  (`GET /api/v1/team/bookings`, which accepts the same `status` and `q`), bookings from
+  another team.
 - Keep `q`, `status`, the time filters and `order` unchanged while following `nextCursor`.
-  Ordering stays by start time and ID, so pages do not repeat or skip bookings when new
-  bookings are added or cancelled meanwhile.
+  Ordering stays by start time and ID, so a booking that still matches is neither repeated
+  nor skipped while other bookings are added or cancelled. A booking cancelled behind the
+  cursor leaves a `status=confirmed` list and shows in `status=cancelled` from its first page.
 
 Known limitations: search matches the invitee who booked, not guests; the current title
 of an event type that still exists, not stored booking titles, answers or notes; and whole
