@@ -1202,6 +1202,65 @@ export interface SmsDeliveries {
   updated_at: Generated<Timestamp>;
 }
 
+export interface SsoAttempts {
+  browser_binding_digest: string;
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  input_digest: string;
+  kind: string;
+  mailbox: string | null;
+  mailbox_proof_expires_at: Timestamp | null;
+  mailbox_proven_at: Timestamp | null;
+  operation: string;
+  organization_id: string;
+  provider_id: string | null;
+  provider_revision: number | null;
+  requires_mailbox: Generated<boolean>;
+  requires_sso: Generated<boolean>;
+  session_id: string | null;
+  step_up_authenticated_at: Timestamp | null;
+  step_up_link_id: string | null;
+  step_up_proof_expires_at: Timestamp | null;
+  step_up_provider_id: string | null;
+  step_up_trust_generation: number | null;
+  user_id: string | null;
+}
+
+export interface SsoBrowserProofs {
+  created_at: Generated<Timestamp>;
+  domain_generation: number;
+  domain_id: string;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  link_generation: number;
+  link_id: string;
+  member_id: string;
+  organization_id: string;
+  provider_id: string;
+  session_id: string;
+  trust_generation: number;
+  user_id: string;
+}
+
+export interface SsoDelegationBindings {
+  api_key_id: string | null;
+  created_at: Generated<Timestamp>;
+  domain_generation: number;
+  domain_id: string;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  link_generation: number;
+  link_id: string;
+  member_id: string;
+  oauth_grant_id: string | null;
+  organization_id: string;
+  provider_id: string;
+  trust_generation: number;
+  user_id: string;
+}
+
 export interface SsoDomains {
   challenge_digest: string;
   challenge_expires_at: Timestamp;
@@ -1217,6 +1276,29 @@ export interface SsoDomains {
   retired_at: Timestamp | null;
   verification_expires_at: Timestamp | null;
   verified_at: Timestamp | null;
+}
+
+export interface SsoIdentityLinks {
+  created_at: Generated<Timestamp>;
+  email_proven_at: Timestamp;
+  generation: Generated<number>;
+  id: Generated<string>;
+  issuer: string;
+  organization_id: string;
+  proven_email: string;
+  provider_id: string;
+  retired_at: Timestamp | null;
+  subject: string;
+  user_id: string;
+}
+
+export interface SsoMailboxTokens {
+  attempt_id: string;
+  consumed_at: Timestamp | null;
+  expires_at: Timestamp;
+  issued_at: Generated<Timestamp>;
+  organization_id: string;
+  token_digest: string;
 }
 
 export interface SsoPolicies {
@@ -1264,6 +1346,15 @@ export interface SsoRecoveryOwners {
   nominated_by_user_id: string;
   organization_id: string;
   user_id: string;
+}
+
+export interface SsoReplayCache {
+  consumed_at: Generated<Timestamp>;
+  key_digest: string;
+  kind: string;
+  organization_id: string;
+  provider_id: string;
+  retain_until: Timestamp;
 }
 
 export interface WaitlistCandidates {
@@ -1533,12 +1624,18 @@ export interface DB {
   scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
   sms_deliveries: SmsDeliveries;
+  sso_attempts: SsoAttempts;
+  sso_browser_proofs: SsoBrowserProofs;
+  sso_delegation_bindings: SsoDelegationBindings;
   sso_domains: SsoDomains;
+  sso_identity_links: SsoIdentityLinks;
+  sso_mailbox_tokens: SsoMailboxTokens;
   sso_policies: SsoPolicies;
   sso_provider_domains: SsoProviderDomains;
   sso_providers: SsoProviders;
   sso_recovery_nominations: SsoRecoveryNominations;
   sso_recovery_owners: SsoRecoveryOwners;
+  sso_replay_cache: SsoReplayCache;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

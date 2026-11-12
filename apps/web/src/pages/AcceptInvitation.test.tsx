@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
@@ -21,6 +20,7 @@ import { chooseLanguage } from '../i18n/store.ts'
 import { msg, translateMessage, type UiText } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
 import { PATHS } from '../paths.ts'
+import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import {
   emptyAccount,
   emptyTeamLists,
@@ -350,14 +350,15 @@ describe('accept invitation entry', () => {
       ),
     }
     const copiedRoutes = (text: string) => {
-      const compiled = execFileSync(
-        process.execPath,
-        [
-          '--input-type=module',
-          '-e',
-          "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-        ],
-        { input: text.replace('export const', 'const'), encoding: 'utf8' },
+      const compiled = compileSourceCopy(
+        'apps/web/src/App.tsx',
+        text.replace('export const', 'const'),
+        {
+          loader: 'tsx',
+          format: 'cjs',
+          jsxFactory: 'reactRuntime.createElement',
+          jsxFragment: 'reactRuntime.Fragment',
+        },
       )
       return new Function(
         'reactRuntime',

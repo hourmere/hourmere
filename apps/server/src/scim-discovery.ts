@@ -130,16 +130,19 @@ const resourceTypes = (base: string) => [
   },
 ]
 
+/** The User schema, then its enterprise extension; the query parser projects these fields. */
+export const scimUserSchemas = [
+  { id: SCIM_URN.user, name: 'User', description: 'User Account', attributes: userAttributes },
+  {
+    id: SCIM_URN.enterpriseUser,
+    name: 'EnterpriseUser',
+    description: 'Enterprise User',
+    attributes: enterpriseAttributes,
+  },
+]
+
 const schemas = (base: string) =>
-  [
-    { id: SCIM_URN.user, name: 'User', description: 'User Account', attributes: userAttributes },
-    {
-      id: SCIM_URN.enterpriseUser,
-      name: 'EnterpriseUser',
-      description: 'Enterprise User',
-      attributes: enterpriseAttributes,
-    },
-  ].map((schema) => ({
+  scimUserSchemas.map((schema) => ({
     schemas: [SCIM_URN.schema],
     ...schema,
     meta: { resourceType: 'Schema', location: `${base}/Schemas/${schema.id}` },

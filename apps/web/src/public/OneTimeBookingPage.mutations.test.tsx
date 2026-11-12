@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import * as language from '@hourmere/core/language'
 import { render, screen, waitFor } from '@testing-library/react'
@@ -17,6 +16,7 @@ import * as duration from '../i18n/duration.ts'
 import * as formatting from '../i18n/formatting.ts'
 import * as runtime from '../i18n/runtime.tsx'
 import * as translate from '../i18n/translate.ts'
+import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import { fakeApi, json, type Routes } from '../test/fake-api.tsx'
 import { booking, EVENT, slot } from '../test/public-fixtures.ts'
 import * as calendar from './AddToCalendar.tsx'
@@ -48,16 +48,13 @@ const source = readFileSync('apps/web/src/public/BookingPage.tsx', 'utf8')
 const apiSource = readFileSync('apps/web/src/public/api.ts', 'utf8')
 
 /** Execute changed production copies; leave repository source untouched. */
-function compile<T>(text: string, dependencies: Record<string, unknown>): T {
-  const code = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: text, encoding: 'utf8' },
-  )
+function compile<T>(file: string, text: string, dependencies: Record<string, unknown>): T {
+  const code = compileSourceCopy(file, text, {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   const module = { exports: {} }
   new Function('require', 'module', 'exports', 'reactRuntime', code)(
     (name: string) => {
@@ -72,47 +69,51 @@ function compile<T>(text: string, dependencies: Record<string, unknown>): T {
 }
 
 function pageCopy(text = source): typeof OneTimeBookingPage {
-  return compile<{ OneTimeBookingPage: typeof OneTimeBookingPage }>(text, {
-    '@hourmere/core/language': language,
-    react,
-    'react-router': router,
-    '../components/ConferenceNotice.tsx': conferenceNotice,
-    '../components/EmailDeliveryHint.tsx': emailHint,
-    '../components/TimeZonePicker.tsx': zonePicker,
-    '../format.ts': format,
-    '../hooks.ts': hooks,
-    '../i18n/duration.ts': duration,
-    '../i18n/formatting.ts': formatting,
-    '../i18n/runtime.tsx': runtime,
-    '../i18n/translate.ts': translate,
-    './AddToCalendar.tsx': calendar,
-    './api.ts': publicApi,
-    './BookingDetails.tsx': details,
-    './BookingForm.tsx': form,
-    './calendar.ts': calendarDates,
-    './EventDescription.tsx': description,
-    './embed-context.ts': embed,
-    './env.ts': {
-      ...env,
-      now: () => Date.parse('2026-11-01T04:30:00Z'),
-      detectTimeZone: () => 'America/New_York',
-      preferredLocale: () => 'en-US',
+  return compile<{ OneTimeBookingPage: typeof OneTimeBookingPage }>(
+    'apps/web/src/public/BookingPage.tsx',
+    text,
+    {
+      '@hourmere/core/language': language,
+      react,
+      'react-router': router,
+      '../components/ConferenceNotice.tsx': conferenceNotice,
+      '../components/EmailDeliveryHint.tsx': emailHint,
+      '../components/TimeZonePicker.tsx': zonePicker,
+      '../format.ts': format,
+      '../hooks.ts': hooks,
+      '../i18n/duration.ts': duration,
+      '../i18n/formatting.ts': formatting,
+      '../i18n/runtime.tsx': runtime,
+      '../i18n/translate.ts': translate,
+      './AddToCalendar.tsx': calendar,
+      './api.ts': publicApi,
+      './BookingDetails.tsx': details,
+      './BookingForm.tsx': form,
+      './calendar.ts': calendarDates,
+      './EventDescription.tsx': description,
+      './embed-context.ts': embed,
+      './env.ts': {
+        ...env,
+        now: () => Date.parse('2026-11-01T04:30:00Z'),
+        detectTimeZone: () => 'America/New_York',
+        preferredLocale: () => 'en-US',
+      },
+      './PublicLayout.tsx': layout,
+      './paths.ts': paths,
+      './SlotPicker.tsx': picker,
+      './slot-link.ts': slotLink,
+      './time.ts': time,
+      './validation.ts': validation,
+      './visitor-time-zone.ts': visitorZone,
+      './waitlist-link.ts': waitlistLink,
+      './waitlist-window.ts': waitlistWindow,
+      './WaitlistJoin.tsx': waitlistJoin,
     },
-    './PublicLayout.tsx': layout,
-    './paths.ts': paths,
-    './SlotPicker.tsx': picker,
-    './slot-link.ts': slotLink,
-    './time.ts': time,
-    './validation.ts': validation,
-    './visitor-time-zone.ts': visitorZone,
-    './waitlist-link.ts': waitlistLink,
-    './waitlist-window.ts': waitlistWindow,
-    './WaitlistJoin.tsx': waitlistJoin,
-  }).OneTimeBookingPage
+  ).OneTimeBookingPage
 }
 
 function apiCopy(text = apiSource) {
-  return compile<typeof publicApi>(text, {
+  return compile<typeof publicApi>('apps/web/src/public/api.ts', text, {
     '../api/client.ts': client,
     '../api/errors.ts': errors,
     '../i18n/duration.ts': duration,

@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
 import { embedSnippet } from '@hourmere/core/embed-snippet'
@@ -7,6 +6,7 @@ import * as react from 'react'
 import { createPortal } from 'react-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CopyButton } from '../../components/CopyButton.tsx'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { eventType } from '../../test/fixtures.ts'
 import type { EventEmbedAction } from './EventEmbedAction.tsx'
 
@@ -44,15 +44,12 @@ beforeEach(() => {
 
 /** Compile copies in memory; every negative control must fail a real rendered assertion. */
 function copy(code: string, state: InstanceState, snippet = embedSnippet): Dialog {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: code, encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy('apps/web/src/pages/event-types/EventEmbedAction.tsx', code, {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   const dependencies = {
     useEffect: react.useEffect,
     useId: react.useId,
