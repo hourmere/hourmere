@@ -4,6 +4,7 @@ import type { DB } from './tables.ts'
 
 export { importedBookingCondition } from './imported-booking-condition.ts'
 export { importedBookingIds, isImportedBooking } from './imported-bookings.ts'
+export type * from './meeting-poll-types.ts'
 export { runMigrations } from './migrate.ts'
 export type * from './tables.ts'
 

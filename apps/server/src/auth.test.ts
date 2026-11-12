@@ -1156,6 +1156,59 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
   })
 
+  it('lets a team take the slug route, which only personal handles cannot newly claim', async () => {
+    const cookie = await signIn('route-team-owner@example.com')
+    const id = await createTeam(cookie, 'route')
+    expect(
+      await db
+        .selectFrom('auth.organization')
+        .select('slug')
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ slug: 'route' })
+    // Release the slug so no later case depends on running after this one.
+    await db
+      .updateTable('auth.organization')
+      .set({ slug: `released-${id.slice(0, 8)}` })
+      .where('id', '=', id)
+      .execute()
+  })
+
+  it('refuses route in any case as the first handle of an account just signed up', async () => {
+    const email = 'route@example.com'
+    expect(
+      await count('SELECT count(*)::int AS n FROM auth."user" WHERE email = $1', [email]),
+    ).toBe(0)
+    const cookie = await signIn(email)
+    const id = await userId(email)
+    const app = createApp({
+      checkDb: async () => {},
+      authHandler: main.auth.handler,
+      resolveCaller: createCallerResolver({ auth: main.auth, db }),
+      publicUrl: origin,
+      routes: [profileRoutes({ db })],
+    })
+    const put = (handle: string) =>
+      app.request('/api/v1/profile', {
+        method: 'PUT',
+        headers: { cookie, origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ handle, timeZone: 'UTC', locale: 'en' }),
+      })
+    // The web app suggests `route` from this address; the claim is refused all the same.
+    for (const handle of ['route', 'Route', 'ROUTE']) {
+      const refused = await put(handle)
+      expect(refused.status, handle).toBe(400)
+      expect(await refused.json(), handle).toEqual({
+        error: 'handle_reserved',
+        message: 'This handle is reserved',
+      })
+    }
+    expect(await count('SELECT count(*)::int AS n FROM profiles WHERE user_id = $1', [id])).toBe(0)
+    const created = await put('route-owner')
+    expect(created.status).toBe(201)
+    expect(await created.json()).toMatchObject({ handle: 'route-owner' })
+  })
+
   it('refreshes real sessions and API-key identity after the independent name API', async () => {
     const email = 'display-name-rest@example.com'
     const cookie = await signIn(email)

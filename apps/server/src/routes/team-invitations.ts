@@ -138,7 +138,16 @@ export function teamInvitationRoutes(
             c.var.principal,
             c.var.principal.organization.id,
             async (trx, actor) => {
-              await cancelTeamInvitation(trx, actor, invitationId)
+              await cancelTeamInvitation(
+                trx,
+                {
+                  ...actor,
+                  ...(c.var.principal.kind === 'session'
+                    ? { sessionId: c.var.principal.sessionId }
+                    : {}),
+                },
+                invitationId,
+              )
               return summary(trx, actor, invitationId)
             },
             { expectedOrganizationId },

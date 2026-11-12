@@ -1,4 +1,4 @@
-import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
+import { expect, fillInvitee, pickSlot, test, waitUntilAtRest } from '../fixtures.ts'
 
 for (const selected of ['en', 'zh-CN'] as const) {
   const zh = selected === 'zh-CN'
@@ -130,7 +130,9 @@ for (const selected of ['en', 'zh-CN'] as const) {
       const days = frame.locator('button.day-available')
       if (await days.count()) {
         await days.last().click()
-        await frame.locator('.slots button').first().click()
+        const slot = frame.locator('.slots button').first()
+        await waitUntilAtRest(slot, page)
+        await slot.click()
         break
       }
       await frame.getByRole('button', { name: zh ? '下个月' : 'Next month', exact: true }).click()

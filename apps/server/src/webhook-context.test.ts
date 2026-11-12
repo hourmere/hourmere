@@ -11,6 +11,7 @@ import {
   TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
@@ -81,6 +82,8 @@ function routeCopy(
     'packages/webhooks/src/service.ts',
     {
       randomUUID,
+      auditActor,
+      writeAuditEvent,
       z,
       DomainError,
       encryptWebhookSecret,

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -62,8 +63,8 @@ describe.skipIf(!serverUrl)('OAuth booking attribution and retry scopes', () => 
       id = randomUUID(),
       other = randomUUID()
     const origins: BookingOrigin[] = [
-      { source: 'mcp', apiKeyId: null, oauthConsentId: id },
-      { source: 'mcp', apiKeyId: null, oauthConsentId: other },
+      { source: 'mcp', apiKeyId: null, oauthConsentId: id, audit: auditActor(s.oauth(id)) },
+      { source: 'mcp', apiKeyId: null, oauthConsentId: other, audit: auditActor(s.oauth(other)) },
       { source: 'api', apiKeyId: id },
       { source: 'web', apiKeyId: null },
     ]
@@ -96,7 +97,13 @@ describe.skipIf(!serverUrl)('OAuth booking attribution and retry scopes', () => 
   })
   it('serializes simultaneous retries of the same grant with one notification', async () => {
     const s = await setup(),
-      origin: BookingOrigin = { source: 'mcp', apiKeyId: null, oauthConsentId: randomUUID() }
+      id = randomUUID(),
+      origin: BookingOrigin = {
+        source: 'mcp',
+        apiKeyId: null,
+        oauthConsentId: id,
+        audit: auditActor(s.oauth(id)),
+      }
     const results = await Promise.all(
       Array.from({ length: 4 }, () => createPublicBooking(s.pub, s.input(), origin)),
     )

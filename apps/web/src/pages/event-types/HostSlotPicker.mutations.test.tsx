@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { registeredLocales } from '@hourmere/core/language'
 import * as snippet from '@hourmere/core/slot-snippet'
@@ -9,6 +8,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import { codeOf, eventSlots, getEventType } from '../../public/api.ts'
 import { addDays, parseDateKey } from '../../public/calendar.ts'
 import { dateKeyIn, instantOf } from '../../public/time.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json, later, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import type { HostSlotPicker, HostSlotPickerProps } from './HostSlotPicker.tsx'
@@ -42,14 +42,15 @@ const props = (overrides: Partial<HostSlotPickerProps> = {}): HostSlotPickerProp
   ...overrides,
 })
 function component(code: string, overrides: Record<string, unknown> = {}): typeof HostSlotPicker {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader:'tsx',format:'cjs',jsxFactory:'reactRuntime.createElement',jsxFragment:'reactRuntime.Fragment' }).code)",
-    ],
-    { input: code.replace(/^export /gm, ''), encoding: 'utf8' },
+  const compiled = compileSourceCopy(
+    'apps/web/src/pages/event-types/HostSlotPicker.tsx',
+    code.replace(/^export /gm, ''),
+    {
+      loader: 'tsx',
+      format: 'cjs',
+      jsxFactory: 'reactRuntime.createElement',
+      jsxFragment: 'reactRuntime.Fragment',
+    },
   )
   const deps = {
     useEffect: react.useEffect,

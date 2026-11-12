@@ -31,6 +31,36 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
+The [SCIM design and provisioning-token foundation](scim.md) describes organization-scoped
+credential storage and the planned user lifecycle and Groups-to-teams mapping. Token
+administration and connection/User storage are implemented; SCIM resources remain unavailable.
+
+Migration `0073_scim_identity.sql` adds one stable `scim_connections` identity per
+organization and separate `scim_token_connections` bindings. Existing credentials,
+including revoked history, are bound without rewriting their fields. New token inserts
+receive the same organization connection; rotation retains that binding.
+
+`scim_users` stores organization-local mapped attributes, desired active state and
+nullable account/membership links. Its generated trimmed, lowercase user name and
+case-sensitive external ID are unique within a connection while the resource is live,
+including inactive entries. A linked account can have only one live resource per
+connection. Retirement preserves the opaque resource ID permanently while allowing a
+new resource to reuse the retired identifiers. Composite foreign keys bind resources,
+managers, membership links and invitation claims to their organization and connection.
+
+`scim_user_claims` stores expiring, deduplicated invitation intents, without creating
+accounts or verifying mailboxes. `scim_membership_blocks` stores separate local and SCIM
+suspension/removal records that survive membership and account deletion. Account deletion
+nulls the account reference and retains an immutable normalized mailbox tombstone for the
+shared SSO/SCIM admission checks described in [the SCIM design](scim.md); the captured
+decision is frozen, cleared at most once, undeletable while its organization exists and
+unique per organization, mailbox, authority and kind. A blocker whose mailbox cannot be
+stored, or whose decision is already a live tombstone, is dropped so that account deletion
+is never refused. These tables provide storage
+for later claim and authorization work; this migration does not enforce new admission,
+suspension or revocation behavior in application services. Users, Groups and discovery
+handlers remain unregistered in production.
+
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
 available in this foundation release.
@@ -58,6 +88,49 @@ available in this foundation release.
   exclusive end date; availability expands them at local midnights in the evaluated
   host's schedule zone. Wall-clock rules (working hours) retain their IANA time zone.
   Temporal handles DST when these dates and rules become instants.
+
+## Meeting poll storage
+
+Migration `0071_meeting_polls.sql` adds organization-scoped polls, candidate slots,
+voters, votes, purpose-bound capabilities, mailbox counters, operation receipts and
+recipient deliveries. Generated database interfaces and selectable row types describe
+storage. The internal host lifecycle service in `packages/scheduling/src/meeting-polls.ts`
+creates, reads, closes, cancels and deletes polls and rotates public links; it validates
+every candidate against the availability engine at creation, fixes every
+creation setting, never reopens a closed or canceled poll, and adds no transport. The
+internal enrollment and verification service in
+`packages/scheduling/src/meeting-poll-voters.ts` enrolls public voters, invites and
+re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
+invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
+resend counters under the poll lock. It queues delivery rows only; no worker, transport,
+flag or UI is enabled.
+See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
+capacity bounds and the remaining implementation steps. Numeric admission and cleanup
+constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
+
+The chosen cleanup schedule is hourly, at most 500 rows per transaction. It persists
+closure for abandoned open polls at their deadline, deletes expired public pending
+voters and their dependent personal data, and clears expired capability ciphertext.
+Capacity and voting expiry are synchronous database-clock decisions, never dependent on
+worker punctuality. Normal terminal poll history follows the installation's booking-data
+retention policy from its terminal transition (deadline for automatic closure); with no
+such policy, the current repository retains booking and terminal poll history until
+explicit deletion. This storage step does not install the later cleanup worker.
+
+Mailbox digest counters and terminal delivery receipts remain for the entire retained
+poll lifetime so removing/recreating voters cannot reset mail budgets, reminder receipts
+or opt-outs. Counters' `purge_at` is unset until the parent is due for retention deletion;
+poll deletion cascades them. Delivery ciphertext is cleared immediately at terminal
+sent/suppressed/skipped state; retries have at most 5 attempts and 5-minute leases.
+Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion,
+then retain only pseudonymous replay digests for 90 days before the hourly purge: the
+organization ID and an unkeyed digest of the acting user, API key or OAuth grant. That
+digest can be recomputed from the bare ID, and in a personal space the organization ID
+identifies the user.
+Organization deletion removes them immediately. Poll deletion preserves the booking;
+linked-booking deletion first deletes poll history and clears receipt references.
+See [the full cleanup contract](meeting-polls.md#storage-policy-and-cleanup-schedule)
+for the later workers and installation retention integration.
 
 ## Tables
 
@@ -760,7 +833,218 @@ Canceling from the confirmation removes the continuation link.
 Group seats retain `manage_token_hash` and `responses` on each independent `bookings`
 row; they do not move private seat data onto shared slots or attendee rosters.
 
+## Routing form storage
+
+Migration 0072 installs the five tables specified in [Routing forms](routing-forms.md):
+`routing_forms`, `routing_form_versions`, `routing_target_dependencies`,
+`routing_receipts` and `booking_routing`. Storage alone enables no routing execution,
+transport, UI or operator setting.
+
+Each organization may retain **100 non-archived forms**, including disabled forms,
+and **1000 total forms**, including archived forms; each form may retain
+**1000 published versions**. A transaction advisory lock keyed by
+`hourmere.routing-form-quota:<organizationId>` serializes form admission without writing
+the organization row. Form creation and unarchiving require `READ COMMITTED`; other
+isolation modes fail closed with `40001` and must restart at `READ COMMITTED` so that
+quota counts use a fresh snapshot after waiting. Version admission writes the form row,
+so stale repeatable-read version writers must retry. Archiving frees a non-archived slot
+but not a total-forms slot. Cleanup may free a version slot but cannot lower the form's
+`last_version_number` high-water mark or reuse an old version number.
+
+Composite organization foreign keys fence versions, published pointers, dependencies,
+receipts and consuming bookings. A published pointer additionally belongs to the same
+form and is deferred for atomic publication. Form identity and organization cannot change.
+Published versions and booking routing snapshots reject updates. The current pointer and
+all receipts (including consumed replay evidence) prevent version deletion; unreferenced
+old versions may be cleaned up. Historical target/user UUIDs and booking snapshot
+form/version UUIDs have no foreign keys to deletable targets/users/forms, so deletion
+cannot cascade away booking history or block event deletion. Organization deletion
+cascades all routing rows; booking deletion cascades its snapshot and consumed receipt.
+
+SQL checks enforce the same lowercase slug format as event types (with unique
+organization/slug pairs), JSON containers, positive revisions/version numbers, enabled/archive
+shape, expiry after creation, digest/rule identity shape and no ciphertext on consumed
+receipts. Dependency identity (organization, version, rule and event type) is immutable;
+only health metadata changes, with `health_code` restricted to `ok`, `unavailable` or `unknown`. Receipt issuance bindings and nonnull answer ciphertext cannot change; ciphertext can
+only be erased. A null ciphertext also permits expiry purge without consuming a receipt.
+Consumed receipt evidence cannot be rebound or revived.
+Question/rule/target semantics remain the future shared validator's responsibility.
+Unconsumed receipt indexes support bounded expiry cleanup and form/instance admission
+counts; receipt lifetime, encryption and admission services land in later steps.
+
+## SSO configuration storage
+
+Migration 0074 installs the configuration storage of the [SSO design](sso.md)
+(Configuration storage step): `sso_policies`, `sso_providers`, `sso_domains`,
+`sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. Nothing reads
+or writes them yet: there is no route, worker, read path or setting, and OIDC and SAML stay
+hard-off. A test keeps every production module outside the storage layer from naming them.
+
+All six belong to a team: a personal organization's rows are refused, and deleting the
+organization deletes them. Policies, providers and domain claims are deleted only with
+their organization; providers and claims are retired instead, so a trust generation is
+never reset, a provider ID never reused and a claim generation never revived by deleting
+and inserting a row again.
+
+- **Policy** (one row per team): `require_sso`, `admission` (`invitation_only` or `jit`),
+  `policy_revision` and `trust_generation`, both positive and never decreasing. A change of
+  enforcement or admission needs a new `policy_revision`; turning enforcement off needs a
+  new `trust_generation`, which ends every proof and delegation of the team.
+- **Providers** have a never-reused ID, an immutable organization, protocol (`oidc` or
+  `saml`) and identity (the OIDC issuer and client ID, or the SAML IdP entity ID in
+  `issuer`), a display name and a positive `revision`. The configuration, secrets included,
+  is stored only as an AES-256-GCM envelope (version 1, IV, tag, ciphertext), never as
+  plaintext JSON; its authenticated data binds organization, provider and revision, so
+  ciphertext moved to another organization, provider or revision fails to decrypt. A new
+  revision and a new sealed configuration go together, so rotating the operator key re-seals
+  every provider that is not retired at a new revision. Retirement disables the provider and
+  is permanent.
+- **Domain claims** store an exact lowercase IDNA ASCII name (no wildcard, IP address or
+  trailing dot; public suffixes are refused by the application), the current `generation`,
+  the SHA-256 digest of that generation's TXT challenge and its expiry, verification and
+  recheck times, and the latest recheck outcome (`positive`, `failed` or `unknown`). A
+  pending challenge reserves nothing. From its first verification until retirement a claim
+  is the one active claim for its name on the instance, expired or not. Each new generation
+  has a new, unverified challenge. A verified generation keeps its verification time; its
+  expiry can be renewed, including by a positive recheck of a frozen claim, only while it
+  is unexpired. After a lapse only a new generation can be verified, so the proofs and
+  delegations that recorded the old generation never revive. Retirement is permanent.
+- **Provider domains** link a provider to its team's own domain claims only; the claims
+  may be pending or retired, which the services check.
+- **Recovery nominations and recovery owners** are written only for a current owner's
+  membership (including `owner` among several roles), checked on insert. Deleting the
+  membership, by leaving, removal or the user's deletion, deletes them, and re-joining
+  restores nothing. Deleting them on demotion, with its audit event, belongs to the Recovery
+  enrollment step. Both are immutable. A team has at most one pending nomination per owner,
+  and one recovery record per owner.
+
+`sso-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0074_sso_configuration.json`), and every check and
+trigger rule also has source-copy mutations that remove or weaken it
+(`packages/db/src/sso-storage-protections.ts`), run against the predecessor schema. The
+upgrade test preserves a populated predecessor down to row versions and compares fresh and
+upgraded schemas. The operator key that seals provider configuration is configured by the
+first step that writes it.
+
+## SSO identity storage
+
+Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage
+step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_cache`,
+`sso_browser_proofs` and `sso_delegation_bindings`. Nothing reads or writes them yet: there
+is no route, worker, read path or setting, and OIDC and SAML stay hard-off. The test that
+keeps production modules from naming the configuration tables covers these too. Admission
+tombstones need no new table: they are the shared `scim_membership_blocks` of the
+[SCIM identity storage](scim.md), which keep the team-local mailbox through member and
+account deletion; a subject-keyed JIT check adds its column there in the step that needs it.
+
+- **Identity links** bind one person to one IdP subject at one provider of a team. The
+  identity, `(organization, provider, issuer, subject)`, is immutable, and the issuer must
+  be the provider's (which 0074 already keeps immutable), so one live link per provider and
+  subject keeps the whole identity unique, also under concurrent writers; a person has at
+  most one live link per provider. A link records the normalized mailbox Hourmere last
+  proved for it, never an IdP's email statement, and a new mailbox needs a later proof
+  time. A link is retired rather than deleted while its team and account exist; retirement
+  is permanent and takes a new link `generation`. New links are made only at an enabled
+  provider.
+- **Attempts** are a sign-in (before any session), a provider test or self-link (a person
+  and their current session), or a fresh proof for one write (a person, their session and
+  the team). Each freezes its kind, team, provider and current provider revision, person,
+  session, browser-binding digest, operation and canonical input digest, and expires
+  within `authenticationAttemptLifetime` (600 seconds). Only a fresh proof can require an
+  SSO step-up, and it requires at least one method; the required methods only gain the
+  mailbox later, and the mailbox is fixed once chosen. A mailbox proof needs the attempt's
+  consumed token and ends with it; a step-up comes from the attempt's own person's live link
+  at an enabled provider, authenticated between 60 seconds before the attempt and 60
+  seconds after it is recorded, and records the team's current `trustGeneration`. Each
+  proof is recorded once, within `freshAdministrationProof` (300 seconds). Nothing changes
+  after expiry, and an attempt is consumed once, only while every required proof is live and
+  what it relied on is unchanged: its provider still at the frozen revision and not retired
+  (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
+  trust generation current. Logging out deletes the session's attempts.
+- **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
+  issued only while the attempt awaits its mailbox proof, valid until the earlier of the
+  attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
+- **The replay cache** keeps the SHA-256 digest of each consumed SAML request, response and
+  assertion ID per provider and kind, so concurrent callbacks consume it once. Entries are
+  written at consumption, immutable and kept until `retain_until`, which the service sets to
+  at least `max(acceptanceDeadline + clockSkew, requestExpiresAt)` and which is in the future
+  and at most 720 seconds after consumption (the largest value that bound can take under the
+  pinned limits); only the team's deletion removes them earlier.
+- **Browser proofs and delegation bindings** record the membership, the enabled provider,
+  the link and its generation, the team's `trustGeneration` (1 before the team has a policy)
+  and the domain claim with its generation; all must be current when the row is written,
+  and the claim must be one the provider serves, verified and unexpired. Both are immutable,
+  and revoking one deletes it. A proof belongs to its person's session (logout deletes it)
+  and lasts at most `ssoProofLifetime`, the session's expiry and the claim's verification
+  expiry. A binding binds the person's own API key or MCP OAuth grant for the same team, one
+  binding per credential, and lasts at most `ssoDelegationLifetime` and the key's expiry.
+  Deleting the membership, the credential or the link deletes them. Because a lapsed claim
+  generation can never be verified again, a proof or lease that recorded it never revives;
+  rebinding inserts a binding at the claim's current generation.
+
+`sso-identity-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0075_sso_identity.json`), and every check and
+trigger rule also has source-copy mutations that remove or weaken it
+(`packages/db/src/sso-identity-protections.ts`), run against the predecessor schema. The
+upgrade test preserves a populated predecessor, including the SSO configuration rows of
+0074, down to row versions and compares fresh and upgraded schemas.
+
+## Workflow definition storage
+
+Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
+(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Nothing reads or writes
+them yet: there is no route, worker, read path or setting, and workflows stay hard-off behind
+`WORKFLOWS_IMPLEMENTED = false`. A test keeps every production module outside the storage
+layer from naming them.
+
+- **Definitions** have an immutable ID, organization, owner and creation time. A personal
+  definition belongs to its user in that user's personal organization (`owner_user_id`); a
+  team definition (`owner_user_id` NULL) belongs to the team organization, never to the member
+  who created it, and is refused in a personal organization. The owner is checked when the
+  definition is created; a future change that turns a personal organization into a team must
+  handle its personal definitions. `revision` is the current
+  revision, which always exists and is the latest one; it never goes back. `enabled` is the
+  live switch, false by default, and no revision carries it, so enabling and disabling change
+  only the definition row. Deleting a workflow tombstones it (`deleted_at`): a tombstone is
+  disabled, final and takes no new revision. A definition row is removed only as a tombstone
+  (a later purge), with its organization, or with its personal owner, even when the user no
+  longer has a personal organization; its revisions go with it.
+- **Revisions** are numbered 1, 2, 3… within their definition, with no gap or repeat, and
+  each new one becomes the current revision. They are never updated, and are deleted only
+  with their definition. A revision stores the definition that the contract in
+  `packages/workflows` validated: its canonical output without `enabled`. The database checks
+  mirror the contract's envelope: exactly the keys `name`, `scope`, `trigger`, `conditions`
+  and `actions`; a name of 1 to 200 UTF-8 bytes; a known scope; a known trigger with its delay
+  (0 to 43200 whole minutes) or its offset (5 to 43200 whole minutes) and nothing else; at
+  most five conditions with known fields; exactly one email or webhook action. The service
+  validates everything else through the contract before it writes, and a test binds each
+  mirrored limit and catalogue to the contract's constants and schemas, in both directions.
+
+Writers lock the organization before the definition, as other organization writers do: a
+definition insert locks its organization row through its foreign key, and a new revision
+locks the organization and then its definition, so a concurrent organization deletion waits
+instead of deadlocking, and concurrent revisions of one workflow are numbered one at a time.
+An update of a definition row takes no organization lock, so a transaction that updates a
+definition and then adds a revision must lock the organization first. The service steps take
+the organization lock before any workflow row.
+
+`workflow-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0076_workflow_definitions.json`), including a lock
+check of the organization foreign key, and every check and trigger rule also has source-copy
+mutations that remove or weaken it (`packages/db/src/workflow-storage-protections.ts`), run
+against the predecessor schema. The upgrade test preserves a populated predecessor with
+configured reminders, follow-ups, booking snapshots, scheduled messages and receipts down to
+row versions, and compares fresh and upgraded schemas.
+
 ## Planned additions (each a new migration)
+
+The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
+email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
+Only its definition storage exists ([workflow definition storage](#workflow-definition-storage));
+no execution table, API or runtime enablement exists yet.
 
 | When | Change |
 |---|---|
@@ -768,7 +1052,7 @@ row; they do not move private seat data onto shared slots or attendee rosters.
 | Weeks 5–8 | Better Auth teams (sub-groups for round-robin pools) |
 | With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
 | After launch | Better Auth `two-factor` |
-| Year 2 (enterprise) | Better Auth `sso`; `audit_events` |
+| Planned, all instances | Organization SSO (OIDC/SAML): [evaluation and design](sso.md); audit integration |
 
 Background jobs (notification emails, reminders, calendar synchronization and webhook
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
@@ -1079,6 +1363,23 @@ The phases within that organization boundary are:
   order, then share-locks their member rows in sorted user-ID order. Round-robin bookings
   next lock their assignment state. A changed host set is refused; do not append newly
   discovered advisory locks out of order.
+- Routing form creation takes the organization share lock, then the transaction advisory
+  lock `hashtextextended('hourmere.routing-form-quota:' || organizationId, 0)` before
+  inserting the form. It never upgrades or writes the organization row. Any transaction
+  combining form admission with event/form/receipt operations must take this advisory
+  lock after the organization lock and before event-type, form and receipt row locks.
+  Any future operation that unarchives a form must take the organization lock and then
+  this advisory lock explicitly before it locks or updates the form row. The form trigger
+  also takes the advisory lock to check capacity, but only as a backstop: a bare
+  `UPDATE … SET archived_at = NULL` locks the form row before the trigger runs and can
+  deadlock (`40P01`) with a transaction that took the advisory lock first. No unarchive
+  operation exists yet.
+- Routing form configuration writes (create, save, archive, publish) take the
+  organization share lock first, after a personal organization's owner as above, then the
+  actor and member share locks. Creation next takes the form-admission advisory lock;
+  publication share-locks its target event types in ID order; each write then locks the
+  form row. Publication therefore waits for membership management and event-type edits
+  instead of deadlocking with them. Preview takes no lock and runs read-only.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
@@ -1343,6 +1644,35 @@ index pg-boss's retained job history. The migration uses ordinary `CREATE INDEX`
 Retention has no status filter and uses the existing `created_at` index; delivery metadata
 pages use the existing `(webhook_id,id)` index in reverse order.
 
+
+Migration 0068 adds first-class Slack destinations to `webhooks`: `destination_kind`
+(default `webhook`), `url_ciphertext`, optional `event_type_id` and `pause_reason`.
+`pause_reason` is `url_rejected` from Slack's 404/410 until the URL is replaced or the
+destination is enabled (a check constraint requires an inactive Slack row); pausing an
+active destination and generic webhooks keep it null. A partial unique index
+allows one Slack destination per organization without consuming the ten signed-webhook
+slots. The URL field contains only a masked Slack address; AES-256-GCM ciphertext uses
+the webhook encryption key with organization, destination ID and URL-specific associated
+data. A composite event-type foreign key enforces the same organization; hard deletion of
+a filtered event type removes the destination rather than broadening its subscription.
+Generic webhook management excludes Slack rows.
+
+Slack captures immutable Block Kit payloads in the booking transaction and reuses bounded
+outbox retries and terminal state tracking. The minimum projection contains booking ID,
+event kind, event-type title, zoned start/end with UTC offset, status and an authenticated
+admin booking link; personal payloads add the invitee name. Team-wide payloads exclude
+free-text booking titles, answers, attendee details, meeting links and reschedule-chain identifiers. Slack accepts the
+five lifecycle and reschedule-request events only: migration 0070's attendee no-show event is
+for signed webhooks, and capture never queues it for Slack. Both capture and delivery check the
+current event-type filter. Synthetic test deliveries have a nullable booking ID and bypass
+only that filter; active/subscribed checks still apply. One pending test per destination
+is enforced under its row lock. A test delivery stores its own event ID in `request_id`:
+with migration 0064's `NULLS NOT DISTINCT` key on `(webhook_id, booking_id, event_type,
+request_id)`, a null value would make every later sample a duplicate of the first. On rows
+with a null `booking_id`, `request_id` is this sample marker, not a reschedule-request ID. Slack requires `WEBHOOKS_ENABLED=true` and
+`WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
+processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
+
 ## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and
@@ -1575,6 +1905,39 @@ is present, including paid bookings later cancelled. Unconfirmed terminal holds 
 Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
 unique index, so they cannot collide with ordinary booking idempotency keys.
 
+## Private attendee no-show markers
+
+Migration 0070 adds nullable `booking_attendees.no_show_marked_at` and
+`no_show_marked_by` as a paired current-state marker. Existing attendees remain unmarked.
+Attribution is the acting account UUID, retained as history rather than a cascading account
+foreign key. Unmarking clears both fields. Booking/attendee deletion retains its existing
+retention behavior. No invitee projection includes this metadata.
+
+Actual booking hosts may change each attendee independently. Current team owners/admins
+may manage bookings they do not host only through a browser session; API keys of any scope
+and MCP OAuth retain host-only read and write access. Changes are allowed strictly after
+the scheduled start, never on cancelled or imported read-only bookings.
+Payment holds follow host booking reads: pending, expired and unpaid-cancelled holds return
+`booking_not_found`; confirmed paid bookings stay readable but refuse changes with
+`paid_booking_management_unavailable`, as host cancellation and rescheduling do.
+Collective hosts share the attendee state; round-robin authority belongs to the assigned
+host, not every pool member. Serialized changes preserve idempotent replay attribution.
+Rescheduling creates fresh attendee rows; cancellation retains historical marks.
+Follow-ups and notifications are unaffected. See [no-shows](https://hourmere.com/docs/no-shows).
+
+The migration only widens the webhook subscription and delivery event checks to add
+`booking.attendee_no_show_changed`. Migration 0064's unique delivery key
+`(webhook_id, booking_id, event_type, request_id)` with NULLs equal stays unchanged, and so
+does capture's `ON CONFLICT` target. Attendance deliveries reuse `request_id` (a plain
+`uuid` without a foreign key) as a per-change receipt identity: capture stores the change's
+fresh event ID there, in the transaction that changes the marker. Every transition therefore
+gets its own delivery, while lifecycle receipts (NULL request) and reschedule-request receipts
+(the request's ID) deduplicate exactly as before. The stored value is only a receipt key; it
+does not identify a reschedule request and attendance payloads never include
+`data.requestId`. Existing subscription arrays and delivery snapshots are preserved. The
+migration is safe to apply while the previous version runs: old code writes only the five
+older events and keeps its arbiter. Apply it before starting the new version.
+
 ## Group slots and independent seats
 
 A group event is a single-host event with `booking_mode = 'group'` and a capacity
@@ -1605,6 +1968,28 @@ Daily, weekly and monthly event limits count one occupied slot, regardless of it
 count. Joining an already occupied slot does not consume another limit unit. Different
 meeting lengths share these limits. Every seat in a slot uses that slot's one shared
 location option and immutable logistics snapshot; seats cannot select different locations.
+Changes to the event location, default location option, assigned schedule or selected Zoom
+connection apply to new occurrences. Existing open occurrences continue accepting seats
+with their original logistics; their already reserved interval is not recalculated against
+the edited schedule. Later host time-off overrides, external-calendar busy blocks and
+calendar-sync staleness are not rechecked for additional seats or moves into that occurrence.
+To stop admission after such a change, the host must cancel the occurrence. New occurrences
+still check current schedules, time off, calendar conflicts and sync freshness. New seats
+and moves into existing occurrences inherit the shared location and option.
+Current event activation, host identity, allowed duration, minimum notice and booking window
+still apply (the window uses the occurrence's snapshotted host time zone), and automatic
+conferences still require their pinned resources to remain usable. Retiring the last seat
+allows a later generation to use current settings.
+
+Full occurrences return the same `slot_taken` / `group_slot_full` error for existing and
+unknown mailboxes before checking mailbox duplication. An exact authorized idempotent replay
+still returns its original seat without consuming capacity or sending another notification.
+For occurrences with spare capacity, duplicate-mailbox rejection is not a non-enumeration
+guarantee: a different mailbox can create a real booking and trigger its notifications.
+A later failure of the pinned Zoom resource can also return a different error to a new
+mailbox while rolling back its tentative seat. Snapshot location-option mismatches are
+checked before mailbox duplication and return the same error to both callers.
+
 Moving one seat cancels its predecessor and creates a successor in the same transaction,
 so capacity is released/taken atomically and surviving source seats retain their resources.
 
@@ -1659,3 +2044,46 @@ UNION view that resolves ordinary booking resources or a seat's shared slot reso
 the existing recipient worker; it never transfers ownership to a seat. Logistics readiness
 uses the conference's matching applied revision and ready URL, independently of calendar
 count writeback. Count failures therefore cannot revoke a ready URL or resend invitations.
+
+### Operator SMS dispatch foundation
+
+Migration `0069_sms_delivery_limits.sql` adds `sms_deliveries`, an internal ledger,
+not a reminder queue. No host or invitee SMS surface exists yet. Each logical job has
+one purpose-keyed HMAC-SHA256 key digest, globally unique across organizations. The
+transaction takes a database-local advisory fence, checks rolling recipient/hour, recipient/day,
+instance/hour and organization/day budgets using database time, and commits a
+`dispatching` reservation before HTTP. Failed and uncertain attempts consume budget.
+Provider 429 responses move to `rate_limited`, release local budgets, and store a bounded
+`retry_not_before` time (1–3600 seconds; missing/invalid Retry-After defaults to 60).
+Only those known non-sends may reserve again after that time, under the same fence,
+after checking the fingerprint and all budgets; this resets `created_at` to the database
+time of the new reservation for budget and retention accounting. A crash before dispatch
+can lose a message; a crash after dispatch cannot cause its retry to send twice.
+
+Rows contain only a purpose-keyed HMAC of the normalized destination, a last-two-digit
+mask, organization ID, a keyed request fingerprint, provider message ID, status and
+timestamps. Neither the body, full phone number nor Twilio credentials are persisted.
+Request fingerprints bind destination, body and organization so changed retries fail.
+Keep SMS_HASH_KEY stable and backed up: rotation changes job-key hashes and therefore
+defeats deduplication, as well as resetting recipient accounting. Key rotation requires
+a separate data/key migration.
+Organization IDs deliberately have no cascading foreign key: organization deletion
+must never reopen a consumed job key.
+
+After 720 elapsed hours (30 days) from the latest reserved attempt, hourly maintenance
+(registered even when SMS is disabled) and opportunistic maintenance erase all delivery
+details in batches of at most 1,000.
+Only the job-key digest, timestamps and `expired` status remain indefinitely. These
+small tombstones prevent old job retries from sending after detail retention ends.
+A stopped worker delays cleanup; resume it to process the backlog. A retained accepted
+record can return its provider ID on retry; failed records return `sms_provider_rejected`,
+while dispatching, unknown and expired records return `sms_delivery_unknown`. A rate-limited
+record returns `sms_rate_limited` and the remaining delay before its retry-not-before time.
+Status callbacks and final delivery receipts are deferred, so
+`accepted` means Twilio accepted the request, not that a handset received it.
+
+## Audit events
+
+`audit_events` is the append-only management journal available to every instance.
+See [Audit event journal](audit-log.md) for fields, actions, privacy, transaction
+boundaries, indexes and future retention. Events are recorded but not yet viewable.
