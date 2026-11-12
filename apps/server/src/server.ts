@@ -167,6 +167,7 @@ export function productRoutes({
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
+  bookingExportMaxConcurrent,
   hostedSignupUrl,
   privacyPolicyUrl,
   termsUrl,
@@ -190,6 +191,7 @@ export function productRoutes({
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
+  bookingExportMaxConcurrent?: number | undefined
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -282,6 +284,7 @@ export function productRoutes({
       automaticMeet,
       automaticZoom,
       bookingMaxInviteeReschedules,
+      bookingExportMaxConcurrent,
     }),
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
@@ -450,6 +453,7 @@ export function productionAppOptions({
       slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
       successRedirectPolicy,
       bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
+      bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
       hostedSignupUrl: config.HOSTED_SIGNUP_URL,
       privacyPolicyUrl: config.PRIVACY_POLICY_URL,
       termsUrl: config.TERMS_URL,

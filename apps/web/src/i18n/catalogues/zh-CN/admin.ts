@@ -146,6 +146,8 @@ export const admin = {
   'Include UTF-8 BOM for Excel': '包含 UTF-8 BOM，便于 Excel 读取',
   'Could not download CSV. Check the booking range and try again shortly.':
     '无法下载 CSV。请检查预约时间范围，稍后重试。',
+  'An export is already running for your account. Wait for it to finish and try again.':
+    '你的账户已有导出正在进行。请等待导出完成后重试。',
   'Download CSV': '下载 CSV',
 
   'Past date overrides ({0})': '过去的特定日期安排（{0}）',
