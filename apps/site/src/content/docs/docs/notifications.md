@@ -56,6 +56,10 @@ exclude import-connected records before applying their page limit so ordinary wo
 continue behind stale imported intents. See the
 [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md).
 
+No-show marks are private attendance metadata. They send no email and do not reschedule,
+suppress or recreate reminders or follow-ups. Existing follow-up eligibility still uses
+the scheduled end, regardless of attendance. See [marking no-shows](/docs/no-shows).
+
 ## Configure reminders and follow-ups
 
 For host steps in the event-type editor, see
@@ -1012,3 +1016,10 @@ see [proxy behavior](/docs/self-hosting#proxy-behavior-and-an-existing-proxy).
 Public joining, host administration, REST/MCP/CLI operations, mail-link confirmations and
 optional public-booking attribution are available. See [booking waitlists](/docs/booking-waitlist)
 for setup, SMTP requirements, capacity errors and the complete lifecycle.
+
+## SMS foundation
+
+An optional [operator-configured Twilio provider](/docs/sms-provider) supplies internal
+SMS sending with durable per-number, instance and organization limits. Costs are billed
+to your Twilio account. There are no user-facing SMS reminders or workflow actions yet;
+no SMS sending jobs or status callback endpoint are enabled by configuration.

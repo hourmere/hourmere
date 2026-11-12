@@ -270,7 +270,16 @@ export function buildPreview(
       sourceFingerprint,
       kind,
       id,
-      payload,
+      // Preserve hashes written before optional weekly/monthly proposals existed.
+      payload:
+        kind === 'event_type'
+          ? Object.fromEntries(
+              Object.entries(payload as Record<string, unknown>).filter(
+                ([key, value]) =>
+                  !(['maxBookingsPerWeek', 'maxBookingsPerMonth'].includes(key) && value == null),
+              ),
+            )
+          : payload,
       decisions: options.bookingDecisions,
       resolutions: options.resolutions ?? {},
     })
@@ -420,6 +429,18 @@ export function buildPreview(
     const user = plan.users.find((u) => u.sourceId === b.userId)
     if (!user || b.status !== 'accepted' || !validInstant(b.startTime) || !validInstant(b.endTime))
       continue
+    for (const slot of state.groupOccupancy) {
+      if (
+        slot.user_id === user.targetUserId &&
+        Date.parse(b.startTime as string) < Date.parse(slot.end_at) &&
+        Date.parse(b.endTime as string) > Date.parse(slot.start_at)
+      )
+        impacts.push({
+          code: 'target_overlap',
+          sourceBookingId: b.id as number,
+          relatedId: slot.group_slot_id,
+        })
+    }
     for (const t of state.bookings) {
       if (
         t.status === 'cancelled' ||
@@ -464,6 +485,16 @@ export function buildPreview(
     const start = Date.parse(b.start),
       end = Date.parse(b.end)
     const related = [
+      ...state.groupOccupancy
+        .filter((slot) => slot.user_id === b.targetUserId)
+        .map((slot) => ({
+          id: slot.group_slot_id,
+          start: slot.start_at,
+          end: slot.end_at,
+          before: slot.buffer_before_minutes,
+          after: slot.buffer_after_minutes,
+          sameEvent: false,
+        })),
       ...state.bookings
         .filter(
           (t) =>
@@ -526,6 +557,26 @@ export function buildPreview(
       count: daily,
       ...(event.maxBookingsPerDay != null ? { limit: event.maxBookingsPerDay } : {}),
     })
+    const localDate = (value: string) =>
+      Temporal.Instant.from(value).toZonedDateTimeISO(zone).toPlainDate()
+    const week = (value: string) => {
+      const date = localDate(value)
+      return date.subtract({ days: date.dayOfWeek - 1 }).toString()
+    }
+    const month = (value: string) => localDate(value).with({ day: 1 }).toString()
+    for (const [period, key, limit] of [
+      ['weekly', week, event.maxBookingsPerWeek],
+      ['monthly', month, event.maxBookingsPerMonth],
+    ] as const) {
+      const count = 1 + related.filter((r) => r.sameEvent && key(r.start) === key(b.start)).length
+      impacts.push({
+        code: limit != null && count > limit ? `${period}_limit_exceeded` : `${period}_count`,
+        sourceBookingId: b.sourceId,
+        relatedId: b.eventSourceId,
+        count,
+        ...(limit != null ? { limit } : {}),
+      })
+    }
     impacts.push({
       code: 'historical_time_preserved_review_schedule',
       sourceBookingId: b.sourceId,

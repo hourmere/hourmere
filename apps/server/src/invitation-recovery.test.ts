@@ -9,6 +9,7 @@ import {
   TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { deliverInvitationEmail } from '@hourmere/notifications'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
@@ -550,9 +551,11 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
     const javascript = stripTypeScriptTypes(
       source.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
     ).replace(/\bexport /g, '')
-    return new Function('TeamManagementError', `${javascript}; return cancelTeamInvitation`)(
-      TeamManagementError,
-    ) as typeof cancelTeamInvitation
+    return new Function(
+      'TeamManagementError',
+      'writeAuditEvent',
+      `${javascript}; return cancelTeamInvitation`,
+    )(TeamManagementError, writeAuditEvent) as typeof cancelTeamInvitation
   }
   it('keeps a joined membership through the unchanged cancellation source copy', () =>
     verifyJoinedMember(cancellationCopy()))

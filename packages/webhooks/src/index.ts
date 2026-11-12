@@ -5,6 +5,7 @@ export {
   WebhookDeliveryPayload,
   type WebhookDeps,
   type WebhookQueue,
+  webhookAttendeeNoShowNotifier,
   webhookBookingNotifier,
   webhookCleanupJob,
   webhookDeliveryJob,
@@ -27,4 +28,15 @@ export {
   WebhookUpdateInput,
   type WebhookView,
 } from './service.ts'
+export {
+  createSlackDestination,
+  deleteSlackDestination,
+  listSlackDestinations,
+  SlackCreateInput,
+  type SlackDestinationView,
+  SlackUpdateInput,
+  testSlackDestination,
+  updateSlackDestination,
+} from './slack.ts'
+export { SLACK_EVENTS } from './slack-format.ts'
 export { isPublicAddress, sendWebhook, type WebhookTransport, webhookUrl } from './transport.ts'

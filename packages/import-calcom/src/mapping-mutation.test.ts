@@ -72,7 +72,12 @@ eventsMutation(
   '(() => {})({',
   { length: 0 },
   {},
-  noEvent,
+  ({ events, problems }) => {
+    noEvent({ events })
+    // Limit validation may also reject the event; the duration validator must
+    // still report its specific diagnostic rather than being masked by it.
+    expect(has(problems, 'event_duration_rules')).toBe(true)
+  },
 )
 eventsMutation(
   'schedule precedence',

@@ -13,6 +13,7 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import * as openapi from '../openapi.ts'
 import * as rateLimits from '../rate-limit.ts'
+import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import * as management from '../team-management.ts'
 import * as bookings from './bookings.ts'
 import * as publicPage from './public.ts'
@@ -38,6 +39,7 @@ function routeCopy<T>(file: 'public' | 'bookings', returned: string, change?: Ch
     source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '').replace(/^export \{[^\n]+\}\n/gm, ''),
   ).replace(/\bexport /g, '')
   const bindings = {
+    publicBookingAuditOrigin,
     createRoute,
     z,
     ...calendars,
