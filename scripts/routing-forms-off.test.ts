@@ -94,7 +94,7 @@ const STORAGE_LAYER =
 // A table name as a whole identifier, in any case (PostgreSQL folds unquoted identifiers):
 // `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
-  /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
+  /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_form_operations|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
 // Step a3's configuration and publication services, which no production entry point loads yet.
 const CONFIGURATION_SERVICES = ['packages/scheduling/src/routing-form-service.ts']
 // Step a4's target invalidation and retention, loaded by event-type updates and deletion,
@@ -578,6 +578,7 @@ describe('routing forms are storage only', () => {
     for (const source of [
       "selectFrom('booking_routing')",
       'DELETE FROM "routing_receipts"',
+      "insertInto('routing_form_operations')",
       'SELECT 1 FROM ROUTING_RECEIPTS',
       'from Routing_Forms',
       "import './routing-storage-limits.ts'",

@@ -1364,9 +1364,9 @@ describe.skipIf(!serverUrl)('routing form configuration services', () => {
         [
           `        const form = await findForm(trx, organizationId, id, true)
         assertRevision(form, expected)
-        const current = storedDraft(form.draft)`,
+        const draft = DRAFT_FIELDS.some(`,
           `        const form = await findForm(trx, organizationId, id, true)
-        const current = storedDraft(form.draft)`,
+        const draft = DRAFT_FIELDS.some(`,
         ],
       ],
       scenario: staleSaveIsRejected,
