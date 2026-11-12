@@ -762,6 +762,12 @@ describe('routing evaluation', () => {
     ]
     expect(evaluate(rules, base).ruleId).toBe('fallback')
     expect(evaluate(rules, { ...base, [Q.region]: O.apac }).ruleId).toBe(R.first)
+    // An earlier condition that fails blocks the rule even when the last one holds.
+    const lastHolds = [
+      { id: R.first, conditions: [regionIs(O.apac), sizeIn(O.large)], target: event(E.sales) },
+    ]
+    expect(evaluate(lastHolds, base).ruleId).toBe('fallback')
+    expect(evaluate(lastHolds, { ...base, [Q.region]: O.apac }).ruleId).toBe(R.first)
   })
 
   it('expresses OR with one_of inside a select and with adjacent rules', () => {

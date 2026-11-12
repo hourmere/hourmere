@@ -115,6 +115,19 @@ describe('routing target eligibility allowlist', () => {
     )
     expect(routingTargetProblem(ORG, teamEvent({ organizationId: OTHER_ORG }))).toBe('not_found')
     expect(routingTargetProblem(OTHER_ORG, personalEvent())).toBe('not_found')
+    // No state of a foreign event shows through: an ineligible one reports what a missing one does.
+    const missing = routingTargetProblem(ORG, undefined)
+    for (const state of [
+      { deleted: true },
+      { active: false },
+      { bookingMode: 'group' },
+      { bookingMode: 'auction' },
+      { schedulingType: 'managed' },
+      { payment: 'required' },
+      { deleted: true, active: false, bookingMode: 'group', payment: 'required' },
+    ])
+      for (const event of [personalEvent(state), teamEvent(state)])
+        expect(routingTargetProblem(ORG, { ...event, organizationId: OTHER_ORG })).toBe(missing)
   })
 
   it('requires the ownership an organization’s pages have', () => {
@@ -416,6 +429,10 @@ describe.skipIf(!serverUrl)('routing targets in stored event types', () => {
     expect(await reason(alice.organizationId, disabled)).toBe('disabled')
     expect(await reason(alice.organizationId, personalGroup)).toBe('group_booking')
     expect(await reason(team, teamGroup)).toBe('group_booking')
+    // From another organization each of them reports exactly like a missing event.
+    for (const event of [deleted, disabled, personalGroup])
+      expect(await reason(team, event)).toBe('not_found')
+    expect(await reason(alice.organizationId, teamGroup)).toBe('not_found')
   })
 
   it('fails closed on modes the schema does not allow today', async () => {
