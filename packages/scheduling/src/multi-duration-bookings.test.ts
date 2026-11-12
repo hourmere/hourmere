@@ -8,6 +8,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as availability from './availability.ts'
 import * as bookingPage from './booking-page.ts'
 import {
@@ -61,12 +62,16 @@ type ManageApi = {
   listHostBookingSlots: typeof listHostBookingSlots
 }
 
-function manageSourceCopy(change?: Change): ManageApi {
-  let source = readFileSync('packages/scheduling/src/manage.ts', 'utf8')
-  if (change) {
+function applyChanges(source: string, changes: Change[]) {
+  for (const change of changes) {
     expect(source.includes(change[0]), 'mutation must match source').toBe(true)
     source = source.replace(...change)
   }
+  return source
+}
+
+function manageSourceCopy(...changes: Change[]): ManageApi {
+  let source = applyChanges(readFileSync('packages/scheduling/src/manage.ts', 'utf8'), changes)
   source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
     /\bexport /g,
     '',
@@ -80,19 +85,17 @@ function manageSourceCopy(change?: Change): ManageApi {
     DomainError,
     ...hosts,
   }
-  return new Function(
-    ...Object.keys(bindings),
-    `${source}; return { listManagedSlots, listHostBookingSlots }`,
-  )(...Object.values(bindings)) as ManageApi
+  return guardCopy(
+    new Function(
+      ...Object.keys(bindings),
+      `${source}; return { listManagedSlots, listHostBookingSlots }`,
+    )(...Object.values(bindings)) as ManageApi,
+  )
 }
 
 /** Mutations compile an isolated source copy, leaving the working implementation intact. */
-function sourceCopy(change?: Change): Api {
-  let source = readFileSync('packages/scheduling/src/bookings.ts', 'utf8')
-  if (change) {
-    expect(source.includes(change[0]), 'mutation must match source').toBe(true)
-    source = source.replace(...change)
-  }
+function sourceCopy(...changes: Change[]): Api {
+  let source = applyChanges(readFileSync('packages/scheduling/src/bookings.ts', 'utf8'), changes)
   source = stripTypeScriptTypes(
     source
       .replace(/^import[\s\S]*?from '[^']+'\n/gm, '')
@@ -124,10 +127,27 @@ function sourceCopy(change?: Change): Api {
     cleanInviteeEmail,
     cleanText,
   }
-  return new Function(
-    ...Object.keys(bindings),
-    `${source}; return { createPublicBooking, createPublicTeamBooking, rescheduleManagedBooking, rescheduleHostBooking }`,
-  )(...Object.values(bindings)) as Api
+  return guardCopy(
+    new Function(
+      ...Object.keys(bindings),
+      `${source}; return { createPublicBooking, createPublicTeamBooking, rescheduleManagedBooking, rescheduleHostBooking }`,
+    )(...Object.values(bindings)) as Api,
+  )
+}
+
+// An unbound name on a path every verifier takes, as when a copy misses one of its bindings.
+const BROKEN_BOOKINGS: Change = [
+  'const email = cleanInviteeEmail(input.email)',
+  'const email = unboundInSourceCopy(input.email)',
+]
+const BROKEN_MANAGE: Change = [
+  'await assertBookingLocallyManaged(ctx.db, booking.id)',
+  'await unboundInSourceCopy(ctx.db, booking.id)',
+]
+const BROKEN_COPY_FAILURE = {
+  name: 'BrokenSourceCopyError',
+  message: expect.stringContaining('unboundInSourceCopy is not defined'),
+  cause: expect.any(ReferenceError),
 }
 
 describe.skipIf(!serverUrl)('multiple duration bookings', () => {
@@ -509,7 +529,7 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     await verifyManagedSnapshotCap(copy)
   })
 
-  it.each<[string, Change, (copy: ManageApi) => Promise<unknown>]>([
+  const manageControls: [string, Change, (copy: ManageApi) => Promise<unknown>][] = [
     [
       'managed duration forwarding',
       [
@@ -526,12 +546,23 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
       ],
       verifyManagedSnapshotCap,
     ],
-  ])('detects removal of %s with a real assertion failure', async (_, change, verify) => {
-    const copy = manageSourceCopy(change)
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
-  })
+  ]
 
-  it.each<[string, Change, (copy: Api) => Promise<unknown>]>([
+  it.each(manageControls)(
+    'detects removal of %s with a real assertion failure',
+    (_, change, verify) => expectKilled(manageSourceCopy(change), verify),
+  )
+
+  it.each(manageControls)(
+    'reports a broken copy for %s as a harness failure, not a kill',
+    async (_, change, verify) => {
+      await expect(
+        expectKilled(manageSourceCopy(change, BROKEN_MANAGE), verify),
+      ).rejects.toMatchObject(BROKEN_COPY_FAILURE)
+    },
+  )
+
+  const bookingControls: [string, Change, (copy: Api) => Promise<unknown>][] = [
     [
       'selected booking duration',
       ['selectDurationMinutes(current, input.durationMinutes)', 'current.durationMinutes'],
@@ -576,8 +607,19 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
       ['now,\n              durationMinutes: input.durationMinutes,', 'now,'],
       (copy) => verifyTeam(copy, 'round_robin'),
     ],
-  ])('detects removal of %s with a real assertion failure', async (_, change, verify) => {
-    const copy = sourceCopy(change)
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
-  })
+  ]
+
+  it.each(bookingControls)(
+    'detects removal of %s with a real assertion failure',
+    (_, change, verify) => expectKilled(sourceCopy(change), verify),
+  )
+
+  it.each(bookingControls)(
+    'reports a broken copy for %s as a harness failure, not a kill',
+    async (_, change, verify) => {
+      await expect(expectKilled(sourceCopy(change, BROKEN_BOOKINGS), verify)).rejects.toMatchObject(
+        BROKEN_COPY_FAILURE,
+      )
+    },
+  )
 })

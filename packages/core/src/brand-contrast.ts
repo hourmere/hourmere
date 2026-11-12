@@ -1,4 +1,4 @@
-/** WCAG 2.x sRGB relative luminance and contrast; the page background is white. */
+/** WCAG 2.x sRGB relative luminance and contrast; the reference background is white (#FFFFFF). */
 export function brandContrast(color: string) {
   const channels = [1, 3, 5].map((offset) => {
     const value = Number.parseInt(color.slice(offset, offset + 2), 16) / 255

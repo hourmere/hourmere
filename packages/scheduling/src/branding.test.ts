@@ -8,7 +8,7 @@ import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import sharp from 'sharp'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import {
   BRAND_LOGO_MAX_BYTES,
@@ -34,6 +34,12 @@ describe('logo normalization', () => {
       [Buffer.from('not an image'), 'image/png'],
       [
         await sharp({ create: { width: 2049, height: 1, channels: 3, background: 'white' } })
+          .png()
+          .toBuffer(),
+        'image/png',
+      ],
+      [
+        await sharp({ create: { width: 1, height: 2049, channels: 3, background: 'white' } })
           .png()
           .toBuffer(),
         'image/png',
@@ -207,6 +213,110 @@ describe.skipIf(!process.env.DATABASE_URL)('organization branding', () => {
       code: 'insufficient_role',
     })
   })
+  it('refuses members and demoted admins reading an existing logo and kills the role bypass', async () => {
+    const owner = await createTestUser(db),
+      admin = await createTestUser(db),
+      member = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: admin, role: 'admin' },
+      { user: member, role: 'member' },
+    ])
+    const logo = await uploadBrandLogo(testContext(db, team.as(owner)), await png(), 'image/png')
+    const hash = logo.brandLogo as string
+    expect(await getBrandLogo(testContext(db, team.as(admin)), hash)).toBeInstanceOf(Buffer)
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', admin.id)
+      .execute()
+    for (const user of [member, admin]) {
+      const verify = async (module: ReturnType<typeof serviceCopy>) => {
+        await expect(
+          module.getBrandLogo(testContext(db, team.as(user)), hash),
+        ).rejects.toMatchObject({ code: 'insufficient_role' })
+      }
+      await verify(serviceCopy())
+      await expect(
+        verify(
+          serviceCopy([
+            'export async function getBrandLogo(ctx: ServiceContext, hash: string) {\n  await authorize(ctx.db, ctx)',
+            'export async function getBrandLogo(ctx: ServiceContext, hash: string) {',
+          ]),
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await verify(serviceCopy())
+    }
+  })
+  it.each(['api_key', 'oauth'] as const)(
+    'refuses a %s member without requesting the organization lock and kills the pre-check bypass',
+    async (kind) => {
+      const member = await createTestUser(db)
+      const team = await createTestTeam(db, [{ user: member, role: 'member' }])
+      const principal = team.as(member)
+      const ctx = testContext(
+        db,
+        kind === 'api_key'
+          ? principal
+          : {
+              user: principal.user,
+              organization: principal.organization,
+              kind: 'oauth',
+              oauthConsentId: 'test-consent',
+              clientId: 'test-client',
+              scopes: ['full'],
+            },
+      )
+      const verify = async (module: ReturnType<typeof serviceCopy>) => {
+        const holder = await database.pool.connect()
+        let pending: Promise<unknown> | undefined
+        let outcome: unknown
+        try {
+          await holder.query('BEGIN')
+          // Booking FK checks hold KEY SHARE: an unauthorized FOR UPDATE must never wait here.
+          await holder.query('SELECT id FROM auth.organization WHERE id=$1 FOR KEY SHARE', [
+            team.id,
+          ])
+          const {
+            rows: [backend],
+          } = await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+          pending = module.setBranding(ctx, { brandPrimaryColor: '#112233' }).then(
+            (value) => {
+              outcome = value
+            },
+            (error: unknown) => {
+              outcome = error
+            },
+          )
+          let blocked: number[] = []
+          await vi.waitFor(
+            async () => {
+              const { rows } = await database.pool.query<{ pid: number }>(
+                `SELECT DISTINCT pid FROM pg_locks
+               WHERE NOT granted AND $1=ANY(pg_blocking_pids(pid))`,
+                [backend?.pid],
+              )
+              blocked = rows.map((row) => row.pid)
+              expect(outcome !== undefined || blocked.length > 0).toBe(true)
+            },
+            { timeout: 3000, interval: 10 },
+          )
+          expect(blocked).toEqual([])
+          expect(outcome).toMatchObject({ code: 'insufficient_role' })
+        } finally {
+          await holder.query('ROLLBACK')
+          holder.release()
+          await pending
+        }
+      }
+      await verify(serviceCopy())
+      await expect(
+        verify(serviceCopy(['      await authorize(trx, ctx)', '      void 0'])),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await verify(serviceCopy())
+    },
+  )
   it('rechecks demotion after waiting for the organization lock and kills its bypass', async () => {
     const owner = await createTestUser(db)
     const team = await createTestTeam(db, [{ user: owner, role: 'admin' }])
@@ -425,6 +535,20 @@ describe('logo source-copy mutations', () => {
           await expect(
             m.normalizeBrandLogo(
               await sharp({ create: { width: 2049, height: 1, channels: 3, background: 'white' } })
+                .png()
+                .toBuffer(),
+              'image/png',
+            ),
+          ).rejects.toMatchObject({ code: 'invalid_brand_logo' })
+        },
+      ],
+      [
+        'metadata.height > 2048',
+        'false',
+        async (m) => {
+          await expect(
+            m.normalizeBrandLogo(
+              await sharp({ create: { width: 1, height: 2049, channels: 3, background: 'white' } })
                 .png()
                 .toBuffer(),
               'image/png',

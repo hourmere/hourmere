@@ -1,10 +1,13 @@
 // SSO configuration and identity storage are tables only (docs/sso.md, Configuration storage
 // and Identity storage): migrations 0074 and 0075, the generated table types and the storage
 // test support exist, and no production module imports or queries the new tables, so no
-// route, worker or read path uses them. OIDC and SAML stay hard-off
-// (apps/server/src/sso.test.ts and sso-catalogues.test.ts). The scan is limited to the new
-// table names; it never compares whole catalogues. The first step that reads or writes this
-// storage from service code narrows it to the modules that own SSO data access.
+// route, worker or read path uses them. The one other module that names them,
+// apps/server/src/sso-storage-errors.ts, only recognises them in database errors so that the
+// error log omits their row details; it imports nothing and performs no data access. OIDC
+// and SAML stay hard-off (apps/server/src/sso.test.ts and sso-catalogues.test.ts). The scan
+// is limited to the new table names; it never compares whole catalogues. The first step that
+// reads or writes this storage from service code narrows it to the modules that own SSO data
+// access.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,11 +19,13 @@ const rootPath = fileURLToPath(root)
 // The storage layer: the migrations, the generated table types and the storage test support.
 const STORAGE_LAYER =
   /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/sso-(storage|identity)-[^/]+\.ts$)/
+// Recognises the tables in database errors for the error log; never reads or writes them.
+const ERROR_RECOGNISER = 'apps/server/src/sso-storage-errors.ts'
 // A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
 // its generated row type, or the storage test support. `sso_providers_guard` or
-// `listSsoProviders` is not one.
+// `listSsoProviders` is not one, and neither is an import of the error recogniser.
 const STORAGE_NAMES = new RegExp(
-  `sso-storage|sso-identity-|(?<![A-Za-z0-9_])(?:${[
+  `sso-storage(?!-errors\\.ts)|sso-identity-|(?<![A-Za-z0-9_])(?:${[
     // Configuration storage (0074).
     'sso_policies',
     'sso_providers',
@@ -109,6 +114,7 @@ describe('SSO configuration and identity storage are tables only', () => {
       'bindSsoDelegation',
       'sso_attempts_kind',
       'ssoDelegationLifetime',
+      "import { ssoStorageDiagnostic } from './sso-storage-errors.ts'",
     ])
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
@@ -134,8 +140,20 @@ describe('SSO configuration and identity storage are tables only', () => {
     expect(tables).toMatch(/^ {2}sso_recovery_owners: SsoRecoveryOwners;$/m)
     expect(tables).toMatch(/^ {2}sso_delegation_bindings: SsoDelegationBindings;$/m)
     const referencing = sources
-      .filter((file) => !STORAGE_LAYER.test(file))
+      .filter((file) => !STORAGE_LAYER.test(file) && file !== ERROR_RECOGNISER)
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
+  })
+
+  it('lets the error recogniser name the tables without any data access', () => {
+    expect(productionSources()).toContain(ERROR_RECOGNISER)
+    const recogniser = readFileSync(new URL(ERROR_RECOGNISER, root), 'utf8')
+    // It does name them, so the exception is needed...
+    expect(STORAGE_NAMES.test(recogniser)).toBe(true)
+    // ...but imports nothing and has no query builder, SQL, driver or database handle.
+    expect(recogniser).not.toMatch(/^\s*import\b|\bimport\(|\brequire\(/m)
+    expect(recogniser).not.toMatch(
+      /selectFrom|insertInto|updateTable|deleteFrom|\bsql\s*`|\.query\(|\bdb\.|\bpool\b/,
+    )
   })
 })

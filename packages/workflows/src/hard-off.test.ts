@@ -7,13 +7,78 @@ import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
 import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
+// The specifier production imports, not ./index.ts: what it resolves to is what runs.
+import * as workflows from '@hourmere/workflows'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { hardOffWorkflowAuditPort } from './audit.ts'
 import * as hardOff from './hard-off.ts'
-import * as workflows from './index.ts'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
+
+/**
+ * Every runtime export of `@hourmere/workflows`, sorted. An allow-list: a new export (which
+ * could wrap a guard and run its operation while off) must be added here, and so reviewed.
+ */
+const PACKAGE_EXPORTS = [
+  'PERSONAL_ONLY_CONDITION_FIELDS',
+  'WORKFLOWS_IMPLEMENTED',
+  'WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES',
+  'WORKFLOW_ANSWER_VARIABLE_PREFIX',
+  'WORKFLOW_AUDIT_EVENTS',
+  'WORKFLOW_BODY_MAX_BYTES',
+  'WORKFLOW_BOOKING_SOURCES',
+  'WORKFLOW_CONTENT_LOCALES',
+  'WORKFLOW_HISTORY_DAYS',
+  'WORKFLOW_INSTANCE_MAIL_CAP_DIVISOR',
+  'WORKFLOW_LIMITS',
+  'WORKFLOW_MAIL_MAX_PER_HOUR',
+  'WORKFLOW_MAX_ACTIONS',
+  'WORKFLOW_MAX_CONDITIONS',
+  'WORKFLOW_MAX_DEFINITIONS_PER_OWNER',
+  'WORKFLOW_MAX_ENABLED_PER_EVENT',
+  'WORKFLOW_MAX_LATE_MINUTES',
+  'WORKFLOW_MAX_OFFSET_MINUTES',
+  'WORKFLOW_MIN_TIMER_OFFSET_MINUTES',
+  'WORKFLOW_NAME_MAX_BYTES',
+  'WORKFLOW_OWNER_MAIL_MAX_PER_HOUR',
+  'WORKFLOW_RECIPIENT_CLASSES',
+  'WORKFLOW_RECIPIENT_EMAILS_PER_DAY',
+  'WORKFLOW_RECIPIENT_EMAILS_PER_HOUR',
+  'WORKFLOW_RENDERED_MAX_BYTES',
+  'WORKFLOW_SCALAR_QUESTION_TYPES',
+  'WORKFLOW_SKIP_REASONS',
+  'WORKFLOW_SUBJECT_MAX_BYTES',
+  'WORKFLOW_TEMPLATE_VARIABLES',
+  'WorkflowActionSchema',
+  'WorkflowConditionSchema',
+  'WorkflowConditionsSchema',
+  'WorkflowDefinitionSchema',
+  'WorkflowOwnerSelectorSchema',
+  'WorkflowScopeSchema',
+  'WorkflowTriggerSchema',
+  'evaluateConditions',
+  'hardOffWorkflowAuditPort',
+  'isWorkflowBooking',
+  'isWorkflowEventType',
+  'ownsEventType',
+  'ownsWebhook',
+  'parseWorkflowDefinition',
+  'requireWorkflowsImplemented',
+  'scopeSelectsEventType',
+  'templatePlaceholders',
+  'templateVariableProblem',
+  'validateWorkflowDefinition',
+  'workflowCapture',
+  'workflowDispatchWindow',
+  'workflowExecution',
+  'workflowMatches',
+  'workflowOperation',
+  'workflowOwnerSelector',
+  'workflowReferences',
+  'workflowRunTiming',
+  'workflowTimerDueAt',
+]
 
 async function disabled(run: () => Promise<unknown>) {
   const error = await run().then(
@@ -113,6 +178,19 @@ describe('workflow hard-off', () => {
     }
   })
 
+  it('reaches production through one package entry that re-exports the guards unchanged', () => {
+    // `@hourmere/workflows` has a single entry, this package's index. A new subpath or a
+    // different entry module must update this pin.
+    const manifest = JSON.parse(
+      readFileSync(join(root, 'packages/workflows/package.json'), 'utf8'),
+    ) as { exports?: unknown }
+    expect(manifest.exports).toEqual({ '.': './src/index.ts' })
+    // The constant and every guard, as production imports them, are hard-off.ts's own.
+    for (const [name, value] of Object.entries(hardOff))
+      expect((workflows as Record<string, unknown>)[name], name).toBe(value)
+    expect(Object.keys(workflows).sort()).toEqual(PACKAGE_EXPORTS)
+  })
+
   it('exports the constant and its guards only, with no way to change them', () => {
     expect(Object.keys(hardOff).sort()).toEqual([
       'WORKFLOWS_IMPLEMENTED',
@@ -169,12 +247,18 @@ describe('workflow hard-off', () => {
         try { attempt(); attempts[name] = 'allowed' } catch (error) { attempts[name] = error.name }
       }
       attempts.reflect = Reflect.set(workflows, 'WORKFLOWS_IMPLEMENTED', true)
-      let operation = 'ran'
-      try { await workflows.workflowOperation(async () => undefined)() } catch (error) { operation = error.code }
-      let ran = false
-      await workflows.workflowCapture(async () => { ran = true })()
-      await workflows.workflowExecution(async () => { ran = true })()
-      console.log(JSON.stringify({ attempts, value: workflows.WORKFLOWS_IMPLEMENTED, operation, ran }))
+      // Each wrapped function, called with no argument and with call-time arguments that a
+      // switch could read: none of them runs the inner function.
+      const calls = {}
+      for (const [label, args] of Object.entries({ none: [], true: [true], whileOff: [{ whileOff: true }] }))
+        for (const guard of ['workflowOperation', 'workflowCapture', 'workflowExecution']) {
+          let ran = false
+          const wrapped = workflows[guard](async () => { ran = true; return 'ran' })
+          let outcome
+          try { outcome = { resolved: (await wrapped(...args)) ?? null } } catch (error) { outcome = { refused: error.code ?? error.name } }
+          calls[guard + ' ' + label] = { ...outcome, ran }
+        }
+      console.log(JSON.stringify({ attempts, value: workflows.WORKFLOWS_IMPLEMENTED, calls }))
     `
     const child = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
       cwd: root,
@@ -189,11 +273,18 @@ describe('workflow hard-off', () => {
     })
     expect(child.stderr).toBe('')
     expect(child.status).toBe(0)
+    const refused = { refused: 'workflows_disabled', ran: false }
+    const skipped = { resolved: null, ran: false }
     expect(JSON.parse(child.stdout)).toEqual({
       attempts: { assign: 'TypeError', define: 'TypeError', remove: 'TypeError', reflect: false },
       value: false,
-      operation: 'workflows_disabled',
-      ran: false,
+      calls: Object.fromEntries(
+        ['none', 'true', 'whileOff'].flatMap((label) => [
+          [`workflowOperation ${label}`, refused],
+          [`workflowCapture ${label}`, skipped],
+          [`workflowExecution ${label}`, skipped],
+        ]),
+      ),
     })
   }, 60_000)
 

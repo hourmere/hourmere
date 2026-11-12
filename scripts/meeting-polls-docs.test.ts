@@ -284,6 +284,20 @@ const protections = [
     before: 'no release may let users create a poll that it cannot also close',
     after: 'a release may let users create a poll before it can close',
   },
+  {
+    name: 'a changed secret fails closed while keyed data exists',
+    pattern:
+      /If it changes while keyed data exists, the startup check and every voter operation\s+fail closed with `MeetingPollKeyMismatchError`/,
+    before: 'every voter operation\nfail closed',
+    after: 'every voter operation\nrecords the new secret',
+  },
+  {
+    name: 'a secret is recorded only without keyed data',
+    pattern:
+      /A secret is recorded only while no keyed data exists, at first use or replacing another\s+one: no voter row and no mailbox counter/,
+    before: 'A secret is recorded only while no keyed data exists',
+    after: 'A secret is recorded whenever it is configured',
+  },
 ] as const
 
 describe('meeting poll design protections', () => {
@@ -546,6 +560,16 @@ function verifyPlan(source: string) {
   expect(acceptance('B2')).toMatch(
     /CLI secrets must be read from stdin from this first step, never argv/,
   )
+  expect(acceptance('B1')).toContain(
+    'Workers take `ensureMeetingPollKey` first in each transaction, before any row lock or claim',
+  )
+  expect(acceptance('B4')).toContain(
+    'Jobs that open or mint a credential take `ensureMeetingPollKey` first in each transaction',
+  )
+  expect(acceptance('B2')).toContain(
+    'call `ensureMeetingPollKey` at server start, before any meeting-poll route serves',
+  )
+  expect(acceptance('B2')).toContain('every public operation refused under a mismatched key')
   expect(acceptance('C2b')).toContain(
     'finalize while open with a stale results revision returns `poll_changed`',
   )
@@ -638,6 +662,26 @@ describe('meeting poll day-sized implementation plan', () => {
       'creation ships with roster remedies',
       'Host create/invite/resend/remove/remove-unverified/rotate-link REST',
       'Host create/invite REST',
+    ],
+    [
+      'worker key fence',
+      'Workers take `ensureMeetingPollKey` first in each transaction, before any row lock',
+      'Workers take `ensureMeetingPollKey` in each transaction, after their claims',
+    ],
+    [
+      'reminder job key fence',
+      'Jobs that open or mint a credential take `ensureMeetingPollKey` first',
+      'Jobs that open or mint a credential',
+    ],
+    [
+      'startup key fence',
+      'call `ensureMeetingPollKey` at server start',
+      'derive the meeting-poll keys at server start',
+    ],
+    [
+      'mismatched key refusal tests',
+      'every public operation refused under a mismatched key',
+      'rotation of the secret',
     ],
     [
       'deadline mail switch',

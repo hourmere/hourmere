@@ -18,6 +18,7 @@
     "@hourmere/jobs": "*",
     "@hourmere/mail": "*",
     "@hourmere/notifications": "*",
+    "@hourmere/outbound": "*",
     "@hourmere/scheduling": "*",
     "@hourmere/webhooks": "*",
     "@modelcontextprotocol/server": "2.4.0",

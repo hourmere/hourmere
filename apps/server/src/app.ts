@@ -48,6 +48,7 @@ import {
   strictTransportSecurity,
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
+import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 import {
   successRedirectErrorField,
   successRedirectIssueField,
@@ -397,13 +398,15 @@ export function createApp({
       }`,
     )
   }
+  // A database error of the SSO storage tables keeps only its names: the row or key it
+  // repeats holds mailboxes and IdP subjects.
   const logError = (c: Context, label: string, detail: unknown) =>
     logLine(
       c,
       'ERROR',
       isSlackDestinationPath(c.req.path)
         ? '[private Slack diagnostic omitted]'
-        : `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+        : `${label}${ssoStorageDiagnostic(detail) ?? inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
     )
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
