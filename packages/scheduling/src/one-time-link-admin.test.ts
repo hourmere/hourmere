@@ -7,6 +7,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as Links from './one-time-links.ts'
 import { createFixtures, createTestTeam, createTestUser, testContext } from './testing.ts'
 
@@ -23,7 +24,9 @@ async function sourceCopy(replacement?: readonly [string, string]): Promise<Link
     (_, specifier: string) =>
       `from '${specifier.startsWith('node:') ? specifier : specifier.startsWith('.') ? new URL(specifier, location).href : pathToFileURL(createRequire(location).resolve(specifier)).href}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  )
 }
 function safeMetadata(value: unknown, token: string) {
   const serialized = JSON.stringify(value)
@@ -638,17 +641,7 @@ describe.skipIf(!serverUrl)('one-time link administration', () => {
     replacement: readonly [string, string],
     assertion: (module: LinkModule) => Promise<unknown>,
   ) {
-    const module = await sourceCopy(replacement)
-    let failure: unknown
-    try {
-      await assertion(module)
-    } catch (error) {
-      failure = error
-    }
-    expect(
-      failure instanceof Error && failure.name === 'AssertionError',
-      'mutation must fail a real assertion',
-    ).toBe(true)
+    await expectKilled(await sourceCopy(replacement), assertion)
   }
   it('mutation: durable retry marker', async () => {
     await mutation(

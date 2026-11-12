@@ -7,6 +7,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
@@ -104,7 +105,7 @@ function sourceCopy(
     resolvedBookingHosts,
     toTeamAdminBooking,
   ) as typeof readTeamBookingPage
-  return new Function(
+  const read = new Function(
     'sql',
     'z',
     'bookingPageQuery',
@@ -130,6 +131,7 @@ function sourceCopy(
     checkedCatalogPage,
     teamRead,
   ) as Read
+  return guardCopy(read)
 }
 
 describe.skipIf(!serverUrl)('member departure impact', () => {
@@ -1006,9 +1008,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
       const read = sourceCopy(mutation)
       const f = await setup()
       const { ctx, query } = await change(f)
-      await expect(expectDenied(read, ctx, query ?? input(f))).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(read, (copy) => expectDenied(copy, ctx, query ?? input(f)))
     },
   )
 
@@ -1045,9 +1045,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
               : { user: { ...ctx.principal.user, id: 'invalid' } }),
           },
         }
-      await expect(expectDenied(sourceCopy(replacement), ctx, query)).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(sourceCopy(replacement), (copy) => expectDenied(copy, ctx, query))
     },
   )
 
@@ -1282,7 +1280,7 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
     'detects a broken $name with a real assertion failure',
     async ({ service, page, team, verify }) => {
       const read = sourceCopy(service, page, team)
-      await expect(verify(read)).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(read, verify)
     },
   )
 })
