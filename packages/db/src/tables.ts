@@ -1430,6 +1430,25 @@ export interface Webhooks {
   url_ciphertext: Buffer | null;
 }
 
+export interface WorkflowDefinitions {
+  created_at: Generated<Timestamp>;
+  deleted_at: Timestamp | null;
+  enabled: Generated<boolean>;
+  id: Generated<string>;
+  organization_id: string;
+  owner_user_id: string | null;
+  revision: Generated<number>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface WorkflowRevisions {
+  created_at: Generated<Timestamp>;
+  definition: Json;
+  organization_id: string;
+  revision: number;
+  workflow_id: string;
+}
+
 export interface DB {
   audit_events: AuditEvents;
   "auth.account": AuthAccount;
@@ -1533,4 +1552,6 @@ export interface DB {
   waitlist_verification_requests: WaitlistVerificationRequests;
   webhook_deliveries: WebhookDeliveries;
   webhooks: Webhooks;
+  workflow_definitions: WorkflowDefinitions;
+  workflow_revisions: WorkflowRevisions;
 }

@@ -1,7 +1,8 @@
 # Booking workflows design
 
 Status: proposed design, not a shipped feature. Step 1 of the plan has added the pure
-definition contract in `packages/workflows` behind the hard-off constant; no migration,
+definition contract in `packages/workflows` behind the hard-off constant, and step 2 the
+definition and revision tables (migration 0076), which nothing reads or writes yet; no
 interface or interface string exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
@@ -608,9 +609,10 @@ never authorize answers, free-text title/cancellation reason, source/attribution
 reschedule-chain data, location or conference links. Recipient email addresses are used
 internally for delivery and never rendered as template variables or returned in history.
 
-Proposed tables (future migration, not added here): workflow definitions and immutable
-revisions; booking workflow snapshots; lifecycle occurrences; action runs and recipient
-intents; workflow mail reservations. Proposed columns on existing tables:
+Migration 0076 (step 2) adds workflow definitions and their immutable revisions; see
+[workflow definition storage](data-model.md#workflow-definition-storage). Proposed tables
+(future migrations, not added here): booking workflow snapshots; lifecycle occurrences; action
+runs and recipient intents; workflow mail reservations. Proposed columns on existing tables:
 `notification_email_sends.workflow_reservation_id` (step 3) and
 `webhook_deliveries.workflow_run_id` (step 14a), both nullable and without foreign keys.
 Use organization-scoped FKs and unique occurrence/

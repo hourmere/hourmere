@@ -921,11 +921,55 @@ upgrade test preserves a populated predecessor down to row versions and compares
 upgraded schemas. The operator key that seals provider configuration is configured by the
 first step that writes it.
 
+## Workflow definition storage
+
+Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
+(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Nothing reads or writes
+them yet: there is no route, worker, read path or setting, and workflows stay hard-off behind
+`WORKFLOWS_IMPLEMENTED = false`. A test keeps every production module outside the storage
+layer from naming them.
+
+- **Definitions** have an immutable ID, organization, owner and creation time. A personal
+  definition belongs to its user in that user's personal organization (`owner_user_id`); a
+  team definition (`owner_user_id` NULL) belongs to the team organization, never to the member
+  who created it, and is refused in a personal organization. `revision` is the current
+  revision, which always exists and is the latest one; it never goes back. `enabled` is the
+  live switch, false by default, and no revision carries it, so enabling and disabling change
+  only the definition row. Deleting a workflow tombstones it (`deleted_at`): a tombstone is
+  disabled, final and takes no new revision. A definition row is removed only as a tombstone
+  (a later purge), with its organization, or with its personal owner, even when the user no
+  longer has a personal organization; its revisions go with it.
+- **Revisions** are numbered 1, 2, 3… within their definition, with no gap or repeat, and
+  each new one becomes the current revision. They are never updated, and are deleted only
+  with their definition. A revision stores the definition that the contract in
+  `packages/workflows` validated: its canonical output without `enabled`. The database checks
+  mirror the contract's envelope: exactly the keys `name`, `scope`, `trigger`, `conditions`
+  and `actions`; a name of 1 to 200 UTF-8 bytes; a known scope; a known trigger with its delay
+  (0 to 43200 whole minutes) or its offset (5 to 43200 whole minutes) and nothing else; at
+  most five conditions with known fields; exactly one email or webhook action. The service
+  validates everything else through the contract before it writes, and a test binds each
+  mirrored limit and catalogue to the contract's constants and schemas.
+
+Writers lock the organization before the definition, as other organization writers do: a
+definition insert locks its organization row through its foreign key, and a new revision
+locks the organization and then its definition, so a concurrent organization deletion waits
+instead of deadlocking, and concurrent revisions of one workflow are numbered one at a time.
+
+`workflow-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0076_workflow_definitions.json`), including a lock
+check of the organization foreign key, and every check and trigger rule also has source-copy
+mutations that remove or weaken it (`packages/db/src/workflow-storage-protections.ts`), run
+against the predecessor schema. The upgrade test preserves a populated predecessor with
+configured reminders, follow-ups, booking snapshots, scheduled messages and receipts down to
+row versions, and compares fresh and upgraded schemas.
+
 ## Planned additions (each a new migration)
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
-email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget. It is
-design only: no workflow tables, migration, API or runtime enablement exist yet.
+email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
+Only its definition storage exists ([workflow definition storage](#workflow-definition-storage));
+no execution table, API or runtime enablement exists yet.
 
 | When | Change |
 |---|---|
