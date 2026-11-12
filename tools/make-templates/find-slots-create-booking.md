@@ -10,8 +10,8 @@ required `body:responses` using the existing public event-type contract.
 Use **Authentication type = No authentication** on both HTTP modules. Public
 slot lookup and booking creation need no API key; sending none is the least-privilege
 setup. Do not create or store an Hourmere API key in Make for these templates.
-A leaked `bookings` key could list, cancel and reschedule every booking in its
-organization, including exposing invitee data. It adds no capability or attribution
+A leaked `bookings` key could list, cancel and reschedule every booking you host in
+that organization, including exposing invitee data. It adds no capability or attribution
 here: these public bookings are recorded with source `web` and no API-key ID.
 
 Open **Scenario settings** (gear icon) and enable **Keep data confidential = Yes**

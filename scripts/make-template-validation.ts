@@ -1,3 +1,5 @@
+import { createHmac } from 'node:crypto'
+
 type Schema = {
   $ref?: string
   properties?: Record<string, Schema>
@@ -27,13 +29,23 @@ type Recipe = Fields & {
   title: string
   webhookEvents: string[]
   connections: { kind: string; purpose: string }[]
-  settings: { documentation: string }
+  settings: { documentation: string; apiKeyScope?: string }
 }
-/** Accepted events with the field paths of each event's real payload, and the delivery headers. */
+/**
+ * Accepted events with the field paths of each event's real payload, the delivery headers,
+ * one real delivery's signing inputs with the signature it sent, and the timestamp tolerance
+ * of Hourmere's own webhook verifier.
+ */
 export type WebhookContract = {
   events: Readonly<Record<string, readonly string[]>>
   headers: readonly string[]
+  signature: { secret: string; timestamp: string; body: string; value: string }
+  timestampToleranceSeconds: number
 }
+/** API-key requirements from the scope matrix, keyed by `METHOD /api/v1/path`. */
+export type ApiKeyOperations = Readonly<
+  Record<string, { authentication: string; allowedScopes: readonly string[] }>
+>
 
 /** Diagnostics never echo the potentially sensitive input. */
 export function validateMakeSecrets(raw: string) {
@@ -42,7 +54,9 @@ export function validateMakeSecrets(raw: string) {
   if (/\bwhsec_[A-Za-z0-9_-]+/i.test(raw)) errors.push('embedded webhook secret')
   if (/\bBearer[ \t]+(?!<YOUR_[A-Z0-9_]+>)[A-Za-z0-9_~+/.=-]+/i.test(raw))
     errors.push('embedded bearer token')
-  if (/\b(?:hook[s]?\.)[a-z0-9.-]*make\.com\//i.test(raw)) errors.push('embedded Make hook URL')
+  // Make hook hosts, with or without a scheme: current, Celonis and legacy Integromat names.
+  if (/\bhooks?\.(?:[a-z0-9-]+\.)*(?:make\.com|make\.celonis\.com|integromat\.com)\//i.test(raw))
+    errors.push('embedded Make hook URL')
   for (const match of raw.matchAll(/https?:\/\/[^\s"<>`\\)]+/gi)) {
     try {
       const url = new URL(match[0])
@@ -194,6 +208,36 @@ export function validateMakeRecipe(value: unknown, document: Document, webhooks:
   return errors
 }
 
+const signatureTables =
+  /^\| Set variable \| Value \(braces mark mapped items\) \|\n\|[- |]+\|\n((?:\|[^\n]*\|(?:\n|$))*)/gm
+/**
+ * Evaluates a Make text value: literal text plus `{{…}}` items that are variables or Make's
+ * documented `sha256(text; encoding; key; key encoding)`, which is HMAC-SHA256 given a key.
+ */
+function makeText(template: string, variables: ReadonlyMap<string, string>, calls: string[]) {
+  let text = ''
+  for (const [index, part] of template.split(/\{\{([^{}]*)\}\}/).entries()) {
+    if (index % 2 === 0) {
+      text += part
+      continue
+    }
+    const call = part.match(/^sha256\((\w+); "(hex|base64|latin1)"; (\w+); "(text|hex|base64)"\)$/)
+    const message = variables.get(call?.[1] ?? '')
+    const key = variables.get(call?.[3] ?? '')
+    const value = !call
+      ? variables.get(part)
+      : message === undefined || key === undefined
+        ? undefined
+        : createHmac('sha256', Buffer.from(key, call[4] === 'text' ? 'utf8' : (call[4] as 'hex')))
+            .update(message, 'utf8')
+            .digest(call[2] as 'hex')
+    if (value === undefined) return undefined
+    if (call) calls.push(part)
+    text += value
+  }
+  return text
+}
+
 /**
  * hourmere-fields fences declare operation and webhook event context; inline kind:field
  * markers are checked too. `recipes` maps each event to the recipe document covering it.
@@ -305,8 +349,47 @@ export function validateMakeReferences(
     if (!webhooks.headers.includes(match[1]?.toLowerCase() ?? ''))
       errors.push('unknown webhook header')
   }
+  // Lookups run after names are lowercased, so each must name a delivery header exactly.
+  for (const match of raw.matchAll(/map\([^;()]*; "value"; "name"; "([^"]*)"\)/g)) {
+    if (!webhooks.headers.includes(match[1] ?? '')) errors.push('unknown webhook header lookup')
+  }
+  // A signature table, evaluated row by row with Make's semantics, must reproduce the
+  // signature of a real delivery; any other quoted sha256 call must be one it verified.
+  const verifiedCalls = new Set<string>()
+  for (const table of raw.matchAll(signatureTables)) {
+    const variables = new Map([
+      ['timestamp', webhooks.signature.timestamp],
+      ['rawBody', webhooks.signature.body],
+      ['signingSecret', webhooks.signature.secret],
+    ])
+    const calls: string[] = []
+    let evaluated = true
+    for (const row of (table[1] ?? '').split('\n').filter(Boolean)) {
+      const [, name = '', template = ''] = row.match(/^\| `([A-Za-z]+)` \| `([^`]+)` \|$/) ?? []
+      const value = makeText(template, variables, calls)
+      if (!name || value === undefined) {
+        evaluated = false
+        break
+      }
+      variables.set(name, value)
+    }
+    if (!evaluated || variables.get('expectedSignature') !== webhooks.signature.value)
+      errors.push('wrong webhook signature formula')
+    else for (const call of calls) verifiedCalls.add(call)
+  }
+  for (const match of raw.matchAll(/sha256\([^()]*"[^()]*\)/g)) {
+    if (!verifiedCalls.has(match[0])) errors.push('unverified webhook signature formula')
+  }
+  // The timestamp condition and every stated tolerance use the verifier's value.
+  for (const match of raw.matchAll(
+    /`abs\(formatDate\(now; "X"\) - timestamp\)`[^`\n]*`(\d+)`|\b(\d+)(?:\*\*)?[ -]seconds?(?:\*\*)?(?= (?:of|from) current UTC time| tolerance)/g,
+  )) {
+    if (Number(match[1] ?? match[2]) !== webhooks.timestampToleranceSeconds)
+      errors.push('wrong timestamp tolerance')
+  }
   // Mapped text uses Make braces; uppercase names are explicit operator placeholders.
-  for (const match of raw.matchAll(/\{\{([a-z][A-Za-z0-9_.]*)\}\}/g)) {
+  // Signature tables map verification inputs, not payload fields.
+  for (const match of raw.replace(signatureTables, '').matchAll(/\{\{([a-z][A-Za-z0-9_.]*)\}\}/g)) {
     if (payloadErrors(match[1] ?? '').length) errors.push('unknown mapped payload field')
   }
   // An event table lists exactly the accepted events, the recipe covering each one (or
@@ -424,6 +507,75 @@ export function validateMakeRecipeEvents(manifestEvents: readonly string[], raw:
     manifestEvents.every((event) => declared.has(event))
     ? []
     : ['recipe events differ from manifest']
+}
+/**
+ * A documented credential must be exactly what the scope matrix requires for every listed
+ * operation: `none` means no key is needed, and a scope means `full` or that scope, no other.
+ */
+function requireScope(scope: string, ids: readonly string[], operations: ApiKeyOperations) {
+  const errors: string[] = []
+  for (const id of ids) {
+    const operation = Object.hasOwn(operations, id) ? operations[id] : undefined
+    if (!operation) errors.push('unknown scoped operation')
+    else if (
+      scope === 'none'
+        ? !['optional_key', 'public_metadata'].includes(operation.authentication)
+        : operation.authentication !== 'key' ||
+          [...new Set(operation.allowedScopes)].sort().join() !==
+            [...new Set(['full', scope])].sort().join()
+    )
+      errors.push('wrong documented API key scope')
+  }
+  return errors
+}
+// These booking operations reach only bookings the caller hosts in the key's organization
+// (listHostBookings, cancelHostBooking and rescheduleHostBooking filter on the caller's host
+// rows; apps/server/src/team-booking-host-scope.test.ts guards the listings), so a leaked
+// key's reach is stated as "every booking you host".
+const leakedKeyActions: Readonly<Record<string, string>> = {
+  list: 'GET /api/v1/bookings',
+  cancel: 'POST /api/v1/bookings/{id}/cancel',
+  reschedule: 'POST /api/v1/bookings/{id}/reschedule',
+}
+/** Credential tables and leaked-key statements in a Make document match the scope matrix. */
+export function validateMakeScopes(raw: string, operations: ApiKeyOperations) {
+  const errors: string[] = []
+  for (const table of raw.matchAll(
+    /^\| Purpose \| Hourmere operations \| Credential \|\n\|[- |]+\|\n((?:\|[^\n]*\|(?:\n|$))*)/gm,
+  )) {
+    for (const row of (table[1] ?? '').split('\n').filter(Boolean)) {
+      const [, operationCell = '', credential = ''] = row.split('|').slice(1, -1)
+      const ids = [...operationCell.matchAll(/`([A-Z]+ \/api\/v1\/[^`]+)`/g)].map((m) => m[1] ?? '')
+      const scope = credential.includes('**No authentication**')
+        ? 'none'
+        : credential.match(/\(`(full|read|bookings)`\)/)?.[1]
+      if (ids.length > 0 !== Boolean(scope)) errors.push('unbound API key scope')
+      else if (scope) errors.push(...requireScope(scope, ids, operations))
+    }
+  }
+  for (const match of raw.matchAll(
+    /A leaked `([a-z]+)` key\s+could\s+((?:[a-z]+(?:,\s+|\s+and\s+))*[a-z]+)\s+every\s+booking\b(\s+you\s+host\b)?/g,
+  )) {
+    if (!match[3]) errors.push('overstated leaked key reach')
+    for (const action of (match[2] ?? '').split(/,\s+|\s+and\s+/)) {
+      const id = Object.hasOwn(leakedKeyActions, action) ? leakedKeyActions[action] : undefined
+      const operation = id && Object.hasOwn(operations, id) ? operations[id] : undefined
+      if (operation?.authentication !== 'key' || !operation.allowedScopes.includes(match[1] ?? ''))
+        errors.push('unsupported leaked key action')
+    }
+  }
+  return errors
+}
+/** A manifest's `settings.apiKeyScope` must match the scope matrix for each of its requests. */
+export function validateMakeRecipeScope(value: unknown, operations: ApiKeyOperations) {
+  const recipe = value as Recipe
+  const scope = recipe?.settings?.apiKeyScope?.match(/^(none|full|read|bookings)\b/)?.[1]
+  if (!scope || !Array.isArray(recipe.requests)) return ['unbound API key scope']
+  return requireScope(
+    scope,
+    recipe.requests.map((request) => `${request.method} ${request.path}`),
+    operations,
+  )
 }
 export function validateMakeInventory(names: string[]) {
   const required = [
