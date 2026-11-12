@@ -10,7 +10,9 @@ The query parser step adds the shared filter, projection and pagination parser t
 will use; it adds no endpoint, and production imports none of it. The User reads step adds
 `GET /Users` and `GET /Users/{id}` handlers under the same resource test flag, and the User
 creation step adds `POST /Users` under it, with pending claims and invitations through the
-existing invitation service; production registers none of them either.
+existing invitation service; production registers none of them either. The claim completion
+step completes a claim when its invitation is accepted, through a dependency that only test
+harnesses pass to `createAuth`; production acceptance completes none.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -164,8 +166,8 @@ that another administrator's, a legacy, a duplicated or a departed inviter's pen
 invitation holds, or whose pending invitation another entry's claim already holds, gets the
 same entry and a pending
 claim without an invitation, nothing is sent, and the answer is the same 201 as any other
-create; claim completion proves the person's own account and links it. Only a duplicate
-live identity of the connection gets 409. Exhausted admission limits get 429 with
+create; the SSO linking completion step proves the person's own account and links it. Only
+a duplicate live identity of the connection gets 409. Exhausted admission limits get 429 with
 `Retry-After`. Sign-up
 policy is decided from the instance settings alone: a restricted instance (`SIGNUP` set to
 `closed` or `first-user`) refuses a work address whose domain is not in
@@ -173,7 +175,37 @@ policy is decided from the instance settings alone: a restricted instance (`SIGN
 or session is created, no address is marked verified and nothing is linked: admission waits
 for the claim. The entry, its claim, the invitation and the `scim_user.created` and
 `membership.invited` events commit or roll back together; the events name the provisioning
-token as their actor.
+token as their actor. When the address's pending invitation expires while the create waits for
+its delivery row, the mail budget or another administrator's invitation, admission runs once
+more from its savepoint: the expired invitation is retired and a new one issued, exactly as the
+provider's retry would get, never a claim without an invitation and so without an email.
+
+Claim completion rides on the existing acceptance of the invitation the create bound to the
+claim (`/organization/accept-invitation`); it adds no operation. The person proves the mailbox
+and their own current account exactly as acceptance requires: a signed-in account whose
+verified address is the invitation's, rechecked after the acceptance's locks. An existing
+same-email personal account accepts the same way, in its own session, and nothing else links
+it; the create's answer and the invitation are the same whether or not that account exists.
+After the organization and invitation locks, acceptance locks the claim and then its entry.
+A SCIM-issued invitation never clears an admission blocker: while a live local or SCIM
+suspension or removal names the accepting account or the proven mailbox, admission is refused
+with the acceptance's uniform 403 `TEAM_MANAGEMENT_ACCESS_DENIED` and nothing is written.
+Otherwise the native acceptance adds the ordinary member membership and, in the same
+transaction, the entry is linked to the account and that membership, the claim is marked
+completed and `scim_user.claimed` is recorded; all of it commits or rolls back together. No
+address is marked verified, and neither the account's profile, address or sign-in methods nor
+the entry's provisioned profile or timestamps change. A second or concurrent acceptance of the
+invitation is refused as before, so a claim completes once. An expired invitation admits
+nobody and completes nothing. A claim expires after 48 hours, as its invitation does, judged
+at the same instant as the invitation's expiry, and an administrator's resend can extend or
+replace that invitation: an expired claim is then never completed, while its still-valid
+invitation admits the person as an ordinary acceptance, the administrator's resend being the
+consent, and the entry stays unlinked. An account that
+another live entry of the connection already links is admitted the same way, without a second
+link. Claims without an invitation stay unlinked until the SSO linking completion step, and
+expire after 48 hours without renewal: acceptance never completes them, whichever invitation is
+accepted, and nothing links them by email. `ScimClaimCompletion` in
+`packages/auth/src/scim-claims.ts` is the extension point where that step adds its proof.
 
 No ETags or `meta.version` in the first release; advertise `etag.supported=false`.
 Reject conditional writes with 412 rather than pretend to honor If-Match. Serialize
@@ -393,9 +425,14 @@ source) against the bounded wait and its retry.
   expire after 48 hours. The `INVITATION_*` limits can be raised.
 - User creation records an existing member's address, or one that another pending
   invitation or another entry's claim already holds, as an entry with a pending claim and no
-  invitation, and sends nothing. Until the claim completion and linking step proves and links
-  those people, their entries stay unlinked. Such a claim lasts 48 hours, as an invitation
-  does.
+  invitation, and sends nothing. Those entries stay unlinked until the SSO linking completion
+  step proves and links those people; accepting an invitation never completes such a claim.
+  Such a claim lasts 48 hours, as an invitation does, and is not renewed, so most will have
+  expired by then.
+- A claim also lasts 48 hours when it has an invitation. An administrator who resends or
+  replaces that invitation gives it a new lifetime but not the claim: once the claim has
+  expired, accepting the invitation admits the person as an ordinary member and leaves the
+  entry unlinked.
 - While the admission limits are exhausted, only a create whose invitation would queue an
   email (a new invitation, or a first delivery for a legacy pending one) gets 429; one that
   reuses a pending invitation's delivery or records a claim without an invitation still gets
@@ -492,12 +529,14 @@ The [audit journal](audit-log.md) records token administration as `scim_token.cr
 `scim_token.rotated` and `scim_token.revoked`: the token ID and the session that made the
 change, never the name, secret or digest. User creation records `scim_user.created` on the
 new resource ID, with the provisioning token as actor (`scim_token`, credential `none`) and
-empty details; the invitation it issues records `membership.invited` the same way. Token
-foundation must never claim full audit coverage. SCIM action names follow the journal's
+empty details; the invitation it issues records `membership.invited` the same way. Claim
+completion records `scim_user.claimed` on the resource ID with empty details, attributed to the
+accepting person's session like the `membership.accepted` event beside it, in the acceptance
+transaction. Token foundation must never claim full audit coverage. SCIM action names follow the journal's
 one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
 check allows exactly one dot. Required future actions:
 `scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
-aggregation); `scim_user.updated`, `scim_user.claimed`, `scim_user.deactivated`,
+aggregation); `scim_user.updated`, `scim_user.deactivated`,
 `scim_user.reactivated`, `scim_user.deleted`; `scim_group.created`, `scim_group.updated`,
 `scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
 `scim_mapping.linked`, `scim_mapping.unlinked`; `scim_user.conflicted`;
@@ -564,8 +603,9 @@ operator-accessible.
 | Query parser | Discovery representations | Shared filter/projection/pagination parser; no new endpoint/tool/command | Resource test flag only | Bounded quoted equality and escaped strings, projections, count/startIndex edge cases, SCIM errors |
 | User reads | Query parser | GET Users and Users/{id}; no MCP/CLI | Resource test flag only | Filtered/unfiltered pagination, inactive entries, scoped not-found, no personal-account enumeration |
 | User creation and claim intent | User reads; audit log PR #246 | POST Users; existing invitation issuance service; no MCP/CLI | Resource test flag only; no automatic admission | Duplicate/replay race, deduplicated notification, signup policy, pending claim, audit atomicity, no verified-email mutation |
-| Claim completion and admission | User creation and claim intent; SSO design PR #247 and accepted linking implementation | Existing invitation acceptance and SSO linking completion; no new operation/tool/command | Resource test flag only | Own-account/mailbox proof, same-email conflict, expired invitation, local/SCIM tombstones, claim replay |
-| User profile replacement | Claim completion and admission | PUT Users/{id}; no MCP/CLI | Resource test flag only | Okta replacement fixtures, server-owned fields protected, no global profile/email takeover |
+| Claim completion through invitation acceptance | User creation and claim intent | Existing invitation acceptance; no new operation/tool/command | Resource test flag only | Mailbox and own-account proof through acceptance, same-email account without disclosure, expired invitation, expired claim with a resent invitation, local/SCIM tombstones, claim replay, claims without an invitation untouched |
+| Claim completion through SSO linking | Claim completion through invitation acceptance; SSO design PR #247 and accepted linking implementation | SSO linking completion; no new operation/tool/command | Resource test flag only | Own-account proof through the accepted linking flow, claims without an invitation and their 48-hour expiry, same-email conflict, local/SCIM tombstones, claim replay |
+| User profile replacement | Claim completion through invitation acceptance | PUT Users/{id}; no MCP/CLI | Resource test flag only | Okta replacement fixtures, server-owned fields protected, no global profile/email takeover |
 | User PATCH normalization | User profile replacement | PATCH Users/{id} profile operations; active changes refused; no MCP/CLI | Resource test flag only | Ordered atomic patch, Entra forms, invalid-path rollback, bounded input, mutation assertions |
 | Suspension checks on authorization | User PATCH normalization; SSO design PR #247 and accepted linking implementation | Shared REST/MCP/native membership authorization; no new interface | Resource test flag only | Every credential/cached proof refuses suspended team, personal/other-team preservation, native selection and JIT cannot bypass |
 | Session authorization revocation | Suspension checks on authorization | Shared session and team-proof revocation; no new interface | Resource test flag only | Active-team sessions revoked, other sessions cannot reselect suspended team, transaction/lock races, bounded pools |
@@ -585,6 +625,11 @@ operator-accessible.
 | Local Keycloak harness | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
 | Local lifecycle acceptance | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
 | Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
+
+The design does not yet say how claims without an invitation are proven and linked: an existing
+member's address, and addresses held by another administrator's, a duplicate, a stale-role or a
+departed inviter's invitation or by another entry's claim. The SSO linking completion row
+settles that, with their 48-hour expiry, before it is built.
 
 Mapping administration is ordinary product configuration, not credential minting, so it
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional

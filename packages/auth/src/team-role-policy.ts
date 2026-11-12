@@ -13,6 +13,7 @@ import {
 } from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid, personalOwner } from './organizations.ts'
+import type { ScimClaimCompletion, ScimClaimFinish } from './scim-claims.ts'
 import {
   checkTeamManagementAccess,
   checkTeamManagementMembership,
@@ -136,6 +137,7 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
  * this policy's locks and writes join it, including administrative member removal.
  * Creation and acceptance add an enclosing native transaction. Policy writes without a
  * native transaction use their own short transaction; invitation admission/delivery is separate.
+ * SCIM claim completion joins acceptance only when a test harness passes `scimClaims`.
  */
 export function createTeamRolePolicy(
   db: Db,
@@ -144,9 +146,12 @@ export function createTeamRolePolicy(
     teamId: string,
     expectedOrganizationId: string,
   ) => Promise<{ organizationId: string }>,
+  scimClaims?: ScimClaimCompletion,
 ) {
   const requests = new AsyncLocalStorage<{ ctx?: AuthMiddlewareContext }>()
   const transactions = new AsyncLocalStorage<Transaction<Database>>()
+  // A claim the acceptance decided to complete, finished once its member row exists.
+  const claimFinishes = new WeakMap<Transaction<Database>, ScimClaimFinish>()
 
   function operationContext() {
     const current = requests.getStore()?.ctx
@@ -294,11 +299,14 @@ export function createTeamRolePolicy(
       throw teamRoleDenied()
     }
     // Check wall time after every lock wait, on the database clock rather than the
-    // process clock or transaction start time.
-    const validity = await trx
-      .selectNoFrom(sql<boolean>`${stored.expiresAt}::timestamptz > clock_timestamp()`.as('active'))
-      .executeTakeFirstOrThrow()
-    if (!validity.active) throw teamRoleDenied()
+    // process clock or transaction start time. A SCIM claim's expiry is checked at the
+    // same instant, so the invitation and its claim never disagree about it.
+    const validity = (
+      await sql<{ active: boolean; now: string }>`SELECT
+        ${stored.expiresAt}::timestamptz > clock.at AS active, clock.at::text AS now
+        FROM (SELECT clock_timestamp() AS at) AS clock`.execute(trx)
+    ).rows[0]
+    if (!validity?.active) throw teamRoleDenied()
     const personal = await trx
       .selectFrom('personal_organizations')
       .select('organization_id')
@@ -339,6 +347,22 @@ export function createTeamRolePolicy(
         code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED',
         message: 'Organization membership limit reached',
       })
+    }
+    // A SCIM-issued invitation's claim, after the organization and invitation locks: a live
+    // admission blocker refuses, and a completable claim is finished with the member row.
+    const claim = await scimClaims?.invitation(trx, {
+      organizationId: organization.id,
+      invitationId: stored.id,
+      userId: actor.user.id,
+      mailbox: user.email.trim().toLowerCase(),
+      checkedAt: validity.now,
+      audit: auditActor(actor),
+    })
+    if (claim?.refused) throw teamRoleDenied()
+    if (claim?.finish) {
+      // The link commits with the native member and session writes, or not at all.
+      if (transactions.getStore() !== trx) throw teamRoleDenied()
+      claimFinishes.set(trx, claim.finish)
     }
     return stored
   }
@@ -455,6 +479,19 @@ export function createTeamRolePolicy(
             })
             return created as never
           })
+        }
+        if (ctx?.path === accept && request.model === 'member') {
+          const trx = transactions.getStore()
+          const finish = trx && claimFinishes.get(trx)
+          if (trx && finish) {
+            claimFinishes.delete(trx)
+            const member = await create<
+              Record<string, unknown>,
+              { id: string; userId: string; organizationId: string }
+            >(request)
+            await finish(trx, member)
+            return member as never
+          }
         }
         return create(request)
       }
