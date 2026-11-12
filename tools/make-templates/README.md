@@ -147,17 +147,33 @@ pass-through byte fidelity before activating real deliveries; adapt the iterator
 mapping if its output uses different keys. Preserve the original body and method
 outputs across aggregation. Do not lowercase the JSON body or header values.
 
-Use **Tools > Set variable** named `expectedSignature`. In the value mapper enter
-literal `v1=` followed by `sha256(message; "hex"; signingSecret; "text")`.
-Here `message` is the extracted timestamp, a literal dot, then the untouched
-pass-through JSON text; `signingSecret` is the mapped Data store field, including
-its prefix, as UTF-8 text without base64 decoding. Do not parse/re-encode, trim,
-or normalize the body before hashing.
+Then add two **Tools > Set variable** modules, in this order, with these values.
+Enter the literal text as shown; braces mark mapped items. `timestamp` is the
+Timestamp lookup above, `rawBody` is the untouched pass-through JSON text and
+`signingSecret` is the mapped Data store field, including its prefix, as UTF-8 text
+without base64 decoding. Do not parse/re-encode, trim, or normalize the body before
+hashing.
 
-Add a router before JSON parsing. Its valid route has a filter: request method equals `POST`; timestamp consists
-only of Unix-second digits and lies within 300 seconds of current UTC time;
-signature matches `v1=` plus 64 lowercase hex characters and equals the computed
-value; both delivery and event ID headers are present. Missing inputs must reject.
+| Set variable | Value (braces mark mapped items) |
+| --- | --- |
+| `message` | `{{timestamp}}.{{rawBody}}` |
+| `expectedSignature` | `v1={{sha256(message; "hex"; signingSecret; "text")}}` |
+
+Add a router before JSON parsing. Its valid route has a filter: request method
+equals `POST`; signature matches `v1=` plus 64 lowercase hex characters and equals
+`expectedSignature`; both delivery and event ID headers are present; and the
+timestamp meets both conditions below. Missing inputs must reject.
+
+| Timestamp condition | Make filter condition |
+| --- | --- |
+| Unix-second digits only | `timestamp` **Text operators: Matches pattern** `^[0-9]{1,12}$` |
+| Within 300 seconds of current UTC time | `abs(formatDate(now; "X") - timestamp)` **Numeric operators: Less than or equal to** `300` |
+
+`formatDate(now; "X")` is the current Unix time in seconds; never compare the header
+with milliseconds or a formatted date. These conditions have not been live-tested:
+before activation, check in a test scenario that a fixed old value such as
+`1700000000` fails the second condition.
+
 Make the router's fallback rejection route end in **Webhooks > Webhook response**,
 **Status = 401**, **Body = Rejected**. Never route rejection to Sheets or Slack.
 Configure response modules on the other terminal routes too: a successfully

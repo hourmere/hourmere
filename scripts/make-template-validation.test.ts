@@ -1,5 +1,7 @@
+import { createHmac } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import type { Db } from '@hourmere/db'
 import {
   deliverWebhook,
@@ -17,12 +19,26 @@ import {
 } from 'kysely'
 import { describe, expect, it } from 'vitest'
 import { openApiDocument } from '../apps/server/src/openapi-document.ts'
+import { API_KEY_REST_OPERATIONS } from '../packages/auth/src/api-key-operations.ts'
 import { encryptWebhookSecret, newWebhookSecret } from '../packages/webhooks/src/crypto.ts'
 import * as validator from './make-template-validation.ts'
 
 const directory = new URL('../tools/make-templates/', import.meta.url)
 const names = readdirSync(directory)
 const source = readFileSync(new URL('./make-template-validation.ts', import.meta.url), 'utf8')
+// The documented timestamp tolerance is the one Hourmere's own webhook verifier enforces. The
+// n8n package keeps its dependency graph out of root installs, so its module is loaded by path
+// rather than through a typed import that would need n8n's types.
+const n8nVerifier = fileURLToPath(
+  new URL('../tools/n8n-nodes-hourmere/nodes/HourmereTrigger/signature.ts', import.meta.url),
+)
+const { TIMESTAMP_TOLERANCE_SECONDS } = (await import(n8nVerifier)) as {
+  TIMESTAMP_TOLERANCE_SECONDS: number
+}
+// Documented credentials are checked against the scope matrix the REST layer enforces.
+const operations: validator.ApiKeyOperations = Object.fromEntries(
+  API_KEY_REST_OPERATIONS.map((operation) => [operation.id, operation]),
+)
 
 // Payload fields come from running the production notifiers and delivery job, not from a
 // second schema or from parsing their source. Only the database driver is replaced: every
@@ -230,10 +246,12 @@ for (const [change, status, timings, notify] of changes)
             payload: delivery.payload,
           })
         }
-// Headers come from one real delivery attempt through a capturing transport.
-async function deliveryHeaders(eventType: string, payload: string) {
+// Headers, body and signature come from one real delivery attempt through a capturing
+// transport, signed with a known secret.
+async function deliverySample(eventType: string, payload: string) {
   const encryptionKey = Buffer.alloc(32, 7).toString('base64')
-  let sent: Readonly<Record<string, string>> | undefined
+  const secret = newWebhookSecret()
+  let sent: { headers: Readonly<Record<string, string>>; body: string } | undefined
   const db = syntheticDb(({ sql }) => {
     if (
       /^select "webhook_id", "destination_kind" from "webhook_deliveries" inner join "webhooks" on "webhooks"\."id" = "webhook_deliveries"\."webhook_id" where "webhook_deliveries"\."id" = \$1$/.test(
@@ -252,7 +270,7 @@ async function deliveryHeaders(eventType: string, payload: string) {
           is_active: true,
           events: [eventType],
           secret_ciphertext: encryptWebhookSecret(
-            newWebhookSecret(),
+            secret,
             encryptionKey,
             ids.endpoint,
             ids.organization,
@@ -282,8 +300,8 @@ async function deliveryHeaders(eventType: string, payload: string) {
       enabled: true,
       encryptionKey,
       now: () => now,
-      transport: async ({ headers }) => {
-        sent = headers
+      transport: async ({ headers, body }) => {
+        sent = { headers, body }
         return 204
       },
     },
@@ -291,8 +309,23 @@ async function deliveryHeaders(eventType: string, payload: string) {
     new AbortController().signal,
   )
   if (!sent) throw new Error('Webhook delivery sent no request; update the Make derivation')
-  return Object.keys(sent).map((name) => name.toLowerCase())
+  const headers = new Map(
+    Object.entries(sent.headers).map(([name, value]) => [name.toLowerCase(), value]),
+  )
+  return {
+    headers: [...headers.keys()],
+    signature: {
+      secret,
+      timestamp: headers.get('webhook-timestamp') ?? '',
+      body: sent.body,
+      value: headers.get('webhook-signature') ?? '',
+    },
+  }
 }
+const sample = await deliverySample(
+  'booking.created',
+  captured['booking.created']?.[0]?.payload ?? '{}',
+)
 // A recipe may rely only on fields an event sends in every captured state; a test below
 // also requires every state of an event to send the same fields.
 const webhooks: validator.WebhookContract = {
@@ -305,10 +338,9 @@ const webhooks: validator.WebhookContract = {
       ),
     ]),
   ),
-  headers: await deliveryHeaders(
-    'booking.created',
-    captured['booking.created']?.[0]?.payload ?? '{}',
-  ),
+  headers: sample.headers,
+  signature: sample.signature,
+  timestampToleranceSeconds: TIMESTAMP_TOLERANCE_SECONDS,
 }
 // Each Make recipe document covers the events its manifest subscribes to.
 const recipes: Record<string, string> = Object.fromEntries(
@@ -375,6 +407,9 @@ const secretCases = [
   ['Bearer synthetic_not_real', 'embedded bearer token'],
   ['https://hook.us1.make.com/synthetic', 'embedded Make hook URL'],
   ['hook.us1.make.com/synthetic', 'embedded Make hook URL'],
+  ['hook.eu1.make.celonis.com/synthetic', 'embedded Make hook URL'],
+  ['hook.integromat.com/synthetic', 'embedded Make hook URL'],
+  ['hook.eu2.integromat.com/synthetic', 'embedded Make hook URL'],
   ['https://user:synthetic@example.com/', 'non-placeholder URL'],
   ['https://example.com.attacker.test/', 'non-placeholder URL'],
   ['https://[invalid', 'invalid URL'],
@@ -392,6 +427,44 @@ function eventRow(event: string, overrides: { recipe?: string; fields?: string }
 const eventTable = (rows: string[]) =>
   `| Event | Make recipe | Additional payload fields |\n| --- | --- | --- |\n${rows.join('\n')}\n`
 const allRows = WEBHOOK_EVENTS.map((event) => eventRow(event))
+// Signature tables, timestamp conditions and credential tables in the documents' formats.
+const formula = 'sha256(message; "hex"; signingSecret; "text")'
+const signatureTable = (message: string, expected: string) =>
+  `| Set variable | Value (braces mark mapped items) |\n| --- | --- |\n| \`message\` | \`${message}\` |\n| \`expectedSignature\` | \`${expected}\` |\n`
+const signed = signatureTable('{{timestamp}}.{{rawBody}}', `v1={{${formula}}}`)
+const tolerance = webhooks.timestampToleranceSeconds
+const timestampCondition = (seconds: number) =>
+  `\`abs(formatDate(now; "X") - timestamp)\` **Less than or equal to** \`${seconds}\``
+const scopeOperations: validator.ApiKeyOperations = {
+  'GET /api/v1/public/synthetic': {
+    authentication: 'optional_key',
+    allowedScopes: ['full', 'read', 'bookings'],
+  },
+  'POST /api/v1/synthetic': { authentication: 'key', allowedScopes: ['full'] },
+  'GET /api/v1/synthetic': { authentication: 'key', allowedScopes: ['full', 'read'] },
+  'GET /api/v1/bookings': { authentication: 'key', allowedScopes: ['full', 'read', 'bookings'] },
+  'POST /api/v1/bookings/{id}/cancel': {
+    authentication: 'key',
+    allowedScopes: ['full', 'bookings'],
+  },
+  'POST /api/v1/bookings/{id}/reschedule': {
+    authentication: 'key',
+    allowedScopes: ['full', 'bookings'],
+  },
+}
+const scopeTable = (rows: string[]) =>
+  `| Purpose | Hourmere operations | Credential |\n| --- | --- | --- |\n${rows.join('\n')}\n`
+const scopeRows = [
+  '| Receive events | Signed deliveries | Signing secret; no Hourmere API key |',
+  '| Public requests | `GET /api/v1/public/synthetic` | **No authentication** |',
+  '| Change | `POST /api/v1/synthetic` | **Full account access** (`full`) |',
+  '| Inspect | `GET /api/v1/synthetic` | **Read** (`read`) |',
+]
+const leaked = 'A leaked `bookings` key could list, cancel and reschedule every booking you host.'
+const scoped = (method: string, path: string, apiKeyScope?: string) => ({
+  requests: [{ method, path }],
+  settings: apiKeyScope === undefined ? {} : { apiKeyScope },
+})
 function verify(check: typeof validator) {
   expect(check.validateMakeRecipe(recipe, document, webhooks)).toEqual([])
   expect(
@@ -413,6 +486,91 @@ function verify(check: typeof validator) {
     ),
   ).toEqual([])
   expect(check.validateMakeReferences(eventTable(allRows), document, webhooks, recipes)).toEqual([])
+  // The table reproduces the real delivery's signature, and prose may repeat its call.
+  expect(
+    check.validateMakeReferences(`${signed}\nUse \`${formula}\`.`, document, webhooks),
+  ).toEqual([])
+  expect(
+    check.validateMakeReferences(
+      `${timestampCondition(tolerance)}, within ${tolerance} seconds of current UTC time; a ${tolerance}-second tolerance.`,
+      document,
+      webhooks,
+    ),
+  ).toEqual([])
+  expect(
+    check.validateMakeReferences(
+      `get(map(normalizedHeaders; "value"; "name"; "${webhooks.headers[0]}"); 1)`,
+      document,
+      webhooks,
+    ),
+  ).toEqual([])
+  // Bare hosts that are not Make hook hosts stay allowed.
+  for (const content of [
+    'webhook.example.com/hourmere',
+    'notahook.make.com/synthetic',
+    'hook.make.company.example.com/synthetic',
+    'hook.us1.make.com.example.com/synthetic',
+    'make.celonis.com/synthetic',
+    'integromat.com/synthetic',
+  ])
+    expect(check.validateMakeSecrets(content), content).toEqual([])
+  expect(check.validateMakeScopes(`${scopeTable(scopeRows)}\n${leaked}`, scopeOperations)).toEqual(
+    [],
+  )
+  expect(
+    check.validateMakeRecipeScope(
+      scoped('POST', '/api/v1/synthetic', 'full (setup only)'),
+      scopeOperations,
+    ),
+  ).toEqual([])
+  expect(
+    check.validateMakeRecipeScope(
+      scoped('GET', '/api/v1/public/synthetic', 'none; public'),
+      scopeOperations,
+    ),
+  ).toEqual([])
+  const scopeNegatives: [string, string][] = [
+    [
+      scopeTable(['| Change | `POST /api/v1/synthetic` | **Read** (`read`) |']),
+      'wrong documented API key scope',
+    ],
+    [
+      scopeTable(['| Inspect | `GET /api/v1/synthetic` | **Full account access** (`full`) |']),
+      'wrong documented API key scope',
+    ],
+    [
+      scopeTable(['| Public | `POST /api/v1/synthetic` | **No authentication** |']),
+      'wrong documented API key scope',
+    ],
+    [
+      scopeTable(['| Public | `GET /api/v1/public/synthetic` | **Read** (`read`) |']),
+      'wrong documented API key scope',
+    ],
+    [
+      scopeTable(['| Unknown | `GET /api/v1/unknown` | **Read** (`read`) |']),
+      'unknown scoped operation',
+    ],
+    [scopeTable(['| Change | `POST /api/v1/synthetic` | A setup key |']), 'unbound API key scope'],
+    [scopeTable(['| Inspect | Delivery metadata | **Read** (`read`) |']), 'unbound API key scope'],
+    [
+      'A leaked `bookings` key could list, cancel and reschedule every booking in its organization.',
+      'overstated leaked key reach',
+    ],
+    ['A leaked `read` key could cancel every booking you host.', 'unsupported leaked key action'],
+    [
+      'A leaked `bookings` key could delete every booking you host.',
+      'unsupported leaked key action',
+    ],
+  ]
+  for (const [raw, error] of scopeNegatives)
+    expect(check.validateMakeScopes(raw, scopeOperations), raw).toContain(error)
+  for (const [value, error] of [
+    [scoped('POST', '/api/v1/synthetic', 'read (setup only)'), 'wrong documented API key scope'],
+    [scoped('POST', '/api/v1/synthetic', 'none; public'), 'wrong documented API key scope'],
+    [scoped('POST', '/api/v1/unknown', 'full'), 'unknown scoped operation'],
+    [scoped('POST', '/api/v1/synthetic'), 'unbound API key scope'],
+  ] as const)
+    expect(check.validateMakeRecipeScope(value, scopeOperations)).toContain(error)
   for (const [content, error] of secretCases) {
     expect(check.validateMakeRecipe({ ...recipe, title: content }, document, webhooks)).toContain(
       error,
@@ -466,6 +624,55 @@ function verify(check: typeof validator) {
     ['booking.unknown', 'unknown inline webhook event'],
     ['`Webhook-Nonexistent`', 'unknown webhook header'],
     ['get(map(headers; "value"; "name"; "webhook-nonexistent"); 1)', 'unknown webhook header'],
+    [
+      'get(map(normalizedHeaders; "value"; "name"; "signature"); 1)',
+      'unknown webhook header lookup',
+    ],
+    [
+      `get(map(normalizedHeaders; "value"; "name"; "${webhooks.headers[0]?.toUpperCase()}"); 1)`,
+      'unknown webhook header lookup',
+    ],
+    [
+      signatureTable('{{timestamp}}.{{rawBody}}', `v1={{${formula.replace('"hex"', '"base64"')}}}`),
+      'wrong webhook signature formula',
+    ],
+    [
+      signatureTable(
+        '{{timestamp}}.{{rawBody}}',
+        `v1={{${formula.replace('"text"', '"base64"')}}}`,
+      ),
+      'wrong webhook signature formula',
+    ],
+    [
+      signatureTable('{{rawBody}}.{{timestamp}}', `v1={{${formula}}}`),
+      'wrong webhook signature formula',
+    ],
+    [
+      signatureTable('{{timestamp}}:{{rawBody}}', `v1={{${formula}}}`),
+      'wrong webhook signature formula',
+    ],
+    [
+      signatureTable('{{timestamp}}.{{rawBody}}', `v2={{${formula}}}`),
+      'wrong webhook signature formula',
+    ],
+    [
+      signatureTable('{{timestamp}}.{{body}}', `v1={{${formula}}}`),
+      'wrong webhook signature formula',
+    ],
+    [
+      signatureTable('{{timestamp}}.{{rawBody}}', `v1={{${formula.replace('sha256', 'sha1')}}}`),
+      'wrong webhook signature formula',
+    ],
+    [`${signed}| \`extra\` | not a Make value |\n`, 'wrong webhook signature formula'],
+    [`\`${formula}\``, 'unverified webhook signature formula'],
+    [
+      `${signed}\`${formula.replace('"hex"', '"base64"')}\``,
+      'unverified webhook signature formula',
+    ],
+    [timestampCondition(tolerance + 1), 'wrong timestamp tolerance'],
+    [`within ${tolerance + 1} seconds of current UTC time`, 'wrong timestamp tolerance'],
+    [`more than **${tolerance + 1} seconds** from current UTC time`, 'wrong timestamp tolerance'],
+    [`enforce ${tolerance + 1}-second tolerance`, 'wrong timestamp tolerance'],
     ['{{data.nonexistentField}}', 'unknown mapped payload field'],
     [
       `${fence({ requests: [request] })}\n\`\`\`json\n{"nonexistentField":1}\n\`\`\``,
@@ -555,14 +762,32 @@ function verify(check: typeof validator) {
   expect(check.validateMakeInventory([])).toHaveLength(3)
 }
 function sourceCopy(copy: string): typeof validator {
-  const body = stripTypeScriptTypes(copy).replace(/^export /gm, '')
+  // The validator's only import is node:crypto's createHmac, supplied to the copy directly.
+  const body = stripTypeScriptTypes(copy)
+    .replace("import { createHmac } from 'node:crypto'\n", '')
+    .replace(/^export /gm, '')
+  expect(body).not.toMatch(/^import /m)
   return new Function(
-    `${body}\nreturn { validateMakeRecipe, validateMakeReferences, validateMakeRecipeEvents, validateMakeInventory, validateMakeSecrets, validateMakeFields }`,
-  )()
+    'createHmac',
+    `${body}\nreturn { validateMakeRecipe, validateMakeReferences, validateMakeRecipeEvents, validateMakeScopes, validateMakeRecipeScope, validateMakeInventory, validateMakeSecrets, validateMakeFields }`,
+  )(createHmac)
 }
 
 const sitePage = new URL('../apps/site/src/content/docs/docs/make.md', import.meta.url)
 const tableHeader = /^\| Event \| Make recipe \| Additional payload fields \|$/m
+const signatureHeader = /^\| Set variable \| Value \(braces mark mapped items\) \|$/m
+const timestampExpression = /`abs\(formatDate\(now; "X"\) - timestamp\)`[^`\n]*`\d+`/
+const generatedDocument = async () =>
+  (await openApiDocument()) as Parameters<typeof validator.validateMakeRecipe>[1]
+const read = (name: string) => readFileSync(new URL(name, directory), 'utf8')
+const manifests = () =>
+  names
+    .filter((name) => name.endsWith('.recipe.json'))
+    .map((name) => [name, JSON.parse(read(name))] as const)
+const markdownDocuments = () => [
+  ...names.filter((name) => name.endsWith('.md')).map((name) => [name, read(name)] as const),
+  ['site make.md', readFileSync(sitePage, 'utf8')] as const,
+]
 
 describe('Make manual recipe artifacts', () => {
   it('derives every accepted webhook event from the real notifiers', () => {
@@ -597,6 +822,87 @@ describe('Make manual recipe artifacts', () => {
       const manifest = JSON.parse(readFileSync(new URL(name, directory), 'utf8'))
       const raw = readFileSync(new URL(manifest.settings.documentation, directory), 'utf8')
       expect(validator.validateMakeRecipeEvents(manifest.webhookEvents, raw), name).toEqual([])
+    }
+  })
+  it('reproduces a real delivery signature with the README and site page formula', async () => {
+    const generated = await generatedDocument()
+    const documents = [read('README.md'), readFileSync(sitePage, 'utf8')]
+    for (const raw of documents) {
+      expect(raw).toMatch(signatureHeader)
+      expect(validator.validateMakeReferences(raw, generated, webhooks, recipes)).toEqual([])
+    }
+    // Had the delivery been signed any other way, the documented formula would not match.
+    const { secret, timestamp, body } = webhooks.signature
+    const sign = (algorithm: string, key: string | Buffer, message: string, digest = 'hex') =>
+      createHmac(algorithm, key)
+        .update(message)
+        .digest(digest as 'hex')
+    const decodedKey = Buffer.from(secret.slice(secret.indexOf('_') + 1), 'base64url')
+    for (const [label, value] of [
+      [
+        'delivery ID signed too',
+        `v1=${sign('sha256', secret, `${ids.delivery}.${timestamp}.${body}`)}`,
+      ],
+      ['another separator', `v1=${sign('sha256', secret, `${timestamp}:${body}`)}`],
+      ['base64 digest', `v1=${sign('sha256', secret, `${timestamp}.${body}`, 'base64')}`],
+      ['SHA-512', `v1=${sign('sha512', secret, `${timestamp}.${body}`)}`],
+      ['decoded key', `v1=${sign('sha256', decodedKey, `${timestamp}.${body}`)}`],
+      ['another prefix', `v2=${sign('sha256', secret, `${timestamp}.${body}`)}`],
+    ]) {
+      const changed = { ...webhooks, signature: { ...webhooks.signature, value: value ?? '' } }
+      for (const raw of documents)
+        expect(validator.validateMakeReferences(raw, generated, changed, recipes), label).toContain(
+          'wrong webhook signature formula',
+        )
+    }
+    // A renamed delivery header breaks the README lookup that names it.
+    for (const header of webhooks.headers) {
+      const headers = webhooks.headers.map((name) => (name === header ? `${name}-renamed` : name))
+      expect(
+        validator.validateMakeReferences(documents[0] ?? '', generated, { ...webhooks, headers }),
+        header,
+      ).toContain('unknown webhook header lookup')
+    }
+  })
+  it('binds the documented timestamp tolerance to the verifier constant', async () => {
+    const generated = await generatedDocument()
+    const changed = { ...webhooks, timestampToleranceSeconds: TIMESTAMP_TOLERANCE_SECONDS + 60 }
+    for (const raw of [read('README.md'), readFileSync(sitePage, 'utf8')]) {
+      expect(raw).toMatch(timestampExpression)
+      expect(validator.validateMakeReferences(raw, generated, changed, recipes)).toContain(
+        'wrong timestamp tolerance',
+      )
+    }
+    for (const [name, manifest] of manifests().filter(([, value]) => value.webhookEvents.length))
+      expect(validator.validateMakeRecipe(manifest, generated, changed), name).toContain(
+        'wrong timestamp tolerance',
+      )
+  })
+  it('binds the documented API key scopes to the scope matrix', () => {
+    const site = readFileSync(sitePage, 'utf8')
+    expect(site).toMatch(/^\| Purpose \| Hourmere operations \| Credential \|$/m)
+    for (const raw of [site, read('find-slots-create-booking.md')])
+      expect(raw).toMatch(/A leaked `bookings` key\s+could/)
+    const errors = (matrix: validator.ApiKeyOperations) => [
+      ...markdownDocuments().flatMap(([, raw]) => validator.validateMakeScopes(raw, matrix)),
+      ...manifests().flatMap(([, value]) => validator.validateMakeRecipeScope(value, matrix)),
+    ]
+    expect(errors(operations)).toEqual([])
+    // Changing the requirement of any documented operation fails the documents stating it.
+    for (const [id, update] of [
+      ['POST /api/v1/webhooks', { allowedScopes: ['full', 'bookings'] }],
+      ['PATCH /api/v1/webhooks/{id}', { allowedScopes: ['full', 'read'] }],
+      ['POST /api/v1/webhooks/{id}/rotate-secret', { allowedScopes: ['full', 'read'] }],
+      ['GET /api/v1/webhooks/{id}/deliveries', { allowedScopes: ['full'] }],
+      ['GET /api/v1/public/{handle}/{slug}/slots', { authentication: 'key' }],
+      ['POST /api/v1/public/{handle}/{slug}/bookings', { authentication: 'key' }],
+      ['GET /api/v1/bookings', { allowedScopes: ['full', 'read'] }],
+      ['POST /api/v1/bookings/{id}/cancel', { allowedScopes: ['full'] }],
+      ['POST /api/v1/bookings/{id}/reschedule', { allowedScopes: ['full'] }],
+    ] as const) {
+      const current = operations[id]
+      if (!current) throw new Error(`The scope matrix has no ${id}`)
+      expect(errors({ ...operations, [id]: { ...current, ...update } }), id).not.toEqual([])
     }
   })
   it('validates every manifest, recipe, README and site page against real sources', async () => {
@@ -768,6 +1074,15 @@ describe('source-copy Make validator mutation checks', () => {
     'wrong event recipe coverage',
     'wrong additional payload fields',
     'incomplete webhook event table',
+    'unknown webhook header lookup',
+    'wrong webhook signature formula',
+    'unverified webhook signature formula',
+    'wrong timestamp tolerance',
+    'unknown scoped operation',
+    'wrong documented API key scope',
+    'unbound API key scope',
+    'overstated leaked key reach',
+    'unsupported leaked key action',
   ]) {
     it(`kills removal of ${error}`, () => {
       const mutant = source.replace(`errors.push('${error}')`, 'errors.push()')
@@ -781,7 +1096,25 @@ describe('source-copy Make validator mutation checks', () => {
     ['manual format', "recipe?.format !== 'hourmere.make.manual-recipe.v1'", 'false'],
     ['inventory', '!names.includes(name)', 'false'],
     ['array object fields', '...child.flatMap(', '...([] as unknown[]).flatMap('],
-    ['bare hook host', '/\\b(?:hook[s]?\\.)', '/https?:\\/\\/(?:hook[s]?\\.)'],
+    ['bare hook host', '/\\bhooks?\\.(?:', '/https?:\\/\\/hooks?\\.(?:'],
+    ['Celonis hook host', '|make\\.celonis\\.com', ''],
+    ['Integromat hook host', '|integromat\\.com', ''],
+    ['signature table mapping', "raw.replace(signatureTables, '')", 'raw'],
+    ['HMAC output encoding', ".digest(call[2] as 'hex')", ".digest('hex')"],
+    ['HMAC key encoding', "call[4] === 'text' ? 'utf8'", "call[4] !== 'hex' ? 'utf8'"],
+    [
+      'exact documented scope',
+      "[...new Set(['full', scope])]",
+      '[...new Set(operation.allowedScopes)]',
+    ],
+    [
+      'no-key operations',
+      "!['optional_key', 'public_metadata'].includes(",
+      '![operation.authentication].includes(',
+    ],
+    ['leaked key scope', "!operation.allowedScopes.includes(match[1] ?? '')", 'false'],
+    ['manifest scope', "return ['unbound API key scope']", 'return []'],
+    ['every signature row', 'evaluated = false', 'evaluated = true'],
     ['fields every subscribed event sends', 'events.every((event) =>', 'events.some((event) =>'],
     ['fence event context', 'events.push(...(fields.webhookEvents ?? []))', 'void fields'],
     ['shared snapshot', 'filter((field) => !shared.includes(field))', 'filter(() => false)'],

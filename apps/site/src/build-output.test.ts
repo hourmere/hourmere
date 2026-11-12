@@ -177,6 +177,20 @@ describe('built website', () => {
     expect(statements[0]?.closest('[hidden], [aria-hidden="true"]')).toBeNull()
   })
 
+  it('keeps the Make field declarations for the recipe validator off the rendered page', () => {
+    const dom = new JSDOM(readFileSync(join(output, 'docs/make.html'), 'utf8'))
+    try {
+      const content = dom.window.document.querySelector('.sl-markdown-content')
+      if (!content) throw new Error('The Make page has no documentation content')
+      expect(text(content)).toContain('Verify before parsing or acting')
+      expect(text(content)).not.toContain('webhookPayloadFields')
+      expect(content.querySelector('[data-language="hourmere-fields"]')).toBeNull()
+      expect(content.querySelector('#validated-field-references')).toBeNull()
+    } finally {
+      dom.window.close()
+    }
+  })
+
   it('keeps the trademark notice out of ordinary documentation', () => {
     const document = new JSDOM(readFileSync(join(output, 'docs/rest.html'), 'utf8')).window.document
     expect(text(document.body)).not.toContain(trademarkNotice)
