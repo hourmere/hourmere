@@ -590,7 +590,7 @@ export function createApp({
 
   for (const register of routes) register({ app, caller })
   mcp?.mount({ app, resolveCaller, publicUrl })
-  mountScim(app, scim, trustedProxies)
+  mountScim(app, scim, trustedProxies, publicUrl)
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
   // /api/health is operational and stays unversioned. doc31 renders schemas the 3.1 way:
