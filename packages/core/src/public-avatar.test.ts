@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { publicAvatarImage } from './public-avatar.ts'
 
 describe('public avatar image references', () => {
@@ -53,24 +54,26 @@ function sourceCopy(before: string, after: string): typeof publicAvatarImage {
   const original = readFileSync('packages/core/src/public-avatar.ts', 'utf8')
   expect(original.includes(before), 'mutation must match source').toBe(true)
   const source = stripTypeScriptTypes(original.replace(before, after)).replace(/\bexport /g, '')
-  return new Function(`${source}; return publicAvatarImage`)() as typeof publicAvatarImage
+  return guardCopy(
+    new Function(`${source}; return publicAvatarImage`)() as typeof publicAvatarImage,
+  )
 }
 
 describe('public avatar negative controls', () => {
-  it('detects accepting coerced non-string image values', () => {
+  it('detects accepting coerced non-string image values', async () => {
     const mutated = sourceCopy("typeof value === 'string' && ", '')
     const value = { toString: () => '/assets/host.png' }
-    expect(() => expect(mutated(value)).toBeUndefined()).toThrowError()
+    await expectKilled(mutated, (copy) => expect(copy(value)).toBeUndefined())
   })
 
-  it('detects removing the root-relative path requirement', () => {
+  it('detects removing the root-relative path requirement', async () => {
     const mutated = sourceCopy('/^\\/', '/^(?:https?:\\/\\/|\\/\\/|\\/)')
     for (const value of ['https://avatar/ada.png', '//avatar/ada.png']) {
-      expect(() => expect(mutated(value)).toBeUndefined()).toThrowError()
+      await expectKilled(mutated, (copy) => expect(copy(value)).toBeUndefined())
     }
   })
 
-  it('detects permitting unsafe path characters and directory segments', () => {
+  it('detects permitting unsafe path characters and directory segments', async () => {
     const mutated = sourceCopy(
       '(?:[a-z0-9_-]+\\/)*[a-z0-9_-]+(?:\\.[a-z0-9_-]+)*',
       '(?:[^\\/]+\\/)*[^\\/]+',
@@ -84,22 +87,22 @@ describe('public avatar negative controls', () => {
       '/assets/ada\u0000.png',
       '/assets/ada photo.png',
     ]) {
-      expect(() => expect(mutated(value)).toBeUndefined()).toThrowError()
+      await expectKilled(mutated, (copy) => expect(copy(value)).toBeUndefined())
     }
   })
 
-  it('detects permitting URL parameters or fragments', () => {
+  it('detects permitting URL parameters or fragments', async () => {
     const mutated = sourceCopy('webp)(?![\\s\\S])/i', 'webp)(?:[?#].*)?(?![\\s\\S])/i')
     for (const value of [
       '/assets/ada.png?email=ada@example.test',
       '/assets/ada.png#email=ada@example.test',
     ]) {
-      expect(() => expect(mutated(value)).toBeUndefined()).toThrowError()
+      await expectKilled(mutated, (copy) => expect(copy(value)).toBeUndefined())
     }
   })
 
-  it('detects permitting non-raster image formats', () => {
+  it('detects permitting non-raster image formats', async () => {
     const mutated = sourceCopy('(?:avif|gif|jpe?g|png|webp)', '[a-z]+')
-    expect(() => expect(mutated('/assets/ada.svg')).toBeUndefined()).toThrowError()
+    await expectKilled(mutated, (copy) => expect(copy('/assets/ada.svg')).toBeUndefined())
   })
 })

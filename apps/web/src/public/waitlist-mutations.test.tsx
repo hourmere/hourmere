@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -7,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ErrorSummary, Field, FieldError } from '../components/forms.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
+import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import { codeOf, failureMessage, loadSlotsInRange } from './api.ts'
 import * as calendar from './calendar.ts'
 import { MonthCalendar } from './MonthCalendar.tsx'
@@ -30,19 +30,17 @@ function copy<T>(source: string, value: string, dependencies: Record<string, unk
   const entries = Object.entries(dependencies).filter(
     ([name]) => name !== 'default' && /^[A-Za-z_$][\w$]*$/.test(name),
   )
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import {readFileSync} from 'node:fs'; import {transformSync} from 'esbuild'; process.stdout.write(transformSync(readFileSync(0,'utf8'),{loader:'tsx',format:'cjs',jsxFactory:'react.createElement',jsxFragment:'react.Fragment'}).code)",
-    ],
+  const compiled = compileSourceCopy(
+    value,
+    source
+      .replace(/^import[\s\S]*?from '[^']+'$/gm, '')
+      .replace(/^import '[^']+'$/gm, '')
+      .replace(/^export /gm, ''),
     {
-      input: source
-        .replace(/^import[\s\S]*?from '[^']+'$/gm, '')
-        .replace(/^import '[^']+'$/gm, '')
-        .replace(/^export /gm, ''),
-      encoding: 'utf8',
+      loader: 'tsx',
+      format: 'cjs',
+      jsxFactory: 'react.createElement',
+      jsxFragment: 'react.Fragment',
     },
   )
   return new Function(...entries.map(([name]) => name), `${compiled}; return ${value}`)(

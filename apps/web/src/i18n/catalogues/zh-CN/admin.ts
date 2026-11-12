@@ -1,5 +1,44 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'SCIM provisioning tokens': 'SCIM 预配令牌',
+  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
+    '预配功能尚未开放。这些令牌用于为组织未来的 SCIM 连接做准备。',
+  'Tokens only authorize SCIM for this organization. Keep them private.':
+    '令牌仅授权访问此组织的 SCIM 服务。请妥善保管。',
+  'Could not update provisioning tokens. Check the token list before trying again.':
+    '无法更新预配令牌。请先查看令牌列表，再重试。',
+  'New provisioning token': '新预配令牌',
+  'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
+    '请立即复制此令牌。隐藏令牌或离开此视图后，将无法再次查看。',
+  'Copy token': '复制令牌',
+  'Dismiss token': '隐藏令牌',
+  'Provisioning token name': '预配令牌名称',
+  'Create provisioning token': '创建预配令牌',
+  'Loading provisioning tokens…': '正在加载预配令牌……',
+  'Could not load provisioning tokens.': '无法加载预配令牌。',
+  'No provisioning tokens.': '暂无预配令牌。',
+  'Previous token valid until: {date}': '旧令牌有效期至：{date}',
+  'Last used: {date}': '上次使用时间：{date}',
+  'Rotate token': '轮换令牌',
+  'Revoke token': '撤销令牌',
+  'Confirm token change': '确认令牌更改',
+  'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.':
+    '旧令牌将继续有效一小时。请在此期间将身份提供方中的令牌更新为新令牌。重叠有效期结束前无法再次轮换。',
+  'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.':
+    '撤销后，当前令牌及其上一版本将立即失效。此操作不可恢复。',
+
+  'No-shows': '未出席记录',
+  'No-show': '未出席',
+  'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
+    '这些标记仅供主持人和团队管理员查看。不会发送邮件，已安排的会后消息也不会改变。',
+  'Clear no-show for {name}': '清除{name}的未出席标记',
+  'Mark {name} as a no-show': '将{name}标记为未出席',
+  'Clear no-show': '清除未出席标记',
+  'Mark no-show': '标记为未出席',
+  'Could not update the no-show mark. Refresh the booking and try again.':
+    '无法更新未出席标记。请刷新预约后重试。',
+  'No-show mark updated.': '未出席标记已更新。',
+
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
   'Loading logo preview…': '正在加载标志预览…',
@@ -35,6 +74,46 @@ export const admin = {
   White: '白色',
   'Branding saved. Booking pages and emails are unchanged.':
     '品牌设置已保存。预约页面和邮件暂不受影响。',
+  'Event type filter': '按活动类型筛选',
+  'All event types': '所有活动类型',
+  'Saved event type — details unavailable': '已保存的活动类型（详情暂不可用）',
+  'Loading event type choices…': '正在加载活动类型选项……',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    '无法加载活动类型选项。已保存的筛选条件保持不变。',
+
+  Integrations: '集成',
+  'Slack booking notifications': 'Slack 预约通知',
+  'Booking created': '预约已创建',
+  'Booking cancelled': '预约已取消',
+  'Booking rescheduled': '预约已改期',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    '向 Slack 发送活动标题、预约编号、时间、状态和后台链接。个人接收地址还包含受邀人姓名，不包含邮箱、自定义答案或会议链接。',
+  'Loading Slack notifications…': '正在加载 Slack 通知……',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    '无法加载 Slack 通知。只有组织所有者和管理员可以管理通知。',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    '无法更新 Slack 通知。请检查权限和设置，然后重试。',
+  'No Slack destination yet.': '尚未设置 Slack 接收地址。',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack 拒绝了此 Webhook 地址，通知已暂停。请先更换地址，再启用通知。',
+  'Slack notifications are paused.': 'Slack 通知已暂停。',
+  'Slack destination saved.': '已保存 Slack 接收地址。',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack 测试消息已加入发送队列。这不代表消息已送达。',
+  'Send test message': '发送测试消息',
+  'Delete this Slack destination and its delivery history?': '删除此 Slack 接收地址及其发送记录？',
+  'Delete Slack destination': '删除 Slack 接收地址',
+  'Slack destination deleted.': '已删除 Slack 接收地址。',
+  'Configure Slack notifications': '配置 Slack 通知',
+  'Enter a Slack webhook URL and choose at least one event.':
+    '请输入 Slack Webhook 地址，并至少选择一种事件。',
+  'Replacement Slack webhook URL': '新的 Slack Webhook 地址',
+  'Slack incoming-webhook URL': 'Slack 传入 Webhook 地址',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    '请使用 hooks.slack.com 的 HTTPS 传入 Webhook 地址，并妥善保密。无需更换时，请将新地址留空。',
+  'Events to post': '要发送的事件',
+  'Enable Slack notifications': '启用 Slack 通知',
+  'Save Slack destination': '保存 Slack 接收地址',
   'Group-seat bookings do not support reschedule requests.': '团体席位预约不支持请求改期。',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
     '请使用最多 2000 个字符的纯文本，不可包含制表符和控制字符。',
@@ -67,7 +146,34 @@ export const admin = {
   'Include UTF-8 BOM for Excel': '包含 UTF-8 BOM，便于 Excel 读取',
   'Could not download CSV. Check the booking range and try again shortly.':
     '无法下载 CSV。请检查预约时间范围，稍后重试。',
+  'An export is already running for your account. Wait for it to finish and try again.':
+    '你的账户已有导出正在进行。请等待导出完成后重试。',
   'Download CSV': '下载 CSV',
+
+  'Past date overrides ({0})': '过去的特定日期安排（{0}）',
+  'Times are in {0}.': '时间均以{0}时区显示。',
+  'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.':
+    '此日程已在其他标签页中或通过 API、MCP 或 CLI 客户端更改。你的更改仍保留在此页面。请先查看最新版本，再重新应用你的草稿。',
+  'Review latest version': '查看最新版本',
+  'Latest saved version': '最新保存的版本',
+  'Apply my draft to this version': '将我的草稿应用到此版本',
+  'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.':
+    '应用你的草稿将替换最新的每周时间段和特定日期安排。保存前请对照查看最新版本和你的草稿。',
+  'Could not load the latest version. {0}': '无法加载最新版本。{0}',
+  'Copy hours from {0}': '复制{0}的时段',
+  'Copy to…': '复制到…',
+  'Replace the selected days with these hours, including unavailable days. Changes are saved with Save changes.':
+    '将所选各天的时段替换为该天的时段（不可用的日子也会照搬）。点击“保存更改”后生效。',
+  Weekdays: '工作日',
+  'All days': '全选',
+  'Apply copy': '确认复制',
+  'Each date can have only one override.': '每个日期只能有一项特定日期安排。',
+  'Date overrides replace weekly hours on that date. Save changes applies every change on this page.':
+    '特定日期安排会替换当天的每周时间段。点击“保存更改”即可保存本页所有更改。',
+  'No date overrides.': '暂无特定日期安排。',
+  'Date override {0}': '特定日期安排{0}',
+  'Save schedule details, weekly hours and date overrides together with Save changes.':
+    '点击“保存更改”，统一保存日程详情、每周时间段和特定日期安排。',
 
   Imported: '已导入',
   'the original scheduling system': '原预约系统',
@@ -108,6 +214,7 @@ export const admin = {
     '要移除此候补条目吗？联系信息将被清除，不会发送邮件。',
   'Could not remove the waitlist entry.': '无法移除此候补条目。',
   'Back to first page': '返回第一页',
+  'Previous page': '上一页',
   'Next page': '下一页',
   Refresh: '刷新',
 
@@ -798,17 +905,9 @@ export const admin = {
   'Give the key a name above, then choose Create key.': '在上方为密钥命名，然后选择“创建密钥”。',
   'Connect a Zoom account to get started.': '连接 Zoom 账号以开始使用。',
   'Review calendar connection options': '查看日历连接选项',
-  'Save schedule details and weekly hours here. Save date overrides in their section below.':
-    '在此保存日程信息和每周时段。特定日期安排请在下方对应区域保存。',
-  '. Use Save override to save a date. Select dates to remove, then use Save removals.':
-    '。点击“保存日期安排”保存单个日期；选择要移除的日期后，点击“保存移除”。',
-  'Save removals': '保存移除',
-  'Unsaved date override removals': '日期安排移除尚未保存',
   'Removal pending save': '移除待保存',
   'Undo removal: {0}': '撤销移除：{0}',
   'Undo removal': '撤销移除',
-  'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}':
-    '未能保存所有移除操作。已保存的移除仍然有效，请重试剩余日期。{0}',
 
   '.': '。',
   '{0}–{1}.': '{0}–{1}。',
@@ -1083,7 +1182,6 @@ export const admin = {
   'Could not disconnect {0} Calendar.': '无法断开{0}日历。',
   'Could not load more bookings. {0}': '无法加载更多预约。{0}',
   'Could not load the booking.': '无法加载预约。',
-  'Could not load the date overrides.': '无法加载特定日期安排。',
   'Could not load the event type.': '无法加载活动类型。',
   'Could not load the schedule.': '无法加载日程。',
   'Could not load your bookings.': '无法加载你的预约。',
@@ -1095,7 +1193,6 @@ export const admin = {
   'Could not remove it. {0}': '无法移除。{0}',
   'Could not revoke the key. {0}': '无法撤销密钥。{0}',
   'Could not save the event type. {0}': '无法保存活动类型。{0}',
-  'Could not save the override. {0}': '无法保存日期安排。{0}',
   'Could not save the schedule. {0}': '无法保存日程。{0}',
   'Could not save your display name. {0}': '无法保存显示名称。{0}',
   'Could not save your profile. {0}': '无法保存个人资料。{0}',
@@ -1203,7 +1300,6 @@ export const admin = {
   Hours: '时间段',
   'Hours {0}, from': '时间段{0}，从',
   'Hours {0}, until': '时间段{0}，至',
-  'Hours on that date': '该日期的时间段',
   'How far ahead a meeting must be booked.': '会议至少需要提前多久预约。',
   'I’ve saved my key': '我已保存密钥',
   'In 1 year': '1 年后',
@@ -1228,7 +1324,6 @@ export const admin = {
   'Loading calendars…': '正在加载日历…',
   'Loading event types…': '正在加载活动类型…',
   'Loading keys…': '正在加载密钥…',
-  'Loading overrides…': '正在加载日期安排…',
   'Loading schedules…': '正在加载日程…',
   'Loading the booking…': '正在加载预约…',
   'Loading your profile…': '正在加载个人资料…',
@@ -1276,7 +1371,6 @@ export const admin = {
   'No past bookings yet.': '尚无过去的预约。',
   'No public booking link': '没有公开预约链接',
   'No upcoming bookings.': '没有即将到来的预约。',
-  'No upcoming date overrides.': '没有即将到来的特定日期安排。',
   None: '无',
   'Not set': '未设置',
   'Offer at most {0} options.': '最多提供{0}个选项。',
@@ -1291,8 +1385,6 @@ export const admin = {
   Organization: '组织',
   'Organization to connect': '要连接的组织',
   'Organization:': '组织：',
-  'Other hours': '其他时间安排',
-  'Other hours on single dates, such as holidays, in': '节假日等特定日期的其他时间安排，时区为',
   'Other video or meeting link': '其他视频或会议链接',
   Past: '过去',
   'Past bookings': '过去的预约',
@@ -1312,13 +1404,12 @@ export const admin = {
   Remove: '移除',
   'Remove {0}': '移除{0}',
   'Remove option {0}{1}, of question {2}': '移除问题{2}的选项{0}{1}',
-  'Remove override: {0}': '移除日期安排：{0}',
+  'Remove override: {0}': '移除特定日期安排：{0}',
   'Remove question': '移除问题',
   'Remove question: {0}': '移除问题：{0}',
   'Remove special control characters (tabs and line breaks are fine).':
     '请移除特殊控制字符（可保留制表符和换行符）。',
   'Removed question {0}{1}.': '已移除问题{0}{1}。',
-  'Removed the override for {0}.': '已移除{0}的日期安排。',
   'Removing…': '正在移除…',
   Replaced: '已替换',
   Required: '必填',
@@ -1342,7 +1433,6 @@ export const admin = {
   Saturday: '星期六',
   'Save changes': '保存更改',
   'Save display name': '保存显示名称',
-  'Save override': '保存日期安排',
   'Save profile': '保存个人资料',
   'Saved.': '已保存。',
   'Saving…': '正在保存…',
@@ -1415,8 +1505,6 @@ export const admin = {
     '此连接只有日历列表访问权限。启用同步后，方可检查忙闲时间和写入预约事件。',
   'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.':
     '此连接仅用于列出日历。忙闲同步和写入预约事件暂不可用。',
-  'This date has an override already; saving replaces it.':
-    '此日期已有单独安排；保存将替换原安排。',
   'This email address already has an account. {0}': '此邮箱已有账号。{0}',
   'This event type does not exist, or it was deleted.': '此活动类型不存在，或已被删除。',
   'This handle is already taken. Choose another one.': '此用户名已被占用。请选择另一个。',
@@ -1534,8 +1622,6 @@ export const admin = {
   '{label}, hours {count}, from': '{label}，时间段{count}，从',
   '{label}, hours {count}, until': '{label}，时间段{count}，至',
   '“{name}” is now your default schedule.': '“{name}”现已设为你的默认日程。',
-  'Added the override for {date}: {hours}.': '已添加{date}的日期安排：{hours}。',
-  'Replaced the override for {date}: {hours}.': '已替换{date}的日期安排：{hours}。',
   Availability: '可预约时间',
   Bookings: '预约',
   Calendars: '日历',

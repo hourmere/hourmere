@@ -62,6 +62,9 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 
 | Command | Tool | Arguments |
 |---|---|---|
+| `branding get` | `get_branding` | `{}`; requires `read` or `full` |
+| `branding set` | `set_branding` | optional `brandPrimaryColor` (`#RRGGBB`), `brandLogo` (uploaded hash); `null` clears; requires `full` |
+| `branding upload` | REST `POST /api/v1/branding/logo` | `--file FILE --content-type image/png` (also `image/jpeg`, `image/webp`); requires `full` |
 | `whoami` | `whoami` | `{}` |
 | `profile` | `get_profile` | `{}` |
 | `catalog` | `list_event_types` | optional `limit`, `after` |
@@ -80,6 +83,14 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
 | `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
 | `one-time-links revoke` | `revoke_one_time_link` | `eventTypeId`, `id`; requires `bookings` or `full` |
+| `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+| `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+
+`workflows list` and `workflows get` read booking workflows, which are not available yet:
+until they are enabled on the instance both exit `1` with `workflows_disabled` on stderr
+(a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
+key acts as: your personal workflows from a personal key, or a team's from a team key held by a
+current owner or admin.
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
@@ -387,6 +398,17 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Record attendee no-shows
+
+[Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
+scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
+MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
+`noShow`. API keys require `bookings` or `full` plus booked-host authority. API keys
+of every scope and MCP OAuth can read or mark attendees only on bookings the caller
+hosts in the current organization. Non-host team owners/admins need a browser session;
+agent credentials receive `booking_not_found`, just as for a missing booking.
+Invitee pages and messages are unchanged, including scheduled follow-ups.
 
 ## Booking waitlists
 

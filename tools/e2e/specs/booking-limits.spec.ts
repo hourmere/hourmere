@@ -1,4 +1,4 @@
-import { expect, fillInvitee, test } from '../fixtures.ts'
+import { expect, fillInvitee, test, waitUntilAtRest } from '../fixtures.ts'
 
 test('a weekly limit saved in the editor closes the rest of that week on the public page', async ({
   page,
@@ -38,7 +38,9 @@ test('a weekly limit saved in the editor closes the rest of that week on the pub
     )
   }
   await page.locator(`[data-day="${monday}"]`).click()
-  await page.locator('.slots button').first().click()
+  const slot = page.locator('.slots button').first()
+  await waitUntilAtRest(slot, page)
+  await slot.click()
   await fillInvitee(page)
   const creating = page.waitForResponse(
     (response) => response.request().method() === 'POST' && response.url().endsWith('/bookings'),

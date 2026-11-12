@@ -33,7 +33,9 @@ export const BrandingView = z
       .string()
       .nullable()
       .openapi({ description: 'Readable button text, currently #FFFFFF or #000000' }),
-    backgroundContrast: z.number().nullable(),
+    backgroundContrast: z.number().nullable().openapi({
+      description: 'WCAG contrast against white (#FFFFFF), not light or dark page themes',
+    }),
     buttonTextContrast: z.number().nullable(),
   })
   .openapi('Branding')
@@ -45,7 +47,7 @@ const headers = z.object({
   }),
 })
 const errors = errorResponses({
-  400: 'invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request',
+  400: 'invalid_brand_logo, brand_logo_too_large or invalid_request',
   403: 'insufficient_role, team_management_access_denied or forbidden',
   404: 'brand_logo_not_found',
   409: 'organization_context_changed',

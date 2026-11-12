@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -434,7 +435,6 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     expect(bounded.slice(1).map((row) => row[0])).toEqual([next])
   })
   it('caps exports across organizations before connection acquisition and keeps queries responsive', async () => {
-    vi.stubEnv('BOOKING_EXPORT_MAX_CONCURRENT', '2')
     const users = await Promise.all(Array.from({ length: 3 }, () => createTestUser(db)))
     const streams: ReadableStream<Uint8Array>[] = []
     try {
@@ -465,8 +465,104 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
       expect(owned.pool.waitingCount).toBe(0)
     } finally {
       await Promise.all(streams.map((stream) => stream.cancel()))
-      vi.unstubAllEnvs()
     }
+  })
+  it('uses the configured process limit and releases reservations after validation failure', async () => {
+    const user = await createTestUser(db),
+      other = await createTestUser(db)
+    const ctx = { ...testContext(db, user.principal), bookingExportMaxConcurrent: 1 }
+    await expect(exportBookingsCsv(ctx, { ...range, from: 'bad' })).rejects.toMatchObject({
+      code: 'invalid_export_range',
+    })
+    const stream = await exportBookingsCsv(ctx, range)
+    const otherCtx = { ...testContext(db, other.principal), bookingExportMaxConcurrent: 1 }
+    let unexpected: ReadableStream<Uint8Array> | undefined
+    try {
+      await expect(
+        exportBookingsCsv(otherCtx, range).then((result) => {
+          unexpected = result
+          return result
+        }),
+      ).rejects.toMatchObject({ code: 'export_busy' })
+    } finally {
+      await stream.cancel()
+      await unexpected?.cancel()
+    }
+    await (await exportBookingsCsv(otherCtx, range)).cancel()
+  })
+  it('limits each user across personal and team exports before acquiring a connection', async () => {
+    const user = await createTestUser(db),
+      other = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const personal = testContext(db, user.principal)
+    const teamContext = testContext(db, await session(team.as(user)))
+    const streams: ReadableStream<Uint8Array>[] = []
+    try {
+      // Starting both calls together exercises reservation before asynchronous permission checks.
+      const first = exportBookingsCsv(personal, range)
+      const connect = vi.spyOn(owned.pool, 'connect')
+      try {
+        await expect(
+          exportBookingsCsv(teamContext, range).then((stream) => {
+            streams.push(stream)
+            return stream
+          }),
+        ).rejects.toMatchObject({ code: 'export_user_in_progress' })
+        expect(connect).not.toHaveBeenCalled()
+      } finally {
+        connect.mockRestore()
+        streams.push(await first)
+      }
+      streams.push(await exportBookingsCsv(testContext(db, other.principal), range))
+      await expect(exportBookingsCsv(teamContext, range)).rejects.toMatchObject({
+        code: 'export_user_in_progress',
+      })
+    } finally {
+      await Promise.all(streams.map((stream) => stream.cancel()))
+    }
+    // Cancellation frees the user reservation as well as the process slot.
+    await expect(
+      exportBookingsCsv(teamContext, range).then((stream) => stream.cancel()),
+    ).resolves.toBeUndefined()
+  })
+  it('releases the connection and export slots when the stream is never read', async () => {
+    const user = await createTestUser(db)
+    const ctx = { ...testContext(db, user.principal), bookingExportMaxConcurrent: 1 }
+    const idleBefore = owned.pool.totalCount - owned.pool.idleCount
+    let stream: ReadableStream<Uint8Array> | undefined
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      stream = await exportBookingsCsv(ctx, range)
+      expect(owned.pool.totalCount - owned.pool.idleCount).toBe(idleBefore + 1)
+      await vi.advanceTimersByTimeAsync(EXPORT_STALL_TIMEOUT_MS)
+      vi.useRealTimers()
+      // No reader is acquired until after the connection has returned.
+      await vi.waitFor(() => expect(owned.pool.totalCount - owned.pool.idleCount).toBe(idleBefore))
+      await expect(stream.getReader().read()).rejects.toThrow('reader timed out')
+      await (await exportBookingsCsv(ctx, range)).cancel()
+    } finally {
+      vi.useRealTimers()
+      if (stream && !stream.locked) await stream.cancel().catch(() => {})
+    }
+  })
+  it('emits personal and team headers in exactly the documented order', async () => {
+    const doc = readFileSync(
+      new URL('../../../apps/site/src/content/docs/docs/booking-export.md', import.meta.url),
+      'utf8',
+    )
+    const personalColumns = [
+      ...(doc.split('## Columns')[1] ?? '').matchAll(/^\| `([^`]+)` \|/gmu),
+    ].map((match) => match[1])
+    const teamSection = doc.match(/Team exports use only ([\s\S]*?)\./u)?.[1] ?? ''
+    const teamColumns = [...teamSection.matchAll(/`([^`]+)`/gu)].map((match) => match[1])
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const personal = await read(await exportBookingsCsv(testContext(db, user.principal), range))
+    const teamRows = await read(
+      await exportBookingsCsv(testContext(db, await session(team.as(user))), range),
+    )
+    expect(personalColumns).toEqual(personal[0])
+    expect(teamColumns).toEqual(teamRows[0])
   })
   it('cuts off stalled readers and returns their database connection', async () => {
     const user = await createTestUser(db)
@@ -612,9 +708,14 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
   it('holds a cross-connection lease, releases on cancel and timeout, and isolates organizations', async () => {
     const user = await createTestUser(db),
       other = await createTestUser(db)
-    const ctx = testContext(db, user.principal)
+    const team = await createTestTeam(db, [
+      { user, role: 'owner' },
+      { user: other, role: 'admin' },
+    ])
+    const ctx = testContext(db, await session(team.as(user)))
+    const otherContext = testContext(db, await session(team.as(other)))
     const stream = await exportBookingsCsv(ctx, range)
-    await expect(exportBookingsCsv(ctx, range)).rejects.toMatchObject({
+    await expect(exportBookingsCsv(otherContext, range)).rejects.toMatchObject({
       code: 'export_in_progress',
     })
     await (await exportBookingsCsv(testContext(db, other.principal), range)).cancel()

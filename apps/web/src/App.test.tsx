@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { isValidElement } from 'react'
-import { MemoryRouter, type RouteObject } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { Link, MemoryRouter, type RouteObject } from 'react-router'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import indexHtml from '../index.html?raw'
 import { App, appRoutes } from './App.tsx'
 import { chooseLanguage } from './i18n/store.ts'
 import { SessionLayout } from './lazy-pages.tsx'
@@ -28,6 +29,66 @@ const sessionRoute = appRoutes.find(
   ({ element, handle }) =>
     isValidElement(element) && element.type === SessionLayout && handle?.surface === 'admin',
 )
+
+describe('App installation metadata', () => {
+  let originalHead: string
+  beforeEach(() => {
+    originalHead = document.head.innerHTML
+    document.head.innerHTML = new DOMParser().parseFromString(indexHtml, 'text/html').head.innerHTML
+    vi.stubEnv('PROD', true)
+    vi.stubEnv('VITE_PWA_ENABLED', 'true')
+  })
+  afterEach(() => {
+    cleanup()
+    document.head.innerHTML = originalHead
+    Reflect.deleteProperty(navigator, 'serviceWorker')
+    vi.unstubAllEnvs()
+  })
+
+  it('mounts the PWA once across admin routes and removes it on public navigation', () => {
+    const register = vi.fn().mockResolvedValue({})
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { register } })
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/app/event-types']}>
+        <Link to="/app/bookings">Bookings route</Link>
+        <Link to="/ada/intro">Public route</Link>
+        <Link to="/app/settings">Settings route</Link>
+        <App />
+      </MemoryRouter>,
+    )
+    const theme = document.querySelector<HTMLMetaElement>(
+      'meta[name="theme-color"][media="(prefers-color-scheme: light)"]',
+    )
+    const manifest = document.querySelector('link[rel="manifest"]')
+    expect(manifest?.getAttribute('href')).toBe('/app/manifest.webmanifest')
+    expect(theme?.content).toBe('#1f4fd8')
+    expect(register).toHaveBeenCalledExactlyOnceWith('/app/sw.js', {
+      scope: '/app/',
+      updateViaCache: 'none',
+    })
+
+    fireEvent.click(screen.getByRole('link', { name: 'Bookings route' }))
+    expect(document.querySelector('link[rel="manifest"]')).toBe(manifest)
+    expect(theme?.content).toBe('#1f4fd8')
+    expect(register).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('link', { name: 'Public route' }))
+    expect(document.querySelector('link[rel="manifest"]')).toBeNull()
+    expect(document.querySelector('meta[name="apple-mobile-web-app-capable"]')).toBeNull()
+    expect(theme?.content).toBe('#ffffff')
+    expect(register).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('link', { name: 'Settings route' }))
+    expect(document.querySelector('link[rel="manifest"]')?.getAttribute('href')).toBe(
+      '/app/manifest.webmanifest',
+    )
+    expect(theme?.content).toBe('#1f4fd8')
+    expect(register).toHaveBeenCalledTimes(2)
+    unmount()
+    expect(document.querySelector('link[rel="manifest"]')).toBeNull()
+    expect(theme?.content).toBe('#ffffff')
+  })
+})
 
 describe('route loading language', () => {
   it('finds the admin session subtree in the rendered route definitions', () => {

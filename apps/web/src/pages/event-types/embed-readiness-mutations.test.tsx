@@ -1,5 +1,4 @@
 import '../../i18n/admin.ts'
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
@@ -11,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import * as paths from '../../paths.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json, ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { EventEmbedAction } from './EventEmbedAction.tsx'
@@ -57,15 +57,12 @@ beforeEach(() => {
 
 /** Exercise real entrypoint source and the real dialog without replacing production files. */
 function copy<T>(source: string, exported: string): T {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: source.replace(/^export /gm, ''), encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(exported, source.replace(/^export /gm, ''), {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   const dependencies = {
     ...paths,
     EventEmbedAction,

@@ -11,11 +11,8 @@ export const EXPORT_PAGE_SIZE = 100
 export const EXPORT_TIMEOUT_MS = 300_000
 export const EXPORT_STALL_TIMEOUT_MS = 30_000
 let activeExports = 0
+const exportingUsers = new Set<string>()
 
-function exportConcurrencyLimit(): number {
-  const configured = Number(process.env.BOOKING_EXPORT_MAX_CONCURRENT)
-  return Number.isInteger(configured) && configured >= 1 && configured <= 8 ? configured : 2
-}
 export interface BookingExportInput {
   from: string
   to: string
@@ -178,13 +175,21 @@ export async function exportBookingsCsv(
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   // Reserve synchronously before acquiring any connection, including for permission checks.
-  if (activeExports >= exportConcurrencyLimit())
+  const userId = ctx.principal.user.id
+  if (exportingUsers.has(userId))
+    throw new DomainError(
+      'conflict',
+      'export_user_in_progress',
+      'You already have an export running. Wait for it to finish before starting another.',
+    )
+  if (activeExports >= (ctx.bookingExportMaxConcurrent ?? 2))
     throw new DomainError(
       'conflict',
       'export_busy',
       'Too many exports are running. Try again shortly.',
     )
   activeExports++
+  exportingUsers.add(userId)
   const ready = Promise.withResolvers<ReadableStream<Uint8Array>>()
   const done = Promise.withResolvers<void>()
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -395,6 +400,7 @@ export async function exportBookingsCsv(
     })
     .finally(() => {
       activeExports--
+      exportingUsers.delete(userId)
     })
   return ready.promise
 }

@@ -1,5 +1,5 @@
 import { constants, readFileSync } from 'node:fs'
-import { mkdtemp, open, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, rm, symlink, writeFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -115,6 +115,60 @@ describe('branding CLI', () => {
       headers: { 'content-type': 'image/png' },
     })
   })
+  it.each(['missing', 'symlink', 'directory'] as const)(
+    'refuses a %s upload file as a local input error',
+    async (kind) => {
+      const path = await file(new Uint8Array([1]))
+      const inputPath = kind === 'directory' ? join(path, '..') : `${path}.${kind}`
+      if (kind === 'symlink') await symlink(path, inputPath)
+      const fetcher = vi.fn<typeof fetch>()
+      const result = await run(
+        ['branding', 'upload', '--file', inputPath, '--content-type', 'image/png'],
+        fetcher,
+      )
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(JSON.parse(result.stderr)).toEqual({
+        error: kind === 'directory' ? 'invalid_input_file' : 'file_error',
+      })
+      expect(fetcher).not.toHaveBeenCalled()
+    },
+  )
+  it('retains an unknown outcome when the upload request fails', async () => {
+    const path = await file(new Uint8Array([1]))
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      throw new Error('connection interrupted')
+    })
+    const result = await run(
+      ['branding', 'upload', '--file', path, '--content-type', 'image/png'],
+      fetcher,
+    )
+    expect(result.code).toBe(3)
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: 'request_failed',
+      outcomeMayBeUnknown: true,
+    })
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+  it('kills source-copy marking an upload as sent before reading the file', async () => {
+    const path = `${await file(new Uint8Array([1]))}.missing`
+    async function verify(runner: typeof runCli) {
+      const fetcher = vi.fn<typeof fetch>()
+      const result = await run(
+        ['branding', 'upload', '--file', path, '--content-type', 'image/png'],
+        fetcher,
+        {},
+        runner,
+      )
+      expect(result.code).toBe(1)
+      expect(JSON.parse(result.stderr)).toEqual({ error: 'file_error' })
+      expect(fetcher).not.toHaveBeenCalled()
+    }
+    await verify(cliCopy())
+    await expect(
+      verify(cliCopy(["called = args.command !== 'branding upload'", 'called = true'])),
+    ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
+  })
   it('refuses oversized files before sending a request', async () => {
     const path = await file(new Uint8Array(512 * 1024 + 1))
     const fetcher = vi.fn<typeof fetch>()
@@ -123,7 +177,7 @@ describe('branding CLI', () => {
       fetcher,
     )
     expect(result.code).toBe(1)
-    expect(JSON.parse(result.stderr).error).toBe('input_too_large')
+    expect(JSON.parse(result.stderr)).toEqual({ error: 'input_too_large' })
     expect(fetcher).not.toHaveBeenCalled()
   })
   it('refuses SVG and conflicting JSON input before a request', async () => {

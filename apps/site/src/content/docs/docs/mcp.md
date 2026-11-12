@@ -78,6 +78,11 @@ notifications and trigger configured integrations.
 | --- | --- | --- | --- |
 | `get_branding` | — | `branding get` | `full, read` |
 | `set_branding` | — | `branding set` | `full` |
+| `list_slack_destinations` | — | `slack list` | `full, read` |
+| `create_slack_destination` | — | `slack create` | `full` |
+| `update_slack_destination` | — | `slack update` | `full` |
+| `delete_slack_destination` | — | `slack delete` | `full` |
+| `test_slack_destination` | — | `slack test` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -94,6 +99,8 @@ notifications and trigger configured integrations.
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
+| `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
@@ -103,6 +110,8 @@ notifications and trigger configured integrations.
 | `set_event_type_notifications` | — | `set-event-notifications` | `full` |
 | `list_schedules` | — | `schedules` | `full, read` |
 | `get_schedule` | — | `schedule` | `full, read` |
+| `get_schedule_availability` | — | `schedule-availability` | `full, read` |
+| `save_schedule_availability` | — | `save-availability` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
@@ -121,8 +130,15 @@ notifications and trigger configured integrations.
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `list_workflows` | — | `workflows list` | `full, read` |
+| `get_workflow` | — | `workflows get` | `full, read` |
 
 <!-- api-key-scope-table:end -->
+
+`list_workflows` and `get_workflow` are listed before booking workflows are available:
+until they are enabled, `tools/list` omits them and a direct call by a `read` or `full` key
+returns `isError: true` with `workflows_disabled` (a `bookings` key still gets
+`insufficient_scope`). `workflows list` and `workflows get` report the same codes.
 
 Scope is immutable: use **Create replacement** on `/app/api-keys`, update the client and
 revoke the old key. Legacy keys and native API creations that omit `metadata.scope` retain
@@ -572,6 +588,14 @@ when the successor falls outside the current page or filters. Public/manage resp
 it. The predecessor's `status` remains `cancelled`; use `rescheduledToId` to distinguish a
 reschedule from a cancellation, and `rescheduledFromId` to trace back to its predecessor.
 
+`list_workflows` and `get_workflow` read booking workflows, which are not available yet. They
+stay out of `tools/list`, and a direct call answers `workflows_disabled`, until workflows are
+enabled on the instance; discover availability with `workflowsEnabled` from
+`GET /api/v1/instance`. Once enabled, `list_workflows` takes the explicit owner you act as
+(`{kind: "personal", id: your user ID}` in your personal organization, or
+`{kind: "team", id: team ID}` as a current team owner or admin), and both return the current
+revision's definition with its enabled flag.
+
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as
 `structuredContent` and, for older clients, as the same JSON in a text block.
@@ -735,6 +759,15 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Attendee attendance access
+
+`get_booking_attendees` and `set_attendee_no_show` require the caller to host the booking
+in the current organization, for API keys of every scope and MCP OAuth alike. Team
+owner/admin status does not grant access to bookings hosted by other members through
+MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
+Non-host team administrators must use a browser session. See the
+[no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.
 
 ## Booking waitlists
 

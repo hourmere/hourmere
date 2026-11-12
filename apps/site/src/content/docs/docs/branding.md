@@ -29,7 +29,7 @@ Enter a six-digit hexadecimal colour such as `#2457A7`. Short hex, named colours
 transparency and CSS expressions are not accepted. Clear the value to remove the custom
 colour. Each space keeps its own setting.
 
-Hourmere computes WCAG 2.x relative luminance and contrast against white page background,
+Hourmere computes WCAG 2.x relative luminance and contrast against a white (#FFFFFF) reference background,
 white button text and black button text. It selects whichever text colour has the higher
 contrast. Every opaque sRGB colour has a black or white text choice meeting 4.5:1, so
 rejecting otherwise valid colours would unnecessarily restrict branding. The background
@@ -56,7 +56,9 @@ replacement. Include the database in normal backups; no external object store is
 Branding belongs to the current organization. Personal settings require the personal
 owner; team settings require a current owner or admin. An ordinary team member cannot
 read or edit these administrative settings. Read API keys require `read` or `full` scope;
-changes require `full`. Role checks still apply to every credential.
+changes require `full`. Role checks still apply to every credential. Every logo upload
+and every saved change is recorded in the [audit log](/docs/audit-log) with the credential
+used and which setting changed, never the image or the colour.
 
 REST uses `GET /api/v1/branding` and `PATCH /api/v1/branding`. Send only the fields to change:
 
@@ -70,6 +72,10 @@ Omitted fields are preserved; `null` clears a setting. `brandLogo` references th
 logo already uploaded to the same space; it cannot fetch an external URL or borrow another
 space's image. Browser session writes include `X-Expected-Organization-Id`, binding the
 action to the space shown when the form was opened. Reload after a space-context conflict.
+
+Malformed colours or logo references return REST `400 invalid_request`. MCP rejects
+them during tool input validation. Neither interface returns `invalid_brand_color`
+for malformed input.
 
 MCP exposes `get_branding` and `set_branding` with the same permissions and validation.
 Upload binary images through REST or CLI first; MCP can then reference the uploaded logo.
@@ -99,7 +105,8 @@ edited fields and reload before restoring an older logo reference.
 - Storage and validation are available now. Applying branding to public booking pages,
   embeds and email templates is a separate change.
 - There are no custom fonts, theme CSS, per-event branding or removal of Hourmere attribution.
-- The contrast reference is a white page. Future themes need to check their actual
-  backgrounds and other interface elements separately.
+- `backgroundContrast` uses white (#FFFFFF) only. It does not measure contrast against
+  the light page background (#F7F9FE) or dark-mode backgrounds. Future themes need to
+  check their actual backgrounds and other interface elements separately.
 - Logo colours are not analysed for contrast. Keep meaningful content accessible through
   text as well as images when the display feature becomes available.

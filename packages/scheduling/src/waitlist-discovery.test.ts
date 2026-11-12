@@ -26,7 +26,12 @@ import {
   waitlistRecipientHash,
 } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
-import { cleanupWaitlistSignals, scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
+import {
+  cleanupWaitlistSignals,
+  consumeSignals,
+  scanWaitlistEvent,
+  scanWaitlists,
+} from './waitlist-discovery.ts'
 import * as policy from './waitlist-policy.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -66,11 +71,12 @@ function sourceCopy(
   const bindings = { sql, ...availability, ...waitlist, ...policy }
   return new Function(
     ...Object.keys(bindings),
-    `${source}; return ${file === 'waitlist-discovery' ? '{ cleanupWaitlistSignals, scanWaitlistEvent, scanWaitlists }' : '{ attributeWaitlistBooking }'}`,
+    `${source}; return ${file === 'waitlist-discovery' ? '{ cleanupWaitlistSignals, consumeSignals, scanWaitlistEvent, scanWaitlists }' : '{ attributeWaitlistBooking }'}`,
   )(...Object.values(bindings)) as {
     scanWaitlistEvent: typeof scanWaitlistEvent
     scanWaitlists: typeof scanWaitlists
     cleanupWaitlistSignals: typeof cleanupWaitlistSignals
+    consumeSignals: typeof consumeSignals
     attributeWaitlistBooking: typeof attributeWaitlistBooking
   }
 }
@@ -109,6 +115,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     await db
       .transaction()
       .execute((trx) => ensureWaitlistKey(trx, SECRET, new Date(NOW.epochMilliseconds)))
+    // Signal-batch tests choose their planner statistics; a background ANALYZE must not
+    // replace them at an arbitrary moment.
+    await testDb.pool.query('ALTER TABLE waitlist_scan_signals SET (autovacuum_enabled = false)')
   })
 
   afterAll(async () => {
@@ -542,12 +551,44 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     },
   )
 
+  /**
+   * Empty the signal table and leave the statistics in which a rescanned
+   * IN (... LIMIT ... SKIP LOCKED) batch removed every row: zero tuples on allocated
+   * pages, as ANALYZE records right after a drain, and no column statistics. Column
+   * statistics from an ANALYZE that saw rows survive later drains and ANALYZEs and steer
+   * the planner away from that plan, so start from them and clear them explicitly.
+   */
+  async function emptySignalsWithStaleStatistics() {
+    await testDb.pool.query(
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
+      [randomUUID()],
+    )
+    await testDb.pool.query('ANALYZE waitlist_scan_signals')
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    await testDb.pool.query('ANALYZE waitlist_scan_signals')
+    await testDb.pool.query(
+      `SELECT pg_clear_attribute_stats('public','waitlist_scan_signals',attname,false)
+        FROM pg_attribute WHERE attrelid='waitlist_scan_signals'::regclass
+          AND attnum>0 AND NOT attisdropped`,
+    )
+    const { rows } = await testDb.pool.query<{
+      reltuples: number
+      relpages: number
+      columns: number
+    }>(
+      `SELECT reltuples, relpages, (SELECT count(*)::int FROM pg_stats
+          WHERE schemaname='public' AND tablename='waitlist_scan_signals') AS columns
+        FROM pg_class WHERE oid='waitlist_scan_signals'::regclass`,
+    )
+    expect(rows[0]?.reltuples, 'statistics must record an empty signal table').toBe(0)
+    expect(rows[0]?.relpages, 'statistics must record allocated pages').toBeGreaterThan(0)
+    expect(rows[0]?.columns, 'the signal table must have no column statistics').toBe(0)
+  }
+
   async function verifyBoundedConsumption(scan = scanWaitlistEvent) {
     const s = await setup()
     await entry(s)
-    await testDb.pool.query('DELETE FROM waitlist_scan_signals WHERE event_type_id=$1', [
-      s.eventTypeId,
-    ])
+    await emptySignalsWithStaleStatistics()
     await testDb.pool.query(
       'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
       [s.eventTypeId],
@@ -563,6 +604,7 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
           s.eventTypeId,
         ])
       ).rows,
+      'one event pass must consume at most 1000 signals',
     ).toHaveLength(1501)
     expect(await scan(s.ctx, s.eventTypeId)).toBe(0)
     expect(
@@ -597,10 +639,34 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         'ORDER BY id FOR UPDATE SKIP LOCKED',
       ],
     ])
-    await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toThrow(
+      /one event pass must consume at most 1000 signals: expected \[\] to have a length of 1501 but got \+0/,
+    )
   })
+
+  it(
+    'detects source-copy signal consumption through a rescannable IN subquery',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          `WHERE id = ANY(ARRAY(
+      SELECT id FROM waitlist_scan_signals`,
+          `WHERE id IN (
+      SELECT id FROM waitlist_scan_signals`,
+        ],
+        [
+          `FOR UPDATE SKIP LOCKED
+    )) RETURNING id`,
+          `FOR UPDATE SKIP LOCKED
+    ) RETURNING id`,
+        ],
+      ])
+      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toThrow(
+        /one event pass must consume at most 1000 signals: expected \[\] to have a length of 1501 but got \+0/,
+      )
+    },
+  )
 
   it(
     'detects source-copy postponement of discovery behind an existing backlog',
@@ -615,9 +681,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         const signalSnapshot =`,
         ],
       ])
-      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toThrow(
+        /an existing backlog must not postpone discovery: expected \+0 to be 1/,
+      )
     },
   )
 
@@ -632,9 +698,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
           '',
         ],
       ])
-      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expect(verifyBoundedConsumption(copy.scanWaitlistEvent)).rejects.toThrow(
+        /an existing backlog must not postpone discovery: expected \+0 to be 1/,
+      )
     },
   )
 
@@ -830,7 +896,9 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
   )
 
   async function verifyCleanupBudget(cleanup = cleanupWaitlistSignals) {
-    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    // The batch bound must hold under every plan, including the one chosen when the
+    // statistics record an empty table without column statistics.
+    await emptySignalsWithStaleStatistics()
     const orphan = randomUUID()
     const active = await setup()
     await entry(active)
@@ -855,9 +923,10 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         return result
       },
     })
-    expect(await cleanup({ ...ctx, db: timedDb }, { timeBudgetMs: 5000, now: () => clock })).toBe(
-      1000,
-    )
+    expect(
+      await cleanup({ ...ctx, db: timedDb }, { timeBudgetMs: 5000, now: () => clock }),
+      'an expired run must stop after one batch of at most 1000 signals',
+    ).toBe(1000)
     expect(
       (
         await testDb.pool.query('SELECT id FROM waitlist_scan_signals WHERE event_type_id=$1', [
@@ -865,7 +934,11 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         ])
       ).rows,
     ).toHaveLength(1501)
-    expect(await cleanup(ctx)).toBe(1501)
+    // A frozen clock gives the next run its whole budget regardless of machine load.
+    expect(
+      await cleanup(ctx, { now: () => 0 }),
+      'the next run must drain the remaining backlog',
+    ).toBe(1501)
     expect(
       (await testDb.pool.query('SELECT event_type_id FROM waitlist_scan_signals')).rows,
     ).toEqual([{ event_type_id: active.eventTypeId }])
@@ -882,25 +955,55 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
         'ORDER BY s.id FOR UPDATE OF s SKIP LOCKED',
       ],
     ])
-    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toThrow(
+      /an expired run must stop after one batch of at most 1000 signals: expected 2501 to be 1000/,
+    )
   })
+
+  it(
+    'detects source-copy irrelevant-signal cleanup through a rescannable IN subquery',
+    SERIALIZED,
+    async () => {
+      const copy = sourceCopy('waitlist-discovery', [
+        [
+          `WHERE id = ANY(ARRAY(
+            SELECT s.id FROM waitlist_scan_signals s`,
+          `WHERE id IN (
+            SELECT s.id FROM waitlist_scan_signals s`,
+        ],
+        [
+          `FOR UPDATE OF s SKIP LOCKED
+          )) RETURNING id`,
+          `FOR UPDATE OF s SKIP LOCKED
+          ) RETURNING id`,
+        ],
+        // The rescanned statement does quadratic work. Without its statement budget,
+        // machine load cannot turn the unbounded batch into a timed-out one.
+        [
+          `await sql\`SELECT set_config('statement_timeout',\${String(remaining)},true)\`.execute(trx)`,
+          '',
+        ],
+      ])
+      await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toThrow(
+        /an expired run must stop after one batch of at most 1000 signals: expected 2501 to be 1000/,
+      )
+    },
+  )
 
   it('detects source-copy cleanup limited to one batch per run', SERIALIZED, async () => {
     const copy = sourceCopy('waitlist-discovery', [['if (count < SIGNAL_LIMIT) break', 'break']])
-    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toThrow(
+      /the next run must drain the remaining backlog: expected 1000 to be 1501/,
+    )
   })
 
   it('detects source-copy removal of the cleanup run budget', SERIALIZED, async () => {
     const copy = sourceCopy('waitlist-discovery', [
       ['if (remaining <= 0) break', 'if (false) break'],
     ])
-    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expect(verifyCleanupBudget(copy.cleanupWaitlistSignals)).rejects.toThrow(
+      /an expired run must stop after one batch of at most 1000 signals: expected 2501 to be 1000/,
+    )
   })
 
   async function verifyCleanupStatementTimeout(cleanup = cleanupWaitlistSignals) {
@@ -995,6 +1098,278 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       name: 'AssertionError',
     })
   })
+
+  // Advisory key of the signal DELETE gate; nothing else in this owned database uses it.
+  const SIGNAL_GATE = 1752658811
+
+  /**
+   * Arm a gate that pauses the first signal DELETE once its batch selection has run: a
+   * BEFORE DELETE row trigger fires only after the ARRAY(...) selection has locked its rows.
+   * The trigger waits for an advisory lock held by a controller session, so tests find the
+   * paused statement through pg_blocking_pids instead of waiting a fixed time. A statement
+   * trigger records the backend and transaction that deleted each signal.
+   */
+  async function installSignalGate() {
+    await testDb.pool.query(`
+      CREATE TABLE waitlist_test_gate (armed boolean NOT NULL);
+      CREATE SEQUENCE waitlist_test_gate_claims;
+      CREATE TABLE waitlist_test_deleted (
+        id uuid NOT NULL,
+        pid integer NOT NULL DEFAULT pg_backend_pid(),
+        xid xid8 NOT NULL DEFAULT pg_current_xact_id()
+      );
+      CREATE FUNCTION waitlist_test_gate() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        -- Sequences ignore rollback and row locks: exactly one row claims the armed gate.
+        IF EXISTS(SELECT FROM waitlist_test_gate) THEN
+          IF nextval('waitlist_test_gate_claims')=1 THEN
+            PERFORM pg_advisory_xact_lock_shared(${SIGNAL_GATE});
+          END IF;
+        END IF;
+        RETURN OLD;
+      END $$;
+      CREATE TRIGGER waitlist_test_gate BEFORE DELETE ON waitlist_scan_signals
+        FOR EACH ROW EXECUTE FUNCTION waitlist_test_gate();
+      CREATE FUNCTION waitlist_test_deleted() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        INSERT INTO waitlist_test_deleted(id) SELECT id FROM deleted;
+        RETURN NULL;
+      END $$;
+      CREATE TRIGGER waitlist_test_deleted AFTER DELETE ON waitlist_scan_signals
+        REFERENCING OLD TABLE AS deleted
+        FOR EACH STATEMENT EXECUTE FUNCTION waitlist_test_deleted();
+    `)
+  }
+
+  async function removeSignalGate() {
+    await testDb.pool.query(`
+      DROP TRIGGER waitlist_test_gate ON waitlist_scan_signals;
+      DROP TRIGGER waitlist_test_deleted ON waitlist_scan_signals;
+      DROP FUNCTION waitlist_test_gate(), waitlist_test_deleted();
+      DROP TABLE waitlist_test_gate, waitlist_test_deleted;
+      DROP SEQUENCE waitlist_test_gate_claims;
+    `)
+  }
+
+  /**
+   * Pause one signal batch after its selection, probe its row locks from another session,
+   * then run a second batch of the same kind to completion before releasing the first.
+   */
+  async function verifySignalBatchLocks(
+    kind: 'cleanup' | 'consumption',
+    run: (eventTypeId: string) => Promise<unknown>,
+  ) {
+    await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    const eventTypeId = randomUUID()
+    await testDb.pool.query(
+      'INSERT INTO waitlist_scan_signals(event_type_id) SELECT $1 FROM generate_series(1,2501)',
+      [eventTypeId],
+    )
+    const ids = (
+      await testDb.pool.query<{ id: string }>('SELECT id FROM waitlist_scan_signals ORDER BY id')
+    ).rows.map((row) => row.id)
+    const position = new Map(ids.map((id, index) => [id, index]))
+    // With distinct IDs, a count equal to the index range proves one contiguous ID run.
+    const span = (list: string[]) => {
+      const indexes = list.map((id) => position.get(id) ?? -1)
+      return { count: list.length, first: Math.min(...indexes), last: Math.max(...indexes) }
+    }
+    await installSignalGate()
+    const controller = await testDb.pool.connect()
+    const probe = await testDb.pool.connect()
+    const pending: Promise<unknown>[] = []
+    let released = false
+    const release = async () => {
+      if (released) return
+      released = true
+      await controller.query('ROLLBACK')
+    }
+    try {
+      const controllerPid = (
+        await controller.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      ).rows[0]?.pid
+      await controller.query('BEGIN')
+      await controller.query('SELECT pg_advisory_xact_lock($1::bigint)', [SIGNAL_GATE])
+      await testDb.pool.query('INSERT INTO waitlist_test_gate VALUES (true)')
+      const first = run(eventTypeId)
+      pending.push(first)
+      first.catch(() => {})
+      let pausedPid: number | undefined
+      await expect
+        .poll(
+          async () => {
+            const { rows } = await testDb.pool.query<{ pid: number }>(
+              `SELECT pid FROM pg_stat_activity
+                WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))`,
+              [controllerPid],
+            )
+            pausedPid = rows[0]?.pid
+            return rows.length
+          },
+          { interval: 5, timeout: 10_000, message: `the first ${kind} batch must reach the gate` },
+        )
+        .toBe(1)
+
+      // Another session finds exactly the selected batch locked: SKIP LOCKED returns only
+      // the later signals, and NOWAIT on the last selected signal fails at once.
+      await probe.query('BEGIN')
+      const unlocked = (
+        await probe.query<{ id: string }>(
+          'SELECT id FROM waitlist_scan_signals ORDER BY id FOR UPDATE SKIP LOCKED',
+        )
+      ).rows.map((row) => row.id)
+      expect(
+        span(unlocked),
+        `a paused ${kind} batch must lock exactly its selected signals`,
+      ).toEqual({ count: 1501, first: 1000, last: 2500 })
+      await expect(
+        probe.query('SELECT id FROM waitlist_scan_signals WHERE id=$1 FOR UPDATE NOWAIT', [
+          ids[999],
+        ]),
+      ).rejects.toMatchObject({ code: '55P03' })
+      await probe.query('ROLLBACK')
+
+      // A second batch must finish while the first is still paused, never waiting for it.
+      const second = run(eventTypeId)
+      pending.push(second)
+      let settled = false
+      second
+        .finally(() => {
+          settled = true
+        })
+        .catch(() => {})
+      let waited = false
+      await expect
+        .poll(
+          async () => {
+            if (settled) return true
+            waited =
+              (
+                await testDb.pool.query<{ waited: boolean }>(
+                  `SELECT EXISTS(SELECT FROM pg_stat_activity
+                    WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))) AS waited`,
+                  [pausedPid],
+                )
+              ).rows[0]?.waited ?? false
+            return waited || settled
+          },
+          { interval: 5, timeout: 10_000, message: `the second ${kind} batch must finish` },
+        )
+        .toBe(true)
+      expect(
+        waited,
+        `a concurrent ${kind} must skip the paused batch instead of waiting for it`,
+      ).toBe(false)
+      const secondResult = await second
+      await release()
+      const firstResult = await first
+
+      const log = (
+        await testDb.pool.query<{ id: string; pid: number; xid: string }>(
+          'SELECT id, pid, xid::text AS xid FROM waitlist_test_deleted',
+        )
+      ).rows
+      expect(new Set(log.map((row) => row.id)).size, 'no signal may be deleted twice').toBe(
+        log.length,
+      )
+      const perTransaction = new Map<string, number>()
+      for (const row of log) perTransaction.set(row.xid, (perTransaction.get(row.xid) ?? 0) + 1)
+      expect(
+        [...perTransaction.values()].sort((a, b) => b - a),
+        'no batch may delete more than 1000 signals',
+      ).toEqual(kind === 'cleanup' ? [1000, 1000, 501] : [1000, 1000])
+      expect(
+        span(log.filter((row) => row.pid === pausedPid).map((row) => row.id)),
+        'the paused batch must delete exactly the signals it selected',
+      ).toEqual({ count: 1000, first: 0, last: 999 })
+      expect(
+        span(log.filter((row) => row.pid !== pausedPid).map((row) => row.id)),
+        'the concurrent batch must delete only signals after the paused selection',
+      ).toEqual(
+        kind === 'cleanup'
+          ? { count: 1501, first: 1000, last: 2500 }
+          : { count: 1000, first: 1000, last: 1999 },
+      )
+      if (kind === 'cleanup') expect([firstResult, secondResult]).toEqual([1000, 1501])
+      expect((await testDb.pool.query('SELECT id FROM waitlist_scan_signals')).rows).toHaveLength(
+        kind === 'cleanup' ? 0 : 501,
+      )
+    } finally {
+      await probe.query('ROLLBACK')
+      probe.release()
+      await release()
+      controller.release()
+      await Promise.allSettled(pending)
+      await removeSignalGate()
+      await testDb.pool.query('DELETE FROM waitlist_scan_signals')
+    }
+  }
+
+  const consumeIn =
+    (consume = consumeSignals) =>
+    (eventTypeId: string) =>
+      db.transaction().execute((trx) => consume(trx, eventTypeId, new Date(NOW.epochMilliseconds)))
+
+  it(
+    'locks each cleanup batch so a concurrent cleanup skips it and deletes disjoint signals',
+    SERIALIZED,
+    async () => {
+      await verifySignalBatchLocks('cleanup', () => cleanupWaitlistSignals(ctx, { now: () => 0 }))
+    },
+  )
+
+  it(
+    'locks each consumed signal batch so a concurrent pass skips it and deletes disjoint signals',
+    SERIALIZED,
+    async () => {
+      await verifySignalBatchLocks('consumption', consumeIn())
+    },
+  )
+
+  it.each([
+    [
+      'cleanup',
+      'without SKIP LOCKED',
+      'FOR UPDATE OF s SKIP LOCKED',
+      'FOR UPDATE OF s',
+      /a concurrent cleanup must skip the paused batch instead of waiting for it: expected true to be false/,
+    ],
+    [
+      'cleanup',
+      'without a row lock',
+      'FOR UPDATE OF s SKIP LOCKED',
+      '',
+      /a paused cleanup batch must lock exactly its selected signals/,
+    ],
+    [
+      'consumption',
+      'without SKIP LOCKED',
+      `ORDER BY id LIMIT \${SIGNAL_LIMIT} FOR UPDATE SKIP LOCKED`,
+      `ORDER BY id LIMIT \${SIGNAL_LIMIT} FOR UPDATE`,
+      /a concurrent consumption must skip the paused batch instead of waiting for it: expected true to be false/,
+    ],
+    [
+      'consumption',
+      'without a row lock',
+      `ORDER BY id LIMIT \${SIGNAL_LIMIT} FOR UPDATE SKIP LOCKED`,
+      `ORDER BY id LIMIT \${SIGNAL_LIMIT}`,
+      /a paused consumption batch must lock exactly its selected signals/,
+    ],
+  ] as const)(
+    'detects source-copy signal %s %s',
+    SERIALIZED,
+    async (kind, _, before, after, failure) => {
+      const copy = sourceCopy('waitlist-discovery', [[before, after]])
+      await expect(
+        verifySignalBatchLocks(
+          kind,
+          kind === 'cleanup'
+            ? () => copy.cleanupWaitlistSignals(ctx, { now: () => 0 })
+            : consumeIn(copy.consumeSignals),
+        ),
+      ).rejects.toThrow(failure)
+    },
+  )
 
   it(
     'detects source-copy omission of irrelevant-signal cleanup from the scan sweep',

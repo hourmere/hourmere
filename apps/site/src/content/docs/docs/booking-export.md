@@ -68,7 +68,7 @@ their UTC offsets so repeated autumn hours remain distinguishable. For example,
 ## Columns
 
 Headers are stable machine-readable names, independent of the admin interface language.
-The table below describes the **personal** column set. Team exports use only `id`,
+The table below describes the **personal** column set in header order. Team exports use only `id`,
 `event_type_id`, `event_type`, `start`, `end`, `start_utc`, `end_utc`, `status`,
 `invitee_name`, `invitee_email`, `guests_count`, `hosts`, `cancelled_at` and `time_zone`.
 Team `hosts` contains IDs and names only, including for former members; no host email
@@ -84,7 +84,6 @@ the existing team-admin booking-read data boundary. A deleted event type has an 
 | `title` | Booking title. |
 | `start` | Start in the requested zone, with UTC offset. |
 | `end` | End in the requested zone, with UTC offset. |
-| `time_zone` | Requested IANA zone, such as `Europe/Berlin`. |
 | `start_utc` | Start instant in UTC. |
 | `end_utc` | End instant in UTC. |
 | `status` | Stored booking status, including cancelled predecessors after a reschedule. |
@@ -97,6 +96,7 @@ the existing team-admin booking-read data boundary. A deleted event type has an 
 | `source` | Creation source, including `import` for imported local bookings. |
 | `created_at` | UTC creation timestamp. |
 | `cancelled_at` | UTC cancellation timestamp, empty when absent. |
+| `time_zone` | Requested IANA zone, such as `Europe/Berlin`. |
 
 Answers use one JSON column instead of one column per question because an export can
 span event types with different questions and historical edits. Stable question IDs keep
@@ -154,8 +154,10 @@ npm run --silent cli -- export --input export-request.json
   PostgreSQL across web processes. Another active download receives
   `409 export_in_progress`; wait for it to finish before retrying. There is also a
   process-wide cap configured by `BOOKING_EXPORT_MAX_CONCURRENT` (default 2, valid 1–8;
-  invalid settings use 2). A full process cap returns `409 export_busy` before acquiring
-  a database connection. Each stream is cut off after 30 seconds without a reader pull,
+  empty means unset; invalid settings prevent startup). A full process cap returns `409 export_busy` before acquiring
+  a database connection. Each user can run only one export per process across personal
+  and team spaces; another request receives `409 export_user_in_progress`. The user
+  limit and process cap are per process, not cluster-wide. Each stream is cut off after 30 seconds without a reader pull,
   as well as after a five-minute overall deadline, returning its connection. Its
   repeatable-read snapshot reflects the data at export start, so changes committed
   later appear only in a new export. A disconnect, stalled reader or deadline releases

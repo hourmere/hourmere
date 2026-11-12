@@ -104,6 +104,63 @@ event type. Its public booking page is `/{handle}/{slug}`. Configure calendars e
 through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest) or
 [MCP](/docs/mcp) guides for agent access. Test one booking before inviting others.
 
+## Turn off app installation
+
+App installation and the static offline shell are enabled by default. To disable them,
+set `VITE_PWA_ENABLED=false` in the repository-root `.env`, then rebuild and redeploy your
+source installation:
+
+```sh
+./scripts/compose-up.sh -d --build --wait
+```
+
+Compose passes this setting to the Docker build as `VITE_PWA_ENABLED`; `.env` stays outside
+the image build context. A shell-exported value overrides `.env`, so remove any conflicting
+export before building. Empty or omitted means the current default (`true`); only `true`
+and `false` are otherwise accepted. Invalid values fail the build with an error naming the
+setting. Leave the example value empty if the installation should follow future defaults.
+
+Direct web builds also read the root `.env`. To override it for one build, use
+`VITE_PWA_ENABLED=false npm run build --workspace @hourmere/web`, then deploy that output.
+A direct image build requires `docker build --build-arg VITE_PWA_ENABLED=false -t hourmere:local .`,
+then deployment of that image. A prebuilt image's setting is fixed at build time; changing
+only its runtime environment cannot disable PWA support. There is no runtime off switch
+for image installs. `docker-compose.image.yml` pins the published image, ignores
+`APP_IMAGE`, and disables builds, so tagging a replacement `hourmere:local` or adding
+`--build` while keeping that overlay does not replace the served app.
+
+To convert an existing image install, first follow the backup and version-selection steps
+in [upgrade and roll back](#upgrade-and-roll-back), retaining the source checkout matching
+the deployed release. Before editing `.env`, set the shell's `HOURMERE_VERSION` to the
+exact version of the currently running image (without the tag's leading `v`) and verify
+that the checkout is at that release tag:
+
+```sh
+test "$(git describe --tags --exact-match --match 'v[0-9]*')" = "v$HOURMERE_VERSION" ||
+  { echo 'Stop: the checkout is not at the running release tag.' >&2; false; }
+```
+
+Stop if the check fails: older code must not run against a newer database schema.
+After the check succeeds, in your existing private `.env`, remove only
+`docker-compose.image.yml` from `COMPOSE_FILE`, preserving the base file, proxy, worker
+and any custom overlays. Unset `HOURMERE_VERSION` in both `.env` and the shell so a
+separate worker also uses the local image; clear any shell-exported `COMPOSE_FILE` so
+Compose reads the edited list. Set `VITE_PWA_ENABLED=false`, then use the source rebuild
+command above to deploy all roles. Do not rerun `setup.sh --source` over an existing
+installation: setup refuses to overwrite `.env`. Retain your secrets, project name and
+volumes, and use the documented backup/restore procedure if a deployment fails.
+
+The disabled build stops registering workers but keeps `/app/sw.js` available as a minimal
+retirement worker. Existing clients receive it at their next online worker update check:
+it activates, deletes only Hourmere app-shell caches and unregisters itself, without
+intercepting requests or forcing a page reload. Browser update timing varies; offline
+clients cannot receive it until they reconnect. Keep serving this worker for returning
+clients instead of deleting the endpoint. Already open pages may remain controlled until
+they close or reload. The change does not delete cookies or remove installed icons; users
+can uninstall those through the browser or operating system. Set the value back to `true`
+or empty and rebuild/redeploy to enable installation again. See the
+[install guide](/docs/install-app) for device sign-in limitations and offline behavior.
+
 ## Google sign-in and calendar publishing
 
 To add the **Continue with Google** button, follow the
@@ -141,6 +198,15 @@ Private exceptions do not bypass TLS verification, allow cloud metadata/link-loc
 addresses, or authorize sending passwords to another origin. Use a certificate trusted
 by the process; there is no “ignore certificate errors” option. Apply narrow egress
 rules and, when configuration is introduced, keep web and worker policy consistent.
+
+## Private identity providers (reserved)
+
+Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for private
+identity providers and is empty by default; leave it empty unless you prepare for a later
+release. It accepts only exact `host:port` entries, permits private routing but never plain
+HTTP, and is separate from `WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid
+one changes nothing yet. See the
+[configuration reference](/docs/configuration#private-identity-providers).
 
 ## Proxy behavior and an existing proxy
 
@@ -1053,3 +1119,10 @@ and defaults to `https://hourmere.com`, independently of your instance's `PUBLIC
 the hosted sign-up page URL when available. The links send no booking details or tracking
 parameters, and suppress the referrer. Removing attribution may become an
 enterprise-license entitlement later; it is outside the current configuration.
+
+## SMS foundation
+
+An optional [operator-configured Twilio provider](/docs/sms-provider) supplies internal
+SMS sending with durable per-number, instance and organization limits. Costs are billed
+to your Twilio account. There are no user-facing SMS reminders or workflow actions yet;
+no SMS sending jobs or status callback endpoint are enabled by configuration.

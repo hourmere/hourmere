@@ -200,14 +200,14 @@ export async function deliverGroupHostMail(
       await sql`UPDATE group_slot_host_messages SET state='skipped',claim_token=NULL,lease_until=NULL WHERE id=${id}`.execute(
         trx,
       )
-      return
+      return 'changed' as const
     }
     if (row.next_attempt_at > asDate(clock(deps)) || row.due_at > asDate(clock(deps))) return
     if (row.attempts >= 13) {
       await sql`UPDATE group_slot_host_messages SET state='failed',claim_token=NULL,lease_until=NULL WHERE id=${id}`.execute(
         trx,
       )
-      return
+      return 'changed' as const
     }
     const token = randomUUID()
     await sql`UPDATE group_slot_host_messages SET state='processing',attempts=attempts+1,claim_token=${token},lease_until=clock_timestamp()+interval '90 seconds' WHERE id=${id}`.execute(
@@ -215,7 +215,8 @@ export async function deliverGroupHostMail(
     )
     return { ...row, token, attempt: row.attempts + 1 }
   })
-  if (!claim) return
+  if (!claim) return false
+  if (claim === 'changed') return true
   let state = 'sent'
   try {
     // Pin calendar organizer outside SMTP; no seat or slot lock is held during delivery.
@@ -289,6 +290,7 @@ export async function deliverGroupHostMail(
   await sql`UPDATE group_slot_host_messages SET state=${state},claim_token=NULL,lease_until=NULL,
     next_attempt_at=${asDate(clock(deps).add({ milliseconds: Math.min(60_000 * 2 ** (claim.attempt - 1), 3_600_000) }))}
     WHERE id=${id} AND claim_token=${claim.token} AND attempts=${claim.attempt}`.execute(deps.db)
+  return true
 }
 
 /** Durable due rows are the queue; a crash never needs to reconstruct policy from a seat. */
@@ -302,16 +304,27 @@ export function groupHostMailJob(deps: NotificationDeps) {
     retry: { limit: 0 },
     expireInSeconds: 300,
     handler: async (_, { signal }) => {
-      const rows = (
-        await sql<{ id: string }>`SELECT id FROM group_slot_host_messages
+      // Leave time for one bounded SMTP attempt before the job's five-minute expiry.
+      // Four is a query batch size, not an instance-wide per-minute delivery cap.
+      const deadline = performance.now() + 230_000
+      while (performance.now() < deadline) {
+        signal.throwIfAborted()
+        const rows = (
+          await sql<{ id: string }>`SELECT id FROM group_slot_host_messages
         WHERE state IN ('pending','processing') AND next_attempt_at<=${asDate(clock(deps))} AND due_at<=${asDate(clock(deps))}
         AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY next_attempt_at,id LIMIT 4`.execute(
-          deps.db,
-        )
-      ).rows
-      for (const row of rows) {
-        signal.throwIfAborted()
-        await deliverGroupHostMail(deps, row.id, signal)
+            deps.db,
+          )
+        ).rows
+        if (rows.length === 0) return
+        let progressed = false
+        for (const row of rows) {
+          signal.throwIfAborted()
+          if (performance.now() >= deadline) return
+          if (await deliverGroupHostMail(deps, row.id, signal)) progressed = true
+        }
+        // Locked rows stay durable for the next scheduled run; do not busy-poll them.
+        if (!progressed) return
       }
     },
   })

@@ -13,6 +13,7 @@ import {
   rescheduleManagedBooking,
 } from './bookings.ts'
 import type { BookingEvent, PublicContext, ServiceContext } from './context.ts'
+import { DomainError } from './errors.ts'
 import {
   assertManageRequestIsolation,
   assertOrganizationIsolation,
@@ -132,22 +133,37 @@ describe.skipIf(!serverUrl)('reschedule requests', () => {
           .executeTakeFirst()
       )?.state,
     ).toBe('replaced')
-    await expect(
-      requestReschedule(ctx, created.booking.id, {
-        idempotencyKey: randomUUID(),
-        note: 'bad\tcontrol',
-      }),
-    ).rejects.toMatchObject({
-      name: 'ZodError',
-      issues: [{ path: ['note'], message: 'must not contain control characters other than LF' }],
-    })
-    await expect(
-      requestReschedule(ctx, created.booking.id, {
-        idempotencyKey: randomUUID(),
-        note: 'a'.repeat(2001),
-      }),
-    ).rejects.toMatchObject({ name: 'ZodError' })
   })
+  it.each([
+    [
+      'control character',
+      'bad\tcontrol',
+      'note: must not contain control characters other than LF',
+    ],
+    [
+      'overlong',
+      'a'.repeat(2001),
+      'note: Too big: expected string to have <=2000 characters; note: must contain at most 2000 UTF-16 code units',
+    ],
+  ])(
+    'rejects an invalid note through the service with a typed client error: %s',
+    async (_label, note, message) => {
+      const { ctx, created, events } = await setup()
+      const request = requestReschedule(ctx, created.booking.id, {
+        idempotencyKey: randomUUID(),
+        note,
+      })
+      await expect(request).rejects.toBeInstanceOf(DomainError)
+      await expect(request).rejects.toMatchObject({
+        kind: 'invalid',
+        code: 'invalid_request',
+        message,
+        detail: message,
+      })
+      expect((await getHostBooking(ctx, created.booking.id)).pendingReschedule).toBeUndefined()
+      expect(events.filter((event) => event.type === 'reschedule_requested')).toHaveLength(0)
+    },
+  )
   it('expires once and preserves booking, ignores stale expiry and unauthorized hosts', async () => {
     const { ctx, pub, created, events } = await setup()
     const request = await requestReschedule(ctx, created.booking.id, {

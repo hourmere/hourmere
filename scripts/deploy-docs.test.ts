@@ -239,6 +239,56 @@ ${log}${fail}exec /usr/bin/install "$@"
 }
 
 describe('documented deployment operations', () => {
+  it.each([
+    { tag: 'v1.2.3', version: '1.2.3', gitStatus: 0, expectedStatus: 0 },
+    { tag: 'v1.2.2', version: '1.2.3', gitStatus: 0, expectedStatus: 1 },
+    { tag: '', version: '1.2.3', gitStatus: 128, expectedStatus: 1 },
+  ])('checks the image conversion checkout ($tag, git status $gitStatus)', (scenario) => {
+    const section = guide.split('To convert an existing image install,')[1]?.split('\n## ')[0]
+    if (!section) throw new Error('Missing image conversion section')
+    const block = section.match(/```sh\n([\s\S]*?)\n```/)
+    const command = block?.[1]
+    if (!command || block.index === undefined)
+      throw new Error('Image conversion must include a runnable version check')
+    // The check must run while HOURMERE_VERSION is still set and before anything is edited,
+    // and the prose must tell the operator to stop on failure before any editing step.
+    let previous = block.index
+    for (const step of [
+      'Stop if the check fails',
+      'remove only',
+      'Unset `HOURMERE_VERSION`',
+      'source rebuild',
+    ]) {
+      const position = section.indexOf(step)
+      expect(position, step).toBeGreaterThan(previous)
+      previous = position
+    }
+    // The stub reports its arguments: only the release-tag pattern may satisfy the check.
+    const result = spawnSync(
+      'sh',
+      [
+        '-c',
+        `git() { printf 'git %s\\n' "$*" >&2; printf '%s\\n' "$CHECKOUT_TAG"; return "$GIT_STATUS"; }\n${command}`,
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CHECKOUT_TAG: scenario.tag,
+          GIT_STATUS: String(scenario.gitStatus),
+          HOURMERE_VERSION: scenario.version,
+        },
+      },
+    )
+    const [gitCall, ...messages] = result.stderr.trim().split('\n')
+    expect(gitCall).toBe('git describe --tags --exact-match --match v[0-9]*')
+    // A failed check must say so where a pasting operator sees it; a passed check stays quiet.
+    expect(messages).toEqual(
+      scenario.expectedStatus === 0 ? [] : [expect.stringMatching(/^Stop: /)],
+    )
+    expect(result.status).toBe(scenario.expectedStatus)
+  })
+
   it('requires a root host in every deployment and a portless HTTPS host for bundled Caddy', () => {
     expect(guide).toMatch(
       /Every deployment must serve Hourmere at the root of its own host name,\s+without a path prefix/,

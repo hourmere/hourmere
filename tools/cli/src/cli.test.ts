@@ -125,7 +125,7 @@ describe('CLI transport and arguments', () => {
     'kills removed waitlist capability privacy in privateFile=%s',
     async (privateFile) => {
       const change: readonly [string, string] = privateFile
-        ? ['[key, oneTimeToken, waitlistToken]', '[key, oneTimeToken]']
+        ? ['[key, oneTimeToken, waitlistToken, slackUrl]', '[key, oneTimeToken, slackUrl]']
         : ['secrets.push(input.waitlistToken)', '']
       await verifyWaitlistPrivacy(sourceCopy(), privateFile)
       await expect(verifyWaitlistPrivacy(sourceCopy(change), privateFile)).rejects.toMatchObject({
@@ -197,7 +197,7 @@ describe('CLI transport and arguments', () => {
     ['stdout capability redaction', ['secrets.push(input.oneTimeToken)', ''], verifyOneTimePrivacy],
     [
       'private file capability redaction',
-      ['[key, oneTimeToken, waitlistToken]', '[key, waitlistToken]'],
+      ['[key, oneTimeToken, waitlistToken, slackUrl]', '[key, waitlistToken, slackUrl]'],
       (runner) => verifyOneTimePrivacy(runner, true),
     ],
     [
@@ -767,6 +767,8 @@ describe('CLI transport and arguments', () => {
     ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
     ['schedule', 'get_schedule'],
+    ['schedule-availability', 'get_schedule_availability'],
+    ['save-availability', 'save_schedule_availability'],
     ['slots', 'find_available_slots'],
     ['book', 'create_booking'],
     ['list', 'list_bookings'],
@@ -775,6 +777,7 @@ describe('CLI transport and arguments', () => {
     ['cancel', 'cancel_booking'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],
+    ['set-no-show', 'set_attendee_no_show'],
   ])(
     'maps %s to the existing %s tool and sends one authenticated request',
     async (command, tool) => {

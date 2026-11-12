@@ -7,7 +7,7 @@ import pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as databaseModule from './index.ts'
 import * as migrationModule from './migrate.ts'
-import { cleanupTestDatabases, createTestDatabase } from './testing.ts'
+import { cleanupTestDatabases, createTestDatabase, reuseConnectionsAfterErrors } from './testing.ts'
 
 function fakePool() {
   return {
@@ -141,11 +141,16 @@ describe('test database ownership', () => {
     await owned.drop()
     const name = new URL(owned.url).pathname.slice(1)
     expect(admin.query).toHaveBeenNthCalledWith(
-      3,
+      2,
+      `ALTER DATABASE ${name} SET synchronous_commit = off`,
+    )
+    expect(admin.query).toHaveBeenNthCalledWith(3, `ALTER DATABASE ${name} SET jit = off`)
+    expect(admin.query).toHaveBeenNthCalledWith(
+      4,
       'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
       [name],
     )
-    expect(admin.query).toHaveBeenNthCalledWith(4, `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+    expect(admin.query).toHaveBeenNthCalledWith(5, `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
   })
 
   it.each([
@@ -271,6 +276,32 @@ describe('test database ownership', () => {
     ).rejects.toThrow('Test database tag')
     expect(pg.Pool).not.toHaveBeenCalled()
   })
+
+  it('copies a test template database and still migrates by default', async () => {
+    const template = 'hourmere_test_coverage_42_0123456789abcdef'
+    const owned = await createTestDatabase('postgres://localhost/hourmere', '/migrations', {
+      template,
+    })
+    expect(admin.query).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(
+          `^CREATE DATABASE hourmere_test_${process.pid}_[a-f0-9]{16} TEMPLATE ${template}$`,
+        ),
+      ),
+    )
+    expect(migrationModule.runMigrations).toHaveBeenCalledWith(pool, '/migrations')
+    await owned.drop()
+  })
+
+  it.each(['hourmere', 'template1', 'hourmere_test_x; DROP DATABASE hourmere'])(
+    'rejects the non-test template %s before creating a pool',
+    async (template) => {
+      await expect(
+        createTestDatabase('postgres://localhost/hourmere', undefined, { template }),
+      ).rejects.toThrow('Test database templates must be test databases')
+      expect(pg.Pool).not.toHaveBeenCalled()
+    },
+  )
 
   it('drops a created database when ALTER fails before a pool is returned', async () => {
     admin.query.mockImplementation(async (sql) => {
@@ -418,17 +449,47 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     return result.rowCount !== 0
   }
 
-  it('creates migrated fixtures with synchronous_commit disabled', async () => {
-    const owned = await createTestDatabase(serverUrl as string)
+  it('can keep a connection after failed statements instead of reopening one', async () => {
+    const owned = await createTestDatabase(serverUrl as string, undefined, {
+      migrate: false,
+      tag: 'reuse',
+    })
     try {
-      expect((await owned.pool.query('SHOW synchronous_commit')).rows).toEqual([
+      const pool = reuseConnectionsAfterErrors(owned.pool)
+      const backends = new Set<number>()
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await expect(pool.query('SELECT 1/0')).rejects.toMatchObject({ code: '22012' })
+        backends.add((await pool.query('SELECT pg_backend_pid() AS pid')).rows[0].pid)
+      }
+      expect(backends.size).toBe(1)
+      expect(pool.totalCount).toBe(1)
+    } finally {
+      await owned.drop()
+    }
+  })
+
+  it('creates migrated fixtures with synchronous_commit and JIT disabled', async () => {
+    const owned = await createTestDatabase(serverUrl as string)
+    const client = await owned.pool.connect()
+    try {
+      expect((await client.query('SHOW synchronous_commit')).rows).toEqual([
         { synchronous_commit: 'off' },
       ])
+      expect((await client.query('SHOW jit')).rows).toEqual([{ jit: 'off' }])
+      // Mid-file statistics can lift any read past the JIT thresholds. Cross them here and
+      // require the read to run uncompiled.
+      await client.query('SET jit_above_cost = 0')
+      const plan = (
+        await client.query('EXPLAIN (ANALYZE, FORMAT JSON) SELECT count(*) FROM schema_migrations')
+      ).rows[0]?.['QUERY PLAN']?.[0]
+      expect(plan?.['Execution Time']).toEqual(expect.any(Number))
+      expect(plan).not.toHaveProperty('JIT')
       expect(
-        (await owned.pool.query<{ n: number }>('SELECT count(*)::int AS n FROM schema_migrations'))
+        (await client.query<{ n: number }>('SELECT count(*)::int AS n FROM schema_migrations'))
           .rows[0]?.n,
       ).toBeGreaterThan(0)
     } finally {
+      client.release(true)
       await owned.drop()
     }
   })
