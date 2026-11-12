@@ -1,15 +1,13 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rmdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { setImmediate } from 'node:timers/promises'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import pg from 'pg'
-import { afterAll, afterEach, it as baseIt, beforeAll, beforeEach, describe, expect } from 'vitest'
+import type pg from 'pg'
+import { afterAll, afterEach, it as baseIt, beforeAll, describe, expect } from 'vitest'
 import { insertBooking } from '../../scheduling/src/bookings.ts'
 import { notificationSnapshot } from '../../scheduling/src/notification-settings.ts'
 import { createTestUser } from '../../scheduling/src/testing.ts'
@@ -30,100 +28,6 @@ import {
 import { createSourceFixture } from './source-fixture.ts'
 import { parserContext, readTargetState, validateAuthorization } from './target.ts'
 import type { SourceVersion } from './types.ts'
-
-// TEMPORARY timing probe for CI diagnosis; removed before review.
-const probeLog = process.env.IMPORT_APPLY_PROBE_LOG
-const probe = probeLog
-  ? (() => {
-      const stats = { queries: 0, queryMs: 0, maxQueryMs: 0, connects: 0, connectMs: 0 }
-      const timed = (started: number, connect: boolean) => () => {
-        const ms = performance.now() - started
-        if (connect) stats.connectMs += ms
-        else {
-          stats.queryMs += ms
-          stats.maxQueryMs = Math.max(stats.maxQueryMs, ms)
-        }
-      }
-      const wrap = (name: 'query' | 'connect') => {
-        const original = pg.Client.prototype[name] as (...args: unknown[]) => unknown
-        ;(pg.Client.prototype as unknown as Record<string, unknown>)[name] = function (
-          this: unknown,
-          ...args: unknown[]
-        ) {
-          const started = performance.now()
-          if (name === 'query') stats.queries++
-          else stats.connects++
-          const done = timed(started, name === 'connect')
-          const last = args.at(-1)
-          if (typeof last === 'function')
-            args[args.length - 1] = (...cb: unknown[]) => {
-              done()
-              return (last as (...x: unknown[]) => unknown)(...cb)
-            }
-          const result = original.apply(this, args)
-          if (result && typeof (result as Promise<unknown>).then === 'function')
-            (result as Promise<unknown>).then(done, done)
-          return result
-        }
-      }
-      wrap('query')
-      wrap('connect')
-      const delay = monitorEventLoopDelay({ resolution: 1 })
-      delay.enable()
-      const sched = () => {
-        try {
-          return readFileSync('/proc/self/schedstat', 'utf8').trim().split(' ').map(Number)
-        } catch {
-          return [0, 0, 0]
-        }
-      }
-      let mark = {
-        t: performance.now(),
-        cpu: process.cpuUsage(),
-        elu: performance.eventLoopUtilization(),
-        sched: sched(),
-      }
-      return {
-        reset() {
-          delay.reset()
-          Object.assign(stats, { queries: 0, queryMs: 0, maxQueryMs: 0, connects: 0, connectMs: 0 })
-          mark = {
-            t: performance.now(),
-            cpu: process.cpuUsage(),
-            elu: performance.eventLoopUtilization(),
-            sched: sched(),
-          }
-        },
-        write(name: string) {
-          const cpu = process.cpuUsage(mark.cpu)
-          const now = sched()
-          appendFileSync(
-            probeLog,
-            `${JSON.stringify({
-              at: new Date().toISOString(),
-              pid: process.pid,
-              name,
-              wallMs: Math.round(performance.now() - mark.t),
-              cpuUserMs: Math.round(cpu.user / 1000),
-              cpuSysMs: Math.round(cpu.system / 1000),
-              elu: Number(performance.eventLoopUtilization(mark.elu).utilization.toFixed(3)),
-              runMs: Math.round(((now[0] ?? 0) - (mark.sched[0] ?? 0)) / 1e6),
-              runqWaitMs: Math.round(((now[1] ?? 0) - (mark.sched[1] ?? 0)) / 1e6),
-              slices: (now[2] ?? 0) - (mark.sched[2] ?? 0),
-              eldP50: Math.round(delay.percentile(50) / 1e6),
-              eldP99: Math.round(delay.percentile(99) / 1e6),
-              eldMax: Math.round(delay.max / 1e6),
-              ...stats,
-              queryMs: Math.round(stats.queryMs),
-              maxQueryMs: Math.round(stats.maxQueryMs),
-              connectMs: Math.round(stats.connectMs),
-              heapMb: Math.round(process.memoryUsage().heapUsed / 2 ** 20),
-            })}\n`,
-          )
-        },
-      }
-    })()
-  : undefined
 
 // Vitest times out the assertion, not its promise. Drain the test body before
 // cleaning shared fixtures so a failed case cannot keep writing into the next one.
@@ -263,57 +167,9 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     target.pool = cancellablePool(target.pool)
     for (const version of ['cal.diy-a5ee96f77edd', 'cal.com-v6.2.0'] as const)
       sources.set(version, await createSourceFixture(version))
-    if (process.env.EXPERIMENT_CI_STATS) {
-      const statsUser = await createTestUser(createDb(target.pool))
-      await target.pool.query('ANALYZE auth."user"')
-      await target.pool.query('DELETE FROM auth."user" WHERE id=$1', [statsUser.id])
-    }
   }, 30_000)
-  beforeEach(() => probe?.reset())
-  afterEach(async ({ task }) => {
-    probe?.write(task.name)
+  afterEach(async () => {
     await Promise.allSettled([...pendingTests])
-    const probeUsers = testStates.flatMap((context) => context.users)
-    if (probeLog && probeUsers.length) {
-      const plan = (
-        await target.pool.query(
-          `EXPLAIN (ANALYZE, SETTINGS, FORMAT JSON) SELECT u.id,u.email,u."emailVerified",p.handle,p.time_zone,p.locale,
-    po.organization_id,
-    coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'role',m.role)
-      ORDER BY m.id) FROM auth.member m WHERE m."userId"=u.id
-      AND m."organizationId"=po.organization_id),'[]'::jsonb) AS memberships
-    FROM auth."user" u LEFT JOIN profiles p ON p.user_id=u.id
-    LEFT JOIN personal_organizations po ON po.user_id=u.id
-    WHERE u.id=ANY($1::uuid[]) OR lower(btrim(u.email)) IN
-      (SELECT lower(btrim(email)) FROM auth."user" WHERE id=ANY($1::uuid[]))
-    ORDER BY u.id`,
-          [probeUsers.slice(0, 1)],
-        )
-      ).rows[0]?.['QUERY PLAN']?.[0]
-      const tables = (
-        await target.pool.query(
-          `SELECT c.relname AS t,c.relpages AS rp,c.reltuples::int AS rt,
-            (pg_relation_size(c.oid)/8192)::int AS pages,s.n_live_tup::int AS live,s.n_dead_tup::int AS dead,
-            s.vacuum_count::int+s.autovacuum_count::int AS vac,s.analyze_count::int+s.autoanalyze_count::int AS an
-          FROM pg_class c LEFT JOIN pg_stat_all_tables s ON s.relid=c.oid
-          WHERE c.oid IN ('auth."user"'::regclass,'auth.member'::regclass,'profiles'::regclass,
-            'personal_organizations'::regclass) ORDER BY c.relname`,
-        )
-      ).rows
-      appendFileSync(
-        probeLog,
-        `${JSON.stringify({
-          name: 'EXPLAIN',
-          cost: plan?.Plan?.['Total Cost'],
-          rows: plan?.Plan?.['Plan Rows'],
-          node: plan?.Plan?.['Node Type'],
-          execMs: plan?.['Execution Time'],
-          jitMs: plan?.JIT?.Timing?.Total ?? null,
-          jitOptions: plan?.JIT?.Options ?? null,
-          tables,
-        })}\n`,
-      )
-    }
     for (const context of testStates.splice(0)) {
       for (const cleanup of context.cleanups) await cleanup()
       await target.pool.query('DELETE FROM auth."user" WHERE id=ANY($1::uuid[])', [context.users])
