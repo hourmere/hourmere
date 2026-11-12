@@ -1400,10 +1400,11 @@ export { expect }
  * animation frames. Playwright's own stability check measures an element inside its frame,
  * so it cannot see an embedded booking page's iframe move within the host page. On narrow
  * screens, choosing a day smoothly scrolls its times into view, which scrolls the host page
- * when the booking page is embedded. A click during that scroll can press one element and
- * release over another: no click reaches the time, yet Playwright reports success.
+ * (or the popup's scrollable content) when the booking page is embedded. A click during that
+ * scroll can press one element and release over another: no click reaches the time, yet
+ * Playwright reports success. Call it between choosing a day and clicking a time.
  */
-async function waitUntilAtRest(target: Locator, page: Page) {
+export async function waitUntilAtRest(target: Locator, page: Page) {
   await target.waitFor()
   let previous: string | undefined
   let unchanged = 0
