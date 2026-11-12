@@ -10,6 +10,7 @@
     "schema:sql": "auth generate --config src/schema-cli.ts --output auth-schema.generated.sql --yes"
   },
   "devDependencies": {
+    "@better-auth/sso": "1.7.16",
     "@types/pg": "8.23.1",
     "auth": "1.7.16"
   },

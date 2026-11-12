@@ -1,7 +1,5 @@
 // Keeps people from losing a half-filled form: while a page has unsaved changes, leaving it
-// asks first. The app uses React Router's declarative mode, which has no navigation
-// blocker (useBlocker needs a data router), so the guard covers the ways out of a page that
-// the app controls or the browser can ask about:
+// asks first. The guard covers app links, browser history and page unload:
 //
 // - links inside the app's frame (navigation, back links, the logo): AppShell asks on click,
 //   before React Router navigates;
@@ -11,8 +9,8 @@
 // - reloading, closing the tab or typing another address: the browser's own prompt
 //   (beforeunload).
 //
-// The browser's back and forward buttons are not covered: declarative mode cannot stop
-// them without patching the router's history.
+// Browser back and forward navigation is blocked by the production data router.
+// Declarative test routers retain link and unload protection.
 import {
   createContext,
   type ReactNode,
@@ -22,6 +20,7 @@ import {
   useMemo,
   useRef,
 } from 'react'
+import { UNSAFE_DataRouterContext, useBlocker } from 'react-router'
 import { useI18n } from './i18n/runtime.tsx'
 
 export const LEAVE_WITH_UNSAVED_CHANGES =
@@ -42,6 +41,10 @@ const UnsavedChangesContext = createContext<UnsavedChanges | null>(null)
 export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   const dirty = useRef(new Set<symbol>())
+  // useBlocker is stable, but only works inside a data router. React Router has
+  // no stable data-router detection API; keep declarative component harnesses
+  // supported and pin this export in unsaved-history.test.tsx on upgrades.
+  const dataRouter = useContext(UNSAFE_DataRouterContext)
 
   const set = useCallback((key: symbol, isDirty: boolean) => {
     if (isDirty) dirty.current.add(key)
@@ -61,7 +64,33 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
     () => ({ set, hasUnsavedChanges, confirmLeave }),
     [set, hasUnsavedChanges, confirmLeave],
   )
-  return <UnsavedChangesContext value={value}>{children}</UnsavedChangesContext>
+  return (
+    <UnsavedChangesContext value={value}>
+      {dataRouter && (
+        <HistoryLeaveGuard hasUnsavedChanges={hasUnsavedChanges} confirmLeave={confirmLeave} />
+      )}
+      {children}
+    </UnsavedChangesContext>
+  )
+}
+
+function HistoryLeaveGuard({
+  hasUnsavedChanges,
+  confirmLeave,
+}: Pick<UnsavedChanges, 'hasUnsavedChanges' | 'confirmLeave'>) {
+  const blocker = useBlocker(
+    ({ historyAction, currentLocation, nextLocation }) =>
+      historyAction === 'POP' &&
+      (currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search) &&
+      hasUnsavedChanges(),
+  )
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return
+    if (confirmLeave()) blocker.proceed()
+    else blocker.reset()
+  }, [blocker, confirmLeave])
+  return null
 }
 
 function useUnsavedChangesContext(): UnsavedChanges {

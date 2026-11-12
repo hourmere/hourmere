@@ -43,6 +43,7 @@ import {
 } from './lazy-pages.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { PATHS } from './paths.ts'
+import { useAdminPwa } from './pwa.ts'
 
 export const appRoutes = createRoutesFromElements(
   <>
@@ -119,8 +120,8 @@ function RouteLoadingStatus() {
 
 /**
  * The web app: one client of the public API (/api/v1 and Better Auth's /api/auth), with no
- * endpoints of its own. The router comes from the caller (BrowserRouter in main.tsx,
- * MemoryRouter in tests).
+ * endpoints of its own. The router comes from the caller (a browser data router in
+ * main.tsx, MemoryRouter in most component tests).
  *
  * Signed-in pages live under /app (paths.ts); the root is for public pages such as booking
  * pages (/{handle}/{slug}). The old top-level addresses (/api-keys, /settings, …) are not
@@ -128,6 +129,7 @@ function RouteLoadingStatus() {
  */
 export function App() {
   const { pathname } = useLocation()
+  useAdminPwa(pathname)
   const admin = matchRoutes(appRoutes, pathname)?.some(
     ({ route }) => route.handle?.surface === 'admin',
   )

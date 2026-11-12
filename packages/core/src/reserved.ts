@@ -97,6 +97,20 @@ export function isReservedName(name: string): boolean {
   return RESERVED_NAMES.has(name.toLowerCase())
 }
 
+/**
+ * Lowercase personal handles nobody may newly claim or change to, although, unlike
+ * RESERVED_NAMES, they are still served where already stored. `route` opens the routing-form
+ * pages /route/{handle}/{slug} (docs/routing-forms.md); listing it in RESERVED_NAMES would stop
+ * serving a legacy `route` owner's pages. Team slugs are unaffected: team pages live under
+ * /team/. See isClaimReservedHandle.
+ */
+export const CLAIM_RESERVED_HANDLES: ReadonlySet<string> = new Set(['route'])
+
+/** Whether `name` (case-insensitively, e.g. `Route`) may not be claimed as a personal handle. */
+export function isClaimReservedHandle(name: string): boolean {
+  return CLAIM_RESERVED_HANDLES.has(name.toLowerCase())
+}
+
 /** Exact-case organization slug eligible for the separate public team URL namespace. */
 export function isPublicTeamSlug(value: string): boolean {
   return /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/i.test(value) && !isReservedName(value)

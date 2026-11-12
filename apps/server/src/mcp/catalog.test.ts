@@ -8,6 +8,7 @@ import {
   DEFAULT_NOTIFICATIONS,
   listEventTypeCatalog,
   listScheduleCatalog,
+  MAX_SCHEDULE_OVERRIDES,
   putProfile,
 } from '@hourmere/scheduling'
 import {
@@ -189,19 +190,27 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
         'get_event_type',
         'get_profile',
         'get_schedule',
+        'get_schedule_availability',
         'list_event_types',
         'list_schedules',
+        'save_schedule_availability',
         'set_event_type_notifications',
         'whoami',
       ])
       for (const tool of tools.filter((t) => t.name !== 'whoami')) {
         expect(tool.inputSchema.additionalProperties).toBe(false)
         expect(tool.annotations).toMatchObject({
-          readOnlyHint: tool.name !== 'set_event_type_notifications',
-          destructiveHint: false,
+          readOnlyHint: !['set_event_type_notifications', 'save_schedule_availability'].includes(
+            tool.name,
+          ),
+          destructiveHint: tool.name === 'save_schedule_availability',
           idempotentHint: true,
           openWorldHint: false,
         })
+        if (tool.name === 'save_schedule_availability') {
+          expect(tool.description).toContain('omitted overrides are removed')
+          expect(tool.description).toContain('Confirm with the user before removing overrides')
+        }
         if (tool.name.startsWith('list_')) {
           expect(tool.outputSchema).toMatchObject({ properties: { data: { maxItems: 100 } } })
           expect(tool.inputSchema.properties?.limit).toMatchObject({ minimum: 1, maximum: 100 })
@@ -215,6 +224,35 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
       await client.close()
     }
   })
+  it('reads and saves the same complete snapshot through MCP and REST, rejecting replay', async () => {
+    const snapshot = ok<{
+      schedule: { name: string; timeZone: string; weeklyHours: unknown }
+      overrides: unknown[]
+      version: string
+    }>(await call('get_schedule_availability', { id: scheduleId }))
+    expect(snapshot).toEqual(await rest(`schedules/${scheduleId}/availability`))
+    const input = {
+      id: scheduleId,
+      name: snapshot.schedule.name,
+      timeZone: snapshot.schedule.timeZone,
+      weeklyHours: snapshot.schedule.weeklyHours,
+      overrides: [{ date: '2026-12-31', intervals: [] }],
+      expectedVersion: snapshot.version,
+    }
+    expect(
+      error(
+        await call('save_schedule_availability', {
+          ...input,
+          overrides: Array.from({ length: MAX_SCHEDULE_OVERRIDES + 1 }, () => input.overrides[0]),
+        }),
+      ).error,
+    ).toBe('too_many_overrides')
+    expect(ok(await call('get_schedule_availability', { id: scheduleId }))).toEqual(snapshot)
+    const saved = ok(await call('save_schedule_availability', input))
+    expect(saved).toEqual(await rest(`schedules/${scheduleId}/availability`))
+    expect(error(await call('save_schedule_availability', input)).error).toBe('schedule_conflict')
+  })
+
   it('returns the exact REST profile, including when using a team key', async () => {
     expect(ok(await call('get_profile'))).toEqual(await rest('profile'))
     expect(ok(await call('get_profile', {}, teamKey))).toEqual(await rest('profile', teamKey))

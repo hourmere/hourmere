@@ -11,6 +11,7 @@ import * as Links from '../../../packages/scheduling/src/one-time-links.ts'
 import { COMMANDS, runCli } from '../../../tools/cli/src/cli.ts'
 import { oneTimeLinkTools } from '../../server/src/mcp/one-time-links.ts'
 import { openApiDocument } from '../../server/src/openapi-document.ts'
+import { admin } from '../../web/src/i18n/catalogues/en/admin.ts'
 import { common } from '../../web/src/i18n/catalogues/en/common.ts'
 import { ONE_TIME_LINK_EXPIRIES } from '../../web/src/pages/event-types/one-time-link-options.ts'
 
@@ -242,6 +243,7 @@ describe('one-time booking link documentation', () => {
       expect(() => check(prose(source).replaceAll(before, after))).toThrow(assertion)
       const value = await changedConstant(fact.module, fact.key, fact.value, fact.value + 1)
       expect(() => check(source, value)).toThrow(assertion)
+      check(prose(source).replaceAll(before, after), value)
     })
   }
 
@@ -253,6 +255,15 @@ describe('one-time booking link documentation', () => {
       expect(() => check(source.replaceAll(fact.phrase, fact.mutation))).toThrow(assertion)
     })
   }
+
+  it('uses the editor revocation button label and rejects stale wording', () => {
+    const check = (source: string) =>
+      expect(section(source, 'Create and revoke in the editor')).toContain(
+        `choose **${admin['Revoke link']}**`,
+      )
+    check(guide())
+    expect(() => check(guide().replace('**Revoke link**', '**Revoke**'))).toThrow(assertion)
+  })
 
   it('documents the real editor expiry presets without claiming a TTL policy bound', () => {
     checkPresets(guide())
@@ -355,7 +366,9 @@ describe('one-time booking link documentation', () => {
   it('validates all MCP examples against real tool schemas', () => {
     checkMcp(guide())
     expect(() => checkMcp(guide().replaceAll('"eventTypeId":', '"eventId":'))).toThrow(assertion)
-    expect(() => checkMcp(guide().replaceAll('"limit": 50', '"limit": 101'))).toThrow(assertion)
+    expect(() =>
+      checkMcp(guide().replaceAll('"limit": 50', `"limit": ${Links.ONE_TIME_LINK_PAGE_MAX + 1}`)),
+    ).toThrow(assertion)
     expect(() => checkMcp(guide().replaceAll('"idempotencyKey":', '"retryKey":'))).toThrow(
       assertion,
     )

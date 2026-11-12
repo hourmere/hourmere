@@ -29,6 +29,8 @@ export const COMMANDS = {
   'resend-waitlist-verification': 'resend_waitlist_verification',
   schedules: 'list_schedules',
   schedule: 'get_schedule',
+  'schedule-availability': 'get_schedule_availability',
+  'save-availability': 'save_schedule_availability',
   slots: 'find_available_slots',
   'open-time-snippet': 'generate_open_time_snippet',
   book: 'create_booking',
@@ -37,8 +39,15 @@ export const COMMANDS = {
   reschedule: 'reschedule_booking',
   'request-reschedule': 'request_reschedule',
   cancel: 'cancel_booking',
+  'set-no-show': 'set_attendee_no_show',
+  'booking-attendees': 'get_booking_attendees',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
+  'slack list': 'list_slack_destinations',
+  'slack create': 'create_slack_destination',
+  'slack update': 'update_slack_destination',
+  'slack delete': 'delete_slack_destination',
+  'slack test': 'test_slack_destination',
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
@@ -53,9 +62,15 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
+Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
+Supply incoming-webhook URLs only through private JSON input; responses are masked.
+Slack events: booking.created, booking.rescheduled, booking.cancelled,
+  booking.reschedule_requested, booking.reschedule_request_expired.
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
-          book, list, reschedule, request-reschedule, cancel, retry-meeting, retry-calendar-copy
+          schedule-availability, save-availability,
+          book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees,
+          retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
@@ -82,7 +97,7 @@ book requires an explicit random idempotencyKey in its input. Calls are never re
 request-reschedule requires bookingId, an explicit idempotencyKey and optional plain-text note.
 The original slot remains booked until the invitee moves or cancels; expiry keeps it booked.
 Imported bookings remain read-only in the original system (managementPolicy=local_only_read_only).
-Cancel, reschedule and retry commands refuse them with imported_booking_read_only.
+Cancel, reschedule, set-no-show and retry commands refuse them with imported_booking_read_only.
 For one-time links, book input uses oneTimeToken instead of handle/teamSlug/slug.
 one-time-links create requires bookings or full scope, eventTypeId and an explicit idempotencyKey.
 Its secret URL is printed once to stdout; --output is refused and nothing is stored.
@@ -109,7 +124,9 @@ function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
-    first === 'one-time-links' || first === 'branding' ? `${first} ${parts.shift() ?? ''}` : first
+    first === 'one-time-links' || first === 'branding' || first === 'slack'
+      ? `${first} ${parts.shift() ?? ''}`
+      : first
   const rest = parts
   if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
     throw new CliError('invalid_command')
@@ -281,6 +298,9 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    const slackUrl =
+      args.command.startsWith('slack ') && typeof input.url === 'string' ? input.url : ''
+    if (slackUrl) secrets.push(slackUrl)
     if (args.durationMinutes !== undefined) {
       if (Object.hasOwn(input, 'durationMinutes') && input.durationMinutes !== args.durationMinutes)
         throw new CliError('invalid_duration')
@@ -379,7 +399,7 @@ export async function runCli(options: {
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {
-      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken]))
+      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken, slackUrl]))
       await output.sync()
       options.stdout('{"outputWritten":true}\n')
     } else {

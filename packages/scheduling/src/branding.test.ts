@@ -4,7 +4,9 @@ import { stripTypeScriptTypes } from 'node:module'
 import { crc32 } from 'node:zlib'
 import { brandContrast } from '@hourmere/core'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { sql } from 'kysely'
 import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
@@ -402,6 +404,74 @@ describe.skipIf(!process.env.DATABASE_URL)('organization branding', () => {
         code: 'invalid_brand_color',
       })
   })
+  it('records each branding change with what changed, never the image, hash or colour', async () => {
+    const user = await createTestUser(db),
+      ctx = testContext(db, user.principal),
+      organizationId = user.principal.organization.id,
+      keyId = user.principal.kind === 'api_key' ? user.principal.apiKeyId : ''
+    const journal = () =>
+      db
+        .selectFrom('audit_events')
+        .selectAll()
+        .where('organization_id', '=', organizationId)
+        .orderBy('id')
+        .execute()
+    const uploaded = await uploadBrandLogo(ctx, await png(), 'image/png')
+    await setBranding(ctx, { brandPrimaryColor: '#12ab34' })
+    await setBranding(ctx, { brandLogo: uploaded.brandLogo, brandPrimaryColor: null })
+    // Refused and empty updates change nothing and record nothing.
+    await setBranding(ctx, {})
+    await expect(setBranding(ctx, { brandLogo: 'f'.repeat(64) })).rejects.toMatchObject({
+      code: 'brand_logo_not_found',
+    })
+    await setBranding(ctx, { brandLogo: null })
+    const rows = await journal()
+    expect(
+      rows.map((row) => [row.action, row.details]),
+      'branding audit',
+    ).toEqual([
+      ['organization.branding_updated', { logo: 'uploaded' }],
+      ['organization.branding_updated', { primaryColor: 'set' }],
+      ['organization.branding_updated', { logo: 'selected', primaryColor: 'cleared' }],
+      ['organization.branding_updated', { logo: 'removed' }],
+    ])
+    for (const row of rows)
+      expect(row, 'branding audit').toMatchObject({
+        actor_type: 'api_key',
+        actor_id: keyId,
+        credential_type: 'api_key',
+        credential_id: keyId,
+        credential_scope: 'full',
+        target_type: 'organization',
+        target_id: organizationId,
+      })
+    const text = JSON.stringify(rows).toLowerCase()
+    for (const value of [uploaded.brandLogo as string, '#12ab34', user.email.toLowerCase()])
+      expect(text, 'branding audit privacy').not.toContain(value)
+    // The change and its event commit or roll back together.
+    await sql`CREATE FUNCTION reject_branding_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.action='organization.branding_updated' THEN RAISE EXCEPTION 'synthetic branding audit failure'; END IF;
+      RETURN NEW; END $$`.execute(db)
+    await sql`CREATE TRIGGER reject_branding_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_branding_audit()`.execute(
+      db,
+    )
+    try {
+      await expect(setBranding(ctx, { brandPrimaryColor: '#654321' })).rejects.toThrow(
+        /synthetic branding audit failure/,
+      )
+      await expect(uploadBrandLogo(ctx, await png(), 'image/png')).rejects.toThrow(
+        /synthetic branding audit failure/,
+      )
+    } finally {
+      await sql`DROP TRIGGER reject_branding_audit ON audit_events`.execute(db)
+      await sql`DROP FUNCTION reject_branding_audit()`.execute(db)
+    }
+    expect(await getBranding(ctx), 'branding audit rollback').toMatchObject({
+      brandLogo: null,
+      brandPrimaryColor: null,
+    })
+    expect(await journal()).toHaveLength(4)
+  })
 })
 
 // Each trial runs a transformed copy; production source is never temporarily broken.
@@ -420,8 +490,18 @@ function serviceCopy(replacement?: readonly [string, string]) {
     'sharp',
     'z',
     'DomainError',
+    'auditActor',
+    'writeAuditEvent',
     `${script}; return {normalizeBrandLogo,getBranding,setBranding,uploadBrandLogo,getBrandLogo}`,
-  )(createHash, brandContrast, sharp, z, DomainError) as typeof import('./branding.ts')
+  )(
+    createHash,
+    brandContrast,
+    sharp,
+    z,
+    DomainError,
+    auditActor,
+    writeAuditEvent,
+  ) as typeof import('./branding.ts')
 }
 describe('logo source-copy mutations', () => {
   it('kills input limit, declared type, dimension and re-encoding bypasses', async () => {
