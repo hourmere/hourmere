@@ -47,11 +47,15 @@ export interface ScimReply {
  * setting, request parameter or build option reaches it.
  */
 export type ScimResources = (request: ScimResourceRequest) => ScimReply | undefined
+/** A resource handler that may read storage before it answers; injected the same way. */
+export type ScimResourceHandler = (
+  request: ScimResourceRequest,
+) => ScimReply | undefined | Promise<ScimReply | undefined>
 
 export interface ScimOptions {
   db: Db
   enabled: boolean
-  resources?: ScimResources | undefined
+  resources?: ScimResourceHandler | undefined
 }
 
 /** Separate protocol boundary. Production registers no SCIM resource handlers yet. */
@@ -94,7 +98,7 @@ export function mountScim(
         return respond(c, 401, 'A valid provisioning token is required.')
       }
       // Locations name the stored organization, never the URL's spelling of it.
-      const reply = options.resources?.({
+      const reply = await options.resources?.({
         method: c.req.method,
         path: c.req.path.slice(`/scim/v2/${organizationId}`.length),
         query: new URL(c.req.url).searchParams,
