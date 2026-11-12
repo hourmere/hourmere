@@ -21,6 +21,7 @@ import {
   summarizeAuditReports,
   summarizeFindingTypes,
 } from '../tools/e2e/reports.ts'
+import { expectKilled, guardCopy } from './source-copy-guard.ts'
 
 function sourceCopy<T>(file: string, exports: string, replacement?: [string, string]): T {
   let source = readFileSync(`tools/e2e/${file}.ts`, 'utf8')
@@ -30,7 +31,7 @@ function sourceCopy<T>(file: string, exports: string, replacement?: [string, str
   }
   source = source.replace(/^import[\s\S]*? from ['"].+?['"]\n/gm, '')
   source = stripTypeScriptTypes(source).replace(/\bexport (?=(?:async )?function|const)/g, '')
-  return new Function('AxeBuilder', `${source}; return {${exports}}`)(AxeBuilder) as T
+  return guardCopy(new Function('AxeBuilder', `${source}; return {${exports}}`)(AxeBuilder)) as T
 }
 
 function rectangle(
@@ -1020,15 +1021,13 @@ describe('source-copy mutation controls', () => {
   it.each([
     ['button canary', ["!rules.has('button-name')", 'false']],
     ['image canary', ["!rules.has('image-alt')", 'false']],
-  ] as const)('detects removal of %s assertions', (_name, replacement) => {
+  ] as const)('detects removal of %s assertions', async (_name, replacement) => {
     const copy = sourceCopy<{ assertAxeCanary: typeof assertAxeCanary }>(
       'a11y',
       'assertAxeCanary',
       [...replacement],
     )
-    expect(() => verifyCanary(copy.assertAxeCanary)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyCanary(module.assertAxeCanary))
   })
   it('detects loss of per-type summary counts', () => {
     const copy = sourceCopy<{ summarizeFindingTypes: typeof summarizeFindingTypes }>(
@@ -1068,14 +1067,12 @@ describe('source-copy mutation controls', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
   })
-  it('detects loss of the future blocking switch', () => {
+  it('detects loss of the future blocking switch', async () => {
     const copy = sourceCopy<{ assertAuditFindings: typeof assertAuditFindings }>(
       'reports',
       'assertAuditFindings',
       ['if (blocking && count)', 'if (false)'],
     )
-    expect(() => verifyBlocking(copy.assertAuditFindings)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyBlocking(module.assertAuditFindings))
   })
 })

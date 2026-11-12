@@ -28,8 +28,9 @@ import {
   teamSession,
   teamSessionUser,
 } from '../../../packages/auth/src/team-management.ts'
+import { expectKilled, guardCopy, recordCopyFault } from '../../../scripts/source-copy-guard.ts'
 import { createApp } from './app.ts'
-import { ErrorBody, json } from './openapi.ts'
+import { ErrorBody, json, type RouteModule } from './openapi.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { listTeamInvitationSummaries, TeamInvitationSummarySchema } from './team-invitations.ts'
 import { teamManagementAccess } from './team-management.ts'
@@ -785,12 +786,21 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
 
   async function verifyInvitationMissingContext(routes: typeof teamInvitationRoutes) {
     const f = await fixture()
+    const module = routes({ db, invitationMailLimits: { secret } })
+    // Hono answers a copied handler's engine error with a 500: record it for the copy first.
+    const recorded: RouteModule = (shared) => {
+      shared.app.use('*', async (c, next) => {
+        await next()
+        if (c.error) recordCopyFault(routes, c.error)
+      })
+      module(shared)
+    }
     const selected = createApp({
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       checkDb: async () => {},
       publicUrl: origin,
-      routes: [routes({ db, invitationMailLimits: { secret } })],
+      routes: [recorded],
     })
     expect((await invitationRequest(f, 'POST', null, { selected })).status).toBe(409)
     await unchanged(f)
@@ -823,9 +833,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       TeamInvitationSummarySchema,
       teamManagementAccess,
     }
-    return new Function(...Object.keys(bindings), `${code}; return teamInvitationRoutes`)(
-      ...Object.values(bindings),
-    ) as typeof teamInvitationRoutes
+    return guardCopy(
+      new Function(...Object.keys(bindings), `${code}; return teamInvitationRoutes`)(
+        ...Object.values(bindings),
+      ) as typeof teamInvitationRoutes,
+    )
   }
 
   it('passes invitation context recovery with the unchanged route source copy', async () => {
@@ -833,9 +845,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
   })
 
   it('detects generic validation bypassing invitation context recovery with a real assertion', async () => {
-    await expect(
-      verifyInvitationMissingContext(await invitationRouteCopy(true)),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await invitationRouteCopy(true), verifyInvitationMissingContext)
   })
 
   function sourceCopy(mutation?: 'authority' | 'identity'): typeof organizationContext {
@@ -866,9 +876,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       teamSession,
       teamSessionUser,
     }
-    return new Function(...Object.keys(bindings), `${javascript}; return organizationContext`)(
-      ...Object.values(bindings),
-    ) as typeof organizationContext
+    return guardCopy(
+      new Function(...Object.keys(bindings), `${javascript}; return organizationContext`)(
+        ...Object.values(bindings),
+      ) as typeof organizationContext,
+    )
   }
 
   async function verifyAuthority(
@@ -904,9 +916,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     async (kind) => {
       const mutation =
         kind === 'missing context' ? 'authority' : kind === 'switch identity' ? 'identity' : kind
-      await expect(verifyAuthority(sourceCopy(mutation), kind)).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(sourceCopy(mutation), (copy) => verifyAuthority(copy, kind))
     },
   )
 
