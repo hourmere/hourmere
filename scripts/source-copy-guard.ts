@@ -7,7 +7,9 @@
 // failure instead of a kill. It cannot see an engine error the copy swallows or rethrows without
 // `cause`, or a wrong binding that raises none; an unmutated-copy test still covers those. A host
 // that catches the copy's errors itself (an HTTP framework answering 500) reports them with
-// `recordCopyFault`.
+// `recordCopyFault`. An engine error that a test's own callback raises while the copy runs it
+// leaves through the copy too, so it is reported as a broken copy (a harness failure, never a
+// kill).
 //
 // It lives beside the other repository-wide test support (test-clock, test-database-setup) and
 // depends on no workspace package, so every workspace's tests can import it.
@@ -20,10 +22,20 @@ import { expect } from 'vitest'
  * mutation that fails an assertion instead.
  */
 const BROKEN_COPY_ERRORS = [ReferenceError, SyntaxError, TypeError]
-const copyFaults = new WeakMap<object, unknown[]>()
+
+/** A guarded copy, and the copies built `partOf` it: their faults and the wrappers made for them. */
+interface Family {
+  faults: unknown[]
+  /** Each original function or result, mapped to its wrapper. */
+  wrappers: WeakMap<object, object>
+  /** Each wrapper, mapped to what it wraps. */
+  originals: WeakMap<object, object>
+}
+const families = new WeakMap<object, Family>()
 /** Each mutated copy from `mutatedPair`, mapped to its unmutated twin. */
 const twins = new WeakMap<object, object>()
-const guardedFunctions = new WeakSet<object>()
+/** Every wrapper any guard made: it is never wrapped again. */
+const wrappers = new WeakSet<object>()
 
 /** The first engine error in `error` or its `cause` chain, if any. */
 export function brokenCopyError(error: unknown): unknown {
@@ -66,14 +78,30 @@ type Callable = (...args: unknown[]) => unknown
 
 const isClass = (value: Callable) => /^class\b/.test(Function.prototype.toString.call(value))
 
-/** A plain object (a factory's result, a module namespace) with at least one function member. */
-const hasMethods = (value: unknown): value is object => {
+/** A plain object, a null-prototype object (a module namespace) or an array. */
+const isPlain = (value: unknown): value is object => {
   if (typeof value !== 'object' || value === null) return false
   const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) return false
-  return Object.values(Object.getOwnPropertyDescriptors(value)).some(
-    (descriptor) => typeof descriptor.value === 'function',
+  return (
+    prototype === Object.prototype ||
+    prototype === null ||
+    (prototype === Array.prototype && Array.isArray(value))
   )
+}
+
+/** Whether a plain value holds copy code: a function or accessor, here or in a nested plain value. */
+const carriesCode = (value: object, seen = new Set<object>()): boolean => {
+  seen.add(value)
+  return Reflect.ownKeys(value).some((key) => {
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, key)
+    if (!descriptor) return false
+    if (!('value' in descriptor)) return true
+    const member: unknown = descriptor.value
+    return (
+      typeof member === 'function' ||
+      (isPlain(member) && !seen.has(member) && carriesCode(member, seen))
+    )
+  })
 }
 
 export interface GuardOptions {
@@ -86,55 +114,119 @@ export interface GuardOptions {
  * rethrown unchanged. Accepts an object of exports (for example a module namespace) or a single
  * function, whose own properties count as further exports. Classes and non-function exports pass
  * through untouched, so `instanceof`, `new` and constants keep working. Synchronous throws and
- * rejected thenables are both recorded. What a guarded function returns or resolves to is part
- * of the copy too: a returned function, and the function members of a returned plain object (a
- * factory's result), are guarded the same way, and `this` is forwarded.
+ * rejected thenables are both recorded.
+ *
+ * What a guarded function returns or resolves to is part of the copy too:
+ * - a returned function is guarded the same way;
+ * - a plain object, null-prototype object or array that holds copy code (a function or an
+ *   accessor, directly or in a nested plain value) is returned as a proxy over the copy's own
+ *   object. Reads go to that object, so state the copy changes later is seen, and every function
+ *   read through the proxy, from a data member, a getter or a nested plain value, is guarded. A
+ *   getter or setter that raises an engine error is recorded. A frozen result cannot change, so
+ *   it is returned as a frozen copy whose functions and accessors are guarded. A read-only,
+ *   non-configurable function member of a result that is not frozen cannot be guarded: reading it
+ *   raises a harness TypeError, recorded like any other fault;
+ * - class instances (including Response, Date and Map) and data are returned as they are, since a
+ *   proxy would break private fields and brand checks: their methods are not guarded.
+ *
+ * A wrapper that comes back into its own copy (as `this`, a direct argument or a value assigned
+ * through a proxy) is unwrapped, so the copy sees its own object. A wrapper from another copy is
+ * passed as it is, so it keeps recording that copy's faults; a returned wrapper is never wrapped
+ * again.
  */
 export function guardCopy<T extends object>(copy: T, { partOf }: GuardOptions = {}): T {
-  const faults = partOf === undefined ? [] : copyFaults.get(partOf)
-  if (!faults) throw new Error('guardCopy needs `partOf` to be a copy wrapped by guardCopy')
+  const family: Family | undefined =
+    partOf === undefined
+      ? { faults: [], wrappers: new WeakMap(), originals: new WeakMap() }
+      : families.get(partOf)
+  if (!family) throw new Error('guardCopy needs `partOf` to be a copy wrapped by guardCopy')
   const record = (error: unknown): never => {
     const fault = brokenCopyError(error)
-    if (fault) faults.push(fault)
+    if (fault) family.faults.push(fault)
     throw error
   }
-  const wrapped = new WeakMap<object, object>()
-  const guardValue = (value: unknown): unknown => {
-    const callable =
-      typeof value === 'function' && !isClass(value as Callable) && !guardedFunctions.has(value)
-    if (!callable && !hasMethods(value)) return value
-    const known = wrapped.get(value as object)
-    if (known) return known
-    if (callable) {
-      const run = value as Callable
-      const guarded = function guarded(this: unknown, ...args: unknown[]) {
-        let result: unknown
-        try {
-          result = Reflect.apply(run, this, args)
-        } catch (error) {
-          return record(error)
-        }
-        return typeof (result as PromiseLike<unknown> | undefined)?.then === 'function'
-          ? Promise.resolve(result).then(guardValue, record)
-          : guardValue(result)
+  const unwrap = (value: unknown) => family.originals.get(value as object) ?? value
+  const remember = <W extends object>(original: object, wrapper: W): W => {
+    family.wrappers.set(original, wrapper)
+    family.originals.set(wrapper, original)
+    wrappers.add(wrapper)
+    return wrapper
+  }
+  const guardFunction = (run: Callable) => {
+    const guarded = remember(run, function guarded(this: unknown, ...args: unknown[]) {
+      let result: unknown
+      try {
+        result = Reflect.apply(run, unwrap(this), args.map(unwrap))
+      } catch (error) {
+        return record(error)
       }
-      guardedFunctions.add(guarded)
-      wrapped.set(run, guarded)
-      for (const [name, member] of Object.entries(run))
-        Object.assign(guarded, {
-          [name]: typeof member === 'function' ? guardValue(member) : member,
-        })
-      return guarded
-    }
-    const object = value as object
-    const guarded = Object.create(Object.getPrototypeOf(object)) as object
-    wrapped.set(object, guarded)
-    const descriptors = Object.getOwnPropertyDescriptors(object)
-    for (const descriptor of Object.values(descriptors))
-      if (typeof descriptor.value === 'function') descriptor.value = guardValue(descriptor.value)
-    Object.defineProperties(guarded, descriptors)
-    if (!Object.isExtensible(object)) Object.preventExtensions(guarded)
+      return typeof (result as PromiseLike<unknown> | undefined)?.then === 'function'
+        ? Promise.resolve(result).then(guardValue, record)
+        : guardValue(result)
+    })
+    for (const [name, member] of Object.entries(run))
+      Object.assign(guarded, {
+        [name]: typeof member === 'function' ? guardValue(member) : member,
+      })
     return guarded
+  }
+  const guardFrozen = (original: object) => {
+    const frozen = remember(
+      original,
+      Array.isArray(original) ? [] : Object.create(Object.getPrototypeOf(original)),
+    )
+    const descriptors = Object.getOwnPropertyDescriptors(original) as Record<
+      PropertyKey,
+      PropertyDescriptor
+    >
+    for (const key of Reflect.ownKeys(descriptors)) {
+      const descriptor = descriptors[key] as PropertyDescriptor
+      if ('value' in descriptor) descriptor.value = guardValue(descriptor.value)
+      if (descriptor.get) descriptor.get = guardValue(descriptor.get) as () => unknown
+      if (descriptor.set) descriptor.set = guardValue(descriptor.set) as (value: unknown) => void
+    }
+    return Object.freeze(Object.defineProperties(frozen, descriptors))
+  }
+  const guardResult = (original: object) =>
+    remember(
+      original,
+      new Proxy(original, {
+        get(target, key, receiver) {
+          const own = Reflect.getOwnPropertyDescriptor(target, key)
+          // Inherited members come from Object.prototype or Array.prototype.
+          if (!own) return Reflect.get(target, key, receiver)
+          let value: unknown
+          try {
+            value = Reflect.get(target, key, unwrap(receiver))
+          } catch (error) {
+            return record(error)
+          }
+          const guarded = guardValue(value)
+          if (guarded !== value && own.configurable === false && own.writable === false)
+            return record(
+              new TypeError(
+                `guardCopy cannot guard ${String(key)}, a read-only member of a result that is not frozen`,
+              ),
+            )
+          return guarded
+        },
+        set(target, key, value, receiver) {
+          try {
+            return Reflect.set(target, key, unwrap(value), unwrap(receiver))
+          } catch (error) {
+            return record(error)
+          }
+        },
+      }),
+    )
+  const guardValue = (value: unknown): unknown => {
+    if (wrappers.has(value as object)) return value
+    const known = family.wrappers.get(value as object)
+    if (known) return known
+    if (typeof value === 'function')
+      return isClass(value as Callable) ? value : guardFunction(value as Callable)
+    if (!isPlain(value) || !carriesCode(value)) return value
+    return Object.isFrozen(value) ? guardFrozen(value) : guardResult(value)
   }
   if (typeof copy === 'function' && isClass(copy as Callable))
     throw new Error('guardCopy needs a function or an object')
@@ -143,7 +235,7 @@ export function guardCopy<T extends object>(copy: T, { partOf }: GuardOptions = 
       ? guardValue(copy)
       : Object.fromEntries(Object.entries(copy).map(([name, value]) => [name, guardValue(value)]))
   ) as T
-  copyFaults.set(guarded, faults)
+  families.set(guarded, family)
   return guarded
 }
 
@@ -152,10 +244,10 @@ export function guardCopy<T extends object>(copy: T, { partOf }: GuardOptions = 
  * for example an HTTP framework's error handler that answers 500 instead of rethrowing.
  */
 export function recordCopyFault(copy: object, error: unknown): void {
-  const faults = copyFaults.get(copy)
-  if (!faults) throw new Error('recordCopyFault needs a copy wrapped by guardCopy')
+  const family = families.get(copy)
+  if (!family) throw new Error('recordCopyFault needs a copy wrapped by guardCopy')
   const fault = brokenCopyError(error)
-  if (fault) faults.push(fault)
+  if (fault) family.faults.push(fault)
 }
 
 /**
@@ -170,8 +262,8 @@ export async function mutatedPair<T extends object, C>(
 ): Promise<{ copy: T; unmutated: T }> {
   const copy = await build(mutation)
   const unmutated = await build(identity)
-  const faults = copyFaults.get(copy)
-  if (!faults || !copyFaults.has(unmutated) || faults === copyFaults.get(unmutated))
+  const family = families.get(copy)
+  if (!family || !families.has(unmutated) || family === families.get(unmutated))
     throw new Error('mutatedPair needs a builder that returns a new guarded copy each time')
   twins.set(copy, unmutated)
   return { copy, unmutated }
@@ -202,7 +294,7 @@ export async function expectKilled<T extends object>(
   verify: (copy: T) => unknown,
   { outcome = {}, unmutated }: KillOptions<T> = {},
 ): Promise<void> {
-  const faults = copyFaults.get(copy)
+  const faults = families.get(copy)?.faults
   if (!faults) throw new Error('expectKilled needs a copy wrapped by guardCopy')
   if (unmutated !== undefined && twins.get(copy) !== unmutated)
     throw new Error('expectKilled needs the unmutated twin that mutatedPair built with the copy')
@@ -215,7 +307,7 @@ export async function expectKilled<T extends object>(
   if (faults.length) {
     const fault = faults.find((error) => !removedGuardCrash(error)) ?? faults[0]
     if (unmutated === undefined || !removedGuardCrash(fault)) throw new BrokenSourceCopyError(fault)
-    const baseline = copyFaults.get(unmutated) as unknown[]
+    const baseline = (families.get(unmutated) as Family).faults
     let baselineFailure: unknown
     try {
       await verify(unmutated)
