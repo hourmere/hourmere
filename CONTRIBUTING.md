@@ -88,8 +88,10 @@ exercise both DB leases and Node SMTP deadlines align that narrow clock path wit
 The `security.txt` test deliberately uses actual system time: its renewal warning is an
 intentional publication deadline and remains enforced during offset runs.
 
-When you add a migration, apply it and regenerate the table types, then commit
-`packages/db/src/tables.ts` with it (CI checks that they match):
+When you add a migration, ship its constraint coverage expectation file and coverage test in
+the same change (see [Constraint coverage for new migrations](#constraint-coverage-for-new-migrations)).
+Apply it and regenerate the table types, then commit `packages/db/src/tables.ts` with it (CI
+checks that they match):
 
 ```sh
 npm run db:migrate
@@ -207,7 +209,8 @@ rejection, or a plain value mismatch with no unrelated database error behind it.
 expected success as `expect(...).resolves` and assert on the error object (`toMatchObject({
 code, constraint })`), and open any extra pool only with `openRelatedPool`; a check that must
 provoke a non-integrity error cannot be part of a coverage suite. The suite runs twice on
-unmodified copies before the drops, so a check that fails only sometimes aborts the run.
+unmodified copies before the drops, so a check that fails on either unmodified run aborts the
+run before any object is judged; a check that fails only sometimes can still pass both runs.
 Generate the expectation file with `HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`, review it and
 commit it; adding, removing or redefining an object later fails until the file is updated.
 Allow-list only objects that are not protections on their own, each with a reason; they are
@@ -233,10 +236,10 @@ Guard those with behavioural checks and source-copy mutation tests.
 `packages/db/src/meeting-poll-protections.ts` with `meeting-polls-coverage.test.ts` and
 `meeting-polls-migration.test.ts` is the reference. `createTestDatabaseTemplate` (from
 `@hourmere/db/testing`) migrates a schema once for any test that needs many copies of it.
-`packages/db/src/testing/migration-objects.test.ts` fails when a migration from 0071 on has no
-expectation file; migrations whose coverage test lands in a follow-up are listed there explicitly.
-It checks only that the expectation file exists, not that a coverage test reads it: the
-coverage test is what keeps the file honest.
+`packages/db/src/testing/migration-objects.test.ts` fails unless the expectation files are
+exactly the migrations from 0071 on; there is no list of exempt migrations, so a migration
+cannot merge before its coverage. It checks only that the expectation file exists, not that a
+coverage test reads it: the coverage test is what keeps the file honest.
 
 ## Browser tests
 

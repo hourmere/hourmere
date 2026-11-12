@@ -4,15 +4,9 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { migrationsDir } from '../migrate.ts'
 
-// Constraint coverage (constraint-coverage.ts) is required from this migration on.
+// Constraint coverage (constraint-coverage.ts) is required from this migration on, for every
+// migration: each ships its expectation file and coverage test in the same change.
 const firstCoveredMigration = 71
-
-/**
- * Migrations that merge from open pull requests before their coverage test; each gets its
- * `migration-objects/<migration>.json` and a coverage test in a follow-up change, which also
- * removes the entry here. Adding a new migration to this list needs the same review.
- */
-const coverageFollowsLater = new Set(['0072_routing_forms.sql', '0073_scim_identity.sql'])
 
 const expectationFiles = new Set(
   readdirSync(fileURLToPath(new URL('./migration-objects/', import.meta.url)))
@@ -20,39 +14,25 @@ const expectationFiles = new Set(
     .map((file) => basename(file, '.json')),
 )
 
-const migrationNumber = (file: string) => Number.parseInt(file.slice(0, 4), 10)
+const migrationNumber = (name: string) => Number.parseInt(name.slice(0, 4), 10)
 
 describe('constraint coverage adoption', () => {
   const migrations = readdirSync(migrationsDir)
     .filter((file) => /^\d{4}_.*\.sql$/.test(file))
+    .map((file) => basename(file, '.sql'))
     .sort()
 
-  it('has an expectation file for every migration from 0071 on', () => {
-    const missing = migrations.filter(
-      (file) =>
-        migrationNumber(file) >= firstCoveredMigration &&
-        !expectationFiles.has(basename(file, '.sql')) &&
-        !coverageFollowsLater.has(file),
-    )
+  it('has an expectation file for exactly the migrations from 0071 on', () => {
+    // Both sides are compared whole, so a migration cannot be left out of the requirement
+    // while its expectation file still exists, nor its file removed while it is required.
     expect(
-      missing,
+      [...expectationFiles].filter((name) => migrationNumber(name) >= firstCoveredMigration).sort(),
       'add a constraint coverage test and its migration-objects file (CONTRIBUTING.md)',
-    ).toEqual([])
-  })
-
-  it('lists only later-covered migrations that still lack their expectation file', () => {
-    const stale = [...coverageFollowsLater].filter((file) =>
-      expectationFiles.has(basename(file, '.sql')),
-    )
-    expect(stale, 'remove the entry: the migration now has its expectation file').toEqual([])
-    for (const file of coverageFollowsLater) {
-      expect(file).toMatch(/^\d{4}_[a-z0-9_]+\.sql$/)
-      expect(migrationNumber(file)).toBeGreaterThan(firstCoveredMigration)
-    }
+    ).toEqual(migrations.filter((name) => migrationNumber(name) >= firstCoveredMigration))
   })
 
   it('names expectation files after existing migrations', () => {
-    const names = new Set(migrations.map((file) => basename(file, '.sql')))
+    const names = new Set(migrations)
     expect([...expectationFiles].filter((name) => !names.has(name))).toEqual([])
   })
 })
