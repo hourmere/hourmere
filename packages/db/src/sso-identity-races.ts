@@ -35,7 +35,10 @@ async function race(
   winners: (round: number) => Promise<unknown[]>,
 ) {
   const first = await pool.connect()
-  const second = await pool.connect()
+  const second = await pool.connect().catch((error: unknown) => {
+    first.release()
+    throw error
+  })
   try {
     let round = 0
     for (const outcome of ['COMMIT', 'ROLLBACK'] as const) {
@@ -137,7 +140,7 @@ export async function checkReplayRace(pool: pg.Pool) {
     released = true
     const keys = [0, 1, 2].map(() => replayValues(f).key_digest as string)
     // Each writer records its own retention, which tells the winner apart.
-    const retains = [at(720), at(721)]
+    const retains = [at(600), at(601)]
     await race(
       pool,
       'sso_replay_cache',

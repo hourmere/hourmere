@@ -134,12 +134,25 @@ const otherTeamFreshProof = (f: IdentityFixture): Row => ({
   user_id: f.otherOwner,
   session_id: f.sessions[f.otherOwner],
 })
-const stepUp = (linkRow: Row, authenticated = at(-5), expires = at(240)): Row => ({
+const stepUp = (
+  linkRow: Row,
+  authenticated = at(-5),
+  expires = at(240),
+  trustGeneration = 1,
+): Row => ({
   step_up_provider_id: linkRow.provider_id,
   step_up_link_id: linkRow.id,
   step_up_authenticated_at: authenticated,
   step_up_proof_expires_at: expires,
+  step_up_trust_generation: trustGeneration,
 })
+/** Records a step-up on an attempt. */
+const recordStepUp = (f: IdentityFixture, attempt: Row, linkRow: Row) =>
+  f.db.query(
+    `UPDATE sso_attempts SET step_up_provider_id=$2, step_up_link_id=$3, step_up_authenticated_at=$4,
+      step_up_proof_expires_at=$5, step_up_trust_generation=$6 WHERE id=$1`,
+    [attempt.id, ...Object.values(stepUp(linkRow))],
+  )
 const memberKey = (f: IdentityFixture) => apiKey(f.db, f.member, f.team)
 
 // ---------------------------------------------------------------------------------------
@@ -368,20 +381,21 @@ const linkProtections: Record<string, IdentityProtection> = {
       dropTrigger(links, 'sso_identity_links_guard'),
     ],
   },
-  'a retired provider gets no new links': {
-    objects: ['sso_identity_links_live_provider'],
+  'new links need an enabled provider': {
+    objects: ['sso_identity_links_enabled_provider'],
     check: async (f) => {
-      const retired = await provider(f, { enabled: false, retired_at: at(-60) })
-      await insertRefused(
-        f.db,
-        links,
-        linkValues(f, f.admin, retired),
-        violation('sso_identity_links_live_provider'),
-      )
-      // A disabled draft can be linked before its activation.
-      await triedInsert(f.db, links, linkValues(f, f.admin, await provider(f, { enabled: false })))
+      for (const values of [{ enabled: false }, { enabled: false, retired_at: at(-60) }])
+        await insertRefused(
+          f.db,
+          links,
+          linkValues(f, f.admin, await provider(f, values)),
+          violation('sso_identity_links_enabled_provider'),
+        )
+      // Disabling a provider later keeps its links, which stay retirable.
+      await f.db.query('UPDATE sso_providers SET enabled=false WHERE id=$1', [f.provider.id])
+      await triedUpdate(f.db, links, byId(f.memberLink), { retired_at: at(0), generation: 2 })
     },
-    mutants: [silence('sso_identity_links_live_provider')],
+    mutants: [silence('sso_identity_links_enabled_provider')],
   },
   "a link repeats its provider's issuer": {
     objects: ['sso_identity_links_issuer'],
@@ -530,7 +544,7 @@ const attemptFrozenNew =
 const attemptFrozenOld =
   'OLD.user_id, OLD.session_id, OLD.browser_binding_digest, OLD.operation, OLD.input_digest,\n         OLD.created_at, OLD.expires_at) THEN'
 const startsOpenRecorded =
-  '\n       OR num_nonnulls(NEW.mailbox_proven_at, NEW.mailbox_proof_expires_at, NEW.step_up_provider_id,\n            NEW.step_up_link_id, NEW.step_up_authenticated_at, NEW.step_up_proof_expires_at,\n            NEW.consumed_at) > 0'
+  '\n       OR num_nonnulls(NEW.mailbox_proven_at, NEW.mailbox_proof_expires_at, NEW.step_up_provider_id,\n            NEW.step_up_link_id, NEW.step_up_authenticated_at, NEW.step_up_proof_expires_at,\n            NEW.step_up_trust_generation, NEW.consumed_at) > 0'
 const mailboxProofCheck = {
   shape: '(mailbox_proven_at IS NULL) = (mailbox_proof_expires_at IS NULL)\n    AND ',
   required: '      requires_mailbox\n      AND mailbox_proof_expires_at > mailbox_proven_at',
@@ -539,7 +553,7 @@ const mailboxProofCheck = {
   window: "\n      AND mailbox_proof_expires_at <= mailbox_proven_at + interval '300 seconds'",
 }
 const stepUpCheck = {
-  shape: 'IN (0, 4)',
+  shape: 'IN (0, 5)',
   required: '      requires_sso\n      AND step_up_authenticated_at',
   skew: "\n      AND step_up_authenticated_at >= created_at - interval '60 seconds'",
   after: '\n      AND step_up_proof_expires_at > step_up_authenticated_at',
@@ -871,7 +885,7 @@ const attemptProtections: Record<string, IdentityProtection> = {
     },
     mutants: [
       dropConstraint(attempts, 'sso_attempts_step_up'),
-      edit('a partial step-up', stepUpCheck.shape, 'IN (0, 1, 2, 3, 4)'),
+      edit('a partial step-up', stepUpCheck.shape, 'IN (0, 1, 2, 3, 4, 5)'),
       edit(
         'a step-up without a required step-up',
         stepUpCheck.required,
@@ -1098,6 +1112,7 @@ const attemptProtections: Record<string, IdentityProtection> = {
         { session_id: await session(f.db, f.owner) },
         { user_id: f.coOwner, session_id: f.sessions[f.coOwner] },
         { provider_id: second.id },
+        { provider_revision: 2 },
         { organization_id: f.otherTeam },
         { id: randomUUID() },
       ])
@@ -1116,6 +1131,10 @@ const attemptProtections: Record<string, IdentityProtection> = {
       edits('the expiry may move', [
         [attemptFrozenNew, attemptFrozenNew.replace(',\n         NEW.expires_at)', ')')],
         [attemptFrozenOld, attemptFrozenOld.replace(', OLD.expires_at)', ')')],
+      ]),
+      edits('the provider revision may change', [
+        ['NEW.provider_id, NEW.provider_revision, NEW.user_id,', 'NEW.provider_id, NEW.user_id,'],
+        ['OLD.provider_id, OLD.provider_revision,', 'OLD.provider_id,'],
       ]),
     ],
   },
@@ -1196,14 +1215,11 @@ const attemptProtections: Record<string, IdentityProtection> = {
           violation('sso_attempts_proof_once'),
         )
       const { ownerLink, attempt } = await stepUpAttempt(f)
-      await f.db.query(
-        `UPDATE sso_attempts SET step_up_provider_id=$2, step_up_link_id=$3,
-          step_up_authenticated_at=$4, step_up_proof_expires_at=$5 WHERE id=$1`,
-        [attempt.id, ...Object.values(stepUp(ownerLink))],
-      )
+      await recordStepUp(f, attempt, ownerLink)
       for (const values of [
         { step_up_authenticated_at: at(-30) },
         { step_up_proof_expires_at: at(200) },
+        { step_up_trust_generation: 2 },
       ])
         await updateRefused(
           f.db,
@@ -1277,7 +1293,7 @@ const attemptProtections: Record<string, IdentityProtection> = {
       ),
     ],
   },
-  'a step-up comes from a live link at an enabled provider, not from the future': {
+  'a step-up comes from a live link at an enabled provider under the current trust generation': {
     objects: ['sso_attempts_step_up_proof'],
     check: async (f) => {
       const { ownerLink, attempt } = await stepUpAttempt(f)
@@ -1286,12 +1302,14 @@ const attemptProtections: Record<string, IdentityProtection> = {
         generation: 2,
         retired_at: at(-60),
       })
-      const draft = await provider(f, { enabled: false })
+      const draft = await provider(f)
       const draftLink = await link(f, f.owner, draft)
+      await f.db.query('UPDATE sso_providers SET enabled=false WHERE id=$1', [draft.id])
       for (const values of [
         stepUp(ownerLink, at(120), at(300)),
         stepUp(retiredLink),
         stepUp(draftLink),
+        stepUp(ownerLink, at(-5), at(240), 2),
       ])
         await updateRefused(
           f.db,
@@ -1301,23 +1319,38 @@ const attemptProtections: Record<string, IdentityProtection> = {
           violation('sso_attempts_step_up_proof'),
         )
       await triedUpdate(f.db, attempts, byId(attempt), stepUp(ownerLink))
+      // After a trust change only the new generation counts.
+      await insert(f.db, 'sso_policies', { organization_id: f.team, trust_generation: 2 })
+      await updateRefused(
+        f.db,
+        attempts,
+        byId(attempt),
+        stepUp(ownerLink),
+        violation('sso_attempts_step_up_proof'),
+      )
+      await triedUpdate(f.db, attempts, byId(attempt), stepUp(ownerLink, at(-5), at(240), 2))
     },
     mutants: [
       silence('sso_attempts_step_up_proof'),
       edit(
         'authentication from the future',
-        "NEW.step_up_authenticated_at > clock_timestamp() + interval '60 seconds'\n    OR EXISTS",
-        'EXISTS',
+        "    NEW.step_up_authenticated_at > clock_timestamp() + interval '60 seconds'\n    OR NEW.step_up_trust_generation",
+        '    NEW.step_up_trust_generation',
+      ),
+      edit(
+        'any trust generation steps up',
+        '    OR NEW.step_up_trust_generation <> coalesce(\n      (SELECT trust_generation FROM public.sso_policies WHERE organization_id = NEW.organization_id), 1)\n    OR EXISTS (',
+        '    OR EXISTS (',
       ),
       edit(
         'retired links step up',
-        '(l.retired_at IS NOT NULL OR NOT p.enabled)',
-        '(NOT p.enabled)',
+        '\n        AND (l.retired_at IS NOT NULL OR NOT p.enabled)',
+        '\n        AND (NOT p.enabled)',
       ),
       edit(
         'disabled providers step up',
-        '(l.retired_at IS NOT NULL OR NOT p.enabled)',
-        '(l.retired_at IS NOT NULL)',
+        '\n        AND (l.retired_at IS NOT NULL OR NOT p.enabled)',
+        '\n        AND (l.retired_at IS NOT NULL)',
       ),
     ],
   },
@@ -1376,12 +1409,93 @@ const attemptProtections: Record<string, IdentityProtection> = {
       ),
     ],
   },
+  'an attempt is consumed only while what it relied on is unchanged': {
+    objects: ['sso_attempts_still_current'],
+    check: async (f) => {
+      const consume = { consumed_at: at(0) }
+      const stale = violation('sso_attempts_still_current')
+      // A new provider revision ends the attempts frozen to the old one.
+      const revised = await insert(f.db, attempts, testValues(f))
+      await f.db.query('UPDATE sso_providers SET revision=2, configuration=$2 WHERE id=$1', [
+        f.provider.id,
+        sealed(),
+      ])
+      await updateRefused(f.db, attempts, byId(revised), consume, stale)
+      // A disabled provider ends sign-ins and links; a retired one ends tests too.
+      const disabled = await provider(f)
+      const signIn = await insert(f.db, attempts, signInValues(f, disabled))
+      const linking = await insert(f.db, attempts, linkAttemptValues(f, disabled))
+      const drafting = await insert(f.db, attempts, testValues(f, disabled))
+      await f.db.query('UPDATE sso_providers SET enabled=false WHERE id=$1', [disabled.id])
+      for (const row of [signIn, linking])
+        await updateRefused(f.db, attempts, byId(row), consume, stale)
+      await triedUpdate(f.db, attempts, byId(drafting), consume)
+      await f.db.query('UPDATE sso_providers SET retired_at=now() WHERE id=$1', [disabled.id])
+      await updateRefused(f.db, attempts, byId(drafting), consume, stale)
+      // A step-up ends with its link, its provider's activation and the trust generation.
+      const stepped = async (providerRow: Row) => {
+        const linkRow = await link(f, f.owner, providerRow)
+        const attempt = await insert(f.db, attempts, freshProofValues(f, { sso: true }))
+        await recordStepUp(f, attempt, linkRow)
+        return { linkRow, attempt }
+      }
+      const unlinked = await stepped(await provider(f))
+      await retire(f, unlinked.linkRow)
+      const deactivated = await stepped(await provider(f))
+      await f.db.query('UPDATE sso_providers SET enabled=false WHERE id=$1', [
+        deactivated.linkRow.provider_id,
+      ])
+      for (const { attempt } of [unlinked, deactivated])
+        await updateRefused(f.db, attempts, byId(attempt), consume, stale)
+      const distrusted = await stepped(await provider(f))
+      await triedUpdate(f.db, attempts, byId(distrusted.attempt), consume)
+      await insert(f.db, 'sso_policies', { organization_id: f.team, trust_generation: 2 })
+      await updateRefused(f.db, attempts, byId(distrusted.attempt), consume, stale)
+    },
+    mutants: [
+      silence('sso_attempts_still_current'),
+      edit(
+        'a new provider revision keeps the attempt',
+        '(revision <> NEW.provider_revision OR retired_at IS NOT NULL',
+        '(retired_at IS NOT NULL',
+      ),
+      edit(
+        'a retired provider keeps the attempt',
+        "(revision <> NEW.provider_revision OR retired_at IS NOT NULL\n             OR (NEW.kind IN ('sign_in', 'link') AND NOT enabled))",
+        "(revision <> NEW.provider_revision\n             OR (NEW.kind IN ('sign_in', 'link') AND NOT enabled))",
+      ),
+      edit(
+        'a disabled provider keeps sign-ins and links',
+        "\n             OR (NEW.kind IN ('sign_in', 'link') AND NOT enabled))",
+        ')',
+      ),
+      edit(
+        'a retired step-up link keeps the attempt',
+        'WHERE l.id = NEW.step_up_link_id AND (l.retired_at IS NOT NULL OR NOT p.enabled)',
+        'WHERE l.id = NEW.step_up_link_id AND (NOT p.enabled)',
+      ),
+      edit(
+        'a disabled step-up provider keeps the attempt',
+        'WHERE l.id = NEW.step_up_link_id AND (l.retired_at IS NOT NULL OR NOT p.enabled)',
+        'WHERE l.id = NEW.step_up_link_id AND (l.retired_at IS NOT NULL)',
+      ),
+      edit(
+        'a new trust generation keeps the attempt',
+        '\n    OR NEW.step_up_trust_generation <> coalesce(\n      (SELECT trust_generation FROM public.sso_policies WHERE organization_id = NEW.organization_id), 1)\n  ) THEN',
+        '\n  ) THEN',
+      ),
+    ],
+  },
 }
 
 // ---------------------------------------------------------------------------------------
 // Mailbox tokens
 // ---------------------------------------------------------------------------------------
 
+const tokenRowNew =
+  'ROW(NEW.token_digest, NEW.organization_id, NEW.attempt_id, NEW.issued_at, NEW.expires_at)'
+const tokenRowOld =
+  'ROW(OLD.token_digest, OLD.organization_id, OLD.attempt_id, OLD.issued_at, OLD.expires_at)'
 const awaitingProof =
   'AND (NOT requires_mailbox OR mailbox_proven_at IS NOT NULL OR consumed_at IS NOT NULL\n             OR expires_at <= clock_timestamp())'
 
@@ -1579,10 +1693,14 @@ const tokenProtections: Record<string, IdentityProtection> = {
         tokens,
         tokenValues(await insert(f.db, attempts, freshProofValues(f))),
       )
+      // Another attempt awaiting its proof, which a consumed token must not move to.
+      const other = await insert(f.db, attempts, freshProofValues(f))
       for (const values of [
         { expires_at: at(100) },
         { token_digest: digest() },
         { issued_at: at(-10) },
+        { attempt_id: other.id },
+        { organization_id: f.otherTeam },
       ])
         await updateRefused(
           f.db,
@@ -1610,6 +1728,14 @@ const tokenProtections: Record<string, IdentityProtection> = {
         '\n     OR (OLD.consumed_at IS NOT NULL AND NEW.consumed_at IS DISTINCT FROM OLD.consumed_at)',
         '',
       ),
+      edits('a token may move to another attempt', [
+        [tokenRowNew, tokenRowNew.replace(' NEW.attempt_id,', '')],
+        [tokenRowOld, tokenRowOld.replace(' OLD.attempt_id,', '')],
+      ]),
+      edits('a token may move to another team', [
+        [tokenRowNew, tokenRowNew.replace(' NEW.organization_id,', '')],
+        [tokenRowOld, tokenRowOld.replace(' OLD.organization_id,', '')],
+      ]),
     ],
   },
   'an expired token cannot be consumed': {
@@ -1721,25 +1847,61 @@ const replayProtections: Record<string, IdentityProtection> = {
     },
     mutants: [dropConstraint(replay, 'sso_replay_cache_provider')],
   },
-  'replay entries are retained past their consumption': {
+  'replay entries are retained past their consumption, for at most 720 seconds': {
     objects: ['sso_replay_cache_retention'],
     check: async (f) => {
-      const consumed = at(0)
-      for (const retain_until of [consumed, at(-1)])
+      await insertRefused(
+        f.db,
+        replay,
+        { ...replayValues(f), retain_until: at(800) },
+        violation('sso_replay_cache_retention'),
+      )
+      const consumed = at(-100)
+      for (const retain_until of [consumed, at(-101)])
         await insertRefused(
           f.db,
           replay,
           { ...replayValues(f), consumed_at: consumed, retain_until },
           violation('sso_replay_cache_retention'),
+          withoutTriggers,
         )
     },
     mutants: [
       dropConstraint(replay, 'sso_replay_cache_retention'),
       edit(
         'retention may end as it starts',
-        'CHECK (retain_until > consumed_at)',
-        'CHECK (retain_until >= consumed_at)',
+        'retain_until > consumed_at AND retain_until',
+        'retain_until >= consumed_at AND retain_until',
       ),
+      edit(
+        'retention has no upper bound',
+        " AND retain_until <= consumed_at + interval '720 seconds'",
+        '',
+      ),
+    ],
+  },
+  'replay entries are consumed now and retained from then on': {
+    objects: ['sso_replay_cache_starts_retained'],
+    check: async (f) => {
+      for (const values of [
+        { consumed_at: at(60), retain_until: at(600) },
+        { consumed_at: at(-300), retain_until: at(-1) },
+      ])
+        await insertRefused(
+          f.db,
+          replay,
+          { ...replayValues(f), ...values },
+          violation('sso_replay_cache_starts_retained'),
+        )
+    },
+    mutants: [
+      silence('sso_replay_cache_starts_retained'),
+      edit(
+        'entries may be consumed in the future',
+        'IF NEW.consumed_at > clock_timestamp() OR NEW.retain_until',
+        'IF NEW.retain_until',
+      ),
+      edit('entries may start expired', ' OR NEW.retain_until <= clock_timestamp() THEN', ' THEN'),
     ],
   },
   'replay entries are immutable': {
@@ -1769,7 +1931,7 @@ const replayProtections: Record<string, IdentityProtection> = {
       )
       const ended = await seeded(f.db, replay, {
         ...replayValues(f),
-        consumed_at: at(-800),
+        consumed_at: at(-700),
         retain_until: at(-60),
       })
       await tried(f.db, 'DELETE FROM sso_replay_cache WHERE key_digest=$1', [ended.key_digest])

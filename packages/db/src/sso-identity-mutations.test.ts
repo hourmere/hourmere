@@ -49,32 +49,37 @@ describe.skipIf(!serverUrl)('SSO identity storage source-copy mutations', () => 
       await protection.check(await identityFixture(db))
     })
 
-  it.each(cases)('%s: detects "%s"', async (name, mutantName) => {
-    const protection = identityProtections[name] as IdentityProtection
-    const mutant = protection.mutants.find((candidate) => candidate.name === mutantName)
-    if (!mutant) throw new Error(`Missing mutant ${mutantName}`)
-    await run(source, protection)
-    const mutated = mutant.apply(source)
-    expect(mutated).not.toBe(source)
-    // Only a failed assertion counts; SQL or setup errors do not detect a mutant.
-    const error = await run(mutated, protection).then(
-      () => undefined,
-      (failure: unknown) => failure as Error,
-    )
-    expect(error).toMatchObject({ name: 'AssertionError' })
-    if (report)
-      await appendFile(
-        report,
-        `${JSON.stringify({ protection: name, mutant: mutantName, failed: error?.message.split('\n')[0] })}\n`,
+  it.each(cases)(
+    '%s: detects "%s"',
+    async (name, mutantName) => {
+      const protection = identityProtections[name] as IdentityProtection
+      const mutant = protection.mutants.find((candidate) => candidate.name === mutantName)
+      if (!mutant) throw new Error(`Missing mutant ${mutantName}`)
+      await run(source, protection)
+      const mutated = mutant.apply(source)
+      expect(mutated).not.toBe(source)
+      // Only a failed assertion counts; SQL or setup errors do not detect a mutant.
+      const error = await run(mutated, protection).then(
+        () => undefined,
+        (failure: unknown) => failure as Error,
       )
-    // The predecessor database is unchanged for the next run.
-    const { rows } = await predecessor.pool.query(
-      "SELECT count(*)::int AS n FROM pg_class WHERE relname = ANY($1) AND relkind = 'r'",
-      [[...identityTables]],
-    )
-    expect(rows[0]?.n).toBe(0)
-    expect(predecessor.pool.totalCount).toBeLessThanOrEqual(2)
-  })
+      expect(error).toMatchObject({ name: 'AssertionError' })
+      if (report)
+        await appendFile(
+          report,
+          `${JSON.stringify({ protection: name, mutant: mutantName, failed: error?.message.split('\n')[0] })}\n`,
+        )
+      // The predecessor database is unchanged for the next run.
+      const { rows } = await predecessor.pool.query(
+        "SELECT count(*)::int AS n FROM pg_class WHERE relname = ANY($1) AND relkind = 'r'",
+        [[...identityTables]],
+      )
+      expect(rows[0]?.n).toBe(0)
+      expect(predecessor.pool.totalCount).toBeLessThanOrEqual(2)
+      // Each case takes about 0.1 s; the margin absorbs a loaded shared database server.
+    },
+    30_000,
+  )
 
   // A race on a database whose 0075 also runs `drop`; the race commits its own rows.
   async function raceMutant(drop: string, race: (pool: pg.Pool) => Promise<void>) {

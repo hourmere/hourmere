@@ -204,7 +204,7 @@ export const replayValues = (f: IdentityFixture, provider: Row = f.provider): Ro
   provider_id: provider.id,
   kind: 'saml_assertion',
   key_digest: digest(),
-  retain_until: at(720),
+  retain_until: at(600),
 })
 
 /** What a proof or binding of the member relied on, all current. */

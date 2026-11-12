@@ -10,6 +10,7 @@ import {
   identityFixture,
   identityMigration,
   identityTables,
+  link,
   proofValues,
   type Row,
 } from './sso-identity-fixtures.ts'
@@ -111,7 +112,7 @@ describe.skipIf(!serverUrl)('SSO identity storage', () => {
     ])
     expect(triggers).toHaveLength(8)
     expect(new Set(rules).size).toBe(rules.length)
-    expect(rules).toHaveLength(39)
+    expect(rules).toHaveLength(41)
     // Two FK target keys restate their primary keys; constraint coverage allow-lists them.
     const targets = ['sso_attempts_organization_id_id', 'sso_identity_links_owner']
     const covered = [
@@ -219,12 +220,26 @@ describe.skipIf(!serverUrl)('SSO identity storage', () => {
       })
       expect(await live(db, 'sso_delegation_bindings', rebound.id)).toBe(true)
 
-      // A trust change ends every proof and lease of the team; a link retirement ends the member's.
+      // Retiring the member's link ends the member's lease, and nobody else's.
+      const adminLink = await link(f, f.admin)
+      const admin = await insert(db, 'sso_delegation_bindings', {
+        ...bindingValues(f, { api_key_id: await apiKey(db, f.admin, f.team) }, adminLink),
+        member_id: f.adminMember,
+        trust_generation: 2,
+        domain_generation: 2,
+      })
+      await db.query(
+        'UPDATE sso_identity_links SET retired_at=now(), generation=generation+1 WHERE id=$1',
+        [f.memberLink.id],
+      )
+      expect(await live(db, 'sso_delegation_bindings', rebound.id)).toBe(false)
+      expect(await live(db, 'sso_delegation_bindings', admin.id)).toBe(true)
+      // A trust change ends every proof and lease of the team.
       await db.query(
         'UPDATE sso_policies SET trust_generation=3, policy_revision=2 WHERE organization_id=$1',
         [f.team],
       )
-      expect(await live(db, 'sso_delegation_bindings', rebound.id)).toBe(false)
+      expect(await live(db, 'sso_delegation_bindings', admin.id)).toBe(false)
     })
     expect(owned.pool.totalCount).toBeLessThanOrEqual(1)
   })

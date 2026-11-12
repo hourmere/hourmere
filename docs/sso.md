@@ -584,12 +584,14 @@ clear a required secret. Do not log tokens, assertions, XML, discovery bodies, D
 challenge values or provider error descriptions. Audit encrypted-key rotation and
 support operator key backup/restore without printing material. The sealed configuration
 binds its provider revision, and the database changes a revision only together with its
-ciphertext, so rotating the operator key re-seals every provider at a new revision, even
-when its trust configuration is unchanged. That ends the tests and pending attempts bound
-to the old revision, so enabling enforcement again needs a fresh owner test of the new
-revision; `trustGeneration` stays, so browser proofs and delegations (which record no
-provider revision) and enforcement already on are unaffected. An envelope version that
-names its key would still need the new revision.
+ciphertext, so rotating the operator key re-seals every provider that is not retired at a
+new revision, even when its trust configuration is unchanged. That ends the tests and
+pending attempts bound to the old revision, so enabling enforcement again needs a fresh
+owner test of the new revision; `trustGeneration` stays, so browser proofs and delegations
+(which record no provider revision) and enforcement already on are unaffected. A retired
+provider is frozen with its last envelope, so retire a provider with a re-sealed revision
+when its secret must not outlive the old key. An envelope version that names its key would
+still need the new revision.
 
 SSO audit uses the `audit_events` [journal](audit-log.md) added in
 [PR #246](https://github.com/hourmere/hourmere/pull/246): an append-only table written by one
@@ -891,7 +893,8 @@ all URLs from configured PUBLIC_URL, never request Host. Keep SAML entity ID sta
 across certificate rotation. Rotate provider secrets through the browser after testing
 a new revision. Back up encrypted configuration and the operator encryption key
 separately; key loss prevents login and requires recovery/reconfiguration. Rotating that
-key re-seals every provider at a new revision (see Fetching, credentials and audit).
+key re-seals every provider that is not retired at a new revision (see Fetching,
+credentials and audit).
 
 The six Keycloak fixture, linking and acceptance steps use an owned local Keycloak
 container/realm, synthetic users, their own disposable database/volumes and free ports

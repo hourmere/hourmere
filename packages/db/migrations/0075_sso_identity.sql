@@ -6,8 +6,9 @@
 -- immutable subject). The provider fixes the organization and the issuer (both immutable
 -- since 0074) and a link must repeat the provider's issuer, so one live link per provider and
 -- subject keeps the whole tuple unique; the index leaves the long issuer out of its key. A
--- person has at most one live link per provider. A link keeps the mailbox Hourmere last
--- proved for it; an IdP's email statement is never stored as proof. A link is retired, not
+-- person has at most one live link per provider, and new links are made only at an enabled
+-- provider. A link keeps the mailbox Hourmere last proved for it; an IdP's email statement is
+-- never stored as proof. A link is retired, not
 -- deleted, while its team and its account exist; retirement is permanent and comes with a new
 -- generation, which browser proofs and delegation bindings record.
 CREATE TABLE sso_identity_links (
@@ -25,7 +26,7 @@ CREATE TABLE sso_identity_links (
     AND strpos(proven_email, '@') > 1
   ),
   email_proven_at timestamptz NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   retired_at timestamptz,
   CONSTRAINT sso_identity_links_owner UNIQUE (organization_id, provider_id, user_id, id),
   CONSTRAINT sso_identity_links_provider FOREIGN KEY (organization_id, provider_id)
@@ -49,9 +50,10 @@ BEGIN
     RETURN OLD;
   END IF;
   IF TG_OP = 'INSERT' THEN
-    IF EXISTS (SELECT FROM public.sso_providers WHERE id = NEW.provider_id AND retired_at IS NOT NULL) THEN
-      RAISE EXCEPTION 'a retired SSO provider gets no new identity links'
-        USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_identity_links_live_provider';
+    -- A retired provider is never enabled.
+    IF EXISTS (SELECT FROM public.sso_providers WHERE id = NEW.provider_id AND NOT enabled) THEN
+      RAISE EXCEPTION 'a new SSO identity link needs an enabled provider'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_identity_links_enabled_provider';
     END IF;
     IF EXISTS (SELECT FROM public.sso_providers WHERE id = NEW.provider_id AND issuer <> NEW.issuer) THEN
       RAISE EXCEPTION 'an SSO identity link names its provider''s issuer'
@@ -94,8 +96,11 @@ CREATE TRIGGER sso_identity_links_guard BEFORE INSERT OR UPDATE OR DELETE ON sso
 -- most authenticationAttemptLifetime (600 seconds). Its required proof methods only grow by
 -- the mailbox (a sign-in or link that must prove a mailbox, or a step-up that cannot prove
 -- freshness); its mailbox is fixed once chosen; each proof is recorded once and lasts at most
--- freshAdministrationProof (300 seconds). Nothing changes after expiry, and an attempt is
--- consumed once, only with every required proof live. Deleting an attempt only ends it.
+-- freshAdministrationProof (300 seconds). A step-up records the team's trust generation. Nothing
+-- changes after expiry, and an attempt is consumed once, only with every required proof live
+-- and while what it relied on is unchanged: its provider at the frozen revision, still live
+-- (and enabled for a sign-in or link), and its step-up's link, enabled provider and trust
+-- generation. Deleting an attempt only ends it.
 CREATE TABLE sso_attempts (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
   kind text NOT NULL
@@ -122,7 +127,8 @@ CREATE TABLE sso_attempts (
   step_up_link_id uuid,
   step_up_authenticated_at timestamptz,
   step_up_proof_expires_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now(),
+  step_up_trust_generation integer,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   expires_at timestamptz NOT NULL,
   consumed_at timestamptz,
   CONSTRAINT sso_attempts_organization_id_id UNIQUE (organization_id, id),
@@ -157,7 +163,8 @@ CREATE TABLE sso_attempts (
     ))
   ),
   CONSTRAINT sso_attempts_step_up CHECK (
-    num_nulls(step_up_provider_id, step_up_link_id, step_up_authenticated_at, step_up_proof_expires_at) IN (0, 4)
+    num_nulls(step_up_provider_id, step_up_link_id, step_up_authenticated_at, step_up_proof_expires_at,
+      step_up_trust_generation) IN (0, 5)
     AND (step_up_link_id IS NULL OR (
       requires_sso
       AND step_up_authenticated_at >= created_at - interval '60 seconds'
@@ -181,7 +188,7 @@ BEGIN
     IF NEW.created_at > clock_timestamp() OR NEW.expires_at <= clock_timestamp()
        OR num_nonnulls(NEW.mailbox_proven_at, NEW.mailbox_proof_expires_at, NEW.step_up_provider_id,
             NEW.step_up_link_id, NEW.step_up_authenticated_at, NEW.step_up_proof_expires_at,
-            NEW.consumed_at) > 0 THEN
+            NEW.step_up_trust_generation, NEW.consumed_at) > 0 THEN
       RAISE EXCEPTION 'an SSO attempt starts unexpired, unproven and unconsumed'
         USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_attempts_starts_open';
     END IF;
@@ -234,8 +241,10 @@ BEGIN
       AND ROW(NEW.mailbox_proven_at, NEW.mailbox_proof_expires_at)
           IS DISTINCT FROM ROW(OLD.mailbox_proven_at, OLD.mailbox_proof_expires_at))
      OR (OLD.step_up_link_id IS NOT NULL
-      AND ROW(NEW.step_up_provider_id, NEW.step_up_link_id, NEW.step_up_authenticated_at, NEW.step_up_proof_expires_at)
-          IS DISTINCT FROM ROW(OLD.step_up_provider_id, OLD.step_up_link_id, OLD.step_up_authenticated_at, OLD.step_up_proof_expires_at)) THEN
+      AND ROW(NEW.step_up_provider_id, NEW.step_up_link_id, NEW.step_up_authenticated_at,
+              NEW.step_up_proof_expires_at, NEW.step_up_trust_generation)
+          IS DISTINCT FROM ROW(OLD.step_up_provider_id, OLD.step_up_link_id, OLD.step_up_authenticated_at,
+              OLD.step_up_proof_expires_at, OLD.step_up_trust_generation)) THEN
     RAISE EXCEPTION 'an SSO attempt records each proof once'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_attempts_proof_once';
   END IF;
@@ -248,13 +257,15 @@ BEGIN
   END IF;
   IF NEW.step_up_link_id IS NOT NULL AND OLD.step_up_link_id IS NULL AND (
     NEW.step_up_authenticated_at > clock_timestamp() + interval '60 seconds'
+    OR NEW.step_up_trust_generation <> coalesce(
+      (SELECT trust_generation FROM public.sso_policies WHERE organization_id = NEW.organization_id), 1)
     OR EXISTS (
       SELECT FROM public.sso_identity_links l JOIN public.sso_providers p ON p.id = l.provider_id
       WHERE l.id = NEW.step_up_link_id
         AND (l.retired_at IS NOT NULL OR NOT p.enabled)
     )
   ) THEN
-    RAISE EXCEPTION 'an SSO step-up comes from a live link at an enabled provider, not from the future'
+    RAISE EXCEPTION 'an SSO step-up comes from a live link at an enabled provider under the current trust generation, not from the future'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_attempts_step_up_proof';
   END IF;
   IF NEW.consumed_at IS NOT NULL AND OLD.consumed_at IS NULL AND (
@@ -263,6 +274,24 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'an SSO attempt is consumed only with every required proof live'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_attempts_proven';
+  END IF;
+  -- A trust edit (a new revision, a disabled or retired provider, a new trust generation) or a
+  -- retired link ends the attempts that relied on them.
+  IF NEW.consumed_at IS NOT NULL AND OLD.consumed_at IS NULL AND (
+    EXISTS (
+      SELECT FROM public.sso_providers WHERE id = NEW.provider_id
+        AND (revision <> NEW.provider_revision OR retired_at IS NOT NULL
+             OR (NEW.kind IN ('sign_in', 'link') AND NOT enabled))
+    )
+    OR EXISTS (
+      SELECT FROM public.sso_identity_links l JOIN public.sso_providers p ON p.id = l.provider_id
+      WHERE l.id = NEW.step_up_link_id AND (l.retired_at IS NOT NULL OR NOT p.enabled)
+    )
+    OR NEW.step_up_trust_generation <> coalesce(
+      (SELECT trust_generation FROM public.sso_policies WHERE organization_id = NEW.organization_id), 1)
+  ) THEN
+    RAISE EXCEPTION 'an SSO attempt is consumed only while what it relied on is unchanged'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_attempts_still_current';
   END IF;
   RETURN NEW;
 END $$;
@@ -279,7 +308,7 @@ CREATE TABLE sso_mailbox_tokens (
     CONSTRAINT sso_mailbox_tokens_digest CHECK (token_digest ~ '^[0-9a-f]{64}$'),
   organization_id uuid NOT NULL,
   attempt_id uuid NOT NULL,
-  issued_at timestamptz NOT NULL DEFAULT now(),
+  issued_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   expires_at timestamptz NOT NULL,
   consumed_at timestamptz,
   CONSTRAINT sso_mailbox_tokens_one_per_attempt UNIQUE (attempt_id),
@@ -331,7 +360,10 @@ CREATE TRIGGER sso_mailbox_tokens_guard BEFORE INSERT OR UPDATE ON sso_mailbox_t
 -- provider (only its SHA-256 digest is stored), by whichever of any number of concurrent
 -- callbacks inserts it first. An entry is immutable and kept until retain_until, which the
 -- service sets to at least max(acceptanceDeadline + clockSkew, requestExpiresAt); only the
--- team's deletion removes it earlier.
+-- team's deletion removes it earlier. That bound is at most 720 seconds after consumption: a
+-- callback is accepted only before acceptanceDeadline + clockSkew, the deadline is at most
+-- IssueInstant + maximumSamlAssertionLifetime (600 seconds), IssueInstant at most clockSkew
+-- (60 seconds) ahead, and a request expires within authenticationAttemptLifetime.
 CREATE TABLE sso_replay_cache (
   organization_id uuid NOT NULL,
   provider_id uuid NOT NULL,
@@ -339,17 +371,26 @@ CREATE TABLE sso_replay_cache (
     CONSTRAINT sso_replay_cache_kind CHECK (kind IN ('saml_request', 'saml_response', 'saml_assertion')),
   key_digest text NOT NULL
     CONSTRAINT sso_replay_cache_key_digest CHECK (key_digest ~ '^[0-9a-f]{64}$'),
-  consumed_at timestamptz NOT NULL DEFAULT now(),
+  consumed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   retain_until timestamptz NOT NULL,
   PRIMARY KEY (provider_id, kind, key_digest),
   CONSTRAINT sso_replay_cache_provider FOREIGN KEY (organization_id, provider_id)
     REFERENCES sso_providers (organization_id, id) ON DELETE CASCADE,
-  CONSTRAINT sso_replay_cache_retention CHECK (retain_until > consumed_at)
+  CONSTRAINT sso_replay_cache_retention CHECK (
+    retain_until > consumed_at AND retain_until <= consumed_at + interval '720 seconds'
+  )
 );
 
 CREATE FUNCTION guard_sso_replay_entry() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.consumed_at > clock_timestamp() OR NEW.retain_until <= clock_timestamp() THEN
+      RAISE EXCEPTION 'an SSO replay cache entry is consumed now and retained from then on'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_replay_cache_starts_retained';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF TG_OP = 'UPDATE' THEN
     RAISE EXCEPTION 'SSO replay cache entries are immutable'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'sso_replay_cache_immutable';
@@ -361,12 +402,13 @@ BEGIN
   END IF;
   RETURN OLD;
 END $$;
-CREATE TRIGGER sso_replay_cache_guard BEFORE UPDATE OR DELETE ON sso_replay_cache
+CREATE TRIGGER sso_replay_cache_guard BEFORE INSERT OR UPDATE OR DELETE ON sso_replay_cache
   FOR EACH ROW EXECUTE FUNCTION guard_sso_replay_entry();
 
 -- Browser proofs and delegation bindings record what they relied on: the member, the enabled
--- provider (a retired provider is never enabled), its identity link and that link's generation, the team's trust generation (1 until the team
--- has a policy) and the domain claim with its generation. Each must be current when the row is
+-- provider (a retired provider is never enabled), its identity link and that link's
+-- generation, the team's trust generation (1 until the team has a policy) and the domain claim
+-- with its generation. Each must be current when the row is
 -- written, so no row names a generation that does not exist yet; every use compares them with
 -- the current values, so a lapsed claim generation, which can never be verified again, never
 -- revives a proof or lease. Both are immutable; revoking one deletes it.
@@ -437,7 +479,7 @@ CREATE TABLE sso_browser_proofs (
   trust_generation integer NOT NULL,
   domain_id uuid NOT NULL,
   domain_generation integer NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   expires_at timestamptz NOT NULL,
   CONSTRAINT sso_browser_proofs_link FOREIGN KEY (organization_id, provider_id, user_id, link_id)
     REFERENCES sso_identity_links (organization_id, provider_id, user_id, id) ON DELETE CASCADE,
@@ -490,7 +532,7 @@ CREATE TABLE sso_delegation_bindings (
   trust_generation integer NOT NULL,
   domain_id uuid NOT NULL,
   domain_generation integer NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   expires_at timestamptz NOT NULL,
   CONSTRAINT sso_delegation_bindings_one_per_api_key UNIQUE (api_key_id),
   CONSTRAINT sso_delegation_bindings_one_per_oauth_grant UNIQUE (oauth_grant_id),

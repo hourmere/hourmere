@@ -885,7 +885,8 @@ and inserting a row again.
   plaintext JSON; its authenticated data binds organization, provider and revision, so
   ciphertext moved to another organization, provider or revision fails to decrypt. A new
   revision and a new sealed configuration go together, so rotating the operator key re-seals
-  every provider at a new revision. Retirement disables the provider and is permanent.
+  every provider that is not retired at a new revision. Retirement disables the provider and
+  is permanent.
 - **Domain claims** store an exact lowercase IDNA ASCII name (no wildcard, IP address or
   trailing dot; public suffixes are refused by the application), the current `generation`,
   the SHA-256 digest of that generation's TXT challenge and its expiry, verification and
@@ -932,7 +933,8 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   most one live link per provider. A link records the normalized mailbox Hourmere last
   proved for it, never an IdP's email statement, and a new mailbox needs a later proof
   time. A link is retired rather than deleted while its team and account exist; retirement
-  is permanent and takes a new link `generation`. A retired provider gets no new links.
+  is permanent and takes a new link `generation`. New links are made only at an enabled
+  provider.
 - **Attempts** are a sign-in (before any session), a provider test or self-link (a person
   and their current session), or a fresh proof for one write (a person, their session and
   the team). Each freezes its kind, team, provider and current provider revision, person,
@@ -942,18 +944,21 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   mailbox later, and the mailbox is fixed once chosen. A mailbox proof needs the attempt's
   consumed token and ends with it; a step-up comes from the attempt's own person's live link
   at an enabled provider, authenticated between 60 seconds before the attempt and 60
-  seconds after it is recorded. Each
+  seconds after it is recorded, and records the team's current `trustGeneration`. Each
   proof is recorded once, within `freshAdministrationProof` (300 seconds). Nothing changes
-  after expiry, and an attempt is consumed once, only while every required proof is live.
-  Logging out deletes the session's attempts.
+  after expiry, and an attempt is consumed once, only while every required proof is live and
+  what it relied on is unchanged: its provider still at the frozen revision and not retired
+  (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
+  trust generation current. Logging out deletes the session's attempts.
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
 - **The replay cache** keeps the SHA-256 digest of each consumed SAML request, response and
   assertion ID per provider and kind, so concurrent callbacks consume it once. Entries are
-  immutable and kept until `retain_until`, which the service sets to at least
-  `max(acceptanceDeadline + clockSkew, requestExpiresAt)`; only the team's deletion removes
-  them earlier.
+  written at consumption, immutable and kept until `retain_until`, which the service sets to
+  at least `max(acceptanceDeadline + clockSkew, requestExpiresAt)` and which is in the future
+  and at most 720 seconds after consumption (the largest value that bound can take under the
+  pinned limits); only the team's deletion removes them earlier.
 - **Browser proofs and delegation bindings** record the membership, the enabled provider,
   the link and its generation, the team's `trustGeneration` (1 before the team has a policy)
   and the domain claim with its generation; all must be current when the row is written,
