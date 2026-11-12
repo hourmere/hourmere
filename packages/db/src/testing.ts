@@ -44,6 +44,7 @@ export interface TestDatabaseTemplate {
 const TEMPLATE_NAME = /^hourmere_test_[a-z0-9_]{1,80}$/
 
 const POOL_CLOSE_GRACE_MS = 250
+const CREATE_STATEMENT_TIMEOUT_MS = 30_000
 const DROP_STATEMENT_TIMEOUT_MS = 30_000
 const DROP_MAX_ATTEMPTS = 3
 
@@ -178,12 +179,24 @@ export async function createTestDatabase(
   // still leaves an owner able to clean up. The runner registers cleanupTestDatabases.
   const unregister = registerTestDatabaseCleanup(drop)
   setup = (async () => {
-    const admin = adminPool(maintenanceUrl)
+    // CREATE copies its whole template and waits for conflicting locks on it; under CI load
+    // that can outlast the default admin timeout. Like DROP, only this statement waits longer.
+    const creator = adminPool(
+      maintenanceUrl,
+      Math.max(adminStatementTimeout(), CREATE_STATEMENT_TIMEOUT_MS),
+    )
     try {
-      await admin.query(
+      await creator.query(
         `CREATE DATABASE ${name}${options.template ? ` TEMPLATE ${options.template}` : ''}`,
       )
       created = true
+    } finally {
+      await creator.end()
+    }
+    // The ALTERs only update a catalog row of a database nobody else knows yet, so they keep
+    // the short default and a broken server still fails fast.
+    const admin = adminPool(maintenanceUrl)
+    try {
       // Throwaway data: commits need not wait for the disk (tests stay fast under load).
       await admin.query(`ALTER DATABASE ${name} SET synchronous_commit = off`)
       // Autovacuum can analyze one churned fixture table before the tables it joins, which
