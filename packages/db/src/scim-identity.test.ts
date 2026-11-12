@@ -46,6 +46,12 @@ import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0073_scim_identity.sql'
+// Adverse order for the binding cleanup: the connection cascade before the token cascade.
+// No entry is optional, because the coverage run never runs this order.
+const bindingCleanupOrder = [
+  ['scim_connections', 'scim_connections_organization_id_fkey'],
+  ['scim_provisioning_tokens', 'scim_provisioning_tokens_organization_id_fkey'],
+] as const
 // Replace only the named column inside the tombstone trigger's decision tuple comparison.
 function dropTupleColumn(source: string, column: string): string {
   const start = source.indexOf('CREATE FUNCTION scim_preserve_block_identity()')
@@ -1031,11 +1037,7 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     // The connection cascade can run before the token cascade when an OID power of ten lies
     // between their RI triggers (CI reproduced this). Force that adverse order: the NO ACTION
     // binding FK must then already be satisfied.
-    const adverseOrder = (client: pg.PoolClient) =>
-      fireCascadesInOrder(client, [
-        ['scim_connections', 'scim_connections_organization_id_fkey'],
-        ['scim_provisioning_tokens', 'scim_provisioning_tokens_organization_id_fkey'],
-      ])
+    const adverseOrder = (client: pg.PoolClient) => fireCascadesInOrder(client, bindingCleanupOrder)
     const verify = async (client: pg.PoolClient) => {
       await succeeds(client, `DELETE FROM auth.organization WHERE id='${org}'`)
       expect(
@@ -1061,6 +1063,65 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     await transaction(mutant, async (client) => {
       await adverseOrder(client)
       await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
+    })
+  })
+
+  // A forced order that silently leaves out a listed foreign key compares a shorter list,
+  // which always matches, so the adverse-order tests would be back to the OID lottery.
+  const setupError = (table: string, constraint: string) => ({
+    name: 'Error',
+    message: `Setup could not fire the cascades in order: ${table} has no foreign key "${constraint}"`,
+  })
+  it.each([
+    [
+      'renamed',
+      'RENAME CONSTRAINT "invitation_organizationId_fkey" TO invitation_organization_fkey',
+    ],
+    ['dropped', 'DROP CONSTRAINT "invitation_organizationId_fkey"'],
+  ])(
+    'organization deletion check fails as setup when the invitation FK is %s',
+    async (_label, ddl) => {
+      await transaction(source, async (client) => {
+        await client.query(`ALTER TABLE auth.invitation ${ddl}`)
+        await expect(organizationDeletionCascades(client)).rejects.toMatchObject(
+          setupError('auth.invitation', 'invitation_organizationId_fkey'),
+        )
+      })
+    },
+  )
+  it.each([
+    [
+      'renamed',
+      'RENAME CONSTRAINT scim_provisioning_tokens_organization_id_fkey TO scim_tokens_organization_fkey',
+    ],
+    ['dropped', 'DROP CONSTRAINT scim_provisioning_tokens_organization_id_fkey'],
+  ])('binding cleanup order fails as setup when the token FK is %s', async (_label, ddl) => {
+    await transaction(source, async (client) => {
+      await client.query(`ALTER TABLE scim_provisioning_tokens ${ddl}`)
+      await expect(fireCascadesInOrder(client, bindingCleanupOrder)).rejects.toMatchObject(
+        setupError('scim_provisioning_tokens', 'scim_provisioning_tokens_organization_id_fkey'),
+      )
+    })
+  })
+  it('a dropped optional FK is left out of the order, and the organization deletion check then fails on the missing cascade itself', async () => {
+    // The coverage run drops the connection FK in turn: the check must report the missing
+    // cascade as an assertion failure, never abort the run with a setup error.
+    await transaction(source, async (client) => {
+      await client.query(
+        'ALTER TABLE scim_connections DROP CONSTRAINT scim_connections_organization_id_fkey',
+      )
+      await expect(organizationDeletionCascades(client)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    })
+    // Optional only where marked: the binding cleanup order requires the same FK.
+    await transaction(source, async (client) => {
+      await client.query(
+        'ALTER TABLE scim_connections DROP CONSTRAINT scim_connections_organization_id_fkey',
+      )
+      await expect(fireCascadesInOrder(client, bindingCleanupOrder)).rejects.toMatchObject(
+        setupError('scim_connections', 'scim_connections_organization_id_fkey'),
+      )
     })
   })
 

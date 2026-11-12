@@ -465,23 +465,35 @@ export async function accountDeletionClearsLinks(client: pg.PoolClient) {
  * order therefore depends on where the cluster's OID counter stood while the migrations ran.
  * This re-creates the foreign keys consecutively, each from its own definition (only the
  * trigger OIDs change), checks the order PostgreSQL uses (bytewise, COLLATE "C") and redoes
- * them while an OID power of ten between them reverses it. A foreign key that does not exist
- * is left out: the coverage run drops each object in turn, and the assertions then see the
- * missing cascade itself.
+ * them while an OID power of ten between them reverses it.
+ *
+ * Only an entry marked optional may be missing, and it is then left out: the coverage run
+ * drops that foreign key, and the assertions then see the missing cascade itself. Any other
+ * missing foreign key (dropped or renamed) fails as setup, because ordering fewer foreign
+ * keys than listed would compare a shorter list that always matches and enforce nothing.
  */
 export async function fireCascadesInOrder(
   client: pg.PoolClient,
-  cascades: readonly (readonly [table: string, constraint: string])[],
+  cascades: readonly (readonly [
+    table: string,
+    constraint: string,
+    options?: { readonly optional: true },
+  ])[],
 ) {
   let fired: string[] = []
   for (let attempt = 1; attempt <= 3; attempt++) {
     const present: string[] = []
-    for (const [table, name] of cascades) {
+    for (const [table, name, options] of cascades) {
       const { rows } = await client.query(
         'SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = $1::regclass AND conname = $2',
         [table, name],
       )
-      if (!rows[0]) continue
+      if (!rows[0]) {
+        if (options?.optional) continue
+        throw new Error(
+          `Setup could not fire the cascades in order: ${table} has no foreign key "${name}"`,
+        )
+      }
       present.push(name)
       await client.query(`ALTER TABLE ${table} DROP CONSTRAINT "${name}";
         ALTER TABLE ${table} ADD CONSTRAINT "${name}" ${rows[0].definition}`)
@@ -505,10 +517,11 @@ export async function organizationDeletionCascades(client: pg.PoolClient) {
   // Adverse order for the claim cleanup: the invitation SET NULL runs before the connection
   // cascade has reached the claims, and rechecks a claim whose SCIM user is already deleted
   // (23503) unless the cleanup trigger removed the claims first. In the opposite order the
-  // cascade deletes the claims itself and a missing cleanup would go unnoticed.
+  // cascade deletes the claims itself and a missing cleanup would go unnoticed. Only the
+  // connection FK comes from 0073, so it is the only one the coverage run drops.
   await fireCascadesInOrder(client, [
     ['auth.invitation', 'invitation_organizationId_fkey'],
-    ['scim_connections', 'scim_connections_organization_id_fkey'],
+    ['scim_connections', 'scim_connections_organization_id_fkey', { optional: true }],
   ])
   await client.query(claimInsert(',invitation_id', `,'${invitation}'`))
   await client.query(`INSERT INTO scim_user_claims (organization_id,connection_id,scim_user_id,invitation_id,work_email,expires_at)
