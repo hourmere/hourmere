@@ -7,8 +7,9 @@
 // CLI command and web page is still absent. The names come from the document's REST, MCP and
 // CLI table; only workflow-specific names are asserted, and no catalogue is snapshotted. Each
 // later step that adds an operation admits its own names here. Definition storage (step 2) is
-// read only by the guarded read service (packages/workflows/src/reads.ts); every other
-// production module stays away from the tables.
+// read only by the guarded read service (packages/workflows/src/reads.ts), which names no
+// execution table; execution storage (step 3) is tables only. Every other production module
+// stays away from the tables of migrations 0076 and 0079.
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -59,16 +60,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// The storage layer: the migration, the generated table types and the storage test support.
-const STORAGE_LAYER =
-  /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/workflow-storage-[^/]+\.ts$)/
-// The modules that own workflow data access: only the guarded definition reads so far.
+// The storage layer: the migrations, the generated table types and exactly these storage test
+// support modules (test files are not production sources). A new module is not exempt because
+// of its name: it must be added here by name.
+const STORAGE_SUPPORT = [
+  'packages/db/src/workflow-storage-protections.ts',
+  'packages/db/src/workflow-storage-execution-protections.ts',
+]
+const isStorageLayer = (file: string) =>
+  file.startsWith('packages/db/migrations/') ||
+  file === 'packages/db/src/tables.ts' ||
+  STORAGE_SUPPORT.includes(file)
+// The workflow tables of migrations 0076 and 0079.
+const STORAGE_TABLES = [
+  'workflow_definitions',
+  'workflow_revisions',
+  'workflow_enrollments',
+  'workflow_runs',
+  'workflow_recipient_claims',
+  'workflow_run_history',
+  'workflow_mail_reservations',
+]
+/** `workflow_run_history` → `WorkflowRunHistory`, the generated row type. */
+const rowType = (table: string) =>
+  table.replace(/(?:^|_)([a-z])/g, (_, letter: string) => letter.toUpperCase())
+// A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers), its
+// generated row type, or the storage test support. `WorkflowDefinitionSchema`,
+// `workflowRunTiming` or `workflow_runs_due` is not one. A name scan has a known limit: a
+// module that builds a table name at run time (joining its parts, say) does not contain it, so
+// review must still catch such code.
+const STORAGE_NAMES = new RegExp(
+  `workflow-storage|(?<![A-Za-z0-9_])(?:${[...STORAGE_TABLES, ...STORAGE_TABLES.map(rowType)].join('|')})(?![A-Za-z0-9_])`,
+  'i',
+)
+// The modules that own workflow data access: only the guarded definition reads so far, which
+// read the definition tables of migration 0076 and no execution table.
 const DATA_ACCESS = ['packages/workflows/src/reads.ts']
-// A new table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
-// its generated row type, or the storage test support. `WorkflowDefinitionSchema` or
-// `workflow_definitions_guard` is not one.
-const STORAGE_NAMES =
-  /workflow-storage|(?<![A-Za-z0-9_])(?:workflow_definitions|workflow_revisions|WorkflowDefinitions|WorkflowRevisions)(?![A-Za-z0-9_])/i
+const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions']
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -375,7 +403,7 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     ).toEqual([])
   })
 
-  it('recognises the definition storage tables as whole identifiers, in any case', () => {
+  it('recognises the workflow storage tables as whole identifiers, in any case', () => {
     for (const source of [
       "selectFrom('workflow_definitions')",
       'DELETE FROM "workflow_revisions"',
@@ -384,6 +412,16 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       "import type { WorkflowDefinitions } from '@hourmere/db'",
       'type Row = Selectable<WorkflowRevisions>',
       "import { workflowFixture } from './workflow-storage-protections.ts'",
+      "selectFrom('workflow_runs')",
+      'UPDATE workflow_recipient_claims SET',
+      'INSERT INTO "workflow_enrollments"',
+      'FROM Workflow_Run_History h',
+      'DELETE FROM workflow_mail_reservations',
+      'type Run = Selectable<WorkflowRuns>',
+      "import type { WorkflowEnrollments, WorkflowMailReservations } from '@hourmere/db'",
+      'Insertable<WorkflowRecipientClaims>',
+      'Selectable<WorkflowRunHistory>',
+      '"./store": "./src/workflow-storage-store.ts"',
     ])
       expect(STORAGE_NAMES.test(source), source).toBe(true)
     for (const source of [
@@ -394,34 +432,44 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       'listWorkflowDefinitions',
       'workflowRevision',
       '/api/v1/workflows',
+      'workflowRunTiming',
+      'type WorkflowRunTiming',
+      'workflow_runs_due',
+      'listWorkflowRuns',
+      'workflow_reservation_id',
     ])
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
 
-  it('keeps the definition storage tables unreferenced outside storage and the guarded reads', () => {
+  it('keeps the workflow storage tables unreferenced outside storage and the guarded reads', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     expect(sources).toContain('apps/server/src/server.ts')
     expect(sources).toContain('packages/workflows/src/definition.ts')
     expect(sources).toContain('packages/workflows/src/testing.ts')
     expect(sources).toContain('packages/db/src/index.ts')
-    const storage = sources.filter((file) => STORAGE_LAYER.test(file))
+    const storage = sources.filter(isStorageLayer)
     // The matcher sees the storage layer itself, so a reference elsewhere cannot hide from it.
-    expect(storage).toEqual(
-      expect.arrayContaining([
-        'packages/db/src/tables.ts',
-        'packages/db/src/workflow-storage-protections.ts',
-      ]),
-    )
+    expect(storage).toEqual(['packages/db/src/tables.ts', ...STORAGE_SUPPORT].sort())
     for (const file of [...storage, ...DATA_ACCESS])
       expect(STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')), file).toBe(true)
-    expect(readFileSync(new URL('packages/db/src/tables.ts', root), 'utf8')).toMatch(
-      /^ {2}workflow_revisions: WorkflowRevisions;$/m,
-    )
+    const tables = readFileSync(new URL('packages/db/src/tables.ts', root), 'utf8')
+    for (const table of STORAGE_TABLES)
+      expect(tables, table).toMatch(new RegExp(`^ {2}${table}: ${rowType(table)};$`, 'm'))
     const referencing = sources
-      .filter((file) => !STORAGE_LAYER.test(file) && !DATA_ACCESS.includes(file))
+      .filter((file) => !isStorageLayer(file) && !DATA_ACCESS.includes(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
+    // The definition reads name the definition tables only, never an execution table.
+    const executionNames = new RegExp(
+      `(?<![A-Za-z0-9_])(?:${STORAGE_TABLES.filter((table) => !DEFINITION_TABLES.includes(table))
+        .flatMap((table) => [table, rowType(table)])
+        .join('|')})(?![A-Za-z0-9_])`,
+      'i',
+    )
+    expect(executionNames.test('selectFrom("workflow_runs")')).toBe(true)
+    for (const file of DATA_ACCESS)
+      expect(executionNames.test(readFileSync(new URL(file, root), 'utf8')), file).toBe(false)
     // Only the package entry loads the data-access module, so every production caller gets
     // the guarded operations and never the internal services behind them.
     const loaders = sources.filter((file) =>
@@ -430,6 +478,35 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       ),
     )
     expect(loaders).toEqual(['packages/workflows/src/index.ts'])
+  })
+
+  it('exposes no storage module through a package entry point', () => {
+    // A package subpath could publish a storage module to production importers whose own
+    // source names only the subpath, so every workspace manifest's entry points are scanned.
+    const manifests = ['apps', 'packages', 'tools'].flatMap((group) =>
+      readdirSync(new URL(group, root)).flatMap((name) => {
+        try {
+          return [
+            {
+              file: `${group}/${name}/package.json`,
+              json: JSON.parse(
+                readFileSync(new URL(`${group}/${name}/package.json`, root), 'utf8'),
+              ),
+            },
+          ]
+        } catch {
+          return [] // Not a workspace.
+        }
+      }),
+    )
+    expect(manifests.map(({ file }) => file)).toContain('packages/db/package.json')
+    expect(
+      manifests
+        .filter(({ json }) =>
+          STORAGE_NAMES.test(JSON.stringify([json.main, json.exports, json.imports])),
+        )
+        .map(({ file }) => file),
+    ).toEqual([])
   })
 
   it('lets exactly one test file replace the hard-off module', () => {

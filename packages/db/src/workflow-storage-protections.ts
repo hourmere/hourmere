@@ -12,7 +12,7 @@ import { reuseConnectionsAfterErrors } from './testing.ts'
 export const workflowMigration = '0076_workflow_definitions.sql'
 export const workflowTables = ['workflow_definitions', 'workflow_revisions'] as const
 
-type Expected = { code: string; constraint?: string; column?: string }
+export type Expected = { code: string; constraint?: string; column?: string }
 const check = (constraint: string): Expected => ({ code: '23514', constraint })
 const foreignKey = (constraint: string): Expected => ({ code: '23503', constraint })
 const notNull = (column: string): Expected => ({ code: '23502', column })
@@ -33,7 +33,7 @@ export function revisionContent(overrides: Record<string, unknown> = {}): Record
 }
 
 /** Runs `action` in a transaction that is always rolled back. */
-async function rolledBack<T>(pool: pg.Pool, action: (db: pg.PoolClient) => Promise<T>) {
+export async function rolledBack<T>(pool: pg.Pool, action: (db: pg.PoolClient) => Promise<T>) {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -45,7 +45,7 @@ async function rolledBack<T>(pool: pg.Pool, action: (db: pg.PoolClient) => Promi
 }
 
 /** Runs `action` in a transaction that commits; a failure rolls it back and rethrows. */
-async function committed<T>(pool: pg.Pool, action: (db: pg.PoolClient) => Promise<T>) {
+export async function committed<T>(pool: pg.Pool, action: (db: pg.PoolClient) => Promise<T>) {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -61,7 +61,7 @@ async function committed<T>(pool: pg.Pool, action: (db: pg.PoolClient) => Promis
 }
 
 /** A write that must succeed: a stray rejection fails an assertion instead of the run. */
-async function accepted<T>(operation: Promise<T>, label?: string): Promise<T> {
+export async function accepted<T>(operation: Promise<T>, label?: string): Promise<T> {
   let value: T | undefined
   await expect(
     operation.then((result) => {
@@ -73,7 +73,7 @@ async function accepted<T>(operation: Promise<T>, label?: string): Promise<T> {
 }
 
 /** `write` runs in a rolled-back transaction and must be refused with `expected`. */
-async function refused(
+export async function refused(
   pool: pg.Pool,
   expected: Expected,
   write: (db: pg.PoolClient) => Promise<unknown>,
@@ -211,9 +211,13 @@ async function organizationUnlocked(pool: pg.Pool, organization: string) {
   return rows.length === 1
 }
 
-/** Waits until session `pid` waits for a lock, so the next step happens while it waits. */
-async function untilBlocked(pool: pg.Pool, pid: number) {
+/**
+ * Waits until session `pid` waits for a lock, so the next step happens while it waits. When
+ * `settled` reports that the session's statement already finished, it never waited: fail now.
+ */
+export async function untilBlocked(pool: pg.Pool, pid: number, settled?: () => boolean) {
   for (let attempt = 0; attempt < 400; attempt++) {
+    if (settled?.()) expect.fail('the second writer finished without waiting for the first')
     const { rows } = await pool.query<{ wait: string | null }>(
       'SELECT wait_event_type AS wait FROM pg_stat_activity WHERE pid=$1',
       [pid],
@@ -236,7 +240,7 @@ export interface WorkflowProtection {
 }
 
 /** A source-copy mutant that replaces exactly one occurrence of `before`. */
-const mutant = (name: string, before: string, after = ''): WorkflowMutant => ({
+export const mutant = (name: string, before: string, after = ''): WorkflowMutant => ({
   name,
   apply: (source) => {
     const count = source.split(before).length - 1
@@ -597,6 +601,41 @@ export const workflowProtections: Record<string, WorkflowProtection> = {
         await accepted(insertRevision(db, f.team, workflow, 3))
         expect(await organizationUnlocked(f.pool, f.team), 'the team row is locked').toBe(false)
       })
+      // … before the definition: while another session holds the organization, a new revision
+      // waits for it without having locked the definition yet. Otherwise it could deadlock
+      // with an organization deletion, which cascades from the organization to the definition.
+      const holder = await f.pool.connect()
+      const writer = await f.pool.connect()
+      let waiting: Promise<unknown> = Promise.resolve()
+      try {
+        await holder.query('BEGIN')
+        await holder.query('SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE', [f.team])
+        await writer.query('BEGIN')
+        const pid = (await writer.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+          ?.pid as number
+        waiting = insertRevision(writer, f.team, workflow, 3).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        await untilBlocked(f.pool, pid)
+        const { rows } = await f.pool.query(
+          'SELECT id FROM workflow_definitions WHERE id=$1 FOR UPDATE SKIP LOCKED',
+          [workflow],
+        )
+        expect(rows, 'the definition is still free while the writer waits').toEqual([
+          { id: workflow },
+        ])
+        await holder.query('ROLLBACK')
+        expect(await waiting, 'the waiting writer').toBeUndefined()
+      } finally {
+        // Ends the holding transaction if it is still open, so the writer finishes; then
+        // discards the writer's revision.
+        await holder.query('ROLLBACK')
+        await waiting
+        await writer.query('ROLLBACK')
+        holder.release()
+        writer.release()
+      }
       // Concurrent writers of the same next revision: the second waits for the definition
       // and is then refused as out of sequence.
       const first = await f.pool.connect()
@@ -645,6 +684,14 @@ export const workflowProtections: Record<string, WorkflowProtection> = {
       mutant(
         'a new revision leaves the organization unlocked',
         '  PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;\n',
+      ),
+      mutant(
+        'a new revision locks the definition before the organization',
+        '  PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;\n',
+        `  PERFORM FROM public.workflow_definitions
+    WHERE organization_id = NEW.organization_id AND id = NEW.workflow_id FOR UPDATE;
+  PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
+`,
       ),
     ],
   },
