@@ -104,8 +104,9 @@ export interface MeetingPollVoterState {
 export interface VerifyMeetingPollVoterResult {
   voter: MeetingPollVoterState
   /**
-   * The voting credential minted when a public enrollee verifies, returned exactly once.
-   * Null for invitees, whose emailed credential already votes, and for every repeat.
+   * The voting credential minted when a public enrollee verifies. It is also mailed; the
+   * response carries it this once. Null for invitees, whose emailed credential already
+   * votes, and for every repeat.
    */
   votingToken: string | null
 }
@@ -344,9 +345,10 @@ export async function enrollMeetingPollVoter(
 
 /**
  * Confirm mailbox possession with an emailed credential, by explicit request only. A public
- * enrollee's verification credential is consumed and replaced by a voting credential that is
- * returned once; an invitee's voting credential stays the same. Repeats return the current
- * state without minting anything. Expired or revoked credentials never verify.
+ * enrollee's verification credential is consumed and replaced by a voting credential, which
+ * is mailed and also returned once; an invitee's voting credential stays the same and
+ * nothing is mailed. Repeats return the current state without minting or mailing anything.
+ * Expired or revoked credentials never verify.
  */
 export async function verifyMeetingPollVoter(
   ctx: MeetingPollPublicContext,
@@ -421,6 +423,11 @@ export async function verifyMeetingPollVoter(
         poll.deadline,
         secret,
       )
+      // The mailbox gets the new voting credential as a verification delivery at that
+      // credential's generation (one generation line, so the delivery identity is unique);
+      // delivery applies the same mail budgets as every poll mail. A newly mailed credential
+      // restarts the mailbox's recovery count.
+      await queueCredentialMail(trx, poll, voterId, 'verification', votingCredential, 'first')
       await newCurrentCredential(trx, poll, credential.email_key, { clearRemoval: false })
       await advanceRevisions(trx, poll, { host: false })
       return { voter: await voterState(trx, poll, voterId), votingToken: votingCredential.token }
@@ -1041,8 +1048,9 @@ async function queueCredentialMail(
 }
 
 /**
- * The mailbox has a new current credential (mailed, or returned once by verification), so
- * its recovery allowance restarts. Resend counts, reminder receipts and opt-outs never reset.
+ * A new credential was mailed to the mailbox (enrollment, invitation or verification), so
+ * its recovery count restarts; resend does the same in its own counter update. Resend
+ * counts, reminder receipts and opt-outs never reset.
  */
 async function newCurrentCredential(
   trx: Db,

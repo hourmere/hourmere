@@ -537,6 +537,10 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
       code: 'poll_closed',
     })
     const deleted = await open()
+    await enroll(M, deleted, 'pending@example.com')
+    await invite(M, deleted, ['invitee@example.com'])
+    const pendingMail = await mailed(deleted, 'pending@example.com')
+    const invitationMail = await mailed(deleted, 'invitee@example.com')
     await db
       .updateTable('event_types')
       .set({ deleted_at: new Date() })
@@ -548,6 +552,20 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     expect(await failure(() => invite(M, deleted, ['a@example.com']))).toMatchObject({
       code: 'poll_closed',
     })
+    // Verification and resend are refused too; recovery answers alike and sends nothing.
+    const untouched = await snapshot(deleted)
+    for (const { token } of [pendingMail, invitationMail])
+      expect(await failure(() => M.verifyMeetingPollVoter(pub(), { token }))).toMatchObject({
+        kind: 'conflict',
+        code: 'poll_closed',
+      })
+    expect(await failure(() => resend(M, deleted, 'invitee@example.com'))).toMatchObject({
+      kind: 'conflict',
+      code: 'poll_closed',
+    })
+    for (const email of ['pending@example.com', 'invitee@example.com'])
+      expect(await succeeds(() => recover(M, deleted, email))).toEqual({ accepted: true })
+    expect(await snapshot(deleted)).toBe(untouched)
   }
 
   /**
@@ -579,13 +597,30 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     for (const email of known)
       expect(await succeeds(() => enroll(M, p, email, '192.0.2.9'))).toEqual({ accepted: true })
     expect(await snapshot(p)).toBe(before)
+    // From an IP holding three live reservations, every mailbox state gets the same 429,
+    // decided before the mailbox is looked at, and nothing is written.
+    for (const name of ['a', 'b', 'c'])
+      await succeeds(() => enroll(M, p, `ip-${name}@example.com`, '192.0.2.88'))
+    const limited = await snapshot(p)
+    const refusals = []
+    for (const email of [...known, 'expired@example.com', 'fresh@example.com'])
+      refusals.push(await failure(() => enroll(M, p, email, '192.0.2.88')))
+    expect(refusals[0]).toMatchObject({ name: 'MeetingPollRateLimitError', code: 'rate_limited' })
+    expect(
+      new Set(refusals.map(({ retryAfterSeconds: _, ...rest }) => JSON.stringify(rest))).size,
+    ).toBe(1)
+    // Retry-After follows the IP's earliest reservation, so it differs at most by a tick.
+    const waits = refusals.map((refusal) => refusal.retryAfterSeconds ?? 0)
+    expect(Math.min(...waits)).toBeGreaterThan(3500)
+    expect(Math.max(...waits) - Math.min(...waits)).toBeLessThanOrEqual(1)
+    expect(await snapshot(p)).toBe(limited)
     const expiredId = (await voter(p, 'expired@example.com')).id
     expect(await succeeds(() => enroll(M, p, 'expired@example.com', '192.0.2.9'))).toEqual({
       accepted: true,
     })
     expect((await voter(p, 'expired@example.com')).id).not.toBe(expiredId)
-    expect(await places(p)).toBe(4)
-    await fill(M, p, 36, 'filler')
+    expect(await places(p)).toBe(7)
+    await fill(M, p, 33, 'filler')
     expect(await places(p)).toBe(40)
     const full = await snapshot(p)
     const answers = []
@@ -862,7 +897,13 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
       purpose: 'voting',
       token: first.votingToken,
     })
-    expect(await deliveries(p)).toHaveLength(1)
+    // The voting credential is also mailed; the verification link's mail is skipped.
+    expect(
+      (await deliveries(p)).map((entry) => [entry.kind, entry.generation, entry.state]),
+    ).toEqual([
+      ['verification', 1, 'skipped'],
+      ['verification', 2, 'pending'],
+    ])
     expect(await revisions(p)).toMatchObject({ host_revision: 1, results_revision: 3 })
     // Repeats return the state without minting or extending anything.
     const before = await snapshot(p)
@@ -910,6 +951,174 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     ).toMatchObject({
       code: 'poll_closed',
     })
+  }
+
+  /**
+   * A public enrollee's verification mails the new voting credential once, at that
+   * credential's generation, and restarts the mailbox's recovery count. Repeats and invitee
+   * verifications mail nothing; a mailbox that spent its recovery allowance verifies alike.
+   */
+  async function verifyVerificationMail(M: VoterModule) {
+    const p = await open()
+    await enroll(M, p, 'public@example.com', '192.0.2.1')
+    const enrolled = await mailed(p, 'public@example.com')
+    // One lost-mail recovery first, so that the restart is visible.
+    await succeeds(() => recover(M, p, 'public@example.com'))
+    expect(await counter(p, 'public@example.com')).toMatchObject({ recovery_count: 1 })
+    const first = await succeeds(() => M.verifyMeetingPollVoter(pub(), { token: enrolled.token }))
+    expect(first.votingToken).toEqual(expect.any(String))
+    const voting = (await credentials(enrolled.voter.id)).filter((row) => row.purpose === 'voting')
+    expect(voting).toHaveLength(1)
+    const sent = await deliveries(p, enrolled.voter.id)
+    expect(
+      sent.map((entry) => [entry.kind, entry.generation, entry.sequence, entry.state]),
+    ).toEqual([
+      ['verification', 1, 0, 'skipped'],
+      ['recovery', 1, 0, 'skipped'],
+      ['verification', 2, 0, 'pending'],
+    ])
+    const mail = sent[2] as (typeof sent)[number]
+    expect(mail.generation).toBe(voting[0]?.generation)
+    expect(opened(p, mail, mail.capability_ciphertext)).toEqual({
+      purpose: 'voting',
+      token: first.votingToken,
+    })
+    // The mail carries the retained copy of exactly that credential.
+    expect(mail.capability_ciphertext?.equals(voting[0]?.capability_ciphertext as Buffer)).toBe(
+      true,
+    )
+    expect(await counter(p, 'public@example.com')).toMatchObject({
+      recovery_count: 0,
+      last_recovery_at: null,
+      resend_count: 0,
+    })
+    // Repeats with either credential mint and mail nothing.
+    const settled = await snapshot(p)
+    for (const again of [enrolled.token, first.votingToken as string])
+      expect(await succeeds(() => M.verifyMeetingPollVoter(pub(), { token: again }))).toEqual({
+        voter: first.voter,
+        votingToken: null,
+      })
+    expect(await snapshot(p)).toBe(settled)
+    // Recovery stays for genuinely lost mail and re-delivers the mailed voting credential.
+    await succeeds(() => recover(M, p, 'public@example.com'))
+    const recovered = await mailed(p, 'public@example.com')
+    expect([recovered.delivery.kind, recovered.delivery.generation, recovered.token]).toEqual([
+      'recovery',
+      2,
+      first.votingToken,
+    ])
+
+    // An invitee's emailed voting credential stays the same, so nothing new is mailed.
+    await invite(M, p, ['invitee@example.com'])
+    const invitation = await mailed(p, 'invitee@example.com')
+    await succeeds(() => recover(M, p, 'invitee@example.com'))
+    const inviteeMail = await deliveries(p, invitation.voter.id)
+    const inviteeCounter = await counter(p, 'invitee@example.com')
+    expect(
+      await succeeds(() => M.verifyMeetingPollVoter(pub(), { token: invitation.token })),
+    ).toMatchObject({ voter: { status: 'verified' }, votingToken: null })
+    expect(await deliveries(p, invitation.voter.id)).toEqual(inviteeMail)
+    expect(await counter(p, 'invitee@example.com')).toEqual(inviteeCounter)
+    expect(await credentials(invitation.voter.id)).toHaveLength(1)
+
+    // A mailbox whose recovery allowance is spent still verifies and gets its mail; the
+    // answer is shaped exactly like a fresh mailbox's and says nothing about the counters.
+    await enroll(M, p, 'spent@example.com', '192.0.2.2')
+    await enroll(M, p, 'fresh@example.com', '192.0.2.3')
+    const spent = await mailed(p, 'spent@example.com')
+    const fresh = await mailed(p, 'fresh@example.com')
+    const cooled = sql`UPDATE meeting_poll_mailbox_counters
+      SET last_recovery_at = clock_timestamp() - interval '16 minutes'
+      WHERE poll_id = ${p.pollId}
+        AND email_key = ${Voters.meetingPollMailboxKey(SECRET, p.pollId, 'spent@example.com')}`
+    for (let i = 0; i < 4; i++) {
+      await succeeds(() => recover(M, p, 'spent@example.com'))
+      await cooled.execute(db)
+    }
+    expect(await deliveries(p, spent.voter.id)).toHaveLength(4)
+    expect(await counter(p, 'spent@example.com')).toMatchObject({ recovery_count: 3 })
+    const spentAnswer = await succeeds(() =>
+      M.verifyMeetingPollVoter(pub(), { token: spent.token }),
+    )
+    const freshAnswer = await succeeds(() =>
+      M.verifyMeetingPollVoter(pub(), { token: fresh.token }),
+    )
+    const shape = (answer: Voters.VerifyMeetingPollVoterResult) => ({
+      ...answer,
+      voter: { ...answer.voter, voterId: 'voter', email: 'mailbox' },
+      votingToken: typeof answer.votingToken,
+    })
+    expect(shape(spentAnswer)).toEqual(shape(freshAnswer))
+    expect(shape(spentAnswer).votingToken).toBe('string')
+    expect(
+      (await deliveries(p, spent.voter.id))
+        .filter((entry) => entry.state === 'pending')
+        .map((entry) => [entry.kind, entry.generation, entry.sequence]),
+    ).toEqual([['verification', 2, 0]])
+    expect(await counter(p, 'spent@example.com')).toMatchObject({
+      recovery_count: 0,
+      last_recovery_at: null,
+    })
+  }
+
+  /**
+   * A retained or queued credential opens only under its own organization, poll, voter and
+   * generation; a ciphertext copied to another delivery row never opens there. Everything
+   * here goes through the module under test, so its own binding is what is checked.
+   */
+  async function verifyCredentialBinding(M: VoterModule) {
+    const p = await open()
+    const elsewhere = await open()
+    await invite(M, p, ['first@example.com', 'second@example.com'])
+    const firstVoter = await voter(p, 'first@example.com')
+    const secondVoter = await voter(p, 'second@example.com')
+    const queuedFor = async (voterId: string) => {
+      const rows = await deliveries(p, voterId)
+      return rows[rows.length - 1] as (typeof rows)[number]
+    }
+    const binding = (row: { voter_id: string | null; generation: number }) => ({
+      organizationId: p.organizationId,
+      pollId: p.pollId,
+      voterId: row.voter_id as string,
+      generation: row.generation,
+    })
+    const openAs = (
+      row: { voter_id: string | null; generation: number },
+      ciphertext: Buffer | null,
+      change: Partial<Voters.MeetingPollCredentialBinding> = {},
+    ) => M.openMeetingPollCredential(SECRET, { ...binding(row), ...change }, ciphertext)
+    const first = await queuedFor(firstVoter.id)
+    const second = await queuedFor(secondVoter.id)
+    const firstCopy = first.capability_ciphertext as Buffer
+    expect(openAs(first, firstCopy)).toMatchObject({ purpose: 'voting' })
+    expect(openAs(second, second.capability_ciphertext)).toMatchObject({ purpose: 'voting' })
+    // Another voter, generation, organization or poll opens nothing.
+    expect(openAs(first, firstCopy, { voterId: secondVoter.id })).toBeUndefined()
+    expect(openAs(first, firstCopy, { generation: first.generation + 1 })).toBeUndefined()
+    expect(openAs(first, firstCopy, { organizationId: elsewhere.organizationId })).toBeUndefined()
+    expect(openAs(first, firstCopy, { pollId: elsewhere.pollId })).toBeUndefined()
+    // A ciphertext moved to another voter's delivery row of the same generation.
+    await db
+      .updateTable('meeting_poll_deliveries')
+      .set({ capability_ciphertext: firstCopy })
+      .where('id', '=', second.id)
+      .execute()
+    const movedToVoter = await queuedFor(secondVoter.id)
+    expect(movedToVoter.generation).toBe(first.generation)
+    expect(openAs(movedToVoter, movedToVoter.capability_ciphertext)).toBeUndefined()
+    // A ciphertext moved to the same voter's next generation after a resend.
+    await succeeds(() => resend(M, p, 'first@example.com'))
+    const next = await queuedFor(firstVoter.id)
+    expect(next.generation).toBe(first.generation + 1)
+    expect(openAs(next, next.capability_ciphertext)).toMatchObject({ purpose: 'voting' })
+    await db
+      .updateTable('meeting_poll_deliveries')
+      .set({ capability_ciphertext: firstCopy })
+      .where('id', '=', next.id)
+      .execute()
+    const movedToGeneration = await queuedFor(firstVoter.id)
+    expect(openAs(movedToGeneration, movedToGeneration.capability_ciphertext)).toBeUndefined()
   }
 
   /** Expired credentials never verify, are never re-delivered and never carry over. */
@@ -1414,6 +1623,41 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     })
   }
 
+  /** Duplicate verifications over two connections mint and mail one voting credential. */
+  async function verifyVerificationRace(M: VoterModule) {
+    const p = await open()
+    await enroll(M, p, 'twice@example.com', '192.0.2.1')
+    const twice = await mailed(p, 'twice@example.com')
+    const verify = () => M.verifyMeetingPollVoter(pub(), { token: twice.token })
+    const result = await queued(p, verify, verify)
+    expect(result.map(outcome)).toEqual(['fulfilled', 'fulfilled'])
+    const tokens = result.map((entry) =>
+      entry.status === 'fulfilled' ? entry.value.votingToken : 'failed',
+    )
+    expect(tokens[0]).toEqual(expect.any(String))
+    expect(tokens[1]).toBeNull()
+    const pending = async (voterId: string) =>
+      (await deliveries(p, voterId))
+        .filter((entry) => entry.state === 'pending')
+        .map((entry) => [entry.kind, entry.generation, entry.sequence])
+    expect(await pending(twice.voter.id)).toEqual([['verification', 2, 0]])
+    expect((await mailed(p, 'twice@example.com')).token).toBe(tokens[0])
+    expect(
+      (await credentials(twice.voter.id)).filter((row) => row.purpose === 'voting'),
+    ).toHaveLength(1)
+    // Three truly parallel requests: one voting credential, one mail.
+    await enroll(M, p, 'thrice@example.com', '192.0.2.2')
+    const thrice = await mailed(p, 'thrice@example.com')
+    const parallel = await Promise.allSettled(
+      [1, 2, 3].map(() => M.verifyMeetingPollVoter(pub(), { token: thrice.token })),
+    )
+    expect(parallel.map(outcome)).toEqual(['fulfilled', 'fulfilled', 'fulfilled'])
+    expect(
+      parallel.filter((entry) => entry.status === 'fulfilled' && entry.value.votingToken !== null),
+    ).toHaveLength(1)
+    expect(await pending(thrice.voter.id)).toEqual([['verification', 2, 0]])
+  }
+
   /** An enrollment waiting while the link rotates finds the old link gone. */
   async function verifyRotationRace(M: VoterModule) {
     const p = await open()
@@ -1514,6 +1758,14 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     await verifyVerification(Voters)
   })
 
+  it('mails the voting credential once when a public enrollee verifies', async () => {
+    await verifyVerificationMail(Voters)
+  })
+
+  it('opens a credential copy only under its own organization, poll, voter and generation', async () => {
+    await verifyCredentialBinding(Voters)
+  })
+
   it('never reuses an expired credential', async () => {
     await verifyExpiredCredential(Voters)
   })
@@ -1550,6 +1802,10 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     await verifyRecoveryResendRace(Voters)
   })
 
+  it('mails one voting credential for duplicate concurrent verifications', async () => {
+    await verifyVerificationRace(Voters)
+  })
+
   it('refuses an enrollment that waited while the link rotated', async () => {
     await verifyRotationRace(Voters)
   })
@@ -1568,6 +1824,8 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     verifyBatch,
     verifyInvitationOutcomes,
     verifyVerification,
+    verifyVerificationMail,
+    verifyCredentialBinding,
     verifyExpiredCredential,
     verifyDurableInvitation,
     verifyRecovery,
@@ -1577,6 +1835,7 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     verifyCapacityRace,
     verifyIpRace,
     verifyRecoveryResendRace,
+    verifyVerificationRace,
     verifyRotationRace,
     verifyPublicLockOrder,
   ]
@@ -1720,8 +1979,21 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     ],
     [
       'credential ciphertext is not bound to its voter',
-      verifyEnrollment,
-      ['${binding.voterId}:${binding.generation}`', '${binding.generation}`'],
+      verifyCredentialBinding,
+      [
+        ':${binding.pollId}:${binding.voterId}:${binding.generation}`',
+        ':${binding.pollId}:${binding.generation}`',
+      ],
+    ],
+    [
+      'credential ciphertext is not bound to its generation',
+      verifyCredentialBinding,
+      [':${binding.voterId}:${binding.generation}`', ':${binding.voterId}`'],
+    ],
+    [
+      'credential ciphertext is not bound to its organization',
+      verifyCredentialBinding,
+      [':v1:${binding.organizationId}:${binding.pollId}', ':v1:${binding.pollId}'],
     ],
     [
       'admission ignores a soft-deleted event',
@@ -1729,6 +2001,42 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
       [
         "if (poll.status !== 'open' || poll.deadlinePassed || poll.eventDeleted) throw pollClosed()",
         "if (poll.status !== 'open' || poll.deadlinePassed) throw pollClosed()",
+      ],
+    ],
+    [
+      'enrollment looks at the mailbox before the per-IP cap',
+      verifyUniformity,
+      [
+        '    if (counts.fromIp >= MEETING_POLL_LIMITS.maxPendingPerIp)\n      throw new MeetingPollRateLimitError(counts.ipRetryAfter ?? undefined)\n',
+        '',
+      ],
+      [
+        '    if (counter?.removed_at || (existing && !existing.expired)) return accepted()\n',
+        '    if (counter?.removed_at || (existing && !existing.expired)) return accepted()\n    if (counts.fromIp >= MEETING_POLL_LIMITS.maxPendingPerIp)\n      throw new MeetingPollRateLimitError(counts.ipRetryAfter ?? undefined)\n',
+      ],
+    ],
+    [
+      'verification ignores a soft-deleted event',
+      verifyEnrollment,
+      [
+        '    requireVotingOpen(poll, pollClosed)\n    const voterId = credential.voter_id\n',
+        '    requireVotingOpen({ ...poll, eventDeleted: false }, pollClosed)\n    const voterId = credential.voter_id\n',
+      ],
+    ],
+    [
+      'resend ignores a soft-deleted event',
+      verifyEnrollment,
+      [
+        '    requireHostVotingOpen(locked)\n    requireHostRevision(locked, request.expectedHostRevision)\n',
+        '    requireHostVotingOpen({ ...locked, eventDeleted: false })\n    requireHostRevision(locked, request.expectedHostRevision)\n',
+      ],
+    ],
+    [
+      'recovery ignores a soft-deleted event',
+      verifyEnrollment,
+      [
+        "    (poll.status === 'open' || poll.status === 'closed') &&\n    !poll.deadlinePassed &&\n    !poll.eventDeleted\n",
+        "    (poll.status === 'open' || poll.status === 'closed') &&\n    !poll.deadlinePassed\n",
       ],
     ],
     [
@@ -1749,6 +2057,38 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
       verifyVerification,
       [
         '      if (credential.consumed)\n        return { voter: await voterState(trx, poll, voterId), votingToken: null }\n',
+        '',
+      ],
+    ],
+    [
+      'verification mails nothing',
+      verifyVerificationMail,
+      [
+        "      await queueCredentialMail(trx, poll, voterId, 'verification', votingCredential, 'first')\n",
+        '',
+      ],
+    ],
+    [
+      'verification mails at another generation',
+      verifyVerificationMail,
+      [
+        "      await queueCredentialMail(trx, poll, voterId, 'verification', votingCredential, 'first')\n",
+        "      await queueCredentialMail(trx, poll, voterId, 'verification', { ...votingCredential, generation: votingCredential.generation + 1 }, 'first')\n",
+      ],
+    ],
+    [
+      'a repeated verification mails the voting credential again',
+      verifyVerificationMail,
+      [
+        '      if (credential.consumed)\n        return { voter: await voterState(trx, poll, voterId), votingToken: null }\n',
+        "      if (credential.consumed) {\n        const current = await trx\n          .selectFrom('meeting_poll_capabilities')\n          .select(['generation', 'capability_ciphertext'])\n          .where('voter_id', '=', voterId)\n          .where('purpose', '=', 'voting')\n          .where('revoked_at', 'is', null)\n          .executeTakeFirstOrThrow()\n        await queueCredentialMail(trx, poll, voterId, 'verification', { generation: current.generation, ciphertext: current.capability_ciphertext as Buffer }, 'next')\n        return { voter: await voterState(trx, poll, voterId), votingToken: null }\n      }\n",
+      ],
+    ],
+    [
+      'verification keeps the recovery count',
+      verifyVerificationMail,
+      [
+        '      await newCurrentCredential(trx, poll, credential.email_key, { clearRemoval: false })\n',
         '',
       ],
     ],
@@ -1934,6 +2274,7 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     ],
     ['public writes skip the poll row lock (capacity)', verifyCapacityRace, NO_POLL_LOCK],
     ['public writes skip the poll row lock (IP cap)', verifyIpRace, NO_POLL_LOCK],
+    ['public writes skip the poll row lock (verification)', verifyVerificationRace, NO_POLL_LOCK],
     [
       'enrollment ignores a link rotated while it waited',
       verifyRotationRace,

@@ -139,12 +139,13 @@ choices below; later transport steps map them, and the error codes stay as liste
   `rate_limited`, Retry-After until that IP's earliest reservation expires) before it looks
   at the mailbox, so neither answer depends on the mailbox's state. The IP digest is keyed,
   per poll, with IPv6 addresses grouped by /64.
-- Verification of a public enrollee consumes the verification credential and returns a new
-  voting credential exactly once in its response; an invitee's emailed voting credential
-  verifies and stays the same. Repeats return the voter's own state and mint nothing. The
-  credential is never mailed again by verification, so the delivery kinds stay
-  verification, invitation and recovery; a lost verification response is recovered by
-  recovery, which re-delivers that voting credential.
+- Verification of a public enrollee consumes the verification credential, mints a voting
+  credential and mails it in the same transaction as a `verification` delivery at that
+  credential's generation, under the same mail budgets as every poll mail; the response may
+  also return it once. Mailing it restarts the mailbox's recovery count. Delivery workers
+  tell the two verification mails apart by the credential's purpose. An invitee's emailed
+  voting credential verifies and stays the same, so nothing new is mailed. Repeats return
+  the voter's own state and mint or mail nothing. Recovery is for genuinely lost mail.
 - Verification and voting credentials share one generation line per voter, so a delivery's
   generation names exactly one credential. Each credential keeps its digest (domain-separated
   by purpose) and an AES-256-GCM copy bound to organization, poll, voter and generation;
@@ -152,8 +153,9 @@ choices below; later transport steps map them, and the error codes stay as liste
   that credential's pending mail.
 - A soft-deleted event closes admission: enrollment, verification, invitation and resend
   get 409 `poll_closed`, and recovery sends nothing. Invalid voter fields get 400
-  `invalid_voter`; a resend to a withdrawn invitee gets 409 `voter_withdrawn`, and a resend
-  to a voter who is not an invitee gets 404 `poll_not_found`.
+  `invalid_voter`, except an invalid voter time zone, which gets 400 `invalid_time_zone` as
+  in booking; a resend to a withdrawn invitee gets 409 `voter_withdrawn`, and a resend to a
+  voter who is not an invitee gets 404 `poll_not_found`.
 - Repeated mailboxes in one invitation batch are one entry. An invitation's language
   defaults to English and its zone to the poll's display zone. Host results contain each
   entry's outcome (`invited`, `upgraded` or `unchanged`), voter ID and current roster
@@ -522,8 +524,12 @@ atomically under the poll lock; 40 pending places therefore need at least 14 IP 
 Reject excess with 429 `rate_limited`, without mail. Host invitations bypass this public
 pending-IP limit but count against 40 total places. Shared NATs may need host invitations.
 Verification frees the pending-IP allowance: catch-all/distributed verified abuse remains
-possible, so this is not a unique-human guarantee. A global per-poll request budget must
-not be the primary control: an attacker could spend it to block legitimate voters.
+possible, so this is not a unique-human guarantee. Because a known mailbox takes no place,
+one probe is inherent: from an IP with one pending allowance left, or with one place left,
+enrolling a target address and then a fresh one shows whether the target was already
+known, at the cost of a verification mail to a new target; invited mode avoids it. A
+global per-poll request budget must not be the primary control: an attacker could spend it
+to block legitimate voters.
 Hosts can bulk remove unverified public enrollees (never host invitees), individually
 remove verified abusers, rotate a leaked public link, or cancel/recreate in invited mode.
 Bulk removal retains mailbox tombstones/counters and uses the same poll lock and
