@@ -58,6 +58,7 @@ function productSourceCopy(change?: Change): Factory {
     oneTimeLinkTools: () => [],
     slackDestinationTools: () => [],
     openTimeSnippetTools: () => [],
+    workflowTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),

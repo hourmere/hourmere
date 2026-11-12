@@ -994,10 +994,11 @@ upgrade test preserves a populated predecessor, including the SSO configuration 
 ## Workflow definition storage
 
 Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
-(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Nothing reads or writes
-them yet: there is no route, worker, read path or setting, and workflows stay hard-off behind
-`WORKFLOWS_IMPLEMENTED = false`. A test keeps every production module outside the storage
-layer from naming them.
+(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Only the definition
+reads of step 4 (`packages/workflows/src/reads.ts`) query them, behind the hard-off guard, so
+they answer `workflows_disabled` while workflows stay off behind
+`WORKFLOWS_IMPLEMENTED = false`; nothing writes them yet, and no worker or setting uses them.
+A test keeps every other production module outside the storage layer from naming them.
 
 - **Definitions** have an immutable ID, organization, owner and creation time. A personal
   definition belongs to its user in that user's personal organization (`owner_user_id`); a
@@ -1043,8 +1044,9 @@ row versions, and compares fresh and upgraded schemas.
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
 email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition storage exists ([workflow definition storage](#workflow-definition-storage));
-no execution table, API or runtime enablement exists yet.
+Only its definition storage exists ([workflow definition storage](#workflow-definition-storage)),
+with read operations that answer `workflows_disabled` while hard-off; no execution table, write
+API or runtime enablement exists yet.
 
 | When | Change |
 |---|---|

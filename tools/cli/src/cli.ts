@@ -51,6 +51,8 @@ export const COMMANDS = {
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
+  'workflows list': 'list_workflows',
+  'workflows get': 'get_workflow',
 } as const
 
 export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' } as const
@@ -59,6 +61,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
+       hourmere workflows list|get [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
@@ -74,6 +77,9 @@ Commands: whoami, profile, catalog, event, create-event, update-event,
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
+Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
+           Read or full scope. Not available yet: both answer workflows_disabled until booking
+           workflows are enabled on the instance.
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
@@ -124,7 +130,7 @@ function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
-    first === 'one-time-links' || first === 'branding' || first === 'slack'
+    first === 'one-time-links' || first === 'branding' || first === 'slack' || first === 'workflows'
       ? `${first} ${parts.shift() ?? ''}`
       : first
   const rest = parts

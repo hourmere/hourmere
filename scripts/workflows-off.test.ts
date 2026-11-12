@@ -1,15 +1,19 @@
-// Booking workflows are a pure definition contract behind the hard-off constant
-// (docs/workflows.md, step 1): no workflow route, OpenAPI path or operation, `/instance` field,
-// MCP tool, CLI command or web page exists yet. The names come from the document's REST, MCP
-// and CLI table and its `/instance` field; only workflow-specific names are asserted, and no
-// catalogue is snapshotted. Each step that adds an operation narrows the assertion for its
-// own names, and step 4 for `workflowsEnabled`. Definition storage (step 2) is tables only:
-// migration 0076, the generated table types and the storage test support exist, and no
-// production module imports or queries the new tables. The first step that reads or writes
-// them from service code narrows that scan to the modules that own workflow data access.
+// Booking workflows stay hard-off (docs/workflows.md, "Rollout and limitations"). Step 4 ships
+// the definition reads while off: `GET /api/v1/workflows` (listWorkflows) and
+// `GET /api/v1/workflows/{id}` (getWorkflow), the MCP tools `list_workflows` and
+// `get_workflow`, the CLI commands `workflows list` and `workflows get`, and `/instance`
+// `workflowsEnabled`, which reports false. Each operation answers 404 workflows_disabled, and
+// tools/list omits the tools. Every other workflow route, OpenAPI path or operation, MCP tool,
+// CLI command and web page is still absent. The names come from the document's REST, MCP and
+// CLI table; only workflow-specific names are asserted, and no catalogue is snapshotted. Each
+// later step that adds an operation admits its own names here. Definition storage (step 2) is
+// read only by the guarded read service (packages/workflows/src/reads.ts); every other
+// production module stays away from the tables.
+import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { CallerResolver, Principal } from '@hourmere/auth'
 import { createGoogleCalendarClient, createMicrosoftCalendarClient } from '@hourmere/calendars'
 import { createZoomClient } from '@hourmere/conferences'
 import { createDb, createPool } from '@hourmere/db'
@@ -20,7 +24,9 @@ import { prepareTools } from '../apps/server/src/mcp/tools.ts'
 import { openApiDocument } from '../apps/server/src/openapi-document.ts'
 import { productionAppOptions, productTools } from '../apps/server/src/server.ts'
 import { PATHS } from '../apps/web/src/paths.ts'
-import { COMMANDS, REST_COMMANDS } from '../tools/cli/src/cli.ts'
+// After the server modules, which extend zod for OpenAPI before any schema is built.
+import * as workflows from '../packages/workflows/src/index.ts'
+import { COMMANDS, HELP, REST_COMMANDS } from '../tools/cli/src/cli.ts'
 
 const root = new URL('..', import.meta.url)
 const document = readFileSync(new URL('docs/workflows.md', root), 'utf8')
@@ -38,6 +44,11 @@ const operations = [
   command: command as string,
 }))
 
+/** The operations step 4 ships while workflows are off; every other one is still absent. */
+const SHIPPED = ['listWorkflows', 'getWorkflow']
+const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
+const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
+
 /** A Hono path such as `/api/v1/workflows/:id`, from an OpenAPI path. */
 const honoPath = (path: string) => path.replace(/\{(\w+)\}/g, ':$1')
 /** Any workflow-named route, OpenAPI path or CLI command, beyond the documented ones. */
@@ -50,6 +61,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // The storage layer: the migration, the generated table types and the storage test support.
 const STORAGE_LAYER =
   /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/workflow-storage-[^/]+\.ts$)/
+// The modules that own workflow data access: only the guarded definition reads so far.
+const DATA_ACCESS = ['packages/workflows/src/reads.ts']
 // A new table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
 // its generated row type, or the storage test support. `WorkflowDefinitionSchema` or
 // `workflow_definitions_guard` is not one.
@@ -81,7 +94,112 @@ function productionSources(): string[] {
   return files.sort()
 }
 
-describe('booking workflows are off and expose no surface', () => {
+/** API-key callers the production assembly's resolver accepts; no database is contacted. */
+function keyCaller(apiKeyScope: 'full' | 'read' | 'bookings'): Principal {
+  return {
+    kind: 'api_key',
+    apiKeyScope,
+    apiKeyId: randomUUID(),
+    user: { id: randomUUID(), name: 'Workflows off', email: 'workflows-off@example.test' },
+    organization: {
+      id: randomUUID(),
+      name: 'Workflows off',
+      slug: 'workflows-off',
+      personal: true,
+    },
+  }
+}
+const keys = { full: keyCaller('full'), read: keyCaller('read'), bookings: keyCaller('bookings') }
+const resolveCaller: CallerResolver = async (headers) => {
+  const scope = headers.get('authorization')?.match(/^Bearer hm_workflows_off_(\w+)$/)?.[1]
+  return scope !== undefined && Object.hasOwn(keys, scope)
+    ? { ok: true, principal: keys[scope as keyof typeof keys], setCookie: [] }
+    : { ok: false, error: 'unauthorized', setCookie: [] }
+}
+const bearer = (scope: keyof typeof keys) => `Bearer hm_workflows_off_${scope}`
+
+/** The production assembly, as scripts/routing-forms-off.test.ts builds it. */
+function productionApp(db: ReturnType<typeof createDb>, databaseUrl: string) {
+  // Every optional route group switched on; no handler that would contact the database runs.
+  const config = loadConfig({
+    DATABASE_URL: databaseUrl,
+    BETTER_AUTH_SECRET: 'workflows-off-secret-with-at-least-32-characters',
+    PUBLIC_URL: 'http://localhost',
+    SCIM_PROVISIONING_ENABLED: 'true',
+    MCP_OAUTH_ENABLED: 'true',
+    SLOT_SNIPPETS_ENABLED: 'true',
+    WEBHOOKS_ENABLED: 'true',
+    WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+    ZOOM_WEBHOOK_SECRET_TOKEN: 'workflows-off-zoom-webhook-token',
+    WEB_DIST: fileURLToPath(root),
+  })
+  const credentials = { clientId: 'workflows-off', clientSecret: 'workflows-off' }
+  const encryptionKey = Buffer.alloc(32, 1).toString('base64')
+  return createApp(
+    productionAppOptions({
+      config,
+      db,
+      auth: { handler: async () => new Response(null, { status: 404 }) },
+      resolveCaller,
+      resolveMcpOAuth: async () => ({ ok: false, error: 'invalid_token' }),
+      checkDb: async () => {},
+      waitlist: { verify: async () => null, remove: async () => null },
+      invitationMailLimits: { secret: 'workflows-off' },
+      webhookSettings: {
+        enabled: config.WEBHOOKS_ENABLED,
+        encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
+      },
+      webhookQueue: { enqueue: async () => null },
+      notify: async () => {},
+      notifyAttendeeNoShow: async () => {},
+      googleCalendar: {
+        client: createGoogleCalendarClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
+        encryptionKey,
+      },
+      microsoftCalendar: {
+        client: createMicrosoftCalendarClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
+        encryptionKey,
+      },
+      zoomConference: {
+        client: createZoomClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
+        encryptionKey,
+        meetingsEnabled: true,
+      },
+      enqueueCalendarSync: async () => null,
+      enqueueCalendarWritebackRecovery: async () => null,
+    }),
+  )
+}
+
+/** One JSON-RPC MCP request with an API key; the result or protocol error. */
+async function mcp(
+  app: ReturnType<typeof productionApp>,
+  scope: keyof typeof keys,
+  method: 'tools/list' | 'tools/call',
+  params: Record<string, unknown> = {},
+) {
+  const res = await app.request('/mcp', {
+    method: 'POST',
+    headers: {
+      authorization: bearer(scope),
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+  expect(res.status).toBe(200)
+  const text = await res.text()
+  const data = text.split('\n').find((line) => line.startsWith('data: '))
+  return JSON.parse(data ? data.slice(6) : text) as {
+    result?: { tools?: { name: string }[]; isError?: boolean; content?: { text: string }[] }
+  }
+}
+const toolError = (message: Awaited<ReturnType<typeof mcp>>) => {
+  expect(message.result?.isError).toBe(true)
+  return JSON.parse(message.result?.content?.[0]?.text ?? '{}')
+}
+
+describe('booking workflows are off and expose only the step 4 reads', () => {
   it('reads every documented workflow operation from the design', () => {
     expect(operations.map(({ operationId }) => operationId)).toEqual([
       'listWorkflows',
@@ -95,12 +213,16 @@ describe('booking workflows are off and expose no surface', () => {
     expect(new Set(operations.map(({ tool }) => tool)).size).toBe(operations.length)
     expect(new Set(operations.map(({ command }) => command)).size).toBe(operations.length)
     expect(document).toContain('`workflowsEnabled`')
+    expect(shipped.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      'GET /api/v1/workflows',
+      'GET /api/v1/workflows/{id}',
+    ])
   })
 
-  it('publishes no workflow path, operation or instance field in OpenAPI', async () => {
+  it('publishes only the read paths, operations and the instance field in OpenAPI', async () => {
     const openapi = (await openApiDocument()) as Record<string, unknown>
     expect(isRecord(openapi.paths)).toBe(true)
-    const paths = openapi.paths as Record<string, unknown>
+    const paths = openapi.paths as Record<string, Record<string, unknown>>
     expect(paths).toHaveProperty(['/api/v1/bookings/{id}'])
     const operationIds = Object.values(paths)
       .filter(isRecord)
@@ -108,101 +230,112 @@ describe('booking workflows are off and expose no surface', () => {
       .map((operation) => operation.operationId)
     // Not every published operation names an ID yet; enough do for the check to see them.
     expect(operationIds.filter((id) => typeof id === 'string').length).toBeGreaterThan(20)
-    for (const { path, operationId } of operations) {
-      expect(Object.keys(paths)).not.toContain(path)
+    for (const { method, path, operationId } of shipped) {
+      const operation = paths[path]?.[method.toLowerCase()] as Record<string, unknown>
+      expect(operation?.operationId, operationId).toBe(operationId)
+      // Each says it is not available yet, as the design requires of every listed interface.
+      expect(String(operation?.description)).toContain('404 workflows_disabled')
+    }
+    for (const { method, path, operationId } of absent) {
+      expect(paths[path]?.[method.toLowerCase()], `${method} ${path}`).toBeUndefined()
       expect(operationIds).not.toContain(operationId)
     }
-    expect(Object.keys(paths).filter((path) => workflowSegment.test(path))).toEqual([])
-    expect(operationIds.filter((id) => typeof id === 'string' && /workflow/i.test(id))).toEqual([])
+    expect(Object.keys(paths).filter((path) => workflowSegment.test(path))).toEqual([
+      '/api/v1/workflows',
+      '/api/v1/workflows/{id}',
+    ])
+    for (const path of ['/api/v1/workflows', '/api/v1/workflows/{id}'])
+      expect(Object.keys(paths[path] ?? {}), path).toEqual(['get'])
+    expect(
+      operationIds.filter((id) => typeof id === 'string' && /workflow/i.test(id)).sort(),
+    ).toEqual([...SHIPPED].sort())
     const instance = (openapi.components as { schemas: Record<string, { properties: object }> })
       .schemas.Instance
     expect(instance?.properties).toHaveProperty('followUpHostNotesEnabled')
-    expect(instance?.properties).not.toHaveProperty('workflowsEnabled')
+    expect(instance?.properties).toHaveProperty(['workflowsEnabled', 'type'], 'boolean')
   })
 
-  it('registers no workflow route on the app startServer serves, with every optional group on', async () => {
-    // The production assembly, as scripts/routing-forms-off.test.ts builds it: every optional
-    // route group switched on and no handler run, so no database or provider is contacted.
+  it('serves only the read routes, each refusing while off, and reports workflows off', async () => {
     const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
-    const config = loadConfig({
-      DATABASE_URL: databaseUrl,
-      BETTER_AUTH_SECRET: 'workflows-off-secret-with-at-least-32-characters',
-      PUBLIC_URL: 'http://localhost',
-      SCIM_PROVISIONING_ENABLED: 'true',
-      MCP_OAUTH_ENABLED: 'true',
-      SLOT_SNIPPETS_ENABLED: 'true',
-      WEBHOOKS_ENABLED: 'true',
-      WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-      ZOOM_WEBHOOK_SECRET_TOKEN: 'workflows-off-zoom-webhook-token',
-      WEB_DIST: fileURLToPath(root),
-    })
     const db = createDb(createPool(databaseUrl))
-    const credentials = { clientId: 'workflows-off', clientSecret: 'workflows-off' }
-    const encryptionKey = Buffer.alloc(32, 1).toString('base64')
     try {
-      const app = createApp(
-        productionAppOptions({
-          config,
-          db,
-          auth: { handler: async () => new Response(null, { status: 404 }) },
-          resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
-          resolveMcpOAuth: async () => ({ ok: false, error: 'invalid_token' }),
-          checkDb: async () => {},
-          waitlist: { verify: async () => null, remove: async () => null },
-          invitationMailLimits: { secret: 'workflows-off' },
-          webhookSettings: {
-            enabled: config.WEBHOOKS_ENABLED,
-            encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
-          },
-          webhookQueue: { enqueue: async () => null },
-          notify: async () => {},
-          notifyAttendeeNoShow: async () => {},
-          googleCalendar: {
-            client: createGoogleCalendarClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
-            encryptionKey,
-          },
-          microsoftCalendar: {
-            client: createMicrosoftCalendarClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
-            encryptionKey,
-          },
-          zoomConference: {
-            client: createZoomClient({ ...credentials, publicUrl: config.PUBLIC_URL }),
-            encryptionKey,
-            meetingsEnabled: true,
-          },
-          enqueueCalendarSync: async () => null,
-          enqueueCalendarWritebackRecovery: async () => null,
-        }),
-      )
-      const paths = app.routes.map(({ path }) => path)
+      const app = productionApp(db, databaseUrl)
+      const routes = app.routes.map(({ path }) => path)
       for (const control of ['/api/v1/bookings/:id', '/api/v1/instance', '/mcp', '/assets/*'])
-        expect(paths, control).toContain(control)
-      for (const { path } of operations) expect(paths).not.toContain(honoPath(path))
-      expect(paths.filter((path) => workflowSegment.test(path))).toEqual([])
+        expect(routes, control).toContain(control)
+      const workflowRoutes = [
+        ...new Set(
+          app.routes
+            .filter(({ path }) => workflowSegment.test(path))
+            .map(({ method, path }) => `${method} ${path}`),
+        ),
+      ].sort()
+      expect(workflowRoutes).toEqual(
+        shipped.map(({ method, path }) => `${method} ${honoPath(path)}`).sort(),
+      )
+      // Hard-off is behavior: every caller the scope allows gets 404 workflows_disabled, for
+      // any input, before validation or lookup (the pool's address refuses connections).
+      for (const url of [
+        '/api/v1/workflows',
+        `/api/v1/workflows?ownerKind=personal&ownerId=${keys.full.user.id}`,
+        '/api/v1/workflows?ownerKind=nobody&limit=0&cursor=x',
+        `/api/v1/workflows/${randomUUID()}`,
+        '/api/v1/workflows/not-a-uuid',
+      ]) {
+        for (const scope of ['full', 'read'] as const) {
+          const res = await app.request(url, { headers: { authorization: bearer(scope) } })
+          expect(res.status, `${scope} ${url}`).toBe(404)
+          expect(await res.json()).toEqual({ error: 'workflows_disabled' })
+          expect(res.headers.get('cache-control')).toBe('no-store')
+        }
+        const bookings = await app.request(url, { headers: { authorization: bearer('bookings') } })
+        expect(bookings.status, url).toBe(403)
+        expect(await bookings.json()).toMatchObject({ error: 'insufficient_scope' })
+        expect((await app.request(url)).status, url).toBe(401)
+      }
       const instance = await app.request('/api/v1/instance')
       expect(instance.status).toBe(200)
-      expect(await instance.json()).not.toHaveProperty('workflowsEnabled')
+      expect(await instance.json()).toHaveProperty('workflowsEnabled', false)
     } finally {
       await db.destroy()
     }
   })
 
-  it('lists no workflow MCP tool, with every optional catalogue enabled', async () => {
+  it('catalogues only the read tools, lists none of them and refuses direct calls', async () => {
     // No handlers run and no connection opens; the pool is still closed explicitly.
-    const pool = createPool('postgres://workflows-off@127.0.0.1:9/workflows-off')
+    const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
+    const db = createDb(createPool(databaseUrl))
     try {
-      const names = prepareTools(
-        productTools({ db: createDb(pool), slotSnippetsEnabled: true }),
-      ).map(({ tool }) => tool.name)
+      const names = prepareTools(productTools({ db, slotSnippetsEnabled: true })).map(
+        ({ tool }) => tool.name,
+      )
       expect(names).toContain('create_booking')
-      for (const { tool } of operations) expect(names).not.toContain(tool)
-      expect(names.filter((name) => /workflow/i.test(name))).toEqual([])
+      for (const { tool } of absent) expect(names).not.toContain(tool)
+      expect(names.filter((name) => /workflow/i.test(name))).toEqual(
+        shipped.map(({ tool }) => tool),
+      )
+      const app = productionApp(db, databaseUrl)
+      for (const scope of ['full', 'read'] as const) {
+        const listed = (await mcp(app, scope, 'tools/list')).result?.tools?.map(({ name }) => name)
+        expect(listed).toContain('whoami')
+        expect(listed?.filter((name) => /workflow/i.test(name))).toEqual([])
+        for (const { tool } of shipped)
+          for (const args of [{}, { owner: { kind: 'personal', id: randomUUID() } }, { id: 'x' }])
+            expect(
+              toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
+            ).toEqual({ error: 'workflows_disabled' })
+      }
+      // The API-key scope check keeps its precedence over the switch.
+      for (const { tool } of shipped)
+        expect(
+          toolError(await mcp(app, 'bookings', 'tools/call', { name: tool, arguments: {} })),
+        ).toMatchObject({ error: 'insufficient_scope' })
     } finally {
-      await pool.end()
+      await db.destroy()
     }
   })
 
-  it('offers no workflow CLI command or web page', () => {
+  it('offers only the read CLI commands and no web page', () => {
     const commands = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),
@@ -210,11 +343,15 @@ describe('booking workflows are off and expose no surface', () => {
       ...Object.values(REST_COMMANDS),
     ]
     expect(commands).toContain('book')
-    for (const { command, tool } of operations) {
+    for (const { command, tool } of absent) {
       expect(commands).not.toContain(command)
       expect(commands).not.toContain(tool)
     }
-    expect(commands.filter((name) => /workflow/i.test(name))).toEqual([])
+    expect(
+      Object.entries(COMMANDS).filter(([command, tool]) => /workflow/i.test(command + tool)),
+    ).toEqual(shipped.map(({ command, tool }) => [command, tool]))
+    expect(Object.keys(REST_COMMANDS).filter((name) => /workflow/i.test(name))).toEqual([])
+    expect(HELP).toContain('workflows_disabled')
     expect(
       Object.entries(PATHS).filter(
         ([name, path]) => /workflow/i.test(name) || workflowSegment.test(path),
@@ -245,7 +382,7 @@ describe('booking workflows are off and expose no surface', () => {
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
 
-  it('keeps the definition storage tables unreferenced outside the storage layer', () => {
+  it('keeps the definition storage tables unreferenced outside storage and the guarded reads', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     expect(sources).toContain('apps/server/src/server.ts')
@@ -260,14 +397,40 @@ describe('booking workflows are off and expose no surface', () => {
         'packages/db/src/workflow-storage-protections.ts',
       ]),
     )
-    for (const file of storage)
+    for (const file of [...storage, ...DATA_ACCESS])
       expect(STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')), file).toBe(true)
     expect(readFileSync(new URL('packages/db/src/tables.ts', root), 'utf8')).toMatch(
       /^ {2}workflow_revisions: WorkflowRevisions;$/m,
     )
     const referencing = sources
-      .filter((file) => !STORAGE_LAYER.test(file))
+      .filter((file) => !STORAGE_LAYER.test(file) && !DATA_ACCESS.includes(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
+    // Only the package entry loads the data-access module, so every production caller gets
+    // the guarded operations and never the internal services behind them.
+    const loaders = sources.filter((file) =>
+      /from '\.\/reads\.ts'|workflows\/src\/reads(?:\.ts)?'/.test(
+        readFileSync(new URL(file, root), 'utf8'),
+      ),
+    )
+    expect(loaders).toEqual(['packages/workflows/src/index.ts'])
+  })
+
+  it('exports only the guarded reads, which refuse before touching their context', async () => {
+    const exported = Object.keys(workflows).filter((name) => /^(?:list|get)Workflow/.test(name))
+    expect(exported.sort()).toEqual(['getWorkflow', 'listWorkflows'])
+    const untouchable = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('a guarded read must not touch its context while off')
+        },
+      },
+    ) as Parameters<typeof workflows.listWorkflows>[0]
+    for (const read of [
+      () => workflows.listWorkflows(untouchable, { owner: { kind: 'team', id: randomUUID() } }),
+      () => workflows.getWorkflow(untouchable, randomUUID()),
+    ])
+      await expect(read()).rejects.toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
   })
 })
