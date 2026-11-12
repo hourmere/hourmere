@@ -1162,9 +1162,10 @@ tables covers it too.
   of another actor, credential, kind or organization never matches.
 - **Retained identity.** A key lives as long as its definition row, tombstone included:
   tombstoning keeps it unchanged. It goes with the definition row (`ON DELETE CASCADE`), when
-  the tombstone is purged or with the organization or personal owner. The table has no guard
-  trigger: the database enforces this lifetime through the cascade only, and does not refuse a
-  direct update or deletion of a key row, which no writer makes.
+  the tombstone is purged or with the organization or personal owner. A guard trigger refuses
+  every update of a key (`workflow_creation_keys_immutable`) and its deletion while the
+  definition row exists, tombstoned or not (`workflow_creation_keys_retained`), so only those
+  cascades remove a key and a retried create always finds it.
 - **Credential deletion.** `actor_user_id` and `credential_id` are historical identifiers
   without foreign keys, as bookings keep `api_key_id` and `oauth_consent_id`. Revoking an API
   key or OAuth consent, signing out or deleting the user changes no key. A later credential or
@@ -1176,16 +1177,18 @@ A key is inserted in the creating transaction after its definition and first rev
 foreign key share-locks the definition row, after the organization lock that the definition
 insert takes.
 
-`workflow-storage-creation-keys-coverage.test.ts` drops every constraint and NOT NULL column
-through `checkConstraintCoverage` (expectation file
+`workflow-storage-creation-keys-coverage.test.ts` drops every constraint, the guard trigger and
+every NOT NULL column through `checkConstraintCoverage` (expectation file
 `packages/db/src/testing/migration-objects/0087_workflow_creation_keys.json`), and the scope
 columns, its `NULLS NOT DISTINCT`, every check, the default, the organization in the foreign
-key, the cascade on purge and the retention through a tombstone and credential deletion also
-have source-copy mutations (`packages/db/src/workflow-storage-creation-keys-protections.ts`),
+key, the cascade on purge, each guard rule and the retention through a tombstone and credential
+deletion also have source-copy mutations (`packages/db/src/workflow-storage-creation-keys-protections.ts`),
 run against the predecessor schema. Two creates race one key, for a session principal and for
 an API key, and exactly one wins. The upgrade test preserves a populated predecessor with
 workflow definitions, revisions and execution rows down to row versions, and compares fresh and
-upgraded schemas.
+upgraded schemas. `packages/workflows/src/creation-key-storage.test.ts` binds the credential
+kinds to `Principal['kind']` of `@hourmere/auth`: typecheck fails when a principal kind is added
+or renamed, and the test fails until the check accepts exactly those kinds.
 
 ## Planned additions (each a new migration)
 

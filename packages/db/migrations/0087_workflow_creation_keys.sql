@@ -12,7 +12,8 @@
 -- bookings keep theirs: deleting an API key, OAuth consent, session or user leaves the row
 -- unchanged, and no later credential or user can match it, because none gets the same random
 -- ID. A key lives as long as its definition row, tombstone included, and goes with it when the
--- tombstone is purged, or with its organization or personal owner.
+-- tombstone is purged, or with its organization or personal owner. It is never changed, and is
+-- deleted only with its definition, so a retried create can always find it.
 CREATE TABLE workflow_creation_keys (
   organization_id uuid NOT NULL,
   workflow_id uuid NOT NULL,
@@ -38,3 +39,23 @@ CREATE TABLE workflow_creation_keys (
   CONSTRAINT workflow_creation_keys_fingerprint_length
     CHECK (octet_length(request_fingerprint) = 32)
 );
+
+-- Keys are never updated, and are deleted only with their definition: by the cascade when the
+-- definition row goes (its tombstone's purge, its organization or its personal owner), never
+-- while it exists, tombstoned or not.
+CREATE FUNCTION guard_workflow_creation_key() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'workflow creation keys are immutable'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'workflow_creation_keys_immutable';
+  END IF;
+  IF EXISTS (SELECT FROM public.workflow_definitions
+      WHERE organization_id = OLD.organization_id AND id = OLD.workflow_id) THEN
+    RAISE EXCEPTION 'a workflow creation key is removed only with its workflow'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'workflow_creation_keys_retained';
+  END IF;
+  RETURN OLD;
+END $$;
+CREATE TRIGGER workflow_creation_keys_guard BEFORE UPDATE OR DELETE ON workflow_creation_keys
+  FOR EACH ROW EXECUTE FUNCTION guard_workflow_creation_key();

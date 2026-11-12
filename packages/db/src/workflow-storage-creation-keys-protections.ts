@@ -246,7 +246,10 @@ async function race(f: CreationKeyFixture, label: string, key: Row) {
 }
 
 export interface CreationKeyProtection {
-  /** Catalog objects (constraint, NOT NULL column) covered; none for a behaviour of its own. */
+  /**
+   * Catalog objects (constraint, trigger, NOT NULL column) and trigger rules covered; none for a
+   * behaviour of its own.
+   */
   objects: string[]
   check: (f: CreationKeyFixture) => Promise<void>
   mutants: WorkflowMutant[]
@@ -449,6 +452,110 @@ END $$;
 CREATE TRIGGER workflow_definitions_forget_creation_key AFTER UPDATE OF deleted_at
   ON workflow_definitions FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL)
   EXECUTE FUNCTION forget_tombstoned_workflow_creation_key();`,
+      ),
+      mutant(
+        'a key blocks the cascades too',
+        `  IF EXISTS (SELECT FROM public.workflow_definitions
+      WHERE organization_id = OLD.organization_id AND id = OLD.workflow_id) THEN`,
+        '  IF true THEN',
+      ),
+    ],
+  },
+
+  guard: {
+    objects: [
+      'workflow_creation_keys_guard',
+      'workflow_creation_keys_immutable',
+      'workflow_creation_keys_retained',
+    ],
+    check: async (f) => {
+      const live = await f.create(f.teamOwner)
+      const kept = await f.keysOf(live)
+      expect(kept).toHaveLength(1)
+      // Every column is fixed, whatever the new value; each one here is otherwise valid.
+      const keyless = await f.workflow(f.teamOwner)
+      const elsewhere = await f.workflow(f.otherTeamOwner)
+      const updates: [string, string, unknown[]][] = [
+        ['the definition', 'workflow_id=$3', [keyless.id]],
+        [
+          'the organization and definition',
+          'organization_id=$3,workflow_id=$4',
+          [elsewhere.organization, elsewhere.id],
+        ],
+        ['the actor', 'actor_user_id=$3', [f.member]],
+        ['the credential', "credential_kind='api_key',credential_id=$3", [randomUUID()]],
+        ['the key', 'idempotency_key=$3', [`create-${randomUUID()}`]],
+        ['the fingerprint', 'request_fingerprint=$3', [randomBytes(32)]],
+        ['the creation time', "created_at=created_at-interval '1 day'", []],
+        ['no value', 'idempotency_key=idempotency_key', []],
+      ]
+      for (const [label, set, values] of updates)
+        await refused(
+          f.pool,
+          check('workflow_creation_keys_immutable'),
+          (db) =>
+            db.query(
+              `UPDATE workflow_creation_keys SET ${set} WHERE organization_id=$1 AND workflow_id=$2`,
+              [live.organization, live.id, ...values],
+            ),
+          label,
+        )
+      expect(await f.keysOf(live), 'after the updates').toEqual(kept)
+      // A key is deleted only with its definition row, never while it exists, tombstoned or not.
+      const remove = (db: Connection) =>
+        db.query('DELETE FROM workflow_creation_keys WHERE organization_id=$1 AND workflow_id=$2', [
+          live.organization,
+          live.id,
+        ])
+      const retained = check('workflow_creation_keys_retained')
+      await refused(f.pool, retained, remove, 'a live definition')
+      await accepted(
+        f.pool.query('UPDATE workflow_definitions SET deleted_at=now() WHERE id=$1', [live.id]),
+        'tombstone',
+      )
+      await refused(f.pool, retained, remove, 'a tombstone')
+      expect(await f.keysOf(live), 'the tombstone keeps its key').toEqual(kept)
+      await accepted(
+        f.pool.query('DELETE FROM workflow_definitions WHERE id=$1', [live.id]),
+        'purge',
+      )
+      expect(await f.keysOf(live), 'the purged key').toEqual([])
+    },
+    mutants: [
+      mutant(
+        'the guard is dropped',
+        `CREATE TRIGGER workflow_creation_keys_guard BEFORE UPDATE OR DELETE ON workflow_creation_keys
+  FOR EACH ROW EXECUTE FUNCTION guard_workflow_creation_key();`,
+      ),
+      mutant(
+        'a key may be updated',
+        `    RAISE EXCEPTION 'workflow creation keys are immutable'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'workflow_creation_keys_immutable';`,
+        '    RETURN NEW;',
+      ),
+      mutant(
+        'a key may be deleted while its definition lives',
+        `  IF EXISTS (SELECT FROM public.workflow_definitions
+      WHERE organization_id = OLD.organization_id AND id = OLD.workflow_id) THEN
+    RAISE EXCEPTION 'a workflow creation key is removed only with its workflow'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'workflow_creation_keys_retained';
+  END IF;
+`,
+      ),
+      mutant(
+        'a key may be deleted once its definition is tombstoned',
+        'WHERE organization_id = OLD.organization_id AND id = OLD.workflow_id) THEN',
+        'WHERE organization_id = OLD.organization_id AND id = OLD.workflow_id\n        AND deleted_at IS NULL) THEN',
+      ),
+      mutant(
+        'the guard does not run on DELETE',
+        'BEFORE UPDATE OR DELETE ON workflow_creation_keys',
+        'BEFORE UPDATE ON workflow_creation_keys',
+      ),
+      mutant(
+        'the guard does not run on UPDATE',
+        'BEFORE UPDATE OR DELETE ON workflow_creation_keys',
+        'BEFORE DELETE ON workflow_creation_keys',
       ),
     ],
   },

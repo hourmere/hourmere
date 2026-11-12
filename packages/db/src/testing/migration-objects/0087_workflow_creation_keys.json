@@ -11,6 +11,7 @@
     "not_null public.workflow_creation_keys.created_at": "NOT NULL DEFAULT now()",
     "not_null public.workflow_creation_keys.credential_kind": "NOT NULL",
     "not_null public.workflow_creation_keys.idempotency_key": "NOT NULL",
-    "not_null public.workflow_creation_keys.request_fingerprint": "NOT NULL"
+    "not_null public.workflow_creation_keys.request_fingerprint": "NOT NULL",
+    "trigger public.workflow_creation_keys.workflow_creation_keys_guard": "CREATE TRIGGER workflow_creation_keys_guard BEFORE DELETE OR UPDATE ON public.workflow_creation_keys FOR EACH ROW EXECUTE FUNCTION guard_workflow_creation_key() -- function SET search_path=public, pg_temp md5 a7ed53ae01dc4981e45b1ee396e48129"
   }
 }

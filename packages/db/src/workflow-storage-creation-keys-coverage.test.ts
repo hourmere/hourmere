@@ -27,7 +27,8 @@ describe.skipIf(!serverUrl)('workflow creation key storage constraint coverage',
       'not_null public.workflow_creation_keys.credential_kind',
       'not_null public.workflow_creation_keys.idempotency_key',
       'not_null public.workflow_creation_keys.request_fingerprint',
+      'trigger public.workflow_creation_keys.workflow_creation_keys_guard',
     ])
-    expect(report.results.map((result) => result.status)).toEqual(Array(11).fill('covered'))
+    expect(report.results.map((result) => result.status)).toEqual(Array(12).fill('covered'))
   }, 600_000)
 })

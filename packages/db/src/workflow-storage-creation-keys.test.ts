@@ -1,8 +1,12 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { migrationsDir } from './migrate.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 import {
   creationKeyFixture,
+  creationKeyMigration,
   creationKeyProtections,
   creationKeyTable,
 } from './workflow-storage-creation-keys-protections.ts'
@@ -47,8 +51,12 @@ describe.skipIf(!serverUrl)('workflow creation key storage', () => {
     await owned?.drop()
   })
 
-  it('names every constraint and NOT NULL column in a protection', async () => {
+  it('names every constraint, trigger, NOT NULL column and trigger rule in a protection', async () => {
     const { constraints, indexes, triggers, notNull } = await catalogObjects(owned.pool)
+    const source = await readFile(join(migrationsDir, creationKeyMigration), 'utf8')
+    // Every rule the guard raises names itself as the error's constraint.
+    const rules = [...source.matchAll(/CONSTRAINT = '([a-z_]+)'/g)].map(([, rule]) => rule)
+    expect(rules).toEqual(['workflow_creation_keys_immutable', 'workflow_creation_keys_retained'])
     expect(constraints).toEqual([
       'workflow_creation_keys_credential',
       'workflow_creation_keys_fingerprint_length',
@@ -58,7 +66,7 @@ describe.skipIf(!serverUrl)('workflow creation key storage', () => {
       'workflow_creation_keys_workflow',
     ])
     expect(indexes).toEqual([])
-    expect(triggers).toEqual([])
+    expect(triggers).toEqual(['workflow_creation_keys_guard'])
     expect(notNull).toEqual([
       'workflow_creation_keys.actor_user_id',
       'workflow_creation_keys.created_at',
@@ -69,7 +77,7 @@ describe.skipIf(!serverUrl)('workflow creation key storage', () => {
     const covered = [
       ...new Set(Object.values(creationKeyProtections).flatMap(({ objects }) => objects)),
     ].sort()
-    expect(covered).toEqual([...constraints, ...notNull].sort())
+    expect(covered).toEqual([...constraints, ...triggers, ...notNull, ...rules].sort())
     for (const [name, { mutants }] of Object.entries(creationKeyProtections))
       expect(mutants.length, name).toBeGreaterThan(0)
   })
