@@ -21,7 +21,7 @@
     "zapier-platform-core": "19.2.1"
   },
   "devDependencies": {
-    "zapier-platform-cli": "19.2.1",
+    "zapier-platform-cli": "19.3.0",
     "nock": "15.0.5",
     "vitest": "5.0.5",
     "typescript": "7.0.2",
