@@ -34,7 +34,7 @@ type Recipe = Fields & {
 /**
  * Accepted events with the field paths of each event's real payload, the delivery headers,
  * one real delivery's signing inputs with the signature it sent, and the timestamp tolerance
- * of Hourmere's own webhook verifier.
+ * of the n8n trigger's verifier.
  */
 export type WebhookContract = {
   events: Readonly<Record<string, readonly string[]>>
@@ -380,11 +380,14 @@ export function validateMakeReferences(
   for (const match of raw.matchAll(/sha256\([^()]*"[^()]*\)/g)) {
     if (!verifiedCalls.has(match[0])) errors.push('unverified webhook signature formula')
   }
-  // The timestamp condition and every stated tolerance use the verifier's value.
+  // A timestamp condition is the expression, Make's inclusive "Less than or equal to"
+  // operator and the verifier's tolerance; every stated tolerance uses that value too.
   for (const match of raw.matchAll(
-    /`abs\(formatDate\(now; "X"\) - timestamp\)`[^`\n]*`(\d+)`|\b(\d+)(?:\*\*)?[ -]seconds?(?:\*\*)?(?= (?:of|from) current UTC time| tolerance)/g,
+    /`abs\(formatDate\(now; "X"\) - timestamp\)`(?:\s+\*\*(?:Numeric operators: )?Less than or equal to\*\*\s+`(\d+)`)?|\b(\d+)(?:\*\*)?[ -]seconds?(?:\*\*)?(?= (?:of|from) current UTC time| tolerance)/g,
   )) {
-    if (Number(match[1] ?? match[2]) !== webhooks.timestampToleranceSeconds)
+    const seconds = match[1] ?? match[2]
+    if (seconds === undefined) errors.push('wrong timestamp comparison')
+    else if (Number(seconds) !== webhooks.timestampToleranceSeconds)
       errors.push('wrong timestamp tolerance')
   }
   // Mapped text uses Make braces; uppercase names are explicit operator placeholders.
@@ -553,11 +556,22 @@ export function validateMakeScopes(raw: string, operations: ApiKeyOperations) {
       else if (scope) errors.push(...requireScope(scope, ids, operations))
     }
   }
-  for (const match of raw.matchAll(
-    /A leaked `([a-z]+)` key\s+could\s+((?:[a-z]+(?:,\s+|\s+and\s+))*[a-z]+)\s+every\s+booking\b(\s+you\s+host\b)?/g,
-  )) {
-    if (!match[3]) errors.push('overstated leaked key reach')
-    for (const action of (match[2] ?? '').split(/,\s+|\s+and\s+/)) {
+  // Every "A leaked `x` key" statement, up to the end of its clause, states exactly the
+  // hosted-only reach: its actions, "every booking you host" (optionally "in that
+  // organization"), then at most the consequence ", exposing invitee data" (optionally
+  // "including"). Any other wording of the statement or of its trailing clause fails, even a
+  // harmless one, so a new wording must be added here deliberately.
+  for (const match of raw.matchAll(/A leaked `([a-z]+)` key\b[^.;]*/g)) {
+    const actions = match[0]
+      .replace(/\s+/g, ' ')
+      .match(
+        /^A leaked `[a-z]+` key could ((?:[a-z]+(?:, | and ))*[a-z]+) every booking you host(?: in that organization)?(?:, (?:including )?exposing invitee data)?$/,
+      )?.[1]
+    if (!actions) {
+      errors.push('overstated leaked key reach')
+      continue
+    }
+    for (const action of actions.split(/, | and /)) {
       const id = Object.hasOwn(leakedKeyActions, action) ? leakedKeyActions[action] : undefined
       const operation = id && Object.hasOwn(operations, id) ? operations[id] : undefined
       if (operation?.authentication !== 'key' || !operation.allowedScopes.includes(match[1] ?? ''))
