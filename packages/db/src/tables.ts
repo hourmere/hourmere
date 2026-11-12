@@ -959,6 +959,7 @@ export interface MeetingPollVotes {
 export interface NotificationEmailSends {
   recipient_hash: Buffer | null;
   sent_at: Timestamp;
+  workflow_reservation_id: string | null;
 }
 
 export interface OneTimeBookingLinks {
@@ -1532,12 +1533,82 @@ export interface WorkflowDefinitions {
   updated_at: Generated<Timestamp>;
 }
 
+export interface WorkflowEnrollments {
+  booking_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  occurrence: string;
+  organization_id: string;
+  revision: number;
+  trigger: string;
+  workflow_id: string;
+}
+
+export interface WorkflowMailReservations {
+  claim_id: string;
+  id: Generated<string>;
+  organization_id: string;
+  reserved_at: Timestamp;
+  run_id: string;
+}
+
+export interface WorkflowRecipientClaims {
+  attempts: Generated<number>;
+  booking_id: string;
+  claim_token: string | null;
+  created_at: Generated<Timestamp>;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  intent_kind: string | null;
+  intent_offset_minutes: number | null;
+  next_attempt_at: Timestamp | null;
+  organization_id: string;
+  recipient: string;
+  recipient_hash: Buffer;
+  run_id: string;
+  skip_reason: string | null;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface WorkflowRevisions {
   created_at: Generated<Timestamp>;
   definition: Json;
   organization_id: string;
   revision: number;
   workflow_id: string;
+}
+
+export interface WorkflowRunHistory {
+  delivery_unknown: Generated<number>;
+  due_at: Timestamp;
+  finished_at: Timestamp;
+  organization_id: string;
+  outcome: string;
+  reason: string | null;
+  rejected: Generated<number>;
+  revision: number;
+  run_id: string;
+  sent: Generated<number>;
+  skipped: Generated<number>;
+  trigger: string;
+  workflow_id: string;
+}
+
+export interface WorkflowRuns {
+  booking_id: string;
+  claim_token: string | null;
+  created_at: Generated<Timestamp>;
+  due_at: Timestamp;
+  enrollment_id: string;
+  expires_at: Timestamp;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  lease_until: Timestamp | null;
+  organization_id: string;
+  skip_reason: string | null;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface DB {
@@ -1650,5 +1721,10 @@ export interface DB {
   webhook_deliveries: WebhookDeliveries;
   webhooks: Webhooks;
   workflow_definitions: WorkflowDefinitions;
+  workflow_enrollments: WorkflowEnrollments;
+  workflow_mail_reservations: WorkflowMailReservations;
+  workflow_recipient_claims: WorkflowRecipientClaims;
   workflow_revisions: WorkflowRevisions;
+  workflow_run_history: WorkflowRunHistory;
+  workflow_runs: WorkflowRuns;
 }

@@ -283,6 +283,11 @@ describe.skipIf(!serverUrl)('workflow definition storage and the definition cont
         ],
         [
           'workflow_revisions_trigger',
+          `${type} at a fractional offset within its range`,
+          { trigger: { type, offsetMinutes: WORKFLOW_MIN_TIMER_OFFSET_MINUTES + 0.5 } },
+        ],
+        [
+          'workflow_revisions_trigger',
           `${type} with a delay`,
           { trigger: { type, offsetMinutes: 60, delayMinutes: 0 } },
         ],
@@ -297,6 +302,11 @@ describe.skipIf(!serverUrl)('workflow definition storage and the definition cont
           'workflow_revisions_trigger',
           `${type} above the largest delay`,
           { trigger: { type, delayMinutes: WORKFLOW_MAX_OFFSET_MINUTES + 1 } },
+        ],
+        [
+          'workflow_revisions_trigger',
+          `${type} delayed by a fractional minute within its range`,
+          { trigger: { type, delayMinutes: 0.5 } },
         ],
         [
           'workflow_revisions_trigger',

@@ -1,9 +1,9 @@
 # Booking workflows design
 
 Status: proposed design, not a shipped feature. Step 1 of the plan has added the pure
-definition contract in `packages/workflows` behind the hard-off constant, and step 2 the
-definition and revision tables (migration 0076), which nothing reads or writes yet; no
-interface or interface string exists yet. Decisions below are Hourmere decisions unless explicitly
+definition contract in `packages/workflows` behind the hard-off constant, step 2 the
+definition and revision tables (migration 0076) and step 3 the execution tables (migration
+0079), which nothing reads or writes yet; no interface or interface string exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 ## Evidence and existing foundations
@@ -610,17 +610,24 @@ reschedule-chain data, location or conference links. Recipient email addresses a
 internally for delivery and never rendered as template variables or returned in history.
 
 Migration 0076 (step 2) adds workflow definitions and their immutable revisions; see
-[workflow definition storage](data-model.md#workflow-definition-storage). Proposed tables
-(future migrations, not added here): booking workflow snapshots; lifecycle occurrences; action
-runs and recipient intents; workflow mail reservations. Proposed columns on existing tables:
-`notification_email_sends.workflow_reservation_id` (step 3) and
-`webhook_deliveries.workflow_run_id` (step 14a), both nullable and without foreign keys.
+[workflow definition storage](data-model.md#workflow-definition-storage). Migration 0079
+(step 3) adds the execution tables: enrollments (the booking workflow snapshots, one per
+booking, lifecycle occurrence and workflow), due runs, per-recipient claims that hold the
+recipient intents, minimal run history and workflow mail reservations, plus the nullable
+`notification_email_sends.workflow_reservation_id` without a foreign key; see
+[workflow execution storage](data-model.md#workflow-execution-storage). The remaining proposed
+column on an existing table is `webhook_deliveries.workflow_run_id` (step 14a), nullable and
+without a foreign key.
 Use organization-scoped FKs and unique occurrence/
 revision/action/recipient identities, with bounded indexes for pending due work and
 retention. Deleting a workflow tombstones its identity and disables pending work while
 retaining safe history for the stated window. Purging history must not erase replay
 protection while a booking, snapshot or job can still reference it: retain minimal
-non-content terminal identity tombstones until all such references are retired. No replay
+non-content terminal identity tombstones until all such references are retired. The execution
+rows are those tombstones: they name the workflow and revision without a foreign key to the
+definition and hold no content, so purging a tombstoned definition with its revisions keeps
+them until their booking or organization goes, and a purge is refused while the workflow has
+an unfinished run. History retention deletes only the history records. No replay
 endpoint exists. Booking deletion removes private snapshots and safely retires ID-only
 jobs. Never store rendered mail bodies, plaintext endpoint secrets or answer snapshots
 in audit/history merely for diagnostics.
