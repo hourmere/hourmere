@@ -54,11 +54,11 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
     )
     await owned?.drop()
   })
-  /** A fresh auth instance whose pool has exactly POOL_SIZE connections. */
-  async function instance() {
+  /** A fresh auth instance whose pool has exactly `size` connections. */
+  async function instance(size = POOL_SIZE) {
     const signup = { mode: 'closed', allowedDomains: [] } as const
     const pool = createAuthPool(owned.url, signup)
-    ;(pool as unknown as { options: { max: number } }).options.max = POOL_SIZE
+    ;(pool as unknown as { options: { max: number } }).options.max = size
     pools.push(pool)
     const auth = createAuth({
       db,
@@ -235,21 +235,27 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
     await sessionStillResolves(target)
   }, 60_000)
 
-  it('finishes as many signed-in consent submissions as the pool has connections', async () => {
-    const target = await instance()
-    const pending = []
-    for (let i = 0; i < POOL_SIZE; i++) {
-      const s = await signedIn()
-      pending.push({ s, body: (await untilConsent(target, s)).body })
-    }
+  // With one connection, a request that holds it while Better Auth needs another waits
+  // forever on every run; a larger pool catches that only when the batch happens to overlap.
+  it('finishes a consent submission and both revocations on a pool of one connection', async () => {
+    const target = await instance(1)
     expect(
-      await bounded(
-        Promise.all(pending.map(({ s, body }) => target.api('consent', s.headers, body))),
-      ),
-      'consent batch',
-    ).toEqual(Array(POOL_SIZE).fill(200))
+      await bounded(revoke(target, randomUUID(), 'probe-token').then((r) => [r])),
+      'anonymous revocation',
+    ).toEqual([400])
+    const s = await signedIn()
+    const pending = await untilConsent(target, s)
+    expect(
+      await bounded(target.api('consent', s.headers, pending.body).then((r) => [r])),
+      'consent submission',
+    ).toEqual([200])
+    const token = await connected(target, await signedIn())
+    expect(
+      await bounded(revoke(target, CLIENT, token).then((r) => [r])),
+      'valid revocation',
+    ).toEqual([200])
     await sessionStillResolves(target)
-  }, 60_000)
+  }, 90_000)
 
   it.each(['/sign-out', '/revoke-session', '/revoke-sessions', '/revoke-other-sessions'])(
     'finishes as many concurrent %s requests as the pool has connections',
