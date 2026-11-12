@@ -891,7 +891,8 @@ and inserting a row again.
   is stored only as an AES-256-GCM envelope (version 1, IV, tag, ciphertext), never as
   plaintext JSON; its authenticated data binds organization, provider and revision, so
   ciphertext moved to another organization, provider or revision fails to decrypt. A new
-  revision and a new sealed configuration go together. Retirement disables the provider and
+  revision and a new sealed configuration go together, so rotating the operator key re-seals
+  every provider that is not retired at a new revision. Retirement disables the provider and
   is permanent.
 - **Domain claims** store an exact lowercase IDNA ASCII name (no wildcard, IP address or
   trailing dot; public suffixes are refused by the application), the current `generation`,
@@ -920,6 +921,70 @@ trigger rule also has source-copy mutations that remove or weaken it
 upgrade test preserves a populated predecessor down to row versions and compares fresh and
 upgraded schemas. The operator key that seals provider configuration is configured by the
 first step that writes it.
+
+## SSO identity storage
+
+Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage
+step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_cache`,
+`sso_browser_proofs` and `sso_delegation_bindings`. Nothing reads or writes them yet: there
+is no route, worker, read path or setting, and OIDC and SAML stay hard-off. The test that
+keeps production modules from naming the configuration tables covers these too. Admission
+tombstones need no new table: they are the shared `scim_membership_blocks` of the
+[SCIM identity storage](scim.md), which keep the team-local mailbox through member and
+account deletion; a subject-keyed JIT check adds its column there in the step that needs it.
+
+- **Identity links** bind one person to one IdP subject at one provider of a team. The
+  identity, `(organization, provider, issuer, subject)`, is immutable, and the issuer must
+  be the provider's (which 0074 already keeps immutable), so one live link per provider and
+  subject keeps the whole identity unique, also under concurrent writers; a person has at
+  most one live link per provider. A link records the normalized mailbox Hourmere last
+  proved for it, never an IdP's email statement, and a new mailbox needs a later proof
+  time. A link is retired rather than deleted while its team and account exist; retirement
+  is permanent and takes a new link `generation`. New links are made only at an enabled
+  provider.
+- **Attempts** are a sign-in (before any session), a provider test or self-link (a person
+  and their current session), or a fresh proof for one write (a person, their session and
+  the team). Each freezes its kind, team, provider and current provider revision, person,
+  session, browser-binding digest, operation and canonical input digest, and expires
+  within `authenticationAttemptLifetime` (600 seconds). Only a fresh proof can require an
+  SSO step-up, and it requires at least one method; the required methods only gain the
+  mailbox later, and the mailbox is fixed once chosen. A mailbox proof needs the attempt's
+  consumed token and ends with it; a step-up comes from the attempt's own person's live link
+  at an enabled provider, authenticated between 60 seconds before the attempt and 60
+  seconds after it is recorded, and records the team's current `trustGeneration`. Each
+  proof is recorded once, within `freshAdministrationProof` (300 seconds). Nothing changes
+  after expiry, and an attempt is consumed once, only while every required proof is live and
+  what it relied on is unchanged: its provider still at the frozen revision and not retired
+  (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
+  trust generation current. Logging out deletes the session's attempts.
+- **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
+  issued only while the attempt awaits its mailbox proof, valid until the earlier of the
+  attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
+- **The replay cache** keeps the SHA-256 digest of each consumed SAML request, response and
+  assertion ID per provider and kind, so concurrent callbacks consume it once. Entries are
+  written at consumption, immutable and kept until `retain_until`, which the service sets to
+  at least `max(acceptanceDeadline + clockSkew, requestExpiresAt)` and which is in the future
+  and at most 720 seconds after consumption (the largest value that bound can take under the
+  pinned limits); only the team's deletion removes them earlier.
+- **Browser proofs and delegation bindings** record the membership, the enabled provider,
+  the link and its generation, the team's `trustGeneration` (1 before the team has a policy)
+  and the domain claim with its generation; all must be current when the row is written,
+  and the claim must be one the provider serves, verified and unexpired. Both are immutable,
+  and revoking one deletes it. A proof belongs to its person's session (logout deletes it)
+  and lasts at most `ssoProofLifetime`, the session's expiry and the claim's verification
+  expiry. A binding binds the person's own API key or MCP OAuth grant for the same team, one
+  binding per credential, and lasts at most `ssoDelegationLifetime` and the key's expiry.
+  Deleting the membership, the credential or the link deletes them. Because a lapsed claim
+  generation can never be verified again, a proof or lease that recorded it never revives;
+  rebinding inserts a binding at the claim's current generation.
+
+`sso-identity-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0075_sso_identity.json`), and every check and
+trigger rule also has source-copy mutations that remove or weaken it
+(`packages/db/src/sso-identity-protections.ts`), run against the predecessor schema. The
+upgrade test preserves a populated predecessor, including the SSO configuration rows of
+0074, down to row versions and compares fresh and upgraded schemas.
 
 ## Planned additions (each a new migration)
 
