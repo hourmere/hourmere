@@ -452,4 +452,222 @@ describe('source copy guard', () => {
     ).rejects.toMatchObject(brokenCopy)
     expect(() => recordCopyFault({}, new TypeError('x'))).toThrow('recordCopyFault needs a copy')
   })
+
+  it('counts a destructuring crash from the mutation as a kill when the unmutated twin passes', async () => {
+    const { copy, unmutated } = await mutatedPair(
+      (guarded: boolean) =>
+        guardCopy({
+          validate: (value: { type: string } | undefined) => {
+            if (guarded && value === undefined) throw new Error('unknown_question')
+            const { type } = value as { type: string }
+            return type
+          },
+        }),
+      false,
+      true,
+    )
+    await expect(expectKilled(copy, verifyRefusal, { unmutated })).resolves.toBeUndefined()
+  })
+})
+
+// Copy results of any shape, typed loosely for these checks.
+type Member = 'access' | 'add' | 'count' | 'createBuilder' | 'createCounter' | 'db' | 'handle'
+type Loose = ((...args: unknown[]) => Loose) & {
+  [key in
+    | Member
+    | 'holder'
+    | 'holds'
+    | 'isLive'
+    | 'live'
+    | 'map'
+    | 'open'
+    | 'parts'
+    | 'write'
+    | 0]: Loose
+}
+// A copy compiled from source text, as the controls build theirs.
+const compile = (source: string, exports: string, bindings: Record<string, unknown> = {}) =>
+  new Function(...Object.keys(bindings), `${source}; return ${exports}`)(
+    ...Object.values(bindings),
+  ) as Loose
+
+describe('source copy guard results', () => {
+  // Each copy keeps using an object it returned. Unmutated, it passes the verifier, so it must
+  // never count as a kill.
+  it.each<[string, string, string, (copy: Loose) => void]>([
+    [
+      'state it changes later',
+      'function createCounter() { const state = { count: 0, add() { state.count += 1 } }; return state }',
+      '{ createCounter }',
+      (copy) => {
+        const counter = copy.createCounter()
+        counter.add()
+        expect(counter.count).toBe(1)
+      },
+    ],
+    [
+      'a method that returns `this`',
+      'function createBuilder() { return { parts: [], add(part) { this.parts.push(part); return this } } }',
+      '{ createBuilder }',
+      (copy) => {
+        const builder = copy.createBuilder()
+        expect(builder.add('a')).toBe(builder)
+        expect(builder.parts).toEqual(['a'])
+      },
+    ],
+    [
+      'a handle it gets back',
+      `const live = new WeakSet()
+      function open() { const handle = { live() { return live.has(this) } }; live.add(handle); return handle }
+      function isLive(handle) { return live.has(handle) }
+      function holder() { return { handle: null, holds() { return live.has(this.handle) } } }`,
+      '{ open, isLive, holder }',
+      (copy) => {
+        expect(copy.isLive(copy.open()), 'as an argument').toBe(true)
+        expect(copy.open().live(), 'as `this`').toBe(true)
+        const holder = copy.holder()
+        holder.handle = copy.open()
+        expect(holder.holds(), 'as an assigned value').toBe(true)
+      },
+    ],
+  ])(
+    'never counts an unmutated copy that keeps %s as a kill',
+    async (_, source, exports, verify) => {
+      verify(compile(source, exports))
+      const survivor = 'the mutation must make a verifier assertion fail'
+      await expect(expectKilled(guardCopy(compile(source, exports)), verify)).rejects.toThrow(
+        survivor,
+      )
+      const { copy, unmutated } = await mutatedPair(
+        () => guardCopy(compile(source, exports)),
+        'mutated',
+        'identity',
+      )
+      await expect(expectKilled(copy, verify, { unmutated })).rejects.toThrow(survivor)
+    },
+  )
+
+  // A working copy binds `check`; a broken one raises a ReferenceError wherever it calls it.
+  it.each<[string, string, (copy: Loose) => unknown]>([
+    [
+      'a getter that returns a method',
+      'function access() { return { get write() { return () => check() } } }',
+      (copy) => copy.access().write(),
+    ],
+    [
+      'a faulting getter',
+      'function access() { return { get write() { return check() } } }',
+      (copy) => copy.access().write,
+    ],
+    [
+      'a faulting setter',
+      'function access() { return { set write(value) { check(value) } } }',
+      (copy) => Object.assign(copy.access(), { write: 'value' }) && 'written',
+    ],
+    [
+      'a method of a nested object',
+      'function access() { return { db: { write() { return check() } } } }',
+      (copy) => copy.access().db.write(),
+    ],
+    [
+      'a function in a returned array',
+      'function access() { return [() => check()] }',
+      (copy) => copy.access()[0](),
+    ],
+    [
+      'a function an array method reads',
+      'function access() { return [() => check()] }',
+      (copy) => copy.access().map((write: Loose) => write())[0],
+    ],
+    [
+      'a method of a null-prototype result',
+      'function access() { return Object.assign(Object.create(null), { write() { return check() } }) }',
+      (copy) => copy.access().write(),
+    ],
+    [
+      'a method of a frozen result',
+      'function access() { return Object.freeze({ write() { return check() } }) }',
+      (copy) => copy.access().write(),
+    ],
+    [
+      'a getter of a frozen result',
+      'function access() { return Object.freeze({ get write() { return () => check() } }) }',
+      (copy) => copy.access().write(),
+    ],
+    [
+      'a function in a frozen array',
+      'function access() { return Object.freeze([() => check()]) }',
+      (copy) => copy.access()[0](),
+    ],
+  ])('guards %s', async (_, source, call) => {
+    expect(call(guardCopy(compile(source, '{ access }', { check: () => 'written' })))).toBe(
+      'written',
+    )
+    const broken = guardCopy(compile(source, '{ access }'))
+    await expect(
+      expectKilled(broken, async (copy) => {
+        await expect(Promise.resolve().then(() => call(copy))).resolves.toBe('written')
+      }),
+    ).rejects.toMatchObject(brokenCopy)
+  })
+
+  it('reports a read-only method of a result that is not frozen as a broken copy', async () => {
+    const copy = guardCopy({
+      make: () =>
+        Object.defineProperty({ open: true, run: () => 'ran' }, 'run', {
+          writable: false,
+          configurable: false,
+        }),
+    })
+    await expect(
+      expectKilled(copy, (module) => expect(module.make().run()).toBe('ran')),
+    ).rejects.toMatchObject({ ...brokenCopy, message: expect.stringContaining('read-only member') })
+  })
+
+  it('returns class instances as they are, with their private fields', () => {
+    class Counter {
+      #count = 0
+      bump = () => ++this.#count
+      get count() {
+        return this.#count
+      }
+    }
+    const counter = new Counter()
+    const copy = guardCopy({ make: () => counter })
+    expect(copy.make()).toBe(counter)
+    copy.make().bump()
+    expect(copy.make().count).toBe(1)
+  })
+
+  it('keeps the identity of a repeated function result and of a function that refers to itself', () => {
+    const handle = () => 'handled'
+    const copy = guardCopy({ handler: () => handle })
+    expect(copy.handler()).toBe(copy.handler())
+    const deliver = Object.assign(() => 'sent', { retry: undefined as unknown })
+    deliver.retry = deliver
+    const guarded = guardCopy(deliver)
+    expect(guarded.retry).toBe(guarded)
+  })
+
+  it('passes a wrapper from another copy through, so it records that copy’s faults', async () => {
+    const unbound = () => {
+      throw new ReferenceError('unbound is not defined')
+    }
+    const helper = guardCopy({ run: unbound, make: () => ({ run: unbound }) })
+    const handle = helper.make()
+    const copy = guardCopy({
+      pass: (value: unknown) => value,
+      call: (value: { run: () => unknown }) => {
+        try {
+          value.run()
+        } catch {}
+        return 'ran'
+      },
+    })
+    expect(copy.pass(helper.run)).toBe(helper.run)
+    expect(copy.pass(handle)).toBe(handle)
+    await expect(
+      expectKilled(helper, () => expect(copy.call(handle)).toBe('failed')),
+    ).rejects.toMatchObject(brokenCopy)
+  })
 })
