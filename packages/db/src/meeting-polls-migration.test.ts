@@ -12,6 +12,7 @@ import {
   insert,
   meetingPollProtections,
   meetingPollSerializationChecks,
+  organizationLockedInserts,
   transaction,
 } from './meeting-poll-protections.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
@@ -1127,6 +1128,13 @@ const mutations: Record<string, { check: string; mutation: Mutation }> = {
     ),
   },
 }
+
+// Without its organization FK an insert no longer locks the organization row.
+for (const table of Object.keys(organizationLockedInserts))
+  mutations[`${table} insert without its organization FK`] = {
+    check: `${table} insert locks its organization`,
+    mutation: `ALTER TABLE ${table} DROP CONSTRAINT ${table}_organization_id_fkey;`,
+  }
 
 // Every copy starts from a 0070 template and applies its own 0071 source. Tests run one at a
 // time (the protection checks use the global expect); each runs its two copies in parallel.
