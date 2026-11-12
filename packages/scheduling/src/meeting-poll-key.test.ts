@@ -751,6 +751,9 @@ function verifyEveryServiceFenced(modules: { file: string; source: string }[]) {
       'recoverMeetingPollVoter',
       'inviteMeetingPollVoters',
       'resendMeetingPollInvitation',
+      'submitMeetingPollBallot',
+      'withdrawMeetingPollVoter',
+      'optOutOfMeetingPollReminders',
     ]),
   )
   for (const entry of services)
