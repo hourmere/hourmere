@@ -6,8 +6,10 @@ internal host lifecycle service (create, read, close, cancel, delete and link ro
 services (enroll, invite, verify, recover and resend) by
 `packages/scheduling/src/meeting-poll-voters.ts`, and the internal ballot services (submit
 and replace ballots, withdraw, reactivate and reminder opt-out) by
-`packages/scheduling/src/meeting-poll-ballots.ts`; results, removal, transport, workers and
-UI remain proposed. Competitor research was checked
+`packages/scheduling/src/meeting-poll-ballots.ts`, and the internal results and removal
+services (host results, voter removal and bulk removal of unverified enrollees) by
+`packages/scheduling/src/meeting-poll-results.ts`; cleanup, deletion cascades, transport,
+workers and UI remain proposed. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -238,6 +240,48 @@ below. These operations use current authority, `expectedHostRevision` and the co
 Removal targets the voter, not a ballot snapshot, so it does not check that voter's ballot
 revision; a retry after a lost response gets 404 `poll_not_found` for the deleted voter ID.
 
+The A4a results and removal service implements these rules with the internal choices below;
+later transport steps map them, and the error codes stay as listed here.
+
+- Results, removal and bulk removal take the key fence first, then the host order of the
+  lifecycle services (organization-write hook for the two writes, actor user, organization
+  and membership `FOR SHARE`, the poll, the event `FOR SHARE`) and decide with one database
+  clock reading after those locks. Removal locks the poll `FOR UPDATE` before it touches a
+  voter row. The results read locks the poll `FOR SHARE`, so no voter or host write commits
+  between the results revision it returns and the rows it counts. Read keys may read
+  results. Because results read voter rows they take the fence as well: a mismatched secret
+  refuses them (poll metadata without voters stays readable), and on an installation
+  without keyed data their first read records the secret, as any voter service would.
+- The results projection, in any poll state, returns the poll metadata with its host
+  revision, the results revision, the number of counted ballots and, per candidate,
+  separate `yes`, `if_need_be` and `no` counts of counted ballots only: those of verified,
+  non-withdrawn voters with a submitted ballot. A voter without a ballot is never counted as
+  `no`. Pending reservations are judged live at the read's instant; their expiry moves no
+  revision. The roster lists every voter with name, mailbox, status, zone, locale, invitation,
+  verification, withdrawal and pending-expiry instants, ballot revision, submission and
+  consent instants, votes and answers; removed voters and expired public reservations are
+  absent, and no credential or digest appears. Advisory availability is added by the
+  results transport (D1).
+- Removal works while the poll is open or closed, including closure by the deadline and a
+  soft-deleted event; a scheduled poll gets 409 `poll_already_scheduled` and a canceled one
+  409 `poll_canceled`. The voter lookup precedes the `expectedHostRevision` check, so a
+  retry gets 404 `poll_not_found`; an expired public reservation is already absent and also
+  gets 404. Removal deletes the voter row, so its votes, credentials and deliveries go with
+  it, and upserts `removed_at` on the mailbox counter row, leaving its resend and recovery
+  counts, reminder receipt and opt-out unchanged. It advances the host and results
+  revisions once and sends no mail. A removed public reservation no longer counts toward
+  its IP's three pending reservations, since no IP digest outlives removal.
+- Bulk removal checks `expectedHostRevision` and removes exactly the unverified public
+  enrollees holding a live reservation, in voter ID order, each behind a tombstone as above.
+  Host invitees, verified and withdrawn voters and expired public reservations stay. With
+  nothing to remove it writes nothing and moves no revision; in invited mode there is never
+  anything to remove. It has no replay key, so a retry after a lost response gets 409
+  `poll_changed` and the host rereads the results.
+- Re-invitation of a removed mailbox is the invitation service's `invited` outcome: a new
+  voter ID, a new place under the cap and one invitation mail. The tombstone clears; resend
+  count and cooldown, reminder receipt and opt-out stay, and the recovery count restarts
+  because a new credential was mailed.
+
 Privacy default is `private`: voters see only their own choices and the candidate list,
 not other names, email addresses, answers or totals. A host can choose `aggregate` at
 creation, exposing only per-candidate yes/conditional/no counts after verification.
@@ -286,8 +330,9 @@ It records a keyed fingerprint of the secret the data was written under: an HMAC
 under its own HKDF subkey, never the secret. `ensureMeetingPollKey` in
 `packages/scheduling/src/meeting-poll-key.ts` is the fence:
 
-- Every voter service (enrollment, verification, recovery, invitation and resend) calls it
-  first in its transaction, before any row lock. It runs only in READ COMMITTED
+- Every voter service (enrollment, verification, recovery, invitation and resend, and
+  likewise ballots, withdrawal, opt-out, results and removal) calls it first in its
+  transaction, before any row lock. It runs only in READ COMMITTED
   transactions, so its reads after the lock see writers that committed meanwhile; other
   isolation levels are refused. Under the recorded secret it takes a shared transaction
   advisory lock and continues.
