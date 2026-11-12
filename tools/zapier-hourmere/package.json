@@ -18,14 +18,14 @@
     "build:verify": "DISABLE_ZAPIER_ANALYTICS=1 NO_UPDATE_NOTIFIER=1 node scripts/verify-build.js"
   },
   "dependencies": {
-    "zapier-platform-core": "19.2.1"
+    "zapier-platform-core": "19.3.0"
   },
   "devDependencies": {
-    "zapier-platform-cli": "19.2.1",
+    "zapier-platform-cli": "19.3.0",
     "nock": "15.0.5",
-    "vitest": "5.0.5",
+    "vitest": "5.1.0",
     "typescript": "7.0.2",
-    "@types/node": "26.6.5"
+    "@types/node": "26.6.6"
   },
   "license": "AGPL-3.0-only",
   "overrides": {
