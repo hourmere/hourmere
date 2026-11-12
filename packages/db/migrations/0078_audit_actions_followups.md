@@ -17,6 +17,10 @@ never writes the new actions. Apply it before starting the new version (automati
 destination changes fail.
 Re-adding the check briefly locks `audit_events` while existing rows are validated.
 
+The migrator applies a missing lower-numbered file after higher ones, so a later change to
+`audit_events_details_check` must use a number above 0078; otherwise fresh and upgraded
+installations would end with different checks.
+
 `audit-actions-followups-migration.test.ts` upgrades a populated database, checks that every
 row is preserved, compares the schema with a fresh installation and reruns the migrations as
 a no-op. `audit-actions-followups-coverage.test.ts` drops the check through

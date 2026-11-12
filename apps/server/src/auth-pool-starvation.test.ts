@@ -22,17 +22,22 @@ const secret = randomBytes(32).toString('base64')
 let nextAddress = 0
 const testIp = () => `198.19.${Math.floor(++nextAddress / 250)}.${(nextAddress % 250) + 1}`
 
-/** Resolves to the statuses, or to 'TIMEOUT' when the batch is still waiting at the bound. */
-async function bounded(work: Promise<Response[]>) {
+/** Resolves to the value, or to 'TIMEOUT' when the work is still waiting at the bound. */
+async function within<T>(work: Promise<T>) {
   let timer: NodeJS.Timeout | undefined
   const outcome = await Promise.race([
-    work.then((responses) => responses.map((response) => response.status)),
+    work,
     new Promise<'TIMEOUT'>((resolve) => {
       timer = setTimeout(() => resolve('TIMEOUT'), BOUND_MS)
     }),
   ])
   clearTimeout(timer)
   return outcome
+}
+
+/** Resolves to the statuses, or to 'TIMEOUT' when the batch is still waiting at the bound. */
+function bounded(work: Promise<Response[]>) {
+  return within(work.then((responses) => responses.map((response) => response.status)))
 }
 
 describe.skipIf(!serverUrl)('auth pool starvation', () => {
@@ -246,12 +251,15 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
     const s = await signedIn()
     const pending = await untilConsent(target, s)
     expect(
-      await bounded(target.api('consent', s.headers, pending.body).then((r) => [r])),
+      await bounded(
+        Promise.resolve(target.api('consent', s.headers, pending.body)).then((r) => [r]),
+      ),
       'consent submission',
     ).toEqual([200])
-    const token = await connected(target, await signedIn())
+    const token = await within(connected(target, await signedIn()))
+    expect(token, 'consent and token exchange for a connection').not.toBe('TIMEOUT')
     expect(
-      await bounded(revoke(target, CLIENT, token).then((r) => [r])),
+      await bounded(revoke(target, CLIENT, token as string).then((r) => [r])),
       'valid revocation',
     ).toEqual([200])
     await sessionStillResolves(target)

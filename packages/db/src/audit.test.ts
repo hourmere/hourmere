@@ -98,6 +98,7 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         .executeTakeFirstOrThrow()
       expect(row.details).toEqual(details)
     }
+    // Every action times every probe key, each refused in the application and the database.
     for (const action of Object.keys(auditDetails) as AuditEvent['action'][]) {
       for (const key of [
         'unexpected',
@@ -185,7 +186,6 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         ),
         JSON.stringify(details),
       ).rejects.toMatchObject({ constraint: 'audit_events_details_check' })
-    // Every action times every probe key, each refused in the application and the database.
   }, 120_000)
   it('rolls back the change when audit fails and the event when the change fails', async () => {
     const id = randomUUID()
