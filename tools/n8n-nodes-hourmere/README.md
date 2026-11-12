@@ -69,7 +69,8 @@ A dry-run's exit code says nothing about where a publication would go. Without
 `--offline`, `npm publish --dry-run` queries the target registry for existing versions,
 ignores the failure and still exits 0, even for the unreachable placeholder. What counts
 is the `npm notice Publishing to <registry> … (dry-run)` line in its output.
-`npm publish --dry-run --ignore-scripts --offline` prints it without network access, and
+Outside CI, `npm publish --dry-run --ignore-scripts --offline` prints it without network
+access (in CI with an ID token, the OIDC exchange still runs), and
 the packaging tests assert that it names `https://registry.invalid/`. They also aim a
 non-dry-run publish with `--force` and `--offline`, outside CI, at a local sink and require
 `EPRIVATE` with no connection to it.
