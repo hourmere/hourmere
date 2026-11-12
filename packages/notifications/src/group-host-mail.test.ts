@@ -4,16 +4,18 @@ import { stripTypeScriptTypes } from 'node:module'
 import { interfaceLanguage } from '@hourmere/core/language'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { defineJob } from '@hourmere/jobs'
 import { escapeHtml, icsAttachment, type MailMessage } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import {
   groupFixture,
   insertSeat,
   occupiedSlot,
   transaction,
 } from '../../db/src/group-seats-fixtures.ts'
-import { deliverGroupHostMail, enqueueGroupHostMail } from './group-host-mail.ts'
+import { deliverGroupHostMail, enqueueGroupHostMail, groupHostMailJob } from './group-host-mail.ts'
 import type { NotificationDeps } from './index.ts'
 import {
   lockNotificationEmailBudget,
@@ -38,6 +40,8 @@ function sourceCopy(change?: [string, string], bindings: Record<string, unknown>
   )
   const deps = {
     sql,
+    defineJob,
+    z,
     randomUUID,
     escapeHtml,
     icsAttachment,
@@ -49,8 +53,9 @@ function sourceCopy(change?: [string, string], bindings: Record<string, unknown>
   }
   return new Function(
     ...Object.keys(deps),
-    `${source}; return {deliverGroupHostMail,enqueueGroupHostMail}`,
+    `${source}; return {deliverGroupHostMail,enqueueGroupHostMail,groupHostMailJob}`,
   )(...Object.values(deps)) as {
+    groupHostMailJob: typeof groupHostMailJob
     deliverGroupHostMail: typeof deliverGroupHostMail
     enqueueGroupHostMail: typeof enqueueGroupHostMail
   }
@@ -130,6 +135,123 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
       )
     ).rows
   }
+  async function dueReminders(count: number) {
+    // Every row belongs to this test file's disposable database.
+    await db.deleteFrom('group_slot_host_messages').execute()
+    const fixtures = []
+    for (let index = 0; index < count; index++) {
+      const f = await fixture()
+      await enqueueGroupHostMail(db, must(f.bookings[0]), f.now)
+      fixtures.push(f)
+    }
+    await sql`UPDATE group_slot_host_messages SET state='skipped' WHERE kind<>'reminder'`.execute(
+      db,
+    )
+    const first = must(fixtures[0])
+    first.deps.now = () => first.now.add({ hours: 24 })
+    return { ...first, fixtures }
+  }
+  async function verifyBulkReminders(makeJob: typeof groupHostMailJob) {
+    const f = await dueReminders(9)
+    const job = makeJob(f.deps)
+    await job.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
+    expect(f.sent).toHaveLength(9)
+    for (const occurrence of f.fixtures)
+      expect((await rows(occurrence.slot)).find((row) => row.kind === 'reminder')?.state).toBe(
+        'sent',
+      )
+    // Durable receipts still prevent duplicate reminders on subsequent worker runs.
+    await job.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
+    expect(f.sent).toHaveLength(9)
+  }
+  it('drains bulk occurrence reminders across batches in one worker run', () =>
+    verifyBulkReminders(groupHostMailJob))
+  it('kills restoring the four-message worker cap with a real assertion', async () => {
+    await verifyBulkReminders(sourceCopy().groupHostMailJob)
+    await expect(
+      verifyBulkReminders(
+        sourceCopy([
+          'while (performance.now() < deadline) {',
+          'if (performance.now() < deadline) {',
+        ]).groupHostMailJob,
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function verifyWorkerDeadline(change?: [string, string]) {
+    const f = await dueReminders(5)
+    let elapsed = 0
+    f.deps.mailer.send = async (message) => {
+      f.sent.push(message)
+      elapsed = 230_000
+    }
+    const job = sourceCopy(change, { performance: { now: () => elapsed } }).groupHostMailJob(f.deps)
+    await job.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
+    expect(f.sent).toHaveLength(1)
+    const pending = await db
+      .selectFrom('group_slot_host_messages')
+      .select(['state', 'attempts'])
+      .where('kind', '=', 'reminder')
+      .where('state', '=', 'pending')
+      .execute()
+    expect(pending).toHaveLength(4)
+    expect(pending.every((row) => row.attempts === 0)).toBe(true)
+    await groupHostMailJob(f.deps).handler(
+      {},
+      { id: randomUUID(), attempt: 1, signal: new AbortController().signal },
+    )
+    expect(f.sent).toHaveLength(5)
+  }
+  it('leaves unattempted reminders durable when the worker time budget runs out', () =>
+    verifyWorkerDeadline())
+  it('kills ignoring the worker deadline between deliveries with a real assertion', async () => {
+    await expect(
+      verifyWorkerDeadline(['if (performance.now() >= deadline) return', 'if (false) return']),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+  async function verifyLockedBatch(change?: [string, string]) {
+    const f = await dueReminders(1)
+    const reminder = must((await rows(f.slot)).find((row) => row.kind === 'reminder'))
+    const blocker = await owned.pool.connect()
+    let clockReads = 0
+    let elapsed = 0
+    const job = sourceCopy(change, {
+      performance: {
+        now: () => {
+          // Bound a broken drain loop without sleeps or a real 230-second wait.
+          if (++clockReads > 10) elapsed = 230_000
+          return elapsed
+        },
+      },
+    }).groupHostMailJob(f.deps)
+    try {
+      await blocker.query('BEGIN')
+      await blocker.query('SELECT id FROM group_slot_host_messages WHERE id=$1 FOR UPDATE', [
+        reminder.id,
+      ])
+      await job.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
+      expect(elapsed, 'a locked batch must stop before exhausting the worker deadline').toBe(0)
+      expect(f.sent).toHaveLength(0)
+      expect((await rows(f.slot)).find((row) => row.id === reminder.id)).toMatchObject({
+        state: 'pending',
+        attempts: 0,
+      })
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    await groupHostMailJob(f.deps).handler(
+      {},
+      { id: randomUUID(), attempt: 1, signal: new AbortController().signal },
+    )
+    expect(f.sent).toHaveLength(1)
+  }
+  it('stops a drain with no progress and retries locked rows on the next run', () =>
+    verifyLockedBatch())
+  it('kills busy-polling a locked batch with a real assertion', async () => {
+    await expect(
+      verifyLockedBatch(['if (!progressed) return', 'if (false) return']),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
   it('keeps one immutable host schedule per slot and gives calendar only the shared UID', async () => {
     const f = await fixture()
     for (const booking of f.bookings) await enqueueGroupHostMail(db, booking, f.now)

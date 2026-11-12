@@ -215,8 +215,8 @@ describe('invitee phone booking source-copy controls', () => {
     ],
     [
       'choice resolution before persistence',
-      'const choice = await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)',
-      'const choice = { location: null, locationOption: null }',
+      'await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)',
+      '{ location: null, locationOption: null }',
     ],
   ])('detects removal of %s', async (_name, before, after) => {
     await verifyLockedPhoneGuard(copiedBooking())
