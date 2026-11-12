@@ -7,6 +7,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -72,7 +73,7 @@ function copies(change?: Change, target: Source = 'handling'): { read: Read; lat
     `${compile('packages/scheduling/src/member-removal.ts', 'handling')}; return { read: getTeamMemberRemovalHandling, latest: getLatestTeamMemberRemovalHandling }`,
   )(...Object.values(bindings)) as { read: Read; latest: LatestRead }
 }
-const sourceCopy = (change?: Change, target?: Source) => copies(change, target).read
+const sourceCopy = (change?: Change, target?: Source) => guardCopy(copies(change, target).read)
 
 describe.skipIf(!serverUrl)('member removal handling service', () => {
   let owned: TestDatabase
@@ -232,9 +233,7 @@ describe.skipIf(!serverUrl)('member removal handling service', () => {
     ],
     ['handling', ['      totalCount,', '      totalCount: data.length,']],
   ])('detects handling projection mutation in %s: %s', async (target, change) => {
-    await expect(verify(sourceCopy(change, target))).rejects.toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(sourceCopy(change, target), verify)
   })
 
   async function verifyMatchingCount(read: Read) {
@@ -270,9 +269,7 @@ describe.skipIf(!serverUrl)('member removal handling service', () => {
       ],
       'team',
     )
-    await expect(verifyMatchingCount(read)).rejects.toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(read, verifyMatchingCount)
   })
 
   async function verifyDenial(read: Read, kind: 'member' | 'foreign' | 'role_record' | 'leave') {
@@ -316,9 +313,7 @@ describe.skipIf(!serverUrl)('member removal handling service', () => {
     ['role_record', [".where('operation', '=', 'member_removed')", '']],
     ['leave', [".whereRef('actor_user_id', '!=', 'target_user_id')", '']],
   ])('detects bypassing %s handling access', async (kind, change) => {
-    await expect(verifyDenial(sourceCopy(change), kind)).rejects.toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(sourceCopy(change), (read) => verifyDenial(read, kind))
   })
 
   async function verifyLatest(read: LatestRead) {
@@ -361,8 +356,6 @@ describe.skipIf(!serverUrl)('member removal handling service', () => {
     ["query = query.where('target_user_id', '=', input.memberUserId)", 'query = query'],
     [".orderBy('occurred_at', 'desc')", ".orderBy('occurred_at', 'asc')"],
   ])('detects broken latest-record discovery %s', async (before, after) => {
-    await expect(verifyLatest(copies([before, after]).latest)).rejects.toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(guardCopy(copies([before, after]).latest), verifyLatest)
   })
 })

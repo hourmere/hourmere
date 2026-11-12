@@ -6,6 +6,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import type { Question } from './questions.ts'
 import * as Config from './routing-form-config.ts'
 import * as Targets from './routing-form-targets.ts'
@@ -24,9 +25,9 @@ async function sourceCopy<T>(file: string, from: string, to: string): Promise<T>
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(
-    `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
-  ) as Promise<T>
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  ) as T
 }
 
 const uuid = (n: number) => `00000000-0000-4000-a000-${String(n).padStart(12, '0')}`
@@ -552,10 +553,13 @@ const targetMutations: {
 ]
 
 describe('routing validation and evaluation source-copy mutations', () => {
+  // Some removed guards make the code crash instead of refusing; the unmutated copy tells
+  // that apart from a broken copy.
   it.each(configMutations)('detects removed $name', async ({ from, to, verify }) => {
     verify(Config)
     const copy = await sourceCopy<ConfigModule>('./routing-form-config.ts', from, to)
-    expect(() => verify(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    const unmutated = await sourceCopy<ConfigModule>('./routing-form-config.ts', from, from)
+    await expectKilled(copy, verify, { unmutated })
   })
 
   it.each(targetMutations)(
@@ -563,7 +567,8 @@ describe('routing validation and evaluation source-copy mutations', () => {
     async ({ from, to, verify }) => {
       verify(Targets)
       const copy = await sourceCopy<TargetsModule>('./routing-form-targets.ts', from, to)
-      expect(() => verify(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+      const unmutated = await sourceCopy<TargetsModule>('./routing-form-targets.ts', from, from)
+      await expectKilled(copy, verify, { unmutated })
     },
   )
 })
@@ -662,7 +667,7 @@ describe.skipIf(!serverUrl)('routing target loading source-copy mutations', () =
   ])('detects a projection that ignores the $name', async ({ from, to, verify }) => {
     await verify(Targets)
     const copy = await sourceCopy<TargetsModule>('./routing-form-targets.ts', from, to)
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
     expect(owned.pool.totalCount).toBeLessThanOrEqual(10)
   })
 })

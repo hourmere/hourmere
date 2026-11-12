@@ -10,6 +10,7 @@ import { createTestTeam, createTestUser, type TestUser } from '@hourmere/schedul
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { manageInvitation } from '../../../packages/auth/src/invitations.ts'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:44831'
@@ -48,9 +49,11 @@ async function admissionCopy(disableOriginalInviterCheck = false) {
       return `from '${resolved}'`
     },
   )
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
-  )) as typeof import('../../../packages/auth/src/invitations.ts')
+  return guardCopy(
+    (await import(
+      `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+    )) as typeof import('../../../packages/auth/src/invitations.ts'),
+  )
 }
 
 describe.skipIf(!serverUrl)('departed original inviter recovery with PostgreSQL', () => {
@@ -316,11 +319,9 @@ describe.skipIf(!serverUrl)('departed original inviter recovery with PostgreSQL'
   it.each(['resend', 'expired replacement', 'replay'] as const)(
     'detects removal of the original-inviter check for %s with a real assertion',
     async (action) => {
-      await expect(
-        verifyAdmission(action, (await admissionCopy(true)).manageInvitation),
-      ).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(await admissionCopy(true), (copy) =>
+        verifyAdmission(action, copy.manageInvitation),
+      )
     },
   )
 })

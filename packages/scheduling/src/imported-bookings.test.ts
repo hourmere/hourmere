@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as availability from './availability.ts'
 import * as bookings from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
@@ -18,7 +19,11 @@ const range = {
   end: Temporal.Instant.from('2026-11-03T17:00:00Z'),
 }
 
-async function sourceCopy<T>(name: string, before: string, after: string): Promise<T> {
+async function sourceCopy<T extends object>(
+  name: string,
+  before: string,
+  after: string,
+): Promise<T> {
   const location = new URL(name, import.meta.url)
   const original = readFileSync(location, 'utf8')
   expect(original.includes(before), 'mutation must match production source').toBe(true)
@@ -27,7 +32,9 @@ async function sourceCopy<T>(name: string, before: string, after: string): Promi
     (_, specifier: string) =>
       `from '${specifier.startsWith('node:') ? specifier : specifier.startsWith('.') ? new URL(specifier, location).href : pathToFileURL(createRequire(location).resolve(specifier)).href}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  return guardCopy<T>(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  )
 }
 
 const readonlyError = { kind: 'conflict', code: 'imported_booking_read_only' }
@@ -279,7 +286,7 @@ describe.skipIf(!serverUrl)('imported local-only booking protection', () => {
     ],
   ] as const)('kills source-copy mutation of %s', async (_, path, before, after, verify) => {
     const copy = await sourceCopy<typeof bookings & typeof manage>(path, before, after)
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
   })
   it('kills an availability mutation that ignores imported busy records', async () => {
     const copy = await sourceCopy<typeof availability>(
@@ -287,6 +294,6 @@ describe.skipIf(!serverUrl)('imported local-only booking protection', () => {
       ".where('bh.active', '=', true)",
       ".where('bh.active', '=', true).where('b.source', '<>', 'import')",
     )
-    await expect(verifyBusy(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verifyBusy)
   })
 })
