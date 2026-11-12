@@ -236,9 +236,12 @@ The service, not user input, controls lifecycle timestamps/revisions and token d
 Organization deletion cascades poll data; event soft deletion leaves history but blocks
 new writes. Creator deletion nulls attribution, without transferring personal poll access.
 Privacy deletion of a poll removes its voters, answers, votes, tokens and deliveries;
-operation tombstones retain only non-personal replay identity for the configured retention
-window. Normal terminal retention uses the installation's booking-data retention policy;
-implementation must document an explicit cleanup schedule, including abandoned open polls.
+operation tombstones retain only pseudonymous replay identity for the configured retention
+window: the organization ID and an unkeyed digest of the acting user, API key or OAuth
+grant. Anyone holding that bare ID can recompute the digest, and in a personal space the
+organization ID itself identifies the user. Normal terminal retention uses the
+installation's booking-data retention policy; implementation must document an explicit
+cleanup schedule, including abandoned open polls.
 Booking retention is independent. Deleting a linked booking must first clear/delete the
 poll's personal history consistently, rather than leave a broken scheduled-pair invariant.
 
@@ -251,6 +254,28 @@ The deadline must precede every candidate start and leave the event's current mi
 before the earliest candidate. No hold rows, provisional bookings or external calendar
 writes while open: a long-running poll must not monopolize the host's calendar or consume
 booking limits. Clearly describe candidates as proposals, not reservations.
+
+The A2 create service implements this check. It resolves the event the way ID-addressed
+booking does (one-time links use the same resolution, so a personal owner needs a public
+handle), and asks the engine whether it offers exactly each candidate's interval at the
+creation instant: `intersectSlots` over every host for individual and collective events,
+`unionRoundRobinSlots` over the eligible pool for round-robin. That covers schedules and
+date overrides in the host's zone, calendar busy time, confirmed bookings and unexpired
+payment holds, minimum notice, booking window, buffers and booking limits. Errors, all 409:
+
+- `slot_unavailable`, the existing booking-service code, when any candidate is not offered.
+  The error lists every refused start, in order, as `unavailableStarts`; transports report
+  it with the field hint `candidateStarts`.
+- `event_type_unavailable` when the event takes no bookings at all (for example, a host who
+  is no longer a verified member, or round-robin turned off).
+- `calendar_sync_unavailable` when a host calendar is stale, as in booking.
+- `poll_event_changed` when the hosts changed while creation waited for their locks.
+
+Creation takes public booking's host phase: an unlocked read names the hosts, then their
+sorted booking advisory locks, then the event `FOR SHARE` and host users and members
+`FOR SHARE`, and it compares the locked host set with the named one. A booking that
+committed first is seen and refuses its candidate; a booking that starts later waits for the
+creation to commit and then books normally, because candidates are not holds.
 
 Recheck availability when viewing host results, but treat it as advisory. Busy candidates
 remain visible with ballots preserved; no automatic vote migration. Unknown/stale calendar
@@ -512,7 +537,7 @@ reservation's capacity, or extends credential validity. The schedule is:
 | Expired public pending voters | Delete on the first hourly sweep after `pending_expires_at`, cascading votes, capabilities and deliveries. Enrollment/invitation replaces expired rows synchronously when needed; no name, mailbox, responses or IP digest remains after cleanup. |
 | Capability ciphertext | Clear immediately on revocation and on the first hourly sweep after expiry. Preserve a voting digest for read-only own-ballot access until poll deletion/retention; expired public pending rows are deleted entirely. |
 | Mailbox counters | Keep counters, reminder receipt, opt-out and removal digest for the entire retained poll lifetime, with no voter FK and no early purge/reset. Set `purge_at` only when the parent retention policy makes the poll due; delete the poll and its counters together. Poll privacy deletion cascades immediately. |
-| Operation receipts | Keep minimal receipts while their poll is retained. On poll deletion erase poll/booking references (`poll_id` and `booking_id`); keep only non-personal replay digests for 90 days from deletion, then delete in the first hourly sweep at or after `purge_at`. Organization deletion cascades immediately. |
+| Operation receipts | Keep minimal receipts while their poll is retained. On poll deletion erase poll/booking references (`poll_id` and `booking_id`); keep only pseudonymous replay digests for 90 days from deletion (the organization ID and an unkeyed digest of the acting user, API key or OAuth grant), then delete in the first hourly sweep at or after `purge_at`. Organization deletion cascades immediately. |
 | Recipient deliveries | Erase ciphertext immediately on sent/suppressed/skipped terminal transition. Retain the minimal terminal recipient receipt for the poll lifetime to prevent duplicate reminders/outcomes; voter/poll deletion cascades. Expired claims keep their attempt count; allow at most 5 attempts with a 5-minute lease, then terminally skip and clear ciphertext. |
 
 Workers and retention-policy integration land in the later cleanup and delivery steps;
@@ -572,6 +597,7 @@ always returns uniform 202 while enforcing its per-mailbox cooldown/cap, and re-
 | 409 `poll_link_unavailable` | Rotate-link on an invited-mode poll, which has no public link |
 | 409 `poll_already_created`, `poll_already_scheduled`, `poll_link_already_rotated`, `idempotency_key_reused` | Explicit replay/conflicting intent outcomes |
 | 409 `poll_event_changed`, `slot_taken`, `calendar_sync_unavailable` | Refresh or choose another time; no partial booking or token consumption |
+| 409 `slot_unavailable`, `event_type_unavailable` | Create: a candidate the availability engine does not offer now (with `unavailableStarts`), or an event that takes no bookings; existing booking-service codes |
 | 429 `rate_limited` | Existing request/mail abuse boundary; Retry-After when known |
 
 Retain existing booking-service validation/conflict codes where applicable rather than
@@ -603,11 +629,11 @@ so every available creation surface has a working results destination without a 
 | Stage / day-sized sub-step | Depends on | Endpoint / MCP / CLI ownership | Flag state | Deliverable and acceptance |
 |---|---|---|---|---|
 | A1 Storage and service: schema | None | None; storage only | No flag; no transport | Poll, candidates, voters, votes, capabilities, mailbox counters, operation receipts and recipient delivery storage/types. Test scoped FKs, lifecycle pairs and caps; populated predecessor preservation, fresh install and no-op migration. Encode numeric admission controls and choose cleanup schedule before service admission lands. |
-| A2 Storage and service: host lifecycle | A1 | None; internal service only | No flag; no transport | Create/read, authority, close/cancel/delete and link rotation services on polls without voters. Test tenant/role/context loss, no holds, immutable settings, idempotent receipts and `expectedHostRevision` on close, cancel, delete and rotate-link. A2 must enforce service-only invariants: immutable event, duration, deadline, admission mode, visibility and settings snapshot/fingerprint; no reopening of closed or canceled polls; public-link polls retain a public token except during deletion. A1 validates candidate duration and start-after-deadline only on slot writes, not parent updates. Voter-dependent results, removal and privacy cascades belong to A4a and A4b. |
+| A2 Storage and service: host lifecycle | A1 | None; internal service only | No flag; no transport | Create/read, authority, close/cancel/delete and link rotation services on polls without voters. Create validates every candidate against the availability engine (see [Availability and atomic finalization](#availability-and-atomic-finalization)). Test tenant/role/context loss, no holds, immutable settings, idempotent receipts and `expectedHostRevision` on close, cancel, delete and rotate-link. A2 must enforce service-only invariants: immutable event, duration, deadline, admission mode, visibility and settings snapshot/fingerprint; no reopening of closed or canceled polls; public-link polls retain a public token except during deletion. A1 validates candidate duration and start-after-deadline only on slot writes, not parent updates. Voter-dependent results, removal and privacy cascades belong to A4a and A4b. |
 | A3a Storage and service: enrollment and verification | A2 | None; internal service only | No flag; no transport | Enroll/invite/verify/recover/resend and purpose-specific credentials. Test 40-person capacity, atomic batch rejection, invitation outcomes for active, verified, pending and expired mailboxes, per-IP pending cap, public pending expiry freeing slots, durable invited places and credentials, recovery re-delivering the unchanged credential without revoking it, separate recovery and resend counters, full 409 uniformity and no expired capability reuse. |
 | A3b Storage and service: ballots and deadline | A3a | None; internal service only | No flag; no transport | Submit/replace full ballots, withdraw/reactivate and opt-out. Test ballot and results revisions, voter writes never changing the host revision, reacquiring capacity, consent, purpose separation and unchanged invitations of withdrawn mailboxes; exact database-clock deadline equality and a transaction waiting across the deadline race; ballots read-only after deadline. |
 | A4a Storage and service: results and removal | A3b | None; internal service only | No flag; no transport | Results projection, remove voter/bulk remove-unverified, voter-row deletion behind mailbox tombstones, removal/rejoin blocks, host re-invitation of removed mailboxes and retained invitation eligibility. Test that a voter replacing their ballot every second cannot make close, cancel, rotate-link, remove-voter or remove-unverified fail with `poll_changed`, while removal changes the results revision; only the mailbox counter row outlives removal; retained abuse accounting and no lost opt-outs or reset budgets across removal and re-invitation. |
-| A4b Storage and service: cleanup and deletion | A4a | None; internal service only | No flag; no transport | Bounded terminal cleanup and expired public pending row cleanup, privacy-deletion cascades and deletion races. Test that a voter replacing their ballot every second cannot make delete fail with `poll_changed`, delayed workers never retaining public pending capacity, consistent booking-history deletion, no personal data after expiry cleanup or poll deletion beyond non-personal replay tombstones, and audit shared lock order including deletion/cascade paths. |
+| A4b Storage and service: cleanup and deletion | A4a | None; internal service only | No flag; no transport | Bounded terminal cleanup and expired public pending row cleanup, privacy-deletion cascades and deletion races. Test that a voter replacing their ballot every second cannot make delete fail with `poll_changed`, delayed workers never retaining public pending capacity, consistent booking-history deletion, no personal data after expiry cleanup or poll deletion beyond the pseudonymous replay tombstones, and audit shared lock order including deletion/cascade paths. |
 | B1 Public voting page: verification mail foundation | A4b | None; workers and internal delivery only | No flag; no transport | Invitation/verification/recovery/resend durable delivery, encrypted capabilities and finite leases/retries, using the existing outbox machinery. Test recovery re-delivering the unchanged credential (nothing after public pending expiry or the deadline), invited credentials remaining valid until deadline, budgets, host-resend generation rotation, terminal suppression and the SMTP duplicate window with fakes. |
 | B2 Public voting page: public transports | B1 | All public REST operations, matching MCP tools and CLI commands together | No flag; public transports available | Own public read/enroll/verify/recover/vote/withdraw/opt-out, OpenAPI/generated types and no-login checks; ship scope classification and matching MCP/CLI adapters together. CLI secrets must be read from stdin from this first step, never argv. Test service parity, invalid bearer, secret redaction, full-capacity responses and no-valid-token recovery entry. |
 | B3 Public voting page: ballot UI | B2 | None added; consumes B2 REST | No flag; public page available | No login; verification/recovery, consent, ballots/edit/withdraw, timezone selection and read-only closure. Keyboard/screen-reader access and usable 320px stacked layout without overflow; all shipped locales, private/aggregate disclosures, neutral loading/403/errors, duplicate/stale submit, DST and midnight zone changes preserving slot IDs. Browser checks only through approved escalation/CI. |

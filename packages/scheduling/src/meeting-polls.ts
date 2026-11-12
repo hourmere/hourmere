@@ -4,14 +4,21 @@
 //
 // Every host write takes the shared order: the transport's organization-write hook, actor
 // user SHARE, organization SHARE, actor membership SHARE, then the poll row FOR UPDATE and
-// its event FOR SHARE. The database clock is captured once after those locks and is the
-// only clock used for lifecycle decisions.
+// its event FOR SHARE. Creation instead takes public booking's host phase after the actor
+// locks: the hosts' sorted booking locks, the event FOR SHARE, then host users and members
+// SHARE. The database clock is captured once after those locks and is the only clock used
+// for lifecycle and availability decisions.
 import { createHash, randomBytes } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
-import { selectDurationMinutes } from './availability.ts'
-import { canonicalJson } from './bookings.ts'
+import {
+  findOneTimeEventType,
+  intersectSlots,
+  selectDurationMinutes,
+  unionRoundRobinSlots,
+} from './availability.ts'
+import { canonicalJson, lockHosts } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isUuid, validTimeZone } from './internal.ts'
@@ -94,6 +101,23 @@ export class MeetingPollAlreadyCreatedError extends DomainError {
   }
 }
 
+/**
+ * Candidates the availability engine does not offer at creation. `unavailableStarts` lists
+ * every refused start in chronological order, so a host can replace exactly those times.
+ */
+export class MeetingPollSlotUnavailableError extends DomainError {
+  readonly unavailableStarts: string[]
+
+  constructor(unavailableStarts: string[]) {
+    super(
+      'conflict',
+      'slot_unavailable',
+      'Every candidate must be a time this event can be booked now. Choose other times.',
+    )
+    this.unavailableStarts = unavailableStarts
+  }
+}
+
 export const MEETING_POLL_PAGE_DEFAULT = 50
 export const MEETING_POLL_PAGE_MAX = 100
 
@@ -133,6 +157,12 @@ const keyReused = () =>
     'conflict',
     'idempotency_key_reused',
     'This Idempotency-Key was already used for a different request.',
+  )
+const eventChanged = () =>
+  new DomainError(
+    'conflict',
+    'poll_event_changed',
+    'This event type’s hosts changed while the poll was being created. Try again.',
   )
 
 const UTC_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
@@ -195,9 +225,11 @@ export async function meetingPollEventSettings(
 }
 
 /**
- * Create an open poll for an event the caller manages. Candidates are proposals only: no
- * booking, hold, calendar write or notification is created. Requires an idempotency key;
- * an exact replay throws MeetingPollAlreadyCreatedError and never returns another link.
+ * Create an open poll for an event the caller manages. Every candidate must be a slot the
+ * availability engine offers at creation, as public booking would check it; candidates
+ * stay proposals only: no booking, hold, calendar write or notification is created.
+ * Requires an idempotency key; an exact replay throws MeetingPollAlreadyCreatedError and
+ * never returns another link.
  */
 export async function createMeetingPoll(
   ctx: ServiceContext,
@@ -210,6 +242,18 @@ export async function createMeetingPoll(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)
     const authority = await lockAuthority(trx, ctx)
+    const named = await trx
+      .selectFrom('event_types')
+      .select(['id', 'owner_user_id'])
+      .where('id', '=', request.eventTypeId)
+      .where('organization_id', '=', ctx.principal.organization.id)
+      .executeTakeFirst()
+    if (!named || !manages(authority, named.owner_user_id)) throw eventNotFound()
+    // Public booking's host phase: an unlocked read names the hosts, whose sorted booking
+    // locks precede the event share lock. A booking of these hosts that committed earlier
+    // is visible to the availability check below; a later one waits for this commit.
+    const hostUserIds = (await findOneTimeEventType(trx, named.id))?.hostUserIds ?? []
+    await lockHosts(trx, hostUserIds)
     const event = await trx
       .selectFrom('event_types')
       .select([
@@ -265,6 +309,7 @@ export async function createMeetingPoll(
     )
     const createdAt = await clock(trx)
     validateSchedule(createdAt, deadlineAt, starts, event.minimum_notice_minutes)
+    await requireBookableCandidates(trx, event.id, hostUserIds, starts, durationMinutes, createdAt)
     const settings = await meetingPollEventSettings(trx, event.id, durationMinutes)
     const publicToken =
       request.admissionMode === 'public_link' ? randomBytes(32).toString('base64url') : null
@@ -432,7 +477,8 @@ export async function cancelMeetingPoll(
 
 /**
  * Delete a poll in any state. Its candidates and stored digests go with it, its receipts
- * keep only non-personal replay identity, and a linked booking is preserved.
+ * keep only pseudonymous replay identity (the organization ID and an unkeyed digest of the
+ * acting user, API key or OAuth grant), and a linked booking is preserved.
  */
 export async function deleteMeetingPoll(
   ctx: ServiceContext,
@@ -850,6 +896,76 @@ function validateSchedule(
     throw invalidPoll(
       'Every candidate must start after deadlineAt, leaving the event’s minimum notice',
     )
+}
+
+/**
+ * Every candidate must be a slot the availability engine offers at the creation instant,
+ * exactly as public booking checks a start: the hosts' schedules and date overrides,
+ * calendar busy time, confirmed bookings and live payment holds, minimum notice, booking
+ * window, buffers and booking limits. Individual and collective events need every host
+ * free; round-robin events need one eligible pool host. Call while holding the booking
+ * locks of `lockedHostUserIds`, the hosts named before the event share lock.
+ */
+async function requireBookableCandidates(
+  trx: Db,
+  eventTypeId: string,
+  lockedHostUserIds: readonly string[],
+  starts: readonly string[],
+  durationMinutes: number,
+  createdAt: string,
+) {
+  let event: Awaited<ReturnType<typeof findOneTimeEventType>>
+  try {
+    // ID-addressed booking's resolution, host eligibility and host user/member locks.
+    event = await findOneTimeEventType(trx, eventTypeId, { lock: true })
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'booking_changed') throw eventChanged()
+    throw error
+  }
+  if (!event)
+    throw new DomainError(
+      'conflict',
+      'event_type_unavailable',
+      'This event type does not take bookings right now',
+    )
+  if (event.hostUserIds.join() !== lockedHostUserIds.join()) throw eventChanged()
+  const now = Temporal.Instant.from(createdAt)
+  const unavailable: string[] = []
+  for (const start of starts) {
+    const from = Temporal.Instant.from(start)
+    const to = from.add({ minutes: durationMinutes })
+    const offered =
+      event.schedulingType === 'round_robin'
+        ? await unionRoundRobinSlots(
+            trx,
+            event.id,
+            event.eligibleHostUserIds,
+            from,
+            to,
+            now,
+            durationMinutes,
+          )
+        : await intersectSlots(
+            trx,
+            event.id,
+            event.hostUserIds,
+            from,
+            to,
+            now,
+            undefined,
+            event.schedulingType === 'collective',
+            durationMinutes,
+          )
+    if (
+      !offered.some(
+        (slot) =>
+          Temporal.Instant.from(slot.start).equals(from) &&
+          Temporal.Instant.from(slot.end).equals(to),
+      )
+    )
+      unavailable.push(start)
+  }
+  if (unavailable.length > 0) throw new MeetingPollSlotUnavailableError(unavailable)
 }
 
 // --- Projection ----------------------------------------------------------------------------

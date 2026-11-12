@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -7,7 +7,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { canonicalJson } from './bookings.ts'
+import { canonicalJson, lockHosts } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import * as Polls from './meeting-polls.ts'
@@ -17,6 +17,7 @@ import {
   createTestUser,
   type TestUser,
   testContext,
+  weekdays,
 } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -51,8 +52,17 @@ async function failure(fn: () => Promise<unknown>) {
     (caught: unknown) => caught,
   )
   if (!(error instanceof Error)) expect.unreachable('expected the operation to fail')
-  const domain = error as Partial<DomainError> & { pollId?: string | null }
-  return { name: error.name, kind: domain.kind, code: domain.code, pollId: domain.pollId }
+  const domain = error as Partial<DomainError> & {
+    pollId?: string | null
+    unavailableStarts?: string[]
+  }
+  return {
+    name: error.name,
+    kind: domain.kind,
+    code: domain.code,
+    pollId: domain.pollId,
+    unavailableStarts: domain.unavailableStarts,
+  }
 }
 
 /** Expected success, reported as an assertion so that a throwing mutant is not a crash. */
@@ -97,11 +107,19 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     return Temporal.Instant.from(rows[0]?.now as string)
   }
 
-  /** Deadline one day from the database clock; candidates deliberately out of order. */
+  /** A whole-hour deadline about a day after the database clock. */
+  async function nextDeadline() {
+    return (await databaseNow()).round({ smallestUnit: 'hour', roundingMode: 'ceil' }).add({
+      hours: 24,
+    })
+  }
+
+  /**
+   * Deadline one day from the database clock; candidates deliberately out of order. Whole
+   * hours are on every test event's slot grid, as a bookable candidate must be.
+   */
   async function input(eventTypeId: string, overrides: Partial<Input> = {}): Promise<Input> {
-    const deadline = (await databaseNow())
-      .round({ smallestUnit: 'minute', roundingMode: 'ceil' })
-      .add({ hours: 24 })
+    const deadline = await nextDeadline()
     return {
       eventTypeId,
       candidateStarts: [
@@ -116,26 +134,71 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     }
   }
 
-  async function personal(event: Parameters<typeof fixtures.eventType>[2] = {}) {
+  type ScheduleOptions = Parameters<typeof fixtures.schedule>[1]
+  /** Every day around the clock in UTC, so any whole-hour candidate is bookable. */
+  const ALWAYS: ScheduleOptions = {
+    timeZone: 'UTC',
+    weeklyHours: {
+      ...weekdays({ start: '00:00', end: '24:00' }),
+      saturday: [{ start: '00:00', end: '24:00' }],
+      sunday: [{ start: '00:00', end: '24:00' }],
+    },
+  }
+
+  /** A personal event whose owner has a public handle and, by default, no busy hours. */
+  async function personal(
+    event: Parameters<typeof fixtures.eventType>[2] = {},
+    schedule: ScheduleOptions = ALWAYS,
+  ) {
     const user = await createTestUser(db, 'Personal Owner')
     const organizationId = user.principal.organization.id
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: user.id,
+        handle: `poll-${randomBytes(6).toString('hex')}`,
+        time_zone: 'UTC',
+      })
+      .execute()
+    await fixtures.schedule(user.id, schedule)
     const eventTypeId = await fixtures.eventType(organizationId, user.id, event)
     return { user, organizationId, eventTypeId, ctx: testContext(db, session(user.principal)) }
   }
 
-  async function team(event: Parameters<typeof fixtures.eventType>[2] = {}) {
+  type TeamRole = 'admin' | 'owner' | 'member'
+  /** A team event hosted, by default, by the ordinary member alone; everyone is free. */
+  async function team(
+    event: Parameters<typeof fixtures.eventType>[2] = {},
+    {
+      hosts = ['member'],
+      schedulingType = 'individual',
+    }: { hosts?: TeamRole[]; schedulingType?: 'individual' | 'collective' | 'round_robin' } = {},
+  ) {
     const admin = await createTestUser(db, 'Team Admin')
     const owner = await createTestUser(db, 'Team Owner')
     const member = await createTestUser(db, 'Configured Host')
+    for (const user of [admin, owner, member]) await fixtures.schedule(user.id, ALWAYS)
     const t = await createTestTeam(db, [
       { user: admin, role: 'admin' },
       { user: owner, role: 'owner' },
       { user: member, role: 'member' },
     ])
+    const users = { admin, owner, member }
     const eventTypeId = await fixtures.eventType(t.id, null, {
-      hosts: [{ userId: member.id }, { userId: admin.id }],
+      hosts: hosts.map((role) => ({ userId: users[role].id })),
       ...event,
     })
+    if (schedulingType !== 'individual')
+      await db
+        .updateTable('event_types')
+        .set({ scheduling_type: schedulingType })
+        .where('id', '=', eventTypeId)
+        .execute()
+    if (schedulingType === 'round_robin')
+      await db
+        .insertInto('round_robin_state')
+        .values({ event_type_id: eventTypeId, enabled: true })
+        .execute()
     const as = (user: TestUser) => testContext(db, session(t.as(user)))
     return {
       team: t,
@@ -149,6 +212,79 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       memberCtx: as(member),
       as,
     }
+  }
+
+  /** A booking with its host rows, written as the booking path stores them. */
+  async function book(
+    executor: Db,
+    organizationId: string,
+    hostUserIds: string[],
+    start: string,
+    {
+      minutes = 30,
+      eventTypeId = null,
+      status = 'confirmed',
+      holdExpiresAt = null,
+    }: {
+      minutes?: number
+      eventTypeId?: string | null
+      status?: 'confirmed' | 'cancelled' | 'pending_payment'
+      holdExpiresAt?: string | null
+    } = {},
+  ) {
+    const row = await executor
+      .insertInto('bookings')
+      .values({
+        organization_id: organizationId,
+        event_type_id: eventTypeId,
+        status,
+        cancelled_at: status === 'cancelled' ? new Date() : null,
+        payment_hold_expires_at: holdExpiresAt,
+        start_at: start,
+        end_at: Temporal.Instant.from(start).add({ minutes }).toString(),
+        title: 'Fixture booking',
+        manage_token_hash: randomBytes(32),
+        source: 'api',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await executor
+      .insertInto('booking_hosts')
+      .values(hostUserIds.map((user_id) => ({ booking_id: row.id, user_id })))
+      .execute()
+    return row.id
+  }
+
+  /** Create with exactly these candidates and a fresh key. */
+  async function propose(
+    M: PollModule,
+    ctx: ServiceContext,
+    eventTypeId: string,
+    candidateStarts: string[],
+    deadline?: Temporal.Instant,
+  ) {
+    return M.createMeetingPoll(ctx, {
+      ...(await input(eventTypeId)),
+      ...(deadline && { deadlineAt: deadline.toString() }),
+      candidateStarts,
+    })
+  }
+
+  /** Whole-hour candidates from a day after a whole-hour deadline, earliest first. */
+  async function hourly(count: number) {
+    const deadline = await nextDeadline()
+    return {
+      deadline,
+      starts: Array.from({ length: count }, (_, i) => deadline.add({ hours: 25 + i }).toString()),
+    }
+  }
+
+  async function pollsOf(eventTypeId: string) {
+    return db
+      .selectFrom('meeting_polls')
+      .select('id')
+      .where('event_type_id', '=', eventTypeId)
+      .execute()
   }
 
   async function stored(id: string) {
@@ -539,7 +675,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   async function verifyFixedSettings(M: PollModule) {
     const s = await team({
       title: 'Planning',
-      questions: [{ id: 'topic', label: 'Topic', type: 'text', required: true }],
+      questions: [{ id: 'topic', label: 'Topic', type: 'short_text', required: true }],
       allowGuests: true,
       location: { kind: 'in_person', address: 'Main office' },
     })
@@ -603,7 +739,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   it('creates an open public-link poll with a one-time link, sorted candidates and a snapshot', async () => {
     const s = await personal({
       title: 'Intro call',
-      questions: [{ id: 'notes', label: 'Notes', type: 'text', required: false }],
+      questions: [{ id: 'notes', label: 'Notes', type: 'short_text', required: false }],
       allowGuests: true,
     })
     await db
@@ -657,7 +793,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       durationMinutes: 60,
       location: null,
       locations: null,
-      questions: [{ id: 'notes', label: 'Notes', type: 'text', required: false }],
+      questions: [{ id: 'notes', label: 'Notes', type: 'short_text', required: false }],
       schedulingType: 'individual',
       bookingMode: 'individual',
       hostUserIds: [s.user.id],
@@ -716,7 +852,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     const s = await personal({ minimumNoticeMinutes: 120 })
     // Unrounded: creation reads the database clock later, so elapsed time only shrinks.
     const now = await databaseNow()
-    const deadline = now.add({ hours: 24 })
+    // A whole hour, so that the accepted candidates sit on the event's slot grid.
+    const deadline = now.round({ smallestUnit: 'hour', roundingMode: 'ceil' }).add({ hours: 24 })
     const at = (hours: number) => deadline.add({ hours }).toString()
     const state = await tableCounts()
     const cases: [Partial<Input>, string][] = [
@@ -823,7 +960,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   async function verifyBounds(M: PollModule) {
     const noticed = await personal({ minimumNoticeMinutes: 120 })
     const immediate = await personal()
-    const pinned = (await databaseNow()).round({ smallestUnit: 'second', roundingMode: 'floor' })
+    // A whole hour, so every accepted candidate sits on the slot grid.
+    const pinned = (await databaseNow()).round({ smallestUnit: 'hour', roundingMode: 'floor' })
     const clock = globalThis as { meetingPollClock?: string }
     clock.meetingPollClock = pinned.toString()
     try {
@@ -844,7 +982,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
         [
           [noticed, min, min.add({ hours: 2 })],
           [noticed, max, max.add({ hours: 2 })],
-          [immediate, min, min.add(µs)],
+          [immediate, min.add({ hours: 1 }).subtract(µs), min.add({ hours: 1 })],
         ]
       for (const [s, deadline, earliest] of accepted) {
         const { poll } = await succeeds(() => attempt(s, deadline, earliest))
@@ -878,8 +1016,9 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   it('normalizes instants to database microseconds before storing and fingerprinting', async () => {
     const s = await personal()
     const request = await input(s.eventTypeId)
+    // Sub-microsecond, so the stored value is the whole hour on the slot grid.
     const precise = Temporal.Instant.from(request.candidateStarts[0] as string).add({
-      nanoseconds: 1_234_567,
+      nanoseconds: 400,
     })
     const offset = Temporal.Instant.from(request.candidateStarts[1] as string).toString({
       timeZone: 'America/New_York',
@@ -891,6 +1030,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     )
     const rounded = Temporal.Instant.from(rows[0]?.value as string)
     expect(rounded.epochNanoseconds % 1000n).toBe(0n)
+    expect(rounded.equals(precise)).toBe(false)
+    expect(rounded.toString()).toBe(request.candidateStarts[0])
     const { poll } = await Polls.createMeetingPoll(s.ctx, {
       ...request,
       candidateStarts: [precise.toString(), offset],
@@ -1340,7 +1481,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     await verifyPublicToken(Polls)
   })
 
-  it('deletes scheduled polls without their booking and keeps only anonymous receipts', async () => {
+  it('deletes scheduled polls without their booking and keeps only pseudonymous receipts', async () => {
     const s = await team()
     const { poll } = await Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId))
     await Polls.rotateMeetingPollLink(s.ctx, {
@@ -1408,7 +1549,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
   async function verifyCreateRace(M: PollModule) {
     const s = await team()
     const request = await input(s.eventTypeId)
-    // Both creators pass authority and then queue on the event row together.
+    // Both creators pass authority; one queues on the event row, the other on its hosts.
     const results = await queuedBehind(
       (trx) =>
         trx
@@ -1436,6 +1577,28 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
         .where('event_type_id', '=', s.eventTypeId)
         .execute(),
     ).toHaveLength(1)
+
+    // Events with different hosts share no booking lock, so only the receipt lock orders
+    // one key reused for another event: the loser conflicts instead of failing on storage.
+    const elsewhere = await fixtures.eventType(s.organizationId, null, {
+      hosts: [{ userId: s.owner.id }],
+    })
+    const key = randomUUID()
+    const reused = await queuedBehind(
+      (trx) =>
+        trx
+          .selectFrom('event_types')
+          .select('id')
+          .where('id', 'in', [s.eventTypeId, elsewhere])
+          .forUpdate()
+          .execute(),
+      async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId, { idempotencyKey: key })),
+      async () => M.createMeetingPoll(s.ctx, await input(elsewhere, { idempotencyKey: key })),
+    )
+    expect(reused.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected'])
+    expect(
+      (reused.find((result) => result.status === 'rejected') as PromiseRejectedResult).reason?.code,
+    ).toBe('idempotency_key_reused')
   }
 
   it('serializes two concurrent creations with one key into one poll', async () => {
@@ -1607,6 +1770,530 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     }
   })
 
+  // --- Availability at creation -----------------------------------------------------------
+
+  /** Refused with every unbookable start, in order, and nothing written for the event. */
+  async function refused(operation: Promise<unknown>, eventTypeId: string, starts: string[]) {
+    expect(await failure(() => operation)).toMatchObject({
+      kind: 'conflict',
+      code: 'slot_unavailable',
+      unavailableStarts: starts,
+    })
+    expect(await pollsOf(eventTypeId)).toEqual([])
+  }
+
+  /** Weekly hours and date overrides in the host's zone, not the poll's display zone. */
+  async function verifyWorkingHours(M: PollModule) {
+    const zone = 'Europe/Berlin'
+    let monday = Temporal.Now.plainDateISO(zone).add({ days: 3 })
+    while (monday.dayOfWeek !== 1) monday = monday.add({ days: 1 })
+    const day = (offset: number) => monday.add({ days: offset })
+    const at = (date: Temporal.PlainDate, time: string) =>
+      date
+        .toZonedDateTime({ timeZone: zone, plainTime: Temporal.PlainTime.from(time) })
+        .toInstant()
+        .toString()
+    const s = await personal(
+      {},
+      {
+        timeZone: zone,
+        weeklyHours: weekdays({ start: '09:00', end: '17:00' }),
+        overrides: [
+          { date: day(1).toString(), intervals: [] },
+          { date: day(5).toString(), intervals: [{ start: '10:00', end: '12:00' }] },
+        ],
+      },
+    )
+    const early = at(day(0), '08:30')
+    const late = at(day(0), '17:00')
+    const closedTuesday = at(day(1), '10:00')
+    const sundayNight = at(day(6), '03:00')
+    const open = [at(day(0), '10:00'), at(day(0), '16:30'), at(day(5), '10:00')]
+    await refused(
+      propose(M, s.ctx, s.eventTypeId, [...open, early, late, closedTuesday, sundayNight]),
+      s.eventTypeId,
+      [early, late, closedTuesday, sundayNight],
+    )
+    const { poll } = await succeeds(() => propose(M, s.ctx, s.eventTypeId, open))
+    expect(poll.candidates.map((candidate) => candidate.startAt)).toEqual(open)
+  }
+
+  /** Confirmed bookings of this or another event type and calendar busy time all block. */
+  async function verifyBusyTime(M: PollModule) {
+    const s = await personal()
+    const host = [s.user.id]
+    const other = await fixtures.eventType(s.organizationId, s.user.id)
+    const { deadline, starts } = await hourly(5)
+    const [free, sameEvent, otherEvent, calendar, canceled] = starts as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+    await book(db, s.organizationId, host, sameEvent, { eventTypeId: s.eventTypeId })
+    await book(db, s.organizationId, host, otherEvent, { eventTypeId: other })
+    await fixtures.calendarBusy(s.user.id, [
+      [calendar, Temporal.Instant.from(calendar).add({ minutes: 30 }).toString()],
+    ])
+    await book(db, s.organizationId, host, canceled, {
+      eventTypeId: s.eventTypeId,
+      status: 'cancelled',
+    })
+    // The earliest candidate is free, so checking only the first one would accept these.
+    await refused(propose(M, s.ctx, s.eventTypeId, starts, deadline), s.eventTypeId, [
+      sameEvent,
+      otherEvent,
+      calendar,
+    ])
+    await succeeds(() => propose(M, s.ctx, s.eventTypeId, [free, canceled], deadline))
+  }
+
+  /** A live payment hold blocks its time like a booking; an expired one does not. */
+  async function verifyHolds(M: PollModule) {
+    const s = await personal()
+    const { deadline, starts } = await hourly(3)
+    const [free, held, expired] = starts as [string, string, string]
+    await book(db, s.organizationId, [s.user.id], held, {
+      eventTypeId: s.eventTypeId,
+      status: 'pending_payment',
+      holdExpiresAt: held,
+    })
+    await book(db, s.organizationId, [s.user.id], expired, {
+      eventTypeId: s.eventTypeId,
+      status: 'pending_payment',
+      holdExpiresAt: (await databaseNow()).subtract({ minutes: 1 }).toString(),
+    })
+    await refused(propose(M, s.ctx, s.eventTypeId, starts, deadline), s.eventTypeId, [held])
+    await succeeds(() => propose(M, s.ctx, s.eventTypeId, [free, expired], deadline))
+  }
+
+  /** Minimum notice, buffers, the booking window and booking limits apply as when booking. */
+  async function verifyEventRules(M: PollModule) {
+    // The deadline rule (candidate at least the notice after the deadline) is stricter than
+    // the engine's (the notice after now), so a candidate inside the notice is refused first.
+    const noticed = await personal({ minimumNoticeMinutes: 180 })
+    const deadline = await nextDeadline()
+    const after = (hours: number, minutes = 0) => deadline.add({ hours, minutes }).toString()
+    expect(
+      await failure(() =>
+        propose(M, noticed.ctx, noticed.eventTypeId, [after(2), after(5)], deadline),
+      ),
+    ).toMatchObject({ code: 'invalid_poll' })
+    expect(await pollsOf(noticed.eventTypeId)).toEqual([])
+    await succeeds(() =>
+      propose(M, noticed.ctx, noticed.eventTypeId, [after(3), after(5)], deadline),
+    )
+
+    const buffered = await personal({ bufferAfterMinutes: 30, bookingWindowDays: 10 })
+    const booked = after(25)
+    await book(db, buffered.organizationId, [buffered.user.id], booked, {
+      eventTypeId: buffered.eventTypeId,
+    })
+    const insideBuffer = after(25, 30)
+    const beyondWindow = after(24 * 12)
+    await refused(
+      propose(
+        M,
+        buffered.ctx,
+        buffered.eventTypeId,
+        [after(27), insideBuffer, beyondWindow],
+        deadline,
+      ),
+      buffered.eventTypeId,
+      [insideBuffer, beyondWindow],
+    )
+    await succeeds(() =>
+      propose(M, buffered.ctx, buffered.eventTypeId, [after(26), after(24 * 7)], deadline),
+    )
+
+    const limited = await personal({ maxBookingsPerDay: 1 })
+    const dayStart = deadline.toZonedDateTimeISO('UTC').startOfDay().add({ days: 3 }).toInstant()
+    await book(
+      db,
+      limited.organizationId,
+      [limited.user.id],
+      dayStart.add({ hours: 8 }).toString(),
+      {
+        eventTypeId: limited.eventTypeId,
+      },
+    )
+    const sameDay = dayStart.add({ hours: 14 }).toString()
+    const nextDay = dayStart.add({ hours: 38 }).toString()
+    await refused(
+      propose(M, limited.ctx, limited.eventTypeId, [sameDay, nextDay], deadline),
+      limited.eventTypeId,
+      [sameDay],
+    )
+  }
+
+  /** A collective event needs every host free. */
+  async function verifyCollective(M: PollModule) {
+    const s = await team({}, { hosts: ['member', 'owner'], schedulingType: 'collective' })
+    const { deadline, starts } = await hourly(4)
+    const [free, memberBusy, ownerBusy, later] = starts as [string, string, string, string]
+    await book(db, s.organizationId, [s.member.id], memberBusy)
+    await book(db, s.organizationId, [s.owner.id], ownerBusy)
+    await refused(propose(M, s.ctx, s.eventTypeId, starts, deadline), s.eventTypeId, [
+      memberBusy,
+      ownerBusy,
+    ])
+    await succeeds(() => propose(M, s.ctx, s.eventTypeId, [free, later], deadline))
+  }
+
+  /** A round-robin event needs one eligible pool host free for each candidate. */
+  async function verifyRoundRobin(M: PollModule) {
+    const s = await team({}, { hosts: ['admin', 'owner', 'member'], schedulingType: 'round_robin' })
+    const { deadline, starts } = await hourly(4)
+    const [oneFree, allBusy, onlyIneligibleFree, open] = starts as [string, string, string, string]
+    await book(db, s.organizationId, [s.owner.id, s.member.id], oneFree)
+    await book(db, s.organizationId, [s.admin.id, s.owner.id, s.member.id], allBusy)
+    await book(db, s.organizationId, [s.admin.id, s.owner.id], onlyIneligibleFree)
+    // An unverified host stays configured but leaves the eligible pool.
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', s.member.id)
+      .execute()
+    await refused(propose(M, s.ctx, s.eventTypeId, starts, deadline), s.eventTypeId, [
+      allBusy,
+      onlyIneligibleFree,
+    ])
+    const { poll } = await succeeds(() =>
+      propose(M, s.ctx, s.eventTypeId, [oneFree, open], deadline),
+    )
+    expect(poll.candidates.map((candidate) => candidate.startAt)).toEqual([oneFree, open])
+  }
+
+  /** Wall-clock hours resolve in the host's zone on each side of a daylight-saving change. */
+  async function verifyTimeZones(M: PollModule) {
+    const zone = 'America/New_York'
+    const s = await personal(
+      { durationMinutes: 60 },
+      { timeZone: zone, weeklyHours: weekdays({ start: '09:00', end: '17:00' }) },
+    )
+    const transition = Temporal.Now.zonedDateTimeISO(zone)
+      .add({ days: 7 })
+      .getTimeZoneTransition('next') as Temporal.ZonedDateTime
+    const weekday = (date: Temporal.PlainDate, step: 1 | -1) => {
+      let current = date
+      while (current.dayOfWeek > 5) current = current.add({ days: step })
+      return current
+    }
+    const before = weekday(transition.toPlainDate().subtract({ days: 1 }), -1)
+    const after = weekday(transition.toPlainDate().add({ days: 1 }), 1)
+    const at = (date: Temporal.PlainDate, hour: number) =>
+      date
+        .toZonedDateTime({ timeZone: zone, plainTime: Temporal.PlainTime.from({ hour }) })
+        .toInstant()
+        .toString()
+    const offset = (instant: string) =>
+      Temporal.Instant.from(instant).toZonedDateTimeISO(zone).offsetNanoseconds
+    expect(offset(at(before, 9))).not.toBe(offset(at(after, 9)))
+    // With a fixed offset, one of 08:00/09:00 and one of 16:00/17:00 would flip sides.
+    const tooEarly = at(after, 8)
+    const tooLate = at(after, 17)
+    const open = [at(before, 9), at(after, 9), at(after, 16)]
+    const display = { displayTimeZone: 'Asia/Tokyo' }
+    await refused(
+      M.createMeetingPoll(s.ctx, {
+        ...(await input(s.eventTypeId, display)),
+        candidateStarts: [...open, tooEarly, tooLate],
+      }),
+      s.eventTypeId,
+      [tooEarly, tooLate],
+    )
+    const { poll } = await succeeds(async () =>
+      M.createMeetingPoll(s.ctx, {
+        ...(await input(s.eventTypeId, display)),
+        candidateStarts: open,
+      }),
+    )
+    expect(poll.candidates.map((candidate) => candidate.startAt)).toEqual(open)
+  }
+
+  /** An event that takes no bookings at all is refused as such, not slot by slot. */
+  async function verifyUnbookableEvent(M: PollModule) {
+    const s = await team({}, { hosts: ['member', 'owner'], schedulingType: 'collective' })
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', s.member.id)
+      .execute()
+    expect(
+      await failure(async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId))),
+    ).toMatchObject({ kind: 'conflict', code: 'event_type_unavailable' })
+    // Booking by ID needs a personal owner's public handle, as one-time links do.
+    const p = await personal()
+    await db.deleteFrom('profiles').where('user_id', '=', p.user.id).execute()
+    expect(
+      await failure(async () => M.createMeetingPoll(p.ctx, await input(p.eventTypeId))),
+    ).toMatchObject({ kind: 'conflict', code: 'event_type_unavailable' })
+    expect([...(await pollsOf(s.eventTypeId)), ...(await pollsOf(p.eventTypeId))]).toEqual([])
+  }
+
+  /** Hold `hold` in its own transaction until the returned release is awaited. */
+  async function holding(hold: (trx: Db) => Promise<unknown>) {
+    const locked = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const done = db.transaction().execute(async (trx) => {
+      try {
+        await hold(trx)
+      } catch (error) {
+        locked.reject(error)
+        throw error
+      }
+      locked.resolve()
+      await release.promise
+    })
+    done.catch(() => undefined)
+    await locked.promise
+    return async () => {
+      release.resolve()
+      await done
+    }
+  }
+
+  /** Whether `work` queues behind a lock (`count` waiters in all) or settles first. */
+  async function queues(work: Promise<unknown>, count: number): Promise<'queued' | 'settled'> {
+    let settled = false
+    work.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    for (let attempt = 0; attempt < 400; attempt++) {
+      if (settled) return 'settled'
+      const { rows } = await sql<{
+        count: string
+      }>`SELECT count(*)::text AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'`.execute(db)
+      if (Number(rows[0]?.count) >= count) return 'queued'
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    throw new Error(`expected ${count} lock waiters or a settled operation`)
+  }
+
+  /**
+   * A booking that holds its host's booking lock commits first: creation waits for it, then
+   * sees the booking and refuses that candidate.
+   */
+  async function verifyBookingFirst(M: PollModule) {
+    const s = await personal()
+    const { deadline, starts } = await hourly(2)
+    const [taken] = starts as [string]
+    const commit = await holding(async (trx) => {
+      await lockHosts(trx, [s.user.id])
+      await book(trx, s.organizationId, [s.user.id], taken, { eventTypeId: s.eventTypeId })
+    })
+    const creation = propose(M, s.ctx, s.eventTypeId, starts, deadline)
+    let order: 'queued' | 'settled'
+    try {
+      order = await queues(creation, 1)
+    } finally {
+      await commit()
+    }
+    expect(order).toBe('queued')
+    await refused(creation, s.eventTypeId, [taken])
+  }
+
+  /**
+   * Creation that holds the host's booking lock first makes a concurrent booking wait for
+   * it; the booking then takes the candidate time, because candidates are not holds.
+   */
+  async function verifyCreationFirst(M: PollModule) {
+    const s = await personal()
+    const { deadline, starts } = await hourly(2)
+    const [proposed] = starts as [string]
+    // Creation takes the host lock, then queues on the event row.
+    const release = await holding((trx) =>
+      trx
+        .selectFrom('event_types')
+        .select('id')
+        .where('id', '=', s.eventTypeId)
+        .forUpdate()
+        .execute(),
+    )
+    const creation = propose(M, s.ctx, s.eventTypeId, starts, deadline)
+    let booking: Promise<string> | undefined
+    let order: 'queued' | 'settled' | undefined
+    try {
+      if ((await queues(creation, 1)) === 'queued') {
+        booking = db.transaction().execute(async (trx) => {
+          await lockHosts(trx, [s.user.id])
+          return book(trx, s.organizationId, [s.user.id], proposed, { eventTypeId: s.eventTypeId })
+        })
+        order = await queues(booking, 2)
+      }
+    } finally {
+      await release()
+    }
+    expect(order).toBe('queued')
+    const { poll } = await succeeds(() => creation)
+    expect(poll.candidates.map((candidate) => candidate.startAt)).toEqual(starts)
+    expect(await booking).toEqual(expect.any(String))
+  }
+
+  /** Hosts replaced while creation waits for the ones it named are a conflict, not a pass. */
+  async function verifyHostChange(M: PollModule) {
+    const s = await team({}, { hosts: ['member', 'owner'], schedulingType: 'collective' })
+    const named = [s.member.id, s.owner.id]
+    const release = await holding((trx) => lockHosts(trx, named))
+    const creation = (async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId)))()
+    let order: 'queued' | 'settled'
+    try {
+      order = await queues(creation, 1)
+      await db
+        .updateTable('event_type_hosts')
+        .set({ user_id: s.admin.id })
+        .where('event_type_id', '=', s.eventTypeId)
+        .where('user_id', '=', s.owner.id)
+        .execute()
+    } finally {
+      await release()
+    }
+    expect(order).toBe('queued')
+    expect(await failure(() => creation)).toMatchObject({
+      kind: 'conflict',
+      code: 'poll_event_changed',
+    })
+    expect(await pollsOf(s.eventTypeId)).toEqual([])
+  }
+
+  /** One actor's receipts in two organizations are separate, even with one key. */
+  async function verifyOrganizationIsolation(M: PollModule) {
+    const admin = await createTestUser(db, 'Admin of two teams')
+    const host = await createTestUser(db, 'Host of two teams')
+    await fixtures.schedule(host.id, ALWAYS)
+    const spaces: { ctx: ServiceContext; eventTypeId: string }[] = []
+    for (const name of ['First team', 'Second team']) {
+      const t = await createTestTeam(
+        db,
+        [
+          { user: admin, role: 'admin' },
+          { user: host, role: 'member' },
+        ],
+        name,
+      )
+      const eventTypeId = await fixtures.eventType(t.id, null, { hosts: [{ userId: host.id }] })
+      spaces.push({ ctx: testContext(db, session(t.as(admin))), eventTypeId })
+    }
+    const key = randomUUID()
+    const created: Polls.MeetingPollWithLink[] = []
+    for (const space of spaces)
+      created.push(
+        await succeeds(async () =>
+          M.createMeetingPoll(space.ctx, await input(space.eventTypeId, { idempotencyKey: key })),
+        ),
+      )
+    const [first, second] = created.map((result) => result.poll.id)
+    expect(first).not.toBe(second)
+    for (const [index, space] of spaces.entries())
+      expect(
+        await failure(async () =>
+          M.createMeetingPoll(space.ctx, await input(space.eventTypeId, { idempotencyKey: key })),
+        ),
+      ).toMatchObject({ code: 'poll_already_created', pollId: created[index]?.poll.id })
+    const rotation = { expectedHostRevision: 1, idempotencyKey: randomUUID() }
+    for (const [index, space] of spaces.entries())
+      await succeeds(() =>
+        M.rotateMeetingPollLink(space.ctx, { ...rotation, id: created[index]?.poll.id as string }),
+      )
+    for (const [index, space] of spaces.entries())
+      expect(
+        await failure(() =>
+          M.rotateMeetingPollLink(space.ctx, {
+            ...rotation,
+            id: created[index]?.poll.id as string,
+          }),
+        ),
+      ).toMatchObject({ code: 'poll_link_already_rotated' })
+    for (const id of [first, second])
+      expect((await receipts(id as string)).map((receipt) => receipt.operation).sort()).toEqual([
+        'create',
+        'rotate_link',
+      ])
+  }
+
+  it('refuses candidates outside the host’s working hours and date overrides', async () => {
+    await verifyWorkingHours(Polls)
+  })
+
+  it('refuses candidates over confirmed bookings of any event type and busy calendars', async () => {
+    await verifyBusyTime(Polls)
+  })
+
+  it('refuses candidates over a live payment hold but not an expired one', async () => {
+    await verifyHolds(Polls)
+  })
+
+  it('applies minimum notice, buffers, the booking window and booking limits', async () => {
+    await verifyEventRules(Polls)
+  })
+
+  it('needs every collective host free', async () => {
+    await verifyCollective(Polls)
+  })
+
+  it('needs one eligible round-robin host free and refuses when all are busy', async () => {
+    await verifyRoundRobin(Polls)
+  })
+
+  it('resolves working hours in the host’s zone across a daylight-saving change', async () => {
+    await verifyTimeZones(Polls)
+  })
+
+  it('refuses events that take no bookings with event_type_unavailable', async () => {
+    await verifyUnbookableEvent(Polls)
+  })
+
+  it('refuses with calendar_sync_unavailable while a host calendar is stale', async () => {
+    const s = await personal()
+    const connection = await db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: s.user.id,
+        provider: 'google',
+        external_account_id: `acct-${randomUUID()}`,
+        credentials: Buffer.from('synthetic-never-used-credential'),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    // Never synced: unknown busy time is not free time.
+    await db
+      .insertInto('calendars')
+      .values({
+        connection_id: connection.id,
+        external_id: `cal-${randomUUID()}`,
+        name: 'Work',
+        check_conflicts: true,
+      })
+      .execute()
+    expect(
+      await failure(async () => Polls.createMeetingPoll(s.ctx, await input(s.eventTypeId))),
+    ).toMatchObject({ kind: 'conflict', code: 'calendar_sync_unavailable' })
+    expect(await pollsOf(s.eventTypeId)).toEqual([])
+  })
+
+  it('waits for a booking that holds the host lock and then refuses its time', async () => {
+    await verifyBookingFirst(Polls)
+  })
+
+  it('makes a racing booking wait for creation, which holds no time', async () => {
+    await verifyCreationFirst(Polls)
+  })
+
+  it('refuses with poll_event_changed when hosts change while creation waits', async () => {
+    await verifyHostChange(Polls)
+  })
+
+  it('keeps one actor’s receipts separate per organization with the same key', async () => {
+    await verifyOrganizationIsolation(Polls)
+  })
+
   // --- Mutation checks --------------------------------------------------------------------
 
   const verifications = [
@@ -1629,12 +2316,25 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     verifyBounds,
     verifyCreateRace,
     verifyActorIsolation,
+    verifyWorkingHours,
+    verifyBusyTime,
+    verifyHolds,
+    verifyEventRules,
+    verifyCollective,
+    verifyRoundRobin,
+    verifyTimeZones,
+    verifyUnbookableEvent,
+    verifyBookingFirst,
+    verifyCreationFirst,
+    verifyHostChange,
+    verifyOrganizationIsolation,
   ]
 
+  // Every check in sequence, including the lock races, so allow more than one check's time.
   it('passes every protection check through the pinned-clock source copy', async () => {
     const copy = await sourceCopy(PIN_CLOCK)
     for (const verify of verifications) await verify(copy)
-  })
+  }, 60_000)
 
   type Mutation = [string, (M: PollModule) => Promise<void>, ...(readonly [string, string])[]]
   const mutations: Mutation[] = [
@@ -1741,6 +2441,14 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       [
         "  const actor =\n    principal.kind === 'api_key'\n      ? { kind: 'api_key', id: principal.apiKeyId.toLowerCase() }\n      : principal.kind === 'oauth'\n        ? { kind: 'oauth', id: principal.oauthConsentId.toLowerCase() }\n        : { kind: 'session', id: principal.user.id.toLowerCase() }\n",
         "  const actor = { kind: 'user', id: principal.user.id.toLowerCase() }\n",
+      ],
+    ],
+    [
+      'receipt lookups ignore the organization',
+      verifyOrganizationIsolation,
+      [
+        "    .where('organization_id', '=', receipt.organizationId)\n    .where('operation', '=', receipt.operation)",
+        "    .where('operation', '=', receipt.operation)",
       ],
     ],
     [
@@ -1965,6 +2673,42 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       'a candidate may start at the deadline',
       verifyBounds,
       ['if (earliest <= deadline ||', 'if (earliest < deadline ||'],
+    ],
+    [
+      'create skips availability validation',
+      verifyBusyTime,
+      [
+        '    await requireBookableCandidates(trx, event.id, hostUserIds, starts, durationMinutes, createdAt)\n',
+        '',
+      ],
+    ],
+    [
+      'create validates only the first candidate',
+      verifyCollective,
+      ['  for (const start of starts) {\n', '  for (const start of starts.slice(0, 1)) {\n'],
+    ],
+    [
+      'round-robin intersects its pool instead of uniting it',
+      verifyRoundRobin,
+      [
+        '? await unionRoundRobinSlots(\n            trx,\n            event.id,\n            event.eligibleHostUserIds,\n            from,\n            to,\n            now,\n            durationMinutes,\n          )',
+        '? await intersectSlots(trx, event.id, event.eligibleHostUserIds, from, to, now, undefined, true, durationMinutes)',
+      ],
+    ],
+    [
+      'create checks availability without the host booking locks (booking first)',
+      verifyBookingFirst,
+      ['    await lockHosts(trx, hostUserIds)\n', ''],
+    ],
+    [
+      'create checks availability without the host booking locks (creation first)',
+      verifyCreationFirst,
+      ['    await lockHosts(trx, hostUserIds)\n', ''],
+    ],
+    [
+      'create ignores hosts that changed while it waited',
+      verifyHostChange,
+      ['  if (event.hostUserIds.join() !== lockedHostUserIds.join()) throw eventChanged()\n', ''],
     ],
   ]
 
