@@ -240,6 +240,22 @@ export async function createTestDatabaseTemplate(
 }
 
 /**
+ * True when a `query` or `connect` call passes a callback, in any position (`query(text, cb)`,
+ * `query(text, values, cb)`, `connect(cb)`) or as the `callback` of a query config object
+ * (`query({ text, callback })`). pg then hands the result and any error to the callback, not
+ * to the promise the caller would await.
+ */
+export function passesCallback(args: readonly unknown[]): boolean {
+  return args.some(
+    (argument) =>
+      typeof argument === 'function' ||
+      (typeof argument === 'object' &&
+        argument !== null &&
+        typeof (argument as { callback?: unknown }).callback === 'function'),
+  )
+}
+
+/**
  * pg.Pool.query discards its connection after any failed statement, so a test that expects
  * many constraint violations would open (and leave in TIME_WAIT) a connection for each one.
  * This view of the pool keeps the connection: a single failed statement outside a transaction
@@ -249,12 +265,13 @@ export function reuseConnectionsAfterErrors(pool: pg.Pool): pg.Pool {
   return new Proxy(pool, {
     get(target, property) {
       if (property === 'query')
-        return (text: string, values?: unknown[]) => {
+        return (...args: unknown[]) => {
           // Refused synchronously: a callback-style caller would otherwise wait forever.
-          if (typeof values === 'function')
+          if (passesCallback(args))
             throw new TypeError(
               'pools with connection reuse use the promise form of query: callbacks are not supported',
             )
+          const [text, values] = args as [string | pg.QueryConfig, unknown[] | undefined]
           return (async () => {
             const client = await target.connect()
             try {

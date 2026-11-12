@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import * as react from 'react'
@@ -6,6 +5,7 @@ import { expect, it, vi } from 'vitest'
 import { Field } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import styles from '../../styles.css?raw'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME } from '../../test/fake-api.tsx'
 import type { BookingExport } from './BookingExport.tsx'
 
@@ -15,15 +15,11 @@ function component(change?: [string, string]): typeof BookingExport {
   const code = (change ? source.replace(...change) : source)
     .replace(/^import[^\n]+\n/gm, '')
     .replace(/^export /gm, '')
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement' }).code)",
-    ],
-    { input: code, encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy('apps/web/src/pages/bookings/BookingExport.tsx', code, {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+  })
   const deps = { useId: react.useId, useState: react.useState, Field, useI18n, useMe: () => ME }
   return new Function('reactRuntime', ...Object.keys(deps), `${compiled}; return BookingExport`)(
     react,

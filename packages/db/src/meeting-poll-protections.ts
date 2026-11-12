@@ -2386,6 +2386,57 @@ export const meetingPollProtections: Record<string, (f: Fixture) => Promise<void
   },
 }
 
+/**
+ * Tables whose organization FK repeats the organization of a scoped composite FK. It also makes
+ * an insert lock the organization row (FOR KEY SHARE), so an organization deletion that starts
+ * during the inserting transaction waits for it. Without that lock the deletion removes the
+ * organization row and waits in its cascade on the parent row, and the transaction's next
+ * write that checks the organization deadlocks with it (40P01).
+ */
+export const organizationLockedInserts: Record<string, (f: Fixture) => Record<string, unknown>> = {
+  meeting_polls: (f) => f.pollValues,
+  meeting_poll_slots: (f) => ({
+    organization_id: f.organization,
+    poll_id: f.poll,
+    position: 2,
+    start_at: later(f.start, 2 * hour),
+    end_at: later(f.end, 2 * hour),
+  }),
+  meeting_poll_voters: (f) => ({ ...f.voterValues, email_key: digest() }),
+  meeting_poll_votes: (f) => ({
+    organization_id: f.organization,
+    poll_id: f.poll,
+    voter_id: f.voter,
+    slot_id: f.slots[0],
+    value: 'yes',
+  }),
+  meeting_poll_capabilities: (f) => votingCapability(f),
+  meeting_poll_mailbox_counters: (f) => counter(f),
+  meeting_poll_deliveries: (f) => voterDelivery(f),
+}
+for (const [table, row] of Object.entries(organizationLockedInserts))
+  meetingPollProtections[`${table} insert locks its organization`] = async (f) => {
+    const writer = await f.pool.connect()
+    try {
+      await writer.query('BEGIN')
+      await insert(writer, table, row(f))
+      // FOR UPDATE conflicts with FOR KEY SHARE, and SKIP LOCKED returns no row instead of
+      // waiting, so a missing lock is a plain value mismatch.
+      expect(
+        (
+          await f.pool.query(
+            'SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE SKIP LOCKED',
+            [f.organization],
+          )
+        ).rows,
+        `${table} insert leaves its organization row unlocked`,
+      ).toEqual([])
+    } finally {
+      await writer.query('ROLLBACK').catch(() => {})
+      writer.release()
+    }
+  }
+
 // Checks that guard many objects run first, so a dropped object usually fails fast.
 const broadChecks = [
   'required columns',

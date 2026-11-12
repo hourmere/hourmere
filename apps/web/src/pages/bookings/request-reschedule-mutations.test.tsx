@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import * as react from 'react'
 import { describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { booking } from '../../test/public-fixtures.ts'
 import type { RequestReschedule } from './RequestReschedule.tsx'
 
@@ -15,17 +15,10 @@ function OrganizationContextConflict() {
   return null
 }
 function component(text: string, calls: unknown[]) {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import {readFileSync} from 'node:fs'; import {transformSync} from 'esbuild'; process.stdout.write(transformSync(readFileSync(0,'utf8'),{loader:'tsx',format:'cjs',jsxFactory:'react.createElement'}).code)",
-    ],
-    {
-      input: text.replace(/^import[\s\S]*?from '[^']+'$/gm, '').replace(/^export /gm, ''),
-      encoding: 'utf8',
-    },
+  const compiled = compileSourceCopy(
+    'apps/web/src/pages/bookings/RequestReschedule.tsx',
+    text.replace(/^import[\s\S]*?from '[^']+'$/gm, '').replace(/^export /gm, ''),
+    { loader: 'tsx', format: 'cjs', jsxFactory: 'react.createElement' },
   )
   let key = 0
   const deps = {
@@ -106,14 +99,15 @@ it('detects offering a reschedule request for a group seat in the detail source 
   const section = detail.slice(start, end)
   expect(section.split('booking.isGroupSeat')).toHaveLength(2)
   function verify(text: string) {
-    const compiled = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        "import {readFileSync} from 'node:fs'; import {transformSync} from 'esbuild'; process.stdout.write(transformSync(readFileSync(0,'utf8'),{loader:'tsx',format:'cjs',jsxFactory:'react.createElement',jsxFragment:'react.Fragment'}).code)",
-      ],
-      { input: `function Copy(){return <>${text}</>}`, encoding: 'utf8' },
+    const compiled = compileSourceCopy(
+      'apps/web/src/pages/bookings/BookingDetail.tsx',
+      `function Copy(){return <>${text}</>}`,
+      {
+        loader: 'tsx',
+        format: 'cjs',
+        jsxFactory: 'react.createElement',
+        jsxFragment: 'react.Fragment',
+      },
     )
     const deps = {
       react,

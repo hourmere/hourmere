@@ -1,5 +1,4 @@
 import '../i18n/admin.ts'
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,18 +11,20 @@ import { BreakableText } from '../components/BreakableText.tsx'
 import { CopyButton } from '../components/CopyButton.tsx'
 import { useLoad, useMounted } from '../hooks.ts'
 import { AccountLanguage, InterfaceScope, useI18n } from '../i18n/runtime.tsx'
+import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
 
 const source = readFileSync('apps/web/src/pages/ProvisioningTokens.tsx', 'utf8')
 function copy(code: string) {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: code.replace(/^import .*\n/gm, '').replace(/^export /gm, ''), encoding: 'utf8' },
+  const compiled = compileSourceCopy(
+    'apps/web/src/pages/ProvisioningTokens.tsx',
+    code.replace(/^import .*\n/gm, '').replace(/^export /gm, ''),
+    {
+      loader: 'tsx',
+      format: 'cjs',
+      jsxFactory: 'reactRuntime.createElement',
+      jsxFragment: 'reactRuntime.Fragment',
+    },
   )
   const dependencies = {
     api,

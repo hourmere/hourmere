@@ -24,10 +24,12 @@
  * What makes a failure count as coverage is what the database did, not how the suite
  * asserted it. Every rejected `query` on the pool handed to the suite, on the clients it
  * hands out through `connect()`, on `connect()` itself, and on pools opened through
- * `openRelatedPool`, is recorded with its SQLSTATE. Only the promise form is supported: a
- * `query` or `connect` call with a callback throws a TypeError, which aborts the run, because
- * a callback would receive the error without the ledger seeing it. On every copy, baseline or
- * dropped, passing or failing:
+ * `openRelatedPool`, is recorded with its SQLSTATE; a refused `connect()` is recorded whether
+ * or not its error carries a code. Only the promise form is supported: a `query` or `connect`
+ * call with a callback, in any argument position (`query(text, cb)`, `query(text, values, cb)`,
+ * `connect(cb)`) or as the `callback` of a query config (`query({ text, callback })`), throws a
+ * TypeError, which aborts the run, because a callback would receive the error without the
+ * ledger seeing it. On every copy, baseline or dropped, passing or failing:
  * - a recorded error of any class other than 23 (integrity constraint), 22 (data exception)
  *   or P0 (raised by a trigger or function), or without a SQLSTATE at all (lost connection,
  *   socket or driver error), aborts the whole run and names the object and the error. This
@@ -91,6 +93,7 @@ import { createPool } from '../index.ts'
 import { migrationsDir, runMigrations } from '../migrate.ts'
 import {
   createTestDatabaseTemplate,
+  passesCallback,
   reuseConnectionsAfterErrors,
   type TestDatabaseTemplate,
 } from '../testing.ts'
@@ -306,9 +309,10 @@ function recordQueryErrors(pool: pg.Pool, ledger: RecordedQueryError[]): pg.Pool
     })
   }
   // The callback form of `query` delivers its error to the callback, which the ledger cannot
-  // see, so it is refused outright (synchronously, so a callback-style caller cannot hang).
+  // see, so it is refused outright (synchronously, so a callback-style caller cannot hang),
+  // whether the callback is an argument or the `callback` of a query config object.
   const refuseCallbacks = (method: string, args: unknown[]) => {
-    if (args.some((argument) => typeof argument === 'function'))
+    if (passesCallback(args))
       throw new TypeError(
         `coverage suites use the promise form of ${method}: a callback bypasses the query-error ledger`,
       )
@@ -340,6 +344,7 @@ function recordQueryErrors(pool: pg.Pool, ledger: RecordedQueryError[]): pg.Pool
         return (...args: unknown[]) => {
           // Checked before the async body, so a callback-style caller gets a synchronous throw.
           refuseCallbacks('connect', args)
+          // Every refusal counts, with or without a code: a socket closed during startup has none.
           return target.connect().then(wrapClient, (error: unknown) => {
             record(error, undefined)
             throw error

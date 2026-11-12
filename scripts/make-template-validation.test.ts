@@ -26,7 +26,7 @@ import * as validator from './make-template-validation.ts'
 const directory = new URL('../tools/make-templates/', import.meta.url)
 const names = readdirSync(directory)
 const source = readFileSync(new URL('./make-template-validation.ts', import.meta.url), 'utf8')
-// The documented timestamp tolerance is the one Hourmere's own webhook verifier enforces. The
+// The documented timestamp tolerance is the one the n8n trigger's verifier enforces. The
 // n8n package keeps its dependency graph out of root installs, so its module is loaded by path
 // rather than through a typed import that would need n8n's types.
 const n8nVerifier = fileURLToPath(
@@ -247,7 +247,9 @@ for (const [change, status, timings, notify] of changes)
           })
         }
 // Headers, body and signature come from one real delivery attempt through a capturing
-// transport, signed with a known secret.
+// transport, signed with a known secret. The attempt is sent part way through a second, so
+// a header that is not whole Unix seconds differs from Make's formatDate(now; "X").
+const sentAt = now.add({ milliseconds: 750 })
 async function deliverySample(eventType: string, payload: string) {
   const encryptionKey = Buffer.alloc(32, 7).toString('base64')
   const secret = newWebhookSecret()
@@ -299,7 +301,7 @@ async function deliverySample(eventType: string, payload: string) {
       db,
       enabled: true,
       encryptionKey,
-      now: () => now,
+      now: () => sentAt,
       transport: async ({ headers, body }) => {
         sent = { headers, body }
         return 204
@@ -461,6 +463,8 @@ const scopeRows = [
   '| Inspect | `GET /api/v1/synthetic` | **Read** (`read`) |',
 ]
 const leaked = 'A leaked `bookings` key could list, cancel and reschedule every booking you host.'
+const leakedInOrganization =
+  'A leaked `bookings` key could list, cancel and reschedule every booking you host in\nthat organization, exposing invitee data; these templates never need it.'
 const scoped = (method: string, path: string, apiKeyScope?: string) => ({
   requests: [{ method, path }],
   settings: apiKeyScope === undefined ? {} : { apiKeyScope },
@@ -497,6 +501,14 @@ function verify(check: typeof validator) {
       webhooks,
     ),
   ).toEqual([])
+  // The README names the operator with its Make category, and a condition may wrap a line.
+  expect(
+    check.validateMakeReferences(
+      `${timestampCondition(tolerance).replace('**Less', '**Numeric operators: Less')}\n${timestampCondition(tolerance).replace('** `', '**\n`')}`,
+      document,
+      webhooks,
+    ),
+  ).toEqual([])
   expect(
     check.validateMakeReferences(
       `get(map(normalizedHeaders; "value"; "name"; "${webhooks.headers[0]}"); 1)`,
@@ -517,6 +529,7 @@ function verify(check: typeof validator) {
   expect(check.validateMakeScopes(`${scopeTable(scopeRows)}\n${leaked}`, scopeOperations)).toEqual(
     [],
   )
+  expect(check.validateMakeScopes(leakedInOrganization, scopeOperations)).toEqual([])
   expect(
     check.validateMakeRecipeScope(
       scoped('POST', '/api/v1/synthetic', 'full (setup only)'),
@@ -554,6 +567,28 @@ function verify(check: typeof validator) {
     [scopeTable(['| Inspect | Delivery metadata | **Read** (`read`) |']), 'unbound API key scope'],
     [
       'A leaked `bookings` key could list, cancel and reschedule every booking in its organization.',
+      'overstated leaked key reach',
+    ],
+    // Rephrased overstatements: a wider set, a wider scope after the reach, a wider clause.
+    [
+      'A leaked `bookings` key could list, cancel and reschedule all bookings in its organization.',
+      'overstated leaked key reach',
+    ],
+    [
+      'A leaked `bookings` key could cancel every booking you host in that organization or elsewhere.',
+      'overstated leaked key reach',
+    ],
+    [
+      'A leaked `bookings` key could cancel every booking you host, plus the bookings of its members.',
+      'overstated leaked key reach',
+    ],
+    // A wider clause in other words: only the allowed consequence may follow the reach.
+    [
+      'A leaked `bookings` key could cancel every booking you host in that organization, and the ones your teammates host, exposing invitee data.',
+      'overstated leaked key reach',
+    ],
+    [
+      "A leaked `bookings` key could cancel every booking you host, plus your colleagues' appointments, including exposing invitee data.",
       'overstated leaked key reach',
     ],
     ['A leaked `read` key could cancel every booking you host.', 'unsupported leaked key action'],
@@ -670,6 +705,20 @@ function verify(check: typeof validator) {
       'unverified webhook signature formula',
     ],
     [timestampCondition(tolerance + 1), 'wrong timestamp tolerance'],
+    // Any other operator, including the exclusive one, or none at all.
+    [
+      timestampCondition(tolerance).replace('Less than or equal to', 'Greater than'),
+      'wrong timestamp comparison',
+    ],
+    [
+      timestampCondition(tolerance).replace('Less than or equal to', 'Less than'),
+      'wrong timestamp comparison',
+    ],
+    [
+      timestampCondition(tolerance).replace('**Less than or equal to**', '`<=`'),
+      'wrong timestamp comparison',
+    ],
+    ['`abs(formatDate(now; "X") - timestamp)`', 'wrong timestamp comparison'],
     [`within ${tolerance + 1} seconds of current UTC time`, 'wrong timestamp tolerance'],
     [`more than **${tolerance + 1} seconds** from current UTC time`, 'wrong timestamp tolerance'],
     [`enforce ${tolerance + 1}-second tolerance`, 'wrong timestamp tolerance'],
@@ -776,7 +825,8 @@ function sourceCopy(copy: string): typeof validator {
 const sitePage = new URL('../apps/site/src/content/docs/docs/make.md', import.meta.url)
 const tableHeader = /^\| Event \| Make recipe \| Additional payload fields \|$/m
 const signatureHeader = /^\| Set variable \| Value \(braces mark mapped items\) \|$/m
-const timestampExpression = /`abs\(formatDate\(now; "X"\) - timestamp\)`[^`\n]*`\d+`/
+const timestampExpression =
+  /`abs\(formatDate\(now; "X"\) - timestamp\)`\s+\*\*(?:Numeric operators: )?Less than or equal to\*\*\s+`\d+`/
 const generatedDocument = async () =>
   (await openApiDocument()) as Parameters<typeof validator.validateMakeRecipe>[1]
 const read = (name: string) => readFileSync(new URL(name, directory), 'utf8')
@@ -872,22 +922,78 @@ describe('Make manual recipe artifacts', () => {
       expect(validator.validateMakeReferences(raw, generated, changed, recipes)).toContain(
         'wrong timestamp tolerance',
       )
+      // The condition accepts at most the tolerance: any other operator in the actual
+      // document, including the exclusive one, fails.
+      for (const operator of ['Greater than', 'Greater than or equal to', 'Less than']) {
+        const mutated = raw.replace(
+          /(\*\*(?:Numeric operators: )?)Less than or equal to\*\*/,
+          `$1${operator}**`,
+        )
+        expect(mutated, operator).not.toBe(raw)
+        expect(
+          validator.validateMakeReferences(mutated, generated, webhooks, recipes),
+          operator,
+        ).toContain('wrong timestamp comparison')
+      }
     }
     for (const [name, manifest] of manifests().filter(([, value]) => value.webhookEvents.length))
       expect(validator.validateMakeRecipe(manifest, generated, changed), name).toContain(
         'wrong timestamp tolerance',
       )
   })
+  it('sends the Unix-second timestamp the documented conditions compare', () => {
+    // The delivery above went through deliverWebhook at `sentAt`, 750 ms into the second that
+    // starts at `now`. Make's formatDate(now; "X") is Unix time in whole seconds, so the header
+    // must be that second, never milliseconds or a fraction. Each document's digits pattern
+    // must accept it and reject the millisecond value.
+    const { timestamp } = webhooks.signature
+    expect(timestamp).toBe(String(now.epochMilliseconds / 1000))
+    for (const raw of [read('README.md'), readFileSync(sitePage, 'utf8')]) {
+      expect(raw).toMatch(timestampExpression)
+      const pattern = raw.match(
+        /`timestamp`\s+\*\*(?:Text operators: )?Matches pattern\*\*\s+`([^`]+)`/,
+      )?.[1]
+      expect(pattern).toBeDefined()
+      expect(timestamp).toMatch(new RegExp(pattern ?? '(?!)'))
+      expect(String(sentAt.epochMilliseconds)).not.toMatch(new RegExp(pattern ?? ''))
+    }
+  })
   it('binds the documented API key scopes to the scope matrix', () => {
     const site = readFileSync(sitePage, 'utf8')
     expect(site).toMatch(/^\| Purpose \| Hourmere operations \| Credential \|$/m)
-    for (const raw of [site, read('find-slots-create-booking.md')])
-      expect(raw).toMatch(/A leaked `bookings` key\s+could/)
     const errors = (matrix: validator.ApiKeyOperations) => [
       ...markdownDocuments().flatMap(([, raw]) => validator.validateMakeScopes(raw, matrix)),
       ...manifests().flatMap(([, value]) => validator.validateMakeRecipeScope(value, matrix)),
     ]
     expect(errors(operations)).toEqual([])
+    // Both guides state the hosted-only reach, and rewording the reach of the actual
+    // statement or widening its trailing clause fails, whatever the phrasing.
+    for (const raw of [site, read('find-slots-create-booking.md')]) {
+      expect(raw).toMatch(
+        /A leaked `bookings` key\s+could\s+list,\s+cancel\s+and\s+reschedule\s+every\s+booking\s+you\s+host\b/,
+      )
+      for (const reach of [
+        'all bookings in its organization',
+        'any booking in that organization',
+      ]) {
+        const mutated = raw.replace(
+          /every\s+booking\s+you\s+host\s+in\s+that\s+organization/,
+          reach,
+        )
+        expect(mutated, reach).not.toBe(raw)
+        expect(validator.validateMakeScopes(mutated, operations), reach).toContain(
+          'overstated leaked key reach',
+        )
+      }
+      const widened = raw.replace(
+        /in\s+that\s+organization,/,
+        'in that organization, and the ones your teammates host,',
+      )
+      expect(widened).not.toBe(raw)
+      expect(validator.validateMakeScopes(widened, operations)).toContain(
+        'overstated leaked key reach',
+      )
+    }
     // Changing the requirement of any documented operation fails the documents stating it.
     for (const [id, update] of [
       ['POST /api/v1/webhooks', { allowedScopes: ['full', 'bookings'] }],
@@ -1078,6 +1184,7 @@ describe('source-copy Make validator mutation checks', () => {
     'wrong webhook signature formula',
     'unverified webhook signature formula',
     'wrong timestamp tolerance',
+    'wrong timestamp comparison',
     'unknown scoped operation',
     'wrong documented API key scope',
     'unbound API key scope',
@@ -1113,6 +1220,10 @@ describe('source-copy Make validator mutation checks', () => {
       '![operation.authentication].includes(',
     ],
     ['leaked key scope', "!operation.allowedScopes.includes(match[1] ?? '')", 'false'],
+    ['hosted-only leaked key reach', 'every booking you host(?: in', '[a-z ]+(?: in'],
+    ['leaked key clause end', 'exposing invitee data)?$/', 'exposing invitee data)?/'],
+    ['leaked key clause allow-list', '(?:, (?:including )?exposing invitee data)?$/', '(?:,.*)?$/'],
+    ['inclusive timestamp operator', 'Less than or equal to\\*\\*', 'Less than[^*]*\\*\\*'],
     ['manifest scope', "return ['unbound API key scope']", 'return []'],
     ['every signature row', 'evaluated = false', 'evaluated = true'],
     ['fields every subscribed event sends', 'events.every((event) =>', 'events.some((event) =>'],
