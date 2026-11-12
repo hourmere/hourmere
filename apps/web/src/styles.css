@@ -861,6 +861,14 @@ input[readonly] {
   margin-top: 0;
 }
 
+/* Slack settings actions must fit narrow panels, including translated labels. */
+.slack-integrations .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 .panel-success {
   border-color: var(--success-border);
   background: var(--success-soft);

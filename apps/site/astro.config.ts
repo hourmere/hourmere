@@ -116,6 +116,8 @@ export default defineConfig({
             { label: 'Automatic Zoom', link: '/docs/automatic-zoom' },
             { label: 'Automatic Google Meet', link: '/docs/automatic-google-meet' },
             { label: 'Webhooks', link: '/docs/webhooks' },
+            { label: 'Slack notifications', link: '/docs/slack' },
+            { label: 'SMS provider foundation', link: '/docs/sms-provider' },
             { label: 'Make', link: '/docs/make' },
             { label: 'n8n', link: '/docs/n8n' },
             { label: 'Zapier', link: '/docs/zapier' },

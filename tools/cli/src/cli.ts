@@ -43,6 +43,11 @@ export const COMMANDS = {
   'booking-attendees': 'get_booking_attendees',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
+  'slack list': 'list_slack_destinations',
+  'slack create': 'create_slack_destination',
+  'slack update': 'update_slack_destination',
+  'slack delete': 'delete_slack_destination',
+  'slack test': 'test_slack_destination',
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
@@ -57,6 +62,10 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
+Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
+Supply incoming-webhook URLs only through private JSON input; responses are masked.
+Slack events: booking.created, booking.rescheduled, booking.cancelled,
+  booking.reschedule_requested, booking.reschedule_request_expired.
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           schedule-availability, save-availability,
@@ -115,7 +124,9 @@ function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
-    first === 'one-time-links' || first === 'branding' ? `${first} ${parts.shift() ?? ''}` : first
+    first === 'one-time-links' || first === 'branding' || first === 'slack'
+      ? `${first} ${parts.shift() ?? ''}`
+      : first
   const rest = parts
   if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
     throw new CliError('invalid_command')
@@ -287,6 +298,9 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    const slackUrl =
+      args.command.startsWith('slack ') && typeof input.url === 'string' ? input.url : ''
+    if (slackUrl) secrets.push(slackUrl)
     if (args.durationMinutes !== undefined) {
       if (Object.hasOwn(input, 'durationMinutes') && input.durationMinutes !== args.durationMinutes)
         throw new CliError('invalid_duration')
@@ -382,7 +396,7 @@ export async function runCli(options: {
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {
-      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken]))
+      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken, slackUrl]))
       await output.sync()
       options.stdout('{"outputWritten":true}\n')
     } else {

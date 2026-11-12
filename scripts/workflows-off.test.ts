@@ -116,6 +116,7 @@ describe('booking workflows are off and expose no surface', () => {
             enabled: config.WEBHOOKS_ENABLED,
             encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
           },
+          webhookQueue: { enqueue: async () => null },
           notify: async () => {},
           notifyAttendeeNoShow: async () => {},
           googleCalendar: {

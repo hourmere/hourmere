@@ -917,6 +917,7 @@ describe('the hard-off constant', () => {
           waitlist: { verify: unavailable, remove: unavailable },
           invitationMailLimits: { secret: 'synthetic-routing-test-only-secret' },
           webhookSettings: { enabled: config.WEBHOOKS_ENABLED },
+          webhookQueue: { enqueue: unavailable },
           notify: unavailable,
           notifyAttendeeNoShow: unavailable,
           googleCalendar: undefined,

@@ -136,6 +136,11 @@ const httpErrorCodes: Record<number, string> = {
   429: 'rate_limited',
 }
 
+/** Slack URLs are bearer secrets; suppress validation echoes and diagnostics. */
+function isSlackDestinationPath(path: string): boolean {
+  return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
+}
+
 /** Admission bodies carry private contacts and arbitrary keys can themselves contain PII. */
 function isWaitlistAdmissionPath(path: string): boolean {
   let decoded = path
@@ -156,7 +161,8 @@ function isWaitlistEntryPath(path: string): boolean {
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
-  if (isOneTimeLinkPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
+  if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
+    return c.json({ error: 'invalid_request' }, 400)
   if (c.req.path.includes('/provisioning-tokens')) return c.json({ error: 'invalid_request' }, 400)
   const message = result.error.issues
     .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
@@ -337,7 +343,8 @@ const requestLogger = createMiddleware(async (c, next) => {
     console.log(escapeControlCharacters(`--> ${c.req.method} ${managementRoute} ${c.res.status}`))
     return
   }
-  if (!isOneTimeLinkPath(c.req.path)) return ordinaryRequestLogger(c, next)
+  if (!isOneTimeLinkPath(c.req.path) && !isSlackDestinationPath(c.req.path))
+    return ordinaryRequestLogger(c, next)
   await next()
   console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
 })
@@ -364,13 +371,14 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
-    const text =
-      isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
+    const text = isSlackDestinationPath(c.req.path)
+      ? '[private Slack diagnostic omitted]'
+      : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
         ? 'private waitlist request failed'
         : detail
     const path = isOneTimeCapabilityPath(c.req.path)
       ? '/book/[redacted]'
-      : isOneTimeLinkPath(c.req.path)
+      : isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path)
         ? routePath(c)
         : c.req.path
     const message = c.req.path.includes('/provisioning-tokens')
@@ -386,7 +394,13 @@ export function createApp({
     )
   }
   const logError = (c: Context, label: string, detail: unknown) =>
-    logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
+    logLine(
+      c,
+      'ERROR',
+      isSlackDestinationPath(c.req.path)
+        ? '[private Slack diagnostic omitted]'
+        : `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+    )
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
   // with an opaque 500; only failures the caller can act on get a specific code.
@@ -407,7 +421,10 @@ export function createApp({
       if (err.res) return err.getResponse()
       const error = httpErrorCodes[err.status] ?? 'invalid_request'
       return c.json(
-        err.message && !isOneTimeLinkPath(c.req.path) && !isWaitlistAdmissionPath(c.req.path)
+        err.message &&
+          !isOneTimeLinkPath(c.req.path) &&
+          !isWaitlistAdmissionPath(c.req.path) &&
+          !isSlackDestinationPath(c.req.path)
           ? { error, message: err.message }
           : { error },
         err.status,
@@ -439,7 +456,8 @@ export function createApp({
             message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
           }),
       }
-      if (isWaitlistAdmissionPath(c.req.path)) delete body.message
+      if (isWaitlistAdmissionPath(c.req.path) || isSlackDestinationPath(c.req.path))
+        delete body.message
       return c.json(body, domainStatus[err.kind])
     }
     logError(c, '', err)

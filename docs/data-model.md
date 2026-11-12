@@ -32,8 +32,34 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
 The [SCIM design and provisioning-token foundation](scim.md) describes organization-scoped
-credential storage and the planned user lifecycle and Groups-to-teams mapping. Only token
-administration is implemented; SCIM resources remain unavailable.
+credential storage and the planned user lifecycle and Groups-to-teams mapping. Token
+administration and connection/User storage are implemented; SCIM resources remain unavailable.
+
+Migration `0073_scim_identity.sql` adds one stable `scim_connections` identity per
+organization and separate `scim_token_connections` bindings. Existing credentials,
+including revoked history, are bound without rewriting their fields. New token inserts
+receive the same organization connection; rotation retains that binding.
+
+`scim_users` stores organization-local mapped attributes, desired active state and
+nullable account/membership links. Its generated trimmed, lowercase user name and
+case-sensitive external ID are unique within a connection while the resource is live,
+including inactive entries. A linked account can have only one live resource per
+connection. Retirement preserves the opaque resource ID permanently while allowing a
+new resource to reuse the retired identifiers. Composite foreign keys bind resources,
+managers, membership links and invitation claims to their organization and connection.
+
+`scim_user_claims` stores expiring, deduplicated invitation intents, without creating
+accounts or verifying mailboxes. `scim_membership_blocks` stores separate local and SCIM
+suspension/removal records that survive membership and account deletion. Account deletion
+nulls the account reference and retains an immutable normalized mailbox tombstone for the
+shared SSO/SCIM admission checks described in [the SCIM design](scim.md); the captured
+decision is frozen, cleared at most once, undeletable while its organization exists and
+unique per organization, mailbox, authority and kind. A blocker whose mailbox cannot be
+stored, or whose decision is already a live tombstone, is dropped so that account deletion
+is never refused. These tables provide storage
+for later claim and authorization work; this migration does not enforce new admission,
+suspension or revocation behavior in application services. Users, Groups and discovery
+handlers remain unregistered in production.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -1432,6 +1458,35 @@ index pg-boss's retained job history. The migration uses ordinary `CREATE INDEX`
 Retention has no status filter and uses the existing `created_at` index; delivery metadata
 pages use the existing `(webhook_id,id)` index in reverse order.
 
+
+Migration 0068 adds first-class Slack destinations to `webhooks`: `destination_kind`
+(default `webhook`), `url_ciphertext`, optional `event_type_id` and `pause_reason`.
+`pause_reason` is `url_rejected` from Slack's 404/410 until the URL is replaced or the
+destination is enabled (a check constraint requires an inactive Slack row); pausing an
+active destination and generic webhooks keep it null. A partial unique index
+allows one Slack destination per organization without consuming the ten signed-webhook
+slots. The URL field contains only a masked Slack address; AES-256-GCM ciphertext uses
+the webhook encryption key with organization, destination ID and URL-specific associated
+data. A composite event-type foreign key enforces the same organization; hard deletion of
+a filtered event type removes the destination rather than broadening its subscription.
+Generic webhook management excludes Slack rows.
+
+Slack captures immutable Block Kit payloads in the booking transaction and reuses bounded
+outbox retries and terminal state tracking. The minimum projection contains booking ID,
+event kind, event-type title, zoned start/end with UTC offset, status and an authenticated
+admin booking link; personal payloads add the invitee name. Team-wide payloads exclude
+free-text booking titles, answers, attendee details, meeting links and reschedule-chain identifiers. Slack accepts the
+five lifecycle and reschedule-request events only: migration 0070's attendee no-show event is
+for signed webhooks, and capture never queues it for Slack. Both capture and delivery check the
+current event-type filter. Synthetic test deliveries have a nullable booking ID and bypass
+only that filter; active/subscribed checks still apply. One pending test per destination
+is enforced under its row lock. A test delivery stores its own event ID in `request_id`:
+with migration 0064's `NULLS NOT DISTINCT` key on `(webhook_id, booking_id, event_type,
+request_id)`, a null value would make every later sample a duplicate of the first. On rows
+with a null `booking_id`, `request_id` is this sample marker, not a reschedule-request ID. Slack requires `WEBHOOKS_ENABLED=true` and
+`WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
+processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
+
 ## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and
@@ -1778,3 +1833,40 @@ UNION view that resolves ordinary booking resources or a seat's shared slot reso
 the existing recipient worker; it never transfers ownership to a seat. Logistics readiness
 uses the conference's matching applied revision and ready URL, independently of calendar
 count writeback. Count failures therefore cannot revoke a ready URL or resend invitations.
+
+### Operator SMS dispatch foundation
+
+Migration `0069_sms_delivery_limits.sql` adds `sms_deliveries`, an internal ledger,
+not a reminder queue. No host or invitee SMS surface exists yet. Each logical job has
+one purpose-keyed HMAC-SHA256 key digest, globally unique across organizations. The
+transaction takes a database-local advisory fence, checks rolling recipient/hour, recipient/day,
+instance/hour and organization/day budgets using database time, and commits a
+`dispatching` reservation before HTTP. Failed and uncertain attempts consume budget.
+Provider 429 responses move to `rate_limited`, release local budgets, and store a bounded
+`retry_not_before` time (1–3600 seconds; missing/invalid Retry-After defaults to 60).
+Only those known non-sends may reserve again after that time, under the same fence,
+after checking the fingerprint and all budgets; this resets `created_at` to the database
+time of the new reservation for budget and retention accounting. A crash before dispatch
+can lose a message; a crash after dispatch cannot cause its retry to send twice.
+
+Rows contain only a purpose-keyed HMAC of the normalized destination, a last-two-digit
+mask, organization ID, a keyed request fingerprint, provider message ID, status and
+timestamps. Neither the body, full phone number nor Twilio credentials are persisted.
+Request fingerprints bind destination, body and organization so changed retries fail.
+Keep SMS_HASH_KEY stable and backed up: rotation changes job-key hashes and therefore
+defeats deduplication, as well as resetting recipient accounting. Key rotation requires
+a separate data/key migration.
+Organization IDs deliberately have no cascading foreign key: organization deletion
+must never reopen a consumed job key.
+
+After 720 elapsed hours (30 days) from the latest reserved attempt, hourly maintenance
+(registered even when SMS is disabled) and opportunistic maintenance erase all delivery
+details in batches of at most 1,000.
+Only the job-key digest, timestamps and `expired` status remain indefinitely. These
+small tombstones prevent old job retries from sending after detail retention ends.
+A stopped worker delays cleanup; resume it to process the backlog. A retained accepted
+record can return its provider ID on retry; failed records return `sms_provider_rejected`,
+while dispatching, unknown and expired records return `sms_delivery_unknown`. A rate-limited
+record returns `sms_rate_limited` and the remaining delay before its retry-not-before time.
+Status callbacks and final delivery receipts are deferred, so
+`accepted` means Twilio accepted the request, not that a handset received it.

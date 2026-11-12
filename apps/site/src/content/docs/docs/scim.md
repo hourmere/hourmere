@@ -4,7 +4,7 @@ description: Prepare organization-scoped provisioning credentials and understand
 ---
 
 **SCIM user and group provisioning is not available yet.** This release provides the
-credential foundation only. Enabling it does not enable Users, Groups or discovery
+credential administration and internal identity storage only. Enabling it does not enable Users, Groups or discovery
 resources, and an identity provider's connection test cannot succeed yet.
 
 The same foundation is available to every installation, including self-hosted instances,
@@ -40,6 +40,11 @@ Token management itself requires your signed-in browser session, just like
 An organization can have at most 10 active tokens. This leaves room for staged IdP
 transitions and recovery while bounding live credentials. Revoke unused tokens before
 creating more.
+
+Credentials in one organization share a stable provisioning connection. Rotating a
+credential preserves this identity. Internal storage for future User profiles, claims
+and suspension records is present, but it does not create accounts, grant membership
+or change access in this release.
 
 ## Rotate and revoke
 

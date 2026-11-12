@@ -176,8 +176,9 @@ not by an email address. Select this event to receive attendance changes.
 ## Examples
 
 **Sync attendance:** select **Attendee No-Show Changed** to update attendance in another
-system. Use the event `id` for deduplication and `data.attendeeId` to identify the changed attendee. A null
-`data.noShowMarkedAt` clears the no-show state; it does not cancel or reschedule the booking.
+system. Use the event `id` for deduplication and `data.attendeeId` to identify the
+changed attendee. A null `data.noShowMarkedAt` clears the no-show state; it does not
+cancel or reschedule the booking.
 
 **Keep another system in sync:** activate a trigger for all six events. Use the event
 `id` as your downstream deduplication key. Match records using `data.bookingId`; for a
@@ -207,16 +208,37 @@ workflows, not all Hourmere configuration endpoints. There is no historical-even
 manual replay or exactly-once delivery guarantee. Protect and retain downstream receipts
 when effects must survive retries, concurrent workers or restarts.
 
-Publishing remains a separate owner-approved step. `publishConfig.registry` points to
-`https://registry.invalid/`; the approved publication change must remove this unresolvable
-placeholder. It applies even with scripts disabled. `prepublishOnly` additionally refuses
-to publish unless `HOURMERE_N8N_PUBLISH=1` is explicitly set; packing does not publish.
-An npm dry-run skips registry access and can succeed with `--ignore-scripts`; it does
-not demonstrate that publication can reach the configured registry. The workflow
-peer range is `*`, with an exact development pin for builds/tests. Contributors must
-install with `npm install --ignore-scripts` or `npm ci --ignore-scripts`, in this package directory, as its CI job
-does. The official CLI requires a lint plugin whose preinstall fetches an unpinned
-`only-allow`; the toolchain’s native install scripts are also unnecessary here.
+Publishing remains a separate owner-approved step; packing does not publish. The
+package manifest sets `"private": true`, so npm refuses every real publication with
+`EPRIVATE` before contacting any registry, whatever `--registry`, `--ignore-scripts` or
+`--force` options are used. Dry-runs never reach that check.
+
+`publishConfig.registry` also points to `https://registry.invalid/`, an unresolvable
+placeholder. It applies with scripts disabled and takes precedence over registries set in
+`.npmrc` files or the environment. An explicit `--registry` option on the command line
+overrides it, so do not pass one to get past the placeholder. `prepublishOnly` refuses to
+publish unless `HOURMERE_N8N_PUBLISH=1` is set, but only when lifecycle scripts run. The
+package directory's `.npmrc` turns them off, so `npm publish` there skips that check
+unless scripts are turned back on, for example with `--ignore-scripts=false`.
+
+The reviewed change that approves publication removes `private` and the placeholder
+registry together. The release then runs in the package directory as
+`HOURMERE_N8N_PUBLISH=1 npm publish --ignore-scripts=false`, so the approval check runs.
+
+A dry-run's exit code says nothing about where a publication would go. Without
+`--offline`, `npm publish --dry-run` queries the target registry for existing versions,
+ignores the failure and still exits 0, even for the unreachable placeholder. What counts
+is the `npm notice Publishing to <registry> … (dry-run)` line in its output.
+`npm publish --dry-run --ignore-scripts --offline` prints it without network access, and
+the package's tests assert that it names `https://registry.invalid/`. They also aim a
+non-dry-run publish at a local sink and require `EPRIVATE` with no connection.
+
+The workflow peer range is `*`, with an exact development pin for builds/tests.
+Contributors must install with `npm install --ignore-scripts` or
+`npm ci --ignore-scripts` in the package directory, as its CI job does; the directory's
+`.npmrc` also turns install scripts off. The official CLI requires a lint plugin whose
+preinstall fetches an unpinned `only-allow`; the toolchain’s native install scripts are
+also unnecessary here.
 
 ### Interface language
 
