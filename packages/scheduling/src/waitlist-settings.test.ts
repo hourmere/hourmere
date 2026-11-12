@@ -3,6 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as events from './event-types.ts'
 import { createTestTeam, createTestUser, testContext } from './testing.ts'
 
@@ -42,10 +43,11 @@ async function sourceCopy(replacement: readonly [string, string]): Promise<Setti
     source = source.replace(item[0], '')
   }
   source = source.replace(/\bexport /g, '')
-  return new Function(
+  const settings = new Function(
     ...Object.keys(dependencies),
     `${source}; return {getEventTypeWaitlist,setEventTypeWaitlist,getEventTypeWaitlistSummary,listEventTypeWaitlistEntries,removeEventTypeWaitlistEntry,createEventType,updateEventType,getEventType}`,
   )(...Object.values(dependencies)) as Settings
+  return guardCopy(settings)
 }
 
 describe.skipIf(!serverUrl)('internal waitlist settings', () => {
@@ -357,7 +359,7 @@ describe.skipIf(!serverUrl)('internal waitlist settings', () => {
     ],
   ])('detects source-copy omission of %s waitlist settings', async (_name, anchor) => {
     const copy = await sourceCopy([anchor as string, ''])
-    await expect(assertRoundTrip(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, assertRoundTrip)
   })
 
   async function assertEntries(api: Settings) {
@@ -533,14 +535,14 @@ describe.skipIf(!serverUrl)('internal waitlist settings', () => {
       'else if (!current.canManageTeam) throw insufficientRole()',
       'else if (false) throw insufficientRole()',
     ])
-    await expect(assertEntries(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, assertEntries)
   })
   it('detects source-copy omission of host removal', async () => {
     const copy = await sourceCopy([
       "if (['pending_verification', 'active', 'notified'].includes(entry.status))",
       'if (false)',
     ])
-    await expect(assertEntries(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, assertEntries)
   })
 
   it.each([
@@ -559,6 +561,6 @@ describe.skipIf(!serverUrl)('internal waitlist settings', () => {
     ['supported mode', "row.scheduling_type !== 'individual' ||", 'false ||', assertUnsupported],
   ] as const)('detects source-copy removal of %s', async (_name, before, after, assertion) => {
     const copy = await sourceCopy([before, after])
-    await expect(assertion(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, assertion)
   })
 })

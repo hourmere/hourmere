@@ -103,6 +103,9 @@ async function auditBranding(
 async function write<T>(ctx: BrandingContext, action: (trx: Db) => Promise<T>) {
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
+    // Reject non-admin callers before they can contend with booking writes.
+    if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
+      await authorize(trx, ctx)
     const user = await trx
       .selectFrom('auth.user')
       .select('id')

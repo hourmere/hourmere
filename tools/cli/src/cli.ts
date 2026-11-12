@@ -359,7 +359,7 @@ export async function runCli(options: {
     // Reserve the private output before making a booking: a path error must not lose its token.
     if (args.command === 'export') exportOutputPath = args.output
     if (args.output) output = await open(args.output, 'wx', 0o600)
-    called = true
+    called = args.command !== 'branding upload'
     const result =
       args.command === 'branding upload'
         ? await uploadLogo({
@@ -367,7 +367,10 @@ export async function runCli(options: {
             key,
             path: args.file ?? '',
             contentType: args.contentType ?? '',
-            fetch: options.fetch,
+            fetch: (...request) => {
+              called = true
+              return (options.fetch ?? fetch)(...request)
+            },
           })
         : await callTool({
             url,

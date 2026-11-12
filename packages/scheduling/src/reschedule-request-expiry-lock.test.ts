@@ -26,7 +26,20 @@ describe.skipIf(!serverUrl)('reschedule request expiry serialization', () => {
     await owned?.drop()
   })
 
-  async function verify(change?: Change) {
+  function scenario(change?: Change) {
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    // findSlots runs after managedRequest has read pending, with the booking row locked,
+    // but before the move resolves the request. Expiry must wait at exactly this point.
+    const copy = sourceCopy(change, async (...args) => {
+      entered.resolve()
+      await release.promise
+      return findSlots(...args)
+    })
+    return { copy, entered, release }
+  }
+
+  async function verify({ copy, entered, release }: ReturnType<typeof scenario>) {
     const fixtures = createFixtures(db)
     const host = await fixtures.host()
     await fixtures.schedule(host.userId)
@@ -53,15 +66,6 @@ describe.skipIf(!serverUrl)('reschedule request expiry serialization', () => {
       slug: 'intro',
       start: Temporal.Instant.from('2026-11-02T09:00Z'),
       invitee: { name: 'Invitee', email: 'invitee@example.test', timeZone: 'UTC' },
-    })
-    const entered = Promise.withResolvers<void>()
-    const release = Promise.withResolvers<void>()
-    // findSlots runs after managedRequest has read pending, with the booking row locked,
-    // but before the move resolves the request. Expiry must wait at exactly this point.
-    const copy = sourceCopy(change, async (...args) => {
-      entered.resolve()
-      await release.promise
-      return findSlots(...args)
     })
     const requested = await copy.requestReschedule(ctx, created.booking.id, {
       idempotencyKey: randomUUID(),
@@ -119,14 +123,18 @@ describe.skipIf(!serverUrl)('reschedule request expiry serialization', () => {
   }
 
   it('holds expiry behind a pick that already checked its pending request', async () => {
-    await verify()
+    await verify(scenario())
   })
   it('detects removal of the expiry booking lock with a real state assertion', async () => {
-    await expect(
-      verify([
-        ".where('id', '=', request.booking_id)\n      .forUpdate()",
-        ".where('id', '=', request.booking_id)",
-      ]),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    // Construct before the rejection matcher so a missing mutation cannot satisfy it.
+    const mutated = scenario([
+      ".where('id', '=', request.booking_id)\n      .forUpdate()",
+      ".where('id', '=', request.booking_id)",
+    ])
+    await expect(verify(mutated)).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual: { state: 'expired', picked_booking_id: null },
+      expected: { state: 'picked', picked_booking_id: expect.any(String) },
+    })
   })
 })

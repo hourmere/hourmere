@@ -17,6 +17,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { findPublicEventType, servedHandle } from './availability.ts'
 import { DomainError } from './errors.ts'
 import { isConstraintViolation, SQLSTATE, timestamp, validTimeZone } from './internal.ts'
@@ -59,10 +60,11 @@ function profileCopy(change?: Change): ProfileModule {
     validTimeZone,
     cleanText,
   }
-  return new Function(
+  const profile = new Function(
     ...Object.keys(bindings),
     `${javascript}; return { putProfile, findLegacyHandleCollisions }`,
   )(...Object.values(bindings)) as ProfileModule
+  return guardCopy(profile)
 }
 
 const serverUrl = process.env.DATABASE_URL
@@ -409,7 +411,7 @@ describe.skipIf(!serverUrl)('the claim-reserved personal handle route', () => {
     ]
 
     it.each(controls)('fail without $name', async ({ change, probe }) => {
-      await expect(probe(profileCopy(change))).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(profileCopy(change), probe)
     })
   })
 

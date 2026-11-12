@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -13,12 +13,27 @@ import {
 
 const serverUrl = process.env.DATABASE_URL
 
-/** Constraints, standalone indexes, triggers and NOT NULL columns the migration creates. */
+/**
+ * Constraints, standalone indexes, triggers and NOT NULL columns the migration creates. Later
+ * migrations may add their own objects to these tables (0079 adds a purge guard); those are
+ * theirs to cover.
+ */
 async function catalogObjects(pool: pg.Pool) {
   const tables = [...workflowTables]
+  const later = new Set<string>()
+  for (const file of (await readdir(migrationsDir)).filter(
+    (name) => name.endsWith('.sql') && name > workflowMigration,
+  ))
+    for (const [, name] of (await readFile(join(migrationsDir, file), 'utf8')).matchAll(
+      /(?:CREATE TRIGGER|CREATE (?:UNIQUE )?INDEX|CONSTRAINT) ([a-z_]+)/g,
+    ))
+      later.add(name as string)
   const relations = `SELECT oid FROM pg_class WHERE relname = ANY($1) AND relnamespace='public'::regnamespace`
   const names = async (sql: string) =>
-    (await pool.query<{ name: string }>(sql, [tables])).rows.map(({ name }) => name).sort()
+    (await pool.query<{ name: string }>(sql, [tables])).rows
+      .map(({ name }) => name)
+      .filter((name) => !later.has(name))
+      .sort()
   return {
     constraints: await names(
       `SELECT conname AS name FROM pg_constraint WHERE contype<>'n' AND conrelid = ANY(${relations})`,

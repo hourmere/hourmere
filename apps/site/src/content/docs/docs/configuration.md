@@ -57,6 +57,7 @@ includes PostgreSQL 18.
 | `WEBHOOKS_ENABLED` | `false` | Capture and deliver organization booking events for outbound HTTPS webhooks and Slack. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled or to configure [Slack notifications](/docs/slack). Encrypts signing secrets and Slack URLs; keep stable and backed up. Slack capture and delivery also require `WEBHOOKS_ENABLED=true`. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
+| `SSO_PRIVATE_TARGETS` | Unset | Reserved for organization SSO, which is not available yet: validated at startup and otherwise unused. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for private identity providers. Private routing only: HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`; see [private identity providers](#private-identity-providers). |
 | `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
@@ -133,6 +134,27 @@ Recreate web and worker together after changing the setting; pending attempts us
 policy. See the [same-network n8n example](/docs/self-hosting#private-webhook-receivers)
 and [booking webhooks](/docs/webhooks)
 for configuration and delivery behavior.
+
+### Private identity providers
+
+Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for it: the server
+validates the value at startup and nothing else reads it, so it routes nothing today. It is
+empty by default. **Hourmere Cloud leaves it empty.** It is a separate operator setting and
+never reuses `WEBHOOK_PRIVATE_TARGETS`; no team setting can add to it.
+
+Each entry is one exact `hostname:port`, `IPv4:port` or `[IPv6]:port`, for example
+`keycloak.internal:8443`. There are no CIDRs, wildcards or port ranges, and the port is
+always explicit (`443` included). An IP entry must be RFC1918 IPv4, loopback or IPv6
+unique-local space; link-local, metadata, IPv4-mapped and public addresses are refused at
+startup, with the same rules as private webhook receivers. Only that exact host and port
+match: a different port, or another hostname that resolves to the same address, does not.
+When SSO uses an entry, every DNS answer for the host must be eligible private or loopback
+space on every request, and the checked address is pinned to the socket.
+
+The setting permits private routing, not plain HTTP: identity providers still need HTTPS
+with a certificate that the server process trusts, and `http://keycloak:8080` is refused
+even when listed. See the [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md)
+for the planned transport rules.
 
 ## Email and registration
 
