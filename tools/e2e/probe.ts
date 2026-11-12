@@ -117,11 +117,12 @@ async function report(page: Page, frame: Frame, shown: boolean, delay: number) {
     scrollRest: rest?.[3] ?? null,
     frameHeightRest: rest?.[5] ?? null,
     contentScrollableRest: rest?.[6] ?? null,
-    movingAtDown: Boolean(atDown && rest && atDown[2] !== rest[2]),
     movedDuringPress: Boolean(atDown && atUp && atDown[2] !== atUp[2]),
-    firstMove: rel(moves[0]),
-    lastMove: rel(moves.at(-1)),
-    moveSamples: moves.length,
+    // Moving at the press: the iframe moved within the frame before the press or before release.
+    movingAtPress: moves.some((e) => Number(e[1]) > downT - 17 && Number(e[1]) <= upT),
+    lastMoveBeforePress: rel(moves.filter((e) => Number(e[1]) <= downT).at(-1)),
+    firstMoveAfterRelease: rel(moves.find((e) => Number(e[1]) > upT)),
+    moves: moves.map((e) => [rel(e), e[2], e[3], e[5]]),
   }
   console.log(`PROBE ${JSON.stringify(summary)}`)
   if (!shown) {
