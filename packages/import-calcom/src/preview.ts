@@ -192,6 +192,7 @@ export async function previewImport(pool: pg.Pool, input: SourceInput): Promise<
   const cutoff = Temporal.Now.instant().toString({ smallestUnit: 'millisecond' })
   const snapshot = await extractForPreview(pool, input, cutoff)
   const client = await pool.connect()
+  let discard = false
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     // The target state includes the same identity read as extraction above.
@@ -202,10 +203,13 @@ export async function previewImport(pool: pg.Pool, input: SourceInput): Promise<
     await client.query('COMMIT')
     return preview
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {})
+    await client.query('ROLLBACK').catch(() => {
+      discard = true
+    })
     throw error
   } finally {
-    client.release()
+    // As in the extraction read, a session whose rollback failed is never pooled.
+    client.release(discard)
   }
 }
 export function buildPreview(
