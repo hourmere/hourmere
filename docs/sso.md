@@ -674,10 +674,11 @@ The Audit actions step built this vocabulary and records nothing itself: the
 and checked by migration 0085, and no production code emits one yet. Later steps call
 `writeSsoAuditEvent` inside the transaction of the change they record, so a rollback removes
 the event with the change, and `writeSsoSecurityFailure` for a security failure. The
-provider and correlation IDs are UUIDv7 values (provider and attempt IDs), which an IdP
-subject, a secret, a token or a mailbox capability cannot pass for. The source of a security
-failure is its action: a failed sign-in, a rejected replay, a JIT refusal or a link conflict.
-Audit limits below pins the bound.
+provider and correlation IDs must be stored provider and attempt IDs (UUIDv7); the checks
+enforce that shape, which refuses a secret, a token, an assertion, a mailbox capability or an
+IdP subject of any other shape. The source of a security failure is its action: a failed
+sign-in, a rejected replay, a JIT refusal or a link conflict. Audit limits below pins the
+bound.
 
 ## Pinned operational limits
 
@@ -748,8 +749,12 @@ failures of the same provider and source were recorded in the last `ssoSecurityF
 seconds, by the database clock; it drops the rest and reports that it did. With four sources, one
 provider records at most 80 failures an hour, however many attempts fail. A transaction-level
 advisory lock per provider and source serializes the count and the insert, so a burst of
-parallel failures cannot exceed the bound. A provider's successes and changes are never
-dropped: only security failures are bounded.
+parallel failures cannot exceed the bound, and a failure already past the bound is dropped from
+an unlocked count without waiting for that lock. Callers write a failure after the request's
+own transaction has settled, with the team, provider and protocol of the provider they loaded.
+A provider's successes and changes are never dropped: only security failures are bounded. The
+cost is that junk failures can fill a window and hide later failures of the same source until
+the window slides.
 
 ## Proposed REST, MCP and CLI contracts
 

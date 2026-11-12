@@ -15,7 +15,12 @@ const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 
 // The journal module, the SSO catalogue and their test support (protection suite, check reader).
-const AUDIT_LAYER = /^packages\/db\/src\/(?:audit\.ts|sso-audit(?:-[a-z-]+)?\.ts)$/
+const AUDIT_LAYER = new Set([
+  'packages/db/src/audit.ts',
+  'packages/db/src/sso-audit.ts',
+  'packages/db/src/sso-audit-protections.ts',
+  'packages/db/src/sso-audit-check-source.ts',
+])
 // An SSO action name as a string literal, whether or not the catalogue lists it.
 const SSO_ACTION = /['"`]sso_[a-z_]+\.[a-z_]+['"`]/
 // The SSO writers and the catalogue module, by name or import.
@@ -79,7 +84,7 @@ describe('SSO audit actions are defined but never recorded', () => {
   it('keeps every SSO action and writer inside the audit layer', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
-    const layer = sources.filter((file) => AUDIT_LAYER.test(file))
+    const layer = sources.filter((file) => AUDIT_LAYER.has(file))
     expect(layer).toEqual(
       expect.arrayContaining(['packages/db/src/audit.ts', 'packages/db/src/sso-audit.ts']),
     )
@@ -89,7 +94,7 @@ describe('SSO audit actions are defined but never recorded', () => {
     const journal = readFileSync(new URL('packages/db/src/audit.ts', root), 'utf8')
     expect(SSO_WRITER.test(journal)).toBe(true)
     const referencing = sources
-      .filter((file) => !AUDIT_LAYER.test(file))
+      .filter((file) => !AUDIT_LAYER.has(file))
       .filter((file) => {
         const text = readFileSync(new URL(file, root), 'utf8')
         return (

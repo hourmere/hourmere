@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { setTimeout } from 'node:timers/promises'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   type AuditEvent,
@@ -397,7 +398,7 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
           action,
           method: 'oidc',
           providerId,
-          revision: value,
+          revision: value as unknown as number,
           reason: value,
           correlationId: value,
         })
@@ -533,9 +534,40 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
             targetId,
           })
         }),
-      ).rejects.toThrow('SSO audit targets are stored IDs')
+      ).rejects.toThrow('SSO audit targets and actors are stored IDs')
       expect(await rowsFor(refused)).toEqual([])
     }
+    // So are the target type and the actor: a type name, and a stored ID or service name.
+    for (const bad of [
+      { targetType: 'SSO provider' },
+      { targetType: ssoSensitiveValues.mailbox },
+      { actor: { type: 'user', id: ssoSensitiveValues.subjectText } },
+      { actor: { type: 'user', id: ssoSensitiveValues.mailbox } },
+      { actor: { type: 'api_key', id: ssoSensitiveValues.secret } },
+      { actor: { type: 'system', id: 'SSO Maintenance <ops@example.com>' } },
+    ]) {
+      const refused = randomUUID()
+      await expect(
+        db.transaction().execute(async (trx) => {
+          await trx.insertInto('auth.organization').values(change(refused)).execute()
+          await writeSsoAuditEvent(trx, {
+            ...event('sso_domain.verified', {}, refused),
+            ...bad,
+          } as SsoAuditEvent<'sso_domain.verified'>)
+        }),
+        JSON.stringify(bad),
+      ).rejects.toThrow('SSO audit targets and actors are stored IDs')
+      expect(await rowsFor(refused)).toEqual([])
+    }
+    const maintenance = randomUUID()
+    await db.transaction().execute((trx) =>
+      writeSsoAuditEvent(trx, {
+        ...event('sso_maintenance.domain_retired', {}, maintenance),
+        actor: { type: 'system', id: 'sso-maintenance' },
+        credential: { type: 'none' },
+      }),
+    )
+    expect(await rowsFor(maintenance)).toMatchObject([{ actor_type: 'system' }])
     // Without a transaction there is no change to join: refused, and nothing is written.
     const outside = randomUUID()
     await refusedByApplication(
@@ -610,6 +642,20 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
       { providerId: randomUUID() },
       { method: 'ldap' },
       { organizationId: null },
+      // The team in canonical form only, so one team has one lock scope.
+      { organizationId: organizationId.replaceAll('-', '') },
+      { organizationId: `{${organizationId}}` },
+      // Who failed: anonymous, an external user or a signed-in user, by stored ID.
+      { actor: { type: 'user', id: ssoSensitiveValues.subjectText } },
+      { actor: { type: 'user', id: ssoSensitiveValues.subjectGuid.toUpperCase() } },
+      { actor: { type: 'api_key', id: randomUUID() } },
+      { actor: { type: 'system', id: 'sso' } },
+      { credential: { type: 'session', id: randomUUID() } },
+      {
+        actor: { type: 'user', id: randomUUID() },
+        credential: { type: 'session', id: ssoSensitiveValues.token },
+      },
+      { credential: { type: 'api_key', id: randomUUID(), scope: 'full' } },
     ])
       await refusedByApplication(
         writeSsoSecurityFailure(db, { ...failure, ...bad } as unknown as SsoSecurityFailure),
@@ -629,25 +675,39 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
       method: 'oidc' as const,
       providerId,
     }
-    // The request's own transaction fails afterwards; the failure stays recorded.
-    const request = await owned.pool.connect()
-    try {
-      await request.query('BEGIN')
-      await withAuditRequest('failed-request', () =>
-        expect(
-          writeSsoSecurityFailure(db, {
-            ...base,
-            action: 'sso_authentication.failed',
-            reason: 'nonce_mismatch',
-            revision: 4,
-            correlationId,
-          }),
-        ).resolves.toBe(true),
-      )
-      await request.query('ROLLBACK')
-    } finally {
-      request.release()
-    }
+    // The request's transaction rolls back; the failure, written once it settled, stays.
+    await withAuditRequest('failed-request', async () => {
+      await expect(
+        db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('auth.organization')
+            .values({
+              id: organizationId,
+              name: 'sso',
+              slug: organizationId,
+              createdAt: new Date(),
+            })
+            .execute()
+          throw new Error('nonce mismatch')
+        }),
+      ).rejects.toThrow('nonce mismatch')
+      await expect(
+        writeSsoSecurityFailure(db, {
+          ...base,
+          action: 'sso_authentication.failed',
+          reason: 'nonce_mismatch',
+          revision: 4,
+          correlationId,
+        }),
+      ).resolves.toBe(true)
+    })
+    expect(
+      await db
+        .selectFrom('auth.organization')
+        .select('id')
+        .where('id', '=', organizationId)
+        .execute(),
+    ).toEqual([])
     for (const failure of [
       // Listed codes are kept; anything else is redacted.
       { action: 'sso_jit.refused', reason: 'jit_disabled', revision: 2_147_483_647 },
@@ -659,7 +719,9 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
       { action: 'sso_authentication.replay_rejected', reason: 'attempt_invalid', correlationId },
       { action: 'sso_link.conflicted', correlationId: randomUUID(), revision: '3' },
     ] as const)
-      await expect(writeSsoSecurityFailure(db, { ...base, ...failure })).resolves.toBe(true)
+      await expect(
+        writeSsoSecurityFailure(db, { ...base, ...failure } as unknown as SsoSecurityFailure),
+      ).resolves.toBe(true)
     expect(await rowsFor(organizationId)).toEqual(
       [
         [
@@ -739,47 +801,114 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
   }, 60_000)
 
   it('counts the failures of a concurrent writer before admitting another', async () => {
+    // Also where sessions default to repeatable read, whose snapshot would predate the lock.
+    const repeatable = new pg.Pool({
+      connectionString: owned.url,
+      max: 2,
+      options: '-c default_transaction_isolation=repeatable\\ read',
+    })
+    try {
+      for (const handle of [db, createDb(repeatable)]) {
+        const organizationId = randomUUID()
+        const failure: SsoSecurityFailure = {
+          organizationId,
+          actor: { type: 'anonymous' },
+          credential: { type: 'none' },
+          action: 'sso_link.conflicted',
+          method: 'oidc',
+          providerId: ssoAuditTestId(),
+        }
+        const limit = SSO_AUDIT_LIMITS.ssoSecurityFailureEvents
+        for (let index = 1; index < limit; index++)
+          await expect(writeSsoSecurityFailure(handle, failure)).resolves.toBe(true)
+        // Another writer holds the scope and has written the last admitted event, uncommitted.
+        const other = await owned.pool.connect()
+        try {
+          await other.query('BEGIN')
+          await other.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+            ssoSecurityFailureScope(failure),
+          ])
+          await other.query(
+            `INSERT INTO audit_events (organization_id, actor_type, credential_type, action, target_type, target_id, details)
+             VALUES ($1, 'anonymous', 'none', $2, 'sso_provider', $3, $4::jsonb)`,
+            [
+              organizationId,
+              failure.action,
+              failure.providerId,
+              JSON.stringify({ method: 'oidc', providerId: failure.providerId }),
+            ],
+          )
+          let settled = false
+          const pending = writeSsoSecurityFailure(handle, failure).finally(() => {
+            settled = true
+          })
+          await setTimeout(300)
+          expect(settled).toBe(false)
+          await other.query('COMMIT')
+          await expect(pending).resolves.toBe(false)
+        } finally {
+          // Never hand a client with an open transaction back to the pool.
+          other.release(true)
+        }
+        expect(await rowsFor(organizationId)).toHaveLength(limit)
+      }
+    } finally {
+      await repeatable.end()
+    }
+  })
+
+  it('validates and writes the same details, read once', async () => {
     const organizationId = randomUUID()
-    const failure: SsoSecurityFailure = {
-      organizationId,
-      actor: { type: 'anonymous' },
-      credential: { type: 'none' },
-      action: 'sso_link.conflicted',
+    let reads = 0
+    const details = {
       method: 'oidc',
       providerId: ssoAuditTestId(),
+      revision: 1,
+      outcome: 'failed',
+      get reason() {
+        reads++
+        return reads === 1 ? 'signature_invalid' : ssoSensitiveValues.token
+      },
     }
-    const limit = SSO_AUDIT_LIMITS.ssoSecurityFailureEvents
-    for (let index = 1; index < limit; index++)
+    await write(event('sso_provider.tested', details, organizationId))
+    expect(reads).toBe(1)
+    expect(await rowsFor(organizationId)).toMatchObject([
+      { details: { reason: 'signature_invalid' } },
+    ])
+  })
+
+  it('drops a failure past the bound without waiting for the lock', async () => {
+    const failure: SsoSecurityFailure = {
+      organizationId: randomUUID(),
+      actor: { type: 'anonymous' },
+      credential: { type: 'none' },
+      action: 'sso_jit.refused',
+      method: 'saml',
+      providerId: ssoAuditTestId(),
+      reason: 'jit_disabled',
+    }
+    for (let index = 0; index < SSO_AUDIT_LIMITS.ssoSecurityFailureEvents; index++)
       await expect(writeSsoSecurityFailure(db, failure)).resolves.toBe(true)
-    // Another writer holds the scope and has written the last admitted event, not yet committed.
     const other = await owned.pool.connect()
+    let dropped: Promise<unknown> | undefined
     try {
       await other.query('BEGIN')
       await other.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
         ssoSecurityFailureScope(failure),
       ])
-      await other.query(
-        `INSERT INTO audit_events (organization_id, actor_type, credential_type, action, target_type, target_id, details)
-         VALUES ($1, 'anonymous', 'none', $2, 'sso_provider', $3, $4::jsonb)`,
-        [
-          organizationId,
-          failure.action,
-          failure.providerId,
-          JSON.stringify({ method: 'oidc', providerId: failure.providerId }),
-        ],
-      )
-      let settled = false
-      const pending = writeSsoSecurityFailure(db, failure).finally(() => {
-        settled = true
-      })
-      await setTimeout(300)
-      expect(settled).toBe(false)
+      // A flood past the bound holds no transaction and no lock while it is dropped.
+      dropped = Promise.all(Array.from({ length: 30 }, () => writeSsoSecurityFailure(db, failure)))
+      const outcome = await Promise.race([dropped, setTimeout(2_000, 'waiting')])
+      expect(outcome).toEqual(Array.from({ length: 30 }, () => false))
       await other.query('COMMIT')
-      await expect(pending).resolves.toBe(false)
     } finally {
-      other.release()
+      // Ending the session releases the lock, so writers that did wait finish before teardown.
+      other.release(true)
+      await dropped?.catch(() => undefined)
     }
-    expect(await rowsFor(organizationId)).toHaveLength(limit)
+    expect(await rowsFor(failure.organizationId)).toHaveLength(
+      SSO_AUDIT_LIMITS.ssoSecurityFailureEvents,
+    )
   })
 
   it('lets the window slide', async () => {
