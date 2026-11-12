@@ -3,7 +3,9 @@
 Status: token administration and identity storage; design sources reviewed on **2026-11-06**.
 The connection identity and User schema step now provides internal storage, including
 credential bindings, claim intents and retained resource identities. It adds no resource
-handlers or membership lifecycle behavior.
+handlers or membership lifecycle behavior. The discovery representations step adds
+ServiceProviderConfig, ResourceTypes and Schemas handlers that only test harnesses inject,
+under the resource test flag described in the implementation plan; production registers none.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -69,6 +71,19 @@ follows SCIM rules, while identifier value comparison follows each schema's
 case-sensitive. Parse escaped quoted strings, never interpolate filters into SQL.
 Reject unsupported expressions with 400 `invalidFilter`, not an unfiltered list.
 Entra must be configured to match `userName`, not its optional work-email query form.
+
+Discovery follows RFC 7644 section 4. `/Schemas` and `/ResourceTypes` answer with a
+`ListResponse`, and their IDs return the single resource (a schema URI may arrive with its
+colons percent-encoded). Paging, sorting and projection parameters are ignored there; a
+`filter` parameter is refused with 403, any method other than GET or HEAD with 501, and an
+unknown resource type or schema ID with 404. Schemas lists the User schema and the enterprise
+extension with exactly the mapped fields of the table below, without the deferred `groups` or
+the refused `roles`, `entitlements` and `password`; `id`, `externalId` and `meta` are common
+attributes, not schema fields. `userName` is the one required field and is returned always;
+derived `manager.displayName` is read-only. ResourceTypes lists User only, with the
+enterprise extension optional, until Groups ship. Discovery representations carry
+`meta.resourceType` and an absolute `meta.location`, without `created`, `lastModified` or
+`version`.
 
 Use `ListResponse` with integer `totalResults`, `startIndex`, `itemsPerPage` and
 `Resources`. Offset pagination starts at 1, defaults to 100, caps at 100, uses stable
