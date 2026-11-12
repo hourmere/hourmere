@@ -4,7 +4,7 @@ import { widget } from '../../../apps/web/src/i18n/catalogues/pt-BR/widget.ts'
 import { type BookingEmailKind, bookingEmail } from '../../../packages/mail/src/booking.ts'
 import { magicLinkEmail } from '../../../packages/mail/src/index.ts'
 import { teamInvitationEmail } from '../../../packages/mail/src/team-invitation.ts'
-import { expect, test } from '../fixtures.ts'
+import { expect, test, waitUntilAtRest } from '../fixtures.ts'
 import { measureLayout } from '../layout.ts'
 
 async function fits(page: Page | Frame, context = 'Brazilian Portuguese public booking') {
@@ -31,7 +31,9 @@ async function chooseSlot(page: Page) {
         await day.click()
         await expect(page.locator('.slots button').first()).toBeVisible()
         await fits(page, 'Brazilian Portuguese slot chips')
-        await page.locator('.slots button').first().click()
+        const slot = page.locator('.slots button').first()
+        await waitUntilAtRest(slot, page)
+        await slot.click()
         return
       }
     }
