@@ -37,9 +37,19 @@ install `n8n-nodes-hourmere` through Settings → Community nodes.
 See the [official manual installation guide](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation.md).
 
 Publishing is a separate owner-approved step; building and packing do not publish.
-`package.json` sets `"private": true`, so npm refuses every real publication with
-`EPRIVATE` before contacting any registry, whatever `--registry`, `--ignore-scripts` or
-`--force` options are used. Dry-runs never reach that check.
+`package.json` sets `"private": true`, so npm refuses every real publication, whatever
+`--registry`, `--ignore-scripts` or `--force` options are used, and nothing is published.
+npm checks `private` only at its last step, though, so it can contact servers first:
+
+1. In a CI job that offers an OIDC ID token, such as GitHub Actions with
+   `id-token: write`, npm obtains that token from the CI provider and exchanges it at the
+   target registry. `--force` and `--offline` do not skip this.
+2. Without credentials for the target registry, npm then stops with `ENEEDAUTH`.
+3. Without `--force` or `--offline`, npm then reads the package's published versions from
+   the target registry, sending your npm token for that registry.
+4. Only then does npm refuse with `EPRIVATE`.
+
+Dry-runs never reach that check.
 
 `publishConfig.registry` also points to `https://registry.invalid/`, an unresolvable
 placeholder. It applies with scripts disabled and takes precedence over registries set in
@@ -50,8 +60,10 @@ scripts run. This directory's `.npmrc` turns them off, so `npm publish` here ski
 guard unless scripts are turned back on, for example with `--ignore-scripts=false`.
 
 The reviewed change that approves publication removes `private` and the placeholder
-registry together. Run the release from this directory as
-`HOURMERE_N8N_PUBLISH=1 npm publish --ignore-scripts=false`, so the approval guard runs.
+registry together. `dist` is not committed and no publish script builds it, so build it
+first: in this directory, run `npm ci --ignore-scripts` and `npm run build`, then run the
+release as `HOURMERE_N8N_PUBLISH=1 npm publish --ignore-scripts=false`, so the approval
+guard runs.
 
 A dry-run's exit code says nothing about where a publication would go. Without
 `--offline`, `npm publish --dry-run` queries the target registry for existing versions,
@@ -59,7 +71,8 @@ ignores the failure and still exits 0, even for the unreachable placeholder. Wha
 is the `npm notice Publishing to <registry> … (dry-run)` line in its output.
 `npm publish --dry-run --ignore-scripts --offline` prints it without network access, and
 the packaging tests assert that it names `https://registry.invalid/`. They also aim a
-non-dry-run publish at a local sink and require `EPRIVATE` with no connection.
+non-dry-run publish with `--force` and `--offline`, outside CI, at a local sink and require
+`EPRIVATE` with no connection to it.
 
 Contributors must use `npm install --ignore-scripts` (or `npm ci --ignore-scripts`):
 the official CLI requires `eslint-plugin-n8n-nodes-base`, whose preinstall otherwise
