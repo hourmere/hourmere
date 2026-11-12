@@ -1034,12 +1034,78 @@ against the predecessor schema. The upgrade test preserves a populated predecess
 configured reminders, follow-ups, booking snapshots, scheduled messages and receipts down to
 row versions, and compares fresh and upgraded schemas.
 
+## Workflow execution storage
+
+Migration 0079 installs the execution storage of the [booking workflows design](workflows.md)
+(step 3 of its plan): `workflow_enrollments`, `workflow_runs`, `workflow_recipient_claims`,
+`workflow_run_history` and `workflow_mail_reservations`, plus a nullable
+`workflow_reservation_id` on the shared mail ledger. Nothing reads or writes them yet: there is
+no route, worker, read path or setting, and workflows stay hard-off behind
+`WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
+tables covers these tables too.
+
+- **Enrollments** record a booking's capture of one workflow revision at one lifecycle
+  occurrence: its creation (the creation trigger and the timers; a reschedule successor
+  carries its timer enrollments under this occurrence with their captured revision), its
+  reschedule or its cancellation, each occurrence taking only its own triggers. They are
+  unique per booking, occurrence and workflow, immutable, and need a live (not tombstoned)
+  definition and a stored revision with the named trigger.
+- **Runs** are the one due run of an enrollment (a revision has one action), on its booking.
+  Their due and expiry instants never change, a worker claims one with a token and a lease,
+  and a run starts pending or skipped (the capture-time `minimum_gap` and
+  `offset_not_future`). Completed, skipped and retired runs are final; skip reasons are the
+  contract's fixed codes. A partial index holds only unfinished runs for the due scan.
+- **Recipient claims** are the recipients of an email run: an attendee or assigned host and
+  the workflow-purpose digest of the normalized address, never the address, unique per run
+  and digest. A timer email's winning recipient also holds its intent (category, offset,
+  digest), which only one workflow can hold on a booking; a losing recipient keeps no intent.
+  `dispatching` is the marker committed before SMTP with its attempt's claim token; sent,
+  rejected, `delivery_unknown` and skipped are final. Claims are added only to an unfinished
+  run.
+- **History** keeps one immutable, content-free record per finished run: workflow, revision,
+  trigger, due and finish times, outcome, a fixed reason and aggregate recipient counts. It is
+  not linked to the run or booking, so it outlives the booking for its retention window; it
+  goes with its workflow, and retention deletes it by finish time.
+- **Mail reservations** charge one admitted recipient claim to its owner organization; the
+  ledger row in `notification_email_sends` names the reservation, at most one per
+  reservation, and always carries a recipient digest. Run and claim are named without foreign
+  keys, so deleting a workflow, booking or run never removes a charge. A reservation is
+  restamped only forward and is removed only after its ledger row or with its organization.
+  Existing and core ledger rows keep NULL; core inserts and count queries are unchanged.
+
+Writers lock the organization before any parent row, as other organization writers do. An
+enrollment or a run takes the organization lock and then a share lock on its definition, so a
+capture and the workflow's deletion take turns: the tombstone waits for a capture, and a
+capture after it is refused. A recipient claim locks the organization and then shares its run.
+Child rows carry their organization in composite foreign keys (as revisions do), and
+reservations, which have no parent row, reference the organization directly.
+
+Execution identity outlives a definition's content. Enrollments name their workflow and
+revision without a foreign key to the definition, and enrollments, runs and recipient claims
+hold no definition content, rendered text or addresses. They are removed only with their
+booking (or, for runs and claims, their parent) or organization, never by retention. Purging a
+tombstoned definition (deleting it with its revisions and history) waits until none of its runs
+is pending or claimed, and keeps every booking's enrollment, run and claim, so a replayed
+capture or a repair meets the same unique identity and the same final state and cannot
+dispatch again. With its organization or personal owner a definition always goes.
+
+`workflow-storage-execution-coverage.test.ts` drops every constraint, index, trigger and NOT
+NULL column through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0079_workflow_execution.json`), and every check,
+default and trigger rule also has source-copy mutations
+(`packages/db/src/workflow-storage-execution-protections.ts`), run against the predecessor
+schema. Two writers race every unique key, and exactly one wins. The upgrade test preserves a
+populated predecessor with reminders, follow-ups, workflow definitions and the mail ledger down
+to row versions, and compares fresh and upgraded schemas. A notifications test shows the core
+ledger counts and purge unchanged on the same rows across the upgrade.
+
 ## Planned additions (each a new migration)
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
 email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition storage exists ([workflow definition storage](#workflow-definition-storage));
-no execution table, API or runtime enablement exists yet.
+Only its definition and execution storage exist ([workflow definition
+storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage));
+no API, worker or runtime enablement exists yet.
 
 | When | Change |
 |---|---|
