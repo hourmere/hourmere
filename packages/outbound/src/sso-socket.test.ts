@@ -16,7 +16,8 @@ import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The synthetic public answer. The harness below sends its socket to the owned loopback
-// listener instead; every other pinned address must already be loopback.
+// listener instead (for a default-port URL also on the listener's port); every other pinned
+// address must already be loopback.
 const PUBLIC_ANSWER = '8.8.8.8'
 const local = vi.hoisted(() => ({ port: 0, ca: '', lookup: vi.fn(), pinned: [] as string[] }))
 vi.mock('node:dns/promises', () => ({ lookup: local.lookup }))
@@ -24,9 +25,9 @@ vi.mock('node:https', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:https')>()
   return {
     ...actual,
-    // Only the trusted test CA changes, and for a default-port (public) URL the TCP port
-    // and the public answer's route. Node still uses the transport's own pinned lookup
-    // callback, family, TLS name verification and HTTP parser.
+    // Only the trusted test CA changes, the public answer's route, and for a default-port
+    // (public) URL the TCP port. Node still uses the transport's own pinned lookup callback,
+    // family, TLS name verification and HTTP parser.
     request: (url: URL, options: RequestOptions, response: (res: IncomingMessage) => void) => {
       const pinnedLookup = options.lookup
       if (!pinnedLookup) throw new Error('Socket test requires the pinned lookup')
@@ -42,7 +43,7 @@ vi.mock('node:https', async (importOriginal) => {
               local.pinned.push(String(address))
               if (error) callback(error, address, family)
               else if (address === '127.0.0.1') callback(null, address, family)
-              else if (publicRoute && address === PUBLIC_ANSWER) callback(null, '127.0.0.1', 4)
+              else if (address === PUBLIC_ANSWER) callback(null, '127.0.0.1', 4)
               // Fail closed if a regression ever reaches for another address.
               else callback(new Error('Socket test refused a nonlocal address'), '', 4)
             }),
@@ -253,6 +254,55 @@ describe('pinned SSO transport over real loopback sockets', () => {
     expect(local.pinned).toEqual(['127.0.0.1'])
     expect((observed[0]?.socket as TLSSocket | undefined)?.servername).toBe(PRIVATE_HOST)
     expect(observed[0]?.headers.host).toBe(`${PRIVATE_HOST}:${local.port}`)
+  })
+
+  it('reaches an operator-listed public host on a non-default port over verified HTTPS', async () => {
+    local.lookup.mockResolvedValue([{ address: PUBLIC_ANSWER, family: 4 }])
+    const url = `https://${PUBLIC_HOST}:${local.port}/realms/a/.well-known/openid-configuration`
+    // Unlisted, the same URL is refused before DNS.
+    expect((await failure(sendSsoRequest({ url, privateTargets: targets() }))).code).toBe(
+      'destination_refused',
+    )
+    expect(local.lookup).not.toHaveBeenCalled()
+    const response = await sendSsoRequest({
+      url,
+      privateTargets: parseSsoPrivateTargets(`${PUBLIC_HOST}:${local.port}`),
+    })
+    expect(response.status).toBe(200)
+    expect(local.lookup).toHaveBeenCalledExactlyOnceWith(PUBLIC_HOST, { all: true, verbatim: true })
+    expect(local.pinned).toEqual([PUBLIC_ANSWER])
+    expect(requests).toBe(1)
+    expect((observed[0]?.socket as TLSSocket | undefined)?.servername).toBe(PUBLIC_HOST)
+    expect(observed[0]?.headers.host).toBe(`${PUBLIC_HOST}:${local.port}`)
+    expect(observed[0]?.url).toBe('/realms/a/.well-known/openid-configuration')
+  })
+
+  it('refuses a listed public host whose answers are mixed, or whose certificate names another host', async () => {
+    const privateTargets = parseSsoPrivateTargets(
+      `${PUBLIC_HOST}:${local.port},other.sso-fixture.com:${local.port}`,
+    )
+    local.lookup.mockResolvedValue([
+      { address: PUBLIC_ANSWER, family: 4 },
+      { address: '10.0.0.1', family: 4 },
+    ])
+    expect(
+      (
+        await failure(
+          sendSsoRequest({ url: `https://${PUBLIC_HOST}:${local.port}/`, privateTargets }),
+        )
+      ).code,
+    ).toBe('destination_refused')
+    expect(local.pinned).toEqual([])
+    local.lookup.mockResolvedValue([{ address: PUBLIC_ANSWER, family: 4 }])
+    expect(
+      (
+        await failure(
+          sendSsoRequest({ url: `https://other.sso-fixture.com:${local.port}/`, privateTargets }),
+        )
+      ).code,
+    ).toBe('transport_failed')
+    expect(local.pinned).toEqual([PUBLIC_ANSWER])
+    expect(requests).toBe(0)
   })
 
   it('verifies an IP literal target against the certificate address', async () => {

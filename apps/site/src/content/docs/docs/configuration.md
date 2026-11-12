@@ -57,7 +57,7 @@ includes PostgreSQL 18.
 | `WEBHOOKS_ENABLED` | `false` | Capture and deliver organization booking events for outbound HTTPS webhooks and Slack. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled or to configure [Slack notifications](/docs/slack). Encrypts signing secrets and Slack URLs; keep stable and backed up. Slack capture and delivery also require `WEBHOOKS_ENABLED=true`. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
-| `SSO_PRIVATE_TARGETS` | Unset | Reserved for organization SSO, which is not available yet: validated at startup and otherwise unused. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for private identity providers. Private routing only: HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`; see [private identity providers](#private-identity-providers). |
+| `SSO_PRIVATE_TARGETS` | Unset | Reserved for organization SSO, which is not available yet: validated at startup and otherwise unused. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for identity providers on a private network or on a port other than 443. HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`; see [private identity providers](#private-identity-providers). |
 | `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
@@ -140,7 +140,9 @@ for configuration and delivery behavior.
 Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for it: the server
 validates the value at startup and nothing else reads it, so it routes nothing today. It is
 empty by default. **Hourmere Cloud leaves it empty.** It is a separate operator setting and
-never reuses `WEBHOOK_PRIVATE_TARGETS`; no team setting can add to it.
+never reuses `WEBHOOK_PRIVATE_TARGETS`; no team setting can add to it. It lists the identity
+providers that the default rules cannot reach: those on a private network, and public ones
+served on a port other than 443.
 
 Each entry is one exact `hostname:port`, `IPv4:port` or `[IPv6]:port`, for example
 `keycloak.internal:8443`. There are no CIDRs, wildcards or port ranges, and the port is
@@ -148,12 +150,16 @@ always explicit (`443` included). An IP entry must be RFC1918 IPv4, loopback or 
 unique-local space; link-local, metadata, IPv4-mapped and public addresses are refused at
 startup, with the same rules as private webhook receivers. Only that exact host and port
 match: a different port, or another hostname that resolves to the same address, does not.
-When SSO uses an entry, every DNS answer for the host must be eligible private or loopback
-space on every request, and the checked address is pinned to the socket.
+When SSO uses an entry, the host's DNS answers are checked again on every request. They
+must all be eligible private or loopback space, or all be public; the second is how a
+public identity provider on a non-default port, such as `idp.example.com:8443`, is reached.
+Answers that mix the two, or include metadata, link-local or other reserved addresses, are
+refused, and the checked address is pinned to the socket. A hostname that is not listed
+keeps the default rules: public addresses only, on port 443 only.
 
-The setting permits private routing, not plain HTTP: identity providers still need HTTPS
-with a certificate that the server process trusts, and `http://keycloak:8080` is refused
-even when listed. See the [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md)
+The setting permits these exact destinations, not plain HTTP: identity providers still need
+HTTPS with a certificate for their hostname that the server process trusts, and
+`http://keycloak:8080` is refused even when listed. See the [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md)
 for the planned transport rules.
 
 ## Email and registration

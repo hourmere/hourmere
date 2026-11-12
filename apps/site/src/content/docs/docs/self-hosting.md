@@ -197,10 +197,11 @@ rules and, when configuration is introduced, keep web and worker policy consiste
 
 ## Private identity providers (reserved)
 
-Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for private
-identity providers and is empty by default; leave it empty unless you prepare for a later
-release. It accepts only exact `host:port` entries, permits private routing but never plain
-HTTP, and is separate from `WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid
+Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for identity
+providers on a private network or on a port other than 443, and is empty by default; leave it
+empty unless you prepare for a later release. It accepts only exact `host:port` entries,
+permits private routing or a public non-default port for exactly those entries but never
+plain HTTP, and is separate from `WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid
 one changes nothing yet. See the
 [configuration reference](/docs/configuration#private-identity-providers).
 

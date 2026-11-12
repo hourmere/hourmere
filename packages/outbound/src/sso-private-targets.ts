@@ -3,9 +3,11 @@ import { urlHostname } from './destination.ts'
 import { isPrivateTargetAddress } from './private-targets.ts'
 
 /**
- * One operator-trusted private SSO destination: an exact host (a DNS name or an IP literal)
- * on exactly one port. There are no networks and no port ranges: a different port, or a
- * different host name that resolves to the same address, is not this target.
+ * One operator-trusted SSO destination: an exact host (a DNS name or an IP literal) on
+ * exactly one port. There are no networks and no port ranges: a different port, or a
+ * different host name that resolves to the same address, is not this target. A listed name
+ * may resolve to ordinary private or loopback space, or to public space (an IdP served
+ * publicly on a non-default port), but never to a mix of the two; HTTPS stays required.
  */
 export interface SsoPrivateTarget {
   readonly host: string
