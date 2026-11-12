@@ -7,7 +7,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type BookingNotifier, cancelTeamAdminBooking } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
+import { expectKilled, guardCopy, mutatedPair } from '../../../scripts/source-copy-guard.ts'
 import { teamManagementAccess } from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -554,10 +554,14 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
     ],
   ])('detects missing service %s in a source copy', async (_label, source) => {
     const path = '../../../packages/scheduling/src/team-bookings.ts'
-    const copy = await sourceCopy<{ cancelTeamAdminBooking: Cancel }>(path, source, 'false')
+    const { copy, unmutated } = await mutatedPair(
+      (after: string) => sourceCopy<{ cancelTeamAdminBooking: Cancel }>(path, source, after),
+      'false',
+      source,
+    )
     // Without validation, a missing options object crashes with a TypeError instead.
     await expectKilled(copy, (module) => verifyServiceContext(module.cancelTeamAdminBooking), {
-      unmutated: await sourceCopy(path, source, source),
+      unmutated,
     })
   })
 

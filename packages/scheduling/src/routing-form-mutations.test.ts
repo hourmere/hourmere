@@ -6,7 +6,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
+import { expectKilled, guardCopy, mutatedPair } from '../../../scripts/source-copy-guard.ts'
 import type { Question } from './questions.ts'
 import * as Config from './routing-form-config.ts'
 import * as Targets from './routing-form-targets.ts'
@@ -557,8 +557,11 @@ describe('routing validation and evaluation source-copy mutations', () => {
   // that apart from a broken copy.
   it.each(configMutations)('detects removed $name', async ({ from, to, verify }) => {
     verify(Config)
-    const copy = await sourceCopy<ConfigModule>('./routing-form-config.ts', from, to)
-    const unmutated = await sourceCopy<ConfigModule>('./routing-form-config.ts', from, from)
+    const { copy, unmutated } = await mutatedPair(
+      (change: string) => sourceCopy<ConfigModule>('./routing-form-config.ts', from, change),
+      to,
+      from,
+    )
     await expectKilled(copy, verify, { unmutated })
   })
 
@@ -566,8 +569,11 @@ describe('routing validation and evaluation source-copy mutations', () => {
     'detects removed eligibility or mapping check: $name',
     async ({ from, to, verify }) => {
       verify(Targets)
-      const copy = await sourceCopy<TargetsModule>('./routing-form-targets.ts', from, to)
-      const unmutated = await sourceCopy<TargetsModule>('./routing-form-targets.ts', from, from)
+      const { copy, unmutated } = await mutatedPair(
+        (change: string) => sourceCopy<TargetsModule>('./routing-form-targets.ts', from, change),
+        to,
+        from,
+      )
       await expectKilled(copy, verify, { unmutated })
     },
   )
