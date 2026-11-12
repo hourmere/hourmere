@@ -189,7 +189,11 @@ omitted, `null` or blank description alike); for publication it is the form ID a
 `expectedRevision`. The same key with other input, or for the other operation, returns
 `idempotency_key_reused`. Concurrent retries of one key queue on a per-key transaction advisory
 lock, so one writes and each returns its result. Authorization runs first, so a retry by an
-actor who lost access is refused like any write.
+actor who lost access is refused like any write. A publication's key lasts only as long as the
+version it published: once a later publication supersedes that version, the next cleanup
+run, normally within 15 minutes, deletes it with its record unless a receipt references it.
+A retry with that key then gets `routing_revision_conflict` instead of the stored version, and
+it never publishes twice.
 
 Target lifecycle and retention (step a4, `packages/db/src/routing-lifecycle.ts`,
 `packages/scheduling/src/routing-target-lifecycle.ts` and the `routing-retention-v1` job) add no
@@ -213,10 +217,12 @@ missing configuration.
 Cleanup runs every 15 minutes, also while routing is off. Each transaction deletes at most 500
 receipts that expired unconsumed, oldest first, together with their encrypted answers, or
 examines at most 1000 versions and deletes at most 100 that are neither their form's current
-version nor referenced by a receipt, with their dependency rows. A run stops after 100
-transactions or 45 seconds and queues one successor for the rest. Consumed receipts are never
-touched; they keep their version until their booking is deleted. Cleanup locks only its own
-rows, with `SKIP LOCKED`, and never waits; with no routing data it finds nothing and writes
+version nor referenced by a receipt, with their dependency rows and publication records. A
+run stops after 100 transactions or 45 seconds and queues one successor for the rest.
+Consumed receipts are never touched; they keep their version until their booking is deleted.
+Cleanup locks only its own rows, with `SKIP LOCKED`, and never waits: a version whose
+dependency rows or publication record another transaction holds, such as a replay returning
+that version, is left for a later sweep. With no routing data it finds nothing and writes
 nothing. Once a version is deleted, its question, option and rule IDs no longer constrain
 publication; booking snapshots carry their own labels.
 

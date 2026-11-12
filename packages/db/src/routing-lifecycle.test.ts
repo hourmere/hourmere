@@ -3,11 +3,11 @@
 // proves the off state: the cleanup finds nothing and issues no write. Protection scenarios
 // take the module as a parameter; the source-copy controls at the end require each to fail a
 // real assertion on a copy with that one protection removed.
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { Kysely, PostgresDialect } from 'kysely'
-import type pg from 'pg'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { createDb, type Db } from './index.ts'
@@ -56,12 +56,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 describe.skipIf(!serverUrl)('routing lifecycle storage', () => {
   let owned: TestDatabase
   let db: Db
+  /** A cleanup connection whose lock waits fail with 55P03 after one second. */
+  let noWait: Db
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'routing_ret' })
     db = createDb(owned.pool)
+    noWait = createDb(
+      new pg.Pool({ connectionString: owned.url, max: 2, options: '-c lock_timeout=1000' }),
+    )
   })
   afterAll(async () => {
+    await noWait?.destroy()
     await owned?.drop()
   })
 
@@ -133,6 +139,20 @@ describe.skipIf(!serverUrl)('routing lifecycle storage', () => {
       event_type_id: eventTypeId,
       health_code: 'ok',
       health_checked_at: new Date('2026-01-01T00:00:00Z'),
+    })
+  }
+
+  /** The replay record of a publication that carried a request key. */
+  async function publication(org: Org, formId: string, versionId: string) {
+    await insert('routing_form_operations', {
+      organization_id: org.id,
+      operation: 'publish',
+      actor_kind: 'session',
+      actor_id: org.user,
+      request_id: randomUUID(),
+      request_fingerprint: randomBytes(32),
+      form_id: formId,
+      version_id: versionId,
     })
   }
 
@@ -233,12 +253,16 @@ describe.skipIf(!serverUrl)('routing lifecycle storage', () => {
   }
 
   /** Runs the version sweep to its end, returning the rows each transaction deleted. */
-  async function sweep(L: LifecycleModule, options: { scan?: number; limit?: number } = {}) {
+  async function sweep(
+    L: LifecycleModule,
+    options: { scan?: number; limit?: number } = {},
+    on: Db = db,
+  ) {
     const batches: number[] = []
     let after: string | null = null
     do {
       const result: Lifecycle.RoutingVersionCleanup = await succeeds(() =>
-        L.deleteUnreferencedRoutingVersions(db, { ...options, after }),
+        L.deleteUnreferencedRoutingVersions(on, { ...options, after }),
       )
       batches.push(result.deleted)
       after = result.next
@@ -638,6 +662,57 @@ describe.skipIf(!serverUrl)('routing lifecycle storage', () => {
     expect((await sweep(L)).reduce((sum, n) => sum + n, 0)).toBe(2)
   }
 
+  /**
+   * Cleanup never waits for a publication replay: a replay share-locks the record of the
+   * publication it returns, so a version whose record is held is left for a later sweep, while
+   * the other versions go with their records. The sweep runs on a connection with a short
+   * lock_timeout, so a wait would also fail it with 55P03.
+   */
+  async function skipsVersionsWithHeldReplayRecords(L: LifecycleModule) {
+    await drain(L)
+    const org = await organization()
+    const formId = await form(org)
+    const replayed = await version(org, formId)
+    const free = await version(org, formId)
+    const current = await version(org, formId, true)
+    for (const id of [replayed, free, current]) await publication(org, formId, id)
+    await dependency(org, replayed, 'fallback', randomUUID())
+    await dependency(org, free, 'fallback', randomUUID())
+    const remaining = async (table: string, column: string) =>
+      (
+        await query<{ id: string }>(
+          `SELECT ${column} AS id FROM ${table} WHERE form_id = $1 ORDER BY ${column}`,
+          [formId],
+        )
+      ).map((row) => row.id)
+    // The replay's own lookup, which holds the record until the replay commits.
+    const replay = await hold(
+      `SELECT 1 FROM routing_form_operations
+       WHERE organization_id = $1 AND form_id = $2 AND version_id = $3 FOR SHARE`,
+      [org.id, formId, replayed],
+    )
+    const cleanup = sweep(L, {}, noWait)
+    try {
+      expect(
+        await finishesWithoutWaiting(cleanup, [replay.pid]),
+        'cleanup never waits for a replay',
+      ).toBe(true)
+      expect((await cleanup).reduce((sum, n) => sum + n, 0)).toBe(1)
+      expect(await remaining('routing_form_versions', 'id')).toEqual([replayed, current].sort())
+      expect(
+        await remaining('routing_form_operations', 'version_id'),
+        'a deleted version takes its replay record with it',
+      ).toEqual([replayed, current].sort())
+    } finally {
+      await replay.close()
+      await cleanup.catch(() => {})
+    }
+    // Once the replay has committed, the next sweep deletes the version and its record.
+    expect((await sweep(L, {}, noWait)).reduce((sum, n) => sum + n, 0)).toBe(1)
+    expect(await remaining('routing_form_versions', 'id')).toEqual([current])
+    expect(await remaining('routing_form_operations', 'version_id')).toEqual([current])
+  }
+
   // --- The shipped module ------------------------------------------------------------------
 
   it('marks the current version of live forms only, the fallback included', () =>
@@ -658,6 +733,9 @@ describe.skipIf(!serverUrl)('routing lifecycle storage', () => {
 
   it('skips versions and dependency rows another transaction holds instead of waiting', () =>
     skipsHeldVersions(Lifecycle))
+
+  it('skips versions whose publication replay record another transaction holds', () =>
+    skipsVersionsWithHeldReplayRecords(Lifecycle))
 
   it('refuses unbounded batch sizes', async () => {
     for (const limit of [0, -1, 1.5, Number.POSITIVE_INFINITY])
@@ -773,6 +851,33 @@ describe.skipIf(!serverUrl)('routing lifecycle storage', () => {
         ],
       ],
       skipsHeldVersions,
+    ))
+
+  it('fails when the version cleanup waits for replay records', () =>
+    killed(
+      [
+        [
+          `      // then the replay record of its idempotent publication, which a replay share-locks while
+      // it returns the version.
+      const { rows: lockedOperations } = await sql<{ version_id: string }>\`
+        SELECT o.version_id FROM routing_form_operations o
+        JOIN routing_form_versions v ON v.organization_id = o.organization_id
+          AND v.form_id = o.form_id AND v.id = o.version_id
+        WHERE v.id = ANY(\${ids}::uuid[])
+        FOR UPDATE OF o SKIP LOCKED\`.execute(trx)
+      const { rows: operations } = await sql<{ version_id: string; count: number }>\`
+        SELECT o.version_id, count(*)::int AS count FROM routing_form_operations o
+        JOIN routing_form_versions v ON v.organization_id = o.organization_id
+          AND v.form_id = o.form_id AND v.id = o.version_id
+        WHERE v.id = ANY(\${ids}::uuid[])
+        GROUP BY o.version_id\`.execute(trx)
+`,
+          '',
+        ],
+        ['[...locked, ...lockedOperations]', 'locked'],
+        ['[...totals, ...operations]', 'totals'],
+      ],
+      skipsVersionsWithHeldReplayRecords,
     ))
 
   it('fails when the version cleanup deletes a receipted version', () =>

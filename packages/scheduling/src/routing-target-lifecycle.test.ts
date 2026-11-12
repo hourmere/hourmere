@@ -9,10 +9,10 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { type Principal, removeTeamMember } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, deleteUnreferencedRoutingVersions } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import type pg from 'pg'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as EventTypes from './event-types.ts'
@@ -859,6 +859,120 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
     expect(original).toContain('"<collective>"')
     expect(current).toBe(original)
     expect(await routingRows(), 'no routing row is written').toBe(rowsBefore)
+  })
+
+  // --- Cleanup and idempotent publication ------------------------------------------------
+
+  /** Runs the version cleanup to its end on `on`, returning the number of versions deleted. */
+  async function sweep(on: Db) {
+    let deleted = 0
+    let after: string | null = null
+    do {
+      const step = await succeeds(() => deleteUnreferencedRoutingVersions(on, { after }))
+      deleted += step.deleted
+      after = step.next
+    } while (after !== null)
+    return deleted
+  }
+
+  /** A form of `space` with an event fallback, created at revision 1. */
+  async function keyedForm(space: Awaited<ReturnType<typeof personalSpace>>) {
+    const { input } = draft([null], await space.event())
+    return (
+      await Service.createRoutingForm(space.ctx, { slug: slug(), title: 'Routing', ...input })
+    ).id
+  }
+
+  async function versionsOf(formId: string) {
+    return (
+      await db
+        .selectFrom('routing_form_versions')
+        .select('id')
+        .where('form_id', '=', formId)
+        .orderBy('version_number')
+        .execute()
+    ).map((row) => row.id)
+  }
+
+  async function replayRecordsOf(formId: string) {
+    return (
+      await db
+        .selectFrom('routing_form_operations')
+        .select('version_id')
+        .where('form_id', '=', formId)
+        .where('operation', '=', 'publish')
+        .orderBy('created_at')
+        .execute()
+    ).map((row) => row.version_id)
+  }
+
+  it('leaves a version whose publication a replay is reading for a later sweep, without waiting', async () => {
+    const space = await personalSpace()
+    const formId = await keyedForm(space)
+    const requestId = randomUUID()
+    const first = await Service.publishRoutingForm(space.ctx, formId, {
+      expectedRevision: 1,
+      requestId,
+    })
+    const second = await Service.publishRoutingForm(space.ctx, formId, {
+      expectedRevision: 2,
+      requestId: randomUUID(),
+    })
+    const third = await Service.publishRoutingForm(space.ctx, formId, { expectedRevision: 3 })
+    expect(await replayRecordsOf(formId)).toEqual([first.version.id, second.version.id])
+    // A connection whose lock waits fail with 55P03 after one second instead of waiting.
+    const noWait = createDb(
+      new pg.Pool({ connectionString: owned.url, max: 2, options: '-c lock_timeout=1000' }),
+    )
+    // A replay of the first publication: its lookup share-locks the record until it commits.
+    const replay = await owned.pool.connect()
+    try {
+      await replay.query('BEGIN')
+      const held = await replay.query(
+        `SELECT version_id FROM routing_form_operations
+         WHERE organization_id = $1 AND actor_kind = 'session' AND actor_id = $2
+           AND request_id = $3
+         FOR SHARE`,
+        [space.organizationId, space.user.id, requestId],
+      )
+      expect(held.rows).toEqual([{ version_id: first.version.id }])
+      await sweep(noWait)
+      expect(await versionsOf(formId), 'the replayed version stays').toEqual([
+        first.version.id,
+        third.version.id,
+      ])
+      expect(await replayRecordsOf(formId)).toEqual([first.version.id])
+      await replay.query('COMMIT')
+      await sweep(noWait)
+      expect(await versionsOf(formId)).toEqual([third.version.id])
+      expect(await replayRecordsOf(formId)).toEqual([])
+    } finally {
+      await replay.query('ROLLBACK').catch(() => {})
+      replay.release()
+      await noWait.destroy()
+    }
+  })
+
+  it('answers a publication retry with a revision conflict once its version was superseded and swept, and writes nothing', async () => {
+    const space = await personalSpace()
+    const formId = await keyedForm(space)
+    const requestId = randomUUID()
+    const retry = () =>
+      Service.publishRoutingForm(space.ctx, formId, { expectedRevision: 1, requestId })
+    const first = await retry()
+    expect((await retry()).version).toEqual(first.version)
+    const second = await Service.publishRoutingForm(space.ctx, formId, { expectedRevision: 2 })
+    // Superseded but not yet swept: the retry still returns the stored version.
+    expect((await retry()).version).toEqual(first.version)
+    await sweep(db)
+    expect(await versionsOf(formId)).toEqual([second.version.id])
+    const before = await Service.getRoutingForm(space.ctx, formId)
+    expect(described(await retry().catch((error: unknown) => error))).toMatchObject({
+      code: 'routing_revision_conflict',
+    })
+    expect(await versionsOf(formId), 'no version is published again').toEqual([second.version.id])
+    expect(await replayRecordsOf(formId)).toEqual([])
+    expect(await Service.getRoutingForm(space.ctx, formId)).toEqual(before)
   })
 
   // --- Source-copy mutation controls ------------------------------------------------------

@@ -145,6 +145,10 @@ function verifyRetention(source: string) {
   expect(ROUTING_RETENTION_CRON).toBe(`*/${minutes} * * * *`)
   // The purge never lags expiry by more than the documented grace, backlog aside.
   expect(minutes).toBeLessThanOrEqual(limits.purge_grace_hours * 60)
+  // A superseded publication's replay lasts until the next run deletes its version.
+  expect(Number(text.match(/the next cleanup run, normally within (\d+) minutes/)?.[1])).toBe(
+    minutes,
+  )
   expect(Number(text.match(/deletes at most (\d+) receipts that expired unconsumed/)?.[1])).toBe(
     ROUTING_RECEIPT_PURGE_BATCH,
   )
@@ -172,6 +176,7 @@ describe('routing retention bounds', () => {
     ['version batch', 'deletes at most 100 that', 'deletes at most 1000 that'],
     ['run bound', 'after 100 transactions', 'after 1000 transactions'],
     ['run budget', 'or 45 seconds', 'or 55 seconds'],
+    ['replay window', 'normally within 15 minutes', 'normally within 60 minutes'],
   ])('rejects source-copy drift of the %s', (_name, from, to) => {
     expect(prose.split(from)).toHaveLength(2)
     expect(() => verifyRetention(prose.replace(from, to))).toThrow()

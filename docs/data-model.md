@@ -1495,8 +1495,10 @@ The phases within that organization boundary are:
 - Routing target invalidation runs inside event-type deletion and updates and administrative
   member removal, after their organization and event-type locks. It updates the dependency
   rows of current published versions only and takes no form or receipt lock. Routing cleanup
-  locks receipt, version and dependency rows with `SKIP LOCKED` in bounded batches and takes
-  no organization, event-type, host or form lock, so it never waits.
+  locks receipt, version, dependency and `routing_form_operations` rows with `SKIP LOCKED` in
+  bounded batches and takes no organization, event-type, host or form lock, so it never
+  waits: a version whose dependency row or publication record another transaction holds (a
+  replay reading that record, say) is left for a later sweep.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in

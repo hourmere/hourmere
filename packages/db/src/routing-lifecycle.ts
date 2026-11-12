@@ -15,9 +15,9 @@
 // Retention. Receipts that expired unconsumed are deleted, and their encrypted answers with
 // them; consumed receipts are booking evidence and go only with their booking. A version that
 // is not its form's current version and that no receipt references is deleted with its
-// dependency rows. Each call is one transaction over a bounded batch that locks only its own
-// rows with SKIP LOCKED, so cleanup never waits for another transaction and takes no
-// organization, event, host or form lock.
+// dependency rows and the replay record of its idempotent publication. Each call is one
+// transaction over a bounded batch that locks only its own rows with SKIP LOCKED, so cleanup
+// never waits for another transaction and takes no organization, event, host or form lock.
 import { type Kysely, sql } from 'kysely'
 import type { DB } from './tables.ts'
 
@@ -132,8 +132,9 @@ export interface RoutingVersionCleanup {
 /**
  * Examines up to `scan` versions after `after`, in ID order, and deletes at most `limit` of
  * them: those that are not their form's current version and that no receipt references, with
- * their dependency rows. Versions, or dependency rows, that another transaction holds are left
- * for a later sweep. One transaction; it never waits for a lock.
+ * their dependency rows and publication replay record. Versions, or dependency rows or replay
+ * records, that another transaction holds are left for a later sweep. One transaction; it
+ * never waits for a lock.
  */
 export async function deleteUnreferencedRoutingVersions(
   db: Db,
@@ -171,8 +172,8 @@ export async function deleteUnreferencedRoutingVersions(
           : last
     let ids = candidates.map((row) => row.id)
     if (ids.length > 0) {
-      // Lock the dependency rows the deletion cascades to, skipping held ones, so that the
-      // cascade never waits; a version with a held row is left for a later sweep.
+      // Lock the rows the deletion cascades to, skipping held ones, so that the cascade never
+      // waits; a version with a held row is left for a later sweep. First its dependency rows,
       const { rows: locked } = await sql<{ version_id: string }>`
         SELECT version_id FROM routing_target_dependencies
         WHERE version_id = ANY(${ids}::uuid[])
@@ -181,12 +182,30 @@ export async function deleteUnreferencedRoutingVersions(
         SELECT version_id, count(*)::int AS count FROM routing_target_dependencies
         WHERE version_id = ANY(${ids}::uuid[])
         GROUP BY version_id`.execute(trx)
+      // then the replay record of its idempotent publication, which a replay share-locks while
+      // it returns the version.
+      const { rows: lockedOperations } = await sql<{ version_id: string }>`
+        SELECT o.version_id FROM routing_form_operations o
+        JOIN routing_form_versions v ON v.organization_id = o.organization_id
+          AND v.form_id = o.form_id AND v.id = o.version_id
+        WHERE v.id = ANY(${ids}::uuid[])
+        FOR UPDATE OF o SKIP LOCKED`.execute(trx)
+      const { rows: operations } = await sql<{ version_id: string; count: number }>`
+        SELECT o.version_id, count(*)::int AS count FROM routing_form_operations o
+        JOIN routing_form_versions v ON v.organization_id = o.organization_id
+          AND v.form_id = o.form_id AND v.id = o.version_id
+        WHERE v.id = ANY(${ids}::uuid[])
+        GROUP BY o.version_id`.execute(trx)
       const held = new Map<string, number>()
-      for (const row of locked) held.set(row.version_id, (held.get(row.version_id) ?? 0) + 1)
+      for (const row of [...locked, ...lockedOperations])
+        held.set(row.version_id, (held.get(row.version_id) ?? 0) + 1)
+      const cascades = new Map<string, number>()
+      for (const row of [...totals, ...operations])
+        cascades.set(row.version_id, (cascades.get(row.version_id) ?? 0) + row.count)
       const busy = new Set(
-        totals
-          .filter((row) => (held.get(row.version_id) ?? 0) < row.count)
-          .map((row) => row.version_id),
+        [...cascades]
+          .filter(([versionId, count]) => (held.get(versionId) ?? 0) < count)
+          .map(([versionId]) => versionId),
       )
       ids = ids.filter((id) => !busy.has(id))
     }
