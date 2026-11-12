@@ -239,9 +239,9 @@ Guard those with behavioural checks and source-copy mutation tests.
 `packages/db/src/testing/migration-objects.test.ts` fails unless the expectation files are
 exactly the migrations that are not on its frozen legacy list, whatever their number. That list
 holds only migrations that predate the requirement (all numbered below 0071, including
-0067–0070); an entry is removed when its migration gains coverage and never added, so no new
-migration can merge without its expectation file. The guard does not check that a coverage
-test reads the file: the coverage test is what keeps the file honest.
+0068–0070); an entry is removed when its migration gains coverage, as 0067 did, and never
+added, so no new migration can merge without its expectation file. The guard does not check
+that a coverage test reads the file: the coverage test is what keeps the file honest.
 
 ## Browser tests
 

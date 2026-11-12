@@ -86,6 +86,8 @@ describe.skipIf(!serverUrl)('audit journal', () => {
       ['organization.branding_updated', { logo: 'uploaded' }],
       ['organization.branding_updated', { logo: 'selected', primaryColor: 'set' }],
       ['organization.branding_updated', { logo: 'removed', primaryColor: 'cleared' }],
+      ['booking.attendee_no_show_changed', { attendeeId: randomUUID(), noShow: 'marked' }],
+      ['booking.attendee_no_show_changed', { attendeeId: randomUUID(), noShow: 'unmarked' }],
     ] as [AuditEvent['action'], Record<string, unknown>][]
     for (const [action, details] of cases) {
       await db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, action, details }))
@@ -96,6 +98,7 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         .executeTakeFirstOrThrow()
       expect(row.details).toEqual(details)
     }
+    // Every action times every probe key, each refused in the application and the database.
     for (const action of Object.keys(auditDetails) as AuditEvent['action'][]) {
       for (const key of [
         'unexpected',
@@ -110,6 +113,8 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         'familySize',
         'logo',
         'primaryColor',
+        'attendeeId',
+        'noShow',
       ]) {
         if ((auditDetails[action] as readonly string[]).includes(key)) continue
         await expect(
@@ -146,7 +151,42 @@ describe.skipIf(!serverUrl)('audit journal', () => {
           [JSON.stringify(details)],
         ),
       ).rejects.toMatchObject({ constraint: 'audit_events_details_check' })
-  }, 30_000)
+    // No-show details name the attendee by stored ID and the resulting state, nothing else.
+    const attendeeId = randomUUID()
+    await expect(
+      db.transaction().execute((trx) =>
+        writeAuditEvent(trx, {
+          ...event,
+          action: 'booking.attendee_no_show_changed',
+          details: { attendeeId, noShow: 'marked', name: 'Private Invitee' },
+        }),
+      ),
+    ).rejects.toThrow('allow-listed')
+    for (const details of [
+      {},
+      { attendeeId },
+      { noShow: 'marked' },
+      { attendeeId, noShow: 'marked', email: 'invitee@example.com' },
+      { attendeeId, noShow: 'marked', note: 'free text' },
+      { attendeeId, noShow: true },
+      { attendeeId, noShow: 'maybe' },
+      { attendeeId, noShow: ['marked'] },
+      { attendeeId, noShow: null },
+      { attendeeId: attendeeId.toUpperCase(), noShow: 'marked' },
+      { attendeeId: 'Private Invitee', noShow: 'marked' },
+      { attendeeId: `${attendeeId} `, noShow: 'unmarked' },
+      { attendeeId: [attendeeId], noShow: 'unmarked' },
+      { attendeeId: null, noShow: 'unmarked' },
+    ])
+      await expect(
+        owned.pool.query(
+          `INSERT INTO audit_events (actor_type, actor_id, credential_type, action, target_type, target_id, details)
+           VALUES ('system', 'test', 'none', 'booking.attendee_no_show_changed', 'booking', 'test', $1::jsonb)`,
+          [JSON.stringify(details)],
+        ),
+        JSON.stringify(details),
+      ).rejects.toMatchObject({ constraint: 'audit_events_details_check' })
+  }, 120_000)
   it('rolls back the change when audit fails and the event when the change fails', async () => {
     const id = randomUUID()
     await expect(

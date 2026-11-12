@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -24,8 +25,19 @@ function sourceCopy(replacement?: [string, string]): typeof service {
     'isUuid',
     'checkTeamManagementAccess',
     'TeamManagementError',
+    'auditActor',
+    'writeAuditEvent',
     `${source}; return {createScimToken,listScimTokens,rotateScimToken,revokeScimToken,authenticateScimToken}`,
-  )(createHash, randomBytes, sql, isUuid, checkTeamManagementAccess, TeamManagementError)
+  )(
+    createHash,
+    randomBytes,
+    sql,
+    isUuid,
+    checkTeamManagementAccess,
+    TeamManagementError,
+    auditActor,
+    writeAuditEvent,
+  )
 }
 
 describe.skipIf(!serverUrl)('SCIM provisioning tokens', () => {
