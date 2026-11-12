@@ -210,6 +210,13 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **SSO audit actions (migration 0085) upgrade in place.** The migration replaces the audit
+  details check with the same rules plus allow-lists for the SSO audit actions, which no
+  version records yet. It is safe to apply while the previous version is still running.
+  Writes to `audit_events` wait while existing rows are validated. A journal row written
+  outside the application with an SSO action name and empty details makes the migration fail
+  with 23514 and change nothing; delete that row and apply again. See the
+  [audit log](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md#sso-actions).
 - **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
   apply while the previous version is still running: it adds nullable attendee columns and
   only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply

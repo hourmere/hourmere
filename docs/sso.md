@@ -669,12 +669,22 @@ with a bounded count per provider and source so failed attempts cannot flood the
 journal. The journal is local to the instance database, so emergency recovery never
 waits for a third-party audit sink.
 
+The Audit actions step built this vocabulary and records nothing itself: the
+[SSO actions](audit-log.md#sso-actions) are defined in `packages/db/src/sso-audit.ts`
+and checked by migration 0085, and no production code emits one yet. Later steps call
+`writeSsoAuditEvent` inside the transaction of the change they record, so a rollback removes
+the event with the change, and `writeSsoSecurityFailure` for a security failure. The
+provider and correlation IDs are UUIDv7 values (provider and attempt IDs), which an IdP
+subject, a secret, a token or a mailbox capability cannot pass for. The source of a security
+failure is its action: a failed sign-in, a rejected replay, a JIT refusal or a link conflict.
+Audit limits below pins the bound.
+
 ## Pinned operational limits
 
 These are initial design commitments, not current runtime settings. The doc-fact test
 pins this table; implementation must import its eventual constants into that test.
-The SSO transport limits are runtime constants already and have their own table below.
-Other resource limits must be selected with fixtures before their release.
+The SSO transport and audit limits are runtime constants already and have their own
+tables below. Other resource limits must be selected with fixtures before their release.
 
 | Limit | Value | Unit |
 |---|---:|---|
@@ -721,6 +731,25 @@ setting step, the constants and this table change together.
 response headers and the entire decoded body. `ssoMaximumResponseBytes` bounds the bytes on
 the wire and, separately, the decoded bytes. The concurrency limits count in-flight requests
 per server process, in total and per origin (scheme, host and port).
+
+### Audit limits
+
+The Audit actions step chose the bound on security-failure events. The values are the runtime
+constants `SSO_AUDIT_LIMITS` in `packages/db/src/sso-audit.ts`, which the doc-fact test
+imports to pin this table.
+
+| Limit | Value | Unit |
+|---|---:|---|
+| `ssoSecurityFailureEvents` | 20 | events |
+| `ssoSecurityFailureWindow` | 3600 | seconds |
+
+`writeSsoSecurityFailure` records a failure only while fewer than `ssoSecurityFailureEvents`
+failures of the same provider and source were recorded in the last `ssoSecurityFailureWindow`
+seconds, by the database clock; it drops the rest and reports that it did. With four sources, one
+provider records at most 80 failures an hour, however many attempts fail. A transaction-level
+advisory lock per provider and source serializes the count and the insert, so a burst of
+parallel failures cannot exceed the bound. A provider's successes and changes are never
+dropped: only security failures are bounded.
 
 ## Proposed REST, MCP and CLI contracts
 
