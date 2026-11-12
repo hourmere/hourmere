@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type pg from 'pg'
 import { expect } from 'vitest'
 import {
   bookingRoutingValues,
@@ -7,6 +8,7 @@ import {
   quote,
   type RoutingFixture,
   receiptValues,
+  routingFixture,
   versionValues,
 } from './routing-storage-fixtures.ts'
 import { readRoutingStorageLimits } from './routing-storage-limits.ts'
@@ -956,4 +958,453 @@ routingProtections['unarchive obeys active form quota'] = {
       "IF TG_OP = 'INSERT' OR (OLD.archived_at IS NOT NULL AND NEW.archived_at IS NULL) THEN",
       "IF TG_OP = 'INSERT' THEN",
     ),
+}
+
+/** Columns 0072 declares NOT NULL outside primary keys, with a row that is valid otherwise. */
+const requiredColumns: [
+  table: string,
+  row: (f: RoutingFixture) => Record<string, unknown>,
+  columns: string[],
+][] = [
+  [
+    'routing_forms',
+    (f) => ({
+      ...formValues(f),
+      draft_revision: 1,
+      last_version_number: 0,
+      enabled: false,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }),
+    [
+      'organization_id',
+      'slug',
+      'created_by_user_id',
+      'draft',
+      'draft_revision',
+      'last_version_number',
+      'enabled',
+      'created_at',
+      'updated_at',
+    ],
+  ],
+  [
+    'routing_form_versions',
+    (f) => ({ ...versionValues(f), version_number: 2, published_at: new Date() }),
+    [
+      'organization_id',
+      'form_id',
+      'version_number',
+      'questions',
+      'rules',
+      'fallback',
+      'published_at',
+      'published_by_user_id',
+    ],
+  ],
+  [
+    'routing_target_dependencies',
+    (f) => ({ ...dependencyValues(f), rule_id: randomUUID(), health_code: 'ok' }),
+    ['organization_id', 'event_type_id', 'health_code'],
+  ],
+  [
+    'routing_receipts',
+    (f) => ({ ...receiptValues(f), created_at: new Date() }),
+    [
+      'organization_id',
+      'form_id',
+      'version_id',
+      'token_hash',
+      'matched_rule_id',
+      'resolved_rule_id',
+      'resolved_target',
+      'created_at',
+      'expires_at',
+    ],
+  ],
+  [
+    'booking_routing',
+    bookingRoutingValues,
+    [
+      'organization_id',
+      'form_id',
+      'version_id',
+      'version_number',
+      'matched_rule_id',
+      'resolved_rule_id',
+      'questions',
+      'answers',
+    ],
+  ],
+]
+routingProtections['required columns'] = {
+  check: async (f) => {
+    const client = await f.pool.connect()
+    const outcomes: string[] = []
+    try {
+      await client.query('BEGIN')
+      for (const [table, row, columns] of requiredColumns)
+        for (const column of columns) {
+          const values: Record<string, unknown> = { ...row(f), [column]: null }
+          // The version guard rejects a missing number for an existing form before the NOT
+          // NULL check runs; a form id without a form leaves only the column to reject it.
+          if (table === 'routing_form_versions' && column === 'version_number')
+            values.form_id = randomUUID()
+          await client.query('SAVEPOINT probe')
+          try {
+            await insertRow(client, table, values)
+            outcomes.push(`${table}.${column}: accepted`)
+          } catch (error) {
+            const { code, column: rejected } = error as { code?: string; column?: string }
+            // Only integrity rejections are outcomes; anything else is a broken run.
+            if (typeof code !== 'string' || !/^(23|22|P0)/.test(code)) throw error
+            if (code !== '23502' || rejected !== column)
+              outcomes.push(`${table}.${column}: ${code} ${rejected ?? ''}`.trim())
+          }
+          await client.query('ROLLBACK TO SAVEPOINT probe')
+        }
+    } finally {
+      await client.query('ROLLBACK').catch(() => {})
+      client.release()
+    }
+    expect(outcomes).toEqual([])
+  },
+  break: (source) => source.replace('  slug text NOT NULL', '  slug text'),
+}
+
+routingProtections['ids are unique across organizations'] = {
+  check: async (f) => {
+    const receipt = await insertRow(f.pool, 'routing_receipts', receiptValues(f))
+    const other = {
+      ...f,
+      organization: f.otherOrganization,
+      form: f.otherForm,
+      version: f.otherVersion,
+    }
+    // The scoped keys include the organization, so only the primary key rejects these.
+    for (const [table, values] of [
+      ['routing_forms', { ...formValues(other), id: f.form }],
+      ['routing_form_versions', { ...versionValues(other), version_number: 2, id: f.version }],
+      ['routing_receipts', { ...receiptValues(other), id: receipt }],
+    ] as const)
+      await expect(insertRow(f.pool, table, values), table).rejects.toMatchObject({
+        code: '23505',
+        constraint: `${table}_pkey`,
+      })
+  },
+  break: drop('routing_receipts', 'routing_receipts_pkey'),
+}
+
+routingProtections['form updates refresh updated_at'] = {
+  check: async (f) => {
+    const form = await insertRow(f.pool, 'routing_forms', {
+      ...formValues(f),
+      created_at: '2020-01-01T00:00Z',
+      updated_at: '2020-01-01T00:00Z',
+    })
+    await expect(
+      f.pool.query('UPDATE routing_forms SET draft_revision=2 WHERE id=$1', [form]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+    expect(
+      (
+        await f.pool.query<{ refreshed: boolean }>(
+          `SELECT updated_at > '2020-01-01T00:00Z' AS refreshed FROM routing_forms WHERE id=$1`,
+          [form],
+        )
+      ).rows,
+    ).toEqual([{ refreshed: true }])
+  },
+  break: noTrigger('routing_forms', 'routing_forms_updated_at'),
+}
+
+interface PlanNode {
+  'Node Type': string
+  'Relation Name'?: string
+  'Index Cond'?: string
+  Plans?: PlanNode[]
+}
+const planNodes = (node: PlanNode): PlanNode[] => [node, ...(node.Plans ?? []).flatMap(planNodes)]
+/**
+ * Lookups the storage must answer from an index: the organization, booking and version
+ * cascades and retention checks, the dependency health sweep, receipt admission and expiry,
+ * and the form list. `columns` must all appear in one index condition on `table`; an ordered
+ * lookup must also come out of the index without a sort.
+ */
+const indexedLookups = (f: RoutingFixture) => [
+  {
+    lookup: 'form list page of an organization',
+    table: 'routing_forms',
+    columns: ['organization_id'],
+    ordered: true,
+    sql: 'SELECT id FROM routing_forms WHERE organization_id=$1 ORDER BY created_at,id LIMIT 50',
+    params: [f.organization],
+  },
+  {
+    lookup: 'dependencies on an event type',
+    table: 'routing_target_dependencies',
+    columns: ['organization_id', 'event_type_id'],
+    sql: 'SELECT version_id,rule_id FROM routing_target_dependencies WHERE organization_id=$1 AND event_type_id=$2',
+    params: [f.organization, f.event],
+  },
+  {
+    lookup: 'unconsumed receipts by expiry, oldest first',
+    table: 'routing_receipts',
+    columns: ['expires_at'],
+    ordered: true,
+    sql: 'SELECT id FROM routing_receipts WHERE consumed_booking_id IS NULL AND expires_at<=$1 ORDER BY expires_at,id LIMIT 100',
+    params: ['2030-01-01T00:00Z'],
+  },
+  {
+    lookup: 'live receipts of a form at admission',
+    table: 'routing_receipts',
+    columns: ['organization_id', 'form_id', 'expires_at'],
+    sql: 'SELECT count(*) FROM routing_receipts WHERE organization_id=$1 AND form_id=$2 AND consumed_booking_id IS NULL AND expires_at>$3',
+    params: [f.organization, f.form, '2030-01-01T00:00Z'],
+  },
+  {
+    lookup: 'receipts consumed by a booking',
+    table: 'routing_receipts',
+    columns: ['consumed_booking_id'],
+    sql: 'SELECT id FROM routing_receipts WHERE consumed_booking_id=$1',
+    params: [f.booking],
+  },
+  {
+    lookup: 'receipts that retain a version',
+    table: 'routing_receipts',
+    columns: ['organization_id', 'form_id', 'version_id'],
+    sql: 'SELECT 1 FROM routing_receipts WHERE organization_id=$1 AND form_id=$2 AND version_id=$3',
+    params: [f.organization, f.form, f.version],
+  },
+  {
+    lookup: 'snapshots of an organization',
+    table: 'booking_routing',
+    columns: ['organization_id'],
+    sql: 'SELECT booking_id FROM booking_routing WHERE organization_id=$1',
+    params: [f.organization],
+  },
+  {
+    lookup: 'snapshots attributed to a version',
+    table: 'booking_routing',
+    columns: ['form_id', 'version_id'],
+    sql: 'SELECT booking_id FROM booking_routing WHERE form_id=$1 AND version_id=$2',
+    params: [f.form, f.version],
+  },
+]
+routingProtections['indexed lookups'] = {
+  check: async (f) => {
+    const client = await f.pool.connect()
+    const unindexed: string[] = []
+    try {
+      await client.query('BEGIN')
+      // Any index access path wins over a sequential or bitmap scan, so the plan shows
+      // whether one exists for the lookup at all, whatever the table size.
+      await client.query('SET LOCAL enable_seqscan=off')
+      await client.query('SET LOCAL enable_bitmapscan=off')
+      for (const { lookup, table, columns, ordered, sql, params } of indexedLookups(f)) {
+        const plan = (
+          await client.query<{ 'QUERY PLAN': [{ Plan: PlanNode }] }>(
+            `EXPLAIN (FORMAT JSON) ${sql}`,
+            params,
+          )
+        ).rows[0]?.['QUERY PLAN'][0].Plan as PlanNode
+        const nodes = planNodes(plan)
+        const indexed = nodes.some(
+          (node) =>
+            node['Relation Name'] === table &&
+            columns.every((column) => new RegExp(`\\b${column}\\b`).test(node['Index Cond'] ?? '')),
+        )
+        const sorted = nodes.some((node) => node['Node Type'].endsWith('Sort'))
+        if (!indexed || (ordered && sorted))
+          unindexed.push(
+            `${lookup}: ${nodes.map((node) => `${node['Node Type']} ${node['Index Cond'] ?? ''}`.trim()).join(' > ')}`,
+          )
+      }
+    } finally {
+      await client.query('ROLLBACK').catch(() => {})
+      client.release()
+    }
+    expect(unindexed).toEqual([])
+  },
+  break: (source) =>
+    source.replace(
+      'CREATE INDEX routing_receipts_booking ON routing_receipts (consumed_booking_id);\n',
+      '',
+    ),
+}
+
+/** Behavioural checks that span several objects; the routing storage tests run each one. */
+export const routingBehaviours: Record<string, (f: RoutingFixture) => Promise<void>> = {
+  'publishes atomically with a deferred same-form pointer and preserves historical authors': async (
+    f,
+  ) => {
+    const client = await f.pool.connect()
+    const id = randomUUID()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        'UPDATE routing_forms SET published_version_id=$1,enabled=true WHERE id=$2',
+        [id, f.form],
+      )
+      await insertRow(client, 'routing_form_versions', {
+        ...versionValues(f),
+        id,
+        version_number: 2,
+      })
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    await expect(
+      f.pool.query('DELETE FROM auth."user" WHERE id=$1', [f.creator]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+    expect(
+      (
+        await f.pool.query(
+          'SELECT created_by_user_id,published_version_id,enabled FROM routing_forms WHERE id=$1',
+          [f.form],
+        )
+      ).rows,
+    ).toEqual([{ created_by_user_id: f.creator, published_version_id: id, enabled: true }])
+    expect(
+      (
+        await f.pool.query('SELECT published_by_user_id FROM routing_form_versions WHERE id=$1', [
+          id,
+        ])
+      ).rows,
+    ).toEqual([{ published_by_user_id: f.creator }])
+    await expect(
+      f.pool.query('UPDATE routing_forms SET archived_at=now() WHERE id=$1', [f.form]),
+    ).rejects.toMatchObject({ code: '23514' })
+    await expect(
+      f.pool.query('UPDATE routing_forms SET enabled=false,archived_at=now() WHERE id=$1', [
+        f.form,
+      ]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+  },
+  'keeps snapshots through form cleanup and dependencies through event deletion': async (f) => {
+    await insertRow(f.pool, 'routing_target_dependencies', dependencyValues(f))
+    await insertRow(f.pool, 'booking_routing', bookingRoutingValues(f))
+    await expect(
+      f.pool.query('DELETE FROM event_types WHERE id=$1', [f.event]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+    expect(
+      (
+        await f.pool.query(
+          'SELECT event_type_id,health_code FROM routing_target_dependencies WHERE version_id=$1',
+          [f.version],
+        )
+      ).rows,
+    ).toEqual([{ event_type_id: f.event, health_code: 'unknown' }])
+    await expect(
+      f.pool.query('DELETE FROM routing_forms WHERE id=$1', [f.form]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+    expect(
+      (
+        await f.pool.query('SELECT version_id FROM booking_routing WHERE booking_id=$1', [
+          f.booking,
+        ])
+      ).rows,
+    ).toEqual([{ version_id: f.version }])
+    expect(
+      (
+        await f.pool.query('SELECT * FROM routing_target_dependencies WHERE version_id=$1', [
+          f.version,
+        ])
+      ).rows,
+    ).toEqual([])
+    await expect(
+      f.pool.query('DELETE FROM bookings WHERE id=$1', [f.booking]),
+    ).resolves.toMatchObject({ rowCount: 1 })
+    expect(
+      (await f.pool.query('SELECT * FROM booking_routing WHERE booking_id=$1', [f.booking])).rows,
+    ).toEqual([])
+  },
+  'organization deletion cascades all five tables even with current pointers and consumed evidence':
+    async (f) => {
+      await f.pool.query('UPDATE routing_forms SET published_version_id=$1 WHERE id=$2', [
+        f.version,
+        f.form,
+      ])
+      await insertRow(f.pool, 'routing_target_dependencies', dependencyValues(f))
+      await insertRow(f.pool, 'booking_routing', bookingRoutingValues(f))
+      await insertRow(f.pool, 'routing_receipts', receiptValues(f))
+      await insertRow(f.pool, 'routing_receipts', {
+        ...receiptValues(f),
+        consumed_booking_id: f.booking,
+        answers_ciphertext: null,
+      })
+      await expect(
+        f.pool.query('DELETE FROM auth.organization WHERE id=$1', [f.organization]),
+      ).resolves.toMatchObject({ rowCount: 1 })
+      for (const table of [
+        'routing_forms',
+        'routing_form_versions',
+        'routing_target_dependencies',
+        'routing_receipts',
+        'booking_routing',
+      ])
+        expect(
+          (await f.pool.query(`SELECT * FROM ${table} WHERE organization_id=$1`, [f.organization]))
+            .rows,
+          table,
+        ).toEqual([])
+      expect(
+        (await f.pool.query('SELECT id FROM routing_forms WHERE id=$1', [f.otherForm])).rows,
+      ).toHaveLength(1)
+    },
+}
+
+// Lock and race checks wait on other sessions, and the stale-snapshot check expects a
+// serialization failure (40001), which a coverage run treats as a broken run; the routing
+// storage tests run them. The last two only re-run another check.
+const notInCoverage = new Set([
+  'form quota serialization',
+  'version quota serialization',
+  'total form quota serialization',
+  'stale snapshot form admission requires retry',
+  'booking share lock permits form admission',
+  'concurrent share holders create forms without escalation',
+  'version quota is not organization scoped',
+  'archived forms do not consume active quota',
+])
+// Checks that guard many objects run first, so a dropped object usually fails fast.
+const firstInCoverage = ['required columns', 'indexed lookups']
+// The backstops disable a guard trigger by name; without that trigger the statement would
+// fail outright, so they run after the checks that fail when the trigger is missing.
+const lastInCoverage = [
+  'nonnegative high water backstop',
+  'positive version backstop',
+  'unique version number backstop',
+]
+
+/**
+ * The protection suite for the 0072 constraint coverage run: every routing protection and
+ * behaviour above, once each, on its own fixture. The error names the first failing check.
+ */
+export async function assertRoutingFormProtections(pool: pg.Pool): Promise<void> {
+  const protection = (name: string) => {
+    const found = routingProtections[name]
+    if (!found) throw new Error(`Missing routing protection ${name}`)
+    return found.check
+  }
+  const checks = new Map<(f: RoutingFixture) => Promise<void>, string>()
+  const add = (name: string, check: (f: RoutingFixture) => Promise<void>) => {
+    if (!checks.has(check)) checks.set(check, name)
+  }
+  for (const name of firstInCoverage) add(name, protection(name))
+  for (const [name, { check }] of Object.entries(routingProtections))
+    if (!notInCoverage.has(name) && !lastInCoverage.includes(name)) add(name, check)
+  for (const [name, check] of Object.entries(routingBehaviours)) add(name, check)
+  for (const name of lastInCoverage) add(name, protection(name))
+  for (const [check, name] of checks) {
+    try {
+      await check(await routingFixture(pool))
+    } catch (error) {
+      if (error instanceof Error) error.message = `[${name}] ${error.message}`
+      throw error
+    }
+  }
 }
