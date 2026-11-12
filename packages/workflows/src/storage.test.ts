@@ -1,7 +1,8 @@
 // Binds the database checks of migration 0076 (workflow definitions and revisions) to this
 // contract: storage accepts every definition the contract accepts, in the canonical form it
-// returns, and each limit and catalogue the database mirrors is derived here from the
-// contract's own constants and schemas, so neither side can change without the other.
+// returns, refuses just beyond each limit it mirrors, and lists exactly the contract's
+// triggers, scopes, condition fields and actions, all derived here from the contract's own
+// constants and schemas, so neither side can change without the other.
 import { randomUUID } from 'node:crypto'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { LOCATION_KINDS, MAX_GUESTS } from '@hourmere/scheduling'
@@ -342,6 +343,28 @@ describe.skipIf(!serverUrl)('workflow definition storage and the definition cont
       contractRefuses({ ...candidate(), ...overrides })
       await refused({ ...base, ...overrides }, constraint, label)
     }
+  })
+
+  it('names exactly the contract catalogues in its checks, with one condition position per allowed condition', async () => {
+    const { rows } = await owned.pool.query<{ name: string; definition: string }>(
+      `SELECT conname AS name,pg_get_constraintdef(oid) AS definition FROM pg_constraint
+      WHERE conrelid='workflow_revisions'::regclass AND contype='c'`,
+    )
+    /** The string lists of every `= ANY (ARRAY[…])` in a check, in order. */
+    const lists = (name: string) =>
+      [
+        ...(rows.find((row) => row.name === name)?.definition ?? '').matchAll(
+          /= ANY \(ARRAY\[([^\]]*)\]\)/g,
+        ),
+      ].map(([, list]) =>
+        [...(list as string).matchAll(/'([^']*)'::text/g)].map(([, value]) => value),
+      )
+    expect(lists('workflow_revisions_scope')).toEqual([scopeTypes])
+    expect(lists('workflow_revisions_trigger')).toEqual([lifecycleTriggers, timerTriggers])
+    expect(lists('workflow_revisions_actions')).toEqual([actionTypes])
+    expect(lists('workflow_revisions_conditions')).toEqual(
+      Array.from({ length: WORKFLOW_MAX_CONDITIONS }, () => conditionFields),
+    )
   })
 
   it('closes every pool it opens', () => {

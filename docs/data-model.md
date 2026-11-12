@@ -932,7 +932,9 @@ layer from naming them.
 - **Definitions** have an immutable ID, organization, owner and creation time. A personal
   definition belongs to its user in that user's personal organization (`owner_user_id`); a
   team definition (`owner_user_id` NULL) belongs to the team organization, never to the member
-  who created it, and is refused in a personal organization. `revision` is the current
+  who created it, and is refused in a personal organization. The owner is checked when the
+  definition is created; a future change that turns a personal organization into a team must
+  handle its personal definitions. `revision` is the current
   revision, which always exists and is the latest one; it never goes back. `enabled` is the
   live switch, false by default, and no revision carries it, so enabling and disabling change
   only the definition row. Deleting a workflow tombstones it (`deleted_at`): a tombstone is
@@ -948,12 +950,15 @@ layer from naming them.
   (0 to 43200 whole minutes) or its offset (5 to 43200 whole minutes) and nothing else; at
   most five conditions with known fields; exactly one email or webhook action. The service
   validates everything else through the contract before it writes, and a test binds each
-  mirrored limit and catalogue to the contract's constants and schemas.
+  mirrored limit and catalogue to the contract's constants and schemas, in both directions.
 
 Writers lock the organization before the definition, as other organization writers do: a
 definition insert locks its organization row through its foreign key, and a new revision
 locks the organization and then its definition, so a concurrent organization deletion waits
 instead of deadlocking, and concurrent revisions of one workflow are numbered one at a time.
+An update of a definition row takes no organization lock, so a transaction that updates a
+definition and then adds a revision must lock the organization first. The service steps take
+the organization lock before any workflow row.
 
 `workflow-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
 through `checkConstraintCoverage` (expectation file

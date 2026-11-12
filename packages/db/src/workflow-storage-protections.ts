@@ -716,10 +716,18 @@ export const workflowProtections: Record<string, WorkflowProtection> = {
       await refused(f.pool, disabled, (db) =>
         insertDefinition(db, { organization_id: f.team, enabled: true, deleted_at: new Date() }),
       )
-      // A live definition is tombstoned before it can be removed.
-      await refused(f.pool, check('workflow_definitions_tombstone_first'), (db) =>
-        db.query('DELETE FROM workflow_definitions WHERE id=$1', [workflow]),
-      )
+      // A live definition is tombstoned before it can be removed, a team's or a person's.
+      const personal = await f.create(f.personalOwner)
+      for (const [label, id] of [
+        ['team', workflow],
+        ['personal', personal],
+      ] as const)
+        await refused(
+          f.pool,
+          check('workflow_definitions_tombstone_first'),
+          (db) => db.query('DELETE FROM workflow_definitions WHERE id=$1', [id]),
+          label,
+        )
       await accepted(
         f.pool.query('UPDATE workflow_definitions SET enabled=false,deleted_at=now() WHERE id=$1', [
           workflow,
@@ -757,6 +765,11 @@ export const workflowProtections: Record<string, WorkflowProtection> = {
        AND EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id)`,
         `    IF false
        AND EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id)`,
+      ),
+      mutant(
+        'a live personal definition can be removed',
+        '         OR EXISTS (SELECT FROM auth."user" WHERE id = OLD.owner_user_id)) THEN',
+        '         OR false) THEN',
       ),
       mutant(
         'a tombstone cannot be purged',
@@ -1072,19 +1085,32 @@ export const workflowProtections: Record<string, WorkflowProtection> = {
   'update time': {
     objects: ['workflow_definitions_updated_at'],
     check: async (f) => {
+      // Compared in the database: the times have microseconds, which a Date drops.
+      const times = async (id: string) =>
+        (
+          await f.pool.query<{ created: string; updated: string }>(
+            'SELECT created_at::text AS created,updated_at::text AS updated FROM workflow_definitions WHERE id=$1',
+            [id],
+          )
+        ).rows[0]
+      const later = async (time: string | undefined, id: string) =>
+        (
+          await f.pool.query<{ later: boolean }>(
+            'SELECT updated_at>$2::timestamptz AS later FROM workflow_definitions WHERE id=$1',
+            [id, time],
+          )
+        ).rows[0]?.later
       const workflow = await f.create(f.teamOwner)
-      const created = await f.definition(workflow)
-      expect(created?.updated_at).toEqual(created?.created_at)
+      const created = await times(workflow)
+      expect(created?.updated).toBe(created?.created)
       await accepted(
         f.pool.query('UPDATE workflow_definitions SET enabled=true WHERE id=$1', [workflow]),
       )
-      const toggled = await f.definition(workflow)
-      expect(toggled?.updated_at.getTime()).toBeGreaterThan(created?.updated_at.getTime() as number)
+      expect(await later(created?.updated, workflow), 'a toggle').toBe(true)
       // A new revision is a change of the definition too.
+      const toggled = await times(workflow)
       await accepted(insertRevision(f.pool, f.team, workflow, 2))
-      expect((await f.definition(workflow))?.updated_at.getTime()).toBeGreaterThan(
-        toggled?.updated_at.getTime() as number,
-      )
+      expect(await later(toggled?.updated, workflow), 'a new revision').toBe(true)
     },
     mutants: [
       mutant(

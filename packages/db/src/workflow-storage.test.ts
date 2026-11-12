@@ -84,10 +84,14 @@ describe.skipIf(!serverUrl)('workflow definition storage', () => {
       expect(mutants.length, name).toBeGreaterThan(0)
   })
 
-  it.each(Object.keys(workflowProtections))('enforces %s', async (name) => {
-    const protection = workflowProtections[name]
-    if (!protection) throw new Error(`Missing protection ${name}`)
-    await protection.check(await workflowFixture(owned.pool))
-    expect(owned.pool.totalCount).toBeLessThanOrEqual(3)
-  }, 30_000)
+  it.each(Object.keys(workflowProtections))(
+    'enforces %s',
+    async (name) => {
+      const protection = workflowProtections[name]
+      if (!protection) throw new Error(`Missing protection ${name}`)
+      await protection.check(await workflowFixture(owned.pool))
+      expect(owned.pool.totalCount).toBeLessThanOrEqual(3)
+    },
+    30_000,
+  )
 })
