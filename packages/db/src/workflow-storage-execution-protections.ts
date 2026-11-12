@@ -703,13 +703,40 @@ export const executionProtections: Record<string, ExecutionProtection> = {
       await refused(f.pool, unique('workflow_enrollments_pkey'), (db) =>
         insert(db, 'workflow_enrollments', f.enrollmentRow(other, { id })),
       )
-      // One capture of a workflow per booking and occurrence, even when two captures race.
-      const raced = { organization: f.team, booking: await f.booking(), workflow }
+      // One capture of a workflow per booking and occurrence, whatever revision it captured: a
+      // capture replayed after an edit (at revision 2) meets the capture at revision 1 and
+      // enrolls nothing, also when the two race.
+      const edited = await f.workflow()
+      await accepted(
+        f.pool.query(
+          'INSERT INTO workflow_revisions (organization_id,workflow_id,revision,definition) VALUES ($1,$2,2,$3)',
+          [f.team, edited, JSON.stringify(revisionContent({ name: 'Prepare for our call again' }))],
+        ),
+        'edit the workflow',
+      )
+      const replayed = { organization: f.team, booking: await f.booking(), workflow: edited }
+      await accepted(
+        insert(f.pool, 'workflow_enrollments', f.enrollmentRow(replayed)),
+        'the capture at revision 1',
+      )
+      await expect(
+        committed(f.pool, (db) =>
+          insert(db, 'workflow_enrollments', f.enrollmentRow(replayed, { revision: 2 })),
+        ),
+        'the replay at revision 2',
+      ).rejects.toMatchObject(unique('workflow_enrollments_identity'))
+      expect(
+        (await f.rows('workflow_enrollments', 'booking_id=$1', [replayed.booking])).map(
+          ({ revision }) => revision,
+        ),
+        'the replayed booking keeps exactly its enrollment at revision 1',
+      ).toEqual([1])
+      const raced = { organization: f.team, booking: await f.booking(), workflow: edited }
       await race(
         f,
         'concurrent capture',
         (db) => insert(db, 'workflow_enrollments', f.enrollmentRow(raced)),
-        (db) => insert(db, 'workflow_enrollments', f.enrollmentRow(raced)),
+        (db) => insert(db, 'workflow_enrollments', f.enrollmentRow(raced, { revision: 2 })),
         unique('workflow_enrollments_identity'),
         async () => (await f.rows('workflow_enrollments', 'booking_id=$1', [raced.booking])).length,
       )
@@ -888,6 +915,11 @@ export const executionProtections: Record<string, ExecutionProtection> = {
         'a workflow enrolls one booking per occurrence',
         'UNIQUE (booking_id, occurrence, workflow_id)',
         'UNIQUE (occurrence, workflow_id)',
+      ),
+      mutant(
+        'a capture replayed after an edit enrolls the booking again',
+        'UNIQUE (booking_id, occurrence, workflow_id)',
+        'UNIQUE (booking_id, occurrence, workflow_id, revision)',
       ),
       mutant(
         'a tombstoned workflow takes enrollments',
