@@ -1,9 +1,11 @@
 # Meeting polls: data model and flow proposal
 
-Status: storage foundation implemented by migration `0071_meeting_polls.sql`, and the
+Status: storage foundation implemented by migration `0071_meeting_polls.sql`, the
 internal host lifecycle service (create, read, close, cancel, delete and link rotation) by
-`packages/scheduling/src/meeting-polls.ts`; voter services, transport, workers and UI
-remain proposed. Competitor research was checked
+`packages/scheduling/src/meeting-polls.ts`, and the internal enrollment and verification
+services (enroll, invite, verify, recover and resend) by
+`packages/scheduling/src/meeting-poll-voters.ts`; ballots, results, removal, transport,
+workers and UI remain proposed. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -123,6 +125,42 @@ all-or-nothing rule, and the 202 response reports each entry's outcome without s
 | Withdrawn voter | Unchanged: withdrawal opted out of poll mail; only the voter's own capability can reactivate. A host who removes and then re-invites the address overrides this deliberately and sends one invitation; a reminder opt-out still applies |
 | Expired public pending enrollee | Invited as new: the expired row is replaced and a new place is reserved |
 | Removed mailbox | Re-invited: the host's explicit invitation clears the removal tombstone and reserves a new place; mailbox counters persist |
+
+The A3a enrollment and verification service implements these rules with the internal
+choices below; later transport steps map them, and the error codes stay as listed here.
+
+- Every voter write serializes on the poll row. Host invitations and resends keep the
+  lifecycle order (organization-write hook, actor user, organization and membership
+  `FOR SHARE`, poll `FOR UPDATE`, event `FOR SHARE`). Public enrollment, verification and
+  recovery first take public booking's organization locks (a personal owner's user, then
+  the organization, `FOR SHARE`), then the same poll and event locks. Neither takes host
+  booking locks. The database clock is read once after those locks.
+- Enrollment decides capacity (409 `poll_full`) and then the per-IP cap (429
+  `rate_limited`, Retry-After until that IP's earliest reservation expires) before it looks
+  at the mailbox, so neither answer depends on the mailbox's state. The IP digest is keyed,
+  per poll, with IPv6 addresses grouped by /64.
+- Verification of a public enrollee consumes the verification credential and returns a new
+  voting credential exactly once in its response; an invitee's emailed voting credential
+  verifies and stays the same. Repeats return the voter's own state and mint nothing. The
+  credential is never mailed again by verification, so the delivery kinds stay
+  verification, invitation and recovery; a lost verification response is recovered by
+  recovery, which re-delivers that voting credential.
+- Verification and voting credentials share one generation line per voter, so a delivery's
+  generation names exactly one credential. Each credential keeps its digest (domain-separated
+  by purpose) and an AES-256-GCM copy bound to organization, poll, voter and generation;
+  queued mail carries the same copy. Revocation or consumption erases the copy and skips
+  that credential's pending mail.
+- A soft-deleted event closes admission: enrollment, verification, invitation and resend
+  get 409 `poll_closed`, and recovery sends nothing. Invalid voter fields get 400
+  `invalid_voter`; a resend to a withdrawn invitee gets 409 `voter_withdrawn`, and a resend
+  to a voter who is not an invitee gets 404 `poll_not_found`.
+- Repeated mailboxes in one invitation batch are one entry. An invitation's language
+  defaults to English and its zone to the poll's display zone. Host results contain each
+  entry's outcome (`invited`, `upgraded` or `unchanged`), voter ID and current roster
+  state, never a credential; an exact replay reports every entry as `unchanged` with its
+  current state.
+- Shared request buckets across processes and additional mail budgets remain transport
+  and delivery work (B1, B2); the opt-out credential is minted by the later mail steps.
 
 Removal deletes the voter row with its votes, capabilities and deliveries and
 records `removed_at` on the mailbox counter row, whose `email_key` digest alone blocks

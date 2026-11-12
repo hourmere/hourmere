@@ -2218,6 +2218,75 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       ])
   }
 
+  /**
+   * The creation instant is read after the host users and members are share-locked, as
+   * public booking reads its clock: a creation that waits for a host's user row records a
+   * time no earlier than the moment that row was released.
+   */
+  async function verifyCreationClock(M: PollModule) {
+    const s = await team()
+    const release = await holding((trx) =>
+      trx.selectFrom('auth.user').select('id').where('id', '=', s.member.id).forUpdate().execute(),
+    )
+    const creation = (async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId)))()
+    let order: 'queued' | 'settled'
+    let released: Temporal.Instant
+    try {
+      order = await queues(creation, 1)
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      released = await databaseNow()
+    } finally {
+      await release()
+    }
+    expect(order).toBe('queued')
+    const { poll } = await succeeds(() => creation)
+    expect(
+      Temporal.Instant.compare(Temporal.Instant.from(poll.createdAt), released),
+    ).toBeGreaterThanOrEqual(0)
+  }
+
+  /**
+   * Collective hosts are judged by their default schedules, as public booking judges them,
+   * never by a per-event schedule. A closed default refuses even with an open per-event
+   * schedule; an open default accepts even with a closed per-event schedule.
+   */
+  async function verifyCollectiveDefaultSchedule(M: PollModule) {
+    const s = await team({}, { hosts: ['member', 'owner'], schedulingType: 'collective' })
+    const assign = async (userId: string, schedule: ScheduleOptions) => {
+      const scheduleId = await fixtures.schedule(userId, { ...schedule, isDefault: false })
+      await db
+        .updateTable('event_type_hosts')
+        .set({ schedule_id: scheduleId })
+        .where('event_type_id', '=', s.eventTypeId)
+        .where('user_id', '=', userId)
+        .execute()
+    }
+    const setDefault = (userId: string, weeklyHours: object) =>
+      db
+        .updateTable('schedules')
+        .set({ weekly_hours: JSON.stringify(weeklyHours) })
+        .where('user_id', '=', userId)
+        .where('is_default', '=', true)
+        .execute()
+    const { deadline, starts } = await hourly(2)
+    await assign(s.owner.id, ALWAYS)
+    await setDefault(s.owner.id, {})
+    await refused(propose(M, s.ctx, s.eventTypeId, starts, deadline), s.eventTypeId, starts)
+
+    await setDefault(s.owner.id, (ALWAYS as { weeklyHours: object }).weeklyHours)
+    await assign(s.member.id, { timeZone: 'UTC', weeklyHours: {} })
+    const { poll } = await succeeds(() => propose(M, s.ctx, s.eventTypeId, starts, deadline))
+    expect(poll.candidates.map((candidate) => candidate.startAt)).toEqual(starts)
+  }
+
+  it('reads the creation clock after the host user and member locks', async () => {
+    await verifyCreationClock(Polls)
+  })
+
+  it('judges collective hosts by their default schedules, not per-event ones', async () => {
+    await verifyCollectiveDefaultSchedule(Polls)
+  })
+
   it('refuses candidates outside the host’s working hours and date overrides', async () => {
     await verifyWorkingHours(Polls)
   })
@@ -2328,6 +2397,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     verifyCreationFirst,
     verifyHostChange,
     verifyOrganizationIsolation,
+    verifyCreationClock,
+    verifyCollectiveDefaultSchedule,
   ]
 
   // Every check in sequence, including the lock races, so allow more than one check's time.
@@ -2678,7 +2749,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       'create skips availability validation',
       verifyBusyTime,
       [
-        '    await requireBookableCandidates(trx, event.id, hostUserIds, starts, durationMinutes, createdAt)\n',
+        '    await requireBookableCandidates(trx, bookable, starts, durationMinutes, createdAt)\n',
         '',
       ],
     ],
@@ -2709,6 +2780,29 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       'create ignores hosts that changed while it waited',
       verifyHostChange,
       ['  if (event.hostUserIds.join() !== lockedHostUserIds.join()) throw eventChanged()\n', ''],
+    ],
+    [
+      'the creation clock is read before the host booking locks',
+      verifyCreationClock,
+      [
+        '    await lockHosts(trx, hostUserIds)\n',
+        '    const early = await clock(trx)\n    await lockHosts(trx, hostUserIds)\n',
+      ],
+      ['?? (await clock(trx))', '?? early'],
+    ],
+    [
+      'the creation clock is read before the host users and members are locked',
+      verifyCreationClock,
+      ['    const bookable = await lockBookableEvent(trx, event.id, hostUserIds)\n', ''],
+      [
+        '    await requireBookableCandidates(trx, bookable,',
+        '    const bookable = await lockBookableEvent(trx, event.id, hostUserIds)\n    await requireBookableCandidates(trx, bookable,',
+      ],
+    ],
+    [
+      'collective hosts use their per-event schedules',
+      verifyCollectiveDefaultSchedule,
+      ["            event.schedulingType === 'collective',\n", '            false,\n'],
     ],
   ]
 
