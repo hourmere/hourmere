@@ -210,6 +210,40 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Audit event details (migration 0080) upgrade in place.** The migration replaces the
+  audit journal's details check: the `events` value of a webhook or Slack destination event
+  must now be an array of distinct event names from that destination's catalogue, at least
+  one and at most the catalogue size. It is safe to apply while the previous version is
+  still running, because that version records only such lists. The check is validated in
+  the migration's transaction, so writes to `audit_events` wait while existing rows are
+  checked: audited changes, including public bookings, pause for that scan, which grows with
+  the journal (about 0.1 s for 200,000 rows on a development machine). If a journal row
+  written outside the application holds another `events` value, the migration fails with
+  SQLSTATE 23514 and changes nothing. After the upgrade, changing a webhook or Slack
+  destination whose stored event list was edited outside the application (a repeated event,
+  or a Slack destination holding an event Slack does not post) fails with 23514 until its
+  events are set again through the API. See the
+  [audit event journal](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md#stable-actions-and-detail-allow-lists).
+- **Audit actions follow-ups (migration 0078) upgrade in place.** The migration replaces
+  the audit journal's details check so that attendee no-show changes can record the
+  attendee ID and the new state, and Slack destination changes their subscribed events;
+  SCIM provisioning token changes use the existing empty-details rule. It is safe to apply
+  while the previous version is still running, because that version never records these
+  actions. Apply it before starting the new version (automatic with `AUTO_MIGRATE=true`):
+  until 0078 is applied, the new version's no-show marks and Slack destination changes,
+  including the delivery worker's automatic pause after Slack answers 404 or 410, fail with
+  SQLSTATE 23514 (`audit_events_details_check`) and change nothing. Replacing the check
+  makes writes to `audit_events` wait while existing rows are validated; that time grows
+  with the journal.
+- **Audit event journal (migration 0067) upgrades in place.** The migration adds the
+  `audit_events` table and its indexes; earlier changes are not backfilled. It is safe to
+  apply while the previous version is still running, because that version neither reads
+  nor writes the table, but old processes record nothing, so stop every old `web`, `all`
+  and `worker` process during the rollout. Apply it before starting the new version
+  (automatic with `AUTO_MIGRATE=true`): without the table, every change the new version
+  records, including public bookings, fails with SQLSTATE 42P01, because a failed audit
+  write aborts its change. The journal is recorded but not yet viewable. See the
+  [audit event journal](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md).
 - **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
   apply while the previous version is still running: it adds nullable attendee columns and
   only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply
