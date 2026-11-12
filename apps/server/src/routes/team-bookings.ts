@@ -54,7 +54,7 @@ export function teamBookingRoutes(
         path: '/api/v1/team/bookings',
         summary: "Bookings of the session's current team",
         description:
-          'Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.',
+          'Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. status=cancelled selects cancelled bookings; q searches the invitee name, invitee email and current event type title within this team only. Pass nextCursor as cursor with the same filters, search and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -93,6 +93,7 @@ export function teamBookingRoutes(
           endAfter: q.endAfter === undefined ? undefined : Temporal.Instant.from(q.endAfter),
           endTo: q.endTo === undefined ? undefined : Temporal.Instant.from(q.endTo),
           status: q.status,
+          q: q.q,
           limit: q.limit,
           cursor: q.cursor,
         })

@@ -256,6 +256,37 @@ delivery state, attempts, fixed error classification and current resend eligibil
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
 
+## Search the booking list
+
+`status=cancelled` lists only cancelled bookings, a page at a time like every other view.
+It includes bookings replaced by a reschedule; their `rescheduledToId` points to the new
+booking. `status=confirmed` lists the others.
+
+`q` searches the list you already have access to. A booking matches when the invitee's name
+or email, or the title of its event type, contains the text, ignoring case:
+
+```sh
+curl --fail-with-body -G "$HOURMERE_URL/api/v1/bookings" \
+  -H "Authorization: Bearer $HOURMERE_API_KEY" \
+  --data-urlencode "status=cancelled" --data-urlencode "q=ada@example.com"
+```
+
+- The text is trimmed and may have at most 100 characters; longer text or control
+  characters return `400 invalid_request`. Blank text means no search.
+- `%`, `_` and `\` match themselves; there are no wildcards.
+- Search only narrows: it never adds bookings you do not host, bookings from another
+  organization or, on the team list, bookings from another team. The team list
+  (`GET /api/v1/team/bookings`) accepts the same `status` and `q`.
+- Keep `q`, `status`, the time filters and `order` unchanged while following `nextCursor`.
+  Ordering stays by start time and ID, so pages do not repeat or skip bookings when new
+  bookings are added or cancelled meanwhile.
+
+Known limitations: search matches the invitee who booked, not guests; the current title
+of an event type that still exists, not stored booking titles, answers or notes; and whole
+substrings, without typo tolerance or accent folding. Letter case is ignored according to
+the database's locale. CSV export does not take `q`, so the web app offers the export only
+when no search is applied.
+
 ## Meeting location choices
 
 Configure an ordered `locations` list through the event-type create/update operations,

@@ -1894,4 +1894,14 @@ export const admin = {
     '已保存的预约链接无效。请重新加载已保存的活动类型后重试。',
   'The email preview could not be created. Reload the saved event type and try again.':
     '无法创建邮件预览。请重新加载已保存的活动类型后重试。',
+  'Cancelled bookings': '已取消的预约',
+  'No cancelled bookings.': '没有已取消的预约。',
+  'Search bookings': '搜索预约',
+  'Invitee name or email, or event type.': '受邀人姓名或邮箱，或活动类型。',
+  'No bookings match your search.': '没有符合搜索条件的预约。',
+  'Try another name, email address or event type.': '请尝试其他姓名、邮箱地址或活动类型。',
+  'Clear search': '清除搜索',
+  'Matching bookings: {0}.': '找到{0}个符合条件的预约。',
+  'Matching bookings shown: {0}. More are available.': '已显示{0}个符合条件的预约，还有更多。',
+  'Clear the search to export bookings as CSV.': '清除搜索后即可将预约导出为 CSV。',
 } as const

@@ -77,7 +77,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `durationMinutes`, `maxSlots`, `after` |
 | `open-time-snippet` | `generate_open_time_snippet` | exactly one of `eventTypeId`, `slug`; `from`, `to`; optional `count`, `locale`, `displayTimeZone`, `durationMinutes` |
 | `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `durationMinutes`, `responses`, `guests` |
-| `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
+| `list` | `list_bookings` | optional `from`, `to`, `status` (`cancelled` for the cancelled view), `q` (search), `order`, `limit`, `cursor` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |

@@ -104,4 +104,12 @@ describe("the web app's form limits", () => {
     expect(property(s.ProfileInput, 'locale').maxLength).toBe(PROFILE.localeMaxLength)
     expect(property(s.CancelBooking, 'reason').maxLength).toBe(BOOKING.cancelReasonMaxLength)
   })
+
+  it('match the booking list search bound', async () => {
+    const doc = (await openApiDocument()) as {
+      paths: Record<string, { get?: { parameters?: { name: string; schema?: SchemaObject }[] } }>
+    }
+    const search = doc.paths['/api/v1/bookings']?.get?.parameters?.find((p) => p.name === 'q')
+    expect(search?.schema?.maxLength).toBe(BOOKING.searchMaxLength)
+  })
 })

@@ -326,7 +326,7 @@ export interface paths {
         };
         /**
          * Bookings the caller hosts
-         * @description Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, the same).
+         * @description Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Filter with status=cancelled for the cancelled view and q to search invitee name, invitee email and event type title. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, status and q, the same).
          */
         get: {
             parameters: {
@@ -342,6 +342,9 @@ export interface paths {
                     limit?: number;
                     /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                     order?: "asc" | "desc";
+                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
+                    q?: string;
+                    /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                     status?: "confirmed" | "cancelled";
                     /** @description Only bookings starting before */
                     to?: string;
@@ -3498,7 +3501,7 @@ export interface paths {
         };
         /**
          * Bookings of the session's current team
-         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.
+         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. status=cancelled selects cancelled bookings; q searches the invitee name, invitee email and current event type title within this team only. Pass nextCursor as cursor with the same filters, search and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.
          */
         get: {
             parameters: {
@@ -3514,6 +3517,9 @@ export interface paths {
                     limit?: number;
                     /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                     order?: "asc" | "desc";
+                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
+                    q?: string;
+                    /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                     status?: "confirmed" | "cancelled";
                     /** @description Only bookings starting before */
                     to?: string;
@@ -7290,6 +7296,7 @@ export interface operations {
                 hostUserId?: string;
                 /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                 order?: "asc" | "desc";
+                /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                 status?: "confirmed" | "cancelled";
                 timeZone?: string;
                 /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
