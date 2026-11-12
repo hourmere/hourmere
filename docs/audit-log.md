@@ -166,8 +166,9 @@ operator policy. There is currently no automatic retention cleanup.
 
 ## Not recorded
 
-Management operations not recorded are host removal of waitlist entries; one-time
-link creation and revocation; schedules and date overrides; profile edits; calendar
+Management operations not recorded are waitlist sign-ups, email verification and
+removal (by the invitee or the host); one-time link creation and revocation; schedules
+and date overrides; profile edits, including display names; calendar
 and conference connections, calendar selection and resource retry operations;
 OAuth old-grant revocation during re-consent; and event-type deactivation as a
 side effect of member removal (the membership removal itself is recorded).

@@ -3,12 +3,13 @@ title: Audit log
 description: Management events recorded for every Hourmere instance.
 ---
 
-Hourmere records audit events for account, membership, API-key, OAuth, booking
-management, [no-show mark](/docs/no-shows), webhook, event-type and branding changes on
-every self-hosted and Cloud instance.
+Hourmere records audit events for sign-in session and sign-in method, membership,
+API-key, OAuth, booking management, [no-show mark](/docs/no-shows), webhook, event-type
+and branding changes on every self-hosted and Cloud instance.
 There is no enterprise-plan requirement. Only those changes are recorded: SCIM
 provisioning tokens and [Slack notification](/docs/slack) destinations are not recorded
-yet, and neither are schedules, one-time links or calendar connections.
+yet, and neither are profile edits (such as display names), schedules, one-time links,
+waitlist entries or calendar connections.
 
 **The audit log is recorded but not yet viewable.** The query UI, REST, MCP and CLI
 read APIs, export and retention settings are planned separately. No automatic
