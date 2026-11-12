@@ -15,7 +15,7 @@ This is what the application already writes: the stored, validated subscription 
 `packages/webhooks/src/audit-event-catalogue.test.ts` binds both catalogues and bounds to
 the code, so adding an event type to either list fails until a new migration updates this
 check. Every other branch is byte-for-byte the 0078 branch
-(`audit-event-details-migration.test.ts` compares them).
+(`audit-event-details-branches.test.ts` compares them).
 
 The migration is safe to apply while the previous version is still running: that version
 writes only lists that satisfy the new check. The check is added `NOT VALID` and validated
@@ -28,10 +28,15 @@ migration would hold only `SHARE UPDATE EXCLUSIVE`, which lets those writes cont
 
 If a journal row holds an `events` value outside this shape (possible only for rows written
 outside the application), validation fails with SQLSTATE 23514, the transaction rolls
-back and the earlier check stays in place. After the upgrade, a change to a webhook or
-Slack destination whose stored event list was edited outside the application (a repeated
-event, or a Slack destination holding an event Slack does not post) fails with 23514
-until that list is corrected through the API.
+back and the earlier check stays in place.
+
+`webhooks_events_check` (0070) is looser than this check: it allows a repeated event, and
+a Slack destination row holding the attendee no-show change. The application never stores
+either, but a row edited outside it can. Every audit event copies the stored list, so after
+the upgrade such a destination's pause, resume, secret rotation, test message and deletion
+fail with 23514, and so does the delivery worker's automatic pause after Slack answers 404
+or 410, which leaves the destination active. Setting the events again through the API
+records the new, valid list and ends this.
 
 The migrator applies a missing lower-numbered file after higher ones, so a later change to
 `audit_events_details_check` must use a number above 0080; otherwise fresh and upgraded

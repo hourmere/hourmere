@@ -307,8 +307,8 @@ it.skipIf(!serverUrl)(
         await insertDetails(client, 'webhook.paused', {
           events: [{ name: 'Private Invitee', email: 'invitee@example.com' }],
         })
-        await client.query('ROLLBACK')
       } finally {
+        await client.query('ROLLBACK').catch(() => {})
         client.release()
       }
 
