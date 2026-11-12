@@ -14,10 +14,11 @@
 //   c4 (`resolve_routing_continuation`, `find_routed_slots`). Those steps list the tools only
 //   while `routingFormsEnabled` is true, so this assertion then moves into their off checks.
 // - CLI commands: b1 onward add `routing-forms …` commands to the static command table.
-// - Storage imports: a3 (configuration services) first imports the storage from service
-//   code; the scan then narrows to the packages that may own routing data access.
-// - Shared services: step a2's validation, evaluation and target checks
-//   (SHARED_SERVICES) stay unloaded until a3's configuration services first import them.
+// - Storage imports: a3's configuration services (CONFIGURATION_SERVICES) are the first
+//   service code to name the storage; nothing else outside the storage layer may.
+// - Shared services: step a2's validation, evaluation and target checks and a3's
+//   configuration services (SHARED_SERVICES) stay unloaded until a transport step (b1
+//   onward) first calls them.
 // The web route table is asserted by apps/web/src/routing-forms-off.test.tsx (jsdom
 // project), which c3, c6 and d1 narrow when they mount routing pages.
 // The Hono routes are read from the app as startServer assembles it (productionAppOptions),
@@ -91,10 +92,15 @@ const STORAGE_LAYER =
 // `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
   /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
-// Step a2's shared validation, evaluation and target services, which no caller loads yet.
+// Step a3's configuration and publication services, the only service code that names the
+// routing tables so far.
+const CONFIGURATION_SERVICES = ['packages/scheduling/src/routing-form-service.ts']
+// Step a2's shared validation, evaluation and target services and step a3's configuration
+// services, which no production entry point loads yet.
 const SHARED_SERVICES = [
   'packages/scheduling/src/routing-form-config.ts',
   'packages/scheduling/src/routing-form-targets.ts',
+  ...CONFIGURATION_SERVICES,
 ]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -867,7 +873,7 @@ describe('routing forms are storage only', () => {
     for (const file of SHARED_SERVICES) expect(reached).not.toContain(file)
   }, 30_000)
 
-  it('keeps the routing storage unreferenced outside the storage layer', () => {
+  it('keeps the routing storage unreferenced outside the storage layer and its services', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     expect(sources).toContain('apps/server/src/server.ts')
@@ -881,6 +887,8 @@ describe('routing forms are storage only', () => {
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
-    expect(referencing).toEqual([])
+    // The configuration services name the tables (so the matcher sees them), and no other
+    // source does; whether a production entry point loads them is asserted above.
+    expect(referencing).toEqual(CONFIGURATION_SERVICES)
   })
 })

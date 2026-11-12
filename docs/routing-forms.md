@@ -1,10 +1,10 @@
 # Routing forms — proposed design
 
-Status: storage foundation only; no routing form is available yet. Migration 0072 adds
-the five storage tables; no routes, UI, execution path or plan checks exist. The shared
-validator, evaluator and target checks (step a2) exist as internal functions that no
-service or transport calls yet. The eventual
-feature is free on self-hosted and Cloud alike,
+Status: storage and internal services only; no routing form is available yet. Migration
+0072 adds the five storage tables; no routes, UI, execution path or plan checks exist. The
+shared validator, evaluator and target checks (step a2) and the configuration and
+publication services (step a3) exist as internal functions that no transport calls yet.
+The eventual feature is free on self-hosted and Cloud alike,
 and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),
 [MCP](mcp.md) and [team administrator booking fields](team-admin-bookings.md) remain
@@ -160,6 +160,20 @@ name a `field` path such as `rules.2.target`; target errors add a `reason`: `not
 `invalid_message`, `invalid_mapping`, `unknown_destination`, `incompatible_mapping` or
 `incompatible_options`. Event types have no price setting yet, so a stored event projects
 no payment requirement; any other projected value fails closed as `payment_required`.
+
+The configuration services (step a3, `packages/scheduling/src/routing-form-service.ts`)
+store the draft as `{ title, description?, questions, rules, fallback }`: the other three are
+the version content above. Migration 0072 has no versioned title or description, so both are
+form text that a save changes at once; the public metadata step decides how it shows them. A
+draft save, like creation, must pass the shared validator; event targets are checked against
+current event types only at publication. Every successful write (save, enable/disable,
+publish, archive) increments `draftRevision`. Publication leaves `enabled` unchanged, and
+enabling needs a published version. An archived form is `routing_form_not_found` to every
+operation and keeps its slug. Publication also refuses an ID that a retained version used
+with another meaning (a question with another type, an option of another question, a question
+or option as a rule) or that the current version no longer has. Preview checks target
+eligibility, not answer mappings, as routing does at run time. Idempotent create and publish
+(`requestId`, below) are not built yet: migration 0072 stores no request key or fingerprint.
 
 Publishing atomically inserts an immutable version (questions, order, rules, targets,
 mappings and labels) and switches the pointer. Versions have monotonically increasing
@@ -512,6 +526,9 @@ its lifetime. If expired, ask the invitee to restart the form, never silently re
 | 409 `routing_revision_conflict`, `routing_form_changed` | Reload editor or public form respectively |
 | 409 `routing_unavailable` | Neutral invalid/expired/consumed capability or target no longer usable; restart unless exact booking replay succeeds |
 | 409 `idempotency_key_reused` | Same retained key with different canonical input |
+| 409 `slug_taken` | Another form of the organization, archived ones included, uses the slug |
+| 409 `routing_form_not_published` | Enabling a form that has no published version; publish first |
+| 409 `routing_form_limit_reached`, `routing_form_version_limit_reached` | A form or version storage quota from the register above is full |
 | 413 `payload_too_large`, 429 `rate_limited` | Transport bounds; Retry-After on throttling |
 
 Ordinary slot conflicts, booking validation, reschedule/cancel and credential errors keep

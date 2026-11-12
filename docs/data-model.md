@@ -1320,6 +1320,12 @@ The phases within that organization boundary are:
   `UPDATE … SET archived_at = NULL` locks the form row before the trigger runs and can
   deadlock (`40P01`) with a transaction that took the advisory lock first. No unarchive
   operation exists yet.
+- Routing form configuration writes (create, save, archive, publish) take the
+  organization share lock first, after a personal organization's owner as above, then the
+  actor and member share locks. Creation next takes the form-admission advisory lock;
+  publication share-locks its target event types in ID order; each write then locks the
+  form row. Publication therefore waits for membership management and event-type edits
+  instead of deadlocking with them. Preview takes no lock and runs read-only.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
