@@ -16,7 +16,8 @@ jobs:
       fail-fast: false
       matrix:
         mode: [alone]
-        shard: [1, 2, 3, 4, 5, 6]
+        stats: [natural, forced]
+        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:18-alpine
@@ -44,6 +45,7 @@ jobs:
         env:
           MODE: ${{ matrix.mode }}
           PG_CONTAINER: ${{ job.services.postgres.id }}
+          EXPERIMENT_CI_STATS: ${{ matrix.stats == 'forced' && '1' || '' }}
         run: |
           nproc
           (

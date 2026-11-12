@@ -263,6 +263,11 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     target.pool = cancellablePool(target.pool)
     for (const version of ['cal.diy-a5ee96f77edd', 'cal.com-v6.2.0'] as const)
       sources.set(version, await createSourceFixture(version))
+    if (process.env.EXPERIMENT_CI_STATS) {
+      const statsUser = await createTestUser(createDb(target.pool))
+      await target.pool.query('ANALYZE auth."user"')
+      await target.pool.query('DELETE FROM auth."user" WHERE id=$1', [statsUser.id])
+    }
   }, 30_000)
   beforeEach(() => probe?.reset())
   afterEach(async ({ task }) => {
