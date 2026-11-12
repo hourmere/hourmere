@@ -1200,7 +1200,7 @@ describe.skipIf(!serverUrl)('meeting poll ballots, withdrawal and reminder opt-o
     )
     expect(waited.map(outcome)).toEqual(['fulfilled', 'fulfilled'])
 
-    const deadline = await deadlineIn(p, 4)
+    const deadline = await deadlineIn(p, 8)
     const before = await snapshot(p)
     const release = await holdPoll(p)
     const attempts: Promise<unknown>[] = []
@@ -1267,16 +1267,25 @@ describe.skipIf(!serverUrl)('meeting poll ballots, withdrawal and reminder opt-o
 
     const canceled = await open('invited')
     const canceledToken = await invitee(M, canceled, 'canceled@example.com')
+    const canceledOptOut = await optOutCredential(
+      canceled,
+      (await voter(canceled, 'canceled@example.com')).id,
+    )
     await Polls.cancelMeetingPoll(canceled.ctx, {
       id: canceled.pollId,
       expectedHostRevision: (await revisions(canceled)).host_revision,
     })
-    expect(await failure(() => ballot(M, canceled, canceledToken, ['yes', 'no'], 0))).toMatchObject(
-      { kind: 'conflict', code: 'poll_canceled' },
-    )
+    const canceledError = await failure(() => ballot(M, canceled, canceledToken, ['yes', 'no'], 0))
+    expect(canceledError).toMatchObject({ kind: 'conflict', code: 'poll_canceled' })
+    expect(await failure(() => withdraw(M, canceledToken, 0))).toEqual(canceledError)
+    await succeeds(() => optOut(M, canceledOptOut))
 
     const deleted = await open('invited')
     const deletedToken = await invitee(M, deleted, 'deleted@example.com')
+    const deletedOptOut = await optOutCredential(
+      deleted,
+      (await voter(deleted, 'deleted@example.com')).id,
+    )
     await db
       .updateTable('event_types')
       .set({ deleted_at: new Date() })
@@ -1284,6 +1293,7 @@ describe.skipIf(!serverUrl)('meeting poll ballots, withdrawal and reminder opt-o
       .execute()
     expect(await failure(() => ballot(M, deleted, deletedToken, ['yes', 'no'], 0))).toEqual(closed)
     expect(await failure(() => withdraw(M, deletedToken, 0))).toEqual(closed)
+    await succeeds(() => optOut(M, deletedOptOut))
   }
 
   /**
@@ -1877,7 +1887,7 @@ describe.skipIf(!serverUrl)('meeting poll ballots, withdrawal and reminder opt-o
       },
     ],
     [
-      'ballot writes lock the poll before the organization',
+      'ballot writes skip the organization lock',
       verifyLockOrder,
       {
         voters: [

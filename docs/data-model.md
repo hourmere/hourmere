@@ -106,7 +106,8 @@ resend counters under the poll lock. It queues delivery rows only; no worker, tr
 flag or UI is enabled. The internal ballot service in
 `packages/scheduling/src/meeting-poll-ballots.ts` submits and replaces complete ballots,
 withdraws and reactivates voters and records reminder opt-outs under the same locks and
-database deadline clock, advancing ballot and results revisions but never the host revision.
+database deadline clock. Ballots and withdrawals advance the ballot and results revisions;
+no voter write, opt-out included, moves the host revision.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.

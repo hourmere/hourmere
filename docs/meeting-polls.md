@@ -198,15 +198,19 @@ transport steps map them, and the error codes stay as listed here.
   409 `poll_closed` (409 `poll_canceled` on a canceled poll).
 - A ballot uses the voting credential. It answers every candidate exactly once with `yes`,
   `if_need_be` or `no`, gives join consent and answers the booking questions of the poll's
-  settings snapshot; otherwise it gets 400 `invalid_ballot` (400 `invalid_responses` for the
-  answers, as in booking) and writes nothing. It may also edit name, zone and locale. It
-  replaces the previous ballot whole and records submission and consent at the decision
-  instant. An invitee's first ballot also confirms the mailbox.
+  settings snapshot; otherwise it gets 400 `invalid_ballot` (also for a malformed
+  `expectedBallotRevision`; 400 `invalid_responses` for the answers, as in booking) and
+  writes nothing. It may also edit name, zone and locale, refused as in A3a with 400
+  `invalid_voter` or `invalid_time_zone`. It replaces the previous ballot whole and records
+  submission and consent at the decision instant. An invitee's first ballot also confirms
+  the mailbox.
 - Every accepted ballot, replacement, withdrawal and reactivation checks
-  `expectedBallotRevision` (0 before the first ballot; 409 `poll_changed` when stale) and
-  advances the voter's ballot revision and the results revision by one. No voter write moves
-  the host revision; opt-out moves neither.
-- Withdrawal erases the ballot, votes, answers and consent, frees the place and skips the
+  `expectedBallotRevision`, the revision last returned (0 until the first ballot or
+  withdrawal; 409 `poll_changed` when stale), and advances the voter's ballot revision and
+  the results revision by one. No voter write moves the host revision; opt-out moves neither.
+- Withdrawal uses the voting credential, so an invitee may withdraw before confirming the
+  mailbox and stays unconfirmed; a pending public enrollee lets the reservation expire.
+  Withdrawal erases the ballot, votes, answers and consent, frees the place and skips the
   voter's queued mail; the credential and its encrypted copy stay for reactivation. A repeat
   at the current revision writes nothing. A ballot from the withdrawn state is the
   reactivation: it takes a place again under the 40-place cap and poll lock, or gets the same
@@ -218,9 +222,10 @@ transport steps map them, and the error codes stay as listed here.
 - Opt-out uses the `reminder_opt_out` credential that the later mail steps mint. It records
   the mailbox's first `reminder_opted_out_at` on the counter row and skips the voter's queued
   reminders, without verification, ballot access or a revision. As a mail preference it is
-  honoured whatever the poll's state; a repeat writes nothing.
-- Each write returns the voter's own ballot; reading it after the deadline belongs to the
-  public read operation of the transport steps.
+  honoured whatever the poll's state and the credential's expiry while the credential is
+  unrevoked; a repeat writes nothing. It returns the opted-out state, not a ballot.
+- Each ballot and withdrawal returns the voter's own ballot; reading it after the deadline
+  belongs to the public read operation of the transport steps.
 
 Managers can remove a voter or revoke a pending enrollment while open or closed. Removal
 revokes capabilities and queued mail, erases answers/ballot/contact data, frees capacity
