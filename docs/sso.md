@@ -273,19 +273,30 @@ address in `auth.user`: one copy per link, in the team's own rows of the instanc
 and so in that database's backups. It is organization-local personal data. The server's
 SSO services read it to compare it with the address the IdP asserts; anyone with direct
 access to the instance database or its backups can read it too. No REST, MCP or CLI
-response returns it (`/me` and the provider inventory list opaque link IDs only), no audit
-detail includes it, and it is never logged. On a live link it is the address last proven:
-a later mailbox proof replaces it, and nothing else changes it. A frozen link, whose
-provider is disabled or retired, keeps it unchanged, because no sign-in through that
-provider can prove another address. A retired link is immutable and keeps the address it
-had when it was retired. Leaving or removal from the team deletes the person's proofs and
-delegation bindings but not the link, which has no membership reference, so a former
-member's link, live or retired, keeps the address as well. Only deleting the link row
-deletes the address: deleting the account deletes that account's links in every team, and
-deleting the team deletes all of the team's links with its providers. Retiring a link or
-its provider does not. The design defines no retention sweep for links, so until a later
-step adds one, a retired or frozen link and a former member's link keep the address until
-the account or the team is deleted.
+response returns it (`/me` and the provider inventory list opaque link IDs only), and no
+audit detail includes it. The database driver's detail for a refused row repeats the row,
+the address included, so the server's error log for failed requests omits the diagnostic
+of any error about an SSO storage table and keeps only its SQLSTATE and the table and
+constraint names; PostgreSQL's own server log can still record a refused row, as for any
+table. On a live link it is the address last proven: a later mailbox proof replaces it,
+and nothing else changes it. A frozen link, whose provider is disabled or retired, keeps
+it unchanged, because no sign-in through that provider can prove another address. A
+retired link is immutable and keeps the address it had when it was retired. Leaving or
+removal from the team deletes the person's proofs and delegation bindings but not the
+link, which has no membership reference, so a former member's link, live or retired, keeps
+the address as well. Only deleting the link row deletes the address: deleting the account
+deletes that account's links in every team, and deleting the team deletes all of the
+team's links with its providers. Retiring a link or its provider does not. The design
+defines no retention sweep for links, so until a later step adds one, a retired or frozen
+link and a former member's link keep the address until the account or the team is deleted.
+The attempt that proves the address keeps its own plain-text copy in
+`sso_attempts.mailbox`, fixed once chosen, until the attempt row is deleted; expiry and
+consumption leave the row in place. An attempt made in a signed-in session is deleted with
+that session, by logout or the account's deletion. A sign-in attempt has no account or
+session reference, so neither the account's deletion nor logout removes it; today only the
+team's deletion does. The Mailbox proof step, the first whose code writes an attempt's
+mailbox and its token, must add the bounded cleanup that deletes expired and consumed
+attempts with their mailbox tokens, sign-in attempts included.
 
 An existing magic-link/Google/Microsoft account with the same email is **not**
 automatically linked to a newly configured enterprise IdP, even on a verified domain.
@@ -1156,7 +1167,7 @@ behaviour keeps available stay available.
 | Identity storage | Identity links with link generations, pending attempts (sign-in, test, link, fresh proof) with frozen operation/input digests, mailbox token digests, replay cache, browser proofs and delegation bindings; admission tombstones reuse the shared `scim_membership_blocks` table from the [SCIM identity storage](scim.md) (organization, normalized mailbox, authority, kind) and a subject-keyed JIT check adds its column there in the SSO step that needs it; none | Configuration storage | OIDC hard-off; SAML hard-off | Predecessor preservation, fresh/no-op migration, `(organization, provider, issuer, subject)` uniqueness race, replay-key uniqueness across two connections, proofs and bindings store `trustGeneration`, link generation and the domain claim they relied on, tombstones in the shared table survive member and account deletion, bounded pools. Off: tables only |
 | Transport | Extract pinned outbound transport and operator `SSO_PRIVATE_TARGETS` policy; none | Identity storage | OIDC hard-off; SAML hard-off | DNS rebinding/mixed answers, socket pinning, timeout/size/redirect negatives, secret redaction; webhook delivery unchanged. Off: no SSO caller; the allowlist routes nothing |
 | Audit actions | Prerequisite: the `audit_events` journal of PR #246 is on main; this step does not start, and builds no substitute, before it is. SSO action names and detail allow-lists in the application and database check, plus the redacted security-failure writer; none | Transport | OIDC hard-off; SAML hard-off | Each SSO action accepts only its allow-listed details and extra keys fail in the application and database; event and change commit or roll back together; failure events bounded per provider/source; no secret, token, assertion, raw subject or mailbox capability recorded. Off: no SSO action emitted; existing audit actions unchanged |
-| Mailbox proof | `POST /api/auth/sso/mailbox-proof/send` and `/consume`; auth-protocol exception, no MCP/CLI; reusable attempt-bound proof for every intent | Audit actions | OIDC hard-off; SAML hard-off | Test-seeded attempts of each intent; missing-session enrollment, exact Origin/browser binding, identical queued send response and message whether or not delivery is eligible, token digest/rotation/expiry, consume race, wrong user/mailbox/intent; fake mail only. Off: both endpoints `404 sso_disabled` |
+| Mailbox proof | `POST /api/auth/sso/mailbox-proof/send` and `/consume`; auth-protocol exception, no MCP/CLI; reusable attempt-bound proof for every intent; bounded cleanup of expired and consumed attempts with their mailbox tokens | Audit actions | OIDC hard-off; SAML hard-off | Test-seeded attempts of each intent; missing-session enrollment, exact Origin/browser binding, identical queued send response and message whether or not delivery is eligible, token digest/rotation/expiry, consume race, wrong user/mailbox/intent; expired and consumed attempts and their tokens deleted by the bounded cleanup, sign-in attempts included; fake mail only. Off: both endpoints `404 sso_disabled` |
 | Fresh proof | Shared fresh-proof gate: pending attempt, `403 sso_reauthentication_required` with `attemptId`/`proofMethods`/`expiresAt`, strict `proofAttemptId` retry, `mailbox` for teams without enforcement, and enforced-team mode requiring `sso` (unsatisfiable until a step-up row); none | Mailbox proof | OIDC hard-off; SAML hard-off | On a test-only operation: 403 before any mutation and attempt only; retry succeeds once; changed input/user/session/team/operation gets a new attempt and leaves the old one unconsumed; consumption race; `freshAdministrationProof` and attempt-expiry boundaries; Authorization header refused; on a seeded enforced team mailbox-only proof is refused. Off: no new route |
 | Draft reads | `listSsoProviders`, `getSsoPolicy`; `list_sso_providers` / `sso providers list`, `get_sso_policy` / `sso policy`; scope-registry entries, regenerated scope tables and the static unavailable note beside them (outside the generated markers) in `docs/api-keys.md`, `docs/mcp.md` and their site copies | Fresh proof | OIDC hard-off; SAML hard-off | Owner/admin plus `read`/`full` key or `mcp:tools` OAuth; ordinary members and `bookings` keys refused; tenant-scoped cursor pagination beyond 101 providers; open objects/statuses and no secret, raw metadata or identity in any surface; MCP/CLI output matches REST. Off: both reads, both MCP tools and both CLI commands `sso_disabled` before lookup; the generated tables list them with the note, the scope-docs consistency test passes, and the Known limitations bullet says SSO is being built and not available yet |
 | Drafts | `createSsoProvider`, `updateSsoProvider`, `deleteSsoProvider` with OIDC fields; no MCP/CLI writes | Draft reads | OIDC hard-off; SAML hard-off | Exact session exemptions, bearer+cookie refusal, role/context/revision races, ciphertext-only storage and secret preservation on omission; a team's first provider created with mailbox fresh administration; `proofAttemptId` in the strict schemas; idempotent repeat delete of a retired provider; a trust edit (secret, certificates, endpoints, algorithms) and a deletion each increment `trustGeneration`, while a display-name edit does not; audit events. Off: all three operations `sso_disabled` before lookup; `protocol: "saml"` `sso_disabled` while SAML is hard-off |
