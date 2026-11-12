@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
@@ -18,6 +19,7 @@ export const WEBHOOK_EVENTS = [
   'booking.cancelled',
   'booking.reschedule_requested',
   'booking.reschedule_request_expired',
+  'booking.attendee_no_show_changed',
 ] as const
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number]
 export const WebhookCreateInput = z.strictObject({
@@ -31,6 +33,7 @@ export const WebhookUpdateInput = z.strictObject({
 })
 export interface WebhookSettings {
   enabled: boolean
+  publicUrl?: string | undefined
   encryptionKey?: string | undefined
   privateTargets?: readonly WebhookPrivateTarget[] | undefined
 }
@@ -63,7 +66,7 @@ const insufficientRole = () =>
   )
 
 /** Check current verified membership; a stale resolver principal cannot retain admin rights. */
-async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
+export async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
   let query = db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
@@ -85,7 +88,7 @@ async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
  * Membership is deliberately locked/rechecked AFTER waiting for the organization and
  * endpoint: a demotion or removal already committed during that wait must win.
  */
-async function lockAuthorizationParents(
+export async function lockAuthorizationParents(
   trx: Db,
   ctx: ServiceContext,
   exclusiveOrganization = false,
@@ -145,11 +148,29 @@ const visibleColumns = [
   'updated_at',
 ] as const
 
+async function auditWebhook(
+  trx: Db,
+  ctx: WebhookServiceContext,
+  action: AuditAction,
+  row: { id: string; organization_id: string; events: string[] },
+) {
+  await writeAuditEvent(trx, {
+    organizationId: row.organization_id,
+    ...auditActor(ctx.principal),
+    action,
+    targetType: 'webhook',
+    targetId: row.id,
+    details: { events: row.events },
+    requestId: ctx.requestId,
+  })
+}
+
 export async function listWebhooks(ctx: ServiceContext): Promise<WebhookView[]> {
   await requireAdmin(ctx.db, ctx)
   return (
     await ctx.db
       .selectFrom('webhooks')
+      .where('destination_kind', '=', 'webhook')
       .select(visibleColumns)
       .where('organization_id', '=', ctx.principal.organization.id)
       .orderBy('id')
@@ -179,6 +200,7 @@ export async function createWebhook(
     await requireAdmin(trx, ctx, true)
     const rows = await trx
       .selectFrom('webhooks')
+      .where('destination_kind', '=', 'webhook')
       .select('id')
       .where('organization_id', '=', ctx.principal.organization.id)
       .limit(10)
@@ -208,6 +230,7 @@ export async function createWebhook(
       })
       .returning(visibleColumns)
       .executeTakeFirstOrThrow()
+    await auditWebhook(trx, ctx, 'webhook.created', row)
     return { webhook: view(row), secret }
   })
 }
@@ -220,6 +243,7 @@ async function lockedWebhook(trx: Db, ctx: WebhookServiceContext, id: unknown) {
   await lockAuthorizationParents(trx, ctx)
   const row = await trx
     .selectFrom('webhooks')
+    .where('destination_kind', '=', 'webhook')
     .select(visibleColumns)
     .where('id', '=', id)
     .where('organization_id', '=', ctx.principal.organization.id)
@@ -259,6 +283,16 @@ export async function updateWebhook(
       .where('id', '=', row.id)
       .returning(visibleColumns)
       .executeTakeFirstOrThrow()
+    // Pausing and resuming are distinct from editing the subscribed events. A call that
+    // does both records both; a call that changes neither still records the update.
+    const activity = updated.is_active === row.is_active ? undefined : updated.is_active
+    if (activity !== undefined)
+      await auditWebhook(trx, ctx, activity ? 'webhook.resumed' : 'webhook.paused', updated)
+    if (
+      activity === undefined ||
+      [...updated.events].sort().join() !== [...row.events].sort().join()
+    )
+      await auditWebhook(trx, ctx, 'webhook.updated', updated)
     return view(updated)
   })
 }
@@ -280,6 +314,7 @@ export async function rotateWebhookSecret(
       })
       .where('id', '=', row.id)
       .execute()
+    await auditWebhook(trx, ctx, 'webhook.secret_rotated', row)
     return { secret }
   })
 }
@@ -288,6 +323,7 @@ export async function deleteWebhook(ctx: WebhookServiceContext, id: unknown) {
   await ctx.db.transaction().execute(async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()
+    await auditWebhook(trx, ctx, 'webhook.deleted', row)
   })
 }
 
@@ -297,6 +333,7 @@ export async function listWebhookDeliveries(ctx: ServiceContext, id: unknown, af
   if (!uuid(id)) throw missing()
   const endpoint = await ctx.db
     .selectFrom('webhooks')
+    .where('destination_kind', '=', 'webhook')
     .select('id')
     .where('id', '=', id)
     .where('organization_id', '=', ctx.principal.organization.id)

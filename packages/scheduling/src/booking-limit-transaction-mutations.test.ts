@@ -1,8 +1,10 @@
 import * as Crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import * as HourmereAuth from '@hourmere/auth'
 import * as HourmereDb from '@hourmere/db'
 import { createDb, type Db } from '@hourmere/db'
+import * as Audit from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -14,6 +16,7 @@ import type { PublicContext } from './context.ts'
 import * as Errors from './errors.ts'
 import * as GroupSeatAdmission from './group-seat-admission.ts'
 import * as Hosts from './hosts.ts'
+import * as LocationOptions from './location-options.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
@@ -35,12 +38,15 @@ const dependencies: Record<string, object> = {
   kysely: Kysely,
   zod: Zod,
   '@hourmere/db': HourmereDb,
+  '@hourmere/auth': HourmereAuth,
+  '@hourmere/db/audit': Audit,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
   './conferences.ts': Conferences,
   './errors.ts': Errors,
   './group-seat-admission.ts': GroupSeatAdmission,
   './hosts.ts': Hosts,
+  './location-options.ts': LocationOptions,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
   './payment-expiry.ts': PaymentExpiry,

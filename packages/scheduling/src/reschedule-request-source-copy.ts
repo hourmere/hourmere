@@ -1,7 +1,9 @@
 import * as Crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import * as HourmereAuth from '@hourmere/auth'
 import * as HourmereDb from '@hourmere/db'
+import * as HourmereAudit from '@hourmere/db/audit'
 import * as Kysely from 'kysely'
 import { expect } from 'vitest'
 import * as Zod from 'zod'
@@ -11,6 +13,7 @@ import * as Conferences from './conferences.ts'
 import * as Errors from './errors.ts'
 import * as GroupSeatAdmission from './group-seat-admission.ts'
 import * as Hosts from './hosts.ts'
+import * as LocationOptions from './location-options.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
@@ -34,12 +37,15 @@ const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
   zod: Zod,
+  '@hourmere/auth': HourmereAuth,
   '@hourmere/db': HourmereDb,
+  '@hourmere/db/audit': HourmereAudit,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
   './conferences.ts': Conferences,
   './errors.ts': Errors,
   './hosts.ts': Hosts,
+  './location-options.ts': LocationOptions,
   './group-seat-admission.ts': GroupSeatAdmission,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,

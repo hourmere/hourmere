@@ -467,8 +467,7 @@ describe('location option source-copy mutation controls', () => {
     },
     {
       name: 'unknown choice refusal',
-      mutate: (source: string) =>
-        source.replace('input.optionId !== undefined && !option', 'false'),
+      mutate: (source: string) => source.replace('optionId !== undefined && !option', 'false'),
       verify: (module: typeof Options) =>
         expect(() =>
           module.resolveLocationChoice([zoom], { optionId: 'missing' }, context),
@@ -489,8 +488,26 @@ describe('location option source-copy mutation controls', () => {
       },
     },
     {
+      name: 'invitee phone separator normalization',
+      mutate: (source: string) =>
+        source.replace("input.inviteePhone.replace(/[ ().-]/g, '')", 'input.inviteePhone'),
+      verify: (module: typeof Options) => {
+        let actual: unknown
+        try {
+          actual = module.resolveLocationChoice(
+            [{ id: 'call', kind: 'phone', askInvitee: true }],
+            { inviteePhone: '+1 (415) 555-0123' },
+            context,
+          ).location
+        } catch {
+          actual = null
+        }
+        expect(actual).toEqual({ kind: 'phone', number: '+14155550123' })
+      },
+    },
+    {
       name: 'invitee E.164 phone',
-      mutate: (source: string) => source.replace('!PHONE_NUMBER.test(input.inviteePhone)', 'false'),
+      mutate: (source: string) => source.replace('!PHONE_NUMBER.test(phone)', 'false'),
       verify: (module: typeof Options) =>
         expect(() =>
           module.resolveLocationChoice(

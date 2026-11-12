@@ -8,6 +8,7 @@ import {
 import { routeBodyLimit } from '../body-limit.ts'
 import { ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, rateLimit } from '../rate-limit.ts'
+import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import { Instant, SelectedDurationMinutes, Slot } from './bookings.ts'
 import {
   BOOKING_BODY_LIMIT,
@@ -93,6 +94,7 @@ export function oneTimeBookingRoutes({
             start: Instant,
             end: Instant,
             durationMinutes: z.coerce.number().pipe(SelectedDurationMinutes).optional(),
+            locationOptionId: z.string().optional(),
           }),
         },
         responses: {
@@ -103,7 +105,7 @@ export function oneTimeBookingRoutes({
         },
       }),
       async (c) => {
-        const { start, end, durationMinutes } = c.req.valid('query')
+        const { start, end, durationMinutes, locationOptionId } = c.req.valid('query')
         return c.json(
           {
             data: await listOneTimeBookingSlots(ctx, {
@@ -111,6 +113,7 @@ export function oneTimeBookingRoutes({
               start: Temporal.Instant.from(start),
               end: Temporal.Instant.from(end),
               durationMinutes,
+              locationOptionId,
             }),
           },
           200,
@@ -137,7 +140,8 @@ export function oneTimeBookingRoutes({
           400: invalid,
           404: unavailable,
           409: {
-            description: 'Slot unavailable or idempotency key reused',
+            description:
+              'Slot unavailable, chosen location unavailable (location_unavailable), or idempotency key reused',
             content: json(ErrorBody),
           },
           429: rateLimited,
@@ -145,15 +149,21 @@ export function oneTimeBookingRoutes({
       }),
       async (c) => {
         const body = c.req.valid('json')
-        const { replayed, ...result } = await createOneTimeBooking(ctx, {
-          token: c.req.valid('param').token,
-          start: Temporal.Instant.from(body.start),
-          durationMinutes: body.durationMinutes,
-          invitee: body.invitee,
-          guests: body.guests,
-          responses: body.responses,
-          idempotencyKey: c.req.valid('header')['idempotency-key'],
-        })
+        const { replayed, ...result } = await createOneTimeBooking(
+          ctx,
+          {
+            token: c.req.valid('param').token,
+            start: Temporal.Instant.from(body.start),
+            durationMinutes: body.durationMinutes,
+            locationOptionId: body.locationOptionId,
+            inviteePhone: body.inviteePhone,
+            invitee: body.invitee,
+            guests: body.guests,
+            responses: body.responses,
+            idempotencyKey: c.req.valid('header')['idempotency-key'],
+          },
+          publicBookingAuditOrigin(c),
+        )
         return replayed ? c.json(result, 200) : c.json(result, 201)
       },
     )

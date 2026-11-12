@@ -20,6 +20,7 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
+import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import {
   BookingWithToken,
   Instant,
@@ -63,6 +64,21 @@ export const PublicEventType = z
     location: z.object({ kind: LocationKind }).nullable().openapi({
       description: 'Only the kind; details such as a phone number come with the booking',
     }),
+    locations: z
+      .array(
+        z.object({
+          id: z.string(),
+          kind: LocationKind,
+          label: z.string().optional(),
+          isDefault: z.literal(true).optional(),
+          askInvitee: z.literal(true).optional(),
+        }),
+      )
+      .nullable()
+      .openapi({
+        description:
+          'Ordered location choices; private host details are disclosed only after booking.',
+      }),
     allowGuests: z.boolean().openapi({ description: 'Whether invitees may add guest recipients' }),
     allowEmbedParentRedirect: z.boolean().optional().openapi({
       description:
@@ -137,6 +153,14 @@ export const CreateBooking = z
   .strictObject({
     start: Instant.openapi({ description: 'The start of an offered slot' }),
     durationMinutes: SelectedDurationMinutes.optional(),
+    locationOptionId: z.string().optional().openapi({
+      description:
+        'An id from the public event locations. Omission selects the default or first option.',
+    }),
+    inviteePhone: z.string().optional().openapi({
+      description:
+        'Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation.',
+    }),
     invitee: z.strictObject({
       name,
       email,
@@ -330,6 +354,7 @@ export function publicRoutes({
               start: Instant,
               end: Instant,
               durationMinutes: z.coerce.number().pipe(SelectedDurationMinutes).optional(),
+              locationOptionId: z.string().optional(),
             }),
           },
           responses: {
@@ -345,12 +370,13 @@ export function publicRoutes({
           },
         }),
         async (c) => {
-          const { start, end, durationMinutes } = c.req.valid('query')
+          const { start, end, durationMinutes, locationOptionId } = c.req.valid('query')
           const slots = await target.slots(ctx, {
             ...c.req.valid('param'),
             start: Temporal.Instant.from(start),
             end: Temporal.Instant.from(end),
             durationMinutes,
+            locationOptionId,
           })
           return c.json({ data: slots }, 200)
         },
@@ -443,11 +469,11 @@ export function publicRoutes({
               content: json(PublicBookingResult),
             },
             400: error(
-              'Invalid request (`invalid_request`, `invalid_duration`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`)',
+              'Invalid request (`invalid_request`, `invalid_duration`, `invalid_location_choice`, `invalid_invitee_phone`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`)',
             ),
             404: eventTypeNotFound,
             409: error(
-              'The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying)',
+              'The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying)',
             ),
             429: rateLimited,
           },
@@ -460,13 +486,15 @@ export function publicRoutes({
               ...c.req.valid('param'),
               start: Temporal.Instant.from(body.start),
               durationMinutes: body.durationMinutes,
+              locationOptionId: body.locationOptionId,
+              inviteePhone: body.inviteePhone,
               invitee: body.invitee,
               guests: body.guests,
               responses: body.responses,
               waitlistToken: body.waitlistToken,
               idempotencyKey: c.req.valid('header')['idempotency-key'],
             },
-            { source: body.source ?? 'web', apiKeyId: null },
+            publicBookingAuditOrigin(c, body.source ?? 'web'),
           )
           return replayed ? c.json(result, 200) : c.json(result, 201)
         },

@@ -545,6 +545,7 @@ describe.skipIf(!serverUrl)('availability', () => {
         description: 'A quick chat',
         durationMinutes: 20,
         location: { kind: 'phone' },
+        locations: [{ id: 'legacy', kind: 'phone' }],
         questions: [
           { id: 'topic', label: 'Topic', type: 'short_text', required: true },
           {

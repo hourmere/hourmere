@@ -232,6 +232,36 @@ function unavailable(): never {
   )
 }
 
+/**
+ * One configured location and no explicit invitee choice keeps the single-location contract:
+ * provider readiness codes and the stored settings are those of an event without choices.
+ * The option id is irrelevant; adding a location or changing its kind allocates a new one.
+ */
+export function isPreservedSingleton(
+  options: readonly unknown[] | null | undefined,
+  optionId: string | undefined,
+): boolean {
+  return options?.length === 1 && optionId === undefined
+}
+
+/** Select configuration before host eligibility or assignment; never fall back for unknown IDs. */
+export function selectLocationOption(
+  options: readonly LocationOption[] | null,
+  optionId?: string,
+): LocationOption | null {
+  const option =
+    optionId === undefined
+      ? (options?.find((item) => item.isDefault === true) ?? options?.[0])
+      : options?.find((item) => item.id === optionId)
+  if (optionId !== undefined && !option)
+    throw new DomainError(
+      'invalid',
+      'invalid_location_choice',
+      'Choose one of the available locations.',
+    )
+  return option ?? null
+}
+
 /** Pure selection/snapshot step. Provider work and booking persistence happen in the caller. */
 export function resolveLocationChoice(
   locations: readonly LocationOption[] | null,
@@ -239,26 +269,19 @@ export function resolveLocationChoice(
   context: LocationChoiceContext,
 ): ResolvedLocationChoice {
   const options = validateLocationOptions(locations)
-  const option =
-    input.optionId === undefined
-      ? (options?.find((item) => item.isDefault === true) ?? options?.[0])
-      : options?.find((item) => item.id === input.optionId)
-  if (input.optionId !== undefined && !option)
-    throw new DomainError(
-      'invalid',
-      'invalid_location_choice',
-      'Choose one of the available locations.',
-    )
+  const option = selectLocationOption(options, input.optionId)
   if (!option) return { locationOption: null, location: null }
   const settings = settingsOf(option)
   if (settings.kind === 'phone' && 'askInvitee' in settings) {
-    if (typeof input.inviteePhone !== 'string' || !PHONE_NUMBER.test(input.inviteePhone))
+    const phone =
+      typeof input.inviteePhone === 'string' ? input.inviteePhone.replace(/[ ().-]/g, '') : ''
+    if (!PHONE_NUMBER.test(phone))
       throw new DomainError(
         'invalid',
         'invalid_invitee_phone',
         'Provide a phone number in E.164 format.',
       )
-    return { locationOption: option, location: { kind: 'phone', number: input.inviteePhone } }
+    return { locationOption: option, location: { kind: 'phone', number: phone } }
   }
   if (
     (settings.kind === 'google_meet' || settings.kind === 'zoom') &&

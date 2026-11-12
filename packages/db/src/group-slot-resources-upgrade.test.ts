@@ -52,8 +52,8 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       const slots = (
         await old.pool.query('SELECT to_jsonb(s)::text AS row FROM group_slots s ORDER BY id')
       ).rows
-      // This checkpoint verifies 0061's exact backfills; later migrations have their own
-      // populated predecessor tests and may add booking columns.
+      // Bound this regression to the migration under test, including its fresh install.
+      // Future migrations must not alter either side of the schema comparison.
       await copyFile(
         join(migrationsDir, '0061_group_slot_resources.sql'),
         join(directory, '0061_group_slot_resources.sql'),
@@ -91,7 +91,7 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
         insertSeat(client, f, ids.slot, 'third@example.test', { location }),
       )
       const after = await snapshotSchema(old.pool)
-      await runMigrations(old.pool, directory)
+      expect(await runMigrations(old.pool, directory)).toEqual([])
       expect(await snapshotSchema(old.pool)).toEqual(after)
       fresh = await createTestDatabase(serverUrl as string, directory)
       expect(await snapshotSchema(fresh.pool)).toEqual(after)

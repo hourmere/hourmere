@@ -7,6 +7,7 @@ import type {
   OrganizationOptions,
 } from 'better-auth/plugins/organization'
 import { sql, type Transaction } from 'kysely'
+import { withAuthAuditTransaction } from './audit.ts'
 
 const databaseErrorCode = (error: unknown) =>
   error !== null && typeof error === 'object' && 'code' in error ? error.code : undefined
@@ -80,7 +81,9 @@ export function teamTransactionAdapter(
             },
           )
           try {
-            return await runInTransaction(trx, async () => callback(transactionAdapter))
+            return await withAuthAuditTransaction(trx, () =>
+              runInTransaction(trx, async () => callback(transactionAdapter)),
+            )
           } catch (error) {
             // Native invitation compensation can run after a PostgreSQL error has
             // already aborted the transaction. Keep that original exception for the

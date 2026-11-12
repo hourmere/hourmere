@@ -861,6 +861,14 @@ input[readonly] {
   margin-top: 0;
 }
 
+/* Slack settings actions must fit narrow panels, including translated labels. */
+.slack-integrations .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 .panel-success {
   border-color: var(--success-border);
   background: var(--success-soft);
@@ -1486,6 +1494,12 @@ input[type="radio"] {
   min-height: 34px;
   font-weight: 500;
   cursor: pointer;
+}
+
+/* Keep the actual export control at least 24px even with fractional root font sizes. */
+.booking-export input[type="checkbox"] {
+  min-width: 24px;
+  min-height: 24px;
 }
 
 .editor input:is([type="checkbox"], [type="radio"]) {
@@ -2121,9 +2135,13 @@ input[type="radio"] {
 
 @media (min-width: 640px) {
   .weekday {
-    grid-template-columns: 9rem minmax(0, 1fr);
+    grid-template-columns: 9rem minmax(0, 1fr) auto;
     align-items: start;
   }
+}
+
+.weekday-copy {
+  justify-self: start;
 }
 
 .weekday-toggle {
@@ -2213,11 +2231,37 @@ input[type="radio"] {
 }
 
 .override-form {
+  min-width: 0;
+  margin-inline: 0;
+  padding-inline: 0;
+  border: 0;
   display: grid;
   gap: var(--space-3);
   margin-top: var(--space-4);
   padding-top: var(--space-4);
   border-top: 1px solid var(--border);
+}
+
+.availability-conflict {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.availability-conflict .button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.past-overrides {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  margin-top: var(--space-4);
+}
+
+.override-form input[type="date"] {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .override-form h3 {
