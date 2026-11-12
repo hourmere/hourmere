@@ -448,7 +448,8 @@ function operationOf(
         ? { kind: 'oauth', id: principal.oauthConsentId.toLowerCase() }
         : { kind: 'session', id: principal.user.id.toLowerCase() }
   return {
-    organizationId: principal.organization.id,
+    // Lowercase, so the lock key matches however the caller spelled the ID.
+    organizationId: principal.organization.id.toLowerCase(),
     operation,
     actor: digest('actor', canonicalJson(actor)),
     requestId,

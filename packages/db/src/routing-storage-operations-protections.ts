@@ -571,7 +571,7 @@ export const operationsProtections: Record<string, OperationsProtection> = {
       const published = await accepted(insertRecord(f.pool, publishRecord(f)))
       const immutable = check(`${operationsTable}_immutable`)
       for (const [label, id, assignment, values] of [
-        // Each of these changes passes every other check, so only the guard refuses it.
+        // Every change but the last passes every other check, so only the guard refuses it.
         ['request key', created, 'request_id=$2', [randomUUID()]],
         ['actor', created, 'actor_scope_digest=$2', [randomBytes(32)]],
         ['fingerprint', published, 'request_fingerprint=$2', [randomBytes(32)]],

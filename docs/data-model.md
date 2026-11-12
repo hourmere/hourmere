@@ -1393,10 +1393,11 @@ The phases within that organization boundary are:
   form row. Publication therefore waits for membership management and event-type edits
   instead of deadlocking with them. Preview takes no lock and runs read-only. A create or
   publish that carries a `requestId` takes the transaction advisory lock
-  `hashtextextended('hourmere.routing-form-request:' || organizationId || ':' || actorDigest || ':' || requestId, 0)`
-  (creation after form admission, publication right after the actor and member locks, both
-  before any event-type or form row lock) and then share-locks its existing
-  `routing_form_operations` record. Only routing takes that lock, always after the
+  `hashtextextended('hourmere.routing-form-request:<organizationId>:<actorDigestHex>:<requestId>', 0)`,
+  with both UUIDs in lowercase (creation after form admission, publication right after the
+  actor, member and API-key checks, both before any event-type or form row lock), and then
+  share-locks its existing `routing_form_operations` record, so a version cleanup deleting
+  that record finishes first. Only routing takes that lock, always after the
   organization and before event types, so it adds no cycle; concurrent retries of one key
   queue on it, and each finds the record the first one committed.
 - Event-type configuration takes the organization lock before the event-type lock and

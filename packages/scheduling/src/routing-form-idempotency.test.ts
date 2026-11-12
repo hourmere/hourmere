@@ -9,9 +9,9 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
-import { createDb, createPool, type Db } from '@hourmere/db'
+import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import type pg from 'pg'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as Service from './routing-form-service.ts'
 import { createTestTeam, createTestUser, type TestUser, testContext } from './testing.ts'
@@ -66,7 +66,7 @@ const PUBLISH_UNLOCKED_CHECK = `        const unlocked = await findForm(trx, org
         assertRevision(unlocked, expected)
 `
 
-/** The error a call throws; source copies load their own error classes. */
+/** The error a call throws, read by its properties. */
 async function caught(fn: () => Promise<unknown>) {
   let error: unknown
   try {
@@ -137,15 +137,17 @@ const slug = () => `form-${randomUUID().slice(0, 8)}`
 describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () => {
   let owned: TestDatabase
   let db: Db
-  // Two more pools: racing requests never share a connection or a pool.
+  // Two more small pools: racing requests never share a connection or a pool.
+  let racePools: pg.Pool[]
   let first: Db
   let second: Db
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'routing_replay' })
     db = createDb(owned.pool)
-    first = createDb(createPool(owned.url))
-    second = createDb(createPool(owned.url))
+    racePools = [0, 1].map(() => new pg.Pool({ connectionString: owned.url, max: 2 }))
+    first = createDb(racePools[0] as pg.Pool)
+    second = createDb(racePools[1] as pg.Pool)
   })
   afterAll(async () => {
     await first?.destroy()
@@ -229,16 +231,27 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
   /** A connection holding `statement`'s locks in an open transaction. */
   async function hold(statement: string, params: unknown[]) {
     const client: pg.PoolClient = await owned.pool.connect()
-    await client.query('BEGIN')
-    await client.query(statement, params)
-    const pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
-      ?.pid as number
+    let pid: number
+    try {
+      await client.query('BEGIN')
+      await client.query(statement, params)
+      pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+        ?.pid as number
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      client.release()
+      throw error
+    }
     let open = true
     return {
       pid,
       async commit() {
         open = false
         await client.query('COMMIT')
+      },
+      async rollback() {
+        open = false
+        await client.query('ROLLBACK')
       },
       async close() {
         if (open) await client.query('ROLLBACK').catch(() => {})
@@ -453,6 +466,74 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
       expect(version.id).not.toBe(initial.version.id)
     }
     expect(await counts(space.team.id)).toEqual({ forms: 4, versions: 4, operations: 8 })
+  }
+
+  /** One user's key in their personal organization never matches it in a team. */
+  async function keysOfOtherOrganizationsNeverMatch(S: ServiceModule) {
+    const user = await createTestUser(db, 'Two spaces')
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const personal = testContext(db, session(user.principal))
+    const inTeam = testContext(db, session(team.as(user)))
+    const input = { requestId: randomUUID(), slug: slug(), title: 'Same key', ...content() }
+    const mine = await succeeds(() => S.createRoutingForm(personal, input))
+    const ours = await succeeds(() => S.createRoutingForm(inTeam, input))
+    expect(ours.id).not.toBe(mine.id)
+    const publication = { expectedRevision: 1, requestId: randomUUID() }
+    const versions = [
+      await succeeds(() => S.publishRoutingForm(personal, mine.id, publication)),
+      await succeeds(() => S.publishRoutingForm(inTeam, ours.id, publication)),
+    ].map(({ version }) => version.formId)
+    expect(versions).toEqual([mine.id, ours.id])
+    expect(await counts(user.principal.organization.id)).toEqual({
+      forms: 1,
+      versions: 1,
+      operations: 2,
+    })
+    expect(await counts(team.id)).toEqual({ forms: 1, versions: 1, operations: 2 })
+  }
+
+  /**
+   * A retry waits for a version cleanup that is deleting its record: once the cleanup
+   * commits, the record is gone with its version and the retry is an ordinary stale request;
+   * once it rolls back, the retry returns the version.
+   */
+  async function replayWaitsForVersionCleanup(S: ServiceModule) {
+    for (const outcome of ['commit', 'rollback'] as const) {
+      const space = await personalSpace()
+      const form = await S.createRoutingForm(space.ctx, {
+        slug: slug(),
+        title: 'Cleanup',
+        ...content(),
+      })
+      const publication = { expectedRevision: 1, requestId: randomUUID() }
+      const published = await S.publishRoutingForm(space.ctx, form.id, publication)
+      await S.updateRoutingForm(space.ctx, form.id, { expectedRevision: 2, title: 'Next' })
+      await S.publishRoutingForm(space.ctx, form.id, { expectedRevision: 3 })
+      // The superseded version, deleted in a transaction left open.
+      const cleanup = await hold('DELETE FROM routing_form_versions WHERE id = $1', [
+        published.version.id,
+      ])
+      let retry: Promise<{ value?: { version: { id: string } }; error?: unknown }> | undefined
+      try {
+        retry = settle(
+          S.publishRoutingForm(testContext(first, space.principal), form.id, publication),
+        )
+        await blockedBy(cleanup.pid, 1)
+        await cleanup[outcome]()
+        const result = await retry
+        if (outcome === 'commit') {
+          expect((result.error as { code?: string })?.code).toBe('routing_revision_conflict')
+          expect(await counts(space.organizationId)).toEqual({
+            forms: 1,
+            versions: 1,
+            operations: 0,
+          })
+        } else expect(result.value?.version).toEqual(published.version)
+      } finally {
+        await cleanup.close()
+        await retry
+      }
+    }
   }
 
   /** Two retries of one publication, on two pools and lined up on the form lock, write once. */
@@ -681,15 +762,22 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
           ...content(),
         })
         const requestId = randomUUID()
+        // Both settle before any assertion, so no request outlives a failed round.
         const results = await Promise.all(
           [first, second].map((pool) =>
-            Service.publishRoutingForm(testContext(pool, space.principal), form.id, {
-              expectedRevision: 1,
-              requestId,
-            }),
+            settle(
+              Service.publishRoutingForm(testContext(pool, space.principal), form.id, {
+                expectedRevision: 1,
+                requestId,
+              }),
+            ),
           ),
         )
-        expect(results[0]).toEqual(results[1])
+        expect(results.map((result) => (result.error as { code?: string })?.code)).toEqual([
+          undefined,
+          undefined,
+        ])
+        expect(results[0]?.value).toEqual(results[1]?.value)
         expect(await counts(space.organizationId)).toEqual({ forms: 1, versions: 1, operations: 1 })
       }
     })
@@ -698,6 +786,10 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
   describe('scope and lifecycle', () => {
     it('never matches a key of another actor or credential', () =>
       keysOfOtherActorsNeverMatch(Service))
+    it('never matches a key of the same user in another organization', () =>
+      keysOfOtherOrganizationsNeverMatch(Service))
+    it('waits for a version cleanup that removes the record of a retry', () =>
+      replayWaitsForVersionCleanup(Service))
 
     it('answers a retry for an archived form as routing_form_not_found', async () => {
       const space = await personalSpace()
@@ -797,6 +889,16 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
       name: 'actor scope of the key lookup',
       replacements: [["    .where('actor_scope_digest', '=', operation.actor)\n", '']],
       scenario: keysOfOtherActorsNeverMatch,
+    },
+    {
+      name: 'organization scope of the key lookup',
+      replacements: [["    .where('organization_id', '=', operation.organizationId)\n", '']],
+      scenario: keysOfOtherOrganizationsNeverMatch,
+    },
+    {
+      name: 'share lock on the record a retry reads',
+      replacements: [['    .forShare()\n    .executeTakeFirst()', '    .executeTakeFirst()']],
+      scenario: replayWaitsForVersionCleanup,
     },
     {
       name: 'publication lookup before the unlocked revision check (looked up after it)',

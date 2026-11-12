@@ -181,8 +181,9 @@ Create and publish take an optional `requestId` (step a3b, migration 0083), as t
 sketch below describes. A retry with the same key and canonical input returns the original
 result: creation returns the form it created, publication the version it published (also
 after that publication moved the revision on), each with the form as it is now, so an archived
-form is `routing_form_not_found` here too. Canonical input is the validated input (text
-trimmed, an omitted optional field equal to `null`); for publication it is the form ID and
+form is `routing_form_not_found` here too. Canonical input is the validated input, as the
+draft would be stored (text trimmed, omitted questions or rules equal to empty lists, and an
+omitted, `null` or blank description alike); for publication it is the form ID and
 `expectedRevision`. The same key with other input, or for the other operation, returns
 `idempotency_key_reused`. Concurrent retries of one key queue on a per-key transaction advisory
 lock, so one writes and each returns its result. Authorization runs first, so a retry by an
