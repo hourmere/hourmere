@@ -3,8 +3,12 @@
 // MCP tool, CLI command or web page exists yet. The names come from the document's REST, MCP
 // and CLI table and its `/instance` field; only workflow-specific names are asserted, and no
 // catalogue is snapshotted. Each step that adds an operation narrows the assertion for its
-// own names, and step 4 for `workflowsEnabled`.
-import { readFileSync } from 'node:fs'
+// own names, and step 4 for `workflowsEnabled`. Definition storage (step 2) is tables only:
+// migration 0076, the generated table types and the storage test support exist, and no
+// production module imports or queries the new tables. The first step that reads or writes
+// them from service code narrows that scan to the modules that own workflow data access.
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createGoogleCalendarClient, createMicrosoftCalendarClient } from '@hourmere/calendars'
 import { createZoomClient } from '@hourmere/conferences'
@@ -41,6 +45,40 @@ const workflowSegment = /(?:^|\/)workflows?(?:\/|$)/i
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// The storage layer: the migration, the generated table types and the storage test support.
+const STORAGE_LAYER =
+  /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/workflow-storage-[^/]+\.ts$)/
+// A new table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
+// its generated row type, or the storage test support. `WorkflowDefinitionSchema` or
+// `workflow_definitions_guard` is not one.
+const STORAGE_NAMES =
+  /workflow-storage|(?<![A-Za-z0-9_])(?:workflow_definitions|workflow_revisions|WorkflowDefinitions|WorkflowRevisions)(?![A-Za-z0-9_])/i
+
+/** Every non-test source file in the src directory of each apps, packages and tools workspace. */
+function productionSources(): string[] {
+  const rootPath = fileURLToPath(root)
+  const files: string[] = []
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory)) {
+      if (entry === 'node_modules' || entry === 'dist') continue
+      const path = join(directory, entry)
+      if (statSync(path).isDirectory()) walk(path)
+      else if (/\.(ts|tsx|js|mjs|astro)$/.test(entry) && !/\.test\.tsx?$/.test(entry))
+        files.push(relative(rootPath, path))
+    }
+  }
+  for (const group of ['apps', 'packages', 'tools'])
+    for (const name of readdirSync(new URL(group, root))) {
+      const source = new URL(`${group}/${name}/src`, root)
+      try {
+        if (statSync(source).isDirectory()) walk(fileURLToPath(source))
+      } catch {
+        // Not a workspace with sources.
+      }
+    }
+  return files.sort()
 }
 
 describe('booking workflows are off and expose no surface', () => {
@@ -182,5 +220,54 @@ describe('booking workflows are off and expose no surface', () => {
         ([name, path]) => /workflow/i.test(name) || workflowSegment.test(path),
       ),
     ).toEqual([])
+  })
+
+  it('recognises the definition storage tables as whole identifiers, in any case', () => {
+    for (const source of [
+      "selectFrom('workflow_definitions')",
+      'DELETE FROM "workflow_revisions"',
+      'SELECT 1 FROM WORKFLOW_DEFINITIONS',
+      'from Workflow_Revisions r',
+      "import type { WorkflowDefinitions } from '@hourmere/db'",
+      'type Row = Selectable<WorkflowRevisions>',
+      "import { workflowFixture } from './workflow-storage-protections.ts'",
+    ])
+      expect(STORAGE_NAMES.test(source), source).toBe(true)
+    for (const source of [
+      'WorkflowDefinitionSchema',
+      'type WorkflowDefinition',
+      'validateWorkflowDefinition',
+      'workflow_definitions_guard',
+      'listWorkflowDefinitions',
+      'workflowRevision',
+      '/api/v1/workflows',
+    ])
+      expect(STORAGE_NAMES.test(source), source).toBe(false)
+  })
+
+  it('keeps the definition storage tables unreferenced outside the storage layer', () => {
+    const sources = productionSources()
+    expect(sources.length).toBeGreaterThan(100)
+    expect(sources).toContain('apps/server/src/server.ts')
+    expect(sources).toContain('packages/workflows/src/definition.ts')
+    expect(sources).toContain('packages/workflows/src/testing.ts')
+    expect(sources).toContain('packages/db/src/index.ts')
+    const storage = sources.filter((file) => STORAGE_LAYER.test(file))
+    // The matcher sees the storage layer itself, so a reference elsewhere cannot hide from it.
+    expect(storage).toEqual(
+      expect.arrayContaining([
+        'packages/db/src/tables.ts',
+        'packages/db/src/workflow-storage-protections.ts',
+      ]),
+    )
+    for (const file of storage)
+      expect(STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')), file).toBe(true)
+    expect(readFileSync(new URL('packages/db/src/tables.ts', root), 'utf8')).toMatch(
+      /^ {2}workflow_revisions: WorkflowRevisions;$/m,
+    )
+    const referencing = sources
+      .filter((file) => !STORAGE_LAYER.test(file))
+      .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
+    expect(referencing).toEqual([])
   })
 })
