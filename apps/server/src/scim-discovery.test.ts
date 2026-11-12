@@ -491,7 +491,7 @@ describe('SCIM discovery representations', () => {
     }
   })
 
-  it('is imported, like the query parser and User reads, by no production source', () => {
+  it('is imported, like the query parser, User reads and creation, by no production source', () => {
     const root = fileURLToPath(new URL('.', import.meta.url))
     const sources = (directory: string): string[] =>
       readdirSync(directory).flatMap((entry) => {
@@ -501,7 +501,7 @@ describe('SCIM discovery representations', () => {
       })
     const files = sources(root)
     // The modules only the resource test flag reaches; they may import each other.
-    const flagged = ['scim-discovery', 'scim-query', 'scim-users']
+    const flagged = ['scim-discovery', 'scim-query', 'scim-users', 'scim-user-create']
     expect(files.some((file) => file.endsWith('server.ts'))).toBe(true)
     for (const name of flagged) expect(files).toContain(join(root, `${name}.ts`))
     expect(

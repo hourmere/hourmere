@@ -10,6 +10,7 @@ import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import type { ScimResourceHandler } from './scim.ts'
 import { SCIM_URN, scimDiscovery } from './scim-discovery.ts'
+import { scimUserCreation } from './scim-user-create.ts'
 import { scimUsers } from './scim-users.ts'
 import { productionAppOptions } from './server.ts'
 
@@ -1111,3 +1112,188 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
     )
   })
 })
+
+// One connection per organization is the rule today, so the connection half of the token
+// scope is observable only with a second connection: on this throwaway database the
+// one-per-organization constraint is dropped after both tokens exist, and token B is rebound
+// to a second connection of the same organization.
+describe.skipIf(!process.env.DATABASE_URL)(
+  'SCIM Users across two connections of one organization',
+  () => {
+    let owned: TestDatabase, db: Db
+    let organization: string
+    const secrets = { a: '', b: '' }
+    const connections = { a: '', b: '' }
+    const ids = {
+      a: 'f0000000-0000-4000-8000-0000000000a1',
+      b: '01000000-0000-4000-8000-0000000000b1',
+    }
+    const names = { a: 'first.idp@example.com', b: 'second.idp@example.com' }
+
+    beforeAll(async () => {
+      owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
+        tag: 'scim_seam',
+      })
+      db = createDb(owned.pool)
+      const owner = await createTestUser(db, 'Owner')
+      organization = (await createTestTeam(db, [{ user: owner, role: 'owner' }])).id
+      const token = async () => {
+        const secret = `scim_${randomBytes(32).toString('base64url')}`
+        const { id } = await db
+          .insertInto('scim_provisioning_tokens')
+          .values({
+            organization_id: organization,
+            name: 'Synthetic IdP',
+            token_hash: createHash('sha256').update(secret).digest('base64url'),
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        return { secret, id }
+      }
+      // Both tokens first: the binding trigger needs the constraint dropped below.
+      const a = await token()
+      const b = await token()
+      secrets.a = a.secret
+      secrets.b = b.secret
+      connections.a = (
+        await db
+          .selectFrom('scim_connections')
+          .select('id')
+          .where('organization_id', '=', organization)
+          .executeTakeFirstOrThrow()
+      ).id
+      await db.schema
+        .alterTable('scim_connections')
+        .dropConstraint('scim_connections_one_per_organization')
+        .execute()
+      connections.b = (
+        await db
+          .insertInto('scim_connections')
+          .values({ organization_id: organization })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id
+      await db
+        .updateTable('scim_token_connections')
+        .set({ connection_id: connections.b })
+        .where('token_id', '=', b.id)
+        .execute()
+      for (const side of ['a', 'b'] as const)
+        await db
+          .insertInto('scim_users')
+          .values({
+            id: ids[side],
+            organization_id: organization,
+            connection_id: connections[side],
+            user_name: names[side],
+            external_id: `ext-${side}`,
+          })
+          .execute()
+    })
+    afterAll(async () => {
+      await owned?.drop()
+    })
+
+    const application = (users: Users, create: typeof scimUserCreation) =>
+      createApp({
+        checkDb: async () => {},
+        authHandler: async () => new Response(null, { status: 404 }),
+        resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+        publicUrl,
+        scim: {
+          db,
+          enabled: true,
+          resources: (request) =>
+            create({ db, signup: { mode: 'open', allowedDomains: [] } })(request) ??
+            users(db)(request),
+        },
+      })
+    async function call(
+      app: ReturnType<typeof application>,
+      secret: string,
+      resource: string,
+      body?: Json,
+    ) {
+      const response = await app.request(`/scim/v2/${organization}/${resource}`, {
+        method: body ? 'POST' : 'GET',
+        headers: { authorization: `Bearer ${secret}` },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      })
+      const text = await response.text()
+      return { status: response.status, body: JSON.parse(text) as Json }
+    }
+    const userNames = (list: Json) => (list.Resources as Json[]).map((user) => user.userName)
+
+    async function verifyConnections(users: Users, create = scimUserCreation) {
+      const app = application(users, create)
+      const notFound = { status: 404, body: errorBody(404, 'Resource not found.') }
+      for (const [own, other] of [
+        ['a', 'b'],
+        ['b', 'a'],
+      ] as const) {
+        // Lists, reads and filters see only the token's own connection.
+        expect(userNames((await call(app, secrets[own], 'Users')).body)).toEqual([names[own]])
+        expect(await call(app, secrets[own], `Users/${ids[other]}`)).toEqual(notFound)
+        expect((await call(app, secrets[own], `Users/${ids[own]}`)).status).toBe(200)
+        for (const filter of [`userName eq "${names[other]}"`, `externalId eq "ext-${other}"`])
+          expect(
+            (await call(app, secrets[own], `Users?${new URLSearchParams({ filter })}`)).body
+              .totalResults,
+            filter,
+          ).toBe(0)
+      }
+      // Creation is scoped to the token's connection too: the other connection's identifiers
+      // are free, and the new entry belongs to the creating token's connection only.
+      const userName = `created-${randomUUID()}@example.com`
+      const created = await call(app, secrets.b, 'Users', {
+        schemas: [core],
+        userName,
+        externalId: 'ext-a',
+      })
+      expect(created.status).toBe(201)
+      const stored = await db
+        .selectFrom('scim_users')
+        .select('connection_id')
+        .where('id', '=', created.body.id as string)
+        .executeTakeFirstOrThrow()
+      expect(stored.connection_id).toBe(connections.b)
+      expect(userNames((await call(app, secrets.b, 'Users')).body)).toContain(userName)
+      expect(userNames((await call(app, secrets.a, 'Users')).body)).toEqual([names.a])
+      expect(
+        (await call(app, secrets.a, 'Users', { schemas: [core], userName: names.a })).status,
+      ).toBe(409)
+      expect(
+        (await call(app, secrets.a, 'Users', { schemas: [core], userName: `${userName}` })).status,
+      ).toBe(201)
+    }
+
+    it("keeps each connection's entries to its own tokens, for reads and creation", () =>
+      verifyConnections(scimUsers))
+
+    it('detects a scope that drops its connection half', async () => {
+      // Reads: the token restriction dropped, so every connection of the organization matches.
+      const reads = await sourceCopy<typeof import('./scim-users.ts')>(
+        './scim-users.ts',
+        [
+          "        'scim_users.connection_id',\n        '=',\n",
+          "        'scim_users.connection_id',\n        'in',\n",
+        ],
+        ["          .where('scim_token_connections.token_id', '=', tokenId)\n", ''],
+      )
+      await expect(verifyConnections(reads.scimUsers)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+      // Creation: the organization's first binding instead of the token's own.
+      const creation = await sourceCopy<typeof import('./scim-user-create.ts')>(
+        './scim-user-create.ts',
+        [
+          "          .where('token_id', '=', principal.tokenId)\n          .where('organization_id', '=', principal.organizationId)\n          .executeTakeFirst()\n        if (!organization",
+          "          .where('organization_id', '=', principal.organizationId)\n          .orderBy('connection_id', 'desc')\n          .executeTakeFirst()\n        if (!organization",
+        ],
+      )
+      await expect(verifyConnections(scimUsers, creation.scimUserCreation)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    })
+  },
+)

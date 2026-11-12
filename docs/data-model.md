@@ -59,7 +59,11 @@ stored, or whose decision is already a live tombstone, is dropped so that accoun
 is never refused. These tables provide storage
 for later claim and authorization work; this migration does not enforce new admission,
 suspension or revocation behavior in application services. Users, Groups and discovery
-handlers remain unregistered in production.
+handlers remain unregistered in production. The User creation handler, which only test
+harnesses register, writes a resource and, for its work address, one pending claim whose
+`invitation_id` names the invitation it issued or reused, or is null when the address
+already belongs to a member or another pending invitation holds it; it never sets an
+account or membership link.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -1470,6 +1474,13 @@ The phases within that organization boundary are:
   publication share-locks its target event types in ID order; each write then locks the
   form row. Publication therefore waits for membership management and event-type edits
   instead of deadlocking with them. Preview takes no lock and runs read-only.
+- SCIM User creation takes the organization update lock first, like membership management,
+  then a key share lock on its provisioning token row (revocation and rotation take the
+  organization lock before their token update lock), then the shared invitation service's
+  locks: the address's pending invitation rows, their delivery rows and the mail-budget
+  lock, inside a savepoint that is rolled back, releasing them, when the claim records no
+  invitation. It locks no member row: the organization lock excludes membership changes while it
+  reads the earliest owner who invites.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
