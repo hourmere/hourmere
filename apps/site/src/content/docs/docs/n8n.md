@@ -215,7 +215,10 @@ npm checks `private` only at its last step, though, so it can contact servers fi
 
 1. In a CI job that offers an OIDC ID token, such as GitHub Actions with
    `id-token: write`, npm obtains that token from the CI provider and exchanges it at the
-   target registry. `--force` and `--offline` do not skip this.
+   target registry. `--force` and `--offline` do not skip this. When the exchange
+   succeeds, the CI job's repository is public and `provenance` is left at its default,
+   npm may then also ask the target registry for the package's visibility, sending the
+   new token. `--offline` skips that request, but `--force` does not.
 2. Without credentials for the target registry, npm then stops with `ENEEDAUTH`.
 3. Without `--force` or `--offline`, npm then reads the package's published versions from
    the target registry, sending your npm token for that registry.
