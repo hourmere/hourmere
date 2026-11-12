@@ -268,6 +268,47 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
   afterEach(async ({ task }) => {
     probe?.write(task.name)
     await Promise.allSettled([...pendingTests])
+    const probeUsers = testStates.flatMap((context) => context.users)
+    if (probeLog && probeUsers.length) {
+      const plan = (
+        await target.pool.query(
+          `EXPLAIN (ANALYZE, SETTINGS, FORMAT JSON) SELECT u.id,u.email,u."emailVerified",p.handle,p.time_zone,p.locale,
+    po.organization_id,
+    coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'role',m.role)
+      ORDER BY m.id) FROM auth.member m WHERE m."userId"=u.id
+      AND m."organizationId"=po.organization_id),'[]'::jsonb) AS memberships
+    FROM auth."user" u LEFT JOIN profiles p ON p.user_id=u.id
+    LEFT JOIN personal_organizations po ON po.user_id=u.id
+    WHERE u.id=ANY($1::uuid[]) OR lower(btrim(u.email)) IN
+      (SELECT lower(btrim(email)) FROM auth."user" WHERE id=ANY($1::uuid[]))
+    ORDER BY u.id`,
+          [probeUsers.slice(0, 1)],
+        )
+      ).rows[0]?.['QUERY PLAN']?.[0]
+      const tables = (
+        await target.pool.query(
+          `SELECT c.relname AS t,c.relpages AS rp,c.reltuples::int AS rt,
+            (pg_relation_size(c.oid)/8192)::int AS pages,s.n_live_tup::int AS live,s.n_dead_tup::int AS dead,
+            s.vacuum_count::int+s.autovacuum_count::int AS vac,s.analyze_count::int+s.autoanalyze_count::int AS an
+          FROM pg_class c LEFT JOIN pg_stat_all_tables s ON s.relid=c.oid
+          WHERE c.oid IN ('auth."user"'::regclass,'auth.member'::regclass,'profiles'::regclass,
+            'personal_organizations'::regclass) ORDER BY c.relname`,
+        )
+      ).rows
+      appendFileSync(
+        probeLog,
+        `${JSON.stringify({
+          name: 'EXPLAIN',
+          cost: plan?.Plan?.['Total Cost'],
+          rows: plan?.Plan?.['Plan Rows'],
+          node: plan?.Plan?.['Node Type'],
+          execMs: plan?.['Execution Time'],
+          jitMs: plan?.JIT?.Timing?.Total ?? null,
+          jitOptions: plan?.JIT?.Options ?? null,
+          tables,
+        })}\n`,
+      )
+    }
     for (const context of testStates.splice(0)) {
       for (const cleanup of context.cleanups) await cleanup()
       await target.pool.query('DELETE FROM auth."user" WHERE id=ANY($1::uuid[])', [context.users])
