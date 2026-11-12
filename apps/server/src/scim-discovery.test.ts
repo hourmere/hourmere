@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { OpenAPIHono } from '@hono/zod-openapi'
 import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -14,12 +15,22 @@ import { loadConfig } from './config.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { type ScimResources, scimError } from './scim.ts'
 import { SCIM_URN, scimDiscovery } from './scim-discovery.ts'
+import {
+  parseScimListQuery,
+  projectScimResource,
+  scimListResponse,
+  scimPageWindow,
+  scimUserQuery,
+} from './scim-query.ts'
 import { productionAppOptions } from './server.ts'
 
 // Every expectation below is read from docs/scim.md or RFC 7643/7644, never from a
 // snapshot of the representations, so the design and the code cannot drift apart.
 const design = readFileSync(new URL('../../../docs/scim.md', import.meta.url), 'utf8')
 const origin = 'http://localhost'
+// PUBLIC_URL of the HTTP harness. Hono's app.request uses http://localhost as the request
+// origin, so a different origin shows that locations never follow the request's Host.
+const publicUrl = 'https://scim-public.example'
 const signingSecret = 'synthetic-scim-discovery-cookie-signing-secret'
 const base = `${origin}/scim/v2/00000000-0000-4000-8000-0000000000a1`
 
@@ -480,7 +491,7 @@ describe('SCIM discovery representations', () => {
     }
   })
 
-  it('is imported by no production source', () => {
+  it('is imported, like the query parser, by no production source', () => {
     const root = fileURLToPath(new URL('.', import.meta.url))
     const sources = (directory: string): string[] =>
       readdirSync(directory).flatMap((entry) => {
@@ -489,12 +500,15 @@ describe('SCIM discovery representations', () => {
         return /\.tsx?$/.test(entry) && !/\.test\.tsx?$|testing\.ts$/.test(entry) ? [path] : []
       })
     const files = sources(root)
+    // The modules only the resource test flag reaches; they may import each other.
+    const flagged = ['scim-discovery', 'scim-query']
     expect(files.some((file) => file.endsWith('server.ts'))).toBe(true)
+    for (const name of flagged) expect(files).toContain(join(root, `${name}.ts`))
     expect(
       files.filter(
         (file) =>
-          !file.endsWith('scim-discovery.ts') &&
-          readFileSync(file, 'utf8').includes('scim-discovery'),
+          !flagged.some((name) => file === join(root, `${name}.ts`)) &&
+          flagged.some((name) => readFileSync(file, 'utf8').includes(name)),
       ),
     ).toEqual([])
   })
@@ -526,6 +540,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
       pool: authPool,
       db,
       signup,
+      // Better Auth names its cookie after this origin; it stays the request origin.
       baseURL: origin,
       secret: signingSecret,
       mailer: { send: async () => {} },
@@ -565,7 +580,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
-      publicUrl: origin,
+      publicUrl,
       scim: { db, enabled, resources },
       routes: [provisioningTokenRoutes({ db, enabled: true })],
     })
@@ -580,7 +595,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
       method,
       headers: {
         cookie: organization === foreignId ? foreignCookie : cookie,
-        origin,
+        origin: publicUrl,
         'x-expected-organization-id': organization,
         'content-type': 'application/json',
       },
@@ -608,14 +623,20 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
   ]
 
   it('serves each organization its own view with absolute locations under PUBLIC_URL', async () => {
+    expect(new URL(publicUrl).origin).not.toBe(origin)
     const application = harness()
+    // A forged Host or forwarded host never names the locations.
+    const forged = { host: 'attacker.example', 'x-forwarded-host': 'attacker.example' }
     for (const [organization, issued] of [
       [organizationId, await issue()],
       [foreignId, await issue(foreignId)],
     ] as const) {
-      const own = `${origin}/scim/v2/${organization}/`
+      const own = `${publicUrl}/scim/v2/${organization}/`
       for (const resource of discovery) {
-        const response = await scim(application, organization, resource, bearer(issued.secret))
+        const response = await scim(application, organization, resource, {
+          ...bearer(issued.secret),
+          ...forged,
+        })
         expect(response.status, resource).toBe(200)
         expect(response.headers.get('content-type')).toBe('application/scim+json')
         expect(response.headers.get('cache-control')).toBe('no-store')
@@ -647,6 +668,147 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
     )
     expect(unknown.status).toBe(404)
     expect(await unknown.json()).toEqual(scimError(404, 'Resource not found.'))
+  })
+
+  it('builds locations from PUBLIC_URL, never from the request (source-copy controls)', async () => {
+    const issued = await issue()
+    const location = `${publicUrl}/scim/v2/${organizationId}/ServiceProviderConfig`
+    const verify = async (mount: typeof import('./scim.ts').mountScim) => {
+      const application = new OpenAPIHono()
+      mount(application, { db, enabled: true, resources: scimDiscovery }, [], publicUrl)
+      for (const url of [
+        `/scim/v2/${organizationId}/ServiceProviderConfig`,
+        `http://attacker.example/scim/v2/${organizationId}/ServiceProviderConfig`,
+      ]) {
+        const response = await application.request(url, {
+          headers: {
+            ...bearer(issued.secret),
+            host: 'attacker.example',
+            'x-forwarded-host': 'attacker.example',
+          },
+        })
+        expect(((await response.json()) as { meta: { location: string } }).meta.location).toBe(
+          location,
+        )
+      }
+    }
+    const control = await sourceCopy<typeof import('./scim.ts')>('./scim.ts')
+    await verify(control.mountScim)
+    // Placeholders of scim.ts's template literal, written without one here.
+    const dollar = '$'
+    const anchor = `base: \`${dollar}{origin}/scim/v2/`
+    for (const replacement of [
+      `${dollar}{new URL(c.req.url).origin}`,
+      `https://${dollar}{c.req.header('host')}`,
+    ]) {
+      const mutant = await sourceCopy<typeof import('./scim.ts')>('./scim.ts', [
+        anchor,
+        `base: \`${replacement}/scim/v2/`,
+      ])
+      await expect(verify(mutant.mountScim), replacement).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    }
+  })
+
+  // A test-only Users list over fixed representations: the shared query parser reached
+  // through the resource test flag, as the User reads step will reach it.
+  const listUsers: ScimResources = (request) => {
+    if (request.path !== '/Users') return scimDiscovery(request)
+    const parsed = parseScimListQuery(request.query, scimUserQuery)
+    if (!parsed.ok) return parsed.reply
+    const { filter, projection } = parsed.value
+    const users = ['alice', 'Bob', 'carol'].map((name, index) => {
+      const id = `00000000-0000-4000-8000-00000000000${index + 1}`
+      const location = `${request.base}/Users/${id}`
+      return {
+        schemas: [SCIM_URN.user],
+        id,
+        userName: `${name}@example.com`,
+        displayName: name,
+        meta: { resourceType: 'User', location },
+      }
+    })
+    const matching = users.filter(
+      (user) =>
+        !filter ||
+        (filter.attribute === 'userName' &&
+          user.userName.toLowerCase() === filter.value.toLowerCase()),
+    )
+    const { offset, limit } = scimPageWindow(parsed.value)
+    const returned = matching
+      .slice(offset, offset + limit)
+      .map((user) => projectScimResource(scimUserQuery, user, projection))
+    return { status: 200, body: scimListResponse(parsed.value, matching.length, returned) }
+  }
+
+  it('reaches the shared query parser through the resource test flag', async () => {
+    const issued = await issue()
+    const application = harness(listUsers)
+    const read = async (query: string) => {
+      const response = await scim(application, organizationId, `Users?${query}`, {
+        ...bearer(issued.secret),
+        host: 'attacker.example',
+      })
+      expect(response.headers.get('content-type'), query).toBe('application/scim+json')
+      expect(response.headers.get('cache-control'), query).toBe('no-store')
+      return { status: response.status, body: await response.json() }
+    }
+    const listed = (totalResults: number, startIndex: number, Resources: unknown[]) => ({
+      status: 200,
+      body: {
+        schemas: [SCIM_URN.listResponse],
+        totalResults,
+        itemsPerPage: Resources.length,
+        startIndex,
+        Resources,
+      },
+    })
+    const bob = {
+      schemas: [SCIM_URN.user],
+      id: '00000000-0000-4000-8000-000000000002',
+      userName: 'Bob@example.com',
+    }
+    // Percent-encoded and form-encoded spaces, a \u escape and case-insensitive userName.
+    expect(
+      await read('filter=userName%20eq%20%22BOB%40example.com%22&attributes=displayName'),
+    ).toEqual(listed(1, 1, [{ ...bob, displayName: 'Bob' }]))
+    expect(
+      await read(new URLSearchParams({ filter: 'USERNAME EQ "bob\\u0040example.com"' }).toString()),
+    ).toEqual(listed(1, 1, [{ ...bob, displayName: 'Bob', meta: expect.any(Object) }]))
+    // Pages, with locations under PUBLIC_URL; zero counts and pages past the end are empty.
+    expect(await read('startIndex=2&count=1&excludedAttributes=displayName')).toEqual(
+      listed(3, 2, [
+        {
+          ...bob,
+          meta: {
+            resourceType: 'User',
+            location: `${publicUrl}/scim/v2/${organizationId}/Users/${bob.id}`,
+          },
+        },
+      ]),
+    )
+    expect(await read('count=0')).toEqual(listed(3, 1, []))
+    expect(await read('startIndex=4&count=-1')).toEqual(listed(3, 4, []))
+    // Refusals are SCIM Errors: a string status and the RFC 7644 keyword.
+    for (const [query, scimType, detail] of [
+      [
+        new URLSearchParams({ filter: 'userName ne "bob@example.com"' }).toString(),
+        'invalidFilter',
+        'Only the eq operator is supported.',
+      ],
+      [
+        'filter=userName+eq+%22a%22+and+externalId+eq+%22b%22',
+        'invalidFilter',
+        'The comparison value must be a valid quoted string.',
+      ],
+      ['attributes=password', 'invalidValue', 'The attribute list names an unsupported attribute.'],
+      ['count=ten', 'invalidValue', 'count must be an integer.'],
+    ] as const)
+      expect(await read(query), query).toEqual({
+        status: 400,
+        body: scimError(400, detail, scimType),
+      })
   })
 
   it('refuses other organizations, revoked and rotated-away tokens, cookies and API keys with one 401', async () => {
@@ -730,7 +892,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
   })
 
   // The production assembly, as startServer builds it, with the operator switch on.
-  async function productionAnswers(options = productionAppOptions) {
+  async function productionAnswers(options = productionAppOptions, resources = discovery) {
     const issued = await issue()
     const config = loadConfig({
       DATABASE_URL: owned.url,
@@ -775,7 +937,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
     }
     expect(Object.keys(document.paths).filter((path) => path.includes('scim/v2'))).toEqual([])
     const answers = []
-    for (const resource of discovery) {
+    for (const resource of resources) {
       const response = await scim(application, organizationId, resource, bearer(issued.secret))
       expect(response.headers.get('content-type')).toBe('application/scim+json')
       answers.push({ resource, status: response.status, body: await response.json() })
@@ -787,6 +949,23 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
     status: 404,
     body: scimError(404, 'SCIM resources are not available yet.'),
   }))
+
+  it('keeps the query parser unreachable in the production assembly with SCIM enabled', async () => {
+    // A handler using the parser would answer these with a list or a 400 SCIM Error.
+    const queries = [
+      'Users?filter=userName+ne+%22x%22',
+      'Users?attributes=password',
+      'Users?count=ten',
+      'Users?startIndex=2&count=0',
+    ]
+    expect(await productionAnswers(productionAppOptions, queries)).toEqual(
+      queries.map((resource) => ({
+        resource,
+        status: 404,
+        body: scimError(404, 'SCIM resources are not available yet.'),
+      })),
+    )
+  })
 
   it('keeps discovery unregistered in the production assembly with SCIM enabled', async () => {
     expect(await productionAnswers()).toEqual(unavailableAnswers)
