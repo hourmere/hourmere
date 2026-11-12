@@ -29,15 +29,22 @@ interface Recorder {
   afterTransaction: string[]
 }
 type Query = (...args: unknown[]) => Promise<pg.QueryResult>
+interface Failures {
+  /** Throw instead of running this identity read (1-based), before it reaches the server. */
+  identityRead?: number
+  /** Reject every ROLLBACK before it reaches the server, so the transaction stays open. */
+  rollback?: boolean
+}
 
 // Production PostgreSQL runs with jit=on; the test helper turns it off per database.
 // Each session here starts with the server default restored, as an operator's would.
 const jitSession = (url: string) =>
   new pg.Pool({ connectionString: url, max: 1, options: '-c jit=on' })
 
-function record(pool: pg.Pool, failIdentityRead = false): Recorder {
+function record(pool: pg.Pool, fail: Failures = {}): Recorder {
   const reads: IdentityRead[] = []
   const afterTransaction: string[] = []
+  let identityReads = 0
   const wrap = (client: pg.PoolClient) =>
     new Proxy(client, {
       get(target, key) {
@@ -45,11 +52,13 @@ function record(pool: pg.Pool, failIdentityRead = false): Recorder {
           return async (text: string, values?: unknown[]) => {
             const query = target.query.bind(target) as Query
             if (text.includes('AS memberships')) {
-              if (failIdentityRead) throw new Error('synthetic identity read failure')
+              if (++identityReads === fail.identityRead)
+                throw new Error('synthetic identity read failure')
               const explained = await query(`EXPLAIN (ANALYZE, FORMAT JSON) ${text}`, values)
               const plan = explained.rows[0]['QUERY PLAN'][0]
               reads.push({ jit: Object.hasOwn(plan, 'JIT'), cost: plan.Plan['Total Cost'] })
             }
+            if (fail.rollback && text === 'ROLLBACK') throw new Error('synthetic rollback failure')
             const result = await query(text, values)
             if (text === 'COMMIT' || text === 'ROLLBACK')
               afterTransaction.push((await query('SHOW jit')).rows[0].jit)
@@ -164,6 +173,12 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
         `Fixture did not price the identity read past JIT: ${JSON.stringify(control)}`,
       )
   }
+  // The same precondition for the importer's own reads: statistics that changed during the
+  // run are a harness error, never a killed mutation.
+  function requirePricedPastJit(reads: IdentityRead[]) {
+    if (!(Math.max(...reads.map((read) => read.cost)) > 100_000))
+      throw new Error(`Fixture lost the JIT state during the run: ${JSON.stringify(reads)}`)
+  }
   const comparable = (preview: PreviewPlan) => ({
     ...preview,
     cutoff: '',
@@ -181,8 +196,8 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
       const live = await preview(recorder.pool, f.input)
       // Extraction and the preview snapshot each read identities.
       expect(recorder.reads.length).toBeGreaterThanOrEqual(2)
+      requirePricedPastJit(recorder.reads)
       expect(recorder.reads.filter((read) => read.jit)).toEqual([])
-      expect(Math.max(...recorder.reads.map((read) => read.cost))).toBeGreaterThan(100_000)
       expect(recorder.afterTransaction.length).toBeGreaterThanOrEqual(2)
       expect(recorder.afterTransaction.filter((jit) => jit !== 'on')).toEqual([])
       // max: 1, so this is the same pooled session the preview used.
@@ -206,8 +221,8 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
       })
       // Re-extraction before the transaction, then the target checks inside it.
       expect(recorder.reads.length).toBeGreaterThanOrEqual(3)
+      requirePricedPastJit(recorder.reads)
       expect(recorder.reads.filter((read) => read.jit)).toEqual([])
-      expect(Math.max(...recorder.reads.map((read) => read.cost))).toBeGreaterThan(100_000)
       expect(recorder.afterTransaction.length).toBeGreaterThanOrEqual(2)
       expect(recorder.afterTransaction.filter((jit) => jit !== 'on')).toEqual([])
     } finally {
@@ -219,13 +234,48 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
     const f = await setup()
     const pool = jitSession(target.url)
     try {
-      const recorder = record(pool, true)
+      const recorder = record(pool, { identityRead: 1 })
       await expect(preview(recorder.pool, f.input)).rejects.toThrow(
         'synthetic identity read failure',
       )
       expect(recorder.afterTransaction).toEqual(['on'])
       // The pooled session left no open transaction and kept its own setting.
       expect((await pool.query('SHOW jit')).rows).toEqual([{ jit: 'on' }])
+    } finally {
+      await pool.end()
+    }
+  }
+
+  // The session's backend and the two settings an open importer transaction would leak.
+  async function session(pool: pg.Pool) {
+    const result = await pool.query<{ pid: number; jit: string; readOnly: string }>(
+      `SELECT pg_backend_pid() AS pid, current_setting('jit') AS jit,
+      current_setting('transaction_read_only') AS "readOnly"`,
+    )
+    return required(result.rows[0])
+  }
+
+  // Preview reads identities once in the extraction transaction, then once in its snapshot
+  // transaction. The chosen read fails and its ROLLBACK is rejected before reaching the
+  // server, so the session is still inside a read-only transaction with JIT off.
+  async function failedRollbackDiscards(identityRead: 1 | 2, preview = previewImport) {
+    const f = await setup()
+    const pool = jitSession(target.url)
+    try {
+      // max: 1, so the importer runs on this session.
+      const before = await session(pool)
+      expect(before).toMatchObject({ jit: 'on', readOnly: 'off' })
+      const recorder = record(pool, { identityRead, rollback: true })
+      await expect(preview(recorder.pool, f.input)).rejects.toThrow(
+        'synthetic identity read failure',
+      )
+      // A failing snapshot read comes after the extraction transaction committed.
+      expect(recorder.afterTransaction).toEqual(identityRead === 2 ? ['on'] : [])
+      // The session was dropped, not pooled; the next one is a new, clean backend.
+      expect(pool.totalCount).toBe(0)
+      const next = await session(pool)
+      expect(next.pid).not.toBe(before.pid)
+      expect(next).toMatchObject({ jit: 'on', readOnly: 'off' })
     } finally {
       await pool.end()
     }
@@ -253,6 +303,12 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
   }, 20_000)
   it('rolls back a failed identity read and returns a clean pooled session', async () => {
     await failedReadRollsBack()
+  }, 20_000)
+  it('discards the extraction session when its rollback fails', async () => {
+    await failedRollbackDiscards(1)
+  }, 20_000)
+  it('discards the preview snapshot session when its rollback fails', async () => {
+    await failedRollbackDiscards(2)
   }, 20_000)
 
   const applySource = new URL('./apply.ts', import.meta.url)
@@ -305,9 +361,24 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
     },
     {
       name: 'a missing rollback of the extraction read',
-      before: "await client.query('ROLLBACK').catch(() => { discard = true })",
-      after: '',
+      // The preview snapshot has the same catch; the extraction's comment keeps this unique.
+      before:
+        "await client.query('ROLLBACK').catch(() => { discard = true }) throw error } finally { // A session whose rollback failed",
+      after: 'throw error } finally { // A session whose rollback failed',
       run: failedReadRollsBack,
+    },
+    {
+      name: 'a pooled extraction session after a failed rollback',
+      before: 'never pool it. client.release(discard)',
+      // The needle starts inside a line comment; the call must stay on its own line.
+      after: 'never pool it.\n    client.release()',
+      run: (preview: typeof previewImport) => failedRollbackDiscards(1, preview),
+    },
+    {
+      name: 'a pooled preview snapshot session after a failed rollback',
+      before: 'is never pooled. client.release(discard)',
+      after: 'is never pooled.\n    client.release()',
+      run: (preview: typeof previewImport) => failedRollbackDiscards(2, preview),
     },
   ])(
     'detects $name in an isolated source copy',

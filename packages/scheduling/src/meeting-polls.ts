@@ -1,7 +1,7 @@
 // Host lifecycle for meeting polls: create, read, close, cancel, delete and public-link
 // rotation. This is an internal service with no transport; voter admission lives in
-// meeting-poll-voters.ts, and ballots, results, removal and finalization land in later
-// steps (docs/meeting-polls.md).
+// meeting-poll-voters.ts and ballots in meeting-poll-ballots.ts, while results, removal and
+// finalization land in later steps (docs/meeting-polls.md).
 //
 // Every host write takes the shared order: the transport's organization-write hook, actor
 // user SHARE, organization SHARE, actor membership SHARE, then the poll row FOR UPDATE and
