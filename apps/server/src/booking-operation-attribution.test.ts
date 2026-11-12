@@ -9,6 +9,7 @@ import type { BookingNotifier } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as bookings from '../../../packages/scheduling/src/bookings.ts'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { teamManagementAccess } from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -28,7 +29,9 @@ async function sourceCopy(before: string, after: string): Promise<BookingModule>
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  )
 }
 
 describe.skipIf(!serverUrl)('booking operation attribution', () => {
@@ -275,7 +278,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
 
   it('detects a removed team actor assignment in a source copy', async () => {
     const copy = await sourceCopy('    actor.userId,\n', '    null,\n')
-    await expect(verifyTeam(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verifyTeam)
   })
 
   it('detects an omitted operation write in a source copy', async () => {
@@ -283,31 +286,31 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
       "  await db\n    .insertInto('organization_operations')",
       "  if (false) await db\n    .insertInto('organization_operations')",
     )
-    await expect(verifyTeam(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verifyTeam)
   })
 
   it('detects lost host and private-link actor propagation in source copies', async () => {
     const s = await fixture()
     const hostCopy = await sourceCopy('      ctx.principal.user.id,\n', '      null,\n')
-    await hostCopy.cancelHostBooking(testContext(db, s.team.as(s.host), now), s.booking.id)
-    const verifyHost = async () =>
+    await expectKilled(hostCopy, async (copy) => {
+      await copy.cancelHostBooking(testContext(db, s.team.as(s.host), now), s.booking.id)
       expect((await operations(s.booking.id))[0]?.actor_user_id).toBe(s.host.id)
-    await expect(verifyHost()).rejects.toMatchObject({ name: 'AssertionError' })
+    })
     const link = await fixture()
     const linkCopy = await sourceCopy('      origin.actorUserId ?? null,\n', '      null,\n')
-    await linkCopy.cancelManagedBooking(
-      { db, now },
-      link.token,
-      {},
-      {
-        source: 'mcp',
-        apiKeyId: randomUUID(),
-        actorUserId: link.outsider.id,
-      },
-    )
-    const verifyLink = async () =>
+    await expectKilled(linkCopy, async (copy) => {
+      await copy.cancelManagedBooking(
+        { db, now },
+        link.token,
+        {},
+        {
+          source: 'mcp',
+          apiKeyId: randomUUID(),
+          actorUserId: link.outsider.id,
+        },
+      )
       expect((await operations(link.booking.id))[0]?.actor_user_id).toBe(link.outsider.id)
-    await expect(verifyLink()).rejects.toMatchObject({ name: 'AssertionError' })
+    })
   })
 
   it('requires the team helper transaction and detects removal of that guard', async () => {
@@ -327,7 +330,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
       "  if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')\n",
       '',
     )
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
   })
 
   it('detects lost team scoping in a source copy', async () => {
@@ -344,14 +347,13 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    const assertion = async () => {
+    await expectKilled(copy, async (module) => {
       await expect(
         s.access.write(s.principal, s.team.id, (trx, actor) =>
-          copy.cancelTeamBookingInTransaction(trx, actor, outside.id, now),
+          module.cancelTeamBookingInTransaction(trx, actor, outside.id, now),
         ),
       ).rejects.toMatchObject({ code: 'booking_not_found' })
-    }
-    await expect(assertion()).rejects.toMatchObject({ name: 'AssertionError' })
+    })
   })
 
   async function verifyClockAfterLock(copy: BookingModule) {
@@ -425,7 +427,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
       "  if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')",
       "  const checkedAt = now(); now = () => checkedAt;\n  if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')",
     )
-    await expect(verifyClockAfterLock(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verifyClockAfterLock)
   })
 
   async function verifyCancellationLockOrder(copy: BookingModule, path: 'host' | 'manage') {
@@ -524,9 +526,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
           : '    await lockCancellationOrganization(trx, parent.organization_id)\n',
         '',
       )
-      await expect(verifyCancellationLockOrder(copy, path)).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(copy, (module) => verifyCancellationLockOrder(module, path))
     },
     10_000,
   )
@@ -549,6 +549,6 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
       '    .forKeyShare()\n    .executeTakeFirst()\n  if (!row) throw bookingNotFound()',
       "    .forKeyShare()\n    .executeTakeFirst()\n  if (!row) throw new DomainError('not_found', 'event_type_not_found')",
     )
-    await expect(verifyDeletedOrganization(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verifyDeletedOrganization)
   })
 })

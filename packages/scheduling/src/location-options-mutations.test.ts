@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as Options from './location-options.ts'
 
 async function sourceCopy(mutate: (source: string) => string) {
@@ -13,9 +14,11 @@ async function sourceCopy(mutate: (source: string) => string) {
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`) as Promise<
-    typeof Options
-  >
+  return guardCopy(
+    (await import(
+      `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+    )) as typeof Options,
+  )
 }
 
 const reject = (module: typeof Options, value: unknown) =>
@@ -599,7 +602,7 @@ describe('location option source-copy mutation controls', () => {
     async ({ mutate, verify }) => {
       verify(Options)
       const copy = await sourceCopy(mutate)
-      expect(() => verify(copy)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+      await expectKilled(copy, verify)
     },
   )
 })

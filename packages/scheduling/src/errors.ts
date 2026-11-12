@@ -1,7 +1,7 @@
 /** What kind of failure, independent of transport; the HTTP layer maps each to a status. */
 export type DomainErrorKind = 'invalid' | 'not_found' | 'forbidden' | 'conflict'
 
-/** Codes the API uses for generic cases; services name specific cases instead. */
+/** Generic API codes; services may use invalid_request only for invalid input. */
 export const RESERVED_ERROR_CODES: ReadonlySet<string> = new Set([
   'invalid_request',
   'unauthorized',
@@ -38,7 +38,7 @@ export class DomainError extends Error {
     message?: string,
     options?: { cause?: unknown },
   ) {
-    if (RESERVED_ERROR_CODES.has(code)) {
+    if (RESERVED_ERROR_CODES.has(code) && !(kind === 'invalid' && code === 'invalid_request')) {
       throw new TypeError(`DomainError code "${code}" is reserved; name the specific case`)
     }
     super(message ?? code, options)
