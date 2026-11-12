@@ -2414,12 +2414,16 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
       const id = randomUUID()
       await accepted(reserve({ id, claim_id: randomUUID() })(f.pool))
       await refused(f.pool, unique('workflow_mail_reservations_pkey'), reserve({ id }))
-      // One reservation per recipient claim, even when two admissions race …
+      // One reservation per recipient claim, even when two admissions race … The two
+      // admissions are stamped a second apart: rows built in the same millisecond would
+      // share `reserved_at`, so a claim key widened with the timestamp could still refuse
+      // the second one and pass by chance.
+      const admittedAt = Date.now()
       await race(
         f,
         'concurrent admissions',
-        reserve(),
-        reserve(),
+        reserve({ reserved_at: new Date(admittedAt) }),
+        reserve({ reserved_at: new Date(admittedAt + 1000) }),
         unique('workflow_mail_reservations_claim'),
         async () =>
           (await f.rows('workflow_mail_reservations', 'claim_id=$1', [captured.claim])).length,
