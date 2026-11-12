@@ -1003,11 +1003,22 @@ export const executionProtections: Record<string, ExecutionProtection> = {
     },
     mutants: [
       mutant(
+        'an enrollment leaves the organization unlocked',
+        `  IF TG_OP = 'INSERT' THEN
+    PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
+    PERFORM FROM public.workflow_definitions`,
+        `  IF TG_OP = 'INSERT' THEN
+    PERFORM FROM public.workflow_definitions`,
+      ),
+      mutant(
         'an enrollment locks the definition before the organization',
         `  IF TG_OP = 'INSERT' THEN
     PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
     PERFORM FROM public.workflow_definitions`,
         `  IF TG_OP = 'INSERT' THEN
+    PERFORM FROM public.workflow_definitions
+      WHERE organization_id = NEW.organization_id AND id = NEW.workflow_id FOR SHARE;
+    PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
     PERFORM FROM public.workflow_definitions`,
       ),
       mutant(
@@ -1080,20 +1091,17 @@ export const executionProtections: Record<string, ExecutionProtection> = {
         (db) => insert(db, 'workflow_runs', f.runRow({ ...third, booking: first.booking })),
         "another booking's enrollment",
       )
-      // It expires after it is due.
+      // It expires after it is due (one instant for both, so they are exactly equal).
+      const due = hours(24)
       for (const [label, expires] of [
-        ['at the due instant', hours(24)],
-        ['before it', hours(23)],
+        ['at the due instant', due],
+        ['before it', new Date(due.getTime() - 1)],
       ] as const)
         await refused(
           f.pool,
           check('workflow_runs_window'),
           (db) =>
-            insert(
-              db,
-              'workflow_runs',
-              f.runRow(third, { due_at: hours(24), expires_at: expires }),
-            ),
+            insert(db, 'workflow_runs', f.runRow(third, { due_at: due, expires_at: expires })),
           label,
         )
       // It starts pending or skipped (capture records minimum_gap and offset_not_future).
@@ -1464,11 +1472,23 @@ export const executionProtections: Record<string, ExecutionProtection> = {
     },
     mutants: [
       mutant(
+        'a run leaves the organization unlocked',
+        `  IF TG_OP = 'INSERT' THEN
+    PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
+    SELECT workflow_id INTO workflow`,
+        `  IF TG_OP = 'INSERT' THEN
+    SELECT workflow_id INTO workflow`,
+      ),
+      mutant(
         'a run locks the definition before the organization',
         `  IF TG_OP = 'INSERT' THEN
     PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
     SELECT workflow_id INTO workflow`,
         `  IF TG_OP = 'INSERT' THEN
+    PERFORM FROM public.workflow_definitions d JOIN public.workflow_enrollments e
+        ON d.organization_id = e.organization_id AND d.id = e.workflow_id
+      WHERE e.organization_id = NEW.organization_id AND e.id = NEW.enrollment_id FOR SHARE OF d;
+    PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
     SELECT workflow_id INTO workflow`,
       ),
       mutant(
@@ -1741,7 +1761,14 @@ export const executionProtections: Record<string, ExecutionProtection> = {
             ]),
           assignment,
         )
-      // The marker, its reversal and a retry are ordinary changes of an unfinished claim.
+      // Under a claimed run, the marker, its reversal and a retry are ordinary changes of an
+      // unfinished claim.
+      await accepted(
+        f.pool.query(
+          `UPDATE workflow_runs SET state='claimed',claim_token=$2,lease_until=now()+interval '5 minutes' WHERE id=$1`,
+          [captured.run, randomUUID()],
+        ),
+      )
       for (const assignment of [
         `state='dispatching',claim_token='${randomUUID()}'`,
         "state='pending',claim_token=NULL,attempts=attempts+1,next_attempt_at=now()",
@@ -1938,6 +1965,13 @@ export const executionProtections: Record<string, ExecutionProtection> = {
         "state='delivery_unknown',finished_at=now()",
         ...skipReasons.map((reason) => `state='skipped',skip_reason='${reason}',finished_at=now()`),
       ]
+      // The run is claimed, so a marker may be set.
+      await accepted(
+        f.pool.query(
+          `UPDATE workflow_runs SET state='claimed',claim_token=$2,lease_until=now()+interval '5 minutes' WHERE id=$1`,
+          [captured.run, randomUUID()],
+        ),
+      )
       for (const assignment of valid)
         await rolledBack(f.pool, (db) => accepted(update(assignment)(db), assignment))
       const invalid = [
@@ -2027,8 +2061,12 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
     ],
   },
 
-  'recipient claim locks': {
-    objects: ['workflow_recipient_claims_guard'],
+  'recipient claim locks and markers': {
+    objects: [
+      'workflow_recipient_claims_guard',
+      'workflow_recipient_claims_marker',
+      'workflow_recipient_claims_dispatching',
+    ],
     check: async (f) => {
       const captured = await f.capture()
       const of = { organization: f.team, run: captured.run, booking: captured.booking }
@@ -2042,10 +2080,72 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
         ]),
       )
       await refused(f.pool, check('workflow_recipient_claims_open_run'), write, 'after retirement')
+
+      // A recipient is marked dispatching only while its run is claimed. A retirement that
+      // commits first prevents the marker; a marker that commits first holds the retirement
+      // back, and its attempt can still end after the run is retired.
+      const claimRun = (run: string) =>
+        f.pool.query(
+          `UPDATE workflow_runs SET state='claimed',claim_token=$2,lease_until=now()+interval '5 minutes' WHERE id=$1`,
+          [run, randomUUID()],
+        )
+      const mark = (claim: string) => (db: pg.PoolClient) =>
+        db.query(
+          `UPDATE workflow_recipient_claims SET state='dispatching',claim_token=$2 WHERE id=$1`,
+          [claim, randomUUID()],
+        )
+      const retire = (run: string) => (db: pg.PoolClient) =>
+        db.query(
+          `UPDATE workflow_runs SET state='retired',finished_at=now(),claim_token=NULL,lease_until=NULL WHERE id=$1`,
+          [run],
+        )
+      const marker = check('workflow_recipient_claims_marker')
+      const unclaimed = await f.capture()
+      await refused(f.pool, marker, mark(unclaimed.claim), 'a pending run')
+      const markedFirst = await f.capture()
+      await accepted(claimRun(markedFirst.run))
+      await takesTurns(f, 'marker first', mark(markedFirst.claim), retire(markedFirst.run))
+      await accepted(
+        f.pool.query(
+          `UPDATE workflow_recipient_claims SET state='delivery_unknown',claim_token=NULL,finished_at=now() WHERE id=$1`,
+          [markedFirst.claim],
+        ),
+        'the marked attempt ends after the retirement',
+      )
+      const retiredFirst = await f.capture()
+      await accepted(claimRun(retiredFirst.run))
+      await takesTurns(f, 'retirement first', retire(retiredFirst.run), async (db) => {
+        await expect(
+          mark(retiredFirst.claim)(db),
+          'the marker after the retirement',
+        ).rejects.toMatchObject(marker)
+      })
+      for (const state of ['completed', 'skipped']) {
+        const done = await f.capture()
+        await accepted(claimRun(done.run))
+        await accepted(
+          f.pool.query(
+            `UPDATE workflow_runs SET state=$2,finished_at=now(),claim_token=NULL,lease_until=NULL,
+              skip_reason=CASE WHEN $2='skipped' THEN 'expired' END WHERE id=$1`,
+            [done.run, state],
+          ),
+        )
+        await refused(f.pool, marker, mark(done.claim), `a ${state} run`)
+      }
+      // The repair of stopped attempts finds markers by index, oldest first.
+      expect(
+        await planUses(
+          f,
+          'workflow_recipient_claims_dispatching',
+          "SELECT id FROM workflow_recipient_claims WHERE state='dispatching' AND updated_at < $1 ORDER BY updated_at,id LIMIT 50",
+          [hours(0)],
+        ),
+        'marker repair',
+      ).toBe(true)
     },
     mutants: [
       mutant(
-        'a recipient locks its run before the organization',
+        'a recipient leaves the organization unlocked',
         `  IF TG_OP = 'INSERT' THEN
     PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
     SELECT state INTO run_state`,
@@ -2053,9 +2153,48 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
     SELECT state INTO run_state`,
       ),
       mutant(
+        'a recipient locks its run before the organization',
+        `  IF TG_OP = 'INSERT' THEN
+    PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
+    SELECT state INTO run_state`,
+        `  IF TG_OP = 'INSERT' THEN
+    PERFORM FROM public.workflow_runs
+      WHERE organization_id = NEW.organization_id AND id = NEW.run_id FOR SHARE;
+    PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
+    SELECT state INTO run_state`,
+      ),
+      mutant(
         'a new recipient does not hold off its run',
-        '      WHERE organization_id = NEW.organization_id AND id = NEW.run_id FOR SHARE;',
-        '      WHERE organization_id = NEW.organization_id AND id = NEW.run_id;',
+        `    SELECT state INTO run_state FROM public.workflow_runs
+      WHERE organization_id = NEW.organization_id AND id = NEW.run_id FOR SHARE;
+    IF FOUND AND run_state NOT IN ('pending', 'claimed') THEN`,
+        `    SELECT state INTO run_state FROM public.workflow_runs
+      WHERE organization_id = NEW.organization_id AND id = NEW.run_id;
+    IF FOUND AND run_state NOT IN ('pending', 'claimed') THEN`,
+      ),
+      mutant(
+        'a recipient may be marked under an unclaimed run',
+        "    IF run_state IS DISTINCT FROM 'claimed' THEN",
+        "    IF run_state IN ('completed', 'skipped', 'retired') THEN",
+      ),
+      mutant(
+        'a recipient may be marked under a finished run',
+        "    IF run_state IS DISTINCT FROM 'claimed' THEN",
+        "    IF run_state = 'pending' THEN",
+      ),
+      mutant(
+        'a marker does not hold off the retirement of its run',
+        `    SELECT state INTO run_state FROM public.workflow_runs
+      WHERE organization_id = NEW.organization_id AND id = NEW.run_id FOR SHARE;
+    IF run_state IS DISTINCT FROM 'claimed' THEN`,
+        `    SELECT state INTO run_state FROM public.workflow_runs
+      WHERE organization_id = NEW.organization_id AND id = NEW.run_id;
+    IF run_state IS DISTINCT FROM 'claimed' THEN`,
+      ),
+      mutant(
+        'markers are not indexed for their repair',
+        "ON workflow_recipient_claims (updated_at, id)\n  WHERE state = 'dispatching';",
+        "ON workflow_recipient_claims (updated_at, id)\n  WHERE state = 'pending';",
       ),
     ],
   },
@@ -2227,7 +2366,7 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
   RAISE EXCEPTION 'workflow run history is immutable'`,
       ),
       mutant(
-        'history locks the definition before the organization',
+        'history leaves the organization unlocked',
         `  IF TG_OP = 'INSERT' THEN
     PERFORM FROM auth.organization WHERE id = NEW.organization_id FOR KEY SHARE;
     RETURN NEW;
@@ -2240,8 +2379,8 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
       ),
       mutant(
         'the history page is not indexed by workflow',
-        'ON workflow_run_history (organization_id, workflow_id, finished_at);',
-        'ON workflow_run_history (organization_id, finished_at);',
+        'ON workflow_run_history (organization_id, workflow_id, finished_at, run_id);',
+        'ON workflow_run_history (organization_id, finished_at, run_id);',
       ),
       mutant(
         'the retention sweep is not indexed',
@@ -2379,6 +2518,7 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
           'workflow_mail_reservations_owner',
           'SELECT count(*) FROM workflow_mail_reservations WHERE organization_id=$1 AND reserved_at > $2',
           [f.team, hours(-1)],
+          ['organization_id', 'reserved_at'],
         ),
         'owner count',
       ).toBe(true)
@@ -2388,6 +2528,7 @@ CREATE TRIGGER workflow_recipient_claims_updated_at`,
           'workflow_mail_reservations_retention',
           'SELECT id FROM workflow_mail_reservations WHERE reserved_at < $1',
           [hours(-48)],
+          ['reserved_at'],
         ),
         'cleanup sweep',
       ).toBe(true)

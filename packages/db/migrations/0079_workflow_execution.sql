@@ -13,8 +13,8 @@
 -- revisions keeps every booking's enrollment, run and recipient claim: replayed capture or
 -- repair meets the same unique identity and cannot dispatch again. These rows hold identity,
 -- timing and fixed codes, never definition content, rendered text or addresses, and they go
--- only with their booking or organization. A purge waits until the workflow has no unfinished
--- run, and no enrollment or run is added for a tombstoned or purged workflow.
+-- only with their booking or organization. A purge is refused while the workflow has an
+-- unfinished run, and no enrollment or run is added for a tombstoned or purged workflow.
 
 -- A booking's capture of one workflow revision at one lifecycle occurrence: its creation (timer
 -- and creation triggers; a reschedule successor carries its timer enrollments under this
@@ -232,10 +232,17 @@ CREATE TABLE workflow_recipient_claims (
 );
 CREATE TRIGGER workflow_recipient_claims_updated_at BEFORE UPDATE ON workflow_recipient_claims
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- Markers whose attempt may have stopped, for the repair that ends them, even under a run that
+-- finished meanwhile.
+CREATE INDEX workflow_recipient_claims_dispatching ON workflow_recipient_claims (updated_at, id)
+  WHERE state = 'dispatching';
 
 -- A recipient is claimed after the organization lock, only while its run is unfinished, and
--- starts pending or skipped. Its identity and intent never change, a finished claim is final,
--- and it is removed only with its run or organization.
+-- starts pending or skipped. Its identity and intent never change and a finished claim is final.
+-- It is marked dispatching only while its run is claimed: the marker shares the run, so a
+-- retirement that commits first prevents the marker, and a marker that commits first holds the
+-- retirement back until it has committed. A marker transaction locks the run before the
+-- recipient, as retirement does. A claim is removed only with its run or organization.
 CREATE FUNCTION guard_workflow_recipient_claim() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 DECLARE
@@ -275,6 +282,14 @@ BEGIN
     RAISE EXCEPTION 'a finished recipient claim is final'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'workflow_recipient_claims_final';
   END IF;
+  IF NEW.state = 'dispatching' AND OLD.state <> 'dispatching' THEN
+    SELECT state INTO run_state FROM public.workflow_runs
+      WHERE organization_id = NEW.organization_id AND id = NEW.run_id FOR SHARE;
+    IF run_state IS DISTINCT FROM 'claimed' THEN
+      RAISE EXCEPTION 'a recipient is marked dispatching only while its run is claimed'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'workflow_recipient_claims_marker';
+    END IF;
+  END IF;
   RETURN NEW;
 END $$;
 CREATE TRIGGER workflow_recipient_claims_guard
@@ -313,8 +328,9 @@ CREATE TABLE workflow_run_history (
         'workflow_disabled', 'instance_disabled')))
   ) IS TRUE)
 );
+-- A workflow's history pages, newest first, with the run as a stable tiebreaker.
 CREATE INDEX workflow_run_history_page
-  ON workflow_run_history (organization_id, workflow_id, finished_at);
+  ON workflow_run_history (organization_id, workflow_id, finished_at, run_id);
 CREATE INDEX workflow_run_history_retention ON workflow_run_history (finished_at);
 
 CREATE FUNCTION guard_workflow_run_history() RETURNS trigger
@@ -385,8 +401,8 @@ ALTER TABLE notification_email_sends ADD CONSTRAINT notification_email_sends_wor
 CREATE UNIQUE INDEX notification_email_sends_workflow_reservation
   ON notification_email_sends (workflow_reservation_id) WHERE workflow_reservation_id IS NOT NULL;
 
--- A definition is purged (its tombstone deleted with its revisions) only once none of its runs
--- is unfinished; with its organization or personal owner it always goes.
+-- A definition's purge (deleting its tombstone with its revisions) is refused while one of its
+-- runs is unfinished; with its organization or personal owner it always goes.
 CREATE FUNCTION guard_workflow_definition_purge() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN

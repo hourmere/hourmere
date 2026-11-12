@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -16,9 +16,10 @@ const serverUrl = process.env.DATABASE_URL
 
 /**
  * Constraints, standalone indexes, triggers and NOT NULL columns of the new tables, plus the
- * objects the migration names on the existing tables it extends.
+ * objects the migration names on the existing tables it extends. Objects that later migrations
+ * name are theirs to cover.
  */
-async function catalogObjects(pool: pg.Pool, named: Set<string>) {
+async function catalogObjects(pool: pg.Pool, named: Set<string>, later: Set<string>) {
   const relations = `SELECT oid FROM pg_class WHERE relname = ANY($1) AND relnamespace='public'::regnamespace`
   const names = async (sql: string) => {
     const created = (await pool.query<{ name: string }>(sql, [[...executionTables]])).rows
@@ -26,7 +27,9 @@ async function catalogObjects(pool: pg.Pool, named: Set<string>) {
     return [
       ...created.map(({ name }) => name),
       ...extended.map(({ name }) => name).filter((name) => named.has(name)),
-    ].sort()
+    ]
+      .filter((name) => !later.has(name))
+      .sort()
   }
   return {
     constraints: await names(
@@ -62,21 +65,33 @@ describe.skipIf(!serverUrl)('workflow execution storage', () => {
 
   it('names every constraint, index, trigger, NOT NULL column and trigger rule in a protection', async () => {
     const source = await readFile(join(migrationsDir, executionMigration), 'utf8')
-    const named = new Set(
-      [...source.matchAll(/(?:CONSTRAINT|INDEX|TRIGGER) (?:= ')?([a-z_]+)/g)].map(
-        ([, name]) => name as string,
-      ),
+    const objectNames = (sql: string) =>
+      new Set(
+        [...sql.matchAll(/(?:CREATE TRIGGER|CREATE (?:UNIQUE )?INDEX|CONSTRAINT) ([a-z_]+)/g)].map(
+          ([, name]) => name as string,
+        ),
+      )
+    const later = new Set<string>()
+    for (const file of (await readdir(migrationsDir)).filter(
+      (name) => name.endsWith('.sql') && name > executionMigration,
+    ))
+      for (const name of objectNames(await readFile(join(migrationsDir, file), 'utf8')))
+        later.add(name)
+    const { constraints, indexes, triggers, notNull } = await catalogObjects(
+      owned.pool,
+      objectNames(source),
+      later,
     )
-    const { constraints, indexes, triggers, notNull } = await catalogObjects(owned.pool, named)
     // Every rule a guard raises names itself as the error's constraint.
     const rules = [...source.matchAll(/CONSTRAINT = '([a-z_]+)'/g)].map(([, rule]) => rule)
     expect(new Set(rules).size).toBe(rules.length)
-    expect(rules).toHaveLength(19)
+    expect(rules).toHaveLength(20)
     expect(indexes).toEqual([
       'notification_email_sends_workflow_reservation',
       'workflow_enrollments_workflow',
       'workflow_mail_reservations_owner',
       'workflow_mail_reservations_retention',
+      'workflow_recipient_claims_dispatching',
       'workflow_run_history_page',
       'workflow_run_history_retention',
       'workflow_runs_due',

@@ -103,6 +103,7 @@ describe.skipIf(!serverUrl)('the shared mail ledger across the workflow executio
     const now = new Date()
     const ago = (hours: number) => new Date(now.getTime() - hours * HOUR)
     const copies: TestDatabase[] = []
+    const directories: string[] = []
     let template: Awaited<ReturnType<typeof createTestDatabaseTemplate>> | undefined
     try {
       const files = (await readdir(migrations))
@@ -139,7 +140,12 @@ describe.skipIf(!serverUrl)('the shared mail ledger across the workflow executio
       )
       const before = await template.clone(predecessors, { tag: 'wf_ledger' })
       copies.push(before)
-      const after = await template.clone(undefined, { tag: 'wf_ledger' })
+      // The predecessor plus 0079 only, whatever later migrations main has.
+      const upgraded = await mkdtemp(join(tmpdir(), 'hourmere-workflow-ledger-upgraded-'))
+      directories.push(upgraded)
+      for (const file of [...files, upgrade])
+        await copyFile(join(migrations, file), join(upgraded, file))
+      const after = await template.clone(upgraded, { tag: 'wf_ledger' })
       copies.push(after)
       expect(
         (
@@ -205,7 +211,8 @@ describe.skipIf(!serverUrl)('the shared mail ledger across the workflow executio
     } finally {
       for (const copy of copies) await copy.drop()
       await template?.drop()
-      await rm(predecessors, { recursive: true, force: true })
+      for (const directory of [predecessors, ...directories])
+        await rm(directory, { recursive: true, force: true })
     }
   }, 120_000)
 })

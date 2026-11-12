@@ -626,8 +626,8 @@ protection while a booking, snapshot or job can still reference it: retain minim
 non-content terminal identity tombstones until all such references are retired. The execution
 rows are those tombstones: they name the workflow and revision without a foreign key to the
 definition and hold no content, so purging a tombstoned definition with its revisions keeps
-them until their booking or organization goes, and a purge waits until the workflow has no
-unfinished run. History retention deletes only the history records. No replay
+them until their booking or organization goes, and a purge is refused while the workflow has
+an unfinished run. History retention deletes only the history records. No replay
 endpoint exists. Booking deletion removes private snapshots and safely retires ID-only
 jobs. Never store rendered mail bodies, plaintext endpoint secrets or answer snapshots
 in audit/history merely for diagnostics.
