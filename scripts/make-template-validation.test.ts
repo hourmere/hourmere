@@ -582,6 +582,15 @@ function verify(check: typeof validator) {
       'A leaked `bookings` key could cancel every booking you host, plus the bookings of its members.',
       'overstated leaked key reach',
     ],
+    // A wider clause in other words: only the allowed consequence may follow the reach.
+    [
+      'A leaked `bookings` key could cancel every booking you host in that organization, and the ones your teammates host, exposing invitee data.',
+      'overstated leaked key reach',
+    ],
+    [
+      "A leaked `bookings` key could cancel every booking you host, plus your colleagues' appointments, including exposing invitee data.",
+      'overstated leaked key reach',
+    ],
     ['A leaked `read` key could cancel every booking you host.', 'unsupported leaked key action'],
     [
       'A leaked `bookings` key could delete every booking you host.',
@@ -958,7 +967,7 @@ describe('Make manual recipe artifacts', () => {
     ]
     expect(errors(operations)).toEqual([])
     // Both guides state the hosted-only reach, and rewording the reach of the actual
-    // statement fails, whatever the phrasing.
+    // statement or widening its trailing clause fails, whatever the phrasing.
     for (const raw of [site, read('find-slots-create-booking.md')]) {
       expect(raw).toMatch(
         /A leaked `bookings` key\s+could\s+list,\s+cancel\s+and\s+reschedule\s+every\s+booking\s+you\s+host\b/,
@@ -976,6 +985,14 @@ describe('Make manual recipe artifacts', () => {
           'overstated leaked key reach',
         )
       }
+      const widened = raw.replace(
+        /in\s+that\s+organization,/,
+        'in that organization, and the ones your teammates host,',
+      )
+      expect(widened).not.toBe(raw)
+      expect(validator.validateMakeScopes(widened, operations)).toContain(
+        'overstated leaked key reach',
+      )
     }
     // Changing the requirement of any documented operation fails the documents stating it.
     for (const [id, update] of [
@@ -1204,8 +1221,8 @@ describe('source-copy Make validator mutation checks', () => {
     ],
     ['leaked key scope', "!operation.allowedScopes.includes(match[1] ?? '')", 'false'],
     ['hosted-only leaked key reach', 'every booking you host(?: in', '[a-z ]+(?: in'],
-    ['leaked key clause end', '((?:,.*)?)$/', '(.*)$/'],
-    ['leaked key clause scope', '/\\b(?:all|any|every|other|bookings?|', '/\\b(?:'],
+    ['leaked key clause end', 'exposing invitee data)?$/', 'exposing invitee data)?/'],
+    ['leaked key clause allow-list', '(?:, (?:including )?exposing invitee data)?$/', '(?:,.*)?$/'],
     ['inclusive timestamp operator', 'Less than or equal to\\*\\*', 'Less than[^*]*\\*\\*'],
     ['manifest scope', "return ['unbound API key scope']", 'return []'],
     ['every signature row', 'evaluated = false', 'evaluated = true'],

@@ -556,17 +556,18 @@ export function validateMakeScopes(raw: string, operations: ApiKeyOperations) {
       else if (scope) errors.push(...requireScope(scope, ids, operations))
     }
   }
-  // Every leaked-key statement, up to the end of its clause, states exactly the hosted-only
-  // reach: its actions, "every booking you host" (optionally "in that organization"), then at
-  // most a comma clause that names no wider set of bookings. Any other phrasing is not bound.
+  // Every "A leaked `x` key" statement, up to the end of its clause, states exactly the
+  // hosted-only reach: its actions, "every booking you host" (optionally "in that
+  // organization"), then at most the consequence ", exposing invitee data" (optionally
+  // "including"). Any other wording of the statement or of its trailing clause fails, even a
+  // harmless one, so a new wording must be added here deliberately.
   for (const match of raw.matchAll(/A leaked `([a-z]+)` key\b[^.;]*/g)) {
-    const [, actions, tail = ''] =
-      match[0]
-        .replace(/\s+/g, ' ')
-        .match(
-          /^A leaked `[a-z]+` key could ((?:[a-z]+(?:, | and ))*[a-z]+) every booking you host(?: in that organization)?((?:,.*)?)$/,
-        ) ?? []
-    if (!actions || /\b(?:all|any|every|other|bookings?|organi[sz]ations?)\b/i.test(tail)) {
+    const actions = match[0]
+      .replace(/\s+/g, ' ')
+      .match(
+        /^A leaked `[a-z]+` key could ((?:[a-z]+(?:, | and ))*[a-z]+) every booking you host(?: in that organization)?(?:, (?:including )?exposing invitee data)?$/,
+      )?.[1]
+    if (!actions) {
       errors.push('overstated leaked key reach')
       continue
     }
