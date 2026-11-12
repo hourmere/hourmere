@@ -19,8 +19,9 @@ sequence gaps are normal after rollback and IDs do not promise commit ordering.
 Indexes cover organization plus time, actor, or action, with ID tie breakers.
 
 Actors form a database-checked closed set: `user`, `api_key`, `oauth_client`,
-`system` (job/service name as ID), `external_api_key`, `external_oauth_client`,
-`external_user` and `anonymous` (the last four without IDs). Credentials are
+`system` (job/service name as ID), `scim_token` (a SCIM provisioning token's ID, always with
+credential `none`, because the token is the credential), `external_api_key`,
+`external_oauth_client`, `external_user` and `anonymous` (the last four without IDs). Credentials are
 `session` (optional session ID), `api_key` (ID and actual scope), `oauth` (client
 and grant IDs), or `none`. Legacy internal calls without an authenticated
 principal may have a null API-key scope (unknown); HTTP and MCP authenticated
@@ -58,7 +59,7 @@ Branding updates allow only `logo` (`uploaded`, `selected` or `removed`) and
 `primaryColor` (`set` or `cleared`), at least one of them; the database also checks
 these values. Attendee no-show changes require exactly `attendeeId` (the attendee's
 stored ID, a lowercase UUID) and `noShow` (`marked` or `unmarked`); the database checks
-both values. Every other action, including the SCIM provisioning token actions,
+both values. Every other action, including the SCIM provisioning token and User actions,
 requires an empty object. No key or token names, webhook or Slack URLs, secrets,
 images, logo hashes, colours, attendee names, email addresses or free text are
 recorded. New detail keys require deliberate schema and documentation review.
@@ -69,6 +70,7 @@ recorded. New detail keys require deliberate schema and documentation review.
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
+| SCIM Users | `scim_user.created` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
@@ -163,6 +165,14 @@ SCIM provisioning token creation, rotation and revocation record `scim_token.cre
 admin session that made the change, with empty details: like API keys, no token name,
 secret or digest is recorded. Revoking an already revoked token records nothing, and a
 refused rotation (a revoked token or an active overlap) records nothing.
+
+SCIM User creation (`POST /Users`, which production does not register yet) records
+`scim_user.created` on the new resource ID, attributed to the provisioning token that made the
+request (actor `scim_token`, credential `none`), with empty details: no `userName`, address,
+name or other attribute value is recorded. The invitation it issues records
+`membership.invited` with the same attribution. Both are written in the transaction that
+creates the entry, its claim and the invitation, so a create that fails or is refused records
+nothing.
 
 An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity by its stored ID, whatever UUID

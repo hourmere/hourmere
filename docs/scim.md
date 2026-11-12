@@ -8,8 +8,9 @@ ServiceProviderConfig, ResourceTypes and Schemas handlers that only test harness
 under the resource test flag described in the implementation plan; production registers none.
 The query parser step adds the shared filter, projection and pagination parser those handlers
 will use; it adds no endpoint, and production imports none of it. The User reads step adds
-`GET /Users` and `GET /Users/{id}` handlers under the same resource test flag; production
-registers none of them either.
+`GET /Users` and `GET /Users/{id}` handlers under the same resource test flag, and the User
+creation step adds `POST /Users` under it, with pending claims and invitations through the
+existing invitation service; production registers none of them either.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -135,6 +136,34 @@ canonical lower-case form names an entry. Representations hold exactly the adver
 fields: `emails` carries the one work address as the primary `work` value, and `manager`
 names only a live entry, with `displayName` derived from it; a retired manager is omitted.
 The list counts and reads its page in one snapshot.
+
+User creation records one live entry in the connection the token is bound to and answers 201
+with the read representation and its location. Within the organization update lock that team
+management takes, it rechecks that the token is unrevoked, then inserts the entry: a live
+entry of the connection with the same trimmed, lower-cased `userName` or the same
+`externalId` gets 409 `uniqueness`, while retired entries and other connections never
+conflict. Read-only and server-owned attributes (`id`, `meta`, `groups`,
+`manager.displayName`) are ignored, as are the RFC 7643 attributes Hourmere does not map,
+`password` included, which is never stored or recorded; an unknown attribute or extension
+gets 400 `invalidValue`, a nonempty `roles` or `entitlements` gets 403 `mutability`, and a
+`manager` must name a live entry of the same connection. `active` may only be true until the
+lifecycle step enables its writes. When the User has a work address (the one `work` entry
+of `emails`, or the primary one among several), the same transaction records a pending
+claim and issues its invitation through the existing invitation service, with the same
+address rules, member-role invitation, mail admission limits, pending cap and delivery
+queue as an invitation sent from the app: the earliest current owner of the organization
+whose email address is verified is the inviter (with no such owner the create gets 409), a
+pending invitation of that owner to the same address is reused rather than sent again, and
+its delivery generation is queued only after commit. An address that belongs to a member,
+to another administrator's or a legacy pending invitation or to another entry's claim gets
+409 `uniqueness`; exhausted admission limits get 429 with `Retry-After`. Sign-up
+policy is decided from the instance settings alone: a restricted instance (`SIGNUP` set to
+`closed` or `first-user`) refuses a work address whose domain is not in
+`SIGNUP_ALLOWED_DOMAINS` with 403, whether or not an account exists. No account, membership
+or session is created, no address is marked verified and nothing is linked: admission waits
+for the claim. The entry, its claim, the invitation and the `scim_user.created` and
+`membership.invited` events commit or roll back together; the events name the provisioning
+token as their actor.
 
 No ETags or `meta.version` in the first release; advertise `etag.supported=false`.
 Reject conditional writes with 412 rather than pretend to honor If-Match. Serialize
@@ -344,6 +373,21 @@ source) against the bounded wait and its retry.
   decision is already recorded as a live tombstone for the same organization, mailbox,
   authority and kind; the existing tombstone remains. Sign-up and sign-in do not yet cap
   account mailbox length; invitations cap it at 254 characters.
+- User creation, available only to test harnesses so far, issues its invitations within the
+  existing invitation admission limits: by default 20 an hour and 100 a day per inviter, 50
+  an hour and 200 a day per team, 5 an hour and 20 a day per recipient address, and 100
+  pending invitations per team. The inviter is the earliest verified owner, so provisioning
+  spends that owner's own invitation budget too. An identity provider's first
+  synchronization of a larger organization therefore gets 429 with `Retry-After: 3600`
+  until capacity returns; the pending cap only frees up as invitations are accepted or
+  expire after 48 hours. The `INVITATION_*` limits can be raised.
+- User creation refuses an address that already belongs to a member of the organization
+  with 409 and stores nothing, so an identity provider's first synchronization of a team
+  that already has members reports those members as conflicts. Adopting existing members
+  needs the claim completion and linking step.
+- When creation reuses the inviting owner's pending invitation, that invitation keeps its
+  delivery state; if its email already failed, an administrator resends it from the team's
+  pending invitations.
 
 
 ## Groups to teams: required schema decision
@@ -428,10 +472,12 @@ never bearer values, bodies or secret-bearing responses.
 
 The [audit journal](audit-log.md) records token administration as `scim_token.created`,
 `scim_token.rotated` and `scim_token.revoked`: the token ID and the session that made the
-change, never the name, secret or digest. Token foundation must never claim full audit
-coverage. Required future actions:
-scim.authentication_failed and scim.rate_limited (bounded aggregation); scim.user.create,
-update, claim, deactivate, reactivate, delete; scim.group.create, update, delete;
+change, never the name, secret or digest. User creation records `scim_user.created` on the
+new resource ID, with the provisioning token as actor (`scim_token`, credential `none`) and
+empty details; the invitation it issues records `membership.invited` the same way. Token
+foundation must never claim full audit coverage. Required future actions:
+scim.authentication_failed and scim.rate_limited (bounded aggregation); scim.user.update,
+claim, deactivate, reactivate, delete; scim.group.create, update, delete;
 scim.group.member.add/remove; scim.mapping.link/unlink; scim.conflict;
 scim.privileged_member_blocked; scim.last_owner_blocked; scim.membership.suspended; scim.credentials.revoked.
 Record organization/connection, safe credential ID or human actor, target opaque ID,

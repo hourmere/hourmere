@@ -76,6 +76,15 @@ export {
   type ResendInvitation,
   type ResendInvitationDelivery,
 } from './invitation-resend.ts'
+export {
+  admitInvitation,
+  type EnqueueInvitationEmail,
+  type InvitationAdmission,
+  type InvitationIssuer,
+  invitationEmailAccepted,
+  invitationRefusalCode,
+  type ReserveInvitationEmail,
+} from './invitations.ts'
 export { escapeControlCharacters, redactLogDetails } from './log.ts'
 export { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from './magic-link.ts'
 export {

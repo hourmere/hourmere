@@ -236,11 +236,10 @@ async function listUsers(db: Db, request: ScimResourceRequest): Promise<ScimRepl
   return { status: 200, body: scimListResponse(page, total, resources) }
 }
 
-async function readUser(db: Db, request: ScimResourceRequest, id: string): Promise<ScimReply> {
-  const parsed = parseScimProjection(request.query, scimUserQuery)
-  if (!parsed.ok) return parsed.reply
-  if (!UUID.test(id)) return notFound
-  const row = await db
+// The live entry `id` of the token's connection. Creation answers from it too, inside its
+// own transaction.
+function scopedUser(db: Db, request: ScimResourceRequest, id: string) {
+  return db
     .selectFrom('scim_users')
     .select(columns)
     .select(manager)
@@ -248,6 +247,19 @@ async function readUser(db: Db, request: ScimResourceRequest, id: string): Promi
     .where(scope(request.principal))
     .where('scim_users.retired_at', 'is', null)
     .executeTakeFirst()
+}
+
+/** The full representation of the live entry `id` of the token's connection, if any. */
+export async function readScimUser(db: Db, request: ScimResourceRequest, id: string) {
+  const row = await scopedUser(db, request, id)
+  return row && representation(row, request.base)
+}
+
+async function readUser(db: Db, request: ScimResourceRequest, id: string): Promise<ScimReply> {
+  const parsed = parseScimProjection(request.query, scimUserQuery)
+  if (!parsed.ok) return parsed.reply
+  if (!UUID.test(id)) return notFound
+  const row = await scopedUser(db, request, id)
   if (!row) return notFound
   return {
     status: 200,
