@@ -24,6 +24,42 @@ async function disabled(run: () => Promise<unknown>) {
   expect(error).toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
 }
 
+/**
+ * The exact source of every statement in hard-off.ts: its import, the constant and the four
+ * guards. Each guard decides from the constant alone and takes no option.
+ */
+const FROZEN_HARD_OFF_STATEMENTS = [
+  "import { DomainError } from '@hourmere/scheduling/errors'",
+  'export const WORKFLOWS_IMPLEMENTED: boolean = false',
+  `export function requireWorkflowsImplemented(): void {
+  if (WORKFLOWS_IMPLEMENTED !== true) throw new DomainError('not_found', 'workflows_disabled')
+}`,
+  `export function workflowOperation<Args extends unknown[], Result>(
+  operation: (...args: Args) => Promise<Result>,
+): (...args: Args) => Promise<Result> {
+  return async (...args) => {
+    requireWorkflowsImplemented()
+    return operation(...args)
+  }
+}`,
+  `export function workflowCapture<Args extends unknown[]>(
+  capture: (...args: Args) => Promise<void>,
+): (...args: Args) => Promise<void> {
+  return async (...args) => {
+    if (WORKFLOWS_IMPLEMENTED !== true) return
+    await capture(...args)
+  }
+}`,
+  `export function workflowExecution<Args extends unknown[]>(
+  execute: (...args: Args) => Promise<void>,
+): (...args: Args) => Promise<void> {
+  return async (...args) => {
+    if (WORKFLOWS_IMPLEMENTED !== true) return
+    await execute(...args)
+  }
+}`,
+]
+
 /** How each guarded entry point refuses while workflows are off; the inner call never runs. */
 const refusals: Record<string, () => Promise<void>> = {
   requireWorkflowsImplemented: () => disabled(async () => hardOff.requireWorkflowsImplemented()),
@@ -106,73 +142,18 @@ describe('workflow hard-off', () => {
     ).toEqual([])
   })
 
-  it('decides in every guard from the constant alone, with no option or other state', () => {
+  it('pins every statement of the module, each guard body included, to its frozen source', () => {
     const source = readFileSync(join(root, 'packages/workflows/src/hard-off.ts'), 'utf8')
     const program = parse(source, { sourceType: 'module', plugins: ['typescript'] }).program
-    const named = (node: { type: string; name?: string }) =>
-      node.type === 'Identifier' ? node.name : node.type
-    // The module imports the error type only and holds no state besides the constant, and
-    // each guard takes exactly its documented parameters: no option, default or rest.
+    // An allow-list, not a search for forbidden shapes: any change to the code of a guard (a
+    // parameter, a default, a loop, a cast, a property read, a call-time argument, another
+    // import or module state) fails here. Comments between statements may change. Only the
+    // plan's opt-in step, which sets the constant true, updates this list.
+    expect(program.interpreter ?? null).toBeNull()
+    expect(program.directives).toEqual([])
     expect(
-      program.body.map((statement) => {
-        if (statement.type === 'ImportDeclaration')
-          return `import ${statement.specifiers.map(({ local }) => local.name)} from ${statement.source.value}`
-        const declaration =
-          statement.type === 'ExportNamedDeclaration' ? statement.declaration : undefined
-        if (declaration?.type === 'VariableDeclaration')
-          return `${declaration.kind} ${declaration.declarations.map(({ id }) => named(id))}`
-        if (declaration?.type === 'FunctionDeclaration')
-          return `function ${declaration.id?.name}(${declaration.params.map(named)})`
-        return statement.type
-      }),
-    ).toEqual([
-      'import DomainError from @hourmere/scheduling/errors',
-      'const WORKFLOWS_IMPLEMENTED',
-      'function requireWorkflowsImplemented()',
-      'function workflowOperation(operation)',
-      'function workflowCapture(capture)',
-      'function workflowExecution(execute)',
-    ])
-    // The guards read only their own parameters, the constant, the error type and the shared
-    // guard, never a property; every branch is the constant check itself.
-    const reads = new Set<string>()
-    const branches: string[] = []
-    const stack: unknown[] = [program.body.slice(1)]
-    while (stack.length) {
-      const node = stack.pop()
-      if (Array.isArray(node)) {
-        stack.push(...node)
-        continue
-      }
-      if (typeof node !== 'object' || node === null) continue
-      const value = node as Record<string, unknown> & { type: string }
-      if (value.type === 'Identifier') reads.add(value.name as string)
-      if (value.type === 'IfStatement') {
-        const test = value.test as { start: number; end: number }
-        branches.push(source.slice(test.start, test.end))
-      }
-      if (/^(?:Optional)?MemberExpression$|^This|^Logical|^Conditional|^Switch/.test(value.type))
-        branches.push(value.type)
-      for (const [key, child] of Object.entries(value))
-        if (
-          !['loc', 'extra', 'typeAnnotation', 'returnType', 'typeParameters'].includes(key) &&
-          typeof child === 'object'
-        )
-          stack.push(child)
-    }
-    expect([...reads].sort()).toEqual([
-      'DomainError',
-      'WORKFLOWS_IMPLEMENTED',
-      'args',
-      'capture',
-      'execute',
-      'operation',
-      'requireWorkflowsImplemented',
-      'workflowCapture',
-      'workflowExecution',
-      'workflowOperation',
-    ])
-    expect(branches).toEqual(Array(3).fill('WORKFLOWS_IMPLEMENTED !== true'))
+      program.body.map((statement) => source.slice(statement.start ?? 0, statement.end ?? 0)),
+    ).toEqual(FROZEN_HARD_OFF_STATEMENTS)
   })
 
   it('cannot be turned on by a production import or the environment', () => {

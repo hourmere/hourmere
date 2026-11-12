@@ -141,11 +141,16 @@ describe('test database ownership', () => {
     await owned.drop()
     const name = new URL(owned.url).pathname.slice(1)
     expect(admin.query).toHaveBeenNthCalledWith(
-      3,
+      2,
+      `ALTER DATABASE ${name} SET synchronous_commit = off`,
+    )
+    expect(admin.query).toHaveBeenNthCalledWith(3, `ALTER DATABASE ${name} SET jit = off`)
+    expect(admin.query).toHaveBeenNthCalledWith(
+      4,
       'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
       [name],
     )
-    expect(admin.query).toHaveBeenNthCalledWith(4, `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+    expect(admin.query).toHaveBeenNthCalledWith(5, `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
   })
 
   it.each([
@@ -463,17 +468,28 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     }
   })
 
-  it('creates migrated fixtures with synchronous_commit disabled', async () => {
+  it('creates migrated fixtures with synchronous_commit and JIT disabled', async () => {
     const owned = await createTestDatabase(serverUrl as string)
+    const client = await owned.pool.connect()
     try {
-      expect((await owned.pool.query('SHOW synchronous_commit')).rows).toEqual([
+      expect((await client.query('SHOW synchronous_commit')).rows).toEqual([
         { synchronous_commit: 'off' },
       ])
+      expect((await client.query('SHOW jit')).rows).toEqual([{ jit: 'off' }])
+      // Mid-file statistics can lift any read past the JIT thresholds. Cross them here and
+      // require the read to run uncompiled.
+      await client.query('SET jit_above_cost = 0')
+      const plan = (
+        await client.query('EXPLAIN (ANALYZE, FORMAT JSON) SELECT count(*) FROM schema_migrations')
+      ).rows[0]?.['QUERY PLAN']?.[0]
+      expect(plan?.['Execution Time']).toEqual(expect.any(Number))
+      expect(plan).not.toHaveProperty('JIT')
       expect(
-        (await owned.pool.query<{ n: number }>('SELECT count(*)::int AS n FROM schema_migrations'))
+        (await client.query<{ n: number }>('SELECT count(*)::int AS n FROM schema_migrations'))
           .rows[0]?.n,
       ).toBeGreaterThan(0)
     } finally {
+      client.release(true)
       await owned.drop()
     }
   })

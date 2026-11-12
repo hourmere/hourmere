@@ -986,11 +986,60 @@ trigger rule also has source-copy mutations that remove or weaken it
 upgrade test preserves a populated predecessor, including the SSO configuration rows of
 0074, down to row versions and compares fresh and upgraded schemas.
 
+## Workflow definition storage
+
+Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
+(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Nothing reads or writes
+them yet: there is no route, worker, read path or setting, and workflows stay hard-off behind
+`WORKFLOWS_IMPLEMENTED = false`. A test keeps every production module outside the storage
+layer from naming them.
+
+- **Definitions** have an immutable ID, organization, owner and creation time. A personal
+  definition belongs to its user in that user's personal organization (`owner_user_id`); a
+  team definition (`owner_user_id` NULL) belongs to the team organization, never to the member
+  who created it, and is refused in a personal organization. The owner is checked when the
+  definition is created; a future change that turns a personal organization into a team must
+  handle its personal definitions. `revision` is the current
+  revision, which always exists and is the latest one; it never goes back. `enabled` is the
+  live switch, false by default, and no revision carries it, so enabling and disabling change
+  only the definition row. Deleting a workflow tombstones it (`deleted_at`): a tombstone is
+  disabled, final and takes no new revision. A definition row is removed only as a tombstone
+  (a later purge), with its organization, or with its personal owner, even when the user no
+  longer has a personal organization; its revisions go with it.
+- **Revisions** are numbered 1, 2, 3… within their definition, with no gap or repeat, and
+  each new one becomes the current revision. They are never updated, and are deleted only
+  with their definition. A revision stores the definition that the contract in
+  `packages/workflows` validated: its canonical output without `enabled`. The database checks
+  mirror the contract's envelope: exactly the keys `name`, `scope`, `trigger`, `conditions`
+  and `actions`; a name of 1 to 200 UTF-8 bytes; a known scope; a known trigger with its delay
+  (0 to 43200 whole minutes) or its offset (5 to 43200 whole minutes) and nothing else; at
+  most five conditions with known fields; exactly one email or webhook action. The service
+  validates everything else through the contract before it writes, and a test binds each
+  mirrored limit and catalogue to the contract's constants and schemas, in both directions.
+
+Writers lock the organization before the definition, as other organization writers do: a
+definition insert locks its organization row through its foreign key, and a new revision
+locks the organization and then its definition, so a concurrent organization deletion waits
+instead of deadlocking, and concurrent revisions of one workflow are numbered one at a time.
+An update of a definition row takes no organization lock, so a transaction that updates a
+definition and then adds a revision must lock the organization first. The service steps take
+the organization lock before any workflow row.
+
+`workflow-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0076_workflow_definitions.json`), including a lock
+check of the organization foreign key, and every check and trigger rule also has source-copy
+mutations that remove or weaken it (`packages/db/src/workflow-storage-protections.ts`), run
+against the predecessor schema. The upgrade test preserves a populated predecessor with
+configured reminders, follow-ups, booking snapshots, scheduled messages and receipts down to
+row versions, and compares fresh and upgraded schemas.
+
 ## Planned additions (each a new migration)
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
-email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget. It is
-design only: no workflow tables, migration, API or runtime enablement exist yet.
+email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
+Only its definition storage exists ([workflow definition storage](#workflow-definition-storage));
+no execution table, API or runtime enablement exists yet.
 
 | When | Change |
 |---|---|
@@ -1905,6 +1954,28 @@ Daily, weekly and monthly event limits count one occupied slot, regardless of it
 count. Joining an already occupied slot does not consume another limit unit. Different
 meeting lengths share these limits. Every seat in a slot uses that slot's one shared
 location option and immutable logistics snapshot; seats cannot select different locations.
+Changes to the event location, default location option, assigned schedule or selected Zoom
+connection apply to new occurrences. Existing open occurrences continue accepting seats
+with their original logistics; their already reserved interval is not recalculated against
+the edited schedule. Later host time-off overrides, external-calendar busy blocks and
+calendar-sync staleness are not rechecked for additional seats or moves into that occurrence.
+To stop admission after such a change, the host must cancel the occurrence. New occurrences
+still check current schedules, time off, calendar conflicts and sync freshness. New seats
+and moves into existing occurrences inherit the shared location and option.
+Current event activation, host identity, allowed duration, minimum notice and booking window
+still apply (the window uses the occurrence's snapshotted host time zone), and automatic
+conferences still require their pinned resources to remain usable. Retiring the last seat
+allows a later generation to use current settings.
+
+Full occurrences return the same `slot_taken` / `group_slot_full` error for existing and
+unknown mailboxes before checking mailbox duplication. An exact authorized idempotent replay
+still returns its original seat without consuming capacity or sending another notification.
+For occurrences with spare capacity, duplicate-mailbox rejection is not a non-enumeration
+guarantee: a different mailbox can create a real booking and trigger its notifications.
+A later failure of the pinned Zoom resource can also return a different error to a new
+mailbox while rolling back its tentative seat. Snapshot location-option mismatches are
+checked before mailbox duplication and return the same error to both callers.
+
 Moving one seat cancels its predecessor and creates a successor in the same transaction,
 so capacity is released/taken atomically and surviving source seats retain their resources.
 
