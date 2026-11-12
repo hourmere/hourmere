@@ -1141,7 +1141,7 @@ async function ensureCounter(trx: Db, poll: VoterPoll, emailKey: Buffer) {
 
 // --- Validation ------------------------------------------------------------------------------
 
-function requireSecret(secret: unknown): string {
+export function requireSecret(secret: unknown): string {
   if (typeof secret !== 'string' || secret.length < 16)
     throw new TypeError('Meeting poll voter services need the installation secret')
   return secret

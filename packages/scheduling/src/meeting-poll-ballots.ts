@@ -13,6 +13,7 @@ import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { DomainError } from './errors.ts'
 import { isUuid, validTimeZone } from './internal.ts'
+import { ensureMeetingPollKey } from './meeting-poll-key.ts'
 import { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 import {
   admissionCounts,
@@ -23,6 +24,7 @@ import {
   meetingPollCapabilityDigest,
   pollClosed,
   pollFull,
+  requireSecret,
   requireVotingOpen,
   type VoterPoll,
   validLocale,
@@ -98,6 +100,7 @@ export async function submitMeetingPollBallot(
   ctx: MeetingPollPublicContext,
   input: SubmitMeetingPollBallotInput,
 ): Promise<MeetingPollOwnBallot> {
+  const secret = requireSecret(ctx.meetingPollSecret)
   if (!input || typeof input !== 'object') throw invalidBallot('The ballot must be an object')
   const token = validToken(input.token)
   const choices = validChoices(input.votes)
@@ -108,6 +111,7 @@ export async function submitMeetingPollBallot(
   const timeZone = input.timeZone === undefined ? undefined : validTimeZone(input.timeZone)
   const locale = input.locale === undefined ? undefined : validLocale(input.locale)
   return ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const { poll, voter } = await lockVotingCredential(trx, token)
     requireVotingOpen(poll, pollClosed)
     const slots = await trx
@@ -177,10 +181,12 @@ export async function withdrawMeetingPollVoter(
   ctx: MeetingPollPublicContext,
   input: WithdrawMeetingPollVoterInput,
 ): Promise<MeetingPollOwnBallot> {
+  const secret = requireSecret(ctx.meetingPollSecret)
   if (!input || typeof input !== 'object') throw invalidBallot('The request must be an object')
   const token = validToken(input.token)
   const expected = validRevision(input.expectedBallotRevision)
   return ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const { poll, voter } = await lockVotingCredential(trx, token)
     requireVotingOpen(poll, pollClosed)
     if (voter.ballot_revision !== expected) throw changed()
@@ -221,9 +227,11 @@ export async function optOutOfMeetingPollReminders(
   ctx: MeetingPollPublicContext,
   input: { token: string },
 ): Promise<MeetingPollReminderOptOut> {
+  const secret = requireSecret(ctx.meetingPollSecret)
   const token = validToken(input?.token)
   const digest = meetingPollCapabilityDigest('reminder_opt_out', token)
   return ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const named = await trx
       .selectFrom('meeting_poll_capabilities')
       .select(['id', 'poll_id', 'organization_id'])
