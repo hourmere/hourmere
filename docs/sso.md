@@ -595,41 +595,47 @@ shared `packages/outbound` module, and the SSO transport profile
 (`packages/outbound/src/sso.ts`) is built on it; URL string validation followed by
 ordinary `fetch` is insufficient. Discovery, token, UserInfo, JWKS and metadata requests,
 including refreshes, use only this profile. By default it requires HTTPS to a public DNS
-name on the default port, and every DNS answer must be public: it rejects IP literals and
-special-use names that the private allowlist below does not list, userinfo, fragments,
-private and reserved addresses, IPv4-mapped answers and mixed DNS answers. It resolves the
-host again on every request and pins the validated address to the socket, while TLS still
-verifies the original hostname through SNI and the certificate. It rejects every redirect
-without contacting its location, so a provider that moves a document is reconfigured, not
-followed. It bounds response size, decompression, connection and body time and
-concurrency with the transport limits below. Bodies may be identity or gzip only; Brotli is
-refused because its decoder may reserve a window of up to 16 MiB before a decoded byte can
-be counted. The bytes on the wire and the decoded bytes each count against the size limit. One
-absolute deadline ends the whole exchange, so a body that trickles slowly cannot hold a
-request open. A request beyond the concurrency limits fails at once instead of waiting.
-There is no connection reuse, proxy from the environment or cookie. Its errors carry only
-a failure code, never a URL, header, token, request or response body, resolver text or TLS
-text, and the profile logs nothing; a caller that receives a provider's error body must not
-log it either. Disable XML external-resource retrieval. Metadata import is untrusted
-configuration, not proof of domain ownership. Parse only expected IdP entities, bind entity
-IDs and endpoints, and review certificate changes; no automatic trust replacement from a
-refreshed metadata URL.
+name on the default port, and every DNS answer must be public: it rejects IP literals,
+special-use names and other ports that the operator allowlist below does not list,
+userinfo, fragments, private and reserved addresses, IPv4-mapped answers and mixed DNS
+answers. It resolves the host again on every request and pins the validated address to the
+socket, while TLS still verifies the original hostname through SNI and the certificate. It
+rejects every redirect without contacting its location, so a provider that moves a
+document is reconfigured, not followed. It bounds response size, decompression, connection
+and body time and concurrency with the transport limits below. Bodies may be identity or
+gzip only; Brotli is refused because its decoder may reserve a window of up to 16 MiB
+before a decoded byte can be counted. The bytes on the wire and the decoded bytes each
+count against the size limit. One absolute deadline ends the whole exchange, so a body
+that trickles slowly cannot hold a request open. A request beyond the concurrency limits
+fails at once instead of waiting. There is no connection reuse, proxy from the environment
+or cookie. Its errors carry only a failure code, never a URL, header, token, request or
+response body, resolver text or TLS text, and the profile logs nothing; a caller that
+receives a provider's error body must not log it either. Disable XML external-resource
+retrieval. Metadata import is untrusted configuration, not proof of domain ownership.
+Parse only expected IdP entities, bind entity IDs and endpoints, and review certificate
+changes; no automatic trust replacement from a refreshed metadata URL.
 
-Self-hosted private IdPs require a separate operator-owned exact host/port allowlist,
-`SSO_PRIVATE_TARGETS`, never a team-editable bypass or reuse of the webhook allowlist
-setting. The configuration loader parses it at startup, empty by default, and nothing else
-reads it until a later step calls the profile, so today it routes nothing. Each of at most
-32 entries is one exact `host:port`, `IPv4:port` or `[IPv6]:port`, without networks,
-wildcards or port ranges; an IP entry must be RFC1918, loopback or IPv6 unique-local
-space, never metadata or link-local. It permits private routing only. A request URL's
-exact host and port must match an entry, so a different port, or another name that
-resolves to the same address, does not, and every DNS answer for a listed host must then
-be eligible private or loopback space; a listed host never falls back to public routing.
-HTTPS stays required. Loopback HTTP is allowed only for an explicitly configured local
-trial: the profile's separate trial input, which no production caller passes and no
-setting enables yet, admits plain HTTP only to a listed `localhost` or loopback literal
-whose every answer is loopback. Cloud leaves the private allowlist empty. The same
-DNS/socket policy applies on every request, not just provider registration.
+Self-hosted IdPs on a private network, or public ones served on a port other than 443,
+require a separate operator-owned exact host/port allowlist, `SSO_PRIVATE_TARGETS`, never a
+team-editable bypass or reuse of the webhook allowlist setting. The configuration loader
+parses it at startup, empty by default, and nothing else reads it until a later step calls
+the profile, so today it routes nothing. Each of at most 32 entries is one exact
+`host:port`, `IPv4:port` or `[IPv6]:port`, without networks, wildcards or port ranges; an
+IP entry must be RFC1918, loopback or IPv6 unique-local space, never metadata or
+link-local. A request URL's exact host and port must match an entry, so a different port,
+or another name that resolves to the same address, does not. The operator trusts that
+exact target, so its DNS answers may be of either kind: every answer eligible private or
+loopback space, or every answer public. The second is how a public IdP on a non-default
+port, such as `https://idp.example.com:8443`, is reached. Answers that mix the two, or that
+include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts that
+are not listed keep the default rules above: public answers only, on the default port only,
+and no private routing. HTTPS stays required, and a listed target is fetched like any other:
+the validated address is pinned to the socket and TLS verifies the original hostname.
+Loopback HTTP is allowed only for an explicitly configured local trial: the profile's
+separate trial input, which no production caller passes and no setting enables yet, admits
+plain HTTP only to a listed `localhost` or loopback literal whose every answer is loopback.
+Cloud leaves the operator allowlist empty. The same DNS/socket policy applies on every
+request, not just provider registration.
 
 Encrypt client secrets and future SP private keys with purpose-bound AES-256-GCM,
 using the existing credential-encryption pattern with organization/provider/revision
@@ -965,9 +971,11 @@ Known compatibility limitations:
   ownership. Entra emits `auth_time` only as a configured optional claim; without it,
   every Entra step-up also needs mailbox proof. See
   [Microsoft's optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
-- Private IdPs still require HTTPS: `SSO_PRIVATE_TARGETS` permits private routing,
-  not plaintext transport. `http://keycloak:8080` on a compose network is refused;
-  only the separately acknowledged loopback trial exception permits HTTP.
+- An IdP on a private network, or a public one on a port other than 443, is reached
+  only through its exact `SSO_PRIVATE_TARGETS` entry, and still requires HTTPS: the
+  setting permits that routing, not plaintext transport. `http://keycloak:8080` on a
+  compose network is refused; only the separately acknowledged loopback trial exception
+  permits HTTP.
 
 Register the exact OIDC callback above in the IdP (no wildcard), and for SAML register
 the exact ACS and the stable entity ID published by the SP metadata endpoint. Derive

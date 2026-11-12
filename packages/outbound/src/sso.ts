@@ -3,9 +3,10 @@ import { request as httpsRequest } from 'node:https'
 import type { Socket } from 'node:net'
 import type { Transform } from 'node:stream'
 import { createGunzip } from 'node:zlib'
-import { isLoopbackAddress } from './addresses.ts'
+import { isLoopbackAddress, isPublicAddress } from './addresses.ts'
 import {
   answersPermitted,
+  type DnsAnswer,
   isPublicHttpsUrl,
   MAX_DNS_ANSWERS,
   MAX_OUTBOUND_URL_BYTES,
@@ -78,7 +79,10 @@ export interface SsoRequest {
   headers?: Readonly<{ accept?: string; authorization?: string; 'content-type'?: string }>
   body?: string
   signal?: AbortSignal
-  /** The operator's parsed `SSO_PRIVATE_TARGETS`; empty routes nothing private. */
+  /**
+   * The operator's parsed `SSO_PRIVATE_TARGETS`; empty routes nothing private and nothing on
+   * a non-default port.
+   */
   privateTargets: readonly SsoPrivateTarget[]
   /**
    * The separately acknowledged local trial: plain HTTP to a listed `localhost` or loopback
@@ -99,8 +103,8 @@ function asPrivateTarget(target: SsoPrivateTarget): PrivateTarget {
 
 /**
  * Syntax and scheme only: HTTPS to a public DNS name on the default port, or HTTPS to an
- * exact listed private host:port. Plain HTTP only through the loopback trial. Every request
- * resolves and validates every DNS answer again.
+ * exact listed host:port. Plain HTTP only through the loopback trial. Every request resolves
+ * and validates every DNS answer again (`ssoAnswersPermitted`).
  */
 export function ssoUrl(
   value: unknown,
@@ -116,6 +120,36 @@ export function ssoUrl(
       return undefined
   } else if (!listed && !isPublicHttpsUrl(url)) return undefined
   return normalizedOutboundUrl(url)
+}
+
+/**
+ * The DNS answer policy, applied on every request after `ssoUrl` admitted the URL. It looks
+ * up the exact listed target for the URL's host and port itself and checks the answers:
+ * - an unlisted host needs public HTTPS syntax and only public answers;
+ * - an exact listed host:port is operator-trusted for either kind: every answer ordinary
+ *   private or loopback space, or every answer public. This deliberately widens the shared
+ *   check, where an exact-host target never falls back to public routing;
+ * - answers that mix kinds, or include metadata, link-local, mapped or other reserved
+ *   space, are refused;
+ * - plain HTTP also needs every answer to be loopback, so public answers are only ever
+ *   reached over HTTPS.
+ * The scheme, the loopback trial and its loopback-name rule stay with `ssoUrl`, and the
+ * shape and size of the answer list with `validAnswers`.
+ */
+export function ssoAnswersPermitted(
+  answers: readonly DnsAnswer[],
+  url: URL,
+  privateTargets: readonly SsoPrivateTarget[],
+): boolean {
+  const target = ssoPrivateTargetFor(urlHostname(url), urlPort(url), privateTargets)
+  return (
+    (answersPermitted(answers, {
+      publicUrl: isPublicHttpsUrl(url),
+      candidates: target ? [asPrivateTarget(target)] : [],
+    }) ||
+      (target !== undefined && answers.every(({ address }) => isPublicAddress(address)))) &&
+    (url.protocol === 'https:' || answers.every(({ address }) => isLoopbackAddress(address)))
+  )
 }
 
 let active = 0
@@ -163,11 +197,9 @@ export async function sendSsoRequest(input: SsoRequest): Promise<SsoResponse> {
   if (!normalized) throw new SsoTransportError('destination_refused')
   const url = new URL(normalized)
   const hostname = urlHostname(url)
-  const target = ssoPrivateTargetFor(hostname, urlPort(url), input.privateTargets)
-  const candidates = target ? [asPrivateTarget(target)] : []
   const release = acquire(url.origin)
   try {
-    return await attempt(input, url, hostname, candidates)
+    return await attempt(input, url, hostname)
   } catch (error) {
     // Only the profile's own error leaves it, whatever failed.
     throw error instanceof SsoTransportError ? error : new SsoTransportError('transport_failed')
@@ -177,12 +209,7 @@ export async function sendSsoRequest(input: SsoRequest): Promise<SsoResponse> {
   }
 }
 
-async function attempt(
-  input: SsoRequest,
-  url: URL,
-  hostname: string,
-  candidates: readonly PrivateTarget[],
-): Promise<SsoResponse> {
+async function attempt(input: SsoRequest, url: URL, hostname: string): Promise<SsoResponse> {
   const connecting = new AbortController()
   const connectDeadline = AbortSignal.timeout(LIMITS.ssoConnectTimeout)
   const responseDeadline = AbortSignal.timeout(LIMITS.ssoResponseTimeout)
@@ -209,14 +236,7 @@ async function attempt(
       stopped,
       failed: () => new SsoTransportError('dns_failed'),
     })
-    if (
-      !validAnswers(answers) ||
-      !answersPermitted(answers, {
-        publicUrl: url.protocol === 'https:' && isPublicHttpsUrl(url),
-        candidates,
-      }) ||
-      (url.protocol === 'http:' && !answers.every(({ address }) => isLoopbackAddress(address)))
-    )
+    if (!validAnswers(answers) || !ssoAnswersPermitted(answers, url, input.privateTargets))
       throw new SsoTransportError('destination_refused')
     if (deadline.aborted) throw stopped()
     const selected = answers[0]

@@ -7,8 +7,14 @@ vi.mock('node:dns/promises', () => ({ lookup: network.lookup }))
 vi.mock('node:https', () => ({ request: network.request }))
 vi.mock('node:http', () => ({ request: network.httpRequest }))
 
-import { SSO_TRANSPORT_LIMITS, SsoTransportError, sendSsoRequest, ssoUrl } from './sso.ts'
-import { parseSsoPrivateTargets } from './sso-private-targets.ts'
+import {
+  SSO_TRANSPORT_LIMITS,
+  SsoTransportError,
+  sendSsoRequest,
+  ssoAnswersPermitted,
+  ssoUrl,
+} from './sso.ts'
+import { parseSsoPrivateTargets, type SsoPrivateTarget } from './sso-private-targets.ts'
 
 type Callback = (res: PassThrough) => void
 
@@ -497,8 +503,8 @@ describe('SSO_PRIVATE_TARGETS routing', () => {
   })
 
   it.each([
-    [['8.8.8.8']],
     [['127.0.0.1', '8.8.8.8']],
+    [['10.0.0.5', '2606:4700:4700::1111']],
     [['169.254.169.254']],
     [['100.100.100.200']],
     [['fd00:ec2::254']],
@@ -519,7 +525,7 @@ describe('SSO_PRIVATE_TARGETS routing', () => {
     network.lookup
       .mockResolvedValueOnce([answer('10.0.0.7')])
       .mockResolvedValueOnce([answer('169.254.169.254')])
-      .mockResolvedValueOnce([answer('8.8.8.8')])
+      .mockResolvedValueOnce([answer('8.8.8.8'), answer('10.0.0.7')])
     respond(network.request)
     expect((await sendSsoRequest(privateRequest('https://idp.internal:8443/'))).status).toBe(200)
     expect(await refusal(sendSsoRequest(privateRequest('https://idp.internal:8443/')))).toBe(
@@ -547,14 +553,249 @@ describe('SSO_PRIVATE_TARGETS routing', () => {
     expect(network.request).not.toHaveBeenCalled()
   })
 
-  it('makes a listed host authoritative even when it has public syntax', async () => {
-    const listed = parseSsoPrivateTargets('idp.example.com:443')
-    network.lookup.mockResolvedValue([answer('8.8.8.8')])
+  it('lets a listed host on the default port resolve publicly or privately, never to a mix', async () => {
+    const listed = {
+      url: 'https://idp.example.com/',
+      privateTargets: parseSsoPrivateTargets('idp.example.com:443'),
+    }
     respond(network.request)
-    expect(
-      await refusal(sendSsoRequest({ url: 'https://idp.example.com/', privateTargets: listed })),
-    ).toBe('destination_refused')
+    network.lookup.mockResolvedValue([answer('8.8.8.8')])
+    expect((await sendSsoRequest(listed)).status).toBe(200)
+    network.lookup.mockResolvedValue([answer('10.0.0.5')])
+    expect((await sendSsoRequest(listed)).status).toBe(200)
+    network.lookup.mockResolvedValue([answer('8.8.8.8'), answer('10.0.0.5')])
+    expect(await refusal(sendSsoRequest(listed))).toBe('destination_refused')
+    expect(network.request).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('an operator-listed IdP served publicly on a non-default port', () => {
+  const listed = parseSsoPrivateTargets('idp.example.com:8443')
+  const url = 'https://idp.example.com:8443/realms/a/.well-known/openid-configuration'
+  const request = (privateTargets = listed, target = url) => ({ url: target, privateTargets })
+
+  it.each([
+    [['8.8.8.8']],
+    [['2606:4700:4700::1111']],
+    [['1.1.1.1', '8.8.8.8', '2606:4700:4700::1111']],
+    [['10.0.0.5']],
+    [['10.0.0.5', 'fd12::5', '127.0.0.1']],
+  ])(
+    'reaches the exact listed host:port resolving to %j, pinned to the first answer with TLS verifying the name',
+    async (addresses) => {
+      network.lookup.mockResolvedValue(addresses.map(answer))
+      respond(network.request)
+      expect((await sendSsoRequest(request())).status).toBe(200)
+      expect(network.lookup).toHaveBeenCalledExactlyOnceWith('idp.example.com', {
+        all: true,
+        verbatim: true,
+      })
+      expect(network.request).toHaveBeenCalledOnce()
+      expect(network.httpRequest).not.toHaveBeenCalled()
+      const [target, options] = network.request.mock.calls[0] ?? []
+      expect(target.href).toBe(url)
+      const first = answer(addresses[0] ?? '')
+      expect(options).toMatchObject({
+        agent: false,
+        family: first.family,
+        servername: 'idp.example.com',
+        rejectUnauthorized: true,
+      })
+      const pinned = vi.fn()
+      options.lookup('idp.example.com', {}, pinned)
+      expect(pinned).toHaveBeenCalledExactlyOnceWith(null, first.address, first.family)
+    },
+  )
+
+  it('refuses the same host on :8443 before DNS while that exact host:port is not listed', async () => {
+    respond(network.request)
+    for (const privateTargets of [
+      parseSsoPrivateTargets(),
+      parseSsoPrivateTargets('idp.example.com:443'),
+      parseSsoPrivateTargets('idp.example.com:9443'),
+      parseSsoPrivateTargets('other.example.com:8443,sso.idp.example.com:8443'),
+    ]) {
+      expect(ssoUrl(url, privateTargets)).toBeUndefined()
+      expect(await refusal(sendSsoRequest(request(privateTargets)))).toBe('destination_refused')
+    }
+    expect(network.lookup).not.toHaveBeenCalled()
     expect(network.request).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [['8.8.8.8', '10.0.0.1']],
+    [['10.0.0.1', '8.8.8.8']],
+    [['2606:4700:4700::1111', 'fd12::1']],
+    [['8.8.8.8', '127.0.0.1']],
+    [['::1', '2606:4700:4700::1111']],
+    [['8.8.8.8', '169.254.169.254']],
+    [['8.8.8.8', '100.64.0.1']],
+    [['8.8.8.8', '::ffff:8.8.8.8']],
+    [['8.8.8.8', '64:ff9b::808:808']],
+    [['::ffff:8.8.8.8']],
+    [['fe80::1']],
+  ])(
+    'refuses a listed host whose answers %j mix kinds or include reserved space',
+    async (addresses) => {
+      network.lookup.mockResolvedValue(addresses.map(answer))
+      respond(network.request)
+      expect(await refusal(sendSsoRequest(request()))).toBe('destination_refused')
+      expect(network.lookup).toHaveBeenCalledOnce()
+      expect(network.request).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    'https://idp.example.com:8444/',
+    'https://idp.example.com:9443/',
+    'https://sso.idp.example.com:8443/',
+    'https://example.com:8443/',
+    'https://idp.example.com.:8443/',
+  ])('refuses %s, another port or host than the listed one, before DNS', async (target) => {
+    respond(network.request)
+    expect(await refusal(sendSsoRequest(request(listed, target)))).toBe('destination_refused')
+    expect(network.lookup).not.toHaveBeenCalled()
+    expect(network.request).not.toHaveBeenCalled()
+  })
+
+  it('leaves the default port on the public rules: listing :8443 routes nothing private on 443', async () => {
+    respond(network.request)
+    network.lookup.mockResolvedValue([answer('10.0.0.5')])
+    expect(await refusal(sendSsoRequest(request(listed, 'https://idp.example.com/')))).toBe(
+      'destination_refused',
+    )
+    network.lookup.mockResolvedValue([answer('8.8.8.8')])
+    expect((await sendSsoRequest(request(listed, 'https://idp.example.com/'))).status).toBe(200)
+    expect(network.request).toHaveBeenCalledOnce()
+  })
+
+  it('refuses plain HTTP to the listed host:port, with or without the loopback trial', async () => {
+    respond(network.httpRequest)
+    for (const loopbackHttpTrial of [false, true])
+      expect(
+        await refusal(
+          sendSsoRequest({
+            url: 'http://idp.example.com:8443/',
+            privateTargets: listed,
+            loopbackHttpTrial,
+          }),
+        ),
+      ).toBe('destination_refused')
+    expect(network.lookup).not.toHaveBeenCalled()
+    expect(network.httpRequest).not.toHaveBeenCalled()
+  })
+
+  it('resolves again on every request: a listed host that rebinds to a mix or metadata is refused', async () => {
+    network.lookup
+      .mockResolvedValueOnce([answer('8.8.8.8')])
+      .mockResolvedValueOnce([answer('8.8.8.8'), answer('10.0.0.1')])
+      .mockResolvedValueOnce([answer('169.254.169.254')])
+    respond(network.request)
+    expect((await sendSsoRequest(request())).status).toBe(200)
+    expect(await refusal(sendSsoRequest(request()))).toBe('destination_refused')
+    expect(await refusal(sendSsoRequest(request()))).toBe('destination_refused')
+    expect(network.lookup).toHaveBeenCalledTimes(3)
+    expect(network.request).toHaveBeenCalledOnce()
+  })
+})
+
+// The answer policy checks the answers again after ssoUrl, so each rule is checked here
+// directly as well, including URLs that ssoUrl already refuses.
+describe('SSO answer policy', () => {
+  const listedPublic = parseSsoPrivateTargets('idp.example.com:8443')
+  const listedLoopback = parseSsoPrivateTargets('localhost:8080')
+  const none = parseSsoPrivateTargets()
+  it.each<[string, string, readonly SsoPrivateTarget[], string[], boolean]>([
+    ['public syntax, public answers', 'https://idp.example.com/', none, ['8.8.8.8'], true],
+    ['public syntax, a private answer', 'https://idp.example.com/', none, ['10.0.0.5'], false],
+    [
+      'public syntax, mixed answers',
+      'https://idp.example.com/',
+      none,
+      ['8.8.8.8', '10.0.0.5'],
+      false,
+    ],
+    ['an unlisted non-default port', 'https://idp.example.com:8443/', none, ['8.8.8.8'], false],
+    ['unlisted plain HTTP', 'http://localhost:8080/', none, ['127.0.0.1'], false],
+    [
+      'a listed host:port, public answers',
+      'https://idp.example.com:8443/',
+      listedPublic,
+      ['8.8.8.8', '2606:4700:4700::1111'],
+      true,
+    ],
+    [
+      'a listed host:port, private answers',
+      'https://idp.example.com:8443/',
+      listedPublic,
+      ['10.0.0.5', 'fd12::5'],
+      true,
+    ],
+    [
+      'another host than the listed one, public answers',
+      'https://other.example.com:8443/',
+      listedPublic,
+      ['8.8.8.8'],
+      false,
+    ],
+    [
+      'the listed host on another port, public answers',
+      'https://idp.example.com:9443/',
+      listedPublic,
+      ['8.8.8.8'],
+      false,
+    ],
+    [
+      'a listed host:port, mixed answers',
+      'https://idp.example.com:8443/',
+      listedPublic,
+      ['8.8.8.8', '10.0.0.5'],
+      false,
+    ],
+    [
+      'a listed host:port, a metadata answer',
+      'https://idp.example.com:8443/',
+      listedPublic,
+      ['169.254.169.254'],
+      false,
+    ],
+    [
+      'a listed host:port, a mapped answer',
+      'https://idp.example.com:8443/',
+      listedPublic,
+      ['::ffff:8.8.8.8'],
+      false,
+    ],
+    [
+      'listed plain HTTP, public answers',
+      'http://idp.example.com:8443/',
+      listedPublic,
+      ['8.8.8.8'],
+      false,
+    ],
+    [
+      'listed plain HTTP, private answers',
+      'http://idp.example.com:8443/',
+      listedPublic,
+      ['10.0.0.5'],
+      false,
+    ],
+    [
+      'the loopback trial, loopback answers',
+      'http://localhost:8080/',
+      listedLoopback,
+      ['127.0.0.1', '::1'],
+      true,
+    ],
+    [
+      'the loopback trial, a public answer',
+      'http://localhost:8080/',
+      listedLoopback,
+      ['8.8.8.8'],
+      false,
+    ],
+  ])('%s', (_, url, privateTargets, addresses, expected) => {
+    expect(ssoAnswersPermitted(addresses.map(answer), new URL(url), privateTargets)).toBe(expected)
   })
 })
 
@@ -588,17 +829,20 @@ describe('separately acknowledged loopback HTTP trial', () => {
     expect(network.httpRequest).not.toHaveBeenCalled()
   })
 
-  it.each([[['10.0.0.1']], [['127.0.0.1', '10.0.0.1']], [['fd12::1']]])(
-    'refuses the trial when localhost answers %j',
-    async (addresses) => {
-      network.lookup.mockResolvedValue(addresses.map(answer))
-      respond(network.httpRequest)
-      expect(await refusal(sendSsoRequest(trial('http://localhost:8080/')))).toBe(
-        'destination_refused',
-      )
-      expect(network.httpRequest).not.toHaveBeenCalled()
-    },
-  )
+  it.each([
+    [['10.0.0.1']],
+    [['127.0.0.1', '10.0.0.1']],
+    [['fd12::1']],
+    [['8.8.8.8']],
+    [['127.0.0.1', '8.8.8.8']],
+  ])('refuses the trial when localhost answers %j', async (addresses) => {
+    network.lookup.mockResolvedValue(addresses.map(answer))
+    respond(network.httpRequest)
+    expect(await refusal(sendSsoRequest(trial('http://localhost:8080/')))).toBe(
+      'destination_refused',
+    )
+    expect(network.httpRequest).not.toHaveBeenCalled()
+  })
 })
 
 describe('SSO transport concurrency', () => {
