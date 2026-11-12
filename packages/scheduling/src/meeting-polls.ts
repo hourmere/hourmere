@@ -1,6 +1,7 @@
 // Host lifecycle for meeting polls: create, read, close, cancel, delete and public-link
-// rotation. This is an internal service with no transport; voter admission, ballots,
-// results, removal and finalization land in later steps (docs/meeting-polls.md).
+// rotation. This is an internal service with no transport; voter admission lives in
+// meeting-poll-voters.ts, and ballots, results, removal and finalization land in later
+// steps (docs/meeting-polls.md).
 //
 // Every host write takes the shared order: the transport's organization-write hook, actor
 // user SHARE, organization SHARE, actor membership SHARE, then the poll row FOR UPDATE and
@@ -141,18 +142,18 @@ const SECOND_NS = 1_000_000_000n
 /** Lifecycle writes may set only these columns; everything else is fixed at creation. */
 const HOST_WRITE_COLUMNS = new Set(['status', 'closed_at', 'canceled_at', 'public_token_digest'])
 
-const pollNotFound = () => new DomainError('not_found', 'poll_not_found', 'No such poll')
+export const pollNotFound = () => new DomainError('not_found', 'poll_not_found', 'No such poll')
 const eventNotFound = () =>
   new DomainError('not_found', 'event_type_not_found', 'No such event type')
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 const invalidPoll = (message: string) => new DomainError('invalid', 'invalid_poll', message)
-const changed = () =>
+export const changed = () =>
   new DomainError(
     'conflict',
     'poll_changed',
     'This poll changed since you loaded it. Reload it before trying again.',
   )
-const keyReused = () =>
+export const keyReused = () =>
   new DomainError(
     'conflict',
     'idempotency_key_reused',
@@ -307,9 +308,12 @@ export async function createMeetingPoll(
       },
       request.durationMinutes,
     )
+    // Host users and members are share-locked before the clock is read, as in public
+    // booking, so a wait for those rows never leaves the decision instant stale.
+    const bookable = await lockBookableEvent(trx, event.id, hostUserIds)
     const createdAt = await clock(trx)
     validateSchedule(createdAt, deadlineAt, starts, event.minimum_notice_minutes)
-    await requireBookableCandidates(trx, event.id, hostUserIds, starts, durationMinutes, createdAt)
+    await requireBookableCandidates(trx, bookable, starts, durationMinutes, createdAt)
     const settings = await meetingPollEventSettings(trx, event.id, durationMinutes)
     const publicToken =
       request.admissionMode === 'public_link' ? randomBytes(32).toString('base64url') : null
@@ -547,7 +551,7 @@ interface Authority {
   userId: string
 }
 
-function requireWriteScope(ctx: ServiceContext) {
+export function requireWriteScope(ctx: ServiceContext) {
   if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope === 'read')
     throw new ApiKeyScopeError()
 }
@@ -599,26 +603,41 @@ function manages(authority: Authority, ownerUserId: string | null) {
   return authority.personal ? ownerUserId === authority.userId : ownerUserId === null
 }
 
-interface LockedPoll {
+export interface LockedPoll {
   id: string
   organization_id: string
   status: string
   effectiveStatus: MeetingPollStatus
   admission_mode: string
   host_revision: number
+  display_time_zone: string
+  /** The event was soft-deleted: history stays, new voter admission stops. */
+  eventDeleted: boolean
   deadline: string
   /** Database clock captured once after the poll and event locks. */
   at: string
 }
 
 /** Lock the poll before its event (the host phase), then capture the database clock. */
-async function lockManagedPoll(trx: Db, ctx: ServiceContext, id: string): Promise<LockedPoll> {
+export async function lockManagedPoll(
+  trx: Db,
+  ctx: ServiceContext,
+  id: string,
+): Promise<LockedPoll> {
   await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
   const authority = await lockAuthority(trx, ctx)
   if (!isUuid(id)) throw pollNotFound()
   const poll = await trx
     .selectFrom('meeting_polls')
-    .select(['id', 'organization_id', 'event_type_id', 'status', 'admission_mode', 'host_revision'])
+    .select([
+      'id',
+      'organization_id',
+      'event_type_id',
+      'status',
+      'admission_mode',
+      'host_revision',
+      'display_time_zone',
+    ])
     .where('id', '=', id)
     .where('organization_id', '=', ctx.principal.organization.id)
     .forUpdate()
@@ -626,7 +645,7 @@ async function lockManagedPoll(trx: Db, ctx: ServiceContext, id: string): Promis
   if (!poll) throw pollNotFound()
   const event = await trx
     .selectFrom('event_types')
-    .select('owner_user_id')
+    .select(['owner_user_id', 'deleted_at'])
     .where('id', '=', poll.event_type_id)
     .where('organization_id', '=', poll.organization_id)
     .forShare()
@@ -649,16 +668,18 @@ async function lockManagedPoll(trx: Db, ctx: ServiceContext, id: string): Promis
       poll.status === 'open' && deadlinePassed ? 'closed' : (poll.status as MeetingPollStatus),
     admission_mode: poll.admission_mode,
     host_revision: poll.host_revision,
+    display_time_zone: poll.display_time_zone,
+    eventDeleted: event.deleted_at !== null,
     deadline,
     at,
   }
 }
 
-function requireHostRevision(poll: LockedPoll, expected: number) {
+export function requireHostRevision(poll: LockedPoll, expected: number) {
   if (poll.host_revision !== expected) throw changed()
 }
 
-const alreadyScheduled = () =>
+export const alreadyScheduled = () =>
   new DomainError(
     'conflict',
     'poll_already_scheduled',
@@ -701,16 +722,16 @@ function pollSource(ctx: ServiceContext, requested: 'api' | 'mcp' | undefined) {
 
 // --- Receipts ------------------------------------------------------------------------------
 
-interface ReceiptIdentity {
+export interface ReceiptIdentity {
   organizationId: string
-  operation: 'create' | 'rotate_link'
+  operation: 'create' | 'invite' | 'resend' | 'rotate_link'
   actor: Buffer
   key: Buffer
   fingerprint: Buffer
 }
 
 /** Scope: organization, operation and actor (session user, API key or OAuth grant). */
-function receiptIdentity(
+export function receiptIdentity(
   ctx: ServiceContext,
   operation: ReceiptIdentity['operation'],
   key: string,
@@ -733,7 +754,7 @@ function receiptIdentity(
 }
 
 /** Serialize concurrent retries of one key before reading its receipt. */
-async function lockedReceipt(trx: Db, receipt: ReceiptIdentity) {
+export async function lockedReceipt(trx: Db, receipt: ReceiptIdentity) {
   const scope = `hourmere.meeting-poll-receipt:${receipt.organizationId}:${receipt.operation}:${receipt.actor.toString('hex')}:${receipt.key.toString('hex')}`
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${scope}, 0))`.execute(trx)
   return trx
@@ -746,7 +767,7 @@ async function lockedReceipt(trx: Db, receipt: ReceiptIdentity) {
     .executeTakeFirst()
 }
 
-async function insertReceipt(trx: Db, receipt: ReceiptIdentity, pollId: string, at: string) {
+export async function insertReceipt(trx: Db, receipt: ReceiptIdentity, pollId: string, at: string) {
   await trx
     .insertInto('meeting_poll_operations')
     .values({
@@ -815,7 +836,7 @@ function validCreateInput(input: CreateMeetingPollInput) {
   }
 }
 
-function validHostWrite(input: MeetingPollHostWriteInput) {
+export function validHostWrite(input: MeetingPollHostWriteInput) {
   if (!input || typeof input !== 'object') throw invalidPoll('The request must be an object')
   if (
     !Number.isSafeInteger(input.expectedHostRevision) ||
@@ -825,7 +846,7 @@ function validHostWrite(input: MeetingPollHostWriteInput) {
   return { id: input.id, expectedHostRevision: input.expectedHostRevision }
 }
 
-function validIdempotencyKey(key: unknown): string {
+export function validIdempotencyKey(key: unknown): string {
   if (typeof key !== 'string' || !IDEMPOTENCY_KEY.test(key))
     throw new DomainError(
       'invalid',
@@ -898,22 +919,18 @@ function validateSchedule(
     )
 }
 
+type BookableEvent = NonNullable<Awaited<ReturnType<typeof findOneTimeEventType>>>
+
 /**
- * Every candidate must be a slot the availability engine offers at the creation instant,
- * exactly as public booking checks a start: the hosts' schedules and date overrides,
- * calendar busy time, confirmed bookings and live payment holds, minimum notice, booking
- * window, buffers and booking limits. Individual and collective events need every host
- * free; round-robin events need one eligible pool host. Call while holding the booking
- * locks of `lockedHostUserIds`, the hosts named before the event share lock.
+ * ID-addressed booking's resolution under lock: host eligibility, then the host users and
+ * members FOR SHARE. Call while holding the booking locks of `lockedHostUserIds`, the
+ * hosts named before the event share lock; a host set that changed meanwhile conflicts.
  */
-async function requireBookableCandidates(
+async function lockBookableEvent(
   trx: Db,
   eventTypeId: string,
   lockedHostUserIds: readonly string[],
-  starts: readonly string[],
-  durationMinutes: number,
-  createdAt: string,
-) {
+): Promise<BookableEvent> {
   let event: Awaited<ReturnType<typeof findOneTimeEventType>>
   try {
     // ID-addressed booking's resolution, host eligibility and host user/member locks.
@@ -929,6 +946,24 @@ async function requireBookableCandidates(
       'This event type does not take bookings right now',
     )
   if (event.hostUserIds.join() !== lockedHostUserIds.join()) throw eventChanged()
+  return event
+}
+
+/**
+ * Every candidate must be a slot the availability engine offers at the creation instant,
+ * exactly as public booking checks a start: the hosts' schedules and date overrides,
+ * calendar busy time, confirmed bookings and live payment holds, minimum notice, booking
+ * window, buffers and booking limits. Individual and collective events need every host
+ * free; round-robin events need one eligible pool host. Collective hosts use their default
+ * schedules, as public booking does.
+ */
+async function requireBookableCandidates(
+  trx: Db,
+  event: BookableEvent,
+  starts: readonly string[],
+  durationMinutes: number,
+  createdAt: string,
+) {
   const now = Temporal.Instant.from(createdAt)
   const unavailable: string[] = []
   for (const start of starts) {
@@ -990,7 +1025,7 @@ function decodeCursor(cursor: string): { createdAt: string; id: string } {
   }
 }
 
-async function loadPoll(trx: Db, ctx: ServiceContext, id: string): Promise<MeetingPoll> {
+export async function loadPoll(trx: Db, ctx: ServiceContext, id: string): Promise<MeetingPoll> {
   const [poll] = await loadPolls(trx, ctx, [id])
   if (!poll) throw pollNotFound()
   return poll
