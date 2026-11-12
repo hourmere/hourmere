@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
 import { isUuid } from './organizations.ts'
 import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
@@ -41,6 +42,22 @@ const metadata = [
   'previous_valid_until as previousValidUntil',
   sql<null>`null`.as('expiresAt'),
 ] as const
+
+/** Like API keys: the token ID and the session that changed it, never the name or a secret. */
+async function audit(
+  trx: Db,
+  actor: ScimTokenActor,
+  action: 'scim_token.created' | 'scim_token.rotated' | 'scim_token.revoked',
+  tokenId: string,
+) {
+  await writeAuditEvent(trx, {
+    organizationId: actor.organizationId,
+    ...auditActor({ kind: 'session', sessionId: actor.sessionId, user: { id: actor.userId } }),
+    action,
+    targetType: 'scim_token',
+    targetId: tokenId,
+  })
+}
 
 async function authorized<T>(
   db: Db,
@@ -102,6 +119,7 @@ export async function createScimToken(db: Db, input: ScimTokenActor & { name: st
         })
         .returning(metadata)
         .executeTakeFirstOrThrow()
+      await audit(trx, input, 'scim_token.created', token.id)
       return { token, secret }
     },
     true,
@@ -179,6 +197,7 @@ export async function rotateScimToken(
         .where('id', '=', row.id)
         .returning(metadata)
         .executeTakeFirstOrThrow()
+      await audit(trx, input, 'scim_token.rotated', token.id)
       return { token, secret }
     },
     true,
@@ -187,6 +206,16 @@ export async function rotateScimToken(
 export async function revokeScimToken(db: Db, input: ScimTokenActor & { tokenId: string }) {
   if (!isUuid(input.tokenId)) throw new ScimTokenError('invalid_input', 400)
   return authorized(db, input, async (trx) => {
+    // Revocation is idempotent: only the request that revokes the token records it. The
+    // organization lock taken by authorization already serializes token writes; this row
+    // lock keeps the read exact on its own.
+    const before = await trx
+      .selectFrom('scim_provisioning_tokens')
+      .select('revoked_at')
+      .where('id', '=', input.tokenId)
+      .where('organization_id', '=', input.organizationId)
+      .forUpdate()
+      .executeTakeFirst()
     const token = await trx
       .updateTable('scim_provisioning_tokens')
       .set({
@@ -200,6 +229,7 @@ export async function revokeScimToken(db: Db, input: ScimTokenActor & { tokenId:
       .returning(metadata)
       .executeTakeFirst()
     if (!token) throw new ScimTokenError('not_found', 404)
+    if (!before?.revoked_at) await audit(trx, input, 'scim_token.revoked', token.id)
     return token
   })
 }

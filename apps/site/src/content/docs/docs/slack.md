@@ -23,7 +23,10 @@ independently of the URL. No Slack account or workspace is created by Hourmere.
 
 Only the personal owner or current team owners/admins can manage a destination. Ordinary
 team members cannot inspect or change it. Switching spaces changes the destination you
-manage. Stale browser writes are rejected and require reloading before retrying.
+manage. Stale browser writes are rejected and require reloading before retrying. Creating,
+changing, pausing, resuming, testing and deleting a destination, and the automatic pause
+after a 404/410, are recorded in the [audit log](/docs/audit-log) with the subscribed
+events only, never the URL.
 
 The URL is a bearer secret. It is encrypted at rest and returned only in masked form,
 including immediately after saving. Keep the original in a secure secret store if needed.
