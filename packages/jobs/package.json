@@ -15,6 +15,6 @@
   },
   "devDependencies": {
     "@hourmere/db": "*",
-    "kysely": "0.29.7"
+    "kysely": "0.29.8"
   }
 }
