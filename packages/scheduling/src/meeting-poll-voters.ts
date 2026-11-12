@@ -44,7 +44,7 @@ import {
   validHostWrite,
   validIdempotencyKey,
 } from './meeting-polls.ts'
-import { cleanText } from './text.ts'
+import { cleanInviteeEmail, cleanText } from './text.ts'
 import { waitlistIpBucket } from './waitlist.ts'
 
 /** Public voter operations: the installation secret and the transport's trusted client IP. */
@@ -150,9 +150,7 @@ type CredentialPurpose = 'verification' | 'voting'
 type CredentialMailKind = 'verification' | 'invitation' | 'recovery'
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MAX_NAME = 200
-const MAX_EMAIL = 254
 const INVITEE_FIELDS = new Set(['name', 'email', 'locale', 'timeZone'])
 /** Deliveries that carry an emailed verification or voting credential. */
 const CREDENTIAL_MAIL: readonly CredentialMailKind[] = ['verification', 'invitation', 'recovery']
@@ -1128,10 +1126,10 @@ function validToken(token: unknown): string {
   return token
 }
 
+/** The shared invitee email rule, then one normalized (lowercase) mailbox per poll. */
 function validEmail(value: unknown): string {
-  const email = cleanText(value, { max: MAX_EMAIL })?.toLowerCase()
-  if (email === undefined || !EMAIL.test(email))
-    throw invalidVoter('email must be a valid email address')
+  const email = cleanInviteeEmail(value)?.toLowerCase()
+  if (email === undefined) throw invalidVoter('email must be a valid email address')
   return email
 }
 
