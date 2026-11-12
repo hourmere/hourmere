@@ -267,6 +267,26 @@ belongs to another Hourmere account: nothing looks the address up before the pro
 a collision is reported only after it, to the mailbox holder, without recording the
 address. Never coerce the claim to true to satisfy the current user-create hook.
 
+The address last proven for a link is stored in plain text, normalized and at most 320
+characters, in `sso_identity_links.proven_email` with its proof time, like the account
+address in `auth.user`: one copy per link, in the team's own rows of the instance database
+and so in that database's backups. It is organization-local personal data. The server's
+SSO services read it to compare it with the address the IdP asserts; anyone with direct
+access to the instance database or its backups can read it too. No REST, MCP or CLI
+response returns it (`/me` and the provider inventory list opaque link IDs only), no audit
+detail includes it, and it is never logged. On a live link it is the address last proven:
+a later mailbox proof replaces it, and nothing else changes it. A frozen link, whose
+provider is disabled or retired, keeps it unchanged, because no sign-in through that
+provider can prove another address. A retired link is immutable and keeps the address it
+had when it was retired. Leaving or removal from the team deletes the person's proofs and
+delegation bindings but not the link, which has no membership reference, so a former
+member's link, live or retired, keeps the address as well. Only deleting the link row
+deletes the address: deleting the account deletes that account's links in every team, and
+deleting the team deletes all of the team's links with its providers. Retiring a link or
+its provider does not. The design defines no retention sweep for links, so until a later
+step adds one, a retired or frozen link and a former member's link keep the address until
+the account or the team is deleted.
+
 An existing magic-link/Google/Microsoft account with the same email is **not**
 automatically linked to a newly configured enterprise IdP, even on a verified domain.
 The person first authenticates through an existing method, then explicitly starts a
