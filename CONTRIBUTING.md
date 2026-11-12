@@ -134,7 +134,10 @@ statement timeout from the default 5000 ms. CREATE DATABASE and DROP use at leas
 or the configured value when higher: copying a template can take longer than 5 seconds under
 load. Each client query timeout is its statement timeout plus 1000 ms.
 The connection timeout remains 5000 ms and shutdown cleanup still has its independent
-15-second deadline.
+15-second deadline. Administrative connections also pin `client_connection_check_interval=1000`
+(URL parameters and `PGOPTIONS` cannot change it), so the server aborts a CREATE DATABASE
+whose client has gone, within about 2 s, instead of creating an orphan database once its
+lock is released.
 
 Inspect those leftovers manually (the default is **dry run**):
 
