@@ -1,7 +1,8 @@
 # Booking workflows design
 
-Status: proposed design, not a shipped feature. This change adds no product code,
-migration or interface strings. Decisions below are Hourmere decisions unless explicitly
+Status: proposed design, not a shipped feature. Step 1 of the plan has added the pure
+definition contract in `packages/workflows` behind the hard-off constant; no migration,
+interface or interface string exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 ## Evidence and existing foundations
@@ -74,8 +75,10 @@ types merely because the person hosts them. An all-event workflow and event-spec
 workflows count together toward the enabled-per-event limit; enforce it under an owner
 lock on workflow changes and event-type creation. Disabled drafts do not execute.
 
-The following are **proposed limits**, pinned by the document test, not existing runtime
-constants. They bound fan-out, storage and understandability. Structural and recipient
+The following limits are source constants in `packages/workflows/src/limits.ts`, and the
+document test binds each number here to its constant. The definition contract enforces the
+structural ones; later steps enforce the rest where their behavior lives. They bound
+fan-out, storage and understandability. Structural and recipient
 limits are fixed; the instance/owner mail values are defaults for the separately configurable
 sub-caps below, rather than unchangeable product capacity limits.
 
@@ -171,7 +174,7 @@ bookings and their reschedule chains are excluded, matching existing import sile
 | --- | --- |
 | Event type equals | Equivalent to an event-specific scope; retained as an explicit AND predicate for editor consistency. |
 | Booking source equals | Personal only; exact existing stored source enum, never caller-supplied inference. |
-| Attendee answer equals | Personal only; booker's saved answer for a stable question ID, exact typed scalar equality. |
+| Attendee answer equals | Personal only; booker's saved answer for a stable question ID of a select or checkbox question, exact typed scalar equality. |
 | Location kind equals | Personal only; fixed location discriminator, never URL/text matching. |
 | Guest count equals/at least/at most | Number of non-booker attendees saved on this booking, inclusive integer comparison. |
 
@@ -179,12 +182,19 @@ Conditions are AND only, with no nesting, OR, regex, scripts or network lookups.
 workflows can express alternatives but still consume the same cap and intent deduplication.
 Missing/deleted questions and unknown values fail closed; arrays/free-text searching are
 unsupported. Answer predicates are only allowed for a single personal event type so the
-question schema is unambiguous. Team definitions reject source, answer and location
-predicates, including in preview: boolean matching and skip history can leak hidden data.
+question schema is unambiguous. They compare select and checkbox questions only, and a
+checkbox `equals false` matches only a stored false. The public booking form always submits
+an unticked box as false, but API and MCP callers may omit an optional checkbox, and an
+omitted answer matches neither true nor false. Team definitions reject source, answer and
+location predicates, including in preview: boolean matching and skip history can leak
+hidden data.
 Evaluate against the captured occurrence snapshot, then recheck live eligibility,
-ownership and lifecycle before dispatch. A failed condition records only `condition_false`,
-not the value or predicate index. Cancelled snapshots intentionally remain eligible for
-cancellation actions; they never revive before/after actions.
+ownership and lifecycle before dispatch. A booking whose event type was deleted after the
+definition was saved is never matched, at capture or at dispatch. This differs from
+reminders, which do not check whether the event type was deleted.
+A failed condition records only `condition_false`, not the value or predicate index.
+Cancelled snapshots intentionally remain eligible for cancellation actions; they never
+revive before/after actions.
 
 ## Email and webhook actions
 
@@ -224,6 +234,20 @@ No template exposes other attendees' email addresses, management tokens, private
 contents, credentials, conference organizer identity or start/retry capabilities. V1
 omits meeting URLs, cancellation reasons and free-text booking titles from all workflow
 variables. Structured date variables are formatted by code, not arbitrary format strings.
+
+The catalog in `packages/workflows/src/variables.ts` names these placeholders; the document
+test binds this table to it. Every other name is unknown, including any attendee no-show
+marker.
+
+| Placeholder | Value | Allowed for |
+| --- | --- | --- |
+| `{{recipient.name}}` | Recipient's own name | Every workflow and recipient class |
+| `{{recipient.time_zone}}` | Recipient's saved zone label | Every workflow and recipient class |
+| `{{event_type.title}}` | Event-type title | Every workflow and recipient class |
+| `{{event_type.public_path}}` | Public booking path while still valid | Every workflow and recipient class |
+| `{{booking.start}}` | Scheduled start in the recipient's saved zone | Every workflow and recipient class |
+| `{{booking.end}}` | Scheduled end in the recipient's saved zone | Every workflow and recipient class |
+| `{{answer.<questionId>}}` | Booker's saved scalar answer | Personal workflows of one event type whose recipients exclude other attendees |
 
 Reject unknown or unauthorized variables at save and preview. Parse placeholders into a
 small AST, substitute only plain scalar values, then escape the whole result for the

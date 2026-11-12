@@ -578,7 +578,7 @@ clear a required secret. Do not log tokens, assertions, XML, discovery bodies, D
 challenge values or provider error descriptions. Audit encrypted-key rotation and
 support operator key backup/restore without printing material.
 
-SSO audit uses the `audit_events` journal being built separately in
+SSO audit uses the `audit_events` [journal](audit-log.md) added in
 [PR #246](https://github.com/hourmere/hourmere/pull/246): an append-only table written by one
 INSERT in the same transaction as the change it records, with a closed actor/credential
 set and per-action detail allow-lists enforced by the application and the database.

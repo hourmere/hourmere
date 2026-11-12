@@ -49,6 +49,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- [Audit events](/docs/audit-log) are recorded only for the management changes listed
+  there; SCIM provisioning tokens, Slack destinations and no-show markers are not recorded
+  yet. The audit viewer, read APIs, export and retention controls are not available yet.
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).

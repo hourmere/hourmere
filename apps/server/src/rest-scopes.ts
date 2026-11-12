@@ -6,6 +6,8 @@ import {
   type Principal,
   requireApiKeyOperation,
 } from '@hourmere/auth'
+import { auditActor } from '@hourmere/db/audit'
+import type { BookingOrigin } from '@hourmere/scheduling'
 import type { Context, Handler, MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { matchedRoutes } from 'hono/route'
@@ -16,6 +18,17 @@ import { isRouteRateLimit } from './rate-limit.ts'
 
 // Bound from the declared route at registration, never from a caller-controlled URL.
 const operations = new WeakMap<Context, string>()
+const auditPrincipals = new WeakMap<Context, Principal>()
+
+/** Preserve public capability/idempotency semantics while attributing a validated key. */
+export function publicBookingAuditOrigin(
+  c: Context,
+  source: BookingOrigin['source'] = 'web',
+): BookingOrigin {
+  const principal = auditPrincipals.get(c)
+  return { source, apiKeyId: null, ...(principal ? { audit: auditActor(principal) } : {}) }
+}
+
 // The check of each featureGate middleware, and the gate of the route a request matched.
 const gateChecks = new WeakMap<object, () => void>()
 const routeGates = new WeakMap<Context, () => void>()
@@ -90,6 +103,7 @@ async function checkBearer(
   }
   if (gate) runCheck(gate)
   requireApiKeyOperation(result.principal, operationId)
+  auditPrincipals.set(c, result.principal)
 }
 
 /** Called after authentication, before validation or any resource lookup. */
