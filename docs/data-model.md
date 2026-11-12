@@ -999,7 +999,11 @@ them yet: there is no route, worker, read path or setting, and workflows stay ha
 `WORKFLOWS_IMPLEMENTED = false`. A test keeps every production module outside the storage
 layer from naming them.
 
-- **Definitions** have an immutable ID, organization, owner and creation time. A personal
+- **Definitions** have an immutable ID, organization, owner and creation time. Definition IDs
+  are server-generated: every definition takes the column's `uuidv7()` default, and callers
+  never supply one. Storage accepts an explicit ID, and if a purged workflow's ID were reused,
+  a retained enrollment of it that has no run could get one, so creation never passes an ID
+  from a request, tool or command. A personal
   definition belongs to its user in that user's personal organization (`owner_user_id`); a
   team definition (`owner_user_id` NULL) belongs to the team organization, never to the member
   who created it, and is refused in a personal organization. The owner is checked when the
@@ -1091,6 +1095,30 @@ organization lock, so a transaction that claims a run and then adds a recipient 
 organization first. Child rows carry their organization in composite foreign keys (as
 revisions do), and reservations, which have no parent row, reference the organization
 directly.
+
+Two rules order the later workflow writers against each other and against the existing writers
+that share their locks:
+
+- **Organization first.** Every workflow writer takes the organization lock first, before the
+  mail-budget lock and before any definition or run row. First means first among the workflow
+  locks: identity locks that the existing order puts before the organization, such as the
+  personal owner's user row that `lockOrganization` share-locks, still come before it. A mail
+  admission, including a
+  retry's re-admission, locks the owner organization (`FOR KEY SHARE`) before
+  `lockNotificationEmailBudget`. Invitation creation holds its team `FOR UPDATE` and then
+  takes the budget lock, so an admission that reached the organization only through its
+  reservation's foreign key, after the budget lock, would deadlock with it.
+- **Definition before runs.** Writers that touch both definitions and runs lock the definition
+  before its runs. A deletion tombstones the definition and then retires its pending runs; if
+  it retired first, it would miss a pending run that a concurrent capture commits. A
+  reschedule or cancellation share-locks the live definitions it may capture, after the
+  organization and in ID order, before it retires or writes any run. A reschedule that retired
+  the predecessor's run and then carried its timer would wait for the definition in the
+  enrollment guard while the deletion, holding the tombstone, waits for that run.
+
+`workflow-storage-lock-order.test.ts` races each reversed order on two connections into a
+deadlock (40P01) and each documented order to completion, with the lock statements of
+`workflow-storage-lock-order.ts` that later steps reuse.
 
 Execution identity outlives a definition's content. Enrollments name their workflow and
 revision without a foreign key to the definition, and enrollments, runs and recipient claims

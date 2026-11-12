@@ -1039,4 +1039,108 @@ describe('workflow design numeric contracts', () => {
       'The final workflow default flip does not change this independent switch or relax the Cloud requirement',
     )
   })
+
+  it('orders workflow writers: the organization before the mail budget, a definition before its runs', () => {
+    const dataModel = read('docs/data-model.md').replace(/\s+/g, ' ')
+    const step = (id: string) => planRows().find((row) => row[1] === id)?.[4] ?? ''
+    const acceptance = (id: string) => planRows().find((row) => row[1] === id)?.[6] ?? ''
+    // The two rules, in the data model and in the design's scheduling prose.
+    expect(dataModel).toContain(
+      'Every workflow writer takes the organization lock first, before the mail-budget lock and before any definition or run row.',
+    )
+    expect(dataModel).toContain(
+      'Writers that touch both definitions and runs lock the definition before its runs.',
+    )
+    expect(text).toContain(
+      'after its identity locks, every workflow writer takes the organization lock first, before the mail-budget lock and before any definition or run row, and writers that touch both definitions and runs lock the definition before its runs',
+    )
+    // First among the workflow locks: the existing identity order still comes before it.
+    expect(dataModel).toContain(
+      "First means first among the workflow locks: identity locks that the existing order puts before the organization, such as the personal owner's user row that `lockOrganization` share-locks, still come before it",
+    )
+    expect(dataModel).toContain(
+      "A mail admission, including a retry's re-admission, locks the owner organization (`FOR KEY SHARE`) before `lockNotificationEmailBudget`",
+    )
+    expect(dataModel).toContain(
+      'Invitation creation holds its team `FOR UPDATE` and then takes the budget lock',
+    )
+    expect(dataModel).toContain(
+      'A deletion tombstones the definition and then retires its pending runs; if it retired first, it would miss a pending run that a concurrent capture commits',
+    )
+    expect(dataModel).toContain(
+      'A reschedule or cancellation share-locks the live definitions it may capture, after the organization and in ID order, before it retires or writes any run',
+    )
+    // Step 7: deletion is definition-first.
+    expect(text).toContain(
+      'Deletion is eager: the deleting transaction locks the organization, tombstones the definition and then retires every pending run of that definition',
+    )
+    expect(step('7')).toContain(
+      'The deletion locks the organization, tombstones the definition and only then retires its runs',
+    )
+    expect(acceptance('7')).toContain(
+      "a deletion and a reschedule that carries the workflow's timer take turns without a deadlock, and the deletion also retires the carried run",
+    )
+    // Step 8c: lifecycle capture share-locks the definitions before any run.
+    expect(text).toContain(
+      'A reschedule or cancellation transaction locks the organization and then share-locks the live definitions it may capture, in ID order, before it retires or writes any run',
+    )
+    expect(step('8c')).toContain(
+      'Reschedule and cancellation lock the organization and then share-lock the live definitions they may capture, in ID order, before they retire or write any run',
+    )
+    expect(acceptance('8c')).toContain(
+      "a reschedule carrying a timer and that workflow's deletion take turns without a deadlock",
+    )
+    // Step 10: admission locks the organization before the shared budget lock.
+    expect(text).toContain(
+      'The admission locks the owner organization before that budget lock, never after it',
+    )
+    expect(text).toContain(
+      're-admits under the same organization and budget locks, in the same order, rather than relying on its first stamp',
+    )
+    expect(step('10')).toContain(
+      'after it locks the owner organization and then takes `lockNotificationEmailBudget`',
+    )
+    expect(acceptance('10')).toContain(
+      'an admission and invitation creation take turns on the organization without a deadlock',
+    )
+    // The reversed orders do not return in the design.
+    expect(text).not.toMatch(/retires?[^.]*\bthen tombstones?/)
+    expect(text).not.toMatch(/budget lock[^.]*\bthen locks? the (?:owner )?organization/)
+
+    // Invitation creation on main still locks the team for management before the budget.
+    const invitations = read('packages/auth/src/invitations.ts').replace(/\s+/g, ' ')
+    const management = invitations.indexOf('await checkTeamManagementAccess(')
+    expect(management).toBeGreaterThan(-1)
+    expect(invitations.slice(management)).toMatch(/^[^;]*organizationId, true, context, \)/)
+    expect(invitations.indexOf('options.reserve(trx')).toBeGreaterThan(management)
+    expect(read('packages/auth/src/team-management.ts')).toContain(
+      'if (lock === true) organizationQuery = organizationQuery.forUpdate()',
+    )
+    expect(read('packages/notifications/src/invitation-mail-limits.ts')).toMatch(
+      /export async function reserveInvitationEmailBudget\([\s\S]*?await lockNotificationEmailBudget\(db\)/,
+    )
+    // The regression test the data model names races both reversed orders into a deadlock.
+    expect(dataModel).toContain(
+      '`workflow-storage-lock-order.test.ts` races each reversed order on two connections into a deadlock (40P01) and each documented order to completion',
+    )
+    const regression = read('packages/db/src/workflow-storage-lock-order.test.ts')
+    expect(regression.match(/'40P01'/g)).toHaveLength(2)
+  })
+
+  it('pins server-generated definition IDs for creation', () => {
+    const dataModel = read('docs/data-model.md').replace(/\s+/g, ' ')
+    const acceptance = (id: string) => planRows().find((row) => row[1] === id)?.[6] ?? ''
+    expect(dataModel).toContain(
+      "Definition IDs are server-generated: every definition takes the column's `uuidv7()` default, and callers never supply one",
+    )
+    expect(dataModel).toContain('so creation never passes an ID from a request, tool or command')
+    expect(acceptance('5')).toContain(
+      'every definition ID is server-generated (uuidv7), and a create input that carries an ID is rejected',
+    )
+    // The default the rule names is the one the definitions table installs.
+    const definitions = latest(
+      /CREATE TABLE workflow_definitions \(\s*id uuid PRIMARY KEY DEFAULT (\w+)\(\),/g,
+    )
+    expect(definitions.match[1]).toBe('uuidv7')
+  })
 })

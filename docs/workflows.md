@@ -168,8 +168,9 @@ row and stops new capture for that definition. A pending run that the dispatcher
 while its definition is disabled ends permanently as `workflow_disabled`. Re-enabling never
 revives terminal or skipped work; runs not yet claimed stay eligible, so a brief toggle loses
 only the runs claimed during it. The editor states this when disabling. Deletion is
-eager: the deleting transaction retires every pending run of that definition. Imported
-bookings and their reschedule chains are excluded, matching existing import silence.
+eager: the deleting transaction locks the organization, tombstones the definition and then
+retires every pending run of that definition. Imported bookings and their reschedule chains
+are excluded, matching existing import silence.
 
 | Condition | Rationale and comparison |
 | --- | --- |
@@ -405,8 +406,10 @@ before that gap, record `minimum_gap`; at or before capture time record `offset_
 Step 8a's pure functions compute due instants and both outcomes before any capture exists;
 capture in steps 8b and 8c applies them when it creates rows, and dispatch rechecks expiry.
 
-Reschedule transaction retires predecessor timer and delayed-created/rescheduled work,
-then creates successor timer rows using the captured definitions and new anchors. This
+A reschedule or cancellation transaction locks the organization and then share-locks the
+live definitions it may capture, in ID order, before it retires or writes any run. The
+reschedule transaction then retires predecessor timer and delayed-created/rescheduled work
+and creates successor timer rows using the captured definitions and new anchors. This
 intentionally differs from Cal.com's documented delay carry-over: a delayed-created message
 about an earlier occurrence is not silently repurposed for the successor. Owners can use
 `booking.rescheduled` or successor timers for that intent; there is no delayed-created
@@ -430,10 +433,14 @@ Each retry still checks cancellation, disablement, authority and endpoint policy
 Use durable definition revisions, booking associations, occurrences, per-action executions
 and per-recipient intents with database uniqueness; pg-boss jobs carry only opaque row IDs.
 Reconciliation recreates missing wakes without recreating intents. Lock in the existing
-identity/organization/lifecycle order, use claim tokens and fencing, and recheck authority,
-workflow enabled state, booking anchors/status, recipient eligibility and deadline after
-waiting. Cancellation/disable serializes with the marker transaction and checks any already
-committed dispatch marker (irreversible unless positively known not sent) to determine which operation won. For email,
+identity/organization/lifecycle order: after its identity locks, every workflow writer takes
+the organization lock first, before the mail-budget lock and before any definition or run
+row, and writers that touch both definitions and runs lock the definition before its runs
+(see [workflow execution storage](data-model.md#workflow-execution-storage)). Use claim
+tokens and fencing, and recheck authority, workflow enabled state, booking anchors/status,
+recipient eligibility and deadline after waiting. Cancellation/disable serializes with the
+marker transaction and checks any already committed dispatch marker (irreversible unless positively
+known not sent) to determine which operation won. For email,
 that marker transaction is the dispatch boundary: a mutation that commits first prevents
 the marker and SMTP; an email whose marker commits first may still start or finish SMTP
 after cancellation/disable returns. This narrow race cannot recall an already-authorized
@@ -511,7 +518,10 @@ and owner sub-counters so they cannot consume booking/sign-in per-address allowa
 
 Workflow charges are recorded in `notification_email_sends`, the table that core admission
 already counts, not in a separate ledger. Each admitted workflow attempt inserts two rows in
-one short admission transaction under the shared `lockNotificationEmailBudget` lock:
+one short admission transaction under the shared `lockNotificationEmailBudget` lock. The
+admission locks the owner organization before that budget lock, never after it: invitation
+creation holds its team `FOR UPDATE` and then takes the budget lock, and the reservation's
+foreign key share-locks the organization. It inserts:
 
 - one `notification_email_sends` row with a workflow-purpose recipient hash and
   `workflow_reservation_id` set;
@@ -564,14 +574,15 @@ The reserve guarantees headroom against workflow flooding, not delivery through 
 outage or exhaustion caused by core traffic itself. No additional provider capacity is
 required merely to enable workflows under the existing documented sizing rule.
 
-A known-not-sent SMTP retry (see Scheduling) re-admits under the same lock rather than
-relying on its first stamp. It recounts every window without its own ledger row. If the
-attempt is still admitted, it moves that row's `sent_at` and the reservation's timestamp
-to the retry instant; otherwise it ends as `budget_suppressed`. A retry never adds a second
-ledger row. Core mail inserts its ledger row inside its SMTP transaction. A workflow
-attempt is stamped in the admission transaction committed just before SMTP, and is
-restamped on each retry. So an attempt's charge never ages out of the sliding hour before
-it reaches SMTP, and the sizing rule holds up to that admission-to-SMTP latency.
+A known-not-sent SMTP retry (see Scheduling) re-admits under the same organization and
+budget locks, in the same order, rather than relying on its first stamp. It recounts every
+window without its own ledger row. If the attempt is still admitted, it moves that row's
+`sent_at` and the reservation's timestamp to the retry instant; otherwise it ends as
+`budget_suppressed`. A retry never adds a second ledger row. Core mail inserts its ledger row
+inside its SMTP transaction. A workflow attempt is stamped in the admission transaction
+committed just before SMTP, and is restamped on each retry. So an attempt's charge never ages
+out of the sliding hour before it reaches SMTP, and the sizing rule holds up to that
+admission-to-SMTP latency.
 
 Workflow email has no long retry. An SMTP outage longer than the 60-minute late bound
 (`WORKFLOW_MAX_LATE_MINUTES`) ends every workflow email whose window closes during the
@@ -829,14 +840,14 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 | 2. Definition storage | 1 | None. New migration for definitions and immutable revisions; select next available migration number at implementation time. | Hard-off | Populated predecessor upgrade preserves reminders and booking snapshots; fresh install equivalent; rerun no-op; generated DB types match. |
 | 3. Execution storage | 2 | None. New migration for enrollments, due runs, per-recipient claims, minimal history and workflow mail reservations, plus nullable `notification_email_sends.workflow_reservation_id` without a foreign key; indexed cleanup. | Hard-off | Unique constraints kill concurrent duplicate capture; deletion/retention cannot revive a dispatch; existing ledger rows keep NULL and core count queries are unchanged; predecessor/fresh/no-op upgrade tests. |
 | 4. Definition reads and availability signals | 2 | `GET /api/v1/workflows` (`listWorkflows`) / `list_workflows` / `workflows list`; `GET /api/v1/workflows/{id}` (`getWorkflow`) / `get_workflow` / `workflows get`. Add optional `workflowsEnabled` to existing `GET /api/v1/instance`; add the workflow feature predicate to the `registerTools()` catalog/visible split. | Hard-off | Full/read scope and current owner/admin checks; foreign IDs and team-context changes reveal no data; `tools/list` omits workflow tools while a direct call returns 404 workflows_disabled; `/instance` reports false; additive OpenAPI responses and generated client. |
-| 5. Create definitions | 4 | `POST /api/v1/workflows` (`createWorkflow`) / `create_workflow` / `workflows create`. Emit the creation audit event through the port (no-op under hard-off until 16b); reject webhook actions until 13d. | Hard-off | Creation replay returns same definition; changed replay conflicts; concurrent all-event/per-event admissions enforce combined cap; full-only writes; parity check passes. |
+| 5. Create definitions | 4 | `POST /api/v1/workflows` (`createWorkflow`) / `create_workflow` / `workflows create`. Emit the creation audit event through the port (no-op under hard-off until 16b); reject webhook actions until 13d. | Hard-off | Creation replay returns same definition; changed replay conflicts; concurrent all-event/per-event admissions enforce combined cap; full-only writes; parity check passes; every definition ID is server-generated (uuidv7), and a create input that carries an ID is rejected. |
 | 6. Edit, enable and disable | 3, 5 | `PATCH /api/v1/workflows/{id}` (`updateWorkflow`) / `update_workflow` / `workflows update`. Emit update/enable/disable audit events through the port; reject webhook actions until 13d. | Hard-off | Expected-revision conflicts; with fixture execution rows, disable and re-enable change only the definition row and never write, retire or backfill an execution row; new revisions do not overwrite booking enrollments. (Wake-time skips are tested in 9; end-to-end sends in 12b.) |
-| 7. Delete and retirement | 3, 6 | `DELETE /api/v1/workflows/{id}` (`deleteWorkflow`) / `delete_workflow` / `workflows delete`. Emit the deletion audit event through the port; retention behavior. | Hard-off | Repeated authorized delete safe; storage-state invariant: the deleting transaction marks every pending fixture run of the definition retired, and no retired row can return to pending; history remains minimal; no cross-tenant existence leaks. (Claim races are tested in 9.) |
+| 7. Delete and retirement | 3, 6 | `DELETE /api/v1/workflows/{id}` (`deleteWorkflow`) / `delete_workflow` / `workflows delete`. Emit the deletion audit event through the port; retention behavior. The deletion locks the organization, tombstones the definition and only then retires its runs. | Hard-off | Repeated authorized delete safe; storage-state invariant: the deleting transaction marks every pending fixture run of the definition retired, and no retired row can return to pending; a deletion and a reschedule that carries the workflow's timer take turns without a deadlock, and the deletion also retires the carried run; history remains minimal; no cross-tenant existence leaks. (Claim races are tested in 9.) |
 | 8a. Timer calculations | 1 | None. Pure UTC due-time, minimum-gap, capture-time and expiration rules used by capture and dispatch. | Hard-off | Before/after start/end anchors; minimum_gap and offset_not_future equality; spring/fall DST and non-hour shifts; late-bound equality. |
 | 8b. Creation capture and intents | 3, 7, 8a | None. Native confirmed creation hooks on the `created` notifier event, immutable enrollments, due rows from 8a, and reminder/workflow intent ordering. | Hard-off | Rollback creates no run; duplicate capture coalesces; hold-confirm captures once; hold-expire/release creates nothing; imported/group bookings remain silent; minimum_gap and offset_not_future recorded at capture. |
-| 8c. Cancellation, reschedule and request-event capture | 8b | None. Cancellation and successor hooks with occurrence identities; `reschedule_requested` and `reschedule_request_expired` notifier events capture nothing; workflows register nothing on `AttendeeNoShowNotifier`. | Hard-off | Reschedule emits neither a second created nor an actual-cancel trigger; cancellation replay coalesces; successor retains timer revisions; delayed-created work retires and never transfers to the successor; request and request-expiry events create no occurrence and leave pending runs and wakes unchanged, and so does marking or unmarking an attendee as a no-show; a pick captures as an ordinary reschedule and a request cancellation as an ordinary cancellation. |
+| 8c. Cancellation, reschedule and request-event capture | 8b | None. Cancellation and successor hooks with occurrence identities; `reschedule_requested` and `reschedule_request_expired` notifier events capture nothing; workflows register nothing on `AttendeeNoShowNotifier`. Reschedule and cancellation lock the organization and then share-lock the live definitions they may capture, in ID order, before they retire or write any run. | Hard-off | Reschedule emits neither a second created nor an actual-cancel trigger; cancellation replay coalesces; successor retains timer revisions; delayed-created work retires and never transfers to the successor; request and request-expiry events create no occurrence and leave pending runs and wakes unchanged, and so does marking or unmarking an attendee as a no-show; a pick captures as an ordinary reschedule and a request cancellation as an ordinary cancellation; a reschedule carrying a timer and that workflow's deletion take turns without a deadlock. |
 | 9. Dispatcher and repair | 8c | None. Bounded due claims, fences, lazy definition-disable check at wake and missing-wake repair. | Hard-off | Cancel/reschedule/disable/delete while claim waits; a claim while its definition is disabled ends as workflow_disabled, and re-enabling before the claim dispatches within the late bound; racing worker cannot reclaim retired work; a pending reschedule request or a no-show mark neither delays nor skips a due run; repair preserves unique identity; no late first attempt. |
-| 10. Shared mail admission and sub-caps | 3 | None. Shared global ledger/lock and workflow-purpose hash; admission inserts the workflow-linked `notification_email_sends` row and the reservation row in one transaction; retry re-admission restamps that row; instance/owner settings in loadConfig with Compose `${…:-}` forwards and no .env.example or configuration.md entry yet. | Hard-off | Unchanged core queries count workflow rows; last-slot races across core/workflow workers admit once; workflow flood leaves 80 core and 20 reserve slots; re-admission excludes its own row, adds none and suppresses when full; small/zero caps and sliding windows; deletion cannot reset budget; Compose forwards both with empty defaults; close pools below CI ceiling. |
+| 10. Shared mail admission and sub-caps | 3 | None. Shared global ledger/lock and workflow-purpose hash; admission inserts the workflow-linked `notification_email_sends` row and the reservation row in one transaction, after it locks the owner organization and then takes `lockNotificationEmailBudget`; retry re-admission restamps that row; instance/owner settings in loadConfig with Compose `${…:-}` forwards and no .env.example or configuration.md entry yet. | Hard-off | Unchanged core queries count workflow rows; last-slot races across core/workflow workers admit once; workflow flood leaves 80 core and 20 reserve slots; re-admission excludes its own row, adds none and suppresses when full; small/zero caps and sliding windows; deletion cannot reset budget; an admission and invitation creation take turns on the organization without a deadlock; Compose forwards both with empty defaults; close pools below CI ceiling. |
 | 11a. Safe email renderer and text policy | 6 | None. Bounded escaped interpolation and FOLLOW_UP_HOST_NOTES_ENABLED policy in save/update, the shared candidate validator and the renderer's built-in fallback used by dispatch (preview endpoint integrates in 15a). | Hard-off | Hostile HTML/header/control inputs inert; unauthorized variables rejected; switch off rejects custom subject/body in save/update and candidate-validator fixtures, including host recipients; the renderer falls back to built-in text for a stored custom revision when the switch is off; built-ins remain valid. |
 | 11b. Localized built-in catalogs | 11a | None. Templates for every shipped public locale and fixture snapshots. | Hard-off | Locale fallback is built-in; plain-text/HTML snapshots; no sibling contacts, capabilities or unauthorized team fields; self-hosted/Cloud defaults documented. |
 | 12a. Email attempt and retry state machine | 9, 10, 11b | None. Marker commit, fenced known-not-sent reversal with re-admission, and terminal ambiguity. | Hard-off | Connection/greeting/auth failure retries the same reservation/intent after re-admission, with one ledger row; stale token cannot reverse marker; post-DATA ambiguity and crash never create a second potentially accepted attempt; bounded backoff expires at due + 60 minutes during a longer outage. |
