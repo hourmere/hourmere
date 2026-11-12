@@ -56,7 +56,13 @@ const all = [
   'remove_waitlist_entry',
   'join_waitlist',
   'resend_waitlist_verification',
+  'list_workflows',
+  'get_workflow',
 ]
+// In the catalog but not available: never listed, and a direct call that passes the scope
+// check answers workflows_disabled without reaching its handler.
+const unavailable = new Set(['list_workflows', 'get_workflow'])
+const disabled = { error: 'workflows_disabled' }
 const configurationWrites = new Set([
   'set_branding',
   'save_schedule_availability',
@@ -97,6 +103,8 @@ const otherReads = new Set([
   'get_event_type_waitlist',
   'list_waitlist_entries',
   'list_one_time_links',
+  'list_workflows',
+  'get_workflow',
 ])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
@@ -214,7 +222,9 @@ describe('MCP scoped discovery and dispatch', () => {
             }),
           )
           const { tools } = await client.listTools()
-          expect(tools.map((tool) => tool.name)).toEqual(expected(scope))
+          expect(tools.map((tool) => tool.name)).toEqual(
+            expected(scope).filter((name) => !unavailable.has(name)),
+          )
           for (const tool of tools) {
             expect(tool.inputSchema.additionalProperties).toBe(false)
             expect(tool.outputSchema).toBeDefined()
@@ -252,7 +262,11 @@ describe('MCP scoped discovery and dispatch', () => {
           tool.run.mockClear()
           const { res, message } = await rpc(tool.name, scope, era, {}, target)
           expect(res.status, `${scope}/${era}/${tool.name}`).toBe(200)
-          if (expected(scope).includes(tool.name)) {
+          if (expected(scope).includes(tool.name) && unavailable.has(tool.name)) {
+            expect(message.result.isError, `${scope}/${tool.name}`).toBe(true)
+            expect(textOf(message.result)).toEqual(disabled)
+            expect(tool.run).not.toHaveBeenCalled()
+          } else if (expected(scope).includes(tool.name)) {
             expect(message.result.isError, `${scope}/${tool.name}`).toBeFalsy()
             expect(tool.run).toHaveBeenCalledTimes(1)
           } else {
@@ -314,7 +328,10 @@ describe('MCP scoped discovery and dispatch', () => {
               throw Error('Unexpected tool error')
             },
           )
-          if (expected(scope).includes(tool.name)) expect(tool.run).toHaveBeenCalledTimes(1)
+          if (expected(scope).includes(tool.name) && unavailable.has(tool.name)) {
+            expect(textOf(result as { content: { text: string }[] })).toEqual(disabled)
+            expect(tool.run).not.toHaveBeenCalled()
+          } else if (expected(scope).includes(tool.name)) expect(tool.run).toHaveBeenCalledTimes(1)
           else {
             expect(result.isError).toBe(true)
             expect(textOf(result as { content: { text: string }[] })).toEqual(denial)
@@ -382,7 +399,9 @@ describe('MCP scoped discovery and dispatch', () => {
           requestInit: { headers: { authorization: 'Bearer oauth-test-token' } },
         }),
       )
-      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(all)
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(
+        all.filter((name) => !unavailable.has(name)),
+      )
       const identity = await client.callTool({ name: 'whoami', arguments: {} })
       expect(identity.structuredContent).toHaveProperty('principal')
       expect((identity.structuredContent as { principal: object }).principal).not.toHaveProperty(
@@ -427,6 +446,8 @@ describe('CLI scope parity', () => {
     ['one-time-links create', 'create_one_time_link'],
     ['one-time-links list', 'list_one_time_links'],
     ['one-time-links revoke', 'revoke_one_time_link'],
+    ['workflows list', 'list_workflows'],
+    ['workflows get', 'get_workflow'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',
@@ -453,7 +474,11 @@ describe('CLI scope parity', () => {
         })
         expect(fetcher).toHaveBeenCalledTimes(1)
         expect((stdout + stderr).includes(key)).toBe(false)
-        if (expected(scope).includes(name)) {
+        if (expected(scope).includes(name) && unavailable.has(name)) {
+          expect(code, `${scope}/${command}`).toBe(1)
+          expect(stdout).toBe('')
+          expect(JSON.parse(stderr)).toMatchObject(disabled)
+        } else if (expected(scope).includes(name)) {
           expect(code, `${scope}/${command}`).toBe(0)
           expect(JSON.parse(stdout)).toEqual({ dispatched: name })
         } else {

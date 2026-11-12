@@ -864,11 +864,11 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   it.each([
     [
       'renewing an expired invitation in place',
-      '        invitation = undefined\n        delivery = undefined',
-      `        if (invitation) invitation = await trx.updateTable('auth.invitation')
-          .set({ status: 'pending', expiresAt: new Date(now.getTime() + lifetime) })
-          .where('id', '=', invitation.id).returningAll().executeTakeFirstOrThrow()
-        delivery = undefined`,
+      '    invitation = undefined\n    delivery = undefined',
+      `    if (invitation) invitation = await trx.updateTable('auth.invitation')
+      .set({ status: 'pending', expiresAt: new Date(now.getTime() + lifetime) })
+      .where('id', '=', invitation.id).returningAll().executeTakeFirstOrThrow()
+    delivery = undefined`,
       'an expired invitation requires a new ID',
     ],
     [

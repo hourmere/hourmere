@@ -130,8 +130,15 @@ notifications and trigger configured integrations.
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `list_workflows` | — | `workflows list` | `full, read` |
+| `get_workflow` | — | `workflows get` | `full, read` |
 
 <!-- api-key-scope-table:end -->
+
+`list_workflows` and `get_workflow` are listed before booking workflows are available:
+until they are enabled, `tools/list` omits them and a direct call by a `read` or `full` key
+returns `isError: true` with `workflows_disabled` (a `bookings` key still gets
+`insufficient_scope`). `workflows list` and `workflows get` report the same codes.
 
 Scope is immutable: use **Create replacement** on `/app/api-keys`, update the client and
 revoke the old key. Legacy keys and native API creations that omit `metadata.scope` retain
@@ -580,6 +587,14 @@ organization that the caller also hosts, or null when none is available. It is r
 when the successor falls outside the current page or filters. Public/manage responses omit
 it. The predecessor's `status` remains `cancelled`; use `rescheduledToId` to distinguish a
 reschedule from a cancellation, and `rescheduledFromId` to trace back to its predecessor.
+
+`list_workflows` and `get_workflow` read booking workflows, which are not available yet. They
+stay out of `tools/list`, and a direct call answers `workflows_disabled`, until workflows are
+enabled on the instance; discover availability with `workflowsEnabled` from
+`GET /api/v1/instance`. Once enabled, `list_workflows` takes the explicit owner you act as
+(`{kind: "personal", id: your user ID}` in your personal organization, or
+`{kind: "team", id: team ID}` as a current team owner or admin), and both return the current
+revision's definition with its enabled flag.
 
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as

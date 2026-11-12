@@ -357,6 +357,7 @@ const invalidCancel = error(
 
 export interface BookingRoutesDeps {
   db: Db
+  bookingExportMaxConcurrent?: number | undefined
   bookingMaxInviteeReschedules?: number | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -378,6 +379,7 @@ export interface BookingRoutesDeps {
 export function bookingRoutes({
   db,
   bookingMaxInviteeReschedules,
+  bookingExportMaxConcurrent,
   now = () => Temporal.Now.instant(),
   notify,
   notifyAttendeeNoShow,
@@ -430,6 +432,7 @@ export function bookingRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      bookingExportMaxConcurrent,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
 
@@ -911,7 +914,7 @@ export function bookingRoutes({
         operationId: 'exportBookingsCsv',
         summary: 'Download bookings as CSV',
         description:
-          'Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
+          'Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization across processes, one export per user per process, and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
         security: authenticated,
         middleware: caller,
         request: {
@@ -938,7 +941,7 @@ export function bookingRoutes({
             'Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials',
           ),
           409: error(
-            'export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
+            'export_user_in_progress when this user already has an export in this process, export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
           ),
           429: keyRateLimited,
         },

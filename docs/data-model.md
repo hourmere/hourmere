@@ -59,7 +59,11 @@ stored, or whose decision is already a live tombstone, is dropped so that accoun
 is never refused. These tables provide storage
 for later claim and authorization work; this migration does not enforce new admission,
 suspension or revocation behavior in application services. Users, Groups and discovery
-handlers remain unregistered in production.
+handlers remain unregistered in production. The User creation handler, which only test
+harnesses register, writes a resource and, for its work address, one pending claim whose
+`invitation_id` names the invitation it issued or reused, or is null when the address
+already belongs to a member or another pending invitation holds it; it never sets an
+account or membership link.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -103,7 +107,11 @@ internal enrollment and verification service in
 re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
 invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
 resend counters under the poll lock. It queues delivery rows only; no worker, transport,
-flag or UI is enabled.
+flag or UI is enabled. The internal ballot service in
+`packages/scheduling/src/meeting-poll-ballots.ts` submits and replaces complete ballots,
+withdraws and reactivates voters and records reminder opt-outs under the same locks and
+database deadline clock. Ballots and withdrawals advance the ballot and results revisions;
+no voter write, opt-out included, moves the host revision.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
@@ -1021,10 +1029,11 @@ upgrade test preserves a populated predecessor, including the SSO configuration 
 ## Workflow definition storage
 
 Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
-(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Nothing reads or writes
-them yet: there is no route, worker, read path or setting, and workflows stay hard-off behind
-`WORKFLOWS_IMPLEMENTED = false`. A test keeps every production module outside the storage
-layer from naming them.
+(step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Only the definition
+reads of step 4 (`packages/workflows/src/reads.ts`) query them, behind the hard-off guard, so
+they answer `workflows_disabled` while workflows stay off behind
+`WORKFLOWS_IMPLEMENTED = false`; nothing writes them yet, and no worker or setting uses them.
+A test keeps every other production module outside the storage layer from naming them.
 
 - **Definitions** have an immutable ID, organization, owner and creation time. A personal
   definition belongs to its user in that user's personal organization (`owner_user_id`); a
@@ -1147,8 +1156,9 @@ ledger counts and purge unchanged on the same rows across the upgrade.
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
 email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
 Only its definition and execution storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage));
-no API, worker or runtime enablement exists yet.
+storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage)),
+with definition read operations that answer `workflows_disabled` while hard-off; no write API,
+worker or runtime enablement exists yet.
 
 | When | Change |
 |---|---|
@@ -1492,6 +1502,13 @@ The phases within that organization boundary are:
   that record finishes first. Only routing takes that lock, always after the
   organization and before event types, so it adds no cycle; concurrent retries of one key
   queue on it, and each finds the record the first one committed.
+- SCIM User creation takes the organization update lock first, like membership management,
+  then a key share lock on its provisioning token row (revocation and rotation take the
+  organization lock before their token update lock), then the shared invitation service's
+  locks: the address's pending invitation rows, their delivery rows and the mail-budget
+  lock, inside a savepoint that is rolled back, releasing them, when the claim records no
+  invitation. It locks no member row: the organization lock excludes membership changes while it
+  reads the earliest owner who invites.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
