@@ -1325,14 +1325,46 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     }
   })
   it('whole-organization deletion does not depend on FK cascade order; removing the binding cleanup fails under the adverse order', async () => {
-    // PostgreSQL fires an organization's referential actions in RI trigger name order,
-    // which follows object creation and can place the connection cascade before the token
-    // cascade (CI reproduced this). Recreate the token cascade after 0073 to force that
-    // order deterministically: the NO ACTION binding FK must then already be satisfied.
-    const adverse = `${source}
-      ALTER TABLE scim_provisioning_tokens DROP CONSTRAINT scim_provisioning_tokens_organization_id_fkey;
-      ALTER TABLE scim_provisioning_tokens ADD CONSTRAINT scim_provisioning_tokens_organization_id_fkey
-        FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE;`
+    // PostgreSQL fires an organization's referential actions in RI trigger name order. The
+    // names embed the trigger OID (RI_ConstraintTrigger_a_<oid>) and compare bytewise, so a
+    // later trigger sorts first once its OID has more digits: '..._a_100002' < '..._a_99998'.
+    // The connection cascade can therefore run before the token cascade (CI reproduced this).
+    // Force that adverse order: re-create the connection cascade, then the token cascade, and
+    // redo both while an OID power of ten between them reverses the order. The NO ACTION
+    // binding FK must then already be satisfied.
+    const cascades = [
+      ['scim_connections', 'scim_connections_organization_id_fkey'],
+      ['scim_provisioning_tokens', 'scim_provisioning_tokens_organization_id_fkey'],
+    ] as const
+    const names = cascades.map(([, name]) => name)
+    const adverseOrder = async (client: pg.PoolClient) => {
+      let fired: string[] = []
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        // Each cascade keeps its own definition; only its trigger OID changes.
+        for (const [table, name] of cascades) {
+          const { rows } = await client.query(
+            'SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = $1::regclass AND conname = $2',
+            [table, name],
+          )
+          await client.query(`ALTER TABLE ${table} DROP CONSTRAINT ${name};
+            ALTER TABLE ${table} ADD CONSTRAINT ${name} ${rows[0].definition}`)
+        }
+        // The firing order is the trigger name order PostgreSQL uses: bytewise, COLLATE "C".
+        const { rows } = await client.query(
+          `SELECT c.conname, t.tgname::text AS tgname
+             FROM pg_trigger t JOIN pg_constraint c ON c.oid = t.tgconstraint
+            WHERE t.tgrelid = 'auth.organization'::regclass
+              AND t.tgfoid = 'pg_catalog."RI_FKey_cascade_del"'::regproc
+              AND c.conname = ANY($1)
+            ORDER BY t.tgname COLLATE "C"`,
+          [names],
+        )
+        fired = rows.map((row) => `${row.conname} (${row.tgname})`)
+        if (rows.map((row) => row.conname).join() === names.join()) return
+      }
+      // A misordered setup fails here as setup, not later as a surviving mutant.
+      throw new Error(`Setup could not fire the connection cascade first: ${fired.join(', ')}`)
+    }
     const verify = async (client: pg.PoolClient) => {
       await succeeds(client, `DELETE FROM auth.organization WHERE id='${org}'`)
       expect(
@@ -1346,13 +1378,17 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
         { token_id: otherToken },
       ])
     }
-    await transaction(adverse, verify)
-    const mutant = adverse.replace(
+    await transaction(source, async (client) => {
+      await adverseOrder(client)
+      await verify(client)
+    })
+    const mutant = source.replace(
       'DELETE FROM scim_token_connections WHERE organization_id = OLD.id;\n',
       '',
     )
-    expect(mutant).not.toBe(adverse)
+    expect(mutant).not.toBe(source)
     await transaction(mutant, async (client) => {
+      await adverseOrder(client)
       await expect(verify(client)).rejects.toMatchObject({ name: 'AssertionError' })
     })
   })
