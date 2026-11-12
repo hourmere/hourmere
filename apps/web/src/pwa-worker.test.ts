@@ -832,10 +832,11 @@ it('lists every rejectable fetch, caches and cache call in worker.js exactly onc
     ),
   ).toEqual(['install:cache.delete', 'install:caches.open'])
   expect(rejectableCallSites(inInstall("await caches?.has('x')"))).toEqual(['install:caches.has'])
-  // A `//` inside a string that comes before a call on the same line must not hide the call.
+  // A `//` inside a string that comes before a call on the same line must not hide the call,
+  // and a trailing comment after the call must not hide it either.
   expect(
     rejectableCallSites(
-      inInstall("await Promise.all(['https://cdn.example/a'].map((u) => caches.has(u)))"),
+      inInstall("await Promise.all(['https://cdn.example/a'].map((u) => caches.has(u))) // x"),
     ),
   ).toEqual(['install:caches.has'])
 })
