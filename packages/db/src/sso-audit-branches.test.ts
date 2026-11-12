@@ -8,7 +8,12 @@ describe('0085 SSO audit actions', () => {
   const previousFile = migrations[migrations.indexOf(migration) - 1] as string
   const previous = detailsCheck(previousFile)
   const current = detailsCheck(migration)
-  const statement = (tail: string) => tail.slice(0, tail.indexOf(';') + 1)
+  // The statements after the CASE (the `NOT VALID` form and its `VALIDATE`), without comments.
+  const statements = (tail: string) =>
+    tail
+      .split('\n')
+      .filter((line) => !line.startsWith('--'))
+      .join('\n')
 
   it('replaces the newest earlier check', () => {
     expect(migrations).toContain(migration)
@@ -18,7 +23,7 @@ describe('0085 SSO audit actions', () => {
 
   it('keeps every earlier branch byte for byte and adds the SSO branches before the default', () => {
     expect(current.head).toBe(previous.head)
-    expect(statement(current.tail)).toBe(statement(previous.tail))
+    expect(statements(current.tail)).toBe(statements(previous.tail))
     const added = current.branches.filter(isSsoBranch)
     expect(added.length).toBeGreaterThan(0)
     // Every other branch, comments included, in the same order.

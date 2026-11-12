@@ -6,7 +6,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import type pg from 'pg'
 import { expect } from 'vitest'
-import { assertAuditDetailProtections } from './audit-actions-followups-protections.ts'
+import { assertAuditEventListProtections } from './audit-event-details-protections.ts'
 
 /** A lowercase UUIDv7, the shape of the provider and attempt IDs that `uuidv7()` generates. */
 export function ssoAuditTestId(): string {
@@ -84,8 +84,8 @@ const empty = [
 
 /** Throws when an SSO action's details accept anything beyond its allow-list. */
 export async function assertSsoAuditDetailProtections(pool: pg.Pool): Promise<void> {
-  // Every earlier branch still holds.
-  await assertAuditDetailProtections(pool)
+  // Every earlier branch still holds: 0080's suite, which runs 0078's first.
+  await assertAuditEventListProtections(pool)
   const providerId = ssoAuditTestId()
   const correlationId = ssoAuditTestId()
   const base = (action: string): Record<string, unknown> => {

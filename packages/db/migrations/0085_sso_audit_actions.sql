@@ -1,6 +1,6 @@
 -- SSO audit actions join the details check (docs/audit-log.md, "SSO actions"). No version
 -- writes them yet; the later SSO steps record them through packages/db/src/audit.ts. The check
--- is replaced as a whole and every earlier branch is unchanged from 0078. An SSO action admits
+-- is replaced as a whole and every earlier branch is unchanged from 0080. An SSO action admits
 -- only its allow-listed keys, each with a safe value: the protocol, a provider or attempt ID (a
 -- UUIDv7, which no secret, token, assertion, IdP subject or mailbox capability is), a positive
 -- integer revision and an outcome or reason code from a closed list. The other SSO actions fall
@@ -11,8 +11,28 @@ ALTER TABLE audit_events ADD CONSTRAINT audit_events_details_check CHECK (
   CASE
     WHEN action = 'membership.role_changed' THEN details - ARRAY['oldRole','newRole'] = '{}'::jsonb
     WHEN action IN ('api_key.created','api_key.rotated') THEN details - 'scope' = '{}'::jsonb
+    -- Each catalogue name present adds one to the sum, so the sum equals the length only when
+    -- every element is a catalogue string and none repeats.
     WHEN action IN ('webhook.created','webhook.updated','webhook.deleted','webhook.secret_rotated','webhook.paused','webhook.resumed') THEN details - 'events' = '{}'::jsonb
+      AND (NOT details ? 'events' OR CASE WHEN jsonb_typeof(details->'events') = 'array' THEN
+        jsonb_array_length(details->'events') BETWEEN 1 AND 6
+        AND jsonb_array_length(details->'events') = (details->'events' ? 'booking.created')::int
+          + (details->'events' ? 'booking.rescheduled')::int
+          + (details->'events' ? 'booking.cancelled')::int
+          + (details->'events' ? 'booking.reschedule_requested')::int
+          + (details->'events' ? 'booking.reschedule_request_expired')::int
+          + (details->'events' ? 'booking.attendee_no_show_changed')::int
+        ELSE false END)
+    -- Slack's catalogue leaves out the attendee no-show change.
     WHEN action IN ('slack_destination.created','slack_destination.updated','slack_destination.deleted','slack_destination.paused','slack_destination.resumed','slack_destination.tested') THEN details - 'events' = '{}'::jsonb
+      AND (NOT details ? 'events' OR CASE WHEN jsonb_typeof(details->'events') = 'array' THEN
+        jsonb_array_length(details->'events') BETWEEN 1 AND 5
+        AND jsonb_array_length(details->'events') = (details->'events' ? 'booking.created')::int
+          + (details->'events' ? 'booking.rescheduled')::int
+          + (details->'events' ? 'booking.cancelled')::int
+          + (details->'events' ? 'booking.reschedule_requested')::int
+          + (details->'events' ? 'booking.reschedule_request_expired')::int
+        ELSE false END)
     WHEN action = 'oauth.token_revoked' THEN details - 'familySize' = '{}'::jsonb
     -- Which branding settings changed and how; never the image or the colour itself.
     WHEN action = 'organization.branding_updated' THEN details - ARRAY['logo','primaryColor'] = '{}'::jsonb
@@ -86,4 +106,7 @@ ALTER TABLE audit_events ADD CONSTRAINT audit_events_details_check CHECK (
         AND details->>'correlationId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', false))
     ELSE details = '{}'::jsonb
   END
-);
+) NOT VALID;
+-- The runner applies each file in one transaction, so the ACCESS EXCLUSIVE lock taken above is
+-- still held while existing rows are validated (0085_sso_audit_actions.md).
+ALTER TABLE audit_events VALIDATE CONSTRAINT audit_events_details_check;
