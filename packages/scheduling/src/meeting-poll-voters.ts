@@ -8,7 +8,9 @@
 // UPDATE, then its event FOR SHARE. Public writes take public booking's organization order
 // (a personal owner's user SHARE, then the organization SHARE), then the same poll FOR
 // UPDATE and event FOR SHARE. Neither takes host booking locks. The database clock is read
-// once after those locks and decides capacity, expiry, deadline and cooldowns.
+// once after those locks and decides capacity, expiry, deadline and cooldowns. Before any of
+// those locks, every service takes the meeting-poll key fence (meeting-poll-key.ts) and
+// refuses a secret other than the one the poll data was written under.
 import {
   createCipheriv,
   createDecipheriv,
@@ -24,6 +26,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { lockOrganization } from './hosts.ts'
 import { isUuid, validTimeZone } from './internal.ts'
+import { ensureMeetingPollKey } from './meeting-poll-key.ts'
 import { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 import {
   alreadyScheduled,
@@ -279,6 +282,7 @@ export async function enrollMeetingPollVoter(
   const locale = validLocale(input.locale)
   const digest = meetingPollPublicTokenDigest(publicToken)
   return ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const named = await trx
       .selectFrom('meeting_polls')
       .select(['id', 'organization_id'])
@@ -359,6 +363,7 @@ export async function verifyMeetingPollVoter(
   const verification = meetingPollCapabilityDigest('verification', token)
   const voting = meetingPollCapabilityDigest('voting', token)
   return ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const named = await trx
       .selectFrom('meeting_poll_capabilities')
       .select(['id', 'poll_id', 'organization_id'])
@@ -462,6 +467,7 @@ export async function recoverMeetingPollVoter(
   if (!isUuid(input.pollId)) return accepted()
   const pollId = input.pollId
   await ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const named = await trx
       .selectFrom('meeting_polls')
       .select(['id', 'organization_id'])
@@ -533,6 +539,7 @@ export async function inviteMeetingPollVoters(
   const secret = requireSecret(ctx.meetingPollSecret)
   const request = validInvitation(input)
   return ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const locked = await lockManagedPoll(trx, ctx, request.id)
     const poll = hostPoll(locked)
     const receipt = receiptIdentity(ctx, 'invite', request.idempotencyKey, {
@@ -650,6 +657,7 @@ export async function resendMeetingPollInvitation(
   const key = validIdempotencyKey(input.idempotencyKey)
   const voterId = input.voterId
   return ctx.db.transaction().execute(async (trx) => {
+    await ensureMeetingPollKey(trx, secret)
     const locked = await lockManagedPoll(trx, ctx, request.id)
     const poll = hostPoll(locked)
     if (!isUuid(voterId)) throw pollNotFound()
