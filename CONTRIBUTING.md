@@ -237,9 +237,11 @@ Guard those with behavioural checks and source-copy mutation tests.
 `meeting-polls-migration.test.ts` is the reference. `createTestDatabaseTemplate` (from
 `@hourmere/db/testing`) migrates a schema once for any test that needs many copies of it.
 `packages/db/src/testing/migration-objects.test.ts` fails unless the expectation files are
-exactly the migrations from 0071 on; there is no list of exempt migrations, so a migration
-cannot merge before its coverage. It checks only that the expectation file exists, not that a
-coverage test reads it: the coverage test is what keeps the file honest.
+exactly the migrations that are not on its frozen legacy list, whatever their number. That list
+holds only migrations that predate the requirement (all numbered below 0071, including
+0067–0070); an entry is removed when its migration gains coverage and never added, so no new
+migration can merge without its expectation file. The guard does not check that a coverage
+test reads the file: the coverage test is what keeps the file honest.
 
 ## Browser tests
 
