@@ -1,0 +1,16 @@
+{
+  "migration": "0087_workflow_creation_keys.sql",
+  "objects": {
+    "constraint public.workflow_creation_keys.workflow_creation_keys_credential": "CHECK ((((credential_kind = 'session'::text) AND (credential_id IS NULL)) OR ((credential_kind = ANY (ARRAY['api_key'::text, 'oauth'::text])) AND (credential_id IS NOT NULL))))",
+    "constraint public.workflow_creation_keys.workflow_creation_keys_fingerprint_length": "CHECK ((octet_length(request_fingerprint) = 32))",
+    "constraint public.workflow_creation_keys.workflow_creation_keys_key_format": "CHECK (((idempotency_key COLLATE \"C\") ~ '^[!-~]{1,255}$'::text))",
+    "constraint public.workflow_creation_keys.workflow_creation_keys_pkey": "PRIMARY KEY (organization_id, workflow_id)",
+    "constraint public.workflow_creation_keys.workflow_creation_keys_scope": "UNIQUE NULLS NOT DISTINCT (organization_id, actor_user_id, credential_kind, credential_id, idempotency_key)",
+    "constraint public.workflow_creation_keys.workflow_creation_keys_workflow": "FOREIGN KEY (organization_id, workflow_id) REFERENCES workflow_definitions(organization_id, id) ON DELETE CASCADE",
+    "not_null public.workflow_creation_keys.actor_user_id": "NOT NULL",
+    "not_null public.workflow_creation_keys.created_at": "NOT NULL DEFAULT now()",
+    "not_null public.workflow_creation_keys.credential_kind": "NOT NULL",
+    "not_null public.workflow_creation_keys.idempotency_key": "NOT NULL",
+    "not_null public.workflow_creation_keys.request_fingerprint": "NOT NULL"
+  }
+}
