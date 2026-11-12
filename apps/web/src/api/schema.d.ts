@@ -4593,6 +4593,7 @@ export interface components {
             manageToken: string | null;
         };
         Branding: {
+            /** @description WCAG contrast against white (#FFFFFF), not light or dark page themes */
             backgroundContrast: number | null;
             brandLogo: string | null;
             brandPrimaryColor: string | null;
@@ -7380,7 +7381,7 @@ export interface operations {
                     "application/json": components["schemas"]["Branding"];
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7464,7 +7465,7 @@ export interface operations {
                     "application/json": components["schemas"]["Branding"];
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7547,7 +7548,7 @@ export interface operations {
                     "application/json": components["schemas"]["Branding"];
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7635,7 +7636,7 @@ export interface operations {
                     "image/png": string;
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
