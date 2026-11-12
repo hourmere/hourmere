@@ -32,6 +32,8 @@ const event: EventPlan = {
   minimumNoticeMinutes: 120,
   bookingWindowDays: null,
   maxBookingsPerDay: null,
+  maxBookingsPerWeek: null,
+  maxBookingsPerMonth: null,
   isHidden: false,
   isActive: false,
   allowGuests: false,

@@ -19,6 +19,10 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/branding',
+    'GET /api/v1/branding/logo/{hash}',
+    'GET /api/v1/bookings/export.csv',
+    'GET /api/v1/slack-destinations',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -29,6 +33,7 @@ const restContract = {
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/schedules',
     'GET /api/v1/schedules/{id}',
+    'GET /api/v1/schedules/{id}/availability',
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
@@ -38,6 +43,7 @@ const restContract = {
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
+    'GET /api/v1/bookings/{id}/attendees',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
     'GET /api/v1/bookings/manage',
@@ -58,6 +64,7 @@ const restContract = {
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
+    'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
     'POST /api/v1/bookings/{id}/request-reschedule',
@@ -71,6 +78,10 @@ const restContract = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   session_only: [
+    'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
@@ -103,6 +114,13 @@ const restContract = {
     'GET /api/v1/teams/{teamId}/readiness',
   ],
   other_write: [
+    'PATCH /api/v1/branding',
+    'POST /api/v1/branding/logo',
+    'PUT /api/v1/schedules/{id}/availability',
+    'POST /api/v1/slack-destinations',
+    'PATCH /api/v1/slack-destinations/{id}',
+    'DELETE /api/v1/slack-destinations/{id}',
+    'POST /api/v1/slack-destinations/{id}/test',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -218,6 +236,7 @@ function verifyMinimalBookingReads(allows: Allows) {
   for (const tool of [
     'list_schedules',
     'get_schedule',
+    'get_schedule_availability',
     'list_calendar_connections',
     'list_conference_connections',
   ]) {
@@ -341,6 +360,14 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'get_branding',
+        'set_branding',
+        'save_schedule_availability',
+        'list_slack_destinations',
+        'create_slack_destination',
+        'update_slack_destination',
+        'delete_slack_destination',
+        'test_slack_destination',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
@@ -349,14 +376,18 @@ describe('shared API-key scope policy', () => {
         'request_reschedule',
         'cancel_booking',
         'list_bookings',
+        'get_booking_attendees',
+        'export_bookings',
         'retry_conference',
         'retry_calendar_copy',
+        'set_attendee_no_show',
         'get_profile',
         'list_event_types',
         'get_event_type',
         'set_event_type_notifications',
         'list_schedules',
         'get_schedule',
+        'get_schedule_availability',
         'create_event_type',
         'update_event_type',
         'create_one_time_link',
@@ -372,15 +403,20 @@ describe('shared API-key scope policy', () => {
         'resend_waitlist_verification',
       ],
       read: [
+        'get_branding',
+        'list_slack_destinations',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
         'list_bookings',
+        'get_booking_attendees',
+        'export_bookings',
         'get_profile',
         'list_event_types',
         'get_event_type',
         'list_schedules',
         'get_schedule',
+        'get_schedule_availability',
         'list_one_time_links',
         'list_calendar_connections',
         'list_conference_connections',
@@ -398,8 +434,10 @@ describe('shared API-key scope policy', () => {
         'request_reschedule',
         'cancel_booking',
         'list_bookings',
+        'get_booking_attendees',
         'retry_conference',
         'retry_calendar_copy',
+        'set_attendee_no_show',
         'get_profile',
         'list_event_types',
         'get_event_type',
@@ -485,6 +523,22 @@ describe('shared API-key scope policy', () => {
 })
 
 describe('scope policy source-copy mutation checks', () => {
+  it.each([
+    [
+      "rest('GET', '/api/v1/bookings/export.csv', 'other_read'",
+      "rest('GET', '/api/v1/bookings/export.csv', 'booking_read'",
+    ],
+    ["mcp('export_bookings', 'other_read'", "mcp('export_bookings', 'booking_read'"],
+    ["cli('export', 'export_bookings')", "cli('export', 'list_bookings')"],
+  ] as const)('kills broadened export scope: %s', (before, after) => {
+    const verify = (operation: typeof apiKeyOperation) => {
+      for (const id of ['GET /api/v1/bookings/export.csv', 'mcp:export_bookings', 'cli:export'])
+        expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+    }
+    verify(sourceCopyRegistry())
+    expect(() => verify(sourceCopyRegistry([before, after]))).toThrow()
+  })
+
   it.each([
     [
       "mcp('get_event_type_waitlist', 'other_read'",
@@ -654,5 +708,52 @@ describe('scope policy source-copy mutation checks', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
     verifyNotificationWrites(sourceCopyPolicy(undefined, sourceCopyRegistry()))
+  })
+})
+
+describe('branding scope source-copy protections', () => {
+  function verify(operation = apiKeyOperation) {
+    for (const id of [
+      'GET /api/v1/branding',
+      'GET /api/v1/branding/logo/{hash}',
+      'mcp:get_branding',
+      'cli:branding get',
+    ])
+      expect(operation(id)?.allowedScopes).toEqual(['full', 'read'])
+    for (const id of [
+      'PATCH /api/v1/branding',
+      'POST /api/v1/branding/logo',
+      'mcp:set_branding',
+      'cli:branding set',
+    ])
+      expect(operation(id)?.allowedScopes).toEqual(['full'])
+  }
+  it('keeps the accepted read/write scope matrix in source copies', () =>
+    verify(sourceCopyRegistry()))
+  it.each([
+    [
+      "rest('GET', '/api/v1/branding', 'other_read'",
+      "rest('GET', '/api/v1/branding', 'booking_read'",
+    ],
+    [
+      "rest('GET', '/api/v1/branding/logo/{hash}', 'other_read'",
+      "rest('GET', '/api/v1/branding/logo/{hash}', 'booking_read'",
+    ],
+    [
+      "rest('PATCH', '/api/v1/branding', 'other_write'",
+      "rest('PATCH', '/api/v1/branding', 'booking_write'",
+    ],
+    [
+      "rest('POST', '/api/v1/branding/logo', 'other_write'",
+      "rest('POST', '/api/v1/branding/logo', 'booking_write'",
+    ],
+    ["mcp('get_branding', 'other_read'", "mcp('get_branding', 'booking_read'"],
+    ["mcp('set_branding', 'other_write'", "mcp('set_branding', 'booking_write'"],
+    ["cli('branding set', 'set_branding')", "cli('branding set', 'create_booking')"],
+    ["cli('branding get', 'get_branding')", "cli('branding get', 'get_profile')"],
+  ] as const)('kills broadened authority %s', (before, after) => {
+    expect(() => verify(sourceCopyRegistry([before, after]))).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
   })
 })

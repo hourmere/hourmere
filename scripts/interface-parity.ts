@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { createDb, createPool } from '@hourmere/db'
 import { openApiDocument } from '../apps/server/src/openapi-document.ts'
 import { productTools } from '../apps/server/src/server.ts'
-import { COMMANDS } from '../tools/cli/src/cli.ts'
+import { COMMANDS, REST_COMMANDS } from '../tools/cli/src/cli.ts'
 
 const METHODS = ['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'delete'] as const
 export type HttpMethod = (typeof METHODS)[number]
@@ -47,11 +47,14 @@ export interface InterfaceInventory {
   mcp: readonly string[]
   /** The command table also records which MCP tool each command actually invokes. */
   cli: Readonly<Record<string, string>>
+  restCli?: Readonly<Record<string, string>>
 }
 
 export type InterfaceParityMapping = Record<
   string,
-  { mcp: string; cli: string } | { exemption: 'browser-session-only'; reason: string }
+  | { mcp: string; cli: string }
+  | { exemption: 'browser-session-only'; reason: string }
+  | { mcpReference: string; cliUpload: string; reason: string }
 >
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -94,6 +97,7 @@ export async function loadInterfaceInventory(): Promise<InterfaceInventory> {
       rest,
       mcp: productTools({ db, slotSnippetsEnabled: true }).map((tool) => tool.name),
       cli: COMMANDS,
+      restCli: REST_COMMANDS,
     }
   } finally {
     await db.destroy()
@@ -227,6 +231,23 @@ export function interfaceParityErrors(
       continue
     }
     const keys = Object.keys(entry)
+    // Binary files travel over REST. MCP supplies the already-uploaded reference.
+    if (Object.hasOwn(entry, 'mcpReference')) {
+      if (
+        Object.keys(entry).length !== 3 ||
+        operationId !== 'uploadBrandLogo' ||
+        writes.get(operationId)?.route !== 'POST /api/v1/branding/logo' ||
+        entry.mcpReference !== 'set_branding' ||
+        !tools.has('set_branding') ||
+        entry.cliUpload !== 'branding upload' ||
+        inventory.restCli?.['branding upload'] !== 'POST /api/v1/branding/logo' ||
+        !oneLineReason(entry.reason)
+      ) {
+        errors.push(`${operationId}: invalid binary upload/reference mapping.`)
+      }
+      continue
+    }
+
     if (
       keys.length === 2 &&
       entry.exemption === 'browser-session-only' &&

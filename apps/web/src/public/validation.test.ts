@@ -233,3 +233,20 @@ describe('server errors on the form', () => {
     expect(translateMessage('de', 'Meeting length')).toBe('Termindauer')
   })
 })
+
+it('maps location errors to localized fields and keeps readiness wording neutral', () => {
+  expect(bookingErrors(new RequestError(422, 'invalid_invitee_phone', 'private'), [])).toEqual({
+    fields: {
+      inviteePhone:
+        'Enter + and 7–15 digits in total, including the country code. Spaces, parentheses, dots and hyphens are allowed.',
+    },
+    form: null,
+  })
+  expect(
+    bookingErrors(new RequestError(422, 'invalid_location_choice', 'private'), []).fields,
+  ).toEqual({ locationOptionId: 'Choose one of the available locations.' })
+  expect(
+    bookingErrors(new RequestError(409, 'location_unavailable', 'private account details'), [])
+      .form,
+  ).toBe('This location is unavailable. Contact the host to book.')
+})

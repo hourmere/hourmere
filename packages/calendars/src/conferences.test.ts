@@ -254,6 +254,55 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     return b
   }
 
+  it.each(['success', 'failure'] as const)(
+    'provisions the selected non-default Meet option with %s',
+    async (outcome) => {
+      await db
+        .updateTable('event_types')
+        .set({
+          locations: JSON.stringify([
+            { id: 'office', kind: 'in_person', address: '100 Example Street' },
+            { id: 'video', kind: 'google_meet', autoCreate: true },
+          ]),
+        })
+        .execute()
+      const input = {
+        handle: 'meet-host',
+        slug: 'meet',
+        start: Temporal.Instant.from(START),
+        invitee: { name: 'Synthetic Invitee', email: 'synthetic@example.com', timeZone: 'UTC' },
+        locationOptionId: 'video',
+        idempotencyKey: 'selected-meet',
+      }
+      const b = await createPublicBooking(ctx, input)
+      expect((await createPublicBooking(ctx, input)).booking.id).toBe(b.booking.id)
+      expect(b.booking.conference?.status).toBe('pending')
+      response = outcome
+      await writeBookingConference(deps, b.booking.id)
+      expect((await row()).state).toBe(outcome === 'success' ? 'ready' : 'failed')
+      expect(imports()).toHaveLength(1)
+      const managed = await getManagedBooking(ctx, b.manageToken as string)
+      expect(managed.location?.url).toBe(outcome === 'success' ? JOIN : undefined)
+      await sendBookingNotification(
+        mail(),
+        b.booking.id,
+        outcome === 'success' ? 'confirmed' : 'conference_failed',
+      )
+      expect(sent).toHaveLength(2)
+      expect(sent.every((message) => !!message.attachments?.length)).toBe(outcome === 'success')
+      const snapshot = await db
+        .selectFrom('bookings')
+        .select('location_option')
+        .where('id', '=', b.booking.id)
+        .executeTakeFirstOrThrow()
+      expect(snapshot.location_option).toEqual({
+        id: 'video',
+        kind: 'google_meet',
+        autoCreate: true,
+      })
+    },
+  )
+
   it('requires explicit opt-in, instance capability, one host and cached Meet support', async () => {
     await expect(book('off', { ...ctx, automaticMeet: false })).rejects.toMatchObject({
       code: 'automatic_meet_disabled',

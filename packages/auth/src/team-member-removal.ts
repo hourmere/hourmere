@@ -1,4 +1,5 @@
 import type { Database, Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
 import { isUuid } from './organizations.ts'
@@ -139,7 +140,15 @@ export function removeTeamMember(
       allowPersonal: false,
     })
     if (actor.role === 'member') throw teamManagementDenied()
-    return removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
+    const result = await removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
+    await writeAuditEvent(trx, {
+      organizationId: actor.organizationId,
+      ...auditActor(principal),
+      action: 'membership.removed',
+      targetType: 'user',
+      targetId: result.memberUserId,
+    })
+    return result
   }
   return db.isTransaction
     ? write(db as Transaction<Database>)

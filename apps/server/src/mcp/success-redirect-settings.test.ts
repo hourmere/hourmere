@@ -87,8 +87,10 @@ function productSourceCopy(change?: Change): Factory {
     catalogTools: () => [],
     integrationTools: () => [],
     oneTimeLinkTools: () => [],
+    slackDestinationTools: () => [],
     openTimeSnippetTools: () => [],
     waitlistTools: () => [],
+    brandingTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import type { Database, Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { DBTransactionAdapter, Where } from 'better-auth/adapters'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { type Insertable, sql, type Transaction } from 'kysely'
@@ -440,11 +441,19 @@ export function createTeamRolePolicy(
               )
             )
               throw teamRoleDenied()
-            return trx
+            const created = await trx
               .insertInto('auth.organization')
               .values(request.data as Insertable<Database['auth.organization']>)
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            await writeAuditEvent(trx, {
+              organizationId: created.id,
+              ...auditActor(actor),
+              action: 'organization.created',
+              targetType: 'organization',
+              targetId: created.id,
+            })
+            return created as never
           })
         }
         return create(request)
@@ -647,12 +656,22 @@ export function createTeamRolePolicy(
               logo?: string | null
               metadata?: string | null
             }
-            return trx
+            const updated = await trx
               .updateTable('auth.organization')
               .set(patch)
               .where('id', '=', facts.organizationId)
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            const actor = await principal(ctx)
+            if (!actor) throw teamRoleDenied()
+            await writeAuditEvent(trx, {
+              organizationId: facts.organizationId,
+              ...auditActor(actor),
+              action: 'organization.updated',
+              targetType: 'organization',
+              targetId: facts.organizationId,
+            })
+            return updated as never
           })
         }
         if (ctx?.path === changeRole && request.model === 'member') {
@@ -669,6 +688,18 @@ export function createTeamRolePolicy(
               .returningAll()
               .executeTakeFirstOrThrow()
             await recordTeamRoleChange(trx, target, facts.userId, role)
+            if (target.role !== role) {
+              const actor = await principal(ctx)
+              if (!actor) throw teamRoleDenied()
+              await writeAuditEvent(trx, {
+                organizationId: facts.organizationId,
+                ...auditActor(actor),
+                action: 'membership.role_changed',
+                details: { oldRole: target.role, newRole: role },
+                targetType: 'user',
+                targetId: target.userId,
+              })
+            }
             return updated as never
           })
         }
@@ -722,14 +753,24 @@ export function createTeamRolePolicy(
                 message: 'This invitation is no longer pending.',
               })
             }
-            return trx
+            const rejected = await trx
               .updateTable('auth.invitation')
               .set({ status: 'rejected' })
-              .where('id', '=', invitationId)
+              .where('id', '=', invitation.id)
               .where('organizationId', '=', organization.id)
               .where('status', '=', 'pending')
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            // The invitee never joined: the team's journal keeps no user or session ID of theirs.
+            await writeAuditEvent(trx, {
+              organizationId: organization.id,
+              actor: { type: 'external_user' },
+              credential: { type: 'none' },
+              action: 'membership.invitation_rejected',
+              targetType: 'invitation',
+              targetId: invitation.id,
+            })
+            return rejected as never
           })
         }
         if (
@@ -747,6 +788,15 @@ export function createTeamRolePolicy(
             throw teamRoleDenied()
           }
           const stored = await acceptance(ctx, trx)
+          const actor = await principal(ctx)
+          if (!actor) throw teamRoleDenied()
+          await writeAuditEvent(trx, {
+            organizationId: stored.organizationId,
+            ...auditActor(actor),
+            action: 'membership.accepted',
+            targetType: 'invitation',
+            targetId: stored.id,
+          })
           // The native endpoint's enclosing transaction also owns the member/session
           // writes, so neither an exception nor process death can publish this alone.
           return trx

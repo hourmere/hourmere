@@ -18,6 +18,9 @@ import { ACCOUNT, PROFILE } from '../limits.ts'
 import { PATHS } from '../paths.ts'
 import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
+import { BrandSettings } from './BrandSettings.tsx'
+import { ProvisioningTokens } from './ProvisioningTokens.tsx'
+import { SlackIntegrations } from './SlackIntegrations.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -112,6 +115,25 @@ export function SettingsPage() {
         </p>
         <p className="hint">{t('Your email comes from how you sign in.')}</p>
       </section>
+      <BrandSettings
+        key={organizationId}
+        organizationId={organizationId}
+        canManage={
+          personal
+            ? me.personalOrganizationId === organizationId
+            : role.status === 'ready'
+              ? !!role.data?.split(',').some((value) => ['owner', 'admin'].includes(value.trim()))
+              : null
+        }
+      />
+      <SlackIntegrations key={`slack-${organizationId}`} organizationId={organizationId} />
+      {!personal && me.principal.kind === 'session' && (
+        <ProvisioningTokens
+          organizationId={organizationId}
+          timeZone={profile.status === 'ready' ? profile.data?.timeZone : undefined}
+          role={role.status === 'ready' ? role.data : null}
+        />
+      )}
       {!personal && (
         <TeamMembers
           key={organizationId}

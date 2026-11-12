@@ -5,6 +5,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { z } from '@hono/zod-openapi'
 import * as calendars from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as scheduling from '@hourmere/scheduling'
 import { createFixtures, type Fixtures, weekdays } from '@hourmere/scheduling/testing'
@@ -34,6 +35,7 @@ function sourceCopy(change?: Change): Factory {
     '',
   )
   const bindings = {
+    auditActor,
     z,
     ...calendars,
     ...scheduling,
@@ -241,16 +243,16 @@ describe.skipIf(!bootstrap)('MCP selected meeting lengths', () => {
     [
       'selected slot forwarding',
       [
-        '{ ...pageInput, start, end, durationMinutes: args.durationMinutes }',
-        '{ ...pageInput, start, end }',
+        '          ...pageInput,\n          start,\n          end,\n          durationMinutes: args.durationMinutes,',
+        '          ...pageInput,\n          start,\n          end,',
       ],
       verifySlots,
     ],
     [
       'selected booking forwarding',
       [
-        '          durationMinutes: args.durationMinutes,\n          invitee:',
-        '          invitee:',
+        '          start: Temporal.Instant.from(args.start),\n          durationMinutes: args.durationMinutes,',
+        '          start: Temporal.Instant.from(args.start),',
       ],
       verifyBooking,
     ],

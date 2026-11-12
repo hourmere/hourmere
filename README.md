@@ -5,6 +5,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 
 ## Features
 
+- Private [per-attendee no-show marking](https://hourmere.com/docs/no-shows) through the dashboard, REST, MCP and CLI.
 - Personal and team booking pages, including [collective meetings](https://hourmere.com/docs/collective-scheduling)
   and [round-robin scheduling](https://hourmere.com/docs/round-robin-scheduling).
 - [Google Calendar](https://hourmere.com/docs/google-calendar) busy-time sync and booking writeback.
@@ -12,8 +13,14 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
   [CLI](https://hourmere.com/docs/cli) access for agents and scripts.
 - [Booking waitlists](https://hourmere.com/docs/booking-waitlist) for fully booked
   one-on-one single-host types; everyone eligible can be notified, with no reservation.
+- [CSV booking exports](https://hourmere.com/docs/booking-export) for personal owners and
+  team administrators, with bounded streaming and spreadsheet formula protection.
 - [Booking emails](https://hourmere.com/docs/notifications), optional signed
-  [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
+  [webhooks](https://hourmere.com/docs/webhooks), [Slack notifications](https://hourmere.com/docs/slack) and first-party [booking activity](https://hourmere.com/docs/analytics).
+- A source-built [Zapier app](https://hourmere.com/docs/zapier) for booking automation,
+  available as a private integration until published.
+- A source-built [n8n community node](https://hourmere.com/docs/n8n) with booking actions
+  and signed triggers for self-hosted n8n, installed from source until published to npm.
 
 ## Repository layout
 
@@ -30,10 +37,13 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/conferences` | Independent Zoom connections and single-host automatic meetings; see [automatic Zoom](https://hourmere.com/docs/automatic-zoom), separate from sign-in. |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
-| `packages/webhooks` | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
+| `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
+| `packages/workflows` | Booking workflow definition contract: strict schemas, AND conditions, ownership selectors, template variables and limits. Not available yet: a source constant keeps workflows off. See the [design](docs/workflows.md). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
+| `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
+| `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
 CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
 iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
@@ -45,10 +55,16 @@ Requires Node.js 26 and Docker.
 
 ```sh
 cp .env.example .env   # set BETTER_AUTH_SECRET, e.g. `openssl rand -base64 32`
-npm install
+npm install --ignore-scripts
 npm run db:up      # Postgres on localhost:5432
 npm run dev        # API on :3000, web app on http://localhost:5173
 ```
+
+Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
+The n8n community node is a standalone package with its own lockfile; root installs,
+builds and tests do not install or load its development toolchain. See
+[`tools/n8n-nodes-hourmere/README.md`](tools/n8n-nodes-hourmere/README.md) for its separate
+installation and checks.
 
 Without `SMTP_URL`, sign-in links are printed in the `npm run dev` output instead of being emailed.
 In development anyone may sign up unless `SIGNUP` or `SIGNUP_ALLOWED_DOMAINS` is set (see Self-hosting).
@@ -250,6 +266,13 @@ disconnected: 20 s to send a request's headers and 60 s for the whole request
 the app, or the proxy may reuse a connection the app has just closed and answer 502. The
 default is above the usual ones: nginx's upstream keepalive and AWS ALB 60 s, Traefik 90 s,
 Caddy 120 s.
+CSV exports reserve at most two database connections per server process by default.
+`BOOKING_EXPORT_MAX_CONCURRENT` accepts 1–8 (invalid values use 2); keep this below
+the database pool capacity, with headroom for ordinary traffic. Excess requests fail
+before acquiring a connection with HTTP 409 `export_busy`. Each stream closes after
+30 seconds without reader progress, or after five minutes overall. These limits apply
+in addition to the one-export-per-organization database lease.
+
 
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
 client ids are set in `.env`. Accounts are only created for email addresses the provider
@@ -399,9 +422,23 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+- Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
+  and restarting cannot change a compiled image. Disabling installation requires a source
+  rebuild and redeployment, including removal of the image overlay and release-version
+  setting; see [the conversion instructions](https://hourmere.com/docs/self-hosting#turn-off-app-installation).
+
+Organization owners and team admins can store a logo and primary colour through settings,
+REST, MCP and CLI. [Branding settings](https://hourmere.com/docs/branding) include safe image
+uploads and automatic readable button-text selection; public pages and emails do not apply
+the stored theme yet.
+
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- The [n8n community node](https://hourmere.com/docs/n8n) is not yet published to npm or available on n8n Cloud.
+  Self-hosters can build and install the package from source.
+- [Zapier](https://hourmere.com/docs/zapier) is not yet published in the Zapier directory.
+  Self-hosters can deploy the source as a private integration using their own Zapier account.
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
@@ -413,6 +450,8 @@ and linked operating guides before deploying:
   calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
   actual host; collective and round-robin event types are unsupported.
+- [Meeting location choices](https://hourmere.com/docs/location-choices) are configured through REST, MCP or CLI;
+  the editor does not yet offer a multiple-location editor. Rescheduling preserves the choice.
 - [Multiple meeting lengths](https://hourmere.com/docs/multiple-durations) share one set of
   hosts, location and booking rules; per-length overrides are unavailable. Web rescheduling
   keeps the original length; changing it requires REST, MCP or CLI.

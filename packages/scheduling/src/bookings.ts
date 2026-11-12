@@ -2,6 +2,7 @@
 // listed, rescheduled and cancelled by hosts. Availability is always recomputed inside the transaction
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
+import { parsePersistedApiKeyMetadata } from '@hourmere/auth'
 import {
   type Database,
   type Db,
@@ -9,6 +10,7 @@ import {
   isImportedBooking,
   type Json,
 } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql, type Transaction } from 'kysely'
 import { z } from 'zod'
 import {
@@ -20,6 +22,7 @@ import {
   type Location,
   type PublicEventTypeRecord,
   parseLocation,
+  selectBookableLocationOption,
   selectDurationMinutes,
   toInstant,
   toIso,
@@ -34,12 +37,20 @@ import {
   cancelBookingConference,
   eligibleMeetHosts,
   prepareBookingConference,
+  requireMeetDestination,
+  requireZoomConnection,
   unresolvedLocation,
+  withLocationAvailability,
 } from './conferences.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { admitGroupSlot, lockGroupBooking } from './group-seat-admission.ts'
 import { bookingHostIds, lockOrganization, resolvedBookingHosts } from './hosts.ts'
+import {
+  isPreservedSingleton,
+  resolveLocationChoice,
+  selectLocationOption,
+} from './location-options.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -68,6 +79,10 @@ export type BookingStatus = 'confirmed' | 'cancelled'
 export type BookingSource = 'web' | 'embed' | 'api' | 'mcp' | 'import'
 
 export interface Attendee {
+  /** Private attendance metadata: authenticated booking reads only. */
+  id?: string
+  noShowMarkedAt?: string | null
+  noShowMarkedBy?: string | null
   name: string
   email: string
   timeZone: string
@@ -77,6 +92,7 @@ export interface Attendee {
 }
 
 export interface Booking {
+  canManageNoShow?: boolean
   id: string
   isGroupSeat?: boolean
   pendingReschedule?: { id: string; expiresAt: string; note: string | null }
@@ -359,13 +375,13 @@ const RESCHEDULE_COLUMNS = [
   'end_at',
   'title',
   'location',
+  'location_option',
   'responses',
   'required_host_user_ids',
   'hosts_use_default_schedule',
   'manage_token_hash',
   'notification_snapshot',
   'group_slot_id',
-  'location_option',
 ] as const
 
 /**
@@ -536,7 +552,17 @@ async function toBookings(
   )
   const attendees = await db
     .selectFrom('booking_attendees')
-    .select(['booking_id', 'name', 'email', 'time_zone', 'locale', 'is_booker'])
+    .select([
+      'booking_id',
+      'name',
+      'email',
+      'time_zone',
+      'locale',
+      'is_booker',
+      'id',
+      'no_show_marked_at',
+      'no_show_marked_by',
+    ])
     .where(
       'booking_id',
       'in',
@@ -549,6 +575,13 @@ async function toBookings(
   for (const a of attendees) {
     const list = byBooking.get(a.booking_id) ?? []
     list.push({
+      ...(host
+        ? {
+            id: a.id,
+            noShowMarkedAt: a.no_show_marked_at?.toISOString() ?? null,
+            noShowMarkedBy: a.no_show_marked_by,
+          }
+        : {}),
       name: a.name,
       email: a.email,
       timeZone: a.time_zone,
@@ -695,6 +728,14 @@ async function toBookings(
       ...(host && imported.has(r.id)
         ? { questions: parseQuestions(r.import_questions ?? []) }
         : {}),
+      ...(host
+        ? {
+            canManageNoShow:
+              r.status === 'confirmed' &&
+              !imported.has(r.id) &&
+              Temporal.Instant.compare(host.now(), toInstant(r.start_at)) > 0,
+          }
+        : {}),
       attendees: byBooking.get(r.id) ?? [],
       ...(coHosts.has(r.id) ? { coHosts: coHosts.get(r.id) } : {}),
       ...(r.status === 'confirmed' && pending.has(r.id)
@@ -725,7 +766,93 @@ async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<
 
 // --- Writing bookings -------------------------------------------------------------------
 
-/** The existing booking form cannot collect an invitee's phone number yet. */
+/**
+ * Resolve only against the locked configuration and the actual assigned hosts. Payment holds
+ * share it so a hold stores the chosen option exactly as its confirmed booking would.
+ */
+export async function resolveBookingLocation(
+  ctx: PublicContext,
+  db: Db,
+  event: PublicEventTypeRecord,
+  hosts: string[],
+  input: Pick<CreateBookingInput, 'locationOptionId' | 'inviteePhone'>,
+) {
+  const options = event.locations
+  const chosen = selectLocationOption(options, input.locationOptionId)
+  const organizer =
+    event.schedulingType === 'collective' ? event.conferenceOrganizerUserId : hosts[0]
+  const meetReady: string[] = []
+  const zoomReady: string[] = []
+  try {
+    if (organizer && automaticMeet(chosen)) {
+      await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)
+      meetReady.push(organizer)
+    }
+    if (organizer && automaticZoom(chosen)) {
+      await requireZoomConnection(db, organizer, event.zoomConnectionId, ctx.automaticZoom, true)
+      zoomReady.push(organizer)
+    }
+  } catch (error) {
+    if (!(error instanceof DomainError)) throw error
+    if (isPreservedSingleton(options, input.locationOptionId)) throw error
+    throw new DomainError('conflict', 'location_unavailable', 'The chosen location is unavailable.')
+  }
+  // Migration 0056 and older compatibility writes keep a single location's settings as stored
+  // (including historical phone formatting), whatever its option id. Booking one must not
+  // turn into a configuration rewrite; choosing it explicitly stores the same snapshot.
+  if (
+    chosen &&
+    options?.length === 1 &&
+    !automaticMeet(chosen) &&
+    !automaticZoom(chosen) &&
+    !(chosen.kind === 'phone' && 'askInvitee' in chosen)
+  ) {
+    const { id: _id, label: _label, isDefault: _default, ...location } = chosen
+    return { locationOption: structuredClone(chosen), location }
+  }
+  return resolveLocationChoice(
+    options,
+    {
+      ...(input.locationOptionId !== undefined && { optionId: input.locationOptionId }),
+      ...(input.inviteePhone !== undefined && { inviteePhone: input.inviteePhone }),
+    },
+    {
+      schedulingType: event.schedulingType,
+      hostUserIds: hosts,
+      ...(hosts[0] && { assignedHostUserId: hosts[0] }),
+      conferenceOrganizerUserId: event.conferenceOrganizerUserId,
+      meetReadyHostUserIds: meetReady,
+      zoomReadyHostUserIds: zoomReady,
+    },
+  )
+}
+
+/** Keep a readiness race during conference intent creation inside the choice error contract. */
+async function prepareChosenBookingConference(
+  ctx: PublicContext,
+  db: Db,
+  bookingId: string,
+  preserveLegacyErrors: boolean,
+): Promise<void> {
+  try {
+    await prepareBookingConference(ctx, db, bookingId)
+  } catch (error) {
+    if (
+      !preserveLegacyErrors &&
+      error instanceof DomainError &&
+      (error.code.startsWith('automatic_meet_') || error.code.startsWith('automatic_zoom_'))
+    ) {
+      throw new DomainError(
+        'conflict',
+        'location_unavailable',
+        'The chosen location is unavailable.',
+      )
+    }
+    throw error
+  }
+}
+
+/** Final invariant: a persisted phone location must contain a collected number. */
 function requireCollectedPhone(location: Location | null): void {
   if (location?.kind === 'phone' && location.askInvitee === true) {
     throw new DomainError(
@@ -973,6 +1100,10 @@ async function cancelLocked(
       occurred_at: now.toString(),
     })
     .execute()
+  await auditBooking(db, row.organization_id, row.id, 'booking.cancelled', {
+    ...origin,
+    actorUserId: origin.actorUserId ?? actorUserId,
+  })
   await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
@@ -1004,6 +1135,8 @@ async function skipScheduledMessages(
 // --- Public booking -----------------------------------------------------------------------
 
 export interface CreateBookingInput {
+  locationOptionId?: string | undefined
+  inviteePhone?: string | undefined
   handle: string
   slug: string
   /** Internal service generation fence; transports introduce it separately. */
@@ -1029,6 +1162,8 @@ export interface CreateBookingInput {
  * The booking page is web without a key; agents pass api or mcp with the key they used.
  */
 export interface BookingOrigin {
+  audit?: ReturnType<typeof auditActor> | undefined
+  requestId?: string | undefined
   source: Exclude<BookingSource, 'import'>
   /** The caller's API key. Idempotency keys are scoped to it; null shares one scope. */
   apiKeyId: string | null
@@ -1209,6 +1344,8 @@ function bookingIdempotency(
         ...(oneTimeLinkId !== undefined && { oneTimeLinkId }),
         start: input.start.toString(),
         durationMinutes: input.durationMinutes,
+        locationOptionId: input.locationOptionId,
+        inviteePhone: input.inviteePhone,
         ...(input.expectedGroupSlotId !== undefined
           ? { expectedGroupSlotId: input.expectedGroupSlotId }
           : {}),
@@ -1268,7 +1405,6 @@ async function publicBooking(
           throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
         throw unavailable()
       }
-      requireCollectedPhone(current.location)
       if (guests.length > 0 && !current.allowGuests) {
         throw new DomainError(
           'invalid',
@@ -1288,6 +1424,7 @@ async function publicBooking(
       const responses = validateResponses(current.questions, input.responses ?? {})
       const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
       const end = input.start.add({ minutes: durationMinutes })
+      const chosenOption = selectBookableLocationOption(current, input.locationOptionId)
       const groupSlot = await admitGroupSlot(trx, {
         event: current,
         bookerEmail: invitee.email,
@@ -1302,8 +1439,10 @@ async function publicBooking(
         await lockRoundRobinState(trx, current.id)
         const available: string[] = []
         let stale = false
-        const candidates = automaticMeet(current.location)
-          ? await eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet)
+        const candidates = automaticMeet(chosenOption)
+          ? await withLocationAvailability(current.locations, input.locationOptionId, () =>
+              eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet),
+            )
           : current.eligibleHostUserIds
         for (const hostUserId of candidates) {
           await expirePaymentHolds({ db: trx, hostUserId })
@@ -1344,6 +1483,8 @@ async function publicBooking(
             useDefaultSchedule: current.schedulingType === 'collective',
           })
       }
+      const choice = await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)
+      requireCollectedPhone(choice.location)
       let settings: SuccessRedirect | null = null
       if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
         try {
@@ -1371,13 +1512,13 @@ async function publicBooking(
       const { id, manageToken } = await insertBooking(trx, {
         successRedirect,
         groupSlotId: groupSlot?.id,
-        locationOption: groupSlot?.locationOption,
         organizationId: current.organizationId,
         eventTypeId: current.id,
         start: input.start,
         end,
         title: `${current.title} with ${invitee.name}`,
-        location: current.location,
+        location: groupSlot ? groupSlot.location : choice.location,
+        locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
         responses,
         source: origin.source,
         apiKeyId: origin.apiKeyId,
@@ -1403,7 +1544,16 @@ async function publicBooking(
           now: ctx.now,
         })
       }
-      await prepareBookingConference(ctx, trx, id)
+      await auditBooking(trx, current.organizationId, id, 'booking.created', {
+        ...origin,
+        requestId: origin.requestId ?? ctx.requestId,
+      })
+      await prepareChosenBookingConference(
+        ctx,
+        trx,
+        id,
+        isPreservedSingleton(current.locations, input.locationOptionId),
+      )
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return {
         booking: await loadBooking(trx, id),
@@ -1683,6 +1833,7 @@ async function rescheduleLocked(
     end,
     title: old.title,
     location: parseLocation(old.location),
+    locationOption: old.location_option,
     responses: (isRecord(old.responses) ? old.responses : {}) as Responses,
     source: origin.source,
     apiKeyId: origin.apiKeyId,
@@ -1711,6 +1862,10 @@ async function rescheduleLocked(
   await skipScheduledMessages(trx, old.id, 'booking_replaced')
   // In this transaction: the new booking's emails. The old booking's queued ones find it
   // cancelled and replaced when they run, and send nothing.
+  await auditBooking(trx, old.organization_id, id, 'booking.rescheduled', {
+    ...origin,
+    requestId: origin.requestId ?? ctx.requestId,
+  })
   await prepareBookingConference(ctx, trx, id)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
   return { booking: await loadBooking(trx, id), manageToken }
@@ -1987,6 +2142,10 @@ async function rescheduleGroupLocked(
   })
   await skipScheduledMessages(trx, old.id, 'booking_replaced')
   await cancelBookingConference(trx, old.id, now)
+  await auditBooking(trx, old.organization_id, result.id, 'booking.rescheduled', {
+    ...origin,
+    requestId: origin.requestId ?? ctx.requestId,
+  })
   await prepareBookingConference(ctx, trx, result.id)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: result.id, start }, now)
   return { booking: await loadBooking(trx, result.id), manageToken: result.manageToken }
@@ -2107,11 +2266,19 @@ export async function rescheduleHostBooking(
       trx,
       old,
       { start, durationMinutes, idempotencyKey, expectedGroupSlotId },
-      origin ?? {
-        source:
-          ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
-        apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
-        oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      {
+        ...(origin ?? {
+          source:
+            ctx.principal.kind === 'api_key'
+              ? 'api'
+              : ctx.principal.kind === 'oauth'
+                ? 'mcp'
+                : 'web',
+          apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+          oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+        }),
+        audit: auditActor(ctx.principal),
+        requestId: ctx.requestId,
       },
       true,
       {
@@ -2164,11 +2331,19 @@ export async function cancelHostBooking(
       ctx.now(),
       cancelReason,
       ctx.notify,
-      origin ?? {
-        source:
-          ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
-        apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
-        oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      {
+        ...(origin ?? {
+          source:
+            ctx.principal.kind === 'api_key'
+              ? 'api'
+              : ctx.principal.kind === 'oauth'
+                ? 'mcp'
+                : 'web',
+          apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+          oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+        }),
+        audit: auditActor(ctx.principal),
+        requestId: ctx.requestId,
       },
       ctx.principal.user.id,
     )
@@ -2187,7 +2362,11 @@ export async function cancelTeamBookingInTransaction(
   actor: { userId: string; organizationId: string },
   id: string,
   now: () => Temporal.Instant,
-  options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
+  options: {
+    reason?: string | undefined
+    notify?: BookingNotifier | undefined
+    sessionId?: string | undefined
+  } = {},
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
   if (!UUID.test(id)) throw bookingNotFound()
@@ -2206,9 +2385,119 @@ export async function cancelTeamBookingInTransaction(
     now(),
     normalizeReason(options.reason),
     options.notify,
-    BOOKING_PAGE,
+    {
+      ...BOOKING_PAGE,
+      audit: {
+        actor: { type: 'user', id: actor.userId },
+        credential: { type: 'session', ...(options.sessionId ? { id: options.sessionId } : {}) },
+      },
+    },
     actor.userId,
   )
+}
+
+/** Stored UUIDs are lowercase; metadata and requests may use any UUID spelling. */
+const sameUuid = (left: unknown, right: unknown) =>
+  typeof left === 'string' &&
+  typeof right === 'string' &&
+  left.toLowerCase() === right.toLowerCase()
+
+async function auditBooking(
+  trx: Db,
+  organizationId: string,
+  targetId: string,
+  action:
+    | 'booking.created'
+    | 'booking.rescheduled'
+    | 'booking.cancelled'
+    | 'booking.reschedule_requested',
+  origin: BookingOrigin,
+) {
+  const auditKeyId =
+    origin.audit?.credential.type === 'api_key' ? origin.audit.credential.id : origin.apiKeyId
+  const key = auditKeyId
+    ? await trx
+        .selectFrom('auth.apikey')
+        .select(['metadata', 'referenceId'])
+        .where('id', '=', auditKeyId)
+        .executeTakeFirst()
+    : undefined
+  const auditGrantId =
+    origin.audit?.credential.type === 'oauth'
+      ? origin.audit.credential.grantId
+      : origin.audit
+        ? undefined
+        : origin.oauthConsentId
+  const grant = auditGrantId
+    ? await trx
+        .selectFrom('mcp_oauth_grants')
+        .select(['client_id', 'user_id', 'organization_id'])
+        .where('id', '=', auditGrantId)
+        .executeTakeFirst()
+    : undefined
+  if (!origin.audit && origin.oauthConsentId && !grant)
+    throw new Error('Missing OAuth audit identity')
+  const keyMetadata = parsePersistedApiKeyMetadata(key?.metadata ?? null)
+  const keyOrganizationId = auditKeyId
+    ? (keyMetadata?.organizationId ??
+      (key
+        ? (
+            await trx
+              .selectFrom('personal_organizations')
+              .select('organization_id')
+              .where('user_id', '=', key.referenceId)
+              .executeTakeFirst()
+          )?.organization_id
+        : undefined))
+    : undefined
+  // A caller authorized for another organization (or whose credential can no longer be
+  // resolved to this one) is recorded without its key, user, client or grant identifiers.
+  const identity =
+    auditKeyId && !sameUuid(keyOrganizationId, organizationId)
+      ? { actor: { type: 'external_api_key' as const }, credential: { type: 'none' as const } }
+      : auditGrantId && !sameUuid(grant?.organization_id, organizationId)
+        ? {
+            actor: { type: 'external_oauth_client' as const },
+            credential: { type: 'none' as const },
+          }
+        : (origin.audit ??
+          (origin.apiKeyId
+            ? {
+                actor: { type: 'api_key' as const, id: origin.apiKeyId },
+                credential: {
+                  type: 'api_key' as const,
+                  id: origin.apiKeyId,
+                  ...(parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope
+                    ? { scope: parsePersistedApiKeyMetadata(key?.metadata ?? null)?.scope }
+                    : {}),
+                },
+              }
+            : origin.oauthConsentId
+              ? {
+                  actor: {
+                    type: 'user' as const,
+                    id: grant?.user_id as string,
+                  },
+                  credential: {
+                    type: 'oauth' as const,
+                    grantId: origin.oauthConsentId,
+                    ...(grant ? { clientId: grant.client_id } : {}),
+                  },
+                }
+              : origin.actorUserId
+                ? {
+                    actor: { type: 'user' as const, id: origin.actorUserId },
+                    credential: { type: 'session' as const },
+                  }
+                : { actor: { type: 'anonymous' as const }, credential: { type: 'none' as const } }))
+  await writeAuditEvent(trx, {
+    organizationId,
+    ...identity,
+    action,
+    targetType: 'booking',
+    targetId,
+    requestId: origin.requestId,
+  })
 }
 
 /** Requests expire after 48 hours, or at the original start, whichever comes first. */
@@ -2350,6 +2639,14 @@ export async function requestReschedule(
       })
       .returning('id')
       .executeTakeFirstOrThrow()
+    await auditBooking(trx, row.organization_id, row.id, 'booking.reschedule_requested', {
+      source:
+        ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
+      apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+      oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      audit: auditActor(ctx.principal),
+      requestId: ctx.requestId,
+    })
     await ctx.notify?.(
       trx,
       { type: 'reschedule_requested', bookingId: id, requestId: request.id },
