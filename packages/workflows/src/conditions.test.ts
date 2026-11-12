@@ -43,7 +43,15 @@ describe('workflow condition evaluation', () => {
             booking({ responses: { [questionId]: value } }),
           ),
         ).toBe(false)
-    // Inherited properties are not answers.
+    // Inherited properties are not answers, even when the inherited value would match.
+    const inherited = Object.create({ plan: 'enterprise', consent: false })
+    expect(inherited.plan).toBe('enterprise')
+    expect(evaluateCondition(answer('plan', 'enterprise'), booking({ responses: inherited }))).toBe(
+      false,
+    )
+    expect(evaluateCondition(answer('consent', false), booking({ responses: inherited }))).toBe(
+      false,
+    )
     for (const questionId of ['constructor', 'toString', '__proto__', 'hasOwnProperty'])
       expect(evaluateCondition(answer(questionId, 'x'), booking({ responses: {} }))).toBe(false)
     expect(

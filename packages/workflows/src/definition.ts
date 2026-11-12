@@ -81,7 +81,9 @@ export type WorkflowTrigger = z.output<typeof WorkflowTriggerSchema>
 export type WorkflowTriggerType = WorkflowTrigger['type']
 
 /** The public locales custom content may be written in, from the shared registry. */
-export const WORKFLOW_CONTENT_LOCALES: readonly string[] = interfaceLanguages('public')
+export const WORKFLOW_CONTENT_LOCALES: readonly string[] = Object.freeze(
+  interfaceLanguages('public'),
+)
 
 const localizedContent = z.strictObject({ subject: z.string(), body: z.string() })
 const content = z
@@ -138,7 +140,10 @@ export interface WorkflowValidationContext {
  * Question types an answer condition may compare: one option or one box. Free text has no
  * exact-match condition, and multi-select answers are lists.
  */
-export const WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES = ['select', 'checkbox'] as const
+export const WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES = Object.freeze([
+  'select',
+  'checkbox',
+] as const)
 
 const invalid = (path: string, constraint: string) =>
   new DomainError('invalid', 'invalid_workflow', `${path}: ${constraint}`)
@@ -203,7 +208,11 @@ export function workflowReferences(definition: WorkflowDefinition): {
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, 'utf8')
 
-/** Checks one event type ID: a missing, foreign or deleted one is the same opaque not-found. */
+/**
+ * Checks one event type ID: a missing or foreign one is the same opaque not-found. The owner's
+ * own group or deleted event type is refused as unsupported instead; ownership is checked
+ * first, so that answer says nothing about other owners' event types.
+ */
 function checkedEventType(
   path: string,
   id: string,

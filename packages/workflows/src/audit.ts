@@ -9,7 +9,7 @@ import { WORKFLOWS_IMPLEMENTED } from './hard-off.ts'
 import type { WorkflowOwner } from './ownership.ts'
 
 /** Every workflow audit event: definition changes, preview, scheduling and delivery. */
-export const WORKFLOW_AUDIT_EVENTS = [
+export const WORKFLOW_AUDIT_EVENTS = Object.freeze([
   'workflow.created',
   'workflow.updated',
   'workflow.enabled',
@@ -26,11 +26,11 @@ export const WORKFLOW_AUDIT_EVENTS = [
   'workflow.webhook_queued',
   'workflow.webhook_completed',
   'workflow.webhook_failed',
-] as const
+] as const)
 export type WorkflowAuditEvent = (typeof WORKFLOW_AUDIT_EVENTS)[number]
 
 /** Fixed skip reasons a run can end with; history and audit carry the code, never details. */
-export const WORKFLOW_SKIP_REASONS = [
+export const WORKFLOW_SKIP_REASONS = Object.freeze([
   'condition_false',
   'existing_notification',
   'minimum_gap',
@@ -40,7 +40,7 @@ export const WORKFLOW_SKIP_REASONS = [
   'render_limit',
   'workflow_disabled',
   'instance_disabled',
-] as const
+] as const)
 export type WorkflowSkipReason = (typeof WORKFLOW_SKIP_REASONS)[number]
 
 /** Who caused the event. Background work names its job explicitly instead of a person. */

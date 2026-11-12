@@ -8,6 +8,7 @@ import { parse } from '@babel/parser'
 import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import { hardOffWorkflowAuditPort } from './audit.ts'
 import * as hardOff from './hard-off.ts'
 import * as workflows from './index.ts'
@@ -89,6 +90,89 @@ describe('workflow hard-off', () => {
     expect(
       Object.keys(workflows).filter((name) => override.test(name) && !Object.hasOwn(hardOff, name)),
     ).toEqual([])
+    // Nor any mutable state: every exported value is a function, a schema, a primitive or a
+    // deeply frozen list or map, so no import can change what the package reads.
+    const frozen = (value: unknown): boolean =>
+      typeof value !== 'object' ||
+      value === null ||
+      (Object.isFrozen(value) && Object.values(value).every(frozen))
+    expect(
+      Object.entries(workflows)
+        .filter(
+          ([, value]) =>
+            typeof value !== 'function' && !(value instanceof z.ZodType) && !frozen(value),
+        )
+        .map(([name]) => name),
+    ).toEqual([])
+  })
+
+  it('decides in every guard from the constant alone, with no option or other state', () => {
+    const source = readFileSync(join(root, 'packages/workflows/src/hard-off.ts'), 'utf8')
+    const program = parse(source, { sourceType: 'module', plugins: ['typescript'] }).program
+    const named = (node: { type: string; name?: string }) =>
+      node.type === 'Identifier' ? node.name : node.type
+    // The module imports the error type only and holds no state besides the constant, and
+    // each guard takes exactly its documented parameters: no option, default or rest.
+    expect(
+      program.body.map((statement) => {
+        if (statement.type === 'ImportDeclaration')
+          return `import ${statement.specifiers.map(({ local }) => local.name)} from ${statement.source.value}`
+        const declaration =
+          statement.type === 'ExportNamedDeclaration' ? statement.declaration : undefined
+        if (declaration?.type === 'VariableDeclaration')
+          return `${declaration.kind} ${declaration.declarations.map(({ id }) => named(id))}`
+        if (declaration?.type === 'FunctionDeclaration')
+          return `function ${declaration.id?.name}(${declaration.params.map(named)})`
+        return statement.type
+      }),
+    ).toEqual([
+      'import DomainError from @hourmere/scheduling/errors',
+      'const WORKFLOWS_IMPLEMENTED',
+      'function requireWorkflowsImplemented()',
+      'function workflowOperation(operation)',
+      'function workflowCapture(capture)',
+      'function workflowExecution(execute)',
+    ])
+    // The guards read only their own parameters, the constant, the error type and the shared
+    // guard, never a property; every branch is the constant check itself.
+    const reads = new Set<string>()
+    const branches: string[] = []
+    const stack: unknown[] = [program.body.slice(1)]
+    while (stack.length) {
+      const node = stack.pop()
+      if (Array.isArray(node)) {
+        stack.push(...node)
+        continue
+      }
+      if (typeof node !== 'object' || node === null) continue
+      const value = node as Record<string, unknown> & { type: string }
+      if (value.type === 'Identifier') reads.add(value.name as string)
+      if (value.type === 'IfStatement') {
+        const test = value.test as { start: number; end: number }
+        branches.push(source.slice(test.start, test.end))
+      }
+      if (/^(?:Optional)?MemberExpression$|^This|^Logical|^Conditional|^Switch/.test(value.type))
+        branches.push(value.type)
+      for (const [key, child] of Object.entries(value))
+        if (
+          !['loc', 'extra', 'typeAnnotation', 'returnType', 'typeParameters'].includes(key) &&
+          typeof child === 'object'
+        )
+          stack.push(child)
+    }
+    expect([...reads].sort()).toEqual([
+      'DomainError',
+      'WORKFLOWS_IMPLEMENTED',
+      'args',
+      'capture',
+      'execute',
+      'operation',
+      'requireWorkflowsImplemented',
+      'workflowCapture',
+      'workflowExecution',
+      'workflowOperation',
+    ])
+    expect(branches).toEqual(Array(3).fill('WORKFLOWS_IMPLEMENTED !== true'))
   })
 
   it('cannot be turned on by a production import or the environment', () => {

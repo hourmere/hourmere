@@ -727,10 +727,11 @@ describe('workflow design numeric contracts', () => {
     expect(acceptance('19a')).toContain('only due wakes skip while off and future rows survive')
     expect(text).not.toMatch(/(?<!not )eagerly swept|sweeps? (?:every|all) pending/)
     // Workflow mail is charged in the shared ledger, never a separate one.
+    expect(step('10')).toContain('Shared global ledger/lock')
     expect(step('10')).toContain(
       'admission inserts the workflow-linked `notification_email_sends` row and the reservation row in one transaction',
     )
-    expect(`${step('10')} ${acceptance('10')}`).not.toMatch(/separate (?:workflow )?ledger/)
+    expect(`${step('10')} ${acceptance('10')}`).not.toMatch(/separate (?:workflow )?ledger/i)
     // Step 4 owns the availability field on /instance, and reports false.
     expect(step('4')).toContain(
       'Add optional `workflowsEnabled` to existing `GET /api/v1/instance`',

@@ -9,7 +9,7 @@
 import type { WorkflowEventTypeFacts, WorkflowOwner } from './ownership.ts'
 
 /** Email recipient classes: the booker, the other attendees and the assigned hosts. */
-export const WORKFLOW_RECIPIENT_CLASSES = ['booker', 'guests', 'hosts'] as const
+export const WORKFLOW_RECIPIENT_CLASSES = Object.freeze(['booker', 'guests', 'hosts'] as const)
 export type WorkflowRecipientClass = (typeof WORKFLOW_RECIPIENT_CLASSES)[number]
 
 /**
@@ -37,13 +37,13 @@ export type WorkflowTemplateVariable = keyof typeof WORKFLOW_TEMPLATE_VARIABLES
  */
 export const WORKFLOW_ANSWER_VARIABLE_PREFIX = 'answer.'
 /** Question types with one scalar answer; multi-select answers are lists. */
-export const WORKFLOW_SCALAR_QUESTION_TYPES = [
+export const WORKFLOW_SCALAR_QUESTION_TYPES = Object.freeze([
   'short_text',
   'long_text',
   'phone',
   'select',
   'checkbox',
-] as const
+] as const)
 
 const QUESTION_ID = /^[A-Za-z0-9_-]{1,64}$/
 const PLACEHOLDER_NAME = /^[A-Za-z0-9_.-]{1,80}$/

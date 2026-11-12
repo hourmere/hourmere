@@ -111,7 +111,7 @@ export function scopeSelectsEventType(
 }
 
 /** Stored booking sources a workflow can see; imported bookings are never among them. */
-export const WORKFLOW_BOOKING_SOURCES = ['web', 'embed', 'api', 'mcp'] as const
+export const WORKFLOW_BOOKING_SOURCES = Object.freeze(['web', 'embed', 'api', 'mcp'] as const)
 export type WorkflowBookingSource = (typeof WORKFLOW_BOOKING_SOURCES)[number]
 
 /** What a workflow reads about a booking, from its captured snapshot. */

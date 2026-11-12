@@ -182,12 +182,19 @@ Conditions are AND only, with no nesting, OR, regex, scripts or network lookups.
 workflows can express alternatives but still consume the same cap and intent deduplication.
 Missing/deleted questions and unknown values fail closed; arrays/free-text searching are
 unsupported. Answer predicates are only allowed for a single personal event type so the
-question schema is unambiguous. Team definitions reject source, answer and location
-predicates, including in preview: boolean matching and skip history can leak hidden data.
+question schema is unambiguous. They compare select and checkbox questions only, and a
+checkbox `equals false` matches only a stored false. The public booking form always submits
+an unticked box as false, but API and MCP callers may omit an optional checkbox, and an
+omitted answer matches neither true nor false. Team definitions reject source, answer and
+location predicates, including in preview: boolean matching and skip history can leak
+hidden data.
 Evaluate against the captured occurrence snapshot, then recheck live eligibility,
-ownership and lifecycle before dispatch. A failed condition records only `condition_false`,
-not the value or predicate index. Cancelled snapshots intentionally remain eligible for
-cancellation actions; they never revive before/after actions.
+ownership and lifecycle before dispatch. A booking whose event type was deleted after the
+definition was saved is never matched, at capture or at dispatch. This differs from
+reminders, which do not check whether the event type was deleted.
+A failed condition records only `condition_false`, not the value or predicate index.
+Cancelled snapshots intentionally remain eligible for cancellation actions; they never
+revive before/after actions.
 
 ## Email and webhook actions
 

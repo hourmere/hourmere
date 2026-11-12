@@ -69,11 +69,11 @@ export const WorkflowConditionsSchema = z
   })
 
 /** Conditions only personal definitions may use: they read hidden booking data. */
-export const PERSONAL_ONLY_CONDITION_FIELDS: readonly WorkflowCondition['field'][] = [
+export const PERSONAL_ONLY_CONDITION_FIELDS: readonly WorkflowCondition['field'][] = Object.freeze([
   'booking_source',
   'answer',
   'location_kind',
-]
+])
 
 /**
  * One predicate against the snapshot; absent or mistyped data is false. It does not check
