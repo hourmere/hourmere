@@ -47,33 +47,33 @@ export interface SsoProtection {
   mutants: SsoMutant[]
 }
 
-const violation = (constraint: string) => ({ code: '23514', constraint })
-const duplicate = (constraint: string) => ({ code: '23505', constraint })
-const foreignKey = { code: '23503' }
+export const violation = (constraint: string) => ({ code: '23514', constraint })
+export const duplicate = (constraint: string) => ({ code: '23505', constraint })
+export const foreignKey = { code: '23503' }
 
-function replaceOnce(source: string, search: string, replacement: string) {
+export function replaceOnce(source: string, search: string, replacement: string) {
   const parts = source.split(search)
   if (parts.length !== 2) throw new Error(`Expected one occurrence of ${search}`)
   return parts.join(replacement)
 }
-const append = (name: string, sql: string): SsoMutant => ({
+export const append = (name: string, sql: string): SsoMutant => ({
   name,
   apply: (source) => `${source}\n${sql}\n`,
 })
-const dropConstraint = (table: string, name: string, cascade = false) =>
+export const dropConstraint = (table: string, name: string, cascade = false) =>
   append(
     `drop ${name}`,
     `ALTER TABLE ${table} DROP CONSTRAINT ${name}${cascade ? ' CASCADE' : ''};`,
   )
-const dropIndex = (name: string) => append(`drop ${name}`, `DROP INDEX ${name};`)
-const dropTrigger = (table: string, name: string) =>
+export const dropIndex = (name: string) => append(`drop ${name}`, `DROP INDEX ${name};`)
+export const dropTrigger = (table: string, name: string) =>
   append(`drop ${name}`, `DROP TRIGGER ${name} ON ${table};`)
-const edit = (name: string, search: string, replacement: string): SsoMutant => ({
+export const edit = (name: string, search: string, replacement: string): SsoMutant => ({
   name,
   apply: (source) => replaceOnce(source, search, replacement),
 })
 /** Replaces text inside one function's body only, where other functions repeat it. */
-const editFunction = (fn: string, name: string, search: string, replacement: string) => ({
+export const editFunction = (fn: string, name: string, search: string, replacement: string) => ({
   name,
   apply: (source: string) => {
     const start = source.indexOf(`CREATE FUNCTION ${fn}(`)
@@ -86,7 +86,7 @@ const editFunction = (fn: string, name: string, search: string, replacement: str
     )
   },
 })
-const neverRaise = (name: string, condition: string) =>
+export const neverRaise = (name: string, condition: string) =>
   edit(name, `IF ${condition} THEN`, 'IF false THEN')
 
 const provider = (f: SsoFixture, organization = f.team) =>
@@ -1446,47 +1446,103 @@ const teamProtections: Record<string, SsoProtection> = {
   },
 }
 
+// Each guard is tried on every state of its row: a guard narrowed to one state (for example
+// only retired providers, or only lapsed claims) would let the other states be deleted and
+// inserted again with a reset revision or generation.
 const retainedCheck =
-  (table: SsoTable, constraint: string, row: (f: SsoFixture) => Promise<Record<string, unknown>>) =>
+  (
+    table: SsoTable,
+    constraint: string,
+    rows: (f: SsoFixture) => Promise<Record<string, unknown>[]>,
+  ) =>
   async (f: SsoFixture) => {
-    const kept = await row(f)
-    const where = table === 'sso_policies' ? 'organization_id=$1' : 'id=$1'
-    const key = table === 'sso_policies' ? kept.organization_id : kept.id
-    await refused(f.db, `DELETE FROM ${table} WHERE ${where}`, [key], violation(constraint))
-    expect(await count(f.db, table, { organization_id: f.team })).toBe(1)
-    // The organization's deletion still removes it.
-    await accepted(f.db, 'DELETE FROM auth.organization WHERE id=$1', [f.team])
-    expect(await count(f.db, table, { organization_id: f.team })).toBe(0)
+    const kept = await rows(f)
+    const key = table === 'sso_policies' ? 'organization_id' : 'id'
+    for (const row of kept)
+      await refused(f.db, `DELETE FROM ${table} WHERE ${key}=$1`, [row[key]], violation(constraint))
+    for (const organization of new Set(kept.map((row) => row.organization_id as string))) {
+      expect(await count(f.db, table, { organization_id: organization })).toBe(
+        kept.filter((row) => row.organization_id === organization).length,
+      )
+      // The organization's deletion still removes them.
+      await accepted(f.db, 'DELETE FROM auth.organization WHERE id=$1', [organization])
+      expect(await count(f.db, table, { organization_id: organization })).toBe(0)
+    }
   }
+const teamExists = 'IF EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id) THEN'
 const keptWhileTeamExists = (fn: string, name: string) =>
+  editFunction(fn, name, teamExists, 'IF false THEN')
+/** Narrows a delete guard to the rows that meet `condition`. */
+const keptOnlyWhen = (fn: string, name: string, condition: string) =>
   editFunction(
     fn,
     name,
-    'IF EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id) THEN',
-    'IF false THEN',
+    teamExists,
+    `IF (${condition}) AND EXISTS (SELECT FROM auth.organization WHERE id = OLD.organization_id) THEN`,
   )
 
 const retainedProtections: Record<string, SsoProtection> = {
   'a policy is kept while its team exists': {
     objects: ['sso_policies_retained'],
-    check: retainedCheck('sso_policies', 'sso_policies_retained', async (f) =>
-      insert(f.db, 'sso_policies', { ...policyValues(f.team), trust_generation: 3 }),
-    ),
-    mutants: [keptWhileTeamExists('guard_sso_policy', 'policies may be deleted and reset')],
+    check: retainedCheck('sso_policies', 'sso_policies_retained', async (f) => [
+      await insert(f.db, 'sso_policies', {
+        ...policyValues(f.team),
+        require_sso: true,
+        trust_generation: 3,
+      }),
+      await insert(f.db, 'sso_policies', { ...policyValues(f.otherTeam), trust_generation: 2 }),
+    ]),
+    mutants: [
+      keptWhileTeamExists('guard_sso_policy', 'policies may be deleted and reset'),
+      keptOnlyWhen('guard_sso_policy', 'only enforced policies are kept', 'OLD.require_sso'),
+      keptOnlyWhen('guard_sso_policy', 'only unenforced policies are kept', 'NOT OLD.require_sso'),
+    ],
   },
   'a provider is retired, not deleted': {
     objects: ['sso_providers_retained'],
-    check: retainedCheck('sso_providers', 'sso_providers_retained', async (f) =>
-      insert(f.db, 'sso_providers', { ...oidcProviderValues(f.team), retired_at: at(-60) }),
-    ),
-    mutants: [keptWhileTeamExists('guard_sso_provider', 'providers may be deleted and reused')],
+    check: retainedCheck('sso_providers', 'sso_providers_retained', async (f) => [
+      await insert(f.db, 'sso_providers', { ...oidcProviderValues(f.team), retired_at: at(-60) }),
+      await insert(f.db, 'sso_providers', { ...oidcProviderValues(f.team), enabled: true }),
+      await insert(f.db, 'sso_providers', samlProviderValues(f.team)),
+    ]),
+    mutants: [
+      keptWhileTeamExists('guard_sso_provider', 'providers may be deleted and reused'),
+      keptOnlyWhen(
+        'guard_sso_provider',
+        'only retired providers are kept',
+        'OLD.retired_at IS NOT NULL',
+      ),
+      keptOnlyWhen('guard_sso_provider', 'only live providers are kept', 'OLD.retired_at IS NULL'),
+      keptOnlyWhen('guard_sso_provider', 'only disabled providers are kept', 'NOT OLD.enabled'),
+    ],
   },
   'a domain claim is retired, not deleted': {
     objects: ['sso_domains_retained'],
-    check: retainedCheck('sso_domains', 'sso_domains_retained', async (f) =>
-      insert(f.db, 'sso_domains', lapsedDomainValues(f.team)),
-    ),
-    mutants: [keptWhileTeamExists('guard_sso_domain', 'lapsed claims may be deleted and revived')],
+    check: retainedCheck('sso_domains', 'sso_domains_retained', async (f) => [
+      await insert(f.db, 'sso_domains', lapsedDomainValues(f.team)),
+      await insert(f.db, 'sso_domains', claimedDomainValues(f.team)),
+      await insert(f.db, 'sso_domains', pendingDomainValues(f.team)),
+      await insert(f.db, 'sso_domains', { ...lapsedDomainValues(f.team), retired_at: at(-60) }),
+    ]),
+    mutants: [
+      keptWhileTeamExists('guard_sso_domain', 'lapsed claims may be deleted and revived'),
+      keptOnlyWhen(
+        'guard_sso_domain',
+        'unexpired verified claims may be deleted',
+        'OLD.verification_expires_at IS NULL OR OLD.verification_expires_at <= clock_timestamp()',
+      ),
+      keptOnlyWhen(
+        'guard_sso_domain',
+        'lapsed claims may be deleted',
+        'OLD.verification_expires_at IS NULL OR OLD.verification_expires_at > clock_timestamp()',
+      ),
+      keptOnlyWhen(
+        'guard_sso_domain',
+        'pending claims may be deleted',
+        'OLD.claimed_at IS NOT NULL',
+      ),
+      keptOnlyWhen('guard_sso_domain', 'retired claims may be deleted', 'OLD.retired_at IS NULL'),
+    ],
   },
 }
 

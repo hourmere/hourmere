@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -16,6 +15,7 @@ import * as runtime from '../../i18n/runtime.tsx'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
 import * as translate from '../../i18n/translate.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json, later } from '../../test/fake-api.tsx'
 import * as unsavedChanges from '../../unsaved-changes.tsx'
 import { UnsavedChangesProvider } from '../../unsaved-changes.tsx'
@@ -480,15 +480,12 @@ function compileSource<T>(
   dependencies: Record<string, unknown>,
   exported: string,
 ): T {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: source, encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(exported, source, {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   const module = { exports: {} as Record<string, T> }
   new Function('require', 'module', 'exports', 'reactRuntime', compiled)(
     (name: string) => {

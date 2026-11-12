@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import '@hono/zod-openapi'
 import {
   type Auth,
   createAuth,
@@ -11,6 +12,11 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import {
+  ONE_TIME_LINK_PAGE_MAX,
+  ONE_TIME_LINK_PREFILL_EMAIL_MAX,
+  ONE_TIME_LINK_PREFILL_NAME_MAX,
+} from '@hourmere/scheduling'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
@@ -58,6 +64,24 @@ describe('one-time link administrative OpenAPI contract', () => {
         expect(operation.responses).toHaveProperty('401')
         expect(operation.responses).toHaveProperty('403')
       }
+    expect(doc.components.schemas.CreateOneTimeBookingLink).toMatchObject({
+      properties: {
+        prefill: {
+          properties: {
+            name: { maxLength: ONE_TIME_LINK_PREFILL_NAME_MAX },
+            email: { maxLength: ONE_TIME_LINK_PREFILL_EMAIL_MAX },
+          },
+        },
+      },
+    })
+    expect(doc.paths[basePath]?.get?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'limit',
+          schema: expect.objectContaining({ maximum: ONE_TIME_LINK_PAGE_MAX }),
+        }),
+      ]),
+    )
     expect(JSON.stringify(doc.components.schemas.OneTimeBookingLink)).not.toMatch(
       /token_hash|tokenHash|"token"|"url"/,
     )
@@ -236,6 +260,32 @@ describe.skipIf(!process.env.DATABASE_URL)(
         data: unknown[]
       }
       expect(listed.data).toHaveLength(1)
+    })
+    it('accepts service maxima and rejects maximum plus one for pages and prefill', async () => {
+      const s = await setup()
+      for (const [limit, status] of [
+        [ONE_TIME_LINK_PAGE_MAX, 200],
+        [ONE_TIME_LINK_PAGE_MAX + 1, 400],
+      ]) {
+        expect(
+          (await request(s, 'read', 'GET', `${path(s.eventTypeId)}?limit=${limit}`)).status,
+        ).toBe(status)
+      }
+      for (const [field, maximum] of [
+        ['name', ONE_TIME_LINK_PREFILL_NAME_MAX],
+        ['email', ONE_TIME_LINK_PREFILL_EMAIL_MAX],
+      ] as const) {
+        for (const extra of [0, 1]) {
+          const value =
+            field === 'name'
+              ? 'n'.repeat(maximum + extra)
+              : `${'e'.repeat(maximum + extra - '@example.test'.length)}@example.test`
+          const response = await request(s, 'full', 'POST', path(s.eventTypeId), {
+            prefill: { [field]: value },
+          })
+          expect(response.status).toBe(extra === 0 ? 201 : 400)
+        }
+      }
     })
     it('validates prefill and expiry, rejects extra fields, and returns uniform missing revocations', async () => {
       const s = await setup()

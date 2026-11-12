@@ -32,7 +32,7 @@ does not offer it. See [known limitations](#known-limitations) before sharing.
    space discards it. The administrator list cannot recover it. If you lose the URL,
    revoke the unused link and create another.
 4. The list shows each link's state, expiry, prefill, creator and creation time, and the
-   original booking reference once used. To withdraw an unused link, choose **Revoke**
+   original booking reference once used. To withdraw an unused link, choose **Revoke link**
    and confirm. Repeating revocation has no further effect; a used link stays used.
 
 The editor offers these expiry presets:
