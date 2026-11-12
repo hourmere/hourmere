@@ -1162,7 +1162,9 @@ tables covers it too.
   of another actor, credential, kind or organization never matches.
 - **Retained identity.** A key lives as long as its definition row, tombstone included:
   tombstoning keeps it unchanged. It goes with the definition row (`ON DELETE CASCADE`), when
-  the tombstone is purged or with the organization or personal owner.
+  the tombstone is purged or with the organization or personal owner. The table has no guard
+  trigger: the database enforces this lifetime through the cascade only, and does not refuse a
+  direct update or deletion of a key row, which no writer makes.
 - **Credential deletion.** `actor_user_id` and `credential_id` are historical identifiers
   without foreign keys, as bookings keep `api_key_id` and `oauth_consent_id`. Revoking an API
   key or OAuth consent, signing out or deleting the user changes no key. A later credential or

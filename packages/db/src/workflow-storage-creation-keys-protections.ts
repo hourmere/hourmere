@@ -527,6 +527,12 @@ CREATE TRIGGER workflow_definitions_forget_creation_key AFTER UPDATE OF deleted_
         SCOPE_COLUMNS,
         '(organization_id, actor_user_id, credential_kind, credential_id),',
       ),
+      // A wider key would let a changed replay write a second definition.
+      mutant(
+        'the scope includes the fingerprint',
+        SCOPE_COLUMNS,
+        '(organization_id, actor_user_id, credential_kind, credential_id, idempotency_key, request_fingerprint),',
+      ),
     ],
   },
 
