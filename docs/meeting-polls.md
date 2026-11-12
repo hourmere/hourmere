@@ -230,6 +230,64 @@ booking guest messages retain the existing booker-language/zone behavior. The bo
 calendar invitation can reveal attendees to one another: disclose that before voting;
 poll privacy does not promise a private calendar attendee list.
 
+## Installation secret and key fence
+
+The voter services derive three keys from one installation secret, `meetingPollSecret`,
+with HKDF: the mailbox digest (`email_key`), the admission IP digests and the AES-256-GCM
+key of retained credentials. Capability digests and the public-link digest are unkeyed.
+Data written under one secret is therefore unusable under another: the same mailbox would
+enroll a second time, a removed mailbox would pass its tombstone, a re-invited invitee would
+take a second place, recovery would find no voter and stored ciphertexts would not open.
+
+Migration `0084_meeting_poll_key_state.sql` adds the one-row `meeting_poll_key_state` table.
+It records a keyed fingerprint of the secret the data was written under: an HMAC-SHA-256
+under its own HKDF subkey, never the secret. `ensureMeetingPollKey` in
+`packages/scheduling/src/meeting-poll-key.ts` is the fence:
+
+- Every voter service (enrollment, verification, recovery, invitation and resend) calls it
+  first in its transaction, before any row lock. It runs only in READ COMMITTED
+  transactions, so its reads after the lock see writers that committed meanwhile; other
+  isolation levels are refused. Under the recorded secret it takes a shared transaction
+  advisory lock and continues.
+- A secret is recorded only while no keyed data exists, at first use or replacing another
+  one: no voter row and no mailbox counter. Every stored ciphertext belongs to a voter, and
+  removal tombstones live on counters; polls without voters hold no keyed data. A missing
+  fingerprint beside keyed data (a row deleted by hand) therefore refuses every secret.
+- Recording takes the lock exclusively, so concurrent first uses serialize to one row, a
+  change waits for every in-flight voter write and then sees its data, and a write that read
+  the old fingerprint before a change committed is refused. Another secret is refused
+  without taking the lock once keyed data exists, so a misconfigured process never stalls
+  correctly configured ones.
+- A refusal throws `MeetingPollKeyMismatchError` (code `meeting_poll_key_mismatch`, a
+  message without secret material) and the transaction writes nothing. No enrollment,
+  invitation, verification, recovery mail or resend happens under another secret, and
+  recovery for a well-formed poll ID fails instead of answering 202 with nothing queued.
+
+No transport supplies the secret yet, so nothing outside these services calls the fence.
+The step that supplies it (B2) calls `ensureMeetingPollKey` at server start, before any
+meeting-poll route serves. Every worker that opens, mints or stores a credential ciphertext
+(B1 delivery, B4 reminders and opt-out credentials) calls it first in each transaction,
+before any row lock or claim: a worker that waited for the fence while holding a poll or
+delivery row could deadlock with a voter write that holds the fence and waits for that row.
+Every later voter service calls it first as well, as the ballot service must.
+`meeting-poll-key.test.ts` fails when an exported voter service skips it.
+
+Operators must keep the meeting-poll secret stable and back it up with the instance's other
+secrets. If it changes while keyed data exists, the startup check and every voter operation
+fail closed with `MeetingPollKeyMismatchError` until the operator either:
+
+1. restores the previous secret. Nothing was written under the new one, so service resumes
+   unchanged; this is the only way to keep rosters, ballots, tombstones and counters; or
+2. invalidates the old data when the previous secret is lost or must be retired, for example
+   after a leak: delete every meeting poll that has voters or mailbox counters (deleting an
+   organization deletes its polls). Once no voter row or mailbox counter remains, the next
+   start records the new secret. Those polls' rosters, ballots, tombstones, mail counters and
+   queued credential mail are gone; polls without voters stay.
+
+No setting supplies the secret yet, so the operator documentation (the configuration entry
+of whichever setting B2 uses) lands with B2 and must state both procedures. Whether B2 also
+ships an operator command that performs the invalidation in one step is decided there.
+
 ## Proposed tables and invariants
 
 Migration `0071_meeting_polls.sql` implements the storage foundation below.
@@ -249,6 +307,7 @@ camelCase API fields, CHECK-constrained text states, and organization-scoped que
 | `meeting_poll_votes` | `id`, `poll_id`, `voter_id`, `slot_id`, `value` | UNIQUE `(poll_id,voter_id,slot_id)`; composite organization/poll/voter and organization/poll/slot FKs prevent cross-poll/tenant votes; value CHECK yes/if_need_be/no; `(poll_id,slot_id,value)` tally index |
 | `meeting_poll_operations` | `id`, nullable `poll_id`, `operation`, `actor_scope_digest`, `idempotency_key_digest`, `request_fingerprint`, nullable `booking_id` (set by finalize; a receipt stores no result beyond its `poll_id` and `booking_id` references). Replays return only those stored references: a create replay returns `poll_id` as `poll_already_created`, a finalize replay returns the booking reference, and invite, resend and rotate-link replays return their safe outcome or conflict without a stored result | UNIQUE `(organization_id,operation,actor_scope_digest,idempotency_key_digest)`; scoped poll/booking FKs; no raw request, token, roster or response cache |
 | `meeting_poll_deliveries` | `id`, `poll_id`, nullable `voter_id`, nullable `host_user_id`, `kind`, `generation`, `sequence`, `due_at`, `state`, `attempts`, `lease_id`, `lease_until`, nullable purpose-bound `capability_ciphertext`, safe error class | exactly one recipient: scoped voter FK or host user FK; separate partial UNIQUE `(poll_id,voter_id,kind,generation,sequence)` and `(poll_id,host_user_id,kind,generation)`; `sequence` is 0 for the first delivery of a kind and generation; recovery copies and booking-update outcome notices take the next ordinal under the poll lock, so re-deliveries never collide while duplicate first deliveries are still rejected; partial due index for pending rows and expired claims; bounded retries and terminal sent/suppressed/skipped outcomes |
+| `meeting_poll_key_state` | `singleton`, `secret_fingerprint`, `updated_at`; installation-wide, so no `organization_id` or `created_at` | One row: `singleton` primary key, CHECK true; 32-byte keyed fingerprint of the meeting-poll secret, never the secret; recorded by the first fence use, never by the migration |
 
 `email_key` is a domain-separated keyed HMAC digest of the normalized mailbox, never
 plaintext; use it for uniqueness, removal tombstones and durable mail counters.
@@ -678,10 +737,10 @@ so every available creation surface has a working results destination without a 
 | A3b Storage and service: ballots and deadline | A3a | None; internal service only | No flag; no transport | Submit/replace full ballots, withdraw/reactivate and opt-out. Test ballot and results revisions, voter writes never changing the host revision, reacquiring capacity, consent, purpose separation and unchanged invitations of withdrawn mailboxes; exact database-clock deadline equality and a transaction waiting across the deadline race; ballots read-only after deadline. |
 | A4a Storage and service: results and removal | A3b | None; internal service only | No flag; no transport | Results projection, remove voter/bulk remove-unverified, voter-row deletion behind mailbox tombstones, removal/rejoin blocks, host re-invitation of removed mailboxes and retained invitation eligibility. Test that a voter replacing their ballot every second cannot make close, cancel, rotate-link, remove-voter or remove-unverified fail with `poll_changed`, while removal changes the results revision; only the mailbox counter row outlives removal; retained abuse accounting and no lost opt-outs or reset budgets across removal and re-invitation. |
 | A4b Storage and service: cleanup and deletion | A4a | None; internal service only | No flag; no transport | Bounded terminal cleanup and expired public pending row cleanup, privacy-deletion cascades and deletion races. Test that a voter replacing their ballot every second cannot make delete fail with `poll_changed`, delayed workers never retaining public pending capacity, consistent booking-history deletion, no personal data after expiry cleanup or poll deletion beyond the pseudonymous replay tombstones, and audit shared lock order including deletion/cascade paths. |
-| B1 Public voting page: verification mail foundation | A4b | None; workers and internal delivery only | No flag; no transport | Invitation/verification/recovery/resend durable delivery, encrypted capabilities and finite leases/retries, using the existing outbox machinery. Test recovery re-delivering the unchanged credential (nothing after public pending expiry or the deadline), invited credentials remaining valid until deadline, budgets, host-resend generation rotation, terminal suppression and the SMTP duplicate window with fakes. |
-| B2 Public voting page: public transports | B1 | All public REST operations, matching MCP tools and CLI commands together | No flag; public transports available | Own public read/enroll/verify/recover/vote/withdraw/opt-out, OpenAPI/generated types and no-login checks; ship scope classification and matching MCP/CLI adapters together. CLI secrets must be read from stdin from this first step, never argv. Test service parity, invalid bearer, secret redaction, full-capacity responses and no-valid-token recovery entry. |
+| B1 Public voting page: verification mail foundation | A4b | None; workers and internal delivery only | No flag; no transport | Invitation/verification/recovery/resend durable delivery, encrypted capabilities and finite leases/retries, using the existing outbox machinery. Test recovery re-delivering the unchanged credential (nothing after public pending expiry or the deadline), invited credentials remaining valid until deadline, budgets, host-resend generation rotation, terminal suppression and the SMTP duplicate window with fakes. Workers take `ensureMeetingPollKey` first in each transaction, before any row lock or claim, and open a retained ciphertext only after it passes. |
+| B2 Public voting page: public transports | B1 | All public REST operations, matching MCP tools and CLI commands together | No flag; public transports available | Own public read/enroll/verify/recover/vote/withdraw/opt-out, OpenAPI/generated types and no-login checks; ship scope classification and matching MCP/CLI adapters together. CLI secrets must be read from stdin from this first step, never argv. Supply the meeting-poll secret and call `ensureMeetingPollKey` at server start, before any meeting-poll route serves; document secret rotation and both recovery procedures in the operator documentation. Test service parity, invalid bearer, secret redaction, full-capacity responses, no-valid-token recovery entry and every public operation refused under a mismatched key. |
 | B3 Public voting page: ballot UI | B2 | None added; consumes B2 REST | No flag; public page available | No login; verification/recovery, consent, ballots/edit/withdraw, timezone selection and read-only closure. Keyboard/screen-reader access and usable 320px stacked layout without overflow; all shipped locales, private/aggregate disclosures, neutral loading/403/errors, duplicate/stale submit, DST and midnight zone changes preserving slot IDs. Browser checks only through approved escalation/CI. |
-| B4 Public voting page: reminder and host deadline mail | B3 | None added; opt-out UI consumes B2 REST | No flag; jobs and opt-out page available | Deadline jobs and mail/opt-out UI. Assert unverified nonresponding invitees receive one reminder carrying their valid voting credential even after one hour and when capacity is full; voted/withdrawn/removed/opted-out people and unverified public enrollees receive none. Test timing, no overdue catch-up, budget suppression, durable once-only receipts, authorized creator deadline notice and departed creator suppression. |
+| B4 Public voting page: reminder and host deadline mail | B3 | None added; opt-out UI consumes B2 REST | No flag; jobs and opt-out page available | Deadline jobs and mail/opt-out UI. Assert unverified nonresponding invitees receive one reminder carrying their valid voting credential even after one hour and when capacity is full; voted/withdrawn/removed/opted-out people and unverified public enrollees receive none. Jobs that open or mint a credential take `ensureMeetingPollKey` first in each transaction, before any row lock or claim. Test timing, no overdue catch-up, budget suppression, durable once-only receipts, authorized creator deadline notice and departed creator suppression. |
 | C1 Host picks a time: booking-core extraction | B4 | None; internal booking core only | No flag; no new transport | Behavior-preserving transaction-taking internal booking core, ordinary entry points unchanged. Existing booking tests remain green; demonstrate rollback and organization → sorted hosts → event → users → members → round-robin lock ordering, with no provider I/O inside locks. |
 | C2a Host picks a time: atomic finalize | C1 | None; internal finalize service only | No flag; no new transport | Service selects eligible booker/attendees and commits booking, poll, receipts and delivery intents together. Test MAX_GUESTS + 1, locked event settings, guest permission/answers, conditional consent, strict availability/limits/buffers, safe projection and exact/changed replay. Inject failure after booking insertion and assert complete rollback. |
 | C2b Host picks a time: concurrency and scheduling modes | C2a | None; internal service tests only | No flag; no new transport | Harden and test vote/finalize, two-finalizer and ordinary-booking collisions: finalize while open with a stale results revision returns `poll_changed`, and finalize after close succeeds even when a voter edited every second until closure. Test collective rollback and round-robin fairness; group/one-time-link rejection without seat/link mutation. This is a required integration gate before exposing finalize. |

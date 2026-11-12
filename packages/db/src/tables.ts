@@ -852,6 +852,12 @@ export interface MeetingPollDeliveries {
   voter_id: string | null;
 }
 
+export interface MeetingPollKeyState {
+  secret_fingerprint: Buffer;
+  singleton: Generated<boolean>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface MeetingPollMailboxCounters {
   created_at: Generated<Timestamp>;
   email_key: Buffer;
@@ -1596,6 +1602,7 @@ export interface DB {
   mcp_oauth_intents: McpOauthIntents;
   meeting_poll_capabilities: MeetingPollCapabilities;
   meeting_poll_deliveries: MeetingPollDeliveries;
+  meeting_poll_key_state: MeetingPollKeyState;
   meeting_poll_mailbox_counters: MeetingPollMailboxCounters;
   meeting_poll_operations: MeetingPollOperations;
   meeting_poll_slots: MeetingPollSlots;

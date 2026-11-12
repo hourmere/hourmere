@@ -108,6 +108,19 @@ See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign ke
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
 
+Migration `0084_meeting_poll_key_state.sql` adds the installation-wide
+`meeting_poll_key_state` row: a keyed fingerprint of the meeting-poll secret that mailbox
+digests, admission IP digests and retained credential ciphertexts were written under, never
+the secret. Every voter service checks it first in its transaction
+(`packages/scheduling/src/meeting-poll-key.ts`). A secret is recorded, at first use or
+replacing another one, only while no voter row or mailbox counter exists; otherwise every
+other secret is refused (see
+[the key fence](meeting-polls.md#installation-secret-and-key-fence)). The migration writes no
+row. Its expectation file is
+`packages/db/src/testing/migration-objects/0084_meeting_poll_key_state.json`, and
+`meeting-poll-key-state-coverage.test.ts` drops each of its five objects and requires a
+protection assertion to fail.
+
 The chosen cleanup schedule is hourly, at most 500 rows per transaction. It persists
 closure for abandoned open polls at their deadline, deletes expired public pending
 voters and their dependent personal data, and clears expired capability ciphertext.
