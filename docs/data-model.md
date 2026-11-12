@@ -860,6 +860,60 @@ Question/rule/target semantics remain the future shared validator's responsibili
 Unconsumed receipt indexes support bounded expiry cleanup and form/instance admission
 counts; receipt lifetime, encryption and admission services land in later steps.
 
+## SSO configuration storage
+
+Migration 0074 installs the configuration storage of the [SSO design](sso.md)
+(Configuration storage step): `sso_policies`, `sso_providers`, `sso_domains`,
+`sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. Nothing reads
+or writes them yet: there is no route, worker, read path or setting, and OIDC and SAML stay
+hard-off. A test keeps every production module outside the storage layer from naming them.
+
+All six belong to a team: a personal organization's rows are refused, and deleting the
+organization deletes them. Policies, providers and domain claims are deleted only with
+their organization; providers and claims are retired instead, so a trust generation is
+never reset, a provider ID never reused and a claim generation never revived by deleting
+and inserting a row again.
+
+- **Policy** (one row per team): `require_sso`, `admission` (`invitation_only` or `jit`),
+  `policy_revision` and `trust_generation`, both positive and never decreasing. A change of
+  enforcement or admission needs a new `policy_revision`; turning enforcement off needs a
+  new `trust_generation`, which ends every proof and delegation of the team.
+- **Providers** have a never-reused ID, an immutable organization, protocol (`oidc` or
+  `saml`) and identity (the OIDC issuer and client ID, or the SAML IdP entity ID in
+  `issuer`), a display name and a positive `revision`. The configuration, secrets included,
+  is stored only as an AES-256-GCM envelope (version 1, IV, tag, ciphertext), never as
+  plaintext JSON; its authenticated data binds organization, provider and revision, so
+  ciphertext moved to another organization, provider or revision fails to decrypt. A new
+  revision and a new sealed configuration go together. Retirement disables the provider and
+  is permanent.
+- **Domain claims** store an exact lowercase IDNA ASCII name (no wildcard, IP address or
+  trailing dot; public suffixes are refused by the application), the current `generation`,
+  the SHA-256 digest of that generation's TXT challenge and its expiry, verification and
+  recheck times, and the latest recheck outcome (`positive`, `failed` or `unknown`). A
+  pending challenge reserves nothing. From its first verification until retirement a claim
+  is the one active claim for its name on the instance, expired or not. Each new generation
+  has a new, unverified challenge. A verified generation keeps its verification time; its
+  expiry can be renewed, including by a positive recheck of a frozen claim, only while it
+  is unexpired. After a lapse only a new generation can be verified, so the proofs and
+  delegations that recorded the old generation never revive. Retirement is permanent.
+- **Provider domains** link a provider to its team's own domain claims only; the claims
+  may be pending or retired, which the services check.
+- **Recovery nominations and recovery owners** are written only for a current owner's
+  membership (including `owner` among several roles), checked on insert. Deleting the
+  membership, by leaving, removal or the user's deletion, deletes them, and re-joining
+  restores nothing. Deleting them on demotion, with its audit event, belongs to the Recovery
+  enrollment step. Both are immutable. A team has at most one pending nomination per owner,
+  and one recovery record per owner.
+
+`sso-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
+through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0074_sso_configuration.json`), and every check and
+trigger rule also has source-copy mutations that remove or weaken it
+(`packages/db/src/sso-storage-protections.ts`), run against the predecessor schema. The
+upgrade test preserves a populated predecessor down to row versions and compares fresh and
+upgraded schemas. The operator key that seals provider configuration is configured by the
+first step that writes it.
+
 ## Planned additions (each a new migration)
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,

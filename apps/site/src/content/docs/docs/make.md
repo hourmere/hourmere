@@ -35,17 +35,17 @@ directly reachable from Make. For outbound events, enable `WEBHOOKS_ENABLED`, co
 
 Use no Hourmere API key inside Make for any of these templates:
 
-| Purpose | Credential |
-| --- | --- |
-| Sheets or Slack scenario receiving events | Webhook signing secret in a Make Data store; no Hourmere runtime API key |
-| Find slots and create bookings | **No authentication**; these are public endpoints |
-| Register, pause or rotate a webhook | **Full account access** (`full`), setup only in a trusted REST client outside Make |
-| Inspect webhook delivery metadata | **Read** (`read`), only if needed outside these templates |
+| Purpose | Hourmere operations | Credential |
+| --- | --- | --- |
+| Sheets or Slack scenario receiving events | Signed deliveries to your Make webhook | Webhook signing secret in a Make Data store; no Hourmere runtime API key |
+| Find slots and create bookings | `GET /api/v1/public/{handle}/{slug}/slots`, `POST /api/v1/public/{handle}/{slug}/bookings` | **No authentication**; these are public endpoints |
+| Register, pause or rotate a webhook | `POST /api/v1/webhooks`, `PATCH /api/v1/webhooks/{id}`, `POST /api/v1/webhooks/{id}/rotate-secret` | **Full account access** (`full`), setup only in a trusted REST client outside Make |
+| Inspect webhook delivery metadata | `GET /api/v1/webhooks/{id}/deliveries` | **Read** (`read`), only if needed outside these templates |
 
 No key is the least-privilege choice for public requests. A leaked `bookings` key
-could list, cancel and reschedule every booking in its organization, exposing invitee
-data; these templates never need it. Supplying it adds no attribution: public bookings
-still have source `web` and no API-key ID.
+could list, cancel and reschedule every booking you host in that organization, exposing
+invitee data; these templates never need it. Supplying it adds no attribution: public
+bookings still have source `web` and no API-key ID.
 
 Webhook configuration requires the organization's owner/admin role (or the personal
 space owner). Create a temporary **Full account access** key at `/app/api-keys` in the
@@ -114,17 +114,25 @@ not signature verification.
 Make does have HMAC support: its
 [text and binary functions](https://help.make.com/text-and-binary-functions) document
 `sha256(text; encoding; key; key encoding)` and state that providing a key computes
-HMAC-SHA256. Use lowercase hex output. The message is the `Webhook-Timestamp` header,
-a literal period, then the exact original JSON text. The key is the **entire UTF-8 signing
-secret, including its prefix**, without base64 decoding. The expected signature is `v1=`
-followed by that digest. Do not parse and reserialize the body before hashing.
+HMAC-SHA256. The message is the `Webhook-Timestamp` header, a literal period, then the
+exact original JSON text. The key is the **entire UTF-8 signing secret, including its
+prefix**, without base64 decoding. The output is lowercase hex, and the expected signature
+is `v1=` followed by that digest. Do not parse and reserialize the body before hashing.
 
 Use the native verification path in the [shared recipe](https://github.com/hourmere/hourmere/blob/main/tools/make-templates/README.md#verify-before-side-effects).
 Before the first run, open **Scenario settings** (gear icon) and enable **Keep data
 confidential = Yes**. Create a Data store `Hourmere signing secrets` with a text field
 `signingSecret`, store the one-time secret in a record keyed by your endpoint ID, and
-use **Data store → Get a record** with that fixed key. Map the returned field into
-`sha256(message; "hex"; signingSecret; "text")`, prefixing the result with `v1=`.
+use **Data store → Get a record** with that fixed key. Then add two **Tools → Set
+variable** modules with these values; braces mark mapped items, where `timestamp` is the
+timestamp lookup below, `rawBody` the untouched pass-through JSON text and `signingSecret`
+the returned Data store field:
+
+| Set variable | Value (braces mark mapped items) |
+| --- | --- |
+| `message` | `{{timestamp}}.{{rawBody}}` |
+| `expectedSignature` | `v1={{sha256(message; "hex"; signingSecret; "text")}}` |
+
 The secret stays out of formula literals and blueprint settings. Do not use ordinary
 variables as secret storage. See [Make Data stores](https://help.make.com/l6du-data-stores)
 and [confidential execution settings](https://help.make.com/scenario-settings).
@@ -145,8 +153,12 @@ unchanged; confirm pass-through byte fidelity. See [Make array functions](https:
 
 Reject missing or duplicate required headers, a method other than `POST`, a timestamp
 that is not Unix-second digits or is more than **300 seconds** from current UTC time,
-and any signature other than `v1=` plus 64 lowercase hex characters matching the
-computed signature. Only the valid route may parse JSON and reach Sheets or Slack.
+and any signature other than `v1=` plus 64 lowercase hex characters equal to
+`expectedSignature`. For the timestamp, the valid route's filter requires both
+`timestamp` **Matches pattern** `^[0-9]{1,12}$` and
+`abs(formatDate(now; "X") - timestamp)` **Less than or equal to** `300`, which compares
+Unix seconds; these conditions are untested in a live Make run. Only the valid route may
+parse JSON and reach Sheets or Slack.
 Use explicit terminal responses: rejection 401, success/duplicate/ignored event 200;
 a failed destination or receipt write must not return success.
 
@@ -213,9 +225,9 @@ handling. See also [REST quickstart](/docs/rest).
 - Make, Sheets and Slack have their own account, connection and service limits. This offline
   recipe release creates no accounts, credentials or provider connections.
 
-## Validated field references
-
-These field paths are checked against Hourmere's API and webhook contracts.
+<!--
+Field declarations for scripts/make-template-validation.test.ts, checked against
+Hourmere's API and webhook contracts. The comment keeps them off the rendered page.
 
 ```hourmere-fields
 {
@@ -262,3 +274,4 @@ These field paths are checked against Hourmere's API and webhook contracts.
   ]
 }
 ```
+-->
