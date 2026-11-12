@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { assertBookingLocallyManaged } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -61,6 +62,16 @@ export async function setAttendeeNoShow(
       .set({ no_show_marked_at: result.noShowMarkedAt, no_show_marked_by: result.noShowMarkedBy })
       .where('id', '=', attendeeId)
       .execute()
+    // Stored IDs, whatever UUID spelling the request used; no name, email or free text.
+    await writeAuditEvent(trx, {
+      organizationId: ctx.principal.organization.id,
+      ...auditActor(ctx.principal),
+      action: 'booking.attendee_no_show_changed',
+      targetType: 'booking',
+      targetId: booking.id,
+      details: { attendeeId: attendee.id, noShow: noShow ? 'marked' : 'unmarked' },
+      requestId: ctx.requestId,
+    })
     await ctx.notifyAttendeeNoShow?.(trx, { bookingId, ...result }, now)
     return result
   })

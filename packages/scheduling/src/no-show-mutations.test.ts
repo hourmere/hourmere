@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { assertBookingLocallyManaged } from './bookings.ts'
@@ -28,6 +29,8 @@ function sourceCopy(
   source = stripTypeScriptTypes(source.replace(from, to)).replace(/\bexport /g, '')
   const bindings = {
     barrier,
+    auditActor,
+    writeAuditEvent,
     assertBookingLocallyManaged,
     DomainError,
     lockOrganization,

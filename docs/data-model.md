@@ -97,8 +97,13 @@ recipient deliveries. Generated database interfaces and selectable row types des
 storage. The internal host lifecycle service in `packages/scheduling/src/meeting-polls.ts`
 creates, reads, closes, cancels and deletes polls and rotates public links; it validates
 every candidate against the availability engine at creation, fixes every
-creation setting, never reopens a closed or canceled poll, and adds no transport. No voter
-admission, worker, flag or UI is enabled.
+creation setting, never reopens a closed or canceled poll, and adds no transport. The
+internal enrollment and verification service in
+`packages/scheduling/src/meeting-poll-voters.ts` enrolls public voters, invites and
+re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
+invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
+resend counters under the poll lock. It queues delivery rows only; no worker, transport,
+flag or UI is enabled.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.

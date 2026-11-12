@@ -22,17 +22,22 @@ const secret = randomBytes(32).toString('base64')
 let nextAddress = 0
 const testIp = () => `198.19.${Math.floor(++nextAddress / 250)}.${(nextAddress % 250) + 1}`
 
-/** Resolves to the statuses, or to 'TIMEOUT' when the batch is still waiting at the bound. */
-async function bounded(work: Promise<Response[]>) {
+/** Resolves to the value, or to 'TIMEOUT' when the work is still waiting at the bound. */
+async function within<T>(work: Promise<T>) {
   let timer: NodeJS.Timeout | undefined
   const outcome = await Promise.race([
-    work.then((responses) => responses.map((response) => response.status)),
+    work,
     new Promise<'TIMEOUT'>((resolve) => {
       timer = setTimeout(() => resolve('TIMEOUT'), BOUND_MS)
     }),
   ])
   clearTimeout(timer)
   return outcome
+}
+
+/** Resolves to the statuses, or to 'TIMEOUT' when the batch is still waiting at the bound. */
+function bounded(work: Promise<Response[]>) {
+  return within(work.then((responses) => responses.map((response) => response.status)))
 }
 
 describe.skipIf(!serverUrl)('auth pool starvation', () => {
@@ -54,11 +59,11 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
     )
     await owned?.drop()
   })
-  /** A fresh auth instance whose pool has exactly POOL_SIZE connections. */
-  async function instance() {
+  /** A fresh auth instance whose pool has exactly `size` connections. */
+  async function instance(size = POOL_SIZE) {
     const signup = { mode: 'closed', allowedDomains: [] } as const
     const pool = createAuthPool(owned.url, signup)
-    ;(pool as unknown as { options: { max: number } }).options.max = POOL_SIZE
+    ;(pool as unknown as { options: { max: number } }).options.max = size
     pools.push(pool)
     const auth = createAuth({
       db,
@@ -235,21 +240,30 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
     await sessionStillResolves(target)
   }, 60_000)
 
-  it('finishes as many signed-in consent submissions as the pool has connections', async () => {
-    const target = await instance()
-    const pending = []
-    for (let i = 0; i < POOL_SIZE; i++) {
-      const s = await signedIn()
-      pending.push({ s, body: (await untilConsent(target, s)).body })
-    }
+  // With one connection, a request that holds it while Better Auth needs another waits
+  // forever on every run; a larger pool catches that only when the batch happens to overlap.
+  it('finishes a consent submission and both revocations on a pool of one connection', async () => {
+    const target = await instance(1)
+    expect(
+      await bounded(revoke(target, randomUUID(), 'probe-token').then((r) => [r])),
+      'anonymous revocation',
+    ).toEqual([400])
+    const s = await signedIn()
+    const pending = await untilConsent(target, s)
     expect(
       await bounded(
-        Promise.all(pending.map(({ s, body }) => target.api('consent', s.headers, body))),
+        Promise.resolve(target.api('consent', s.headers, pending.body)).then((r) => [r]),
       ),
-      'consent batch',
-    ).toEqual(Array(POOL_SIZE).fill(200))
+      'consent submission',
+    ).toEqual([200])
+    const token = await within(connected(target, await signedIn()))
+    expect(token, 'consent and token exchange for a connection').not.toBe('TIMEOUT')
+    expect(
+      await bounded(revoke(target, CLIENT, token as string).then((r) => [r])),
+      'valid revocation',
+    ).toEqual([200])
     await sessionStillResolves(target)
-  }, 60_000)
+  }, 90_000)
 
   it.each(['/sign-out', '/revoke-session', '/revoke-sessions', '/revoke-other-sessions'])(
     'finishes as many concurrent %s requests as the pool has connections',

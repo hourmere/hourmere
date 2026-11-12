@@ -7,7 +7,9 @@ handlers or membership lifecycle behavior. The discovery representations step ad
 ServiceProviderConfig, ResourceTypes and Schemas handlers that only test harnesses inject,
 under the resource test flag described in the implementation plan; production registers none.
 The query parser step adds the shared filter, projection and pagination parser those handlers
-will use; it adds no endpoint, and production imports none of it.
+will use; it adds no endpoint, and production imports none of it. The User reads step adds
+`GET /Users` and `GET /Users/{id}` handlers under the same resource test flag; production
+registers none of them either.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -94,28 +96,45 @@ only totals and an empty resource list; out-of-range pages are empty. Negative c
 is treated as zero and startIndex below 1 as 1. Pagination is not a cross-request
 snapshot: concurrent additions/removals may affect later pages. Support
 `excludedAttributes=members` on Groups and bounded `attributes`/`excludedAttributes`
-projection for mapped attributes. Never let projection hide mandatory identity fields.
+projection for mapped attributes; standard attributes that are not mapped are never
+returned. Never let projection hide mandatory identity fields.
 
 One shared query parser implements this subset; its refusals are 400 SCIM Errors whose detail
 is fixed text that never echoes the request. A filter is at most 4,096 UTF-16 code units and
 exactly one comparison, `attribute eq "value"` with single spaces: names and the operator are
-ASCII case-insensitive, a core attribute may carry the core schema URN, and the value is a
-JSON string decoded exactly as RFC 7159 specifies, except that a lone surrogate or U+0000 is
-refused because no stored identifier can hold it. Every other filter (a longer one, `and`,
-`or`, `not`, grouping, value paths, `pr`, another operator, an unquoted value, an unlisted
-attribute or a second `filter`) gets `invalidFilter`. An attribute list names at most 64
+ASCII case-insensitive, a core attribute or `externalId` may carry the core schema URN, and
+the value is a JSON string decoded exactly as RFC 7159 specifies, except that a lone
+surrogate or U+0000 is refused because no stored identifier can hold it. Every other filter
+(a longer one, `and`, `or`, `not`, grouping, value paths, `pr`, another operator, an
+unquoted value, an unlisted attribute or a second `filter`) gets `invalidFilter`. An attribute list names at most 64
 attributes in at most 4,096 UTF-16 code units, in standard attribute notation: extension
 attributes must be fully qualified, the extension URN alone names its whole object, and the
-common attributes `id`, `externalId` and `meta` are never qualified. Projection always keeps
+common attributes `id`, `externalId` and `meta` may carry the core schema URN, because
+RFC 7643 section 3.1 makes them part of every base resource schema. Projection always keeps
 `schemas`, `id` and `userName`, omits a complex or multi-valued attribute left empty, and
 names in `schemas` only the core schema and the extensions whose objects remain; only
-top-level attributes may be returned always. An unknown or unmapped name, a longer list,
-both lists at once or a repeated list gets `invalidValue`, the keyword RFC 7644 assigns to
-GET. So does a `startIndex` or `count` that is not a decimal integer of at most 32
-characters, is repeated, or is a startIndex above 2^53 − 1. Parameter names are
+top-level core attributes may be returned always, and a schema attribute returned other than
+always or by default is refused when the schema loads. An attribute that RFC 7643 defines
+for the resource but Hourmere does not map, such as `groups`, `phoneNumbers` or `addresses`,
+is never returned: excluding it changes nothing and requesting it adds nothing. An unknown
+name, a longer list, both lists at once or a repeated list gets `invalidValue`, the keyword
+RFC 7644 assigns to GET. So does a `startIndex` or `count` that is not a decimal integer of
+at most 32 characters, is repeated, or is a startIndex above 2^53 − 1. Parameter names are
 case-sensitive: a known name in another case, such as `Filter`, is refused (with
 `invalidFilter` for the filter) rather than ignored, so a filtered request never becomes an
 unfiltered list.
+
+User reads see only the live entries of the connection the token is bound to, in its own
+organization, ordered by resource ID. Inactive entries are listed and read with
+`active: false`. Retired entries, accounts, memberships and other organizations' entries are
+never read, so an unknown, retired, account, membership or other-organization ID gets the
+same 404 SCIM Error, and a filter naming any of them gets the same empty list as a name that
+exists nowhere. A `userName` filter compares the trimmed, lower-cased name, as live
+uniqueness does; `externalId` compares exactly. Resource IDs are case-exact, so only the
+canonical lower-case form names an entry. Representations hold exactly the advertised
+fields: `emails` carries the one work address as the primary `work` value, and `manager`
+names only a live entry, with `displayName` derived from it; a retired manager is omitted.
+The list counts and reads its page in one snapshot.
 
 No ETags or `meta.version` in the first release; advertise `etag.supported=false`.
 Reject conditional writes with 412 rather than pretend to honor If-Match. Serialize
@@ -407,8 +426,10 @@ application feature; trust forwarded addresses only through configured trusted p
 Ordinary access logs retain method, route and response status for token administration,
 never bearer values, bodies or secret-bearing responses.
 
-The [audit journal](audit-log.md) from [PR #246](https://github.com/hourmere/hourmere/pull/246) does not record token administration yet. Token foundation must never claim full audit
-coverage. Required future actions: token.create, token.rotate, token.revoke;
+The [audit journal](audit-log.md) records token administration as `scim_token.created`,
+`scim_token.rotated` and `scim_token.revoked`: the token ID and the session that made the
+change, never the name, secret or digest. Token foundation must never claim full audit
+coverage. Required future actions:
 scim.authentication_failed and scim.rate_limited (bounded aggregation); scim.user.create,
 update, claim, deactivate, reactivate, delete; scim.group.create, update, delete;
 scim.group.member.add/remove; scim.mapping.link/unlink; scim.conflict;

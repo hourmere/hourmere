@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { type Db, isImportedBooking } from '@hourmere/db'
+import { writeAuditEvent } from '@hourmere/db/audit'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { AttendeeNoShowNotifier, BookingEvent, BookingNotifier } from '@hourmere/scheduling'
 import { sql } from 'kysely'
@@ -385,7 +386,7 @@ export async function deliverWebhook(
       status = null
     }
     const slackRevoked = isSlack && (status === 404 || status === 410)
-    if (slackRevoked)
+    if (slackRevoked) {
       await trx
         .updateTable('webhooks')
         .set({
@@ -395,6 +396,17 @@ export async function deliverWebhook(
         })
         .where('id', '=', endpoint.id)
         .execute()
+      // The destination was active under the sender lock, so this is the one transition.
+      await writeAuditEvent(trx, {
+        organizationId: endpoint.organization_id,
+        actor: { type: 'system', id: WEBHOOK_DELIVERY_JOB },
+        credential: { type: 'none' },
+        action: 'slack_destination.paused',
+        targetType: 'slack_destination',
+        targetId: endpoint.id,
+        details: { events: endpoint.events },
+      })
+    }
     await trx
       .updateTable('webhook_deliveries')
       .set({

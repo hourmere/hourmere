@@ -77,8 +77,9 @@ may have been restored too.
   interoperability acceptance. Do not interpret the design's request fixtures as certification.
 - Groups-to-teams requires a future hierarchy and permission model: today's team is
   already an organization. Tokens cannot create or control unrelated teams.
-- Full SCIM audit integration, resource rate limits and protocol conformance testing
-  remain planned work. The token foundation does not provide a complete provisioning audit log.
+- Token creation, rotation and revocation are recorded in the [audit log](/docs/audit-log).
+  Audit events for provisioning requests and resources, resource rate limits and protocol
+  conformance testing remain planned work, so this is not a complete provisioning audit log.
 
 The [repository design](https://github.com/hourmere/hourmere/blob/main/docs/scim.md)
 records the intended protocol subset, safe account-claim flow, organization-only

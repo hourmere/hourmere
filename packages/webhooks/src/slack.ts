@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
@@ -90,6 +91,23 @@ async function authorize(trx: Db, ctx: WebhookServiceContext, deferFinal = false
     await requireAdmin(trx, ctx, true)
   }
 }
+/** Like webhooks: the subscribed events only, never the URL or the event-type filter. */
+async function auditSlack(
+  trx: Db,
+  ctx: WebhookServiceContext,
+  action: AuditAction & `slack_destination.${string}`,
+  row: { id: string; organization_id: string; events: string[] },
+) {
+  await writeAuditEvent(trx, {
+    organizationId: row.organization_id,
+    ...auditActor(ctx.principal),
+    action,
+    targetType: 'slack_destination',
+    targetId: row.id,
+    details: { events: row.events },
+    requestId: ctx.requestId,
+  })
+}
 async function filter(trx: Db, ctx: ServiceContext, id: string | null | undefined) {
   if (!id) return
   const found = await trx
@@ -164,23 +182,23 @@ export async function createSlackDestination(
       `${id}:url`,
       ctx.principal.organization.id,
     )
-    return view(
-      await trx
-        .insertInto('webhooks')
-        .values({
-          id,
-          organization_id: ctx.principal.organization.id,
-          destination_kind: 'slack',
-          url: `https://${new URL(url).hostname}/services/••••`,
-          url_ciphertext: ciphertext,
-          secret_ciphertext: Buffer.alloc(0),
-          events: [...parsed.data.events].sort(),
-          event_type_id: parsed.data.eventTypeId ?? null,
-          is_active: parsed.data.isActive ?? true,
-        })
-        .returning(columns)
-        .executeTakeFirstOrThrow(),
-    )
+    const row = await trx
+      .insertInto('webhooks')
+      .values({
+        id,
+        organization_id: ctx.principal.organization.id,
+        destination_kind: 'slack',
+        url: `https://${new URL(url).hostname}/services/••••`,
+        url_ciphertext: ciphertext,
+        secret_ciphertext: Buffer.alloc(0),
+        events: [...parsed.data.events].sort(),
+        event_type_id: parsed.data.eventTypeId ?? null,
+        is_active: parsed.data.isActive ?? true,
+      })
+      .returning(columns)
+      .executeTakeFirstOrThrow()
+    await auditSlack(trx, ctx, 'slack_destination.created', row)
+    return view(row)
   })
 }
 export async function updateSlackDestination(
@@ -197,36 +215,53 @@ export async function updateSlackDestination(
   return ctx.db.transaction().execute(async (trx) => {
     const row = await locked(trx, ctx, id)
     await filter(trx, ctx, data.eventTypeId)
-    return view(
-      await trx
-        .updateTable('webhooks')
-        .set({
-          ...(url && {
-            url: `https://${new URL(url).hostname}/services/••••`,
-            url_ciphertext: encryptWebhookSecret(
-              url,
-              key(settings),
-              `${row.id}:url`,
-              row.organization_id,
-            ),
-          }),
-          ...(data.events && { events: [...data.events].sort() }),
-          ...(data.eventTypeId !== undefined && { event_type_id: data.eventTypeId }),
-          ...(data.isActive !== undefined && { is_active: data.isActive }),
-          // A replacement URL or an explicit enable resolves an automatic 404/410 pause.
-          ...((url || data.isActive) && { pause_reason: null }),
-          updated_at: new Date(ctx.now().epochMilliseconds),
-        })
-        .where('id', '=', row.id)
-        .returning(columns)
-        .executeTakeFirstOrThrow(),
+    const updated = await trx
+      .updateTable('webhooks')
+      .set({
+        ...(url && {
+          url: `https://${new URL(url).hostname}/services/••••`,
+          url_ciphertext: encryptWebhookSecret(
+            url,
+            key(settings),
+            `${row.id}:url`,
+            row.organization_id,
+          ),
+        }),
+        ...(data.events && { events: [...data.events].sort() }),
+        ...(data.eventTypeId !== undefined && { event_type_id: data.eventTypeId }),
+        ...(data.isActive !== undefined && { is_active: data.isActive }),
+        // A replacement URL or an explicit enable resolves an automatic 404/410 pause.
+        ...((url || data.isActive) && { pause_reason: null }),
+        updated_at: new Date(ctx.now().epochMilliseconds),
+      })
+      .where('id', '=', row.id)
+      .returning(columns)
+      .executeTakeFirstOrThrow()
+    // As for webhooks: pausing and resuming are their own events. A call that also edits
+    // the URL, events or filter records both; a call that changes neither records an update.
+    const activity = updated.is_active === row.is_active ? undefined : updated.is_active
+    if (activity !== undefined)
+      await auditSlack(
+        trx,
+        ctx,
+        activity ? 'slack_destination.resumed' : 'slack_destination.paused',
+        updated,
+      )
+    if (
+      activity === undefined ||
+      url !== undefined ||
+      updated.event_type_id !== row.event_type_id ||
+      [...updated.events].sort().join() !== [...row.events].sort().join()
     )
+      await auditSlack(trx, ctx, 'slack_destination.updated', updated)
+    return view(updated)
   })
 }
 export async function deleteSlackDestination(ctx: WebhookServiceContext, id: unknown) {
   await ctx.db.transaction().execute(async (trx) => {
     const row = await locked(trx, ctx, id)
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()
+    await auditSlack(trx, ctx, 'slack_destination.deleted', row)
   })
 }
 /**
@@ -293,6 +328,7 @@ export async function testSlackDestination(
       { deliveryId: delivery.id },
       { transaction: trx, singletonKey: delivery.id },
     )
+    await auditSlack(trx, ctx, 'slack_destination.tested', row)
     return { deliveryId: delivery.id }
   })
 }
