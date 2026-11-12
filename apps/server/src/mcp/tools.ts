@@ -244,7 +244,7 @@ export async function runTool(
     if (tool.scopeMode)
       requireApiKeyOperation(call.caller, `mcp:${tool.name}:${tool.scopeMode(args)}`)
     // A feature that is not available answers its DomainError code here, after the scope
-    // check and before anything reads the arguments.
+    // check and before the argument checks.
     checkAvailable(tool)
     if (hasUnsafeJsonText(args)) {
       const field = privateInput ? undefined : successRedirectUnsafeField(args, hasUnsafeJsonText)

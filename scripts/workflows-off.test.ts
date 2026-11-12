@@ -23,6 +23,7 @@ import { loadConfig } from '../apps/server/src/config.ts'
 import { prepareTools } from '../apps/server/src/mcp/tools.ts'
 import { openApiDocument } from '../apps/server/src/openapi-document.ts'
 import { productionAppOptions, productTools } from '../apps/server/src/server.ts'
+import { workflowsGuard } from '../apps/server/src/workflows.ts'
 import { PATHS } from '../apps/web/src/paths.ts'
 // After the server modules, which extend zod for OpenAPI before any schema is built.
 import * as workflows from '../packages/workflows/src/index.ts'
@@ -273,15 +274,30 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       expect(workflowRoutes).toEqual(
         shipped.map(({ method, path }) => `${method} ${honoPath(path)}`).sort(),
       )
+      // Every registered workflow route, not only today's, carries the workflow guard.
+      for (const route of workflowRoutes)
+        expect(
+          app.routes.some(
+            ({ method, path, handler }) =>
+              `${method} ${path}` === route && handler === workflowsGuard,
+          ),
+          route,
+        ).toBe(true)
       // Hard-off is behavior: every caller the scope allows gets 404 workflows_disabled, for
-      // any input, before validation or lookup (the pool's address refuses connections).
-      for (const url of [
-        '/api/v1/workflows',
-        `/api/v1/workflows?ownerKind=personal&ownerId=${keys.full.user.id}`,
-        '/api/v1/workflows?ownerKind=nobody&limit=0&cursor=x',
-        `/api/v1/workflows/${randomUUID()}`,
-        '/api/v1/workflows/not-a-uuid',
-      ]) {
+      // any input, before validation or lookup (the pool's address refuses connections). The
+      // requests come from the registered routes, so a later route is checked the same way.
+      const urls = workflowRoutes.flatMap((route) => {
+        const path = (route.split(' ')[1] as string).replaceAll(':id', 'not-a-uuid')
+        return [
+          path,
+          `${path}?ownerKind=personal&ownerId=${keys.full.user.id}`,
+          `${path}?ownerKind=nobody&limit=0&cursor=x`,
+          path.replace('not-a-uuid', randomUUID()),
+        ]
+      })
+      expect(urls).toContain('/api/v1/workflows')
+      expect(urls).toContain('/api/v1/workflows/not-a-uuid')
+      for (const url of urls) {
         for (const scope of ['full', 'read'] as const) {
           const res = await app.request(url, { headers: { authorization: bearer(scope) } })
           expect(res.status, `${scope} ${url}`).toBe(404)
@@ -409,11 +425,31 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     // Only the package entry loads the data-access module, so every production caller gets
     // the guarded operations and never the internal services behind them.
     const loaders = sources.filter((file) =>
-      /from '\.\/reads\.ts'|workflows\/src\/reads(?:\.ts)?'/.test(
+      /['"`](?:\.\/reads|[^'"`]*workflows\/src\/reads)(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
     expect(loaders).toEqual(['packages/workflows/src/index.ts'])
+  })
+
+  it('lets exactly one test file replace the hard-off module', () => {
+    // The sanctioned seam for the enabled read path; every other test sees the real guards.
+    const mocking: string[] = []
+    const walk = (directory: string) => {
+      for (const entry of readdirSync(directory)) {
+        if (['node_modules', 'dist', '.git', 'temp'].includes(entry)) continue
+        const path = join(directory, entry)
+        if (statSync(path).isDirectory()) walk(path)
+        else if (
+          /\.test\.tsx?$/.test(entry) &&
+          /vi\.(?:do)?[mM]ock\([^)]*hard-off/.test(readFileSync(path, 'utf8'))
+        )
+          mocking.push(relative(fileURLToPath(root), path))
+      }
+    }
+    for (const group of ['apps', 'packages', 'scripts', 'tools'])
+      walk(fileURLToPath(new URL(group, root)))
+    expect(mocking).toEqual(['apps/server/src/workflows-enabled.test.ts'])
   })
 
   it('exports only the guarded reads, which refuse before touching their context', async () => {

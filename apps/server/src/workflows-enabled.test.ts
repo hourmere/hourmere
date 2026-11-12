@@ -282,9 +282,20 @@ describe.skipIf(!serverUrl)('workflow reads once workflows are enabled', () => {
     ] as const) {
       const res = await rest(token, `/api/v1/workflows/${id}`)
       answers.add(`${res.status} ${await res.text()}`)
+      // MCP and the CLI give the same answer, malformed IDs included.
+      const called = await mcp(token, 'tools/call', { name: 'get_workflow', arguments: { id } })
+      answers.add(`mcp ${JSON.stringify(toolError(called))}`)
+      const command = await cli(token, ['workflows', 'get'], { id })
+      expect(command.code).toBe(1)
+      answers.add(
+        `cli ${JSON.stringify({ ...JSON.parse(command.stderr), outcomeMayBeUnknown: undefined })}`,
+      )
     }
     expect([...answers]).toEqual([
       '404 {"error":"workflow_not_found","message":"No such workflow"}',
+      'mcp {"error":"workflow_not_found","message":"No such workflow"}',
+      // The CLI prints only the stable code of a server error.
+      'cli {"error":"workflow_not_found"}',
     ])
     const lists = new Set<string>()
     for (const [token, kind, id] of [

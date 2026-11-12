@@ -38,7 +38,8 @@ export function workflowTools({ db }: { db: Db }): Tool[] {
       name: 'get_workflow',
       title: 'Get a booking workflow',
       description: `${WORKFLOWS_NOT_AVAILABLE} Reads one workflow of the owner you act as: its current revision, enabled flag, scope, trigger, conditions and action. Requires read or full API key scope. Another owner's or organization's workflow gets the same workflow_not_found as a missing one.`,
-      input: z.strictObject({ id: z.uuid().openapi({ description: 'The workflow ID' }) }),
+      // Any string, as in the REST path: a malformed ID is not found, like an unknown one.
+      input: z.strictObject({ id: z.string().openapi({ description: 'The workflow ID' }) }),
       output: Workflow,
       annotations,
       run(args, call) {

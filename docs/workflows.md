@@ -743,8 +743,9 @@ catalog/visible split in `registerTools()` (`apps/server/src/mcp/tools.ts`) with
 feature predicate. Today that split keeps a tool the API key does not allow out of the
 visible registry, but in `catalog`, so a direct call still reaches `runTool`. With the
 predicate, workflow tools also stay out of the visible registry while workflows are
-unavailable, and a direct call reaches the tool, whose service returns
-`workflows_disabled`. Scope refusals keep their existing precedence.
+unavailable, and a direct call reaches `runTool`, which answers `workflows_disabled` from the
+tool's availability check (`Tool.requireAvailable`) after the scope check and before the
+argument checks. Scope refusals keep their existing precedence.
 
 Build the parity inventory with the feature enabled in effect: registration never depends
 on the constant or the operator switch. So `loadInterfaceInventory()` in
