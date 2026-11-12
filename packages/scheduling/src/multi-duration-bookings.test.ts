@@ -42,7 +42,7 @@ import {
   type Fixtures,
   testContext,
 } from './testing.ts'
-import { cleanText } from './text.ts'
+import { cleanInviteeEmail, cleanText } from './text.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const instant = Temporal.Instant.from
@@ -121,6 +121,7 @@ function sourceCopy(change?: Change): Api {
     validateResponses,
     ...roundRobin,
     ...successRedirect,
+    cleanInviteeEmail,
     cleanText,
   }
   return new Function(
