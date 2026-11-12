@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { inspect } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { createCalDavCredentialRecord, readCalDavCredentials } from './caldav-credentials.ts'
+import { redactCalDavField } from './caldav-redaction.ts'
 import { decryptCredential, encryptCredential } from './credentials.ts'
 
 const input = {
@@ -36,7 +37,10 @@ describe('CalDAV credential records', () => {
       expect(record.credentials.includes(Buffer.from(value))).toBe(false)
       expect(JSON.stringify(record).includes(value)).toBe(false)
     }
-    expect(readCalDavCredentials(key, record)).toEqual(canonical)
+    const decoded = readCalDavCredentials(key, record)
+    expect(decoded.serverUrl).toBe(canonical.serverUrl)
+    expect(decoded.username).toBe(canonical.username)
+    expect(decoded.password).toBe(canonical.password)
     const again = createCalDavCredentialRecord(key, 'owner', canonical)
     expect(again.external_account_id).toBe(record.external_account_id)
     expect(again.credentials.equals(record.credentials)).toBe(false)
@@ -47,13 +51,60 @@ describe('CalDAV credential records', () => {
     (value: unknown) => JSON.stringify(value),
     (value: unknown) => inspect(value),
     (value: unknown) => String(value),
-  ])('redacts decrypted passwords in %s', (render) => {
+  ])('redacts decrypted usernames and passwords in %s', (render) => {
     const record = createCalDavCredentialRecord(key, 'owner', input)
     const credentials = readCalDavCredentials(key, record)
     const output = render(credentials)
     expect(output).toContain('[REDACTED]')
     expect(output).not.toContain(input.password)
+    expect(output).not.toContain(input.username)
     expect(credentials.password).toBe(input.password)
+  })
+
+  it.each([
+    ['spread', (value: object) => ({ ...value })],
+    ['structuredClone', (value: object) => structuredClone(value)],
+    ['entries', (value: object) => Object.fromEntries(Object.entries(value))],
+  ] as const)('omits decrypted secrets from %s copies', (_name, copy) => {
+    const record = createCalDavCredentialRecord(key, 'owner', input)
+    const credentials = readCalDavCredentials(key, record)
+    const copied = copy(credentials)
+    expect(copied).toEqual({ serverUrl: canonical.serverUrl })
+    expect(JSON.stringify(copied)).not.toContain(input.password)
+    expect(JSON.stringify(copied)).not.toContain(input.username)
+    expect(credentials.username).toBe(input.username)
+    expect(credentials.password).toBe(input.password)
+  })
+
+  it('redacts credentials repeatedly without losing either protected field', () => {
+    const record = createCalDavCredentialRecord(key, 'owner', input)
+    const credentials = readCalDavCredentials(key, record)
+    expect(redactCalDavField(credentials, 'password')).toBe(credentials)
+    expect(redactCalDavField(credentials, 'username')).toBe(credentials)
+    expect(JSON.parse(JSON.stringify(credentials))).toEqual({
+      serverUrl: canonical.serverUrl,
+      username: '[REDACTED]',
+      password: '[REDACTED]',
+    })
+  })
+
+  it('keeps secrets out of inspection with custom rendering disabled', () => {
+    const record = createCalDavCredentialRecord(key, 'owner', input)
+    const credentials = readCalDavCredentials(key, record)
+    const output = inspect(credentials, { showHidden: true, customInspect: false })
+    expect(output).not.toContain(input.password)
+    expect(output).not.toContain(input.username)
+  })
+
+  it('can re-encrypt wrapped credentials using explicit field access', () => {
+    const original = createCalDavCredentialRecord(key, 'owner', input)
+    const wrapped = readCalDavCredentials(key, original)
+    const next = createCalDavCredentialRecord(key, 'owner', wrapped)
+    const decoded = readCalDavCredentials(key, next)
+    expect(next.external_account_id).toBe(original.external_account_id)
+    expect(decoded.serverUrl).toBe(canonical.serverUrl)
+    expect(decoded.username).toBe(input.username)
+    expect(decoded.password).toBe(input.password)
   })
 
   it('uses the documented unambiguous provider, owner, row and account binding', () => {
