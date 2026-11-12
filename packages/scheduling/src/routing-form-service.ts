@@ -5,14 +5,17 @@
 //
 // Lock order, the same in every write path: the organization boundary (a personal
 // organization's owner, the organization share lock, then the actor and member share locks),
-// the form-admission advisory lock when a form is created, the target event types in ID order,
-// then the form row. Membership management locks the organization for update before member
-// rows, and event-type edits and public booking take the organization before the event type,
-// so a publication waits for either of them instead of deadlocking (docs/data-model.md, "Team
+// the form-admission advisory lock when a form is created, the request-key advisory lock when
+// a create or publish carries a `requestId`, the target event types in ID order, then the form
+// row. Membership management locks the organization for update before member rows, and
+// event-type edits and public booking take the organization before the event type, so a
+// publication waits for either of them instead of deadlocking (docs/data-model.md, "Team
 // membership and host lock order"). Receipts (a later step) come after the form.
+import { createHash } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
+import { canonicalJson } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { SLUG_PATTERN } from './event-types.ts'
@@ -77,6 +80,12 @@ export interface RoutingFormVersion {
 }
 
 export interface CreateRoutingFormInput {
+  /**
+   * Optional client-generated UUID for safe retries, scoped to the organization and the
+   * acting credential: a retry with the same canonical input returns the form it created,
+   * and the same key with other input is refused with `idempotency_key_reused`.
+   */
+  requestId?: unknown
   slug: unknown
   title: unknown
   description?: unknown
@@ -103,6 +112,15 @@ export interface UpdateRoutingFormInput {
 
 export interface RevisionInput {
   expectedRevision: unknown
+}
+
+export interface PublishRoutingFormInput extends RevisionInput {
+  /**
+   * Optional client-generated UUID for safe retries, scoped like the one of creation: a
+   * retry with the same form and `expectedRevision` returns the version it published, also
+   * after that publication moved the revision on.
+   */
+  requestId?: unknown
 }
 
 export interface PreviewRoutingFormInput {
@@ -152,6 +170,12 @@ const revisionConflict = () =>
     'conflict',
     'routing_revision_conflict',
     'The routing form changed since the given expectedRevision; reload it and try again',
+  )
+const keyReused = () =>
+  new DomainError(
+    'conflict',
+    'idempotency_key_reused',
+    'This requestId was already used for a different request; send a new requestId',
   )
 const invalidForm = (field: string | undefined, message: string) =>
   new RoutingValidationError('invalid_routing_form', field, message)
@@ -225,6 +249,13 @@ function validRevision(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
     throw invalidForm('expectedRevision', 'must be the positive integer draftRevision last read')
   return value
+}
+
+/** An optional request key: a UUID, compared in lowercase. */
+function validRequestId(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (!isUuid(value)) throw invalidForm('requestId', 'must be a UUID')
+  return value.toLowerCase()
 }
 
 function validTitle(value: unknown): string {
@@ -382,6 +413,95 @@ async function lockTargetEvents(db: Db, organizationId: string, ids: readonly st
     .execute()
 }
 
+// --- Idempotency ---------------------------------------------------------------------------
+
+/**
+ * The replay identity of a create or publish that carries a `requestId` (docs/routing-forms.md,
+ * "REST, MCP and CLI contract sketch"), stored in routing_form_operations (migration 0083).
+ * The key is scoped to the organization and the acting credential, like booking and
+ * meeting-poll keys: a session's user, an API key or an OAuth grant, so two credentials never
+ * share a key. The fingerprint covers the operation and its canonical, validated input.
+ */
+interface Operation {
+  organizationId: string
+  operation: 'create' | 'publish'
+  actor: Buffer
+  requestId: string
+  fingerprint: Buffer
+}
+
+const digest = (domain: string, value: string) =>
+  createHash('sha256').update(`hourmere.routing-form.${domain}\0${value}`, 'utf8').digest()
+
+function operationOf(
+  ctx: ServiceContext,
+  operation: Operation['operation'],
+  requestId: string | undefined,
+  request: Record<string, unknown>,
+): Operation | undefined {
+  if (requestId === undefined) return undefined
+  const { principal } = ctx
+  const actor =
+    principal.kind === 'api_key'
+      ? { kind: 'api_key', id: principal.apiKeyId.toLowerCase() }
+      : principal.kind === 'oauth'
+        ? { kind: 'oauth', id: principal.oauthConsentId.toLowerCase() }
+        : { kind: 'session', id: principal.user.id.toLowerCase() }
+  return {
+    organizationId: principal.organization.id,
+    operation,
+    actor: digest('actor', canonicalJson(actor)),
+    requestId,
+    fingerprint: digest(`request.${operation}`, canonicalJson(request)),
+  }
+}
+
+/**
+ * Serializes the writes that carry one request key, then reads its record. Retries of a key
+ * queue on the advisory lock, and each reads the record the first one committed with a fresh
+ * READ COMMITTED snapshot; a second lookup after the form lock instead would leave the early
+ * unlocked revision check between the two lookups, where a retry would see the revision its
+ * first attempt moved on. The record is share-locked so that a later version cleanup cannot
+ * remove its result while the replay reads it. The same key with other input is refused; the
+ * fingerprint's domain names the operation, so that includes another operation.
+ */
+async function lockedOperation(trx: Db, operation: Operation) {
+  const key = `hourmere.routing-form-request:${operation.organizationId}:${operation.actor.toString('hex')}:${operation.requestId}`
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`.execute(trx)
+  const previous = await trx
+    .selectFrom('routing_form_operations')
+    .select(['request_fingerprint', 'form_id', 'version_id'])
+    .where('organization_id', '=', operation.organizationId)
+    .where('actor_scope_digest', '=', operation.actor)
+    .where('request_id', '=', operation.requestId)
+    .forShare()
+    .executeTakeFirst()
+  if (previous !== undefined && !previous.request_fingerprint.equals(operation.fingerprint))
+    throw keyReused()
+  return previous
+}
+
+/** Records the result of a keyed write in that write's transaction, so both commit together. */
+async function recordOperation(
+  trx: Db,
+  operation: Operation,
+  formId: string,
+  versionId: string | null,
+) {
+  await trx
+    .insertInto('routing_form_operations')
+    .values({
+      organization_id: operation.organizationId,
+      operation: operation.operation,
+      actor_scope_digest: operation.actor,
+      request_id: operation.requestId,
+      request_fingerprint: operation.fingerprint,
+      form_id: formId,
+      version_id: versionId,
+    })
+    .execute()
+}
+
 // --- Storage -------------------------------------------------------------------------------
 
 interface FormRow {
@@ -490,13 +610,56 @@ async function loadForm(db: Db, organizationId: string, id: string): Promise<Rou
   return toForm(row)
 }
 
+/** A published version as stored, so a publication and its replays return the same object. */
+async function loadVersion(
+  db: Db,
+  organizationId: string,
+  formId: string,
+  id: string,
+): Promise<RoutingFormVersion> {
+  const row = await db
+    .selectFrom('routing_form_versions')
+    .select([
+      'id',
+      'form_id',
+      'version_number',
+      'questions',
+      'rules',
+      'fallback',
+      utc('published_at').as('published'),
+    ])
+    .where('organization_id', '=', organizationId)
+    .where('form_id', '=', formId)
+    .where('id', '=', id)
+    .executeTakeFirstOrThrow()
+  return {
+    id: row.id,
+    formId: row.form_id,
+    versionNumber: row.version_number,
+    questions: row.questions as unknown as RoutingQuestion[],
+    rules: row.rules as unknown as RoutingRule[],
+    fallback: row.fallback as unknown as RoutingTarget,
+    publishedAt: rfc3339(row.published),
+  }
+}
+
 // --- Draft create, read, update and archive ------------------------------------------------
 
-const CREATE_FIELDS = ['slug', 'title', 'description', 'questions', 'rules', 'fallback'] as const
+const CREATE_FIELDS = [
+  'requestId',
+  'slug',
+  'title',
+  'description',
+  'questions',
+  'rules',
+  'fallback',
+] as const
 
 /**
  * Creates a disabled, unpublished form whose draft is the validated input. The draft's
  * event targets are only shape-checked here; publication checks them against current rows.
+ * With a `requestId`, a retry returns the form the first request created, as it is now
+ * (`routing_form_not_found` once archived), without a slug or quota check.
  */
 export async function createRoutingForm(
   ctx: ServiceContext,
@@ -510,6 +673,7 @@ export async function createRoutingForm(
     questions: fields.questions === undefined ? [] : fields.questions,
     rules: fields.rules === undefined ? [] : fields.rules,
   })
+  const operation = operationOf(ctx, 'create', validRequestId(fields.requestId), { slug, draft })
   const organizationId = ctx.principal.organization.id
   return withWriteErrors(() =>
     ctx.db
@@ -520,6 +684,12 @@ export async function createRoutingForm(
         await ctx.authorizeOrganizationWrite?.(trx, organizationId)
         await authorize(trx, ctx, true)
         await lockFormAdmission(trx, organizationId)
+        // After admission, which already serializes the organization's creations, and before
+        // the insert, so a retry meets neither the slug it took nor the quota.
+        if (operation) {
+          const previous = await lockedOperation(trx, operation)
+          if (previous) return loadForm(trx, organizationId, previous.form_id)
+        }
         const { id } = await trx
           .insertInto('routing_forms')
           .values({
@@ -530,6 +700,7 @@ export async function createRoutingForm(
           })
           .returning('id')
           .executeTakeFirstOrThrow()
+        if (operation) await recordOperation(trx, operation, id, null)
         return loadForm(trx, organizationId, id)
       }),
   )
@@ -609,8 +780,10 @@ const UPDATE_FIELDS = ['expectedRevision', 'slug', 'enabled', ...DRAFT_FIELDS] a
 /**
  * Saves the given fields if the form is still at `expectedRevision`, and increments the
  * revision; a stale revision is refused with `routing_revision_conflict`. Draft fields replace
- * their stored values and the whole draft is validated again. Enabling needs a published
- * version; publication itself never changes `enabled`.
+ * their stored values and the whole draft is validated again. Without a draft field (enabling,
+ * disabling or a slug change) the stored draft stays as it is and is not validated again, so
+ * that a stricter later validator can never block an urgent disable. Enabling needs a
+ * published version; publication itself never changes `enabled`.
  */
 export async function updateRoutingForm(
   ctx: ServiceContext,
@@ -634,16 +807,17 @@ export async function updateRoutingForm(
         await authorize(trx, ctx, true)
         const form = await findForm(trx, organizationId, id, true)
         assertRevision(form, expected)
-        const current = storedDraft(form.draft)
-        const draft = validDraft(
-          // An undefined field is not given; null (description only) removes the value.
-          Object.fromEntries(
-            DRAFT_FIELDS.map((key) => [
-              key,
-              fields[key] !== undefined ? fields[key] : current[key],
-            ]),
-          ),
-        )
+        const draft = DRAFT_FIELDS.some((key) => fields[key] !== undefined)
+          ? validDraft(
+              // An undefined field is not given; null (description only) removes the value.
+              Object.fromEntries(
+                DRAFT_FIELDS.map((key) => [
+                  key,
+                  fields[key] !== undefined ? fields[key] : storedDraft(form.draft)[key],
+                ]),
+              ),
+            )
+          : undefined
         if (enabled === true && form.published_version_id === null)
           throw new DomainError(
             'conflict',
@@ -653,7 +827,7 @@ export async function updateRoutingForm(
         await trx
           .updateTable('routing_forms')
           .set({
-            draft: jsonb(draft),
+            ...(draft === undefined ? {} : { draft: jsonb(draft) }),
             draft_revision: form.draft_revision + 1,
             ...(slug === undefined ? {} : { slug }),
             ...(enabled === undefined ? {} : { enabled }),
@@ -771,15 +945,22 @@ async function assertStableIdentities(trx: Db, form: FormRow, config: RoutingFor
  * membership, the draft, every event target's current eligibility and mapping compatibility
  * (group-mode and payment-requiring events included) and ID stability, and generates the
  * version's target dependencies. Concurrent publications of one revision have one winner;
- * the others get `routing_revision_conflict`. `enabled` is unchanged.
+ * the others get `routing_revision_conflict`. `enabled` is unchanged. With a `requestId`, a
+ * retry returns the version the first request published, with the form as it is now, and
+ * concurrent retries of one key wait for each other instead of conflicting.
  */
 export async function publishRoutingForm(
   ctx: ServiceContext,
   id: string,
-  input: RevisionInput,
+  input: PublishRoutingFormInput,
 ): Promise<{ form: RoutingForm; version: RoutingFormVersion }> {
   requireScope(ctx, 'write')
-  const expected = validRevision(fieldsOf(input, ['expectedRevision']).expectedRevision)
+  const fields = fieldsOf(input, ['expectedRevision', 'requestId'])
+  const expected = validRevision(fields.expectedRevision)
+  const operation = operationOf(ctx, 'publish', validRequestId(fields.requestId), {
+    formId: isUuid(id) ? id.toLowerCase() : id,
+    expectedRevision: expected,
+  })
   const organizationId = ctx.principal.organization.id
   return withWriteErrors(() =>
     ctx.db
@@ -789,6 +970,20 @@ export async function publishRoutingForm(
         await ctx.authorizeOrganizationWrite?.(trx, organizationId)
         // The organization boundary first, so membership is current once it is granted.
         await authorize(trx, ctx, true)
+        // Before any revision check: a successful first attempt has moved the revision on.
+        if (operation) {
+          const previous = await lockedOperation(trx, operation)
+          if (previous)
+            return {
+              form: await loadForm(trx, organizationId, previous.form_id),
+              version: await loadVersion(
+                trx,
+                organizationId,
+                previous.form_id,
+                previous.version_id as string,
+              ),
+            }
+        }
         // Unlocked read: which event types to lock before the form.
         const unlocked = await findForm(trx, organizationId, id, false)
         assertRevision(unlocked, expected)
@@ -826,7 +1021,7 @@ export async function publishRoutingForm(
             published_at: publishedAt,
             published_by_user_id: ctx.principal.user.id,
           })
-          .returning(['id', 'version_number', utc('published_at').as('published')])
+          .returning('id')
           .executeTakeFirstOrThrow()
         // Generated here from the published targets, fallback included; never caller input.
         if (dependencies.length > 0)
@@ -844,6 +1039,7 @@ export async function publishRoutingForm(
               })),
             )
             .execute()
+        if (operation) await recordOperation(trx, operation, form.id, version.id)
         await trx
           .updateTable('routing_forms')
           .set({ published_version_id: version.id, draft_revision: form.draft_revision + 1 })
@@ -851,13 +1047,7 @@ export async function publishRoutingForm(
           .execute()
         return {
           form: await loadForm(trx, organizationId, form.id),
-          version: {
-            id: version.id,
-            formId: form.id,
-            versionNumber: version.version_number,
-            ...config,
-            publishedAt: rfc3339(version.published),
-          },
+          version: await loadVersion(trx, organizationId, form.id, version.id),
         }
       }),
   )

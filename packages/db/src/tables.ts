@@ -1030,6 +1030,18 @@ export interface RoundRobinState {
   next_sequence: Generated<Int8>;
 }
 
+export interface RoutingFormOperations {
+  actor_scope_digest: Buffer;
+  created_at: Generated<Timestamp>;
+  form_id: string;
+  id: Generated<string>;
+  operation: string;
+  organization_id: string;
+  request_fingerprint: Buffer;
+  request_id: string;
+  version_id: string | null;
+}
+
 export interface RoutingForms {
   archived_at: Timestamp | null;
   created_at: Generated<Timestamp>;
@@ -1610,6 +1622,7 @@ export interface DB {
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;
+  routing_form_operations: RoutingFormOperations;
   routing_form_versions: RoutingFormVersions;
   routing_forms: RoutingForms;
   routing_receipts: RoutingReceipts;
