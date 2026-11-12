@@ -16,6 +16,7 @@ import {
   claimInsert,
   connection,
   danglingReferences,
+  fireCascadesInOrder,
   fk,
   id,
   invitation,
@@ -1009,6 +1010,8 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
   })
 
   it('whole-organization deletion cascades its graph and removing the claim cleanup guard fails the success assertion', async () => {
+    // The check forces the cascade order in which only the cleanup trigger keeps the deletion
+    // valid, so both mutants fail whatever trigger OIDs the migrations received.
     const verify = organizationDeletionCascades
     await transaction(source, verify)
     for (const mutant of [
@@ -1025,46 +1028,14 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     }
   })
   it('whole-organization deletion does not depend on FK cascade order; removing the binding cleanup fails under the adverse order', async () => {
-    // PostgreSQL fires an organization's referential actions in RI trigger name order. The
-    // names embed the trigger OID (RI_ConstraintTrigger_a_<oid>) and compare bytewise, so a
-    // later trigger sorts first once its OID has more digits: '..._a_100002' < '..._a_99998'.
-    // The connection cascade can therefore run before the token cascade (CI reproduced this).
-    // Force that adverse order: re-create the connection cascade, then the token cascade, and
-    // redo both while an OID power of ten between them reverses the order. The NO ACTION
+    // The connection cascade can run before the token cascade when an OID power of ten lies
+    // between their RI triggers (CI reproduced this). Force that adverse order: the NO ACTION
     // binding FK must then already be satisfied.
-    const cascades = [
-      ['scim_connections', 'scim_connections_organization_id_fkey'],
-      ['scim_provisioning_tokens', 'scim_provisioning_tokens_organization_id_fkey'],
-    ] as const
-    const names = cascades.map(([, name]) => name)
-    const adverseOrder = async (client: pg.PoolClient) => {
-      let fired: string[] = []
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        // Each cascade keeps its own definition; only its trigger OID changes.
-        for (const [table, name] of cascades) {
-          const { rows } = await client.query(
-            'SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = $1::regclass AND conname = $2',
-            [table, name],
-          )
-          await client.query(`ALTER TABLE ${table} DROP CONSTRAINT ${name};
-            ALTER TABLE ${table} ADD CONSTRAINT ${name} ${rows[0].definition}`)
-        }
-        // The firing order is the trigger name order PostgreSQL uses: bytewise, COLLATE "C".
-        const { rows } = await client.query(
-          `SELECT c.conname, t.tgname::text AS tgname
-             FROM pg_trigger t JOIN pg_constraint c ON c.oid = t.tgconstraint
-            WHERE t.tgrelid = 'auth.organization'::regclass
-              AND t.tgfoid = 'pg_catalog."RI_FKey_cascade_del"'::regproc
-              AND c.conname = ANY($1)
-            ORDER BY t.tgname COLLATE "C"`,
-          [names],
-        )
-        fired = rows.map((row) => `${row.conname} (${row.tgname})`)
-        if (rows.map((row) => row.conname).join() === names.join()) return
-      }
-      // A misordered setup fails here as setup, not later as a surviving mutant.
-      throw new Error(`Setup could not fire the connection cascade first: ${fired.join(', ')}`)
-    }
+    const adverseOrder = (client: pg.PoolClient) =>
+      fireCascadesInOrder(client, [
+        ['scim_connections', 'scim_connections_organization_id_fkey'],
+        ['scim_provisioning_tokens', 'scim_provisioning_tokens_organization_id_fkey'],
+      ])
     const verify = async (client: pg.PoolClient) => {
       await succeeds(client, `DELETE FROM auth.organization WHERE id='${org}'`)
       expect(
