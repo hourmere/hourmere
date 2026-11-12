@@ -11,14 +11,13 @@ function installTop() {
   const now = () => Math.round((performance.timeOrigin + performance.now()) * 10) / 10
   const log: Entry[] = []
   w.__probe = log
+  // The fixture parent page has both an inline embed and a popup: an open popup wins.
   const findFrame = () => {
-    const inline = document.querySelector('[data-hourmere-inline] iframe')
-    if (inline) return inline
     for (const host of document.querySelectorAll('[data-hourmere-popup-host]')) {
       const frame = host.shadowRoot?.querySelector('iframe')
       if (frame) return frame
     }
-    return null
+    return document.querySelector('[data-hourmere-inline] iframe')
   }
   const until = performance.now() + 3000
   const sample = () => {
@@ -31,6 +30,8 @@ function installTop() {
       rect ? Math.round(rect.top * 10) / 10 : null,
       content ? Math.round(content.scrollTop * 10) / 10 : null,
       Math.round(window.scrollY),
+      rect ? Math.round(rect.height) : null,
+      content ? Math.round(content.scrollHeight - content.clientHeight) : null,
     ])
     if (performance.now() < until) requestAnimationFrame(sample)
   }
@@ -68,10 +69,14 @@ function installInner() {
     )
 }
 
-function embedFrame(page: Page) {
-  return page
-    .frames()
-    .find((frame) => frame !== page.mainFrame() && frame.url().includes('/embed/'))
+// The frame the clicked locator enters, so the probe follows the popup rather than the inline embed.
+async function enteredFrame(locator: ClientLocator) {
+  const enter = locator._selector.lastIndexOf(' >> internal:control=enter-frame')
+  if (enter < 0) return undefined
+  const handle = await locator._frame.locator(locator._selector.slice(0, enter)).elementHandle()
+  const frame = (await handle?.contentFrame()) ?? undefined
+  await handle?.dispose()
+  return frame
 }
 
 const active = new WeakMap<Page, { frame: Frame }>()
@@ -110,6 +115,8 @@ async function report(page: Page, frame: Frame, shown: boolean, delay: number) {
     topRest: rest?.[2] ?? null,
     scrollAtDown: atDown?.[3] ?? null,
     scrollRest: rest?.[3] ?? null,
+    frameHeightRest: rest?.[5] ?? null,
+    contentScrollableRest: rest?.[6] ?? null,
     movingAtDown: Boolean(atDown && rest && atDown[2] !== rest[2]),
     movedDuringPress: Boolean(atDown && atUp && atDown[2] !== atUp[2]),
     firstMove: rel(moves[0]),
@@ -142,7 +149,7 @@ export function installProbe(page: Page) {
     const selector = this._selector
     const owner = this.page()
     if (selector.includes('button.day-available')) {
-      const frame = embedFrame(owner)
+      const frame = await enteredFrame(this)
       if (frame) {
         await owner.mainFrame().evaluate(installTop)
         await frame.evaluate(installInner)
