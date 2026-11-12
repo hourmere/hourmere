@@ -224,7 +224,7 @@ describe('routing answer mapping compatibility', () => {
   const destinations = [
     { kind: 'inviteeName' },
     { kind: 'inviteeEmail' },
-    ...bookingQuestions.map((q) => ({ kind: 'question', questionId: q.id })),
+    ...bookingQuestions.map((q) => ({ kind: 'question' as const, questionId: q.id })),
   ] as const
   // Each source's compatible destinations; every other pairing is refused.
   const compatible: Record<string, string[]> = {
