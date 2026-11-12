@@ -135,10 +135,31 @@ describe.skipIf(!serverUrl)('reschedule request source-copy mutations', () => {
               note: 'bad\tcontrol',
             }),
           ).rejects.toMatchObject({
-            name: 'ZodError',
-            issues: [
-              { path: ['note'], message: 'must not contain control characters other than LF' },
-            ],
+            name: 'DomainError',
+            kind: 'invalid',
+            code: 'invalid_request',
+            message: 'note: must not contain control characters other than LF',
+          })
+        },
+      },
+      {
+        name: 'service note errors remain typed client errors',
+        change: [
+          '    if (!parsed.success)\n      throw new DomainError(',
+          '    if (!parsed.success) throw parsed.error\n    if (!parsed.success)\n      throw new DomainError(',
+        ],
+        verify: async (copy) => {
+          const { ctx, created } = await setup()
+          await expect(
+            copy.requestReschedule(ctx, created.booking.id, {
+              idempotencyKey: Crypto.randomUUID(),
+              note: 'bad\tcontrol',
+            }),
+          ).rejects.toMatchObject({
+            name: 'DomainError',
+            kind: 'invalid',
+            code: 'invalid_request',
+            message: 'note: must not contain control characters other than LF',
           })
         },
       },
@@ -152,7 +173,7 @@ describe.skipIf(!serverUrl)('reschedule request source-copy mutations', () => {
               idempotencyKey: Crypto.randomUUID(),
               note: 'bad\tcontrol',
             }),
-          ).rejects.toMatchObject({ name: 'ZodError' })
+          ).rejects.toMatchObject({ name: 'DomainError', kind: 'invalid', code: 'invalid_request' })
         },
       },
       {

@@ -4,6 +4,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { assertBookingLocallyManaged } from './bookings.ts'
 import { DomainError } from './errors.ts'
 import { lockOrganization, resolvedBookingHosts } from './hosts.ts'
@@ -37,8 +38,10 @@ function sourceCopy(
     resolvedBookingHosts,
     isUuid,
   }
-  return new Function(...Object.keys(bindings), `${source};return setAttendeeNoShow`)(
-    ...Object.values(bindings),
+  return guardCopy<typeof setAttendeeNoShow>(
+    new Function(...Object.keys(bindings), `${source};return setAttendeeNoShow`)(
+      ...Object.values(bindings),
+    ),
   )
 }
 describe.skipIf(!serverUrl)('no-show source-copy mutations', () => {
@@ -151,7 +154,7 @@ describe.skipIf(!serverUrl)('no-show source-copy mutations', () => {
         } else await expect(fn(ctx, booking, attendee, true)).rejects.toBeInstanceOf(DomainError)
       }
       await verify(setAttendeeNoShow)
-      await expect(verify(sourceCopy(from, to))).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(sourceCopy(from, to), verify)
       if (scenario === 'replay') await setAttendeeNoShow(ctx, booking, attendee, false)
       else
         await db
@@ -230,7 +233,7 @@ describe.skipIf(!serverUrl)('no-show source-copy mutations', () => {
       await rendezvous
     }
     const broken = sourceCopy('const missing =', 'const missing =', barrier)
-    await expect(verify(broken)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(broken, verify)
     await setAttendeeNoShow(ctx, booking, attendee, false)
     await verify(setAttendeeNoShow)
   })

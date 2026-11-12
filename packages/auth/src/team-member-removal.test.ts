@@ -13,6 +13,7 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { organization } from 'better-auth/plugins/organization'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../apps/server/src/app.ts'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { createCallerResolver } from './caller.ts'
 import { beforeHook } from './hooks.ts'
 import * as authExports from './index.ts'
@@ -64,9 +65,11 @@ function sourceCopy(replacement?: Replacement): Remove {
     teamRoles,
     setRoutingTargetHealth,
   }
-  return new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
-    ...Object.values(bindings),
-  ) as Remove
+  return guardCopy(
+    new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
+      ...Object.values(bindings),
+    ) as Remove,
+  )
 }
 
 function policySourceCopy(
@@ -117,7 +120,9 @@ async function sourceExportCopy(reexportTransactionHelper = false) {
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  )
 }
 
 function verifyExportBoundary(module: Record<string, unknown>) {
@@ -133,10 +138,7 @@ describe('member removal exports', () => {
   })
 
   it('detects a transaction helper export from a source copy with a real assertion', async () => {
-    const copy = await sourceExportCopy(true)
-    expect(() => verifyExportBoundary(copy)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(await sourceExportCopy(true), verifyExportBoundary)
   })
 })
 
@@ -355,9 +357,10 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     verifyCallerTransaction())
 
   it('detects a nested removal transaction in a source copy with a real assertion', async () => {
-    await expect(
-      verifyCallerTransaction(sourceCopy(['return db.isTransaction', 'return false'])),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(
+      sourceCopy(['return db.isTransaction', 'return false']),
+      verifyCallerTransaction,
+    )
   })
 
   it.each(['owner', 'member, admin'])(
@@ -826,9 +829,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   it.each(mutations)(
     'detects broken $name with a real HTTP assertion',
     async ({ replacement, verify }) => {
-      await expect(verify(sourceCopy(replacement))).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(sourceCopy(replacement), verify)
     },
   )
 })

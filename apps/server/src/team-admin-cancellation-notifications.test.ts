@@ -28,6 +28,7 @@ import { fakeZoom, TEST_CONFERENCE_KEY } from '../../../packages/conferences/src
 import { credentials } from '../../../packages/conferences/src/tokens.ts'
 import { createZoomConferenceWork } from '../../../packages/conferences/src/worker.ts'
 import { zoomScopes } from '../../../packages/conferences/src/zoom.ts'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { teamManagementAccess } from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -599,7 +600,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation notification transa
     const copy = await import(
       moduleUrl(serviceSource, serviceLocation, { './bookings.ts': bookingUrl })
     )
-    return copy.cancelTeamAdminBooking
+    return guardCopy<Cancel>(copy.cancelTeamAdminBooking)
   }
 
   it('runs unchanged source copies through the real notification and cleanup assertions', async () => {
@@ -614,11 +615,10 @@ describe.skipIf(!serverUrl)('team administrator cancellation notification transa
   ])(
     'detects omitted %s in a source copy with a real assertion failure',
     async (_label, source) => {
-      await expect(
-        verifyEffects(await sourceCopy(source, source.includes('actor.userId') ? '    null,' : '')),
-      ).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(
+        await sourceCopy(source, source.includes('actor.userId') ? '    null,' : ''),
+        verifyEffects,
+      )
     },
   )
 
@@ -634,9 +634,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation notification transa
       '',
     ],
   ])('detects lost %s in a service source copy', async (_label, before, after) => {
-    await expect(verifyEffects(await sourceCopy(before, after, 'service'))).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(await sourceCopy(before, after, 'service'), verifyEffects)
   })
 
   it('runs unchanged source copies through both partial-write rollback assertions', async () => {
@@ -648,15 +646,11 @@ describe.skipIf(!serverUrl)('team administrator cancellation notification transa
 
   it('detects a swallowed outbox failure in a source copy', async () => {
     const source = "  await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)"
-    await expect(
-      verifyOutboxRollback(await sourceCopy(source, `${source}.catch(() => {})`)),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await sourceCopy(source, `${source}.catch(() => {})`), verifyOutboxRollback)
   })
 
   it('detects a swallowed cleanup failure in a source copy', async () => {
     const source = '  await cancelBookingConference(db, row.id, now)'
-    await expect(
-      verifyCleanupRollback(await sourceCopy(source, `${source}.catch(() => {})`)),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await sourceCopy(source, `${source}.catch(() => {})`), verifyCleanupRollback)
   })
 })
