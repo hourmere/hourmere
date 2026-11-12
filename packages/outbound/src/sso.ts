@@ -2,7 +2,7 @@ import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import type { Socket } from 'node:net'
 import type { Transform } from 'node:stream'
-import { createBrotliDecompress, createGunzip } from 'node:zlib'
+import { createGunzip } from 'node:zlib'
 import { isLoopbackAddress } from './addresses.ts'
 import {
   answersPermitted,
@@ -145,8 +145,9 @@ function decoderFor(encoding: string | undefined): Transform | null | undefined 
   const value = (encoding ?? '').trim().toLowerCase()
   if (value === '' || value === 'identity') return null
   if (value === 'gzip' || value === 'x-gzip') return createGunzip()
-  if (value === 'br') return createBrotliDecompress()
-  // deflate, stacked codings and anything unknown are refused rather than guessed.
+  // Brotli is refused: its decoder may allocate a window of up to 16 MiB before the first
+  // decoded byte can be counted. deflate, stacked codings and anything unknown are refused
+  // rather than guessed.
   return undefined
 }
 
@@ -165,7 +166,23 @@ export async function sendSsoRequest(input: SsoRequest): Promise<SsoResponse> {
   const target = ssoPrivateTargetFor(hostname, urlPort(url), input.privateTargets)
   const candidates = target ? [asPrivateTarget(target)] : []
   const release = acquire(url.origin)
+  try {
+    return await attempt(input, url, hostname, candidates)
+  } catch (error) {
+    // Only the profile's own error leaves it, whatever failed.
+    throw error instanceof SsoTransportError ? error : new SsoTransportError('transport_failed')
+  } finally {
+    // Released on every path, so a failure can never keep a slot.
+    release()
+  }
+}
 
+async function attempt(
+  input: SsoRequest,
+  url: URL,
+  hostname: string,
+  candidates: readonly PrivateTarget[],
+): Promise<SsoResponse> {
   const connecting = new AbortController()
   const connectDeadline = AbortSignal.timeout(LIMITS.ssoConnectTimeout)
   const responseDeadline = AbortSignal.timeout(LIMITS.ssoResponseTimeout)
@@ -210,7 +227,6 @@ export async function sendSsoRequest(input: SsoRequest): Promise<SsoResponse> {
     throw deadline.aborted ? stopped() : new SsoTransportError('transport_failed')
   } finally {
     connected()
-    release()
   }
 }
 
@@ -259,7 +275,7 @@ function exchange(
             'content-type': input.headers['content-type'],
           }),
           ...(body !== undefined && { 'content-length': Buffer.byteLength(body).toString() }),
-          'accept-encoding': 'gzip, br',
+          'accept-encoding': 'gzip',
           'user-agent': 'Hourmere-SSO/1',
         },
       },

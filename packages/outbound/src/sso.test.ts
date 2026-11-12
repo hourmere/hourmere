@@ -347,7 +347,7 @@ describe('pinned SSO request options', () => {
         accept: 'application/json',
         'content-type': 'application/x-www-form-urlencoded',
         'content-length': '29',
-        'accept-encoding': 'gzip, br',
+        'accept-encoding': 'gzip',
         'user-agent': 'Hourmere-SSO/1',
       })
       const pinned = vi.fn()
@@ -399,7 +399,7 @@ describe('pinned SSO request options', () => {
     },
   )
 
-  it.each(['deflate', 'gzip, gzip', 'compress', 'zstd', 'br, gzip'])(
+  it.each(['br', 'deflate', 'gzip, gzip', 'compress', 'zstd', 'br, gzip'])(
     'refuses the %s content coding instead of guessing',
     async (encoding) => {
       network.lookup.mockResolvedValue([answer('8.8.8.8')])
@@ -623,6 +623,17 @@ describe('SSO transport concurrency', () => {
     // Completed requests free their slots.
     respond(network.request)
     expect((await sendSsoRequest(publicRequest(origin(0)))).status).toBe(200)
+  })
+
+  it('frees the slot when setting up the request itself fails', async () => {
+    network.lookup.mockResolvedValue([answer('8.8.8.8')])
+    respond(network.request)
+    const notASignal = { aborted: false } as unknown as AbortSignal
+    for (let i = 0; i < SSO_TRANSPORT_LIMITS.ssoMaximumConcurrentRequests + 2; i += 1)
+      expect(await refusal(sendSsoRequest({ ...publicRequest(), signal: notASignal }))).toBe(
+        'transport_failed',
+      )
+    expect((await sendSsoRequest(publicRequest())).status).toBe(200)
   })
 
   it('frees the slot of a refused or failed request', async () => {

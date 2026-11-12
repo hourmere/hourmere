@@ -459,6 +459,13 @@ describe.skipIf(!serverUrl)('SSO storage database errors in the error log', () =
       .filter(({ table, name }) => recognised(name) !== SSO_STORAGE_TABLES.has(table))
       .map(({ table, name }) => `${table}.${name}`)
     expect(mismatched).toEqual([])
+    // A later migration that adds an SSO table must add it to the recogniser too.
+    const { rows: ssoTables } = await owned.pool.query<{ name: string }>(
+      `SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relkind IN ('r', 'p') AND c.relname LIKE 'sso\\_%'
+        AND n.nspname NOT IN ('pg_catalog', 'information_schema')`,
+    )
+    expect(ssoTables.map(({ name }) => name).sort()).toEqual([...SSO_STORAGE_TABLES].sort())
   })
 
   it.each([

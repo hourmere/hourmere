@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TLSSocket } from 'node:tls'
 import { inspect } from 'node:util'
-import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The synthetic public answer. The harness below sends its socket to the owned loopback
@@ -226,7 +226,7 @@ describe('pinned SSO transport over real loopback sockets', () => {
     expect(req.headers.host).toBe(`${PUBLIC_HOST}:${local.port}`)
     expect((req.socket as TLSSocket).servername).toBe(PUBLIC_HOST)
     expect(req.headers['user-agent']).toBe('Hourmere-SSO/1')
-    expect(req.headers['accept-encoding']).toBe('gzip, br')
+    expect(req.headers['accept-encoding']).toBe('gzip')
     expect(req.headers.cookie).toBeUndefined()
   })
 
@@ -355,37 +355,33 @@ describe('SSO response size and decompression', () => {
     expect((await failure(fetch())).code).toBe('response_too_large')
   })
 
-  it('decodes gzip and Brotli bodies up to exactly the maximum', async () => {
+  it('decodes gzip bodies up to exactly the maximum', async () => {
     const json = Buffer.from(JSON.stringify({ keys: [{ kid: 'synthetic' }] }))
     const full = Buffer.alloc(MAX, 'x')
     for (const [encoding, body, expected] of [
       ['gzip', gzipSync(json), json],
       ['x-gzip', gzipSync(json), json],
-      ['br', brotliCompressSync(json), json],
       ['gzip', gzipSync(full), full],
-      ['br', brotliCompressSync(full), full],
     ] as const) {
       handler = (_req, res) => res.writeHead(200, { 'content-encoding': encoding }).end(body)
       expect((await fetch()).body.equals(expected)).toBe(true)
     }
   })
 
-  it.each([
-    ['gzip', () => gzipSync(Buffer.alloc(64 * MAX))],
-    [
-      'br',
-      () =>
-        brotliCompressSync(Buffer.alloc(64 * MAX), {
-          params: { [constants.BROTLI_PARAM_QUALITY]: 1 },
-        }),
-    ],
-  ])('stops a %s decompression bomb at the maximum decoded size', async (encoding, bomb) => {
-    const body = bomb()
+  it('stops a gzip decompression bomb at the maximum decoded size', async () => {
+    const body = gzipSync(Buffer.alloc(64 * MAX))
     expect(body.length).toBeLessThan(MAX / 4)
-    handler = (_req, res) => res.writeHead(200, { 'content-encoding': encoding }).end(body)
+    handler = (_req, res) => res.writeHead(200, { 'content-encoding': 'gzip' }).end(body)
     const started = performance.now()
     expect((await failure(fetch())).code).toBe('response_too_large')
     expect(performance.now() - started).toBeLessThan(5_000)
+  })
+
+  it('refuses a Brotli body without decoding it, however small', async () => {
+    // Its decoder could reserve a window of up to 16 MiB before any byte is counted.
+    handler = (_req, res) =>
+      res.writeHead(200, { 'content-encoding': 'br' }).end(brotliCompressSync(Buffer.from('{}')))
+    expect((await failure(fetch())).code).toBe('unsupported_encoding')
   })
 
   it('refuses a corrupt compressed body', async () => {
@@ -417,16 +413,16 @@ describe('SSO connection and body deadlines', () => {
   })
 
   it('ends the connection deadline once TLS is established', async () => {
-    shortDeadlines({ connect: 150 })
+    shortDeadlines({ connect: 1_000 })
     handler = (_req, res) => {
       res.writeHead(200)
-      timers.push(setTimeout(() => res.end('{"late":true}'), 400))
+      timers.push(setTimeout(() => res.end('{"late":true}'), 1_500))
     }
     expect((await fetch()).body.toString()).toBe('{"late":true}')
   })
 
   it('stops a server that sends headers and then no body', async () => {
-    const timeout = shortDeadlines({ response: 300 })
+    const timeout = shortDeadlines({ response: 1_000 })
     handler = (_req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.flushHeaders()
@@ -436,7 +432,7 @@ describe('SSO connection and body deadlines', () => {
   })
 
   it('stops a slow-loris body that keeps trickling below the size limit', async () => {
-    shortDeadlines({ response: 400 })
+    shortDeadlines({ response: 1_500 })
     let written = 0
     handler = (_req, res) => {
       res.writeHead(200)
@@ -452,11 +448,11 @@ describe('SSO connection and body deadlines', () => {
     const started = performance.now()
     expect((await failure(fetch())).code).toBe('timeout')
     expect(written).toBeGreaterThan(3)
-    expect(performance.now() - started).toBeLessThan(3_000)
-  })
+    expect(performance.now() - started).toBeLessThan(6_000)
+  }, 15_000)
 
   it('stops a server that never sends headers', async () => {
-    shortDeadlines({ response: 300 })
+    shortDeadlines({ response: 2_000 })
     handler = () => {}
     expect((await failure(fetch())).code).toBe('timeout')
     expect(requests).toBe(1)

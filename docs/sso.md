@@ -278,7 +278,9 @@ audit detail includes it. The database driver's detail for a refused row repeats
 the address included, so the server's error log for failed requests omits the diagnostic
 of any error about an SSO storage table and keeps only its SQLSTATE and the table and
 constraint names; PostgreSQL's own server log can still record a refused row, as for any
-table. On a live link it is the address last proven: a later mailbox proof replaces it,
+table. Only that request error path uses the recogniser today, because nothing writes these
+tables yet; the first step that writes them through Better Auth or a background job routes
+that logger's errors through it as well. On a live link it is the address last proven: a later mailbox proof replaces it,
 and nothing else changes it. A frozen link, whose provider is disabled or retired, keeps
 it unchanged, because no sign-in through that provider can prove another address. A
 retired link is immutable and keeps the address it had when it was retired. Leaving or
@@ -600,8 +602,9 @@ host again on every request and pins the validated address to the socket, while 
 verifies the original hostname through SNI and the certificate. It rejects every redirect
 without contacting its location, so a provider that moves a document is reconfigured, not
 followed. It bounds response size, decompression, connection and body time and
-concurrency with the transport limits below. Bodies may be identity, gzip or Brotli only,
-and the bytes on the wire and the decoded bytes each count against the size limit. One
+concurrency with the transport limits below. Bodies may be identity or gzip only; Brotli is
+refused because its decoder may reserve a window of up to 16 MiB before a decoded byte can
+be counted. The bytes on the wire and the decoded bytes each count against the size limit. One
 absolute deadline ends the whole exchange, so a body that trickles slowly cannot hold a
 request open. A request beyond the concurrency limits fails at once instead of waiting.
 There is no connection reuse, proxy from the environment or cookie. Its errors carry only
@@ -671,6 +674,7 @@ waits for a third-party audit sink.
 These are initial design commitments, not current runtime settings. The doc-fact test
 pins this table; implementation must import its eventual constants into that test.
 The SSO transport limits are runtime constants already and have their own table below.
+Other resource limits must be selected with fixtures before their release.
 
 | Limit | Value | Unit |
 |---|---:|---|
@@ -697,8 +701,8 @@ does not extend Hourmere's acceptance deadline.
 
 The Transport step chose these limits for the SSO transport profile. They are the runtime
 constants `SSO_TRANSPORT_LIMITS` in `packages/outbound/src/sso.ts`, which the doc-fact test
-imports to pin this table. The Keycloak fixture steps confirm or adjust them with fixtures
-before either protocol's setting step, changing the constants and this table together.
+imports to pin this table. If fixtures call for different values before either protocol's
+setting step, the constants and this table change together.
 
 | Limit | Value | Unit |
 |---|---:|---|

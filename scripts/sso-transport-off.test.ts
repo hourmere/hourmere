@@ -113,15 +113,14 @@ describe('SSO transport has no caller while OIDC and SAML are hard-off', () => {
       PROFILE,
     ])
     expect(read('apps/server/src/config.ts')).toMatch(/^ {4}SSO_PRIVATE_TARGETS: optional\(/m)
-    // No production code reads the parsed value, so nothing receives the allowlist.
-    const access =
-      /\??\.[ \t]*SSO_PRIVATE_TARGETS\b|\[[ \t]*['"`]SSO_PRIVATE_TARGETS['"`][ \t]*\]|\{[^}]*\bSSO_PRIVATE_TARGETS\b[^}]*\}\s*=/
-    expect(access.test('config.SSO_PRIVATE_TARGETS')).toBe(true)
-    expect(access.test("env['SSO_PRIVATE_TARGETS']")).toBe(true)
-    expect(access.test('config?.SSO_PRIVATE_TARGETS')).toBe(true)
-    expect(access.test('const { SSO_PRIVATE_TARGETS } = config')).toBe(true)
-    expect(access.test('  SSO_PRIVATE_TARGETS: optional(z.string())')).toBe(false)
-    expect(access.test('never team-editable.\n    SSO_PRIVATE_TARGETS: optional(')).toBe(false)
-    expect(sources.filter((file) => access.test(read(file)))).toEqual([])
+    // No other production code names the setting at all (no property read, destructuring or
+    // parameter), so nothing receives the allowlist. The loader names it twice: its schema
+    // key and its error message.
+    expect(sources.filter((file) => /\bSSO_PRIVATE_TARGETS\b/.test(read(file)))).toEqual([
+      'apps/server/src/config.ts',
+      TARGETS,
+      PROFILE,
+    ])
+    expect(read('apps/server/src/config.ts').match(/\bSSO_PRIVATE_TARGETS\b/g)).toHaveLength(2)
   })
 })
