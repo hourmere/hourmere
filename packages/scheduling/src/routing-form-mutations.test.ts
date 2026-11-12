@@ -147,14 +147,18 @@ const configMutations: {
     },
   },
   {
-    name: 'NFC literal storage',
-    from: "return question.type === 'short_text' ? text.normalize('NFC') : text",
-    to: 'return text',
+    name: 'literals stored as written (validation idempotent)',
+    from: "invalidForm(field, 'must be an email address')\n  return text",
+    to: "invalidForm(field, 'must be an email address')\n  return text.normalize('NFC')",
     verify: (m) => {
       const config = m.validateRoutingFormConfig(
-        form([rule(R.first, [{ questionId: Q.company, operator: 'equals', value: 'Café' }])]),
+        form([
+          rule(R.first, [
+            { questionId: Q.company, operator: 'equals', value: '\u0958'.repeat(500) },
+          ]),
+        ]),
       )
-      expect(config.rules[0]?.conditions[0]).toMatchObject({ value: 'Café' })
+      expect(() => m.validateRoutingFormConfig(config)).not.toThrow()
     },
   },
   {

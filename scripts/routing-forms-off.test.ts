@@ -863,7 +863,7 @@ describe('routing forms are storage only', () => {
     for (const file of SHARED_SERVICES) expect(existsSync(new URL(file, root)), file).toBe(true)
     const reached = runtimeGraph(ENTRY_POINTS)
     // Their own dependencies are loaded, so the graph does reach the package.
-    expect(reached).toContain('packages/scheduling/src/bookings.ts')
+    expect(reached).toContain('packages/scheduling/src/text.ts')
     for (const file of SHARED_SERVICES) expect(reached).not.toContain(file)
   }, 30_000)
 

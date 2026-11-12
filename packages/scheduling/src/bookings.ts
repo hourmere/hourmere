@@ -69,7 +69,7 @@ import {
   type SuccessRedirect,
   validateSuccessRedirect,
 } from './success-redirect.ts'
-import { cleanText } from './text.ts'
+import { cleanInviteeEmail, cleanText } from './text.ts'
 import { ensureWaitlistKey } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
 
@@ -140,10 +140,8 @@ export interface BookingWithToken {
 
 export const MAX_GUESTS = 10
 const MAX_NAME = 200
-const MAX_EMAIL = 254
 const MAX_LOCALE = 35
 const MAX_REASON = 1000
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // A BCP 47 language tag's shape, e.g. "en", "en-US", "zh-Hant-TW".
 const LOCALE = /^[A-Za-z0-9]{1,8}(?:-[A-Za-z0-9]{1,8})*$/
 const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
@@ -176,15 +174,6 @@ export interface InviteeInput extends PersonInput {
   /** IANA time zone, e.g. `Europe/Berlin`. */
   timeZone: string
   locale?: string | undefined
-}
-
-/**
- * The invitee email rule: one trimmed line of at most MAX_EMAIL characters with the address
- * shape. Returns the trimmed address, or undefined when the value fails the rule.
- */
-export function cleanInviteeEmail(value: unknown): string | undefined {
-  const email = cleanText(value, { max: MAX_EMAIL })
-  return email !== undefined && EMAIL.test(email) ? email : undefined
 }
 
 function person(input: PersonInput, code: 'invalid_invitee' | 'invalid_guests', what: string) {

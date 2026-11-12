@@ -322,11 +322,46 @@ describe('routing rule validation', () => {
     })
   })
 
-  it('stores text literals NFC-normalized', () => {
-    const condition = validateRoutingFormConfig(
-      withCondition({ questionId: Q.company, operator: 'equals', value: 'Café' }),
-    ).rules[0]?.conditions[0]
-    expect(condition).toMatchObject({ value: 'Café' })
+  it('keeps literals as written, so validating its own output changes nothing', () => {
+    const decomposed = 'Cafe\u0301'
+    expect(
+      validateRoutingFormConfig(
+        withCondition({ questionId: Q.company, operator: 'equals', value: ` ${decomposed} ` }),
+      ).rules[0]?.conditions[0],
+    ).toMatchObject({ value: decomposed })
+    // NFC lengthens U+0958 to two code units: a normalized copy of this legal literal
+    // would exceed the limit the validator checks.
+    const long = '\u0958'.repeat(500)
+    expect(long.normalize('NFC')).toHaveLength(1000)
+    const config = validateRoutingFormConfig(
+      form({
+        rules: [
+          rule(
+            [
+              { questionId: Q.company, operator: 'equals', value: long },
+              { questionId: Q.email, operator: 'equals', value: ' Sales@Example.com ' },
+              sizeIsLarge,
+            ],
+            {
+              kind: 'event',
+              eventTypeId: E.sales,
+              mappings: [{ questionId: Q.company, destination: { kind: 'inviteeName' } }],
+            },
+          ),
+        ],
+      }),
+    )
+    expect(validateRoutingFormConfig(config)).toEqual(config)
+    expect(
+      evaluateRoutingForm(
+        config,
+        validateRoutingAnswers(config.questions, {
+          [Q.company]: long,
+          [Q.email]: 'sales@example.com',
+          [Q.size]: O.large,
+        }),
+      ).ruleId,
+    ).toBe(R.first)
   })
 
   it('allows one_of on select questions only, with a nonempty distinct subset of its options', () => {

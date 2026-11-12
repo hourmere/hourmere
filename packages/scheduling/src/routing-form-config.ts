@@ -4,10 +4,9 @@
 // with no storage, transport or clock. Target eligibility and answer mappings, which read
 // stored event types, are in routing-form-targets.ts. Nothing calls these while routing is
 // hard-off; the configuration services and the public submission are their later callers.
-import { cleanInviteeEmail } from './bookings.ts'
 import { DomainError } from './errors.ts'
 import { MAX_OPTION_LENGTH, MAX_QUESTIONS } from './questions.ts'
-import { isMultiLineText, isSingleLineText } from './text.ts'
+import { cleanInviteeEmail, isMultiLineText, isSingleLineText } from './text.ts'
 
 /** The design register's limits that bound validation and evaluation work. */
 export const ROUTING_FORM_LIMITS = {
@@ -209,8 +208,9 @@ function validateQuestion(value: unknown, field: string, ids: Set<string>): Rout
 
 /**
  * The literal an `equals` condition compares with: an option ID of a select question, or
- * nonblank text that a legal answer could equal. Text is stored trimmed and NFC-normalized;
- * an email literal must pass the invitee email rule.
+ * nonblank text that a legal answer could equal, stored trimmed as written (evaluation
+ * normalizes both sides, so storing it NFC-normalized, which can lengthen text, would make
+ * validation reject its own output); an email literal must pass the invitee email rule.
  */
 function literal(question: RoutingQuestion, value: unknown, field: string): string {
   if (typeof value !== 'string') throw invalidForm(field, 'must be a string')
@@ -227,7 +227,7 @@ function literal(question: RoutingQuestion, value: unknown, field: string): stri
   if (text === '') throw invalidForm(field, 'must not be blank')
   if (question.type === 'email' && cleanInviteeEmail(text) === undefined)
     throw invalidForm(field, 'must be an email address')
-  return question.type === 'short_text' ? text.normalize('NFC') : text
+  return text
 }
 
 function validateCondition(
@@ -372,8 +372,8 @@ function validateTarget(
 
 /**
  * Validates a version's questions, ordered rules and fallback, and returns them normalized
- * (labels and messages trimmed, text literals NFC-normalized, `required` and `mappings`
- * defaulted). Throws the first problem as `invalid_routing_form`, or `invalid_routing_target`
+ * (labels, literals and messages trimmed, `required` and `mappings` defaulted); validating
+ * the result again returns it unchanged. Throws the first problem as `invalid_routing_form`, or `invalid_routing_target`
  * for a target or mapping. Event targets are only checked for shape here; their eligibility
  * and mapping compatibility need the stored event (routing-form-targets.ts).
  */
