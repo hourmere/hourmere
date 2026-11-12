@@ -8,6 +8,12 @@ export const common = {
     'Esta solicitud ha caducado o ha cambiado. Vuelva a cargar su reserva para elegir qué hacer.',
   'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
     'Su anfitrión le pide que elija otra hora. La reserva original se mantiene hasta que la cambie o cancele.',
+  'This request to choose a new time has expired. Your booking stays at its original time.':
+    'Esta solicitud para elegir otra hora ha caducado. Su reserva se mantiene a la hora original.',
+  'Your host has sent a newer request to choose a new time, which replaces this one.':
+    'Su anfitrión ha enviado una solicitud más reciente para elegir otra hora, que sustituye a esta.',
+  'This booking has already been moved to a new time, so this request is closed.':
+    'Esta reserva ya se ha cambiado a otra hora, por lo que esta solicitud está cerrada.',
   'This waitlist is full (100 entries). Please check available times later.':
     'Esta lista de espera está llena (100 entradas). Consulta los horarios disponibles más tarde.',
   'Waitlist email is unavailable. Please contact the host.':

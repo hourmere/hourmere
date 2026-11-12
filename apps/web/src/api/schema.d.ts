@@ -5485,6 +5485,16 @@ export interface components {
             hosts: {
                 name: string;
             }[];
+            /** @description Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it. */
+            rescheduleRequest?: {
+                /** Format: uuid */
+                id: string;
+                /**
+                 * @description pending: still open (also in pendingReschedule). expired: its deadline passed. replaced: the host sent a newer request. rescheduled: the booking was moved after the email was sent, by the invitee or a host. cancelled: the booking was cancelled. Clients must accept additional values.
+                 * @enum {string}
+                 */
+                state: "pending" | "expired" | "replaced" | "rescheduled" | "cancelled";
+            };
         };
         Me: {
             /** @description The organization the caller acts in */
@@ -7415,7 +7425,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7510,7 +7520,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;
