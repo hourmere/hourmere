@@ -167,7 +167,8 @@ export const pollFull = () =>
   new DomainError('conflict', 'poll_full', 'This poll has no free places for new voters.')
 export const pollClosed = () =>
   new DomainError('conflict', 'poll_closed', 'Voting on this poll is closed')
-const pollCanceled = () => new DomainError('conflict', 'poll_canceled', 'This poll was canceled')
+export const pollCanceled = () =>
+  new DomainError('conflict', 'poll_canceled', 'This poll was canceled')
 const invalidVoter = (message: string) => new DomainError('invalid', 'invalid_voter', message)
 const voterWithdrawn = () =>
   new DomainError(
@@ -737,7 +738,7 @@ export interface VoterPoll {
   at: string
 }
 
-function hostPoll(poll: LockedPoll): VoterPoll {
+export function hostPoll(poll: LockedPoll): VoterPoll {
   return {
     id: poll.id,
     organizationId: poll.organization_id,

@@ -112,6 +112,13 @@ flag or UI is enabled. The internal ballot service in
 withdraws and reactivates voters and records reminder opt-outs under the same locks and
 database deadline clock. Ballots and withdrawals advance the ballot and results revisions;
 no voter write, opt-out included, moves the host revision.
+The internal results and removal service in
+`packages/scheduling/src/meeting-poll-results.ts` projects host results (separate counts
+of counted ballots, the roster and both revisions), removes one voter and bulk-removes
+unverified public enrollees. Removal deletes the voter row with its votes, credentials and
+deliveries and marks the mailbox counter row removed, which alone outlives it with its mail
+counts and opt-out. Removal checks only the host revision and advances the host and results
+revisions, so voter activity cannot make it fail.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
