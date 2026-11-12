@@ -186,6 +186,11 @@ export async function createTestDatabase(
       created = true
       // Throwaway data: commits need not wait for the disk (tests stay fast under load).
       await admin.query(`ALTER DATABASE ${name} SET synchronous_commit = off`)
+      // Autovacuum can analyze one churned fixture table before the tables it joins, which
+      // can lift an ordinary read's estimate past the JIT thresholds for the rest of a file.
+      // Each run then spends 150-300 ms compiling a sub-millisecond query; JIT never changes
+      // a result, so fixtures run without it.
+      await admin.query(`ALTER DATABASE ${name} SET jit = off`)
     } finally {
       await admin.end()
     }
