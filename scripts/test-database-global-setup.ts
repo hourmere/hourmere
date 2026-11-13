@@ -24,8 +24,11 @@ export function templateFailure(error: unknown, serverUrl: string): string {
   let text = `${typeof code === 'string' ? `${code}: ` : ''}${typeof message === 'string' ? message : String(error)}`
   const secrets = [serverUrl]
   try {
-    const password = decodeURIComponent(new URL(serverUrl).password)
-    if (password) secrets.push(password)
+    // A URL derived from the server URL (another database name) carries the password as written.
+    const raw = new URL(serverUrl).password
+    if (raw) secrets.push(raw)
+    const password = decodeURIComponent(raw)
+    if (password && password !== raw) secrets.push(password)
   } catch {}
   for (const secret of secrets) text = text.replaceAll(secret, '[redacted]')
   return text
