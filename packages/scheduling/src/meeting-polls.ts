@@ -1,7 +1,7 @@
 // Host lifecycle for meeting polls: create, read, close, cancel, delete and public-link
 // rotation. This is an internal service with no transport; voter admission lives in
-// meeting-poll-voters.ts and ballots in meeting-poll-ballots.ts, while results, removal and
-// finalization land in later steps (docs/meeting-polls.md).
+// meeting-poll-voters.ts, ballots in meeting-poll-ballots.ts and results and voter removal in
+// meeting-poll-results.ts, while finalization lands in a later step (docs/meeting-polls.md).
 //
 // Every host write takes the shared order: the transport's organization-write hook, actor
 // user SHARE, organization SHARE, actor membership SHARE, then the poll row FOR UPDATE and
@@ -546,7 +546,7 @@ export async function rotateMeetingPollLink(
 
 // --- Authority -----------------------------------------------------------------------------
 
-interface Authority {
+export interface Authority {
   personal: boolean
   userId: string
 }
@@ -561,7 +561,7 @@ export function requireWriteScope(ctx: ServiceContext) {
  * is managed by its own user; a team only by its current owners and admins. Ordinary
  * members, including configured hosts, receive the same refusal for every poll ID.
  */
-async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Authority> {
+export async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Authority> {
   const { principal } = ctx
   if (!isUuid(principal.user.id) || !isUuid(principal.organization.id)) throw denied()
   const personal = await db
@@ -599,7 +599,7 @@ async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Authority> {
 }
 
 /** A personal space manages its owner's events; a team manages its team events. */
-function manages(authority: Authority, ownerUserId: string | null) {
+export function manages(authority: Authority, ownerUserId: string | null) {
   return authority.personal ? ownerUserId === authority.userId : ownerUserId === null
 }
 

@@ -3,11 +3,18 @@ import { once } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as databaseModule from './index.ts'
 import * as migrationModule from './migrate.ts'
-import { cleanupTestDatabases, createTestDatabase, reuseConnectionsAfterErrors } from './testing.ts'
+import {
+  cleanupTestDatabases,
+  createTestDatabase,
+  createTestDatabaseTemplate,
+  reuseConnectionsAfterErrors,
+  type TestDatabase,
+} from './testing.ts'
 
 function fakePool() {
   return {
@@ -69,32 +76,49 @@ describe('test database ownership', () => {
     await owned.drop()
     expect(events.at(-3)).toBe('pool.end')
     expect(events.at(-1)).toMatch(/^DROP DATABASE IF EXISTS hourmere_test_.* WITH \(FORCE\)$/)
-    expect(admin.end).toHaveBeenCalledTimes(2)
+    expect(admin.end).toHaveBeenCalledTimes(3)
   })
 
-  it('gives teardown its own longer timeout without shortening a configured timeout', async () => {
-    vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', '12000')
-    const owned = await createTestDatabase('postgres://localhost/hourmere')
-    await owned.drop()
-    expect(pg.Pool).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(pg.Pool).mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ statement_timeout: 12_000, query_timeout: 13_000 }),
-    )
-    expect(vi.mocked(pg.Pool).mock.calls[1]?.[0]).toEqual(
-      expect.objectContaining({
-        max: 1,
-        connectionTimeoutMillis: 5_000,
-        statement_timeout: 30_000,
-        query_timeout: 31_000,
-      }),
-    )
-    vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', '60000')
-    const slower = await createTestDatabase('postgres://localhost/hourmere')
-    await slower.drop()
-    expect(vi.mocked(pg.Pool).mock.calls[3]?.[0]).toEqual(
-      expect.objectContaining({ statement_timeout: 60_000, query_timeout: 61_000 }),
-    )
-  })
+  it.each([
+    ['the default', undefined, 30_000, 5_000],
+    ['a configured shorter', '12000', 30_000, 12_000],
+    ['a configured longer', '60000', 60_000, 60_000],
+  ])(
+    'with %s admin timeout, gives only CREATE and DROP their longer timeout',
+    async (_label, configured, long, short) => {
+      vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', configured)
+      const statements: [string, unknown, unknown][] = []
+      vi.mocked(pg.Pool).mockImplementation(function (this: pg.Pool, config?: pg.PoolConfig) {
+        Object.assign(this, admin, {
+          query: async (sql: string, values?: string[]) => {
+            statements.push([
+              sql.split(' ', 2).join(' '),
+              config?.statement_timeout,
+              config?.query_timeout,
+            ])
+            return admin.query(sql, values)
+          },
+        })
+        return this
+      })
+      const owned = await createTestDatabase('postgres://localhost/hourmere', undefined, {
+        template: 'hourmere_test_coverage_42_0123456789abcdef',
+      })
+      await owned.drop()
+      expect(statements).toEqual([
+        ['CREATE DATABASE', long, long + 1_000],
+        ['ALTER DATABASE', short, short + 1_000],
+        ['ALTER DATABASE', short, short + 1_000],
+        ['SELECT pg_terminate_backend(pid)', long, long + 1_000],
+        ['DROP DATABASE', long, long + 1_000],
+      ])
+      expect(pg.Pool).toHaveBeenCalledTimes(3)
+      for (const [config] of vi.mocked(pg.Pool).mock.calls) {
+        expect(config).toEqual(expect.objectContaining({ max: 1, connectionTimeoutMillis: 5_000 }))
+      }
+      expect(admin.end).toHaveBeenCalledTimes(3)
+    },
+  )
 
   it('keeps effective admin timeouts independent of fixture URL and environment overrides', async () => {
     vi.stubEnv('PGOPTIONS', '-c statement_timeout=1 -c lock_timeout=1')
@@ -109,7 +133,7 @@ describe('test database ownership', () => {
     const owned = await createTestDatabase(`postgres://localhost/hourmere?${parameters}`)
     await owned.drop()
     expect(new URL(owned.url).searchParams.toString()).toBe(parameters.toString())
-    for (const [index, timeout] of [5_000, 30_000].entries()) {
+    for (const [index, timeout] of [30_000, 5_000, 30_000].entries()) {
       const config = vi.mocked(pg.Pool).mock.calls[index]?.[0]
       const client = new pg.Client(config) as pg.Client & {
         connectionParameters: {
@@ -127,7 +151,7 @@ describe('test database ownership', () => {
             query_timeout: timeout + 1_000,
             lock_timeout: false,
             connect_timeout: 5,
-            options: `-c statement_timeout=${timeout} -c lock_timeout=0`,
+            options: `-c statement_timeout=${timeout} -c lock_timeout=0 -c client_connection_check_interval=1000`,
           }),
         )
       } finally {
@@ -175,8 +199,8 @@ describe('test database ownership', () => {
     expect(
       admin.query.mock.calls.filter(([sql]) => sql.startsWith('SELECT pg_terminate_backend')),
     ).toHaveLength(2)
-    expect(pg.Pool).toHaveBeenCalledTimes(2)
-    expect(admin.end).toHaveBeenCalledTimes(2)
+    expect(pg.Pool).toHaveBeenCalledTimes(3)
+    expect(admin.end).toHaveBeenCalledTimes(3)
     expect(pool.end).toHaveBeenCalledOnce()
   })
 
@@ -190,7 +214,7 @@ describe('test database ownership', () => {
       admin.query.mock.calls.filter(([sql]) => sql.startsWith('SELECT pg_terminate_backend')),
     ).toHaveLength(2)
     expect(admin.query.mock.calls.filter(([sql]) => sql.startsWith('DROP'))).toHaveLength(1)
-    expect(admin.end).toHaveBeenCalledTimes(2)
+    expect(admin.end).toHaveBeenCalledTimes(3)
   })
 
   it('bounds automatic retries and keeps ownership for later cleanup', async () => {
@@ -203,10 +227,10 @@ describe('test database ownership', () => {
     })
     await expect(owned.drop()).rejects.toBe(error)
     expect(attempts).toBe(3)
-    expect(admin.end).toHaveBeenCalledTimes(2)
+    expect(admin.end).toHaveBeenCalledTimes(3)
     await cleanupTestDatabases()
     expect(attempts).toBe(4)
-    expect(admin.end).toHaveBeenCalledTimes(3)
+    expect(admin.end).toHaveBeenCalledTimes(4)
     expect(pool.end).toHaveBeenCalledOnce()
   })
 
@@ -220,7 +244,7 @@ describe('test database ownership', () => {
     })
     await expect(owned.drop()).rejects.toBe(error)
     expect(attempts).toBe(1)
-    expect(admin.end).toHaveBeenCalledTimes(2)
+    expect(admin.end).toHaveBeenCalledTimes(3)
     await owned.drop()
     expect(attempts).toBe(2)
     expect(pool.end).toHaveBeenCalledOnce()
@@ -314,7 +338,7 @@ describe('test database ownership', () => {
     )
     expect(databaseModule.createPool).not.toHaveBeenCalled()
     expect(admin.query).toHaveBeenLastCalledWith(expect.stringMatching(/^DROP .*WITH \(FORCE\)$/))
-    expect(admin.end).toHaveBeenCalledTimes(2)
+    expect(admin.end).toHaveBeenCalledTimes(3)
   })
 
   it('ends the pool and drops the database when migration fails', async () => {
@@ -347,7 +371,7 @@ describe('test database ownership', () => {
     await expect(owned.drop()).rejects.toThrow('drop failed')
     await owned.drop()
     expect(pool.end).toHaveBeenCalledOnce()
-    expect(admin.end).toHaveBeenCalledTimes(3)
+    expect(admin.end).toHaveBeenCalledTimes(4)
   })
 
   it('forces removal even if orderly pool closure is stuck', async () => {
@@ -448,6 +472,197 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     const result = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [name])
     return result.rowCount !== 0
   }
+
+  /**
+   * Keeps CREATE DATABASE … TEMPLATE waiting: COMMENT ON DATABASE holds SHARE UPDATE EXCLUSIVE
+   * on the template until rollback, which conflicts with the SHARE lock CREATE takes on it.
+   * Only clones of this test's own template wait; no other session is touched.
+   */
+  async function holdTemplate(template: string) {
+    const maintenance = new URL(serverUrl as string)
+    maintenance.pathname = '/postgres'
+    const holder = new pg.Client({ connectionString: maintenance.toString() })
+    holder.on('error', () => {})
+    let pid: number | undefined
+    try {
+      await holder.connect()
+      pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]?.pid
+      await holder.query('BEGIN')
+      await holder.query(
+        `COMMENT ON DATABASE ${pg.escapeIdentifier(template)} IS 'held by a CREATE timeout test'`,
+      )
+    } catch (error) {
+      await holder.end().catch(() => {})
+      throw error
+    }
+    let released: Promise<void> | undefined
+    const release = () => {
+      released ??= holder
+        .query('ROLLBACK')
+        .catch(() => {})
+        .then(() => holder.end())
+      return released
+    }
+    // CREATE has reached the template lock and waits for this holder, not for anything else.
+    const waitForBlockedCreate = async () => {
+      const blocked = new RegExp(`^CREATE DATABASE hourmere_test_\\w+ TEMPLATE ${template}$`)
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const { rows } = await admin.query<{ query: string }>(
+          `SELECT query FROM pg_stat_activity
+            WHERE $1::int = ANY (pg_blocking_pids(pid)) AND query LIKE 'CREATE DATABASE %'`,
+          [pid],
+        )
+        if (rows.some(({ query }) => blocked.test(query))) return
+        await delay(50)
+      }
+      throw new Error('CREATE DATABASE never waited for the held template')
+    }
+    return { release, waitForBlockedCreate }
+  }
+
+  function settle(creation: Promise<TestDatabase>) {
+    return creation.then(
+      (database) => ({ database, error: undefined }),
+      (error: unknown) => ({ database: undefined, error }),
+    )
+  }
+
+  it('lets CREATE DATABASE wait past the default admin timeouts', async () => {
+    // URL parameters and PGOPTIONS cannot shorten the wait, including with a lock timeout.
+    vi.stubEnv('PGOPTIONS', '-c statement_timeout=1000 -c lock_timeout=1000')
+    const shortened = new URL(serverUrl as string)
+    shortened.searchParams.set('statement_timeout', '1000')
+    shortened.searchParams.set('query_timeout', '1000')
+    shortened.searchParams.set('lock_timeout', '1000')
+    let template: Awaited<ReturnType<typeof createTestDatabaseTemplate>> | undefined
+    let holder: Awaited<ReturnType<typeof holdTemplate>> | undefined
+    let creation: ReturnType<typeof settle> | undefined
+    try {
+      template = await createTestDatabaseTemplate(shortened.toString(), async () => {}, {
+        tag: 'slow_template',
+      })
+      holder = await holdTemplate(template.name)
+      const started = performance.now()
+      creation = settle(template.clone(undefined, { migrate: false, tag: 'slow_create' }))
+      await holder.waitForBlockedCreate()
+      // Past the default 5 s statement timeout and its 6 s client timeout.
+      await delay(Math.max(0, 7_000 - (performance.now() - started)))
+      await holder.release()
+      const { database, error } = await creation
+      expect(error).toBeUndefined()
+      expect(performance.now() - started).toBeGreaterThan(7_000)
+      expect(await exists(new URL(database?.url as string).pathname.slice(1))).toBe(true)
+    } finally {
+      vi.unstubAllEnvs()
+      await holder?.release()
+      await (await creation)?.database?.drop()
+      await template?.drop()
+    }
+  }, 20_000)
+
+  it('lets the server abort a CREATE DATABASE whose client has gone', async () => {
+    // URL parameters and PGOPTIONS cannot disable the server-side client check.
+    vi.stubEnv('PGOPTIONS', '-c client_connection_check_interval=0')
+    const weakened = new URL(serverUrl as string)
+    weakened.searchParams.set('client_connection_check_interval', '0')
+    weakened.searchParams.set('options', '-c client_connection_check_interval=0')
+    const clients: pg.Client[] = []
+    const connect = pg.Client.prototype.connect
+    vi.spyOn(pg.Client.prototype, 'connect').mockImplementation(function (
+      this: pg.Client,
+      ...args: unknown[]
+    ) {
+      clients.push(this)
+      return (connect as (...a: unknown[]) => unknown).apply(this, args) as never
+    } as never)
+    let template: Awaited<ReturnType<typeof createTestDatabaseTemplate>> | undefined
+    let holder: Awaited<ReturnType<typeof holdTemplate>> | undefined
+    let creation: ReturnType<typeof settle> | undefined
+    try {
+      template = await createTestDatabaseTemplate(weakened.toString(), async () => {}, {
+        tag: 'gone_template',
+      })
+      clients.length = 0
+      holder = await holdTemplate(template.name)
+      creation = settle(template.clone(undefined, { migrate: false, tag: 'gone_client' }))
+      await holder.waitForBlockedCreate()
+      // Only the connection this test's CREATE opened: the backend of that CREATE.
+      const { rows: backends } = await admin.query<{ pid: number }>(
+        "SELECT pid FROM pg_stat_activity WHERE query LIKE $1 || '%' AND query LIKE '% TEMPLATE ' || $2",
+        ['CREATE DATABASE hourmere_test_gone_client_', template.name],
+      )
+      expect(backends).toHaveLength(1)
+      const pid = backends[0]?.pid as number
+      const client = clients.find(
+        (candidate) => (candidate as unknown as { processID: number }).processID === pid,
+      )
+      expect(client).toBeDefined()
+      const stream = (client as unknown as { connection: { stream: { destroy(): void } } })
+        .connection.stream
+      stream.destroy()
+      const started = performance.now()
+      let running = true
+      while (running && performance.now() - started < 3_000) {
+        await delay(100)
+        const { rowCount } = await admin.query(
+          "SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND query LIKE 'CREATE DATABASE %'",
+          [pid],
+        )
+        running = rowCount !== 0
+      }
+      expect(running, 'server-side CREATE DATABASE kept running after its client went').toBe(false)
+      const pattern = `hourmere_test_gone_client_${process.pid}_%`
+      const leftovers = () =>
+        admin.query('SELECT datname FROM pg_database WHERE datname LIKE $1', [pattern])
+      expect((await leftovers()).rows).toEqual([])
+      await holder.release()
+      await delay(1_000)
+      expect((await leftovers()).rows).toEqual([])
+      await creation
+    } finally {
+      vi.restoreAllMocks()
+      vi.unstubAllEnvs()
+      await holder?.release()
+      await (await creation)?.database?.drop()
+      await template?.drop()
+    }
+  }, 30_000)
+
+  it('still cancels CREATE DATABASE with a statement timeout after its 30 s cap', async () => {
+    const guard = new AbortController()
+    let template: Awaited<ReturnType<typeof createTestDatabaseTemplate>> | undefined
+    let holder: Awaited<ReturnType<typeof holdTemplate>> | undefined
+    let creation: ReturnType<typeof settle> | undefined
+    try {
+      template = await createTestDatabaseTemplate(serverUrl as string, async () => {}, {
+        tag: 'cap_template',
+      })
+      holder = await holdTemplate(template.name)
+      const started = performance.now()
+      creation = settle(template.clone(undefined, { migrate: false, tag: 'over_cap' }))
+      await holder.waitForBlockedCreate()
+      // Without a cap, CREATE would wait for as long as the template stays held.
+      const outcome = await Promise.race([
+        creation,
+        delay(40_000, 'still waiting', { signal: guard.signal }),
+      ])
+      expect(outcome, 'CREATE DATABASE was still waiting after 40 s').not.toBe('still waiting')
+      expect(typeof outcome === 'object' && outcome.error).toMatchObject({
+        code: '57014',
+        message: 'canceling statement due to statement timeout',
+      })
+      expect(performance.now() - started).toBeGreaterThan(29_500)
+      const leftovers = await admin.query('SELECT datname FROM pg_database WHERE datname LIKE $1', [
+        `hourmere_test_over_cap_${process.pid}_%`,
+      ])
+      expect(leftovers.rows).toEqual([])
+    } finally {
+      guard.abort()
+      await holder?.release()
+      await (await creation)?.database?.drop()
+      await template?.drop()
+    }
+  }, 60_000)
 
   it('can keep a connection after failed statements instead of reopening one', async () => {
     const owned = await createTestDatabase(serverUrl as string, undefined, {

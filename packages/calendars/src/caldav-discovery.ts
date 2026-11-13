@@ -208,8 +208,8 @@ export function createCalDavDiscovery(
         const values = properties(selected.response).filter((p) => p.uri === uri && p.name === name)
         const value = values.flatMap((p) => children(p, DAV, 'href'))[0]?.text.trim()
         if (!value) throw new CalDavError('invalid_response')
-        // Relative property hrefs use the resource's canonical URL, not the bootstrap URL.
-        return resolve(value, selected.url)
+        // RFC 4918 section 8.3 resolves relative references against the request URI.
+        return resolve(value, base)
       }
       // Explicit DAV paths are preserved; origin-only inputs use RFC 6764 discovery.
       const initial =

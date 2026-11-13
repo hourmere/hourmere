@@ -184,7 +184,11 @@ for verification requirements, exceptions and reconnecting expired grants.
 CalDAV connections are not available in the app yet. The
 [design and foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
 provides encrypted credentials and guarded discovery for later integration, with no
-busy-time synchronization or booking writes.
+busy-time synchronization or booking writes. Relative discovery hrefs resolve against
+the request URI, including nested endpoints that respond without redirects. Internal
+decrypted credentials hide usernames and passwords from routine serialization and
+spread/clone copies; explicit field reads remain sensitive. Raw caller inputs are not
+protected by that wrapper. Real-provider compatibility testing is still pending.
 
 Future CalDAV workers will need outbound DNS and verified HTTPS to the calendar server;
 no new inbound port is needed. For private Nextcloud installations, the internal
@@ -197,12 +201,14 @@ rules and, when configuration is introduced, keep web and worker policy consiste
 
 ## Private identity providers (reserved)
 
-Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for private
-identity providers and is empty by default; leave it empty unless you prepare for a later
-release. It accepts only exact `host:port` entries, permits private routing but never plain
-HTTP, and is separate from `WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid
-one changes nothing yet. See the
-[configuration reference](/docs/configuration#private-identity-providers).
+Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for identity
+providers on a private network or on a port other than 443, and is empty by default; leave
+it empty unless you prepare for a later release. It accepts only exact `host:port` entries
+and permits private routing for exactly those entries, or a public non-default port for an
+entry with a public DNS name (never a single label such as `keycloak` or a special-use name
+such as `idp.internal`), but never plain HTTP. It is separate from
+`WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid one changes nothing yet.
+See the [configuration reference](/docs/configuration#private-identity-providers).
 
 ## Proxy behavior and an existing proxy
 

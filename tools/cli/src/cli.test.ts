@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { runCli } from './cli.ts'
 import * as client from './client.ts'
 import { CliError, callTool, endpoint, MAX_INPUT_BYTES } from './client.ts'
@@ -95,7 +96,9 @@ function clientSourceCopy(change?: readonly [string, string]): typeof callTool {
     /\bexport /g,
     '',
   )
-  return new Function('version', `${source}; return callTool`)(client.version) as typeof callTool
+  return guardCopy(
+    new Function('version', `${source}; return callTool`)(client.version),
+  ) as typeof callTool
 }
 
 describe('CLI transport and arguments', () => {
@@ -590,9 +593,8 @@ describe('CLI transport and arguments', () => {
     ["if (!['invalid_request', 'invalid_success_redirect'].includes(code)) return undefined", ''],
     ['    ].includes(value)', '    ].includes(value) || true'],
   ] as const)('kills removed client redirect field filter %j', async (before, after) => {
-    await expect(verifyFieldFilter(clientSourceCopy([before, after]))).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    const copy = clientSourceCopy([before, after])
+    await expectKilled(copy, (caller) => verifyFieldFilter(caller))
   })
   it.each([false, true])(
     'detects a retargeted event type write alias for update=%s',

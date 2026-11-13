@@ -558,6 +558,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
     )
     // A copy that fails before its read settles at once instead of pausing there.
     await Promise.race([reached, pending])
+    expect(held, 'the first call must pause at its credential read').toBe(true)
     let winner: Bookings.CreateBookingResult
     try {
       winner = await module.createOneTimeBooking(ctx, input)

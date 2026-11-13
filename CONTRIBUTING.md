@@ -129,11 +129,15 @@ cleanup are best effort, bounded to 15 seconds: forced termination, worker crash
 unavailable PostgreSQL can still leave databases behind.
 
 On slow machines, set `HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS` to a positive integer
-number of milliseconds (at most 2147482647). It changes the helper's CREATE/ALTER
-statement timeout from the default 5000 ms. DROP uses at least 30000 ms, or the configured
-value when higher. Each client query timeout is its statement timeout plus 1000 ms.
+number of milliseconds (at most 2147482647). It changes the helper's ALTER DATABASE
+statement timeout from the default 5000 ms. CREATE DATABASE and DROP use at least 30000 ms,
+or the configured value when higher: copying a template can take longer than 5 seconds under
+load. Each client query timeout is its statement timeout plus 1000 ms.
 The connection timeout remains 5000 ms and shutdown cleanup still has its independent
-15-second deadline.
+15-second deadline. Administrative connections also pin `client_connection_check_interval=1000`
+(URL parameters and `PGOPTIONS` cannot change it), so the server aborts a CREATE DATABASE
+whose client has gone, within about 2 s, instead of creating an orphan database once its
+lock is released.
 
 Inspect those leftovers manually (the default is **dry run**):
 

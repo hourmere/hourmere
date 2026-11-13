@@ -67,6 +67,7 @@ const STORAGE_SUPPORT = [
   'packages/db/src/workflow-storage-protections.ts',
   'packages/db/src/workflow-storage-execution-protections.ts',
   'packages/db/src/workflow-storage-creation-keys-protections.ts',
+  'packages/db/src/workflow-storage-lock-order.ts',
 ]
 const isStorageLayer = (file: string) =>
   file.startsWith('packages/db/migrations/') ||

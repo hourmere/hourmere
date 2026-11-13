@@ -1139,6 +1139,7 @@ root, `/{handle}` and `/{handle}/{slug}`, and the invitee's page at `/booking`:
   the order they arranged them (404 `host_not_found`).
 - `/api/v1/public/{handle}/{slug}` (event page, `/slots`, `/bookings`) for personal event types.
 - `/api/v1/bookings/manage` (`GET` shows the booking with its event type and hosts' names,
+  and, for a token from a reschedule request email, what became of that request;
   `GET …/slots` the times it can move to, `POST …/cancel`, `POST …/reschedule`)
   with the invitee's secret in the `X-Manage-Token` header. Invitee links carry it in the URL
   fragment, `https://<app>/booking#token=<token>`, which browsers never send to servers or in

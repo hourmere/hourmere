@@ -754,6 +754,9 @@ function verifyEveryServiceFenced(modules: { file: string; source: string }[]) {
       'submitMeetingPollBallot',
       'withdrawMeetingPollVoter',
       'optOutOfMeetingPollReminders',
+      'getMeetingPollResults',
+      'removeMeetingPollVoter',
+      'removeUnverifiedMeetingPollVoters',
     ]),
   )
   for (const entry of services)
@@ -802,6 +805,9 @@ describe('meeting poll key fence wiring (off: no transport supplies the secret)'
     'recoverMeetingPollVoter',
     'inviteMeetingPollVoters',
     'resendMeetingPollInvitation',
+    'getMeetingPollResults',
+    'removeMeetingPollVoter',
+    'removeUnverifiedMeetingPollVoters',
   ])('detects a source copy where %s skips the fence', (service) => {
     const modules = voterModules().map(({ file, source }) => {
       const at = source.indexOf(`export async function ${service}(`)

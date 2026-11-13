@@ -117,6 +117,7 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
   return new Function(
     'resolvedBookingHosts',
     'getManagedBooking',
+    'managedLinkRescheduleRequest',
     `${copy}; return getManagedBookingDetails`,
   )(
     () => ({ as: () => 'booking_hosts' }),
@@ -124,6 +125,8 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
       id: 'synthetic-booking',
       eventTypeId: 'synthetic-event',
     }),
+    // A token from no reschedule request email.
+    async () => undefined,
   ) as typeof getManagedBookingDetails
 }
 
