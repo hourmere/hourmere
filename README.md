@@ -104,6 +104,11 @@ Agents can generate the same text/HTML with `POST /api/v1/open-time-snippets`, M
 `generate_open_time_snippet` or CLI `open-time-snippet --json`. A `read` key suffices
 with owner/admin permission; see [the agent guide](https://hourmere.com/docs/open-time-snippets)
 for bounded ranges, examples and taken-time fallback.
+**Availability → Troubleshoot availability** explains, for one event type and day, which
+times can be booked and why the others cannot (working hours, buffers, limits, busy calendars
+and more). Agents get the same answer from `GET /api/v1/event-types/{id}/availability-troubleshooting`,
+MCP `troubleshoot_availability` or CLI `troubleshoot-availability` (`full` key, owner/admin only);
+see [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
 
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 

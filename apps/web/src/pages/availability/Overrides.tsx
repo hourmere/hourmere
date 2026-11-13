@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Field, type FieldErrors } from '../../components/forms.tsx'
+import { isKnownTimeZone } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { IntervalsEditor } from './IntervalsEditor.tsx'
@@ -79,10 +80,20 @@ export function Overrides({
   timeZone: string
 }) {
   const { t, formatLocale } = useI18n()
+  const zoneLabel = isKnownTimeZone(timeZone)
+    ? (new Intl.DateTimeFormat(formatLocale, {
+        timeZone,
+        timeZoneName: 'longGeneric',
+      })
+        .formatToParts()
+        .find((part) => part.type === 'timeZoneName')?.value ?? timeZone.replaceAll('_', ' '))
+    : timeZone.replaceAll('_', ' ')
   const today = todayIn(timeZone)
   const isPast = (d: OverrideDraft) => !!d.originalDate && d.originalDate < today
   const past = drafts.filter(isPast)
-  const upcoming = drafts.filter((d) => !isPast(d)).sort((a, b) => a.date.localeCompare(b.date))
+  const upcoming = drafts
+    .filter((d) => !isPast(d))
+    .sort((a, b) => a.originalDate.localeCompare(b.originalDate))
   const dateLabel = (date: string) => {
     const parsed = new Date(`${date}T00:00:00Z`)
     // Native date inputs can supply years beyond the supported four-digit range.
@@ -116,7 +127,7 @@ export function Overrides({
           'Date overrides replace weekly hours on that date. Save changes applies every change on this page.',
         )}
       </p>
-      <p className="hint">{t('Times are in {0}.', { '0': timeZone })}</p>
+      <p className="hint">{t('Times are in {0}.', { '0': zoneLabel })}</p>
       <button
         ref={add}
         type="button"
@@ -168,7 +179,7 @@ export function Overrides({
               {d.intervals.length > 0 && (
                 <IntervalsEditor
                   prefix={`override-${d.key}`}
-                  label={d.date || t('That date')}
+                  label={dateLabel(d.date) || t('That date')}
                   intervals={d.intervals}
                   onChange={(intervals) => {
                     change(d.key, { intervals })

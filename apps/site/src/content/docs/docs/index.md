@@ -33,6 +33,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   through the editor, REST, MCP or CLI, with the booking URL shown once.
 - [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients
   and optional host notes, with delivery limits and configuration examples.
+- [Troubleshoot availability](/docs/availability-troubleshooting): see why a time cannot be
+  booked, from the admin, REST, MCP or CLI.
 - [Open-time snippets for agents](/docs/open-time-snippets): draft an email with current
   alternatives and direct booking links through REST, MCP or CLI.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
@@ -86,7 +88,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   minutes before the start and are not yet stated in emails. Changing them never updates
   existing bookings.
 - [Availability drafts](/docs/availability#known-limitations) have no autosave or automatic
-  conflict merge; use the combined API for atomic edits with version checks.
+  conflict merge; use the combined API for atomic edits with version checks. Schedules
+  allow at most 10,000 date overrides, including past dates.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.

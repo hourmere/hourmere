@@ -97,6 +97,7 @@ export default defineConfig({
             { label: 'One-time booking links', link: '/docs/one-time-links' },
             { label: 'Booking waitlists', link: '/docs/booking-waitlist' },
             { label: 'Open-time snippets', link: '/docs/open-time-snippets' },
+            { label: 'Troubleshoot availability', link: '/docs/availability-troubleshooting' },
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'Request another time', link: '/docs/request-reschedule' },
             { label: 'After-booking redirects', link: '/docs/after-booking' },
