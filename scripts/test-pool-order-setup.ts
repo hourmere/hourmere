@@ -43,7 +43,8 @@ if (!(marker in connect)) {
   prototype.connect = guarded
 }
 
-function reportViolations() {
+/** Fails with every violation recorded since the last report, and clears them. */
+export function reportPoolOrderViolations() {
   if (violations.length === 0) return
   const found = violations.splice(0)
   throw new Error(
@@ -51,6 +52,6 @@ function reportViolations() {
   )
 }
 
-afterEach(reportViolations)
+afterEach(reportPoolOrderViolations)
 // Requests made from suite hooks, or that finish after the last test.
-afterAll(reportViolations)
+afterAll(reportPoolOrderViolations)
