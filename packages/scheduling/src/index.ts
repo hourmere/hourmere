@@ -95,6 +95,12 @@ export {
   DEFAULT_CATALOG_PAGE_SIZE,
   MAX_CATALOG_PAGE_SIZE,
 } from './catalog-page.ts'
+export {
+  CHANGE_CUTOFF_MAX_MINUTES,
+  type ChangeCutoffs,
+  type ChangeKind,
+  changeDeadline,
+} from './change-deadlines.ts'
 export { automaticMeet, type ConferenceStatus, conferenceRoot } from './conferences.ts'
 export type {
   AttendeeNoShowNotifier,

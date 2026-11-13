@@ -85,6 +85,8 @@ const eventKeys = [
   'maxBookingsPerDay',
   'maxBookingsPerWeek',
   'maxBookingsPerMonth',
+  'rescheduleCutoffMinutes',
+  'cancelCutoffMinutes',
   'location',
   'locations',
   'questions',
@@ -126,7 +128,7 @@ const managedBookingKeys = hostBookingKeys
   .filter(
     (key) => key !== 'eventTypeTitle' && key !== 'rescheduledToId' && key !== 'canManageNoShow',
   )
-  .concat(['eventType', 'hosts'])
+  .concat(['eventType', 'hosts', 'changeDeadlines'])
 const slotRange = 'start=2026-11-04T00:00:00Z&end=2026-11-05T00:00:00Z'
 
 // biome-ignore lint/suspicious/noExplicitAny: Assert exact runtime key sets independently of generated response types.

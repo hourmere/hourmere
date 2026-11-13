@@ -81,6 +81,18 @@ export const common = {
   '{count} days': '{count} jours',
   'This booking has been rescheduled the maximum number of times. Contact the host to change it again.':
     'Cette réservation a atteint le nombre maximal de replanifications. Contactez l’hôte pour la modifier à nouveau.',
+  'You can reschedule this booking online until {date} at {time}.':
+    'Vous pouvez replanifier cette réservation en ligne jusqu’au {date} à {time}.',
+  'You can cancel this booking online until {date} at {time}.':
+    'Vous pouvez annuler cette réservation en ligne jusqu’au {date} à {time}.',
+  'Online rescheduling closed on {date} at {time}. Contact your host to change this booking.':
+    'La replanification en ligne était possible jusqu’au {date} à {time}. Contactez votre hôte pour modifier cette réservation.',
+  'Online cancellation closed on {date} at {time}. Contact your host to cancel this booking.':
+    'L’annulation en ligne était possible jusqu’au {date} à {time}. Contactez votre hôte pour annuler cette réservation.',
+  'The deadline for rescheduling this booking online has passed. Contact your host to change it.':
+    'Le délai pour replanifier cette réservation en ligne est dépassé. Contactez votre hôte pour la modifier.',
+  'The deadline for cancelling this booking online has passed. Contact your host to cancel it.':
+    'Le délai pour annuler cette réservation en ligne est dépassé. Contactez votre hôte pour l’annuler.',
   'Skip to content': 'Aller au contenu',
   '{0}: {1}': '{0} : {1}',
   '{0} {1}': '{0} {1}',

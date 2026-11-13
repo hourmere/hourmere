@@ -89,6 +89,7 @@ Locations: create-event/update-event accept locations through JSON; slots/book a
            book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.
+Change deadlines: JSON rescheduleCutoffMinutes, cancelCutoffMinutes; minutes 1–525600 or null.
 After booking: create-event/update-event accept --success-redirect-url URL,
                --success-redirect-parameters NAME,... (empty string clears the list),
                --success-redirect-include-invitee-personal-data true|false,

@@ -360,6 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
           hostsUseDefaultSchedule: false,
           attendees: [],
           notificationSnapshot: notificationSnapshot(null),
+          changeCutoffs: { rescheduleCutoffMinutes: null, cancelCutoffMinutes: null },
           manageTokenHash: null,
           paymentHoldExpiresAt: Temporal.Instant.from(required(clock.rows[0]).deadline).toString(),
         }),

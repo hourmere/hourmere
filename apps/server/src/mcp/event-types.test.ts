@@ -542,6 +542,103 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
     }
   })
 
+  it('round-trips invitee change deadlines through REST, MCP and CLI', async () => {
+    const s = await setup(productTools)
+    const rest = async (method: string, path: string, body?: unknown) =>
+      s.app.request(`/api/v1/event-types${path}`, {
+        method,
+        headers: { authorization: 'Bearer hm_synthetic', 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+    const cli = async (command: string, input: Record<string, unknown>) => {
+      let stdout = ''
+      let stderr = ''
+      const code = await runCli({
+        argv: [command, '--input', '-'],
+        env: { HOURMERE_URL: 'http://localhost:4189', HOURMERE_API_KEY: 'hm_synthetic' },
+        stdin: (async function* () {
+          yield JSON.stringify(input)
+        })(),
+        stdout: (text) => {
+          stdout += text
+        },
+        stderr: (text) => {
+          stderr += text
+        },
+        fetch: async (input, init) => s.app.request(input, init),
+      })
+      return {
+        code,
+        data: stdout ? JSON.parse(stdout) : null,
+        error: stderr ? JSON.parse(stderr) : null,
+      }
+    }
+    const deadlines = { rescheduleCutoffMinutes: 2880, cancelCutoffMinutes: 1440 }
+    // Defaults: no deadline.
+    expect(ok(await s.call('create_event_type', createInput()))).toMatchObject({
+      rescheduleCutoffMinutes: null,
+      cancelCutoffMinutes: null,
+    })
+    const response = await rest('POST', '', { ...createInput(), ...deadlines })
+    expect(response.status).toBe(201)
+    const created = (await response.json()) as { id: string }
+    expect(created).toMatchObject(deadlines)
+    expect(ok(await s.call('get_event_type', { id: created.id }))).toMatchObject(deadlines)
+    expect((await cli('event', { id: created.id })).data).toMatchObject(deadlines)
+    // Omitted fields stay as they are.
+    expect(
+      ok(await s.call('update_event_type', { id: created.id, title: 'Only metadata' })),
+    ).toMatchObject(deadlines)
+    const updated = await cli('update-event', { id: created.id, cancelCutoffMinutes: 525600 })
+    expect(updated.code).toBe(0)
+    expect(await (await rest('GET', `/${created.id}`)).json()).toMatchObject({
+      rescheduleCutoffMinutes: 2880,
+      cancelCutoffMinutes: 525600,
+    })
+    expect(
+      ok(
+        await s.call('update_event_type', {
+          id: created.id,
+          rescheduleCutoffMinutes: null,
+          cancelCutoffMinutes: 1,
+        }),
+      ),
+    ).toMatchObject({ rescheduleCutoffMinutes: null, cancelCutoffMinutes: 1 })
+    const cliCreated = await cli('create-event', { ...createInput(), ...deadlines })
+    expect(cliCreated.code).toBe(0)
+    expect(cliCreated.data).toMatchObject(deadlines)
+    const clear = await rest('PATCH', `/${cliCreated.data.id}`, {
+      rescheduleCutoffMinutes: null,
+      cancelCutoffMinutes: null,
+    })
+    expect(await clear.json()).toMatchObject({
+      rescheduleCutoffMinutes: null,
+      cancelCutoffMinutes: null,
+    })
+    for (const changes of [
+      { rescheduleCutoffMinutes: 0 },
+      { cancelCutoffMinutes: 525601 },
+      { rescheduleCutoffMinutes: 1.5 },
+      { cancelCutoffMinutes: '60' },
+    ]) {
+      for (const update of [false, true]) {
+        const input: Record<string, unknown> = update
+          ? { id: created.id, ...changes }
+          : { ...createInput(), ...changes }
+        const { id: _id, ...body } = input
+        const rejected = await rest(update ? 'PATCH' : 'POST', update ? `/${created.id}` : '', body)
+        expect(rejected.status).toBe(400)
+        const expected = await rejected.json()
+        expect(
+          error(await s.call(update ? 'update_event_type' : 'create_event_type', input)),
+        ).toEqual(expected)
+        const result = await cli(update ? 'update-event' : 'create-event', input)
+        expect(result.code).toBe(1)
+        expect(result.error).toMatchObject({ error: (expected as { error: string }).error })
+      }
+    }
+  })
+
   it('exercises an unchanged source copy before the mutation controls', async () => {
     await verifyCreate(sourceCopy())
     await verifyUpdate(sourceCopy())

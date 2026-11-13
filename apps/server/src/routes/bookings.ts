@@ -240,6 +240,15 @@ export const ManagedBooking = Booking.extend({
       description:
         "Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it.",
     }),
+  changeDeadlines: z
+    .object({
+      rescheduleBy: z.iso.datetime().nullable(),
+      cancelBy: z.iso.datetime().nullable(),
+    })
+    .openapi({
+      description:
+        "The invitee's change deadlines this booking keeps (those of its event type when it was booked; later event type changes do not affect it). From `rescheduleBy` on, rescheduling with this token fails with 409 `booking_reschedule_deadline_passed`; from `cancelBy` on, cancelling fails with 409 `booking_cancel_deadline_passed`. null = until the meeting starts. The host can still change the booking.",
+    }),
 }).openapi('ManagedBooking')
 
 export const BookingWithToken = z
@@ -540,7 +549,7 @@ export function bookingRoutes({
         operationId: 'requestReschedule',
         summary: 'Ask the invitee to choose another time',
         description:
-          'For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused.',
+          'For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused. The request expires after 48 hours, at the start, or at the invitee reschedule deadline of the booking, whichever comes first; once that deadline has passed the request is refused with 409 `booking_reschedule_deadline_passed` (move the booking yourself instead).',
         security: authenticated,
         middleware: hostManage,
         tags: ['Bookings'],
@@ -559,7 +568,7 @@ export function bookingRoutes({
           403: crossOrigin,
           404: hostNotFound,
           409: error(
-            'Booking cancelled, already started, imported read-only, group-seat unsupported, idempotency key reused or organization context changed',
+            'Booking cancelled, already started, the invitee reschedule deadline passed (`booking_reschedule_deadline_passed`), imported read-only, group-seat unsupported, idempotency key reused or organization context changed',
           ),
           429: hostRateLimited,
         },
@@ -702,7 +711,7 @@ export function bookingRoutes({
           ),
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
+            'Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the reschedule deadline of the booking has passed (`booking_reschedule_deadline_passed`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
           ),
           429: rateLimited,
         },
@@ -738,7 +747,7 @@ export function bookingRoutes({
           400: invalidCancel,
           404: manageNotFound,
           409: error(
-            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
+            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the booking's cancel deadline has passed (`booking_cancel_deadline_passed`; the host can still cancel it), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
@@ -779,7 +788,7 @@ export function bookingRoutes({
           ),
           404: manageNotFound,
           409: error(
-            "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
+            "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the booking's reschedule deadline has passed (`booking_reschedule_deadline_passed`; the host can still move it), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },

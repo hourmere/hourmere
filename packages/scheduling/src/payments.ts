@@ -10,6 +10,7 @@ import {
   resolveBookingLocation,
   validateInvitee,
 } from './bookings.ts'
+import { cutoffsOf } from './change-deadlines.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { lockOrganization } from './hosts.ts'
@@ -86,7 +87,12 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       throw new DomainError('conflict', 'event_type_unavailable')
     const model = await trx
       .selectFrom('event_types')
-      .select(['booking_mode', 'notifications'])
+      .select([
+        'booking_mode',
+        'notifications',
+        'reschedule_cutoff_minutes',
+        'cancel_cutoff_minutes',
+      ])
       .where('id', '=', current.id)
       .executeTakeFirstOrThrow()
     if (
@@ -133,6 +139,7 @@ export async function createPaymentHold(ctx: PaymentContext, input: CreateBookin
       hostsUseDefaultSchedule: false,
       attendees: [invitee],
       notificationSnapshot: createNotificationSnapshot(model.notifications),
+      changeCutoffs: cutoffsOf(model),
       manageTokenHash: null,
       paymentHoldExpiresAt: expiresAt,
     })

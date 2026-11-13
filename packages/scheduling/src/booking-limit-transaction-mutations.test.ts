@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as Zod from 'zod'
 import * as Availability from './availability.ts'
 import * as BookingPage from './booking-page.ts'
+import * as ChangeDeadlines from './change-deadlines.ts'
 import * as Conferences from './conferences.ts'
 import type { PublicContext } from './context.ts'
 import * as Errors from './errors.ts'
@@ -42,6 +43,7 @@ const dependencies: Record<string, object> = {
   '@hourmere/db/audit': Audit,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
+  './change-deadlines.ts': ChangeDeadlines,
   './conferences.ts': Conferences,
   './errors.ts': Errors,
   './group-seat-admission.ts': GroupSeatAdmission,

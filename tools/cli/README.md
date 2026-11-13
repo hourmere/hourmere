@@ -206,6 +206,23 @@ type for each active assigned host, using the host schedule’s time zone and lo
 date. ISO weeks start on Monday; months use calendar boundaries. Other event types do
 not consume this allowance. Lowering a ceiling does not cancel existing bookings.
 
+## Configure reschedule and cancel deadlines
+
+`create-event` and `update-event` also accept `rescheduleCutoffMinutes` and
+`cancelCutoffMinutes` in JSON input. Each is a whole number of minutes from 1 to 525600,
+or `null` for no deadline; omitted update fields stay unchanged. For example:
+
+```json
+{ "id": "EVENT_TYPE_ID", "rescheduleCutoffMinutes": 2880, "cancelCutoffMinutes": 1440 }
+```
+
+From that many minutes before the start, the invitee can no longer reschedule or cancel
+through their own link (`booking_reschedule_deadline_passed`,
+`booking_cancel_deadline_passed`). `reschedule` and `cancel` with `bookingId` are host
+actions and are not limited. Each booking keeps the deadlines that applied when it was
+booked; changing the event type later does not affect existing bookings. See
+[reschedule and cancel deadlines](https://hourmere.com/docs/change-deadlines).
+
 ## Configure an after-booking redirect
 
 `event` reads `successRedirect`; `create-event` and `update-event` accept the same nested

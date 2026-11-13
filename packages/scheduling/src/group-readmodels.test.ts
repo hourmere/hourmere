@@ -7,10 +7,12 @@ import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
+import { toIso } from './availability.ts'
 import { resolveBookingOrganization } from './booking-organization.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import { getManagedBooking, managedLinkRescheduleRequest } from './bookings.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
+import { changeDeadline } from './change-deadlines.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { resolvedBookingHosts } from './hosts.ts'
@@ -204,7 +206,13 @@ describe.skipIf(!serverUrl)('group seat read models', () => {
     const read = copy<typeof getManagedBookingDetails>(
       'manage',
       'getManagedBookingDetails',
-      { getManagedBooking, managedLinkRescheduleRequest, resolvedBookingHosts },
+      {
+        getManagedBooking,
+        managedLinkRescheduleRequest,
+        resolvedBookingHosts,
+        changeDeadline,
+        toIso,
+      },
       true,
     )
     await expect(verifyManage(read)).rejects.toMatchObject({ name: 'AssertionError' })

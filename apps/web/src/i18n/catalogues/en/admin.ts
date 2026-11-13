@@ -115,6 +115,8 @@ export const admin = {
   'Events to post': 'Events to post',
   'Enable Slack notifications': 'Enable Slack notifications',
   'Save Slack destination': 'Save Slack destination',
+  'The invitee can no longer reschedule this booking online because its deadline has passed. Move it yourself instead.':
+    'The invitee can no longer reschedule this booking online because its deadline has passed. Move it yourself instead.',
   'Group-seat bookings do not support reschedule requests.':
     'Group-seat bookings do not support reschedule requests.',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
@@ -1991,6 +1993,13 @@ export const admin = {
     'The saved booking link is invalid. Reload the saved event type and try again.',
   'The email preview could not be created. Reload the saved event type and try again.':
     'The email preview could not be created. Reload the saved event type and try again.',
+  'Invitee reschedule deadline': 'Invitee reschedule deadline',
+  'Invitee cancellation deadline': 'Invitee cancellation deadline',
+  'until the meeting starts': 'until the meeting starts',
+  'How long before the start invitees can no longer reschedule with their booking link. Each booking keeps the deadline it was booked with, and you can still change it yourself.':
+    'How long before the start invitees can no longer reschedule with their booking link. Each booking keeps the deadline it was booked with, and you can still change it yourself.',
+  'How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself.':
+    'How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself.',
 
   // Availability troubleshooting
   'Troubleshoot availability': 'Troubleshoot availability',

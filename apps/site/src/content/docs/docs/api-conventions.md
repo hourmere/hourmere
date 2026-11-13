@@ -1182,6 +1182,15 @@ contact the host. New response tokens and older email links share the same budge
 Authenticated host moves do not consume this budget and remain available after it is
 spent; cancellation remains available too.
 
+A booking can also carry invitee [change deadlines](/docs/change-deadlines). At or after
+its reschedule deadline, managed slot lookup and rescheduling return
+`409 booking_reschedule_deadline_passed`; at or after its cancel deadline, managed
+cancellation returns `409 booking_cancel_deadline_passed`. Both mean contact the host.
+`404 booking_not_found`, `409 booking_cancelled` and `409 booking_in_past` take precedence.
+`GET /api/v1/bookings/manage` reports the deadlines as `changeDeadlines.rescheduleBy` and
+`changeDeadlines.cancelBy` (ISO instants, or `null` for none). Authenticated host moves and
+cancellations are not limited by them.
+
 After a cancellation, any token still shows the booking (status `cancelled`); cancelling
 again or rescheduling gets 409 `booking_cancelled`. A token stops working only when its
 booking is deleted. Responses never contain an email's token. With an email's token, a
@@ -1389,3 +1398,13 @@ combinations return `400 invalid_event_type`, through the shared service validat
 used by MCP and CLI. These fields are additive in `/api/v1`;
 clients must continue tolerating unknown response properties. See
 [booking limits](/docs/booking-limits) for period boundaries and counting semantics.
+
+## Event-type change deadlines
+
+Event-type reads and create/update inputs expose nullable `rescheduleCutoffMinutes` and
+`cancelCutoffMinutes`. Each set value must be an integer from 1 to 525600. Creation
+defaults omitted fields to null; PATCH preserves omitted fields and uses explicit null to
+clear a deadline. Wrong JSON types, fractions and out-of-range values return
+`400 invalid_request`. Each booking keeps the values that applied when it was booked, so a
+later PATCH never changes existing bookings. These fields are additive in `/api/v1`. See
+[reschedule and cancel deadlines](/docs/change-deadlines) for the rules.

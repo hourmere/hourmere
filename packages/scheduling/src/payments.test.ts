@@ -5,6 +5,7 @@ import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { findSlots } from './availability.ts'
 import { canonicalJson, createPublicBooking, insertBooking } from './bookings.ts'
+import { NO_CHANGE_CUTOFFS } from './change-deadlines.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 import { FakePaymentProvider } from './payment-provider.ts'
@@ -266,6 +267,7 @@ describe.skipIf(!url)('payment holds', () => {
         hostsUseDefaultSchedule: false,
         attendees: [],
         notificationSnapshot: notificationSnapshot(null),
+        changeCutoffs: NO_CHANGE_CUTOFFS,
         manageTokenHash: null,
         paymentHoldExpiresAt: (rows[0] as { deadline: Date }).deadline.toISOString(),
       }),
@@ -306,6 +308,7 @@ describe.skipIf(!url)('payment holds', () => {
         hostsUseDefaultSchedule: false,
         attendees: [],
         notificationSnapshot: notificationSnapshot(null),
+        changeCutoffs: NO_CHANGE_CUTOFFS,
         manageTokenHash: null,
         paymentHoldExpiresAt: (rows[0] as { now: Date }).now.toISOString(),
       }),

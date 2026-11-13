@@ -571,6 +571,33 @@ move leaves the existing booking intact. Cancellation frees its capacity. Loweri
 limit never cancels or rewrites existing bookings: periods already at or above that
 ceiling refuse new bookings until capacity is available.
 
+## Invitee change deadline contract
+
+Migration 0089 adds nullable integer `reschedule_cutoff_minutes` and
+`cancel_cutoff_minutes` to both `event_types` and `bookings`, each constrained by a CHECK
+to 1–525600 (one year) when set. NULL means no deadline: the invitee may change the
+booking until it starts. Existing rows stay NULL and are not rewritten. The editor, REST,
+MCP and CLI expose the event type columns as `rescheduleCutoffMinutes` and
+`cancelCutoffMinutes`; omitted update fields preserve saved values and explicit null
+clears a deadline.
+
+The booking columns are a snapshot. Booking creation (including a payment hold) copies
+both values from the event type row it already locks; every reschedule, by the invitee
+or a host and including a group-seat move, copies the predecessor's values to the
+successor instead of rereading the event type. Editing the event type therefore never
+changes an existing booking, and bookings created before the migration keep no deadline.
+
+`packages/scheduling/src/change-deadlines.ts` computes each deadline as
+`start_at - minutes` in elapsed time, so it is not shifted by daylight-saving changes.
+An invitee change through a manage token (managed slots, reschedule, cancel; REST and MCP)
+is refused at or after that instant with 409 `booking_reschedule_deadline_passed` or
+`booking_cancel_deadline_passed`, after the token, imported/paid, cancelled and started
+checks, using a clock sampled after the booking locks. Host and team-admin paths pass no
+invitee flag and are never limited. `requestReschedule` refuses a request once the
+reschedule deadline has passed and caps the request's expiry at that deadline. The
+managed booking read derives `changeDeadlines.rescheduleBy` and `cancelBy` from the
+snapshot. See [reschedule and cancel deadlines](https://hourmere.com/docs/change-deadlines).
+
 ## Event duration contract
 
 `event_types.duration_minutes` remains the default (`durationMinutes` in service and

@@ -1,0 +1,9 @@
+{
+  "migration": "0089_change_deadlines.sql",
+  "objects": {
+    "constraint public.bookings.bookings_cancel_cutoff_range": "CHECK (((cancel_cutoff_minutes >= 1) AND (cancel_cutoff_minutes <= 525600)))",
+    "constraint public.bookings.bookings_reschedule_cutoff_range": "CHECK (((reschedule_cutoff_minutes >= 1) AND (reschedule_cutoff_minutes <= 525600)))",
+    "constraint public.event_types.event_types_cancel_cutoff_range": "CHECK (((cancel_cutoff_minutes >= 1) AND (cancel_cutoff_minutes <= 525600)))",
+    "constraint public.event_types.event_types_reschedule_cutoff_range": "CHECK (((reschedule_cutoff_minutes >= 1) AND (reschedule_cutoff_minutes <= 525600)))"
+  }
+}

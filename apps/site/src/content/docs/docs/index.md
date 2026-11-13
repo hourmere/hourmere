@@ -25,6 +25,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   default, and learn how invitees choose and reschedule.
 - [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
   the editor, REST, MCP or CLI.
+- [Reschedule and cancel deadlines](/docs/change-deadlines): stop invitees from moving or
+  cancelling through their link shortly before the start; hosts are not limited.
 - [After-booking redirects](/docs/after-booking): offer a Continue link with explicit
   parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
@@ -82,6 +84,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
+- [Reschedule and cancel deadlines](/docs/change-deadlines#known-limitations) are whole
+  minutes before the start and are not yet stated in emails. Changing them never updates
+  existing bookings.
 - [Availability drafts](/docs/availability#known-limitations) have no autosave or automatic
   conflict merge; use the combined API for atomic edits with version checks. Schedules
   allow at most 10,000 date overrides, including past dates.

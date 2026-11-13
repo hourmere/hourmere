@@ -385,8 +385,9 @@ UUID to replace the outstanding request.
 The returned booking stays `confirmed`, with optional `pendingReschedule` containing
 `id`, `expiresAt` and `note`. The original time stays booked and blocks availability
 until the invitee uses their normal manage link to pick another time or cancel.
-The request expires after 48 hours or when the original meeting starts, whichever
-comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+The request expires after 48 hours, when the original meeting starts, or at the booking's
+[reschedule deadline](/docs/change-deadlines), whichever comes first; after that deadline a
+new request fails with `booking_reschedule_deadline_passed`. Expiry keeps that time and notifies the host. Imported and group-seat bookings
 cannot receive a request. Picking uses the normal availability rules and reschedule
 limit, calendar updates, conference handling and reminders.
 
@@ -415,6 +416,16 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Configure reschedule and cancel deadlines
+
+Put `rescheduleCutoffMinutes` and `cancelCutoffMinutes` in the same `create-event` or
+`update-event` JSON file, for example
+`{ "id": "EVENT_TYPE_ID", "rescheduleCutoffMinutes": 2880, "cancelCutoffMinutes": 1440 }`.
+Each is a whole number from 1 to 525600, or `null` for no deadline. From that many
+minutes before the start, the invitee can no longer reschedule or cancel through their
+link; `reschedule` and `cancel` with `bookingId` are not limited. See
+[reschedule and cancel deadlines](/docs/change-deadlines) for the full rules.
 
 ## Record attendee no-shows
 

@@ -80,6 +80,18 @@ export const common = {
 
   'This booking has been rescheduled the maximum number of times. Contact the host to change it again.':
     '此预约已达到改期次数上限。如需再次改期，请联系主持人。',
+  'You can reschedule this booking online until {date} at {time}.':
+    '你可以在{date} {time}之前在线改期此预约。',
+  'You can cancel this booking online until {date} at {time}.':
+    '你可以在{date} {time}之前在线取消此预约。',
+  'Online rescheduling closed on {date} at {time}. Contact your host to change this booking.':
+    '在线改期已于{date} {time}截止。如需更改此预约，请联系主持人。',
+  'Online cancellation closed on {date} at {time}. Contact your host to cancel this booking.':
+    '在线取消已于{date} {time}截止。如需取消此预约，请联系主持人。',
+  'The deadline for rescheduling this booking online has passed. Contact your host to change it.':
+    '此预约的在线改期截止时间已过。如需更改，请联系主持人。',
+  'The deadline for cancelling this booking online has passed. Contact your host to cancel it.':
+    '此预约的在线取消截止时间已过。如需取消，请联系主持人。',
   'Skip to content': '跳至内容',
   '{0}: {1}': '{0}：{1}',
   '{0} {1}': '{0} {1}',

@@ -18,13 +18,14 @@ import {
   rescheduleManagedBooking,
   rescheduleSlots,
   type Slot,
+  type SlotLoader,
 } from './api.ts'
 import { DetailList, LocationDetails, When } from './BookingDetails.tsx'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import { FocusHeading, PublicLayout, PublicStatus } from './PublicLayout.tsx'
 import { useRequest } from './paths.ts'
 import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
-import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
+import { formatDate, formatTime, formatTimeRange, offsetLabel, zoneName } from './time.ts'
 import { LIMITS, reasonError } from './validation.ts'
 import { rememberVisitorTimeZone } from './visitor-time-zone.ts'
 
@@ -142,6 +143,27 @@ async function followReschedule(
   } catch {
     return booking
   }
+}
+
+/** The server's answer when an invitee change comes at or after its deadline. */
+const DEADLINE_PASSED = new Map<string | undefined, Action>([
+  ['booking_reschedule_deadline_passed', 'reschedule'],
+  ['booking_cancel_deadline_passed', 'cancel'],
+])
+
+/**
+ * A moved booking keeps the same minutes before its start, so its deadlines move with it
+ * (the server carries them along the reschedule chain).
+ */
+function shiftedDeadlines(
+  deadlines: ManagedBooking['changeDeadlines'],
+  from: string,
+  to: string,
+): ManagedBooking['changeDeadlines'] {
+  const delta = Date.parse(to) - Date.parse(from)
+  const shift = (at: string | null) =>
+    at === null ? null : new Date(Date.parse(at) + delta).toISOString()
+  return { rescheduleBy: shift(deadlines.rescheduleBy), cancelBy: shift(deadlines.cancelBy) }
 }
 
 function ManageBooking({ token: initialToken, action }: { token: string; action: Action | null }) {
@@ -273,6 +295,22 @@ function ManageView({
   const started = Date.parse(booking.start) <= observedNow
   const ended = Date.parse(booking.end) <= observedNow
   const changeable = booking.status === 'confirmed' && !started
+  // The server can refuse a change whose deadline this clock has not reached yet; from then
+  // on that change stays closed for the booking shown.
+  const [refused, setRefused] = useState<{ id: string; start: string; kinds: Action[] }>()
+  const deadlineOf = (kind: Action) =>
+    kind === 'reschedule' ? booking.changeDeadlines.rescheduleBy : booking.changeDeadlines.cancelBy
+  const closed = (kind: Action) => {
+    const deadline = deadlineOf(kind)
+    return (
+      (refused?.id === booking.id &&
+        refused.start === booking.start &&
+        refused.kinds.includes(kind)) ||
+      (deadline !== null && Date.parse(deadline) <= observedNow)
+    )
+  }
+  const rescheduleClosed = closed('reschedule')
+  const cancelClosed = closed('cancel')
   // A request email's link says what became of its request; a refused stale answer says the
   // same about the booking it reloaded, and only while that booking is the one shown.
   const [answerNotice, setAnswerNotice] = useState<
@@ -287,10 +325,35 @@ function ManageView({
       ? undefined
       : (answered ?? closedRequestNotice(booking.rescheduleRequest?.state, started))
   // A closed request's email button explains first instead of opening the picker or form.
-  const [mode, setMode] = useState<Mode>(() =>
-    initialAction && changeable && !requestNotice ? { kind: initialAction } : { kind: 'view' },
+  // A closed change's email button lands on the explanation instead.
+  const [chosenMode, setMode] = useState<Mode>(() =>
+    initialAction && changeable && !requestNotice && !closed(initialAction)
+      ? { kind: initialAction }
+      : { kind: 'view' },
   )
-  const loadSlots = useMemo(() => rescheduleSlots(token), [token])
+  // Once a change closes, its picker or form gives way to the explanation.
+  const mode: Mode =
+    (chosenMode.kind === 'cancel' && cancelClosed) ||
+    ((chosenMode.kind === 'reschedule' || chosenMode.kind === 'confirm-reschedule') &&
+      rescheduleClosed)
+      ? { kind: 'view' }
+      : chosenMode
+  // The deadline can pass while the picker is open: its slot lookup is then refused too.
+  const onSlotsRefused = useRef<(err: unknown) => void>(() => {})
+  const loadSlots = useMemo((): SlotLoader => {
+    const load = rescheduleSlots(token)
+    return async (start, end, signal) => {
+      try {
+        return await load(start, end, signal)
+      } catch (err) {
+        if (DEADLINE_PASSED.get(codeOf(err)) === 'reschedule') onSlotsRefused.current(err)
+        throw err
+      }
+    }
+  }, [token])
+  useEffect(() => {
+    onSlotsRefused.current = (err) => void failed(err, 'reschedule')
+  })
   const title = booking.eventType?.title ?? booking.title
   const hosts = formatList(booking.hosts.map((h) => h.name).filter(Boolean), language)
   const durationMinutes = Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000)
@@ -365,6 +428,21 @@ function ManageView({
       })
       return true
     }
+    const closedKind = DEADLINE_PASSED.get(code)
+    if (closedKind) {
+      // Show the booking as it is now, with why this change has to go through the host.
+      const fresh = (await onStale()) ?? booking
+      // A booking moved meanwhile has deadlines of its own.
+      if (fresh.id === booking.id && fresh.start === booking.start) {
+        setRefused((current) =>
+          current?.id === booking.id && current.start === booking.start
+            ? { ...current, kinds: [...new Set([...current.kinds, closedKind])] }
+            : { id: booking.id, start: booking.start, kinds: [closedKind] },
+        )
+      }
+      setMode({ kind: 'view' })
+      return true
+    }
     if (code === 'booking_changed') {
       // An email's link follows the meeting, which kept being moved while this waited. Show
       // it as it is now and let people decide; never send the change again by itself.
@@ -420,6 +498,7 @@ function ManageView({
           onUpdated({
             eventType: booking.eventType,
             hosts: booking.hosts,
+            changeDeadlines: shiftedDeadlines(booking.changeDeadlines, booking.start, fresh.start),
             ...(fresh.id === booking.id &&
               booking.rescheduleRequest && { rescheduleRequest: booking.rescheduleRequest }),
             ...fresh,
@@ -485,13 +564,16 @@ function ManageView({
               {t(requestNotice)}
             </p>
           )}
-          {booking.pendingReschedule && !started && booking.status === 'confirmed' && (
-            <p className="notice" role="status">
-              {t(
-                'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
-              )}
-            </p>
-          )}
+          {booking.pendingReschedule &&
+            !started &&
+            booking.status === 'confirmed' &&
+            !rescheduleClosed && (
+              <p className="notice" role="status">
+                {t(
+                  'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
+                )}
+              </p>
+            )}
           {mode.kind === 'view' && (
             <BookingSummary
               booking={booking}
@@ -514,26 +596,41 @@ function ManageView({
           )}
           {mode.kind === 'view' && changeable && !mode.meetingStarted && (
             <>
-              <CalendarResponseNote />
-              <div className="manage-actions">
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={() => {
-                    setNow(currentTime())
-                    setMode({ kind: 'reschedule' })
-                  }}
-                >
-                  {t('Reschedule')}
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => setMode({ kind: 'cancel' })}
-                >
-                  {t('Cancel booking')}
-                </button>
-              </div>
+              <ChangeDeadlines
+                rescheduleBy={booking.changeDeadlines.rescheduleBy}
+                cancelBy={booking.changeDeadlines.cancelBy}
+                rescheduleClosed={rescheduleClosed}
+                cancelClosed={cancelClosed}
+                now={observedNow}
+                timeZone={timeZone}
+                locale={locale}
+              />
+              {!cancelClosed && <CalendarResponseNote />}
+              {(!rescheduleClosed || !cancelClosed) && (
+                <div className="manage-actions">
+                  {!rescheduleClosed && (
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => {
+                        setNow(currentTime())
+                        setMode({ kind: 'reschedule' })
+                      }}
+                    >
+                      {t('Reschedule')}
+                    </button>
+                  )}
+                  {!cancelClosed && (
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => setMode({ kind: 'cancel' })}
+                    >
+                      {t('Cancel booking')}
+                    </button>
+                  )}
+                </div>
+              )}
             </>
           )}
           {mode.kind === 'cancel' && (
@@ -600,7 +697,18 @@ function ManageView({
                     rescheduleRequest: _request,
                     ...previous
                   } = booking
-                  onRescheduled({ ...previous, ...result.booking }, result.manageToken)
+                  onRescheduled(
+                    {
+                      ...previous,
+                      ...result.booking,
+                      changeDeadlines: shiftedDeadlines(
+                        booking.changeDeadlines,
+                        booking.start,
+                        result.booking.start,
+                      ),
+                    },
+                    result.manageToken,
+                  )
                   setAnswerNotice(undefined)
                   setMode({
                     kind: 'view',
@@ -626,6 +734,79 @@ function ManageView({
         </div>
       )}
     </PublicLayout>
+  )
+}
+
+/** Until when the invitee can change the booking here, or why they no longer can. */
+function ChangeDeadlines({
+  rescheduleBy,
+  cancelBy,
+  rescheduleClosed,
+  cancelClosed,
+  now,
+  timeZone,
+  locale,
+}: {
+  rescheduleBy: string | null
+  cancelBy: string | null
+  rescheduleClosed: boolean
+  cancelClosed: boolean
+  now: number
+  timeZone: string
+  locale: string
+}) {
+  const { t } = useI18n()
+
+  const at = (instant: string) => {
+    const ms = Date.parse(instant)
+    return { date: formatDate(ms, timeZone, locale), time: formatTime(ms, timeZone, locale) }
+  }
+  // When the server closed a change this clock still sees open, it gives no date that fits.
+  const passed = (deadline: string | null): deadline is string =>
+    deadline !== null && Date.parse(deadline) <= now
+  const closedNotes = [
+    rescheduleClosed &&
+      (passed(rescheduleBy)
+        ? t(
+            'Online rescheduling closed on {date} at {time}. Contact your host to change this booking.',
+            at(rescheduleBy),
+          )
+        : t(
+            'The deadline for rescheduling this booking online has passed. Contact your host to change it.',
+          )),
+    cancelClosed &&
+      (passed(cancelBy)
+        ? t(
+            'Online cancellation closed on {date} at {time}. Contact your host to cancel this booking.',
+            at(cancelBy),
+          )
+        : t(
+            'The deadline for cancelling this booking online has passed. Contact your host to cancel it.',
+          )),
+  ].filter((note) => note !== false)
+  const openNotes = [
+    !rescheduleClosed &&
+      rescheduleBy !== null &&
+      t('You can reschedule this booking online until {date} at {time}.', at(rescheduleBy)),
+    !cancelClosed &&
+      cancelBy !== null &&
+      t('You can cancel this booking online until {date} at {time}.', at(cancelBy)),
+  ].filter((note) => note !== false)
+  return (
+    <>
+      {closedNotes.length > 0 && (
+        <div className="alert alert-info">
+          {closedNotes.map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+        </div>
+      )}
+      {openNotes.map((note) => (
+        <p key={note} className="muted">
+          {note}
+        </p>
+      ))}
+    </>
   )
 }
 

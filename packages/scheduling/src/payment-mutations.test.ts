@@ -14,6 +14,7 @@ import {
   lockHosts,
   requireOfferedSlot,
 } from './bookings.ts'
+import { NO_CHANGE_CUTOFFS } from './change-deadlines.ts'
 import { admitGroupSlot } from './group-seat-admission.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { eraseUnpaidHoldPersonalData, expirePaymentHolds } from './payment-expiry.ts'
@@ -112,6 +113,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
           hostsUseDefaultSchedule: false,
           attendees: [],
           notificationSnapshot: notificationSnapshot(null),
+          changeCutoffs: NO_CHANGE_CUTOFFS,
           manageTokenHash: null,
           paymentHoldExpiresAt: ctx.now().subtract({ minutes: 1 }).toString(),
         }),
@@ -195,6 +197,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
             },
           ],
           notificationSnapshot: notificationSnapshot(null),
+          changeCutoffs: NO_CHANGE_CUTOFFS,
         })
       }),
     ).resolves.toHaveProperty('id')
@@ -470,6 +473,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
             },
           ],
           notificationSnapshot: notificationSnapshot(null),
+          changeCutoffs: NO_CHANGE_CUTOFFS,
           manageTokenHash: null,
           paymentHoldExpiresAt: ctx
             .now()
