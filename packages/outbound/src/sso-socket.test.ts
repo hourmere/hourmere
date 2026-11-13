@@ -305,6 +305,27 @@ describe('pinned SSO transport over real loopback sockets', () => {
     expect(requests).toBe(0)
   })
 
+  it('opens no socket for a listed name without public syntax that resolves publicly', async () => {
+    const privateTargets = parseSsoPrivateTargets(
+      `${PRIVATE_HOST}:${local.port},keycloak:${local.port},localhost:${local.port}`,
+    )
+    local.lookup.mockResolvedValue([{ address: PUBLIC_ANSWER, family: 4 }])
+    for (const host of [PRIVATE_HOST, 'keycloak', 'localhost'])
+      expect(
+        (await failure(sendSsoRequest({ url: `https://${host}:${local.port}/`, privateTargets })))
+          .code,
+      ).toBe('destination_refused')
+    expect(local.lookup).toHaveBeenCalledTimes(3)
+    expect(local.pinned).toEqual([])
+    expect(requests).toBe(0)
+    // The same listed name still reaches its private answer.
+    local.lookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }])
+    const response = await sendSsoRequest({ url: privateUrl(), privateTargets })
+    expect(response.status).toBe(200)
+    expect(local.pinned).toEqual(['127.0.0.1'])
+    expect((observed[0]?.socket as TLSSocket | undefined)?.servername).toBe(PRIVATE_HOST)
+  })
+
   it('verifies an IP literal target against the certificate address', async () => {
     const response = await sendSsoRequest({
       url: `https://127.0.0.1:${local.port}/jwks`,

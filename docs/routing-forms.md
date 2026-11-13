@@ -1,9 +1,12 @@
 # Routing forms — proposed design
 
 Status: storage and internal services only; no routing form is available yet. Migration
-0072 adds the five storage tables; no routes, UI, execution path or plan checks exist. The
-shared validator, evaluator and target checks (step a2) and the configuration and
-publication services (step a3) exist as internal functions that no transport calls yet.
+0072 adds the five storage tables and migration 0083 their idempotency records; no routes,
+UI, execution path or plan checks exist. The shared validator, evaluator and target checks
+(step a2) and the configuration and publication services (steps a3 and a3b) exist as
+internal functions that no transport calls yet. Target invalidation and retention cleanup
+(step a4) run inside existing event-type and member-removal mutations and in a background
+job; with no routing form they change nothing.
 The eventual feature is free on self-hosted and Cloud alike,
 and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),
@@ -63,9 +66,9 @@ old paths without redirect aliases. Drafts are private; publishing is explicit.
 Questions are ordered arrays with stable opaque IDs allocated on creation. Reordering or
 renaming retains identity; changing type or deleting/recreating allocates a new identity.
 Choice options also have stable IDs and public labels: rename does not change a match.
-IDs cannot be reused within a form's history. `required` defaults to false. Unknown answer
-IDs and unknown fields are rejected, and optional blank values are omitted. Required
-means a nonblank text value or a selected option, not merely a present JSON key.
+IDs cannot be reused within a form's retained versions. `required` defaults to false.
+Unknown answer IDs and unknown fields are rejected, and optional blank values are omitted.
+Required means a nonblank text value or a selected option, not merely a present JSON key.
 
 Initial types: `short_text`, `select` (single choice), `email`. These cover names,
 company, contact and explicit qualification categories while reusing familiar booking
@@ -172,8 +175,56 @@ enabling needs a published version. An archived form is `routing_form_not_found`
 operation and keeps its slug. Publication also refuses an ID that a retained version used
 with another meaning (a question with another type, an option of another question, a question
 or option as a rule) or that the current version no longer has. Preview checks target
-eligibility, not answer mappings, as routing does at run time. Idempotent create and publish
-(`requestId`, below) are not built yet: migration 0072 stores no request key or fingerprint.
+eligibility, not answer mappings, as routing does at run time. Enabling, disabling and a slug
+change keep the stored draft as it is and do not validate it again, so a stricter later
+validator cannot block an urgent disable; any draft field revalidates the whole draft.
+
+Create and publish take an optional `requestId` (step a3b, migration 0083), as the contract
+sketch below describes. A retry with the same key and canonical input returns the original
+result: creation returns the form it created, publication the version it published (also
+after that publication moved the revision on), each with the form as it is now, so an archived
+form is `routing_form_not_found` here too. Canonical input is the validated input, as the
+draft would be stored (text trimmed, omitted questions or rules equal to empty lists, and an
+omitted, `null` or blank description alike); for publication it is the form ID and
+`expectedRevision`. The same key with other input, or for the other operation, returns
+`idempotency_key_reused`. Concurrent retries of one key queue on a per-key transaction advisory
+lock, so one writes and each returns its result. Authorization runs first, so a retry by an
+actor who lost access is refused like any write. A publication's key lasts only as long as the
+version it published: once a later publication supersedes that version, the next cleanup
+run, normally within 15 minutes, deletes it with its record unless a receipt references it.
+A retry with that key then gets `routing_revision_conflict` instead of the stored version, and
+it never publishes twice.
+
+Target lifecycle and retention (step a4, `packages/db/src/routing-lifecycle.ts`,
+`packages/scheduling/src/routing-target-lifecycle.ts` and the `routing-retention-v1` job) add no
+operation. Event-type deletion and every event-type update, disabling included, rederive that
+event type's eligibility and set the health marker of its dependency rows; administrative
+member removal marks the targets on the event types it deactivates `unavailable`. Each does so
+in its own transaction under the organization and event-type locks it already holds, marks rule
+and fallback targets alike, and touches only the current published version of each live form
+(at most 100 forms of 51 event targets each). Marking takes no form or receipt lock, so a
+publication and one of these mutations wait for each other on the event type or the
+organization and never deadlock. Routing never blocks a deletion, deactivation or departure,
+and no routing row goes with one. Self departure is refused while the member hosts an event
+type, so it changes no target. No service changes booking mode yet: one that does calls the
+same refresh, and reads see the change at once. Reads never trust a marker but rederive health
+from the current event types: `get` returns each rule's and the fallback's target in the
+published version as `ok`, `unavailable` (with the eligibility reason) or `unknown`, and `list`
+the worst of them; a form with nothing published has no health (null). `unknown` means this
+release does not recognise how a target is stored. It is never reported as unavailable or as
+missing configuration.
+
+Cleanup runs every 15 minutes, also while routing is off. Each transaction deletes at most 500
+receipts that expired unconsumed, oldest first, together with their encrypted answers, or
+examines at most 1000 versions and deletes at most 100 that are neither their form's current
+version nor referenced by a receipt, with their dependency rows and publication records. A
+run stops after 100 transactions or 45 seconds and queues one successor for the rest.
+Consumed receipts are never touched; they keep their version until their booking is deleted.
+Cleanup locks only its own rows, with `SKIP LOCKED`, and never waits: a version whose
+dependency rows or publication record another transaction holds, such as a replay returning
+that version, is left for a later sweep. With no routing data it finds nothing and writes
+nothing. Once a version is deleted, its question, option and rule IDs no longer constrain
+publication; booking snapshots carry their own labels.
 
 Publishing atomically inserts an immutable version (questions, order, rules, targets,
 mappings and labels) and switches the pointer. Versions have monotonically increasing
@@ -420,7 +471,7 @@ per-answer breakdown or new analytics IDs. If aggregate counts are added later, 
 an explicit retention/privacy contract, transaction-safe deduplication and small-count
 exposure review; they must not be reconstructed from unbooked answer retention.
 
-## Table sketch (storage installed by migration 0072)
+## Table sketch (storage installed by migrations 0072 and 0083)
 
 Application tables live in `public`, snake_case; UUIDv7 keys and `timestamptz` instants.
 Every organization reference is an FK to `auth.organization`; organization deletion
@@ -433,6 +484,7 @@ cascades. Use composite unique keys/FKs to prevent cross-organization associatio
 | `routing_target_dependencies` | `organization_id`, `version_id`, rule identity (UUID text or `fallback`), historical `event_type_id`, derived health code/time; composite version FK; no cascading event/user FK; JSON target is authoritative | organization + event_type_id; unique version/rule |
 | `routing_receipts` | `id`, `organization_id`, `form_id`, `version_id`, unique `token_hash`, nullable `answers_ciphertext`, matched/resolved rule identities, resolved target snapshot, `created_at`, `expires_at`, nullable `consumed_booking_id`; composite version/booking FKs; expiry after creation; consumed implies booking and no answer ciphertext | digest unique; partial expiry + id for unconsumed cleanup; partial organization + form + expiry for unconsumed admission counts; consuming booking |
 | `booking_routing` | `booking_id` PK/composite organization FK with cascade, historical form/version UUIDs and version number, matched/resolved rule IDs, immutable question/answer snapshots; no cascading FK to form/version | organization + booking; form/version for authorized maintenance only |
+| `routing_form_operations` (0083) | `id`, `organization_id`, `operation` (`create` or `publish`), historical actor kind (`session`, `api_key` or `oauth`) and actor UUID without FK, `request_id` UUID, 32-byte canonical input fingerprint, result reference (`form_id`, and `version_id` exactly for a publication), `created_at`; composite form and version FKs with cascade; rows reject every update | organization + actor kind + actor + request key unique; organization + form + version unique with nulls not distinct (one creation record per form, one publication record per version) |
 
 Published-version pointers must reference that same form and organization (deferred FK
 allows atomic publication). Service validation owns JSON semantics and limits; SQL CHECKs
@@ -448,7 +500,10 @@ Cleanup locks receipt rows in bounded batches, skips locked rows and does not ta
 Migration 0072 installs this storage foundation. Version rows reject every update;
 foreign keys reject deletion of the current published version or any receipted version.
 Only unreferenced historical versions can be cleaned up. Booking routing snapshots
-reject updates and follow booking/organization deletion.
+reject updates and follow booking/organization deletion. Migration 0083 adds the
+idempotency records of create and publish. A record lives exactly as long as its result: it
+cascades with its form and with its version, so it never blocks version cleanup, and at most
+one record exists per form and per version, so the form and version quotas bound them too.
 
 ## REST, MCP and CLI contract sketch (proposal)
 
@@ -484,9 +539,12 @@ booking-read extensions keep returning stored routing provenance. See [Rollout
 gating](#rollout-gating).
 
 Draft create and publish each take a client-generated UUID `requestId` scoped to
-actor/organization for idempotency. Publish/update/archive take `expectedRevision`; a
-repeated publish with the same requestId and canonical input returns its original version.
-Changed input with the same key returns `idempotency_key_reused`. Route submission takes
+actor/organization for idempotency; the actor is the credential (session user, API key or
+OAuth grant), so two credentials of one user never share a key. Publish/update/archive take
+`expectedRevision`; a repeated publish with the same requestId and canonical input returns
+its original version. Changed input with the same key, or the key of the other operation,
+returns `idempotency_key_reused`. A key is retained as long as the form (creation) or the
+version (publication) it produced. Route submission takes
 `{ versionId, answers }`; it intentionally has no durable replay cache containing raw
 tokens. On lost response the invitee submits again and gets a new expiring receipt, within
 the admission ceilings. Each receipt remains single-use; only booking idempotency prevents
@@ -542,7 +600,9 @@ The later project plan is rescheduled into the named steps below, each budgeted 
 working day including its focused tests. The order is storage/services (a), complete
 configuration interfaces (b), public execution (c), editor (d), then answer surfaces,
 documentation, operator setting and release acceptance (e). Each step depends only on the
-row directly above it; e3 also needs the server-side booking export on main. No step borrows
+row directly above it, with three stated exceptions: a4 depends on a3, not on a3b; b1 and b2
+also name a3b, whose idempotency their acceptance checks; and e3 also needs the server-side
+booking export on main. No step borrows
 an API, validator or permission check from a later step. In particular, the editor uses the
 OpenAPI-generated `/api/v1` client in `apps/web/src/api/resources.ts`; configuration REST
 writes, their MCP tools, invoking CLI commands, scope/parity registrations and generated
@@ -704,10 +764,11 @@ remain. “Hard-off” means the code constant above; “fixtures on” means te
 | a1b — Hard-off guard | Code constant `routingFormsEnabled = false` in server composition (no environment variable); shared guard returning `404 routing_forms_disabled` in the order stated under Rollout gating; MCP registration helper that omits routing tools from `tools/list` while off and answers their direct calls with that code; effective state in existing public config | Extend `GET /instance` (`routingFormsEnabled`), OpenAPI and generated web types; no new MCP tool/CLI command | a1a | Hard-off constant introduced | Guard ordering and identical response; injected `true` reaches guarded paths in tests only; setting `ROUTING_FORMS_ENABLED` in the environment changes nothing; a mutation flipping the constant fails a real assertion. Off: `/instance` reports `false` |
 | a1c — Route namespace | Claim-time rejection of `route`, in any case, wherever a personal handle is claimed or changed (sign-up, profile edit, import); `RESERVED_NAMES`, `servedHandle` and team slugs unchanged; legacy collision detector for a stored personal handle `route`, wired into the effective state in e4c | None; extend existing personal-handle claim validation only | a1b | Hard-off | New or changed handle `route`/`Route`/`ROUTE` rejected on every claim path; a stored `route` handle's pages are still served; its owner can still save other profile fields with the unchanged handle, because `putProfile` revalidates the handle on every save and the claim check compares with the stored handle inside the same upsert, race-free; team slug `route` unaffected; detector finds the stored handle; no silent rename. Off: a legacy owner's pages resolve as today |
 | a2 — Shared validation and evaluation | Question/rule validation, ordered first-match evaluator, target eligibility allowlist (enabled, nondeleted, listed or hidden, same organization, `booking_mode = 'individual'`, no payment requirement), complete answer-mapping validator | None; pure/shared services | a1c | Hard-off | Every type/operator/boundary, optional answers, AND/one-of/fallback; dangling IDs, incompatible destination fields/options and cross-org targets rejected; per-member personal/single-host targets accepted within the same organization; group-mode targets and a synthetic payment-requiring projection rejected with `invalid_routing_target`, for the reasons under Scheduling interactions; unknown modes fail closed. Off: no transport, nothing reachable |
-| a3 — Configuration services and publication | Draft CRUD/archive, optimistic revisions, idempotency, atomic immutable publish, dependency generation and side-effect-free preview service | None; service entry points only | a2 | Hard-off | Concurrent publish has one winner; stale save/archive rejected; stable IDs/history; current membership and mapping/target validation inside publish transaction, including group/paid rejection for targets changed after draft save; preview writes no receipt/answers. Off: no transport, nothing reachable |
+| a3 — Configuration services and publication | Draft CRUD/archive, optimistic revisions, atomic immutable publish, dependency generation and side-effect-free preview service | None; service entry points only | a2 | Hard-off | Concurrent publish has one winner; stale save/archive rejected; stable IDs/history; current membership and mapping/target validation inside publish transaction, including group/paid rejection for targets changed after draft save; preview writes no receipt/answers. Off: no transport, nothing reachable |
+| a3b — Idempotent configuration writes | Migration 0083 `routing_form_operations` (request key, actor kind and ID, canonical input fingerprint and result reference, retained as long as the form or version it references); optional `requestId` on create and publish, looked up after authorization and before any slug, quota or revision check, under a per-key transaction advisory lock | None; service entry points only | a3 | Hard-off | Create replay returns the same form; same-input publish retry returns the same version without `routing_revision_conflict`; changed-input replay returns `idempotency_key_reused`; a key of another actor or credential never matches; two concurrent retries of one key on two connections write once and return identical results; constraint coverage, source-copy mutations, populated-predecessor upgrade, fresh install, no-op rerun and DB types. Off: no transport, nothing reachable |
 | a4 — Target lifecycle and retention | Invalidation on event delete/disable, booking-mode change and member departure; derived target health (`ok`, `unavailable`, `unknown`); bounded receipt/version cleanup jobs | None; extend existing mutation services without adding public operations | a3 | Hard-off | Publish/deletion/departure races respect organization → event → form → receipt order; fallback included; `unknown` never shown as missing configuration; no deletion blockers/history cascades; encrypted answers purged after expiry, consumed evidence retained; bounded pools/batches. Off: with no forms, existing event delete/disable/departure responses unchanged and jobs no-op |
-| b1 — Configuration read/create/update/archive interfaces | Shared REST/MCP/CLI adapters, key scopes classified in `packages/auth/src/api-key-operations.ts` with regenerated scope tables and the one-sentence disabled note beside them, strict schemas, OpenAPI and generated web types. Both reads return a4's derived target health, rederived on read: per rule and fallback for the published version in `get`, a per-form summary in `list` | `GET /routing-forms`, `GET /routing-forms/{id}`, `POST /routing-forms`, `PATCH /routing-forms/{id}`, `DELETE /routing-forms/{id}`; `list_routing_forms`, `get_routing_form`, `create_routing_form`, `update_routing_form`, `archive_routing_form`; `routing-forms list/get/create/update/archive` | a4 | Hard-off; fixtures on | All transports share organization/role/scope matrix; read/full for reads, full for writes; Origin/Referer and expected-organization checks; create replay/revision conflicts; health present after a missed invalidation job, so d3 needs no API change; parity registry and scope-doc consistency; the parity inventory and the other catalogue tests that build `productTools` with `slotSnippetsEnabled: true` (capability contracts, MCP scopes, schema contracts) also pass `routingFormsEnabled: true`; generated-client checks. Off: every REST operation and direct MCP call returns `routing_forms_disabled` before any lookup and the CLI prints it; `tools/list` omits the five tools; no row written |
-| b2 — Publish interfaces | Explicit publication adapter and authoritative publish errors | `POST /routing-forms/{id}/publish`; `publish_routing_form`; `routing-forms publish` | b1 | Hard-off; fixtures on | Full scope and current permissions; same-input publish retry vs changed-key input; invalid mappings/targets, including group and paid targets, rejected with `invalid_routing_target` across transports; parity/OpenAPI/types. Off: `routing_forms_disabled` over REST, direct MCP call and CLI; `tools/list` omits `publish_routing_form`; no version written |
+| b1 — Configuration read/create/update/archive interfaces | Shared REST/MCP/CLI adapters, key scopes classified in `packages/auth/src/api-key-operations.ts` with regenerated scope tables and the one-sentence disabled note beside them, strict schemas, OpenAPI and generated web types. Both reads return a4's derived target health, rederived on read: per rule and fallback for the published version in `get`, a per-form summary in `list` | `GET /routing-forms`, `GET /routing-forms/{id}`, `POST /routing-forms`, `PATCH /routing-forms/{id}`, `DELETE /routing-forms/{id}`; `list_routing_forms`, `get_routing_form`, `create_routing_form`, `update_routing_form`, `archive_routing_form`; `routing-forms list/get/create/update/archive` | a4, a3b | Hard-off; fixtures on | All transports share organization/role/scope matrix; read/full for reads, full for writes; Origin/Referer and expected-organization checks; create replay/revision conflicts; health present after a missed invalidation job, so d3 needs no API change; parity registry and scope-doc consistency; the parity inventory and the other catalogue tests that build `productTools` with `slotSnippetsEnabled: true` (capability contracts, MCP scopes, schema contracts) also pass `routingFormsEnabled: true`; generated-client checks. Off: every REST operation and direct MCP call returns `routing_forms_disabled` before any lookup and the CLI prints it; `tools/list` omits the five tools; no row written |
+| b2 — Publish interfaces | Explicit publication adapter and authoritative publish errors | `POST /routing-forms/{id}/publish`; `publish_routing_form`; `routing-forms publish` | b1, a3b | Hard-off; fixtures on | Full scope and current permissions; same-input publish retry vs changed-key input; invalid mappings/targets, including group and paid targets, rejected with `invalid_routing_target` across transports; parity/OpenAPI/types. Off: `routing_forms_disabled` over REST, direct MCP call and CLI; `tools/list` omits `publish_routing_form`; no version written |
 | b3 — Preview interfaces | Author-only draft preview and diagnostics | `POST /routing-forms/{id}/preview`; `preview_routing_form`; `routing-forms preview` | b2 | Hard-off; fixtures on | Full scope; evaluator parity; no anonymous preview, persistence, tokens or notification; CLI stdin/file JSON; parity/OpenAPI/types. Off: `routing_forms_disabled` over REST, direct MCP call and CLI; `tools/list` omits `preview_routing_form`; no evaluation runs |
 | c1 — Receipt and admission services | Purpose-bound encryption/digests with keys derived from `BETTER_AUTH_SECRET`, absolute expiry, `routingSubmission` and `routingContinuation` bucket definitions, form and instance admission ceilings | None; routing submission service only | b3 | Hard-off; fixtures on | Pin bucket and ceiling values and the limiter definitions; live-receipt ceilings counted under their locks without overshoot; depth/unknown keys/overlong raw strings fail before storage; message result retains nothing; key derivation, purpose separation and expiry. Off: service refuses before storing a receipt or counting admission |
 | c2a — Public form metadata adapters | Personal/team public projection with `versionId`, questions and labels; no predicates, alternative targets or hidden slugs | `GET P` (personal and team); `get_public_routing_form`; `routing-forms public` | c1 | Hard-off; fixtures on | Anonymous and supplied-bearer scope rules; `page` bucket on both routes, counting refused requests; collision-free personal/team paths; unknown and archived forms share the neutral not-found response; no predicates, alternative targets or hidden slugs; parity/OpenAPI/types. Off: both paths and direct MCP calls return `routing_forms_disabled` without metadata, for existing and unknown forms alike; `tools/list` omits `get_public_routing_form` |
@@ -733,10 +794,10 @@ Each implementation step adds assertion-failing source-copy mutations for its pr
 and owns its focused tests and generated artifacts. The final e5 step runs the full release
 matrix rather than deferring missing implementation to acceptance. This design's doc-fact
 test checks only the numeric register, the unescaped and fully escaped maximum submission
-against the cap and the server's default body limit, and mutation controls; it does not
-claim to test routing behavior that does not exist yet. The design PR introduced no schema
-changes or product surfaces; the storage step now installs migration 0072 without adding
-product strings or UI.
+against the cap and the server's default body limit, the cleanup bounds of step a4 against
+their code constants, and mutation controls; it does not claim to test routing behavior that
+does not exist yet. The design PR introduced no schema changes or product surfaces; the
+storage steps now install migrations 0072 and 0083 without adding product strings or UI.
 
 ## Out of scope and known limitations
 

@@ -11,7 +11,7 @@ import {
   Route,
   type RouteObject,
 } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { App } from '../App.tsx'
 import type { Schemas } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
@@ -758,9 +758,12 @@ describe('accept invitation entry', () => {
   })
 
   it('refreshes shared organization context after leaving the page during acceptance without navigating', async () => {
-    const pending = later()
+    let answerAcceptance: (response: Response) => void = () => {}
+    const acceptanceResponse = new Promise<Response>((resolve) => {
+      answerAcceptance = resolve
+    })
     const { api, state } = server({
-      [acceptRoute]: () => pending.response,
+      [acceptRoute]: () => acceptanceResponse,
       'POST /api/v1/mcp-oauth/request': () => json(400, { error: 'invalid_request' }),
     })
     render(
@@ -772,16 +775,27 @@ describe('accept invitation entry', () => {
     )
     await screen.findByRole('button', { name: 'Join team' })
     await userEvent.click(joinButton())
+    // Answer in the commit that takes the invitation page off the screen, before React runs
+    // that commit's passive effects: the earliest moment after leaving, where a late answer
+    // once still found the page "mounted" and navigated away from the page opened since.
+    const left = new MutationObserver(() => {
+      if (screen.queryByRole('heading', { name: 'Accept invitation' })) return
+      left.disconnect()
+      state.me = teamMe
+      answerAcceptance(acceptance())
+    })
+    onTestFinished(() => left.disconnect())
+    left.observe(document.body, { childList: true, subtree: true })
     await userEvent.click(screen.getByRole('link', { name: 'Leave invitation' }))
     await screen.findByRole('heading', { name: 'Connect an AI app' })
-    state.me = teamMe
-    await pending.answer(acceptance())
     await waitFor(() => expect(api.to('GET /api/v1/me')).toHaveLength(2))
     expect(screen.queryByText('You joined Team Alpha.')).toBeNull()
     expect(screen.getByRole('heading', { name: 'Connect an AI app' })).toBeDefined()
     await userEvent.click(screen.getByRole('link', { name: 'Inspect organization' }))
     await screen.findByRole('heading', { name: 'Settings', level: 1 })
     expect(screen.getByText('Organization').nextElementSibling?.textContent).toBe(team.name)
+    // Only the shared refresh read the context: the left page did not confirm it itself.
+    expect(api.to('GET /api/v1/me')).toHaveLength(2)
   })
 
   it('does not replace a newer deliberate switch when an old invitation confirmation arrives after leaving', async () => {

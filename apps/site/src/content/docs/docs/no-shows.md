@@ -89,3 +89,6 @@ penalty, refund, or attendance-based follow-up rule. The stored fields are avail
 future reporting/export work. A marker is a host's judgment, not evidence from a meeting
 provider. Corrections overwrite current state; the audit log keeps each change but has
 no viewer, read API or export yet. Imported bookings remain managed in their original system.
+Confirmed paid bookings remain readable, but attendance changes return
+`paid_booking_management_unavailable`; the dashboard hides their mark and unmark actions.
+Pending, expired and unpaid-cancelled payment holds are not visible through attendance reads.

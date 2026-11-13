@@ -134,7 +134,10 @@ statement timeout from the default 5000 ms. CREATE DATABASE and DROP use at leas
 or the configured value when higher: copying a template can take longer than 5 seconds under
 load. Each client query timeout is its statement timeout plus 1000 ms.
 The connection timeout remains 5000 ms and shutdown cleanup still has its independent
-15-second deadline.
+15-second deadline. Administrative connections also pin `client_connection_check_interval=1000`
+(URL parameters and `PGOPTIONS` cannot change it), so the server aborts a CREATE DATABASE
+whose client has gone, within about 2 s, instead of creating an orphan database once its
+lock is released.
 
 Inspect those leftovers manually (the default is **dry run**):
 
@@ -294,9 +297,10 @@ printing the actual token strings.
 
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
-The reusable [CI workflow](.github/workflows/ci.yml) keeps its existing required `check`,
-`cli-compatibility`, `docker` and `e2e` check names, alongside the standalone
-`n8n-compatibility` and `zapier-compatibility` jobs. Four `e2e-shard` jobs run the
+The required checks are `check`, `e2e`, `docker` and `sign-off`; `cli-compatibility`
+and the standalone `n8n-compatibility` and `zapier-compatibility` jobs are not required.
+The reusable [CI workflow](.github/workflows/ci.yml) runs the first three alongside those
+jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Four `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
 web and disposable site fixture and retains the browser-artifact privacy check. The separate

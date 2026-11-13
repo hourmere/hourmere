@@ -1,8 +1,13 @@
 # Availability explanations
 
 Availability explanations are an opt-in engine and scheduling-service capability.
-There is no REST route, MCP tool, CLI command or administration page yet. Ordinary
-availability continues to use its existing fast path.
+Ordinary availability continues to use its existing fast path. One shared transport service,
+`troubleshootEventAvailability` (packages/scheduling/src/availability-troubleshooting.ts),
+explains one local day and serves the REST route
+`GET /api/v1/event-types/{id}/availability-troubleshooting`, the MCP tool
+`troubleshoot_availability`, the CLI command `troubleshoot-availability` and the admin page
+`/app/availability/troubleshoot`. User documentation:
+[Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
 
 ## Typed contract and candidates
 
@@ -86,8 +91,9 @@ and `read`/`bookings` keys receive the same `not_found` outcome as a missing eve
 Team managers may see host identifiers. Even an empty eligible round-robin pool is
 explainable only to its managers, with `no_eligible_round_robin_host`.
 Transports must use the scheduling service, rather than publishing raw engine inputs,
-database rows or a caller-supplied permission flag. Future REST, MCP, CLI and admin
-consumers must retain this manager-only boundary. Any future public explanation must
+database rows or a caller-supplied permission flag. The REST, MCP, CLI and admin
+consumers retain this manager-only boundary; REST additionally refuses `read`/`bookings`
+keys with `403 insufficient_scope` before any lookup. Any future public explanation must
 not return busy/conflict intervals.
 
 Blocking intervals express the part of the candidate affected by a constraint.
@@ -108,6 +114,16 @@ the complete local weeks and months containing candidates, including bookings
 outside the requested range. Future booking rules must extend the typed reason
 order, explained-rules inventory and parity generator together.
 
-The next transport task should add REST, MCP, CLI and administration consumers
-using the same typed service result and authorization boundary. Localized display
-text belongs in those consumers; engine reason codes are machine-readable values.
+Transports serialize instants as UTC RFC 3339 strings and pass reasons through an explicit
+allowlist (`code`, `start`, `end`, optional `hostUserId`); team results add the assigned hosts'
+names for the managers who may call the service. For a team host whose reasons for a time
+include `outside_working_hours`, the transport drops that host's `calendar_busy`,
+`buffer_before`, `buffer_after` and `host_conflict` reasons for that time, so managers do not
+see members' off-hours timings, except that a buffer reason on an in-hours time can reveal the
+edge of an adjacent off-hours commitment within one buffer length (busy from 12:10 with a
+30-minute buffer gives `buffer_after` 11:40–12:00 on the 11:30 time). Personal event types keep every reason: their only caller is
+the host. The local day is
+`[date 00:00, next date 00:00)` in the requested zone (23 or 25 hours on DST days). API keys
+use the `diagnostic_read` operation class (`full` only). Localized display text belongs in the
+admin page; engine reason codes are machine-readable values and the published `code` field is an
+open string.

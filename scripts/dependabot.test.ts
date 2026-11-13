@@ -14,9 +14,14 @@ import { parse } from 'yaml'
 // - versioning-strategy lockfile-only when every dependency left is an exact version;
 // - any target-branch, because a branch that does not exist cannot be detected offline;
 // - a schedule that is not a fixed interval, because a cron expression may never fire.
+// Ignore rules are judged per dependency, with every rule that matches it counted together.
+// This assumes, without an offline check of Dependabot's documentation, that Dependabot skips
+// a version any matching rule ignores and that a rule ignores both its versions and its
+// update types. So a rule for majors and another for minors and patches leave nothing.
 // Where a rule cannot be judged exactly, it errs towards "off": an ignore rule with versions
-// counts as silencing its dependencies, an allow rule for indirect dependencies allows no
-// direct one, and peer dependencies are not counted.
+// counts as silencing its dependencies, whether or not it also lists update types, because
+// this test cannot tell which versions remain; an allow rule for indirect dependencies allows
+// no direct one; and peer dependencies are not counted.
 // Limits, not judged: whether new versions exist upstream; ignore rules that keep one update
 // type, such as majors only, for every dependency; and settings this test does not model,
 // such as exclude-paths, registries or milestone.
@@ -79,11 +84,15 @@ const matches = (pattern: string, name: string) =>
       .join('.*')}$`,
     'i',
   ).test(name)
-// A rule silences a dependency unless it keeps some update type. A versions list counts as
-// silencing too, because this test cannot tell which versions it leaves.
-const silences = (rule: Rule, name: string) =>
-  matches(rule['dependency-name'], name) &&
-  levels.every((level) => rule['update-types']?.includes(level) ?? true)
+// Whether the ignore rules that match a dependency, taken together, leave it no update. A rule
+// with neither versions nor update types ignores every version, and a versions list counts
+// as silencing too. Otherwise the rules' update types must cover major, minor and patch.
+const silenced = (ignore: Rule[], name: string) => {
+  const rules = ignore.filter((rule) => matches(rule['dependency-name'], name))
+  if (rules.some((rule) => rule.versions?.length || !rule['update-types']?.length)) return true
+  const types = new Set(rules.flatMap((rule) => rule['update-types'] ?? []))
+  return levels.every((level) => types.has(level))
+}
 
 // With an allow list, only the direct dependencies one of its rules matches are updated.
 // "indirect", or a type this test does not know, matches no direct dependency here.
@@ -121,8 +130,7 @@ function updatesOff(candidate: Config) {
       off('an ignore rule names every dependency')
     const eligible = directDependencies(update.directory).filter(
       ({ name, type }) =>
-        (update.allow?.some((rule) => allows(rule, name, type)) ?? true) &&
-        !ignore.some((rule) => silences(rule, name)),
+        (update.allow?.some((rule) => allows(rule, name, type)) ?? true) && !silenced(ignore, name),
     )
     if (eligible.length === 0) off('no direct dependency is left for version updates')
     if (
@@ -173,6 +181,34 @@ const fixtures: { name: string; change: (candidate: Config) => void; reason: str
       entry(candidate, '/tools/zapier-hourmere').ignore = [
         ...'@abcdefghijklmnopqrstuvwxyz0123456789',
       ].map((first) => ({ 'dependency-name': `${first}*` }))
+    },
+    reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
+  },
+  {
+    name: 'a versions range next to update types on every dependency',
+    change: (candidate) => {
+      entry(candidate, '/tools/zapier-hourmere').ignore = directDependencies(
+        '/tools/zapier-hourmere',
+      ).map(({ name }) => ({
+        'dependency-name': name,
+        versions: ['>=0'],
+        'update-types': ['version-update:semver-major'],
+      }))
+    },
+    reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
+  },
+  {
+    name: 'majors and the other update types ignored by separate rules',
+    change: (candidate) => {
+      entry(candidate, '/tools/zapier-hourmere').ignore = directDependencies(
+        '/tools/zapier-hourmere',
+      ).flatMap(({ name }) => [
+        { 'dependency-name': name, 'update-types': ['version-update:semver-major'] },
+        {
+          'dependency-name': name,
+          'update-types': ['version-update:semver-minor', 'version-update:semver-patch'],
+        },
+      ])
     },
     reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
   },
@@ -233,6 +269,19 @@ it.each(fixtures)('counts $name as updates off', ({ change, reason }) => {
   const candidate = structuredClone(config)
   change(candidate)
   expect(updatesOff(candidate)).toContain(reason)
+})
+
+it('keeps a dependency whose rules together leave one update type', () => {
+  const candidate = structuredClone(config)
+  entry(candidate, '/tools/zapier-hourmere').ignore = directDependencies(
+    '/tools/zapier-hourmere',
+  ).flatMap(({ name }) => [
+    { 'dependency-name': name, 'update-types': ['version-update:semver-major'] },
+    { 'dependency-name': name, 'update-types': ['version-update:semver-minor'] },
+  ])
+  expect(updatesOff(candidate)).not.toContain(
+    '/tools/zapier-hourmere: no direct dependency is left for version updates',
+  )
 })
 
 it('leaves the n8n workflow pin and TypeScript majors to manual updates', () => {

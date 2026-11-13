@@ -15,7 +15,6 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Private per-attendee no-show marking after the scheduled start, with dashboard, REST,
   MCP and CLI access for hosts and browser-session access for team owners/admins. Optional
   `booking.attendee_no_show_changed` webhooks report actual changes without attendee contacts.
-
 - `security.txt` on hourmere.com and www.hourmere.com lists Hourmere's private vulnerability
   reporting channels.
 - Self-hosted operators can allow exact private webhook hosts or IP/CIDR and port ranges
@@ -210,6 +209,15 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **SSO audit actions (migration 0085) upgrade in place.** The migration follows 0080: it
+  replaces the audit details check with 0080's rules, unchanged, plus allow-lists for the SSO
+  audit actions, which no version records yet. It is safe to apply while the previous version
+  is still running. Like 0080, the check is validated in the migration's transaction, so
+  writes to `audit_events` wait while existing rows are checked. A journal row written
+  outside the application with an SSO action whose new rule requires details, such as
+  `sso_provider.created` with empty details, makes the migration fail with 23514 and change
+  nothing; delete that row and apply again. See the
+  [audit log](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md#sso-actions).
 - **Audit event details (migration 0080) upgrade in place.** The migration replaces the
   audit journal's details check: the `events` value of a webhook or Slack destination event
   must now be an array of distinct event names from that destination's catalogue, at least
@@ -241,7 +249,10 @@ stack includes PostgreSQL 18.
 - **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
   apply while the previous version is still running: it adds nullable attendee columns and
   only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply
-  it before starting the new version (automatic with `AUTO_MIGRATE=true`). See the
+  it before starting the new version (automatic with `AUTO_MIGRATE=true`). Adding the
+  checks takes an `ACCESS EXCLUSIVE` lock and scans the attendee, webhook and delivery
+  tables; concurrent operations can pause until the migration transaction commits, with
+  longer pauses on large tables. See the
   [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#private-attendee-no-show-markers).
 - **Audit event journal (migration 0067) upgrades in place.** The migration adds the
   `audit_events` table and its indexes; earlier changes are not backfilled. It is safe to

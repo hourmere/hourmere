@@ -306,6 +306,8 @@ describe('fixture proxy source-copy negative controls', () => {
   it.each(['outbound', 'pendingClose'])('detects removal of the residual %s guard', async (set) => {
     const stale: Replacement =
       set === 'outbound' ? ['outbound.delete(socket)', ''] : ['pendingClose.delete(closed)', '']
+    // The precondition: only a working copy rejects with the residual message, so a broken copy
+    // fails here with its own error before the guarded kill below is counted.
     await exerciseActive([stale], true)
     await exerciseActive(
       [

@@ -151,7 +151,7 @@ describe('test database ownership', () => {
             query_timeout: timeout + 1_000,
             lock_timeout: false,
             connect_timeout: 5,
-            options: `-c statement_timeout=${timeout} -c lock_timeout=0`,
+            options: `-c statement_timeout=${timeout} -c lock_timeout=0 -c client_connection_check_interval=1000`,
           }),
         )
       } finally {
@@ -559,6 +559,74 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
       await template?.drop()
     }
   }, 20_000)
+
+  it('lets the server abort a CREATE DATABASE whose client has gone', async () => {
+    // URL parameters and PGOPTIONS cannot disable the server-side client check.
+    vi.stubEnv('PGOPTIONS', '-c client_connection_check_interval=0')
+    const weakened = new URL(serverUrl as string)
+    weakened.searchParams.set('client_connection_check_interval', '0')
+    weakened.searchParams.set('options', '-c client_connection_check_interval=0')
+    const clients: pg.Client[] = []
+    const connect = pg.Client.prototype.connect
+    vi.spyOn(pg.Client.prototype, 'connect').mockImplementation(function (
+      this: pg.Client,
+      ...args: unknown[]
+    ) {
+      clients.push(this)
+      return (connect as (...a: unknown[]) => unknown).apply(this, args) as never
+    } as never)
+    let template: Awaited<ReturnType<typeof createTestDatabaseTemplate>> | undefined
+    let holder: Awaited<ReturnType<typeof holdTemplate>> | undefined
+    let creation: ReturnType<typeof settle> | undefined
+    try {
+      template = await createTestDatabaseTemplate(weakened.toString(), async () => {}, {
+        tag: 'gone_template',
+      })
+      clients.length = 0
+      holder = await holdTemplate(template.name)
+      creation = settle(template.clone(undefined, { migrate: false, tag: 'gone_client' }))
+      await holder.waitForBlockedCreate()
+      // Only the connection this test's CREATE opened: the backend of that CREATE.
+      const { rows: backends } = await admin.query<{ pid: number }>(
+        "SELECT pid FROM pg_stat_activity WHERE query LIKE $1 || '%' AND query LIKE '% TEMPLATE ' || $2",
+        ['CREATE DATABASE hourmere_test_gone_client_', template.name],
+      )
+      expect(backends).toHaveLength(1)
+      const pid = backends[0]?.pid as number
+      const client = clients.find(
+        (candidate) => (candidate as unknown as { processID: number }).processID === pid,
+      )
+      expect(client).toBeDefined()
+      const stream = (client as unknown as { connection: { stream: { destroy(): void } } })
+        .connection.stream
+      stream.destroy()
+      const started = performance.now()
+      let running = true
+      while (running && performance.now() - started < 3_000) {
+        await delay(100)
+        const { rowCount } = await admin.query(
+          "SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND query LIKE 'CREATE DATABASE %'",
+          [pid],
+        )
+        running = rowCount !== 0
+      }
+      expect(running, 'server-side CREATE DATABASE kept running after its client went').toBe(false)
+      const pattern = `hourmere_test_gone_client_${process.pid}_%`
+      const leftovers = () =>
+        admin.query('SELECT datname FROM pg_database WHERE datname LIKE $1', [pattern])
+      expect((await leftovers()).rows).toEqual([])
+      await holder.release()
+      await delay(1_000)
+      expect((await leftovers()).rows).toEqual([])
+      await creation
+    } finally {
+      vi.restoreAllMocks()
+      vi.unstubAllEnvs()
+      await holder?.release()
+      await (await creation)?.database?.drop()
+      await template?.drop()
+    }
+  }, 30_000)
 
   it('still cancels CREATE DATABASE with a statement timeout after its 30 s cap', async () => {
     const guard = new AbortController()

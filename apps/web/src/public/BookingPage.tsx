@@ -410,11 +410,14 @@ function BookingFlow({
   }, [handle, slug, team, oneTimeToken])
   const chosenLocation = selectedLocation(event.locations ?? [], values.locationOptionId)
   const locationOptionId = chosenLocation?.id
+  // Omitted choices preserve the existing automatic-conference behavior for singletons.
+  const requestedLocationOptionId =
+    (event.locations?.length ?? 0) > 1 ? locationOptionId : undefined
   const loadSlots = useMemo<SlotLoader>(() => {
     const duration = hasDurationChoices || directFlow ? durationMinutes : undefined
     const load = oneTimeToken
-      ? oneTimeLinkSlots(oneTimeToken, duration, locationOptionId)
-      : eventSlots(handle, slug, team, duration, locationOptionId)
+      ? oneTimeLinkSlots(oneTimeToken, duration, requestedLocationOptionId)
+      : eventSlots(handle, slug, team, duration, requestedLocationOptionId)
     return async (start, end, signal) => {
       try {
         return await load(start, end, signal)
@@ -445,7 +448,7 @@ function BookingFlow({
     oneTimeToken,
     durationMinutes,
     hasDurationChoices,
-    locationOptionId,
+    requestedLocationOptionId,
     directFlow,
     event.questions,
     refreshDurations,
@@ -590,7 +593,7 @@ function BookingFlow({
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
-      ...(chosenLocation && { locationOptionId: chosenLocation.id }),
+      ...(requestedLocationOptionId && { locationOptionId: requestedLocationOptionId }),
       ...(chosenLocation?.askInvitee && {
         inviteePhone: values.inviteePhone?.replace(/[ ().-]/g, ''),
       }),

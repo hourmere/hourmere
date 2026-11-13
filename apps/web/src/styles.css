@@ -2687,3 +2687,14 @@ h3:lang(zh) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Availability troubleshooting: reasons under each time */
+
+.troubleshoot-reasons {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+}
+
+.troubleshoot-reasons li + li {
+  margin-top: var(--space-1);
+}

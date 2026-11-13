@@ -8,8 +8,8 @@
 // CLI table; only workflow-specific names are asserted, and no catalogue is snapshotted. Each
 // later step that adds an operation admits its own names here. Definition storage (step 2) is
 // read only by the guarded read service (packages/workflows/src/reads.ts), which names no
-// execution table; execution storage (step 3) is tables only. Every other production module
-// stays away from the tables of migrations 0076 and 0079.
+// execution table; execution storage (step 3) and the creation keys (step 5) are tables only.
+// Every other production module stays away from the tables of migrations 0076, 0079 and 0087.
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -66,12 +66,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const STORAGE_SUPPORT = [
   'packages/db/src/workflow-storage-protections.ts',
   'packages/db/src/workflow-storage-execution-protections.ts',
+  'packages/db/src/workflow-storage-creation-keys-protections.ts',
+  'packages/db/src/workflow-storage-lock-order.ts',
 ]
 const isStorageLayer = (file: string) =>
   file.startsWith('packages/db/migrations/') ||
   file === 'packages/db/src/tables.ts' ||
   STORAGE_SUPPORT.includes(file)
-// The workflow tables of migrations 0076 and 0079.
+// The workflow tables of migrations 0076, 0079 and 0087.
 const STORAGE_TABLES = [
   'workflow_definitions',
   'workflow_revisions',
@@ -80,6 +82,7 @@ const STORAGE_TABLES = [
   'workflow_recipient_claims',
   'workflow_run_history',
   'workflow_mail_reservations',
+  'workflow_creation_keys',
 ]
 /** `workflow_run_history` → `WorkflowRunHistory`, the generated row type. */
 const rowType = (table: string) =>

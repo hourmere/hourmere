@@ -35,6 +35,13 @@ export {
   type SlotView,
 } from './availability.ts'
 export {
+  type TroubleshootAvailabilityInput,
+  type TroubleshootAvailabilityResult,
+  type TroubleshootReason,
+  type TroubleshootSlot,
+  troubleshootEventAvailability,
+} from './availability-troubleshooting.ts'
+export {
   BOOKING_EXPORT_COLUMNS,
   type BookingExportInput,
   exportBookingsCsv,
