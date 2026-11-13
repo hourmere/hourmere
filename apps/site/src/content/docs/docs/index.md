@@ -81,7 +81,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
 - [Availability drafts](/docs/availability#known-limitations) have no autosave or automatic
-  conflict merge; use the combined API for atomic edits with version checks.
+  conflict merge; use the combined API for atomic edits with version checks. Schedules
+  allow at most 10,000 date overrides, including past dates.
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.

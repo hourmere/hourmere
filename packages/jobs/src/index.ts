@@ -10,6 +10,11 @@ export type { KyselyTransactionLike } from 'pg-boss'
 export { AUDIT_RETENTION_CRON, auditLogRetentionJob } from './audit-retention.ts'
 export { oneTimeBookingLinksRetentionJob } from './one-time-links-retention.ts'
 export { paymentHoldsExpiryJob } from './payment-holds.ts'
+export {
+  ROUTING_RETENTION_CRON,
+  ROUTING_RETENTION_RUN,
+  routingRetentionJob,
+} from './routing-retention.ts'
 
 /**
  * How pg-boss treats jobs that share a `singletonKey` (see https://hourmere.com/docs/notifications):
