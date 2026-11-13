@@ -310,8 +310,9 @@ function SlotRow({ slot, data }: { slot: TroubleshootSlot; data: Troubleshooting
             const partial = reason.start !== slot.start || reason.end !== slot.end
             return (
               <li key={`${reason.code}/${reason.hostUserId ?? ''}/${reason.start}/${reason.end}`}>
-                {host.kind === 'named' && <strong>{t('{name}:', { name: host.name })} </strong>}
-                {host.kind === 'unnamed' && <strong>{t('A team host:')} </strong>}
+                {host.kind === 'named' && <strong>{t('{name}:', { name: host.name })}</strong>}
+                {host.kind === 'unnamed' && <strong>{t('A team host:')}</strong>}
+                {host.kind !== 'none' && !locale.startsWith('zh') && ' '}
                 {t(reasonText(reason.code))}
                 {partial && (
                   <span className="muted">

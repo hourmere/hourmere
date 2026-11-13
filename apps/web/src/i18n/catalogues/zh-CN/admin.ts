@@ -1915,18 +1915,18 @@ export const admin = {
   'This day could not be checked. Check the date and time zone.':
     '无法检查这一天。请核对日期和时区。',
   '{available} of {total} possible times can be booked. Times are shown in {zone}.':
-    '{total} 个可能的时间中有 {available} 个可以预约。时间按 {zone} 显示。',
+    '{total}个可能的时间中有{available}个可以预约。时间按{zone}显示。',
   'Hide times that are only outside the available hours':
     '隐藏仅因不在可预约时段内而无法预约的时间',
   '{count} times outside the available hours are hidden.':
-    '已隐藏 {count} 个不在可预约时段内的时间。',
+    '已隐藏{count}个不在可预约时段内的时间。',
   'There are no possible start times on this day.': '这一天没有可能的开始时间。',
   'Times on this day': '这一天的时间',
   Bookable: '可预约',
   'Not bookable': '不可预约',
   '{name}:': '{name}：',
   'A team host:': '一位团队主持人：',
-  '(affects {range})': '（影响 {range}）',
+  '(affects {range})': '（影响{range}）',
   'This time has already passed.': '这个时间已经过去。',
   'This meeting length is not offered for this event type.': '此活动类型不提供这个会议时长。',
   'Outside the available hours (weekly hours or a date override).':
