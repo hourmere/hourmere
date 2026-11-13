@@ -218,8 +218,9 @@ describe.skipIf(!process.env.DATABASE_URL)('group session calendar write-back pr
       expect(destination.group_slot_id).not.toBe(source.group_slot_id)
       expect(ofSlot(destination.group_slot_id as string)).toHaveLength(1)
       expect(ofSlot(destination.group_slot_id as string)[0]?.description).toBe('1')
-      if (variant !== 'google_meet')
-        expect(ofSlot(source.group_slot_id as string)[0]?.status).toBe('cancelled')
+      // The last exit cancels the source occurrence's event, including its Meet.
+      expect(ofSlot(source.group_slot_id as string)[0]?.status).toBe('cancelled')
+      expect(ofSlot(destination.group_slot_id as string)[0]?.status).toBe('confirmed')
 
       // Every byte any provider received, and every event it stores.
       const wire = JSON.stringify([

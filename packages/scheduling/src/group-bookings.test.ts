@@ -648,7 +648,9 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
       code: 'slot_unavailable',
       message: 'This time is not available',
     })
-    expect(reads).toBeGreaterThan(1)
+    // Exactly the admission check (passes) and the preparation (fails): the refusal
+    // comes from the mapping after admission, not from admission itself.
+    expect(reads).toBe(2)
     expect((await state(s.eventId))[0]!.active_seats).toBe(1)
   })
   it('keeps current notice and booking-window cutoffs on occupied occurrences', async () => {
