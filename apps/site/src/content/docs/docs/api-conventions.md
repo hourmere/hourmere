@@ -1013,6 +1013,15 @@ before it), alongside the existing start-time `from`/`to` filters. The web app s
 and Past at the end time, so a meeting in progress stays Upcoming. Ordering and cursors
 remain based on start time and ID; keep all filters when paginating.
 
+Both booking lists also accept the optional `status` (`confirmed` or `cancelled`) and the
+optional search `q`: at most 100 characters after trimming, matched case-insensitively
+against the invitee's name and email and the current event type title, with `%`, `_` and
+`\` taken literally. A search only narrows the caller's existing host or team list and is
+refused with `400 invalid_request` when too long or containing control characters. The web
+app adds a Cancelled tab (`status=cancelled`, newest first) and a search box to the host's
+bookings page; CSV export does not take `q`. See
+[searching the booking list](/docs/rest#search-the-booking-list).
+
 Authenticated host booking lists and details add optional `rescheduledToId`: the immediate
 successor in the same organization that the caller also hosts, or null when none is
 available. It is included even when the successor is outside the current page or filters,

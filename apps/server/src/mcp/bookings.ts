@@ -525,7 +525,7 @@ export function bookingTools({
     name: 'list_bookings',
     title: 'List my bookings',
     description:
-      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time and id, ascending by default, a page at a time. Use order=desc for newest first. Filter by start time (from inclusive, to exclusive, RFC 3339) and status. When nextCursor is not null, call again with it as cursor and the same filters and order for the next page. Times are UTC; each attendee has their own timeZone. Imported records carry managementPolicy=local_only_read_only and remain managed in the original system; they cannot be changed or retried here.",
+      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time and id, ascending by default, a page at a time. Use order=desc for newest first. Filter by start time (from inclusive, to exclusive, RFC 3339) and status (cancelled for the cancelled view). q searches the invitee name, invitee email and event type title, ignoring case, within these bookings only. When nextCursor is not null, call again with it as cursor and the same filters, q and order for the next page. Times are UTC; each attendee has their own timeZone. Imported records carry managementPolicy=local_only_read_only and remain managed in the original system; they cannot be changed or retried here.",
     input: ListBookingsInput,
     output: BookingPage,
     annotations: {
@@ -542,6 +542,7 @@ export function bookingTools({
         endAfter: args.endAfter === undefined ? undefined : Temporal.Instant.from(args.endAfter),
         endTo: args.endTo === undefined ? undefined : Temporal.Instant.from(args.endTo),
         status: args.status,
+        q: args.q,
         limit: args.limit,
         cursor: args.cursor,
       })

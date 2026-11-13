@@ -1991,6 +1991,18 @@ export const admin = {
     'The saved booking link is invalid. Reload the saved event type and try again.',
   'The email preview could not be created. Reload the saved event type and try again.':
     'The email preview could not be created. Reload the saved event type and try again.',
+  'Cancelled bookings': 'Cancelled bookings',
+  'No cancelled bookings.': 'No cancelled bookings.',
+  'Search bookings': 'Search bookings',
+  'Invitee name or email, or event type.': 'Invitee name or email, or event type.',
+  'No bookings match your search.': 'No bookings match your search.',
+  'Try another name, email address or event type.':
+    'Try another name, email address or event type.',
+  'Clear search': 'Clear search',
+  'Matching bookings: {0}.': 'Matching bookings: {0}.',
+  'Matching bookings shown: {0}. More are available.':
+    'Matching bookings shown: {0}. More are available.',
+  'Clear the search to export bookings as CSV.': 'Clear the search to export bookings as CSV.',
 
   // Availability troubleshooting
   'Troubleshoot availability': 'Troubleshoot availability',

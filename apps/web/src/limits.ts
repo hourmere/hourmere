@@ -52,6 +52,8 @@ export const PROFILE = {
 
 export const BOOKING = {
   cancelReasonMaxLength: 1000,
+  /** The booking list's `q`, after trimming. */
+  searchMaxLength: 100,
 } as const
 
 /** Better Auth protocol limit, checked against @hourmere/auth in web-limits.test.ts. */
