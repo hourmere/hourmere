@@ -309,6 +309,13 @@ export async function consumeMailboxProof(
   requireSsoEnabled(deps.capabilities)
   const clock = deps.now ?? databaseClock
   return deps.db.transaction().execute(async (trx) => {
+    // Take the row locks first (a delivery may hold the attempt through SMTP), then read the
+    // instant every check and write of this transaction uses.
+    await sql`SELECT 1 FROM sso_attempts WHERE id = ${input.attemptId}::uuid FOR UPDATE`.execute(
+      trx,
+    )
+    await sql`SELECT 1 FROM sso_mailbox_tokens WHERE attempt_id = ${input.attemptId}::uuid
+      FOR UPDATE`.execute(trx)
     const now = await clock(trx)
     const attempt = await lockAttempt(trx, input.attemptId, now)
     if (!attempt || !usable(attempt, presenter)) return false

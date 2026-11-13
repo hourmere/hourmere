@@ -184,6 +184,8 @@ function harness(
           },
           real.MailboxProofEmailPayload.parse(payload),
         ).catch((error: unknown) => errors.push(error))
+      // A refusal is silent; a delivery that threw (a trigger, say) is never a refusal.
+      expect(errors).toEqual([])
     },
   }
 }
@@ -655,6 +657,34 @@ const scenarios = {
     expect(h.sent.filter(({ to }) => to === a.mailbox)).toHaveLength(1)
   },
 
+  /** Consume reads its instant only after the row locks it waits for. */
+  async lockThenClock(M: Module) {
+    const h = harness(M)
+    const who = browser()
+    const a = await attempt('sign_in', who)
+    const token = await proofToken(h, a, who)
+    const blocker = await owned.pool.connect()
+    try {
+      await blocker.query('BEGIN')
+      await blocker.query('SELECT 1 FROM sso_attempts WHERE id=$1 FOR UPDATE', [a.id])
+      const pending = consume(h, a.id, token, who)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const released = (await blocker.query<{ v: string }>('SELECT clock_timestamp()::text AS v'))
+        .rows[0]?.v
+      await blocker.query('COMMIT')
+      expect((await pending).status).toBe(200)
+      expect(
+        await text(
+          'SELECT (mailbox_proven_at >= $2::timestamptz)::text AS v FROM sso_attempts WHERE id=$1',
+          [a.id, released],
+        ),
+      ).toBe('true')
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => {})
+      blocker.release()
+    }
+  },
+
   /** Two concurrent consumes of one token: exactly one proof. */
   async consumeRace(M: Module) {
     const h = harness(M)
@@ -752,7 +782,7 @@ const scenarios = {
       const live = await attempt(kind, who)
       const expired = await seed('sso_attempts', {
         ...(await attemptRowValues(kind, who)),
-        created_at: at(-700),
+        created_at: at(-650),
         expires_at: at(-100),
       })
       await seed('sso_mailbox_tokens', {
@@ -1036,6 +1066,15 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
       ],
       ['guessCap', 'guess cap', ['if (deps.guesses.hit(attempt.id) !== undefined)', 'if (false)']],
       ['cooldown', 'resend cooldown', ['if (cooling[0]?.cooling) return', '']],
+      [
+        'lockThenClock',
+        'consume locks before reading its instant',
+        [
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation anchor.
+          'await sql`SELECT 1 FROM sso_attempts WHERE id = ${input.attemptId}::uuid FOR UPDATE`.execute(',
+          'void ((unlocked: unknown) => unlocked)(',
+        ],
+      ],
       [
         'rotation',
         'rotation deletes the previous token',

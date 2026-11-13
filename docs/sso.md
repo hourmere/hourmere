@@ -979,7 +979,10 @@ when the current one is at least 60 seconds old (database clock); per address, t
 mail ledger with a recipient digest of its own purpose and the sign-in caps
 (`SIGN_IN_MAIL_MAX_PER_HOUR`, `SIGN_IN_MAIL_MAX_PER_DAY`), counted in the shared instance
 `MAIL_MAX_PER_HOUR` like sign-in mail; and the fifth wrong token from the attempt's own browser
-deletes its token, so only a resend issues another. No SSO audit action describes a mailbox
+deletes its token, counted in each process, so only a resend issues another (the 256-bit token
+makes the count a backstop, not the protection). As for sign-in mail, the email is sent inside
+the transaction that stores the token and counts it, so an email whose commit then fails holds
+a dead link and the retry sends another. No SSO audit action describes a mailbox
 proof, so the step records none; the operation the proof is for records its own event.
 
 Protocol endpoints are outside `/api/v1`, as existing Better Auth sign-in already is:
@@ -1200,8 +1203,9 @@ table defines: while both protocols are off, before any lookup, write or rate-li
 count, identically for known and unknown IDs. The registered operations still appear in
 the published catalogues with the note above. `GET /api/v1/instance` reports
 `ssoOidcEnabled`/`ssoSamlEnabled` as `false`, `/me` adds no SSO fields, the web shows no
-SSO navigation or sign-in option, and the domain recheck worker is not scheduled. Two
-things work in every state: a stored `requireSso` policy is enforced from Team
+SSO navigation or sign-in option, and the domain recheck worker is not scheduled. The
+mailbox proof delivery job drops every job, and the attempt cleanup, which only deletes,
+stays scheduled. Two other things work in every state: a stored `requireSso` policy is enforced from Team
 enforcement onward (no product path can store one while hard-off), and the operator
 maintenance commands, which only remove trust, run.
 
