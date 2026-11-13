@@ -46,8 +46,11 @@ Hourmere shows only reasons its scheduling engine actually reports. Several can 
 | `minimum_notice` | Too soon for the event type’s minimum notice. |
 | `booking_window` | Further ahead than people can book. |
 | `calendar_busy` | A connected calendar that is checked for conflicts is busy. |
-| `buffer_before` / `buffer_after` | The buffer before or after the meeting overlaps another commitment. |
-| `daily_limit` / `weekly_limit` / `monthly_limit` | The event type’s booking limit for that host-local period is reached. |
+| `buffer_before` | The buffer before the meeting overlaps another commitment. |
+| `buffer_after` | The buffer after the meeting overlaps another commitment. |
+| `daily_limit` | The event type’s booking limit for the host-local day is reached. |
+| `weekly_limit` | The event type’s booking limit for the host-local week (Monday to Sunday) is reached. |
+| `monthly_limit` | The event type’s booking limit for the host-local month is reached. |
 | `host_conflict` | Another Hourmere booking already takes the time. |
 | `collective_member_unavailable` | A collective event needs every host, and at least one is not free. |
 | `no_eligible_round_robin_host` | No host in the round-robin rotation is free. |
