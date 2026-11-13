@@ -24,6 +24,7 @@ import { memberReadPrivacy } from './member-read-privacy.ts'
 import { serializeOrganizationContext } from './organization-context.ts'
 import { organizationOperationRecords } from './organization-operations.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
+import type { ScimClaimCompletion } from './scim-claims.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
 import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
@@ -225,6 +226,12 @@ export interface AuthConfig {
   mcpOAuth?: boolean | undefined
   /** Injected only by isolated client-metadata tests; runtime uses the pinned DNS transport. */
   mcpMetadataFetcher?: Parameters<typeof mcpOAuthPlugins>[2]
+  /**
+   * SCIM claim completion inside the existing acceptance flows (docs/scim.md). The resource
+   * test flag: only test harnesses pass it, in code; productionAuthOptions never does, and no
+   * setting reaches it. The SSO linking completion step extends the same dependency.
+   */
+  scimClaims?: ScimClaimCompletion | undefined
   socialProviderOptions?: { google?: Partial<GoogleOptions>; microsoft?: Partial<MicrosoftOptions> }
 }
 
@@ -251,11 +258,12 @@ export function createAuth({
   mcpOAuth = false,
   mcpMetadataFetcher,
   leaveTeamMember,
+  scimClaims,
 }: AuthConfig) {
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
   const { google, microsoft } = socialProviders
-  const teamRolePolicy = createTeamRolePolicy(db, leaveTeamMember)
+  const teamRolePolicy = createTeamRolePolicy(db, leaveTeamMember, scimClaims)
   const auth = betterAuth({
     database: teamTransactionAdapter(createDb(pool), teamRolePolicy.withTransaction),
     disabledPaths: [
@@ -523,6 +531,13 @@ export function createAuth({
 
 export type Auth = ReturnType<typeof createAuth>
 
+export {
+  type ScimClaimCompletion,
+  type ScimClaimDecision,
+  type ScimClaimFinish,
+  type ScimInvitationProof,
+  scimClaimCompletion,
+} from './scim-claims.ts'
 export {
   authenticateScimToken,
   createScimToken,
