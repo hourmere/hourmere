@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -13,6 +12,7 @@ import * as hooks from '../../hooks.ts'
 import '../../i18n/admin.ts'
 import * as runtime from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { BOOKING_ID, booking as hostBooking } from '../../test/fixtures.ts'
 import { NoShowAttendees } from './NoShowAttendees.tsx'
@@ -191,15 +191,11 @@ describe('admin no-show controls', () => {
 
 const source = readFileSync('apps/web/src/pages/bookings/NoShowAttendees.tsx', 'utf8')
 function copy(text: string): typeof NoShowAttendees {
-  const code = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement' }).code)",
-    ],
-    { input: text, encoding: 'utf8' },
-  )
+  const code = compileSourceCopy('apps/web/src/pages/bookings/NoShowAttendees.tsx', text, {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+  })
   const dependencies: Record<string, unknown> = {
     react,
     '../../api/booking-policy.ts': policy,

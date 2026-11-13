@@ -9,6 +9,12 @@ export const common = {
     '此请求已过期或发生变更。请重新加载预约，再选择下一步操作。',
   'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
     '主持人请你选择新时间。在你改期或取消前，原预约仍然有效。',
+  'This request to choose a new time has expired. Your booking stays at its original time.':
+    '此改期请求已过期。你的预约仍保持原定时间。',
+  'Your host has sent a newer request to choose a new time, which replaces this one.':
+    '主持人已发送新的改期请求，取代了此请求。',
+  'This booking has already been moved to a new time, so this request is closed.':
+    '此预约已改到新的时间，因此此请求已关闭。',
   'This waitlist is full (100 entries). Please check available times later.':
     '此候补名单已满（100 人）。请稍后查看可预约时间。',
   'Waitlist email is unavailable. Please contact the host.': '候补邮件暂不可用。请联系主持人。',

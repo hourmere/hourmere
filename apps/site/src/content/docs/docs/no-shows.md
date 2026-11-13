@@ -29,8 +29,10 @@ both marking and unmarking. Requests for another attendee or organization confer
 The stored mark records the marking account ID and instant. Repeating the same mark
 preserves that original attribution and time; repeating an unmark is also harmless.
 Unmarking clears both fields. Competing requests serialize, so the final stored state
-reflects one ordered sequence of changes. This is current state, not a permanent audit
-history of every correction.
+reflects one ordered sequence of changes. The stored fields are current state only. Each
+change is also recorded in the [audit log](/docs/audit-log) with the attendee ID, whether
+it marked or unmarked them, and the credential used, never a name or email address;
+repeating the current state records nothing.
 
 ## REST, MCP and CLI
 
@@ -85,8 +87,8 @@ are unchanged; opt in to the new event. Normal delivery retry and ordering limit
 There is no automatic attendance detection, attendance export, aggregate no-show report,
 penalty, refund, or attendance-based follow-up rule. The stored fields are available for
 future reporting/export work. A marker is a host's judgment, not evidence from a meeting
-provider. Corrections overwrite current state; webhook retention is not a permanent audit
-log. Imported bookings remain managed in their original system. Confirmed paid bookings
-remain readable, but attendance changes return `paid_booking_management_unavailable`;
-the dashboard hides their mark and unmark actions. Pending, expired and unpaid-cancelled
-payment holds are not visible through attendance reads.
+provider. Corrections overwrite current state; the audit log keeps each change but has
+no viewer, read API or export yet. Imported bookings remain managed in their original system.
+Confirmed paid bookings remain readable, but attendance changes return
+`paid_booking_management_unavailable`; the dashboard hides their mark and unmark actions.
+Pending, expired and unpaid-cancelled payment holds are not visible through attendance reads.

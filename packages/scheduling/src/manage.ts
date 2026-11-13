@@ -14,6 +14,8 @@ import {
   type Booking,
   getHostBooking,
   getManagedBooking,
+  type ManagedRescheduleRequestState,
+  managedLinkRescheduleRequest,
 } from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -25,15 +27,21 @@ export interface ManagedBooking extends Booking {
   eventType: { title: string; durationMinutes: number; allowedDurationsMinutes?: number[] } | null
   /** The people the invitee meets: each host's name (their handle if they have no name). */
   hosts: { name: string }[]
+  /** Only for a reschedule request email's link: what became of that request. */
+  rescheduleRequest?: { id: string; state: ManagedRescheduleRequestState }
 }
 
-/** getManagedBooking plus the event type and the hosts' names. */
+/** getManagedBooking plus the event type, the hosts' names and the link's own request. */
 export async function getManagedBookingDetails(
   ctx: PublicContext,
   token: string | undefined,
 ): Promise<ManagedBooking> {
-  const booking = await getManagedBooking(ctx, token)
-  const [eventType, hosts] = await Promise.all([
+  // One decision time for the request deadline in both reads (they are separate statements,
+  // so a write committing between them can still show a moment apart).
+  const now = ctx.now()
+  const at = { ...ctx, now: () => now }
+  const booking = await getManagedBooking(at, token)
+  const [eventType, hosts, rescheduleRequest] = await Promise.all([
     booking.eventTypeId === null
       ? undefined
       : ctx.db
@@ -50,6 +58,7 @@ export async function getManagedBookingDetails(
       .where('bh.booking_id', '=', booking.id)
       .orderBy('bh.user_id')
       .execute(),
+    managedLinkRescheduleRequest(at, token, booking.id),
   ])
   return {
     ...booking,
@@ -63,6 +72,7 @@ export async function getManagedBookingDetails(
         }
       : null,
     hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
+    ...(rescheduleRequest && { rescheduleRequest }),
   }
 }
 

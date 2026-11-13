@@ -56,7 +56,9 @@ function productSourceCopy(change?: Change): Factory {
     waitlistTools: () => [],
     brandingTools: () => [],
     oneTimeLinkTools: () => [],
+    slackDestinationTools: () => [],
     openTimeSnippetTools: () => [],
+    workflowTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),

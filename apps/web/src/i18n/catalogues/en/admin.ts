@@ -1,5 +1,32 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'SCIM provisioning tokens': 'SCIM provisioning tokens',
+  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
+    'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',
+  'Tokens only authorize SCIM for this organization. Keep them private.':
+    'Tokens only authorize SCIM for this organization. Keep them private.',
+  'Could not update provisioning tokens. Check the token list before trying again.':
+    'Could not update provisioning tokens. Check the token list before trying again.',
+  'New provisioning token': 'New provisioning token',
+  'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
+    'Copy this token now. It will not be shown again after you dismiss it or leave this view.',
+  'Copy token': 'Copy token',
+  'Dismiss token': 'Dismiss token',
+  'Provisioning token name': 'Provisioning token name',
+  'Create provisioning token': 'Create provisioning token',
+  'Loading provisioning tokens…': 'Loading provisioning tokens…',
+  'Could not load provisioning tokens.': 'Could not load provisioning tokens.',
+  'No provisioning tokens.': 'No provisioning tokens.',
+  'Previous token valid until: {date}': 'Previous token valid until: {date}',
+  'Last used: {date}': 'Last used: {date}',
+  'Rotate token': 'Rotate token',
+  'Revoke token': 'Revoke token',
+  'Confirm token change': 'Confirm token change',
+  'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.':
+    'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.',
+  'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.':
+    'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.',
+
   'No-shows': 'No-shows',
   'No-show': 'No-show',
   'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
@@ -47,6 +74,47 @@ export const admin = {
   White: 'White',
   'Branding saved. Booking pages and emails are unchanged.':
     'Branding saved. Booking pages and emails are unchanged.',
+  'Event type filter': 'Event type filter',
+  'All event types': 'All event types',
+  'Saved event type — details unavailable': 'Saved event type — details unavailable',
+  'Loading event type choices…': 'Loading event type choices…',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    'Could not load event type choices. Your saved filter is unchanged.',
+
+  Integrations: 'Integrations',
+  'Slack booking notifications': 'Slack booking notifications',
+  'Booking created': 'Booking created',
+  'Booking cancelled': 'Booking cancelled',
+  'Booking rescheduled': 'Booking rescheduled',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.',
+  'Loading Slack notifications…': 'Loading Slack notifications…',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    'Could not load Slack notifications. Only organization owners and admins can manage them.',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    'Could not update Slack notifications. Check your access and settings, then try again.',
+  'No Slack destination yet.': 'No Slack destination yet.',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.',
+  'Slack notifications are paused.': 'Slack notifications are paused.',
+  'Slack destination saved.': 'Slack destination saved.',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack test message queued. This does not confirm delivery.',
+  'Send test message': 'Send test message',
+  'Delete this Slack destination and its delivery history?':
+    'Delete this Slack destination and its delivery history?',
+  'Delete Slack destination': 'Delete Slack destination',
+  'Slack destination deleted.': 'Slack destination deleted.',
+  'Configure Slack notifications': 'Configure Slack notifications',
+  'Enter a Slack webhook URL and choose at least one event.':
+    'Enter a Slack webhook URL and choose at least one event.',
+  'Replacement Slack webhook URL': 'Replacement Slack webhook URL',
+  'Slack incoming-webhook URL': 'Slack incoming-webhook URL',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.',
+  'Events to post': 'Events to post',
+  'Enable Slack notifications': 'Enable Slack notifications',
+  'Save Slack destination': 'Save Slack destination',
   'Group-seat bookings do not support reschedule requests.':
     'Group-seat bookings do not support reschedule requests.',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
@@ -80,6 +148,8 @@ export const admin = {
   'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
   'Could not download CSV. Check the booking range and try again shortly.':
     'Could not download CSV. Check the booking range and try again shortly.',
+  'An export is already running for your account. Wait for it to finish and try again.':
+    'An export is already running for your account. Wait for it to finish and try again.',
   'Download CSV': 'Download CSV',
 
   'Past date overrides ({0})': 'Past date overrides ({0})',
@@ -148,6 +218,7 @@ export const admin = {
     'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.',
   'Could not remove the waitlist entry.': 'Could not remove the waitlist entry.',
   'Back to first page': 'Back to first page',
+  'Previous page': 'Previous page',
   'Next page': 'Next page',
   Refresh: 'Refresh',
 

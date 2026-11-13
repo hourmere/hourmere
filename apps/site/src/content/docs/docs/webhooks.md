@@ -5,8 +5,12 @@ description: Configure signed outbound booking webhooks and their delivery limit
 
 Webhooks are optional outbound signed notifications for booking creation, rescheduling and
 cancellation, plus private attendee no-show changes. They use the same booking services for public pages, REST and MCP. They do
-not depend on Google, Microsoft, mail or a billing account. This first version is API-only;
-there is no webhook settings page or third-party integration template.
+not depend on Google, Microsoft, mail or a billing account. Webhook management is REST-only;
+there is no webhook settings page. The private [Zapier app](/docs/zapier) and the trigger
+in the [n8n community node](/docs/n8n) use these endpoints to subscribe and unsubscribe
+automatically. [Make recipes](/docs/make) give manual module settings for
+`booking.created` and `booking.cancelled`. [Slack notifications](/docs/slack) provide a
+separate incoming-webhook destination in Settings → Integrations, reusing this delivery machinery.
 
 ## Enable and configure
 
@@ -15,7 +19,8 @@ Set `WEBHOOKS_ENABLED=true` and an independent `WEBHOOK_ENCRYPTION_KEY` containi
 processes, keep the encryption key stable and back it up securely. Do not reuse calendar or
 authentication keys. The default is disabled: no events or snapshots are captured, and
 enabling does not backfill past bookings. Turning the global switch off also skips queued
-deliveries when a worker sees them. Keep a worker running for delivery and retention cleanup.
+deliveries when a worker sees them. This switch also controls Slack capture, test enqueue
+and delivery. Keep a worker running for delivery and retention cleanup.
 
 Organization owners and admins may use these endpoints with a session or API key acting in
 that organization. Ordinary members/hosts cannot configure or inspect webhooks, since each

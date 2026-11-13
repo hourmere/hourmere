@@ -6,7 +6,7 @@ import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
 import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
-import { msg, type UiText } from '../i18n/translate.ts'
+import { type MessageKey, msg, type UiText } from '../i18n/translate.ts'
 import { ManageLink } from './AddToCalendar.tsx'
 import {
   cancelManagedBooking,
@@ -108,6 +108,24 @@ function CalendarResponseNote() {
       )}
     </p>
   )
+}
+
+const REQUEST_EXPIRED: MessageKey =
+  'This request to choose a new time has expired. Your booking stays at its original time.'
+const REQUEST_REPLACED: MessageKey =
+  'Your host has sent a newer request to choose a new time, which replaces this one.'
+const REQUEST_RESCHEDULED: MessageKey =
+  'This booking has already been moved to a new time, so this request is closed.'
+
+/**
+ * Why a host's request can no longer be answered, for the states the booking itself does not
+ * show: a cancelled booking and a started meeting already say so on this page.
+ */
+function closedRequestNotice(state: string | undefined, started: boolean): MessageKey | undefined {
+  if (state === 'replaced') return REQUEST_REPLACED
+  if (state === 'rescheduled') return REQUEST_RESCHEDULED
+  if (state === 'expired' && !started) return REQUEST_EXPIRED
+  return undefined
 }
 
 async function followReschedule(
@@ -255,8 +273,22 @@ function ManageView({
   const started = Date.parse(booking.start) <= observedNow
   const ended = Date.parse(booking.end) <= observedNow
   const changeable = booking.status === 'confirmed' && !started
+  // A request email's link says what became of its request; a refused stale answer says the
+  // same about the booking it reloaded, and only while that booking is the one shown.
+  const [answerNotice, setAnswerNotice] = useState<
+    { id: string; start: string; key: MessageKey } | undefined
+  >(undefined)
+  const answered =
+    answerNotice?.id === booking.id && answerNotice.start === booking.start
+      ? answerNotice.key
+      : undefined
+  const requestNotice =
+    booking.status === 'cancelled'
+      ? undefined
+      : (answered ?? closedRequestNotice(booking.rescheduleRequest?.state, started))
+  // A closed request's email button explains first instead of opening the picker or form.
   const [mode, setMode] = useState<Mode>(() =>
-    initialAction && changeable ? { kind: initialAction } : { kind: 'view' },
+    initialAction && changeable && !requestNotice ? { kind: initialAction } : { kind: 'view' },
   )
   const loadSlots = useMemo(() => rescheduleSlots(token), [token])
   const title = booking.eventType?.title ?? booking.title
@@ -288,8 +320,43 @@ function ManageView({
     return 'Your booking was not moved: the request did not go through. You can try again.'
   }
 
+  /** The request this page answered changed: show the booking now and say what happened. */
+  async function afterRequestChanged(answered: string | undefined) {
+    const fresh = await onStale()
+    if (!fresh) {
+      setMode({
+        kind: 'view',
+        message:
+          'This request has expired or changed. Reload your booking to choose what to do next.',
+      })
+      return
+    }
+    if (fresh.status === 'cancelled') {
+      setMode({ kind: 'view', message: 'This booking was already cancelled.' })
+      return
+    }
+    if (Date.parse(fresh.start) <= currentTime()) {
+      setMode({ kind: 'view', meetingStarted: true })
+      return
+    }
+    const own = fresh.rescheduleRequest
+    const key =
+      fresh.id !== booking.id || fresh.start !== booking.start
+        ? REQUEST_RESCHEDULED
+        : ((own?.id === answered ? closedRequestNotice(own?.state, false) : undefined) ??
+          (fresh.pendingReschedule && fresh.pendingReschedule.id !== answered
+            ? REQUEST_REPLACED
+            : REQUEST_EXPIRED))
+    setAnswerNotice({ id: fresh.id, start: fresh.start, key })
+    setMode({ kind: 'view' })
+  }
+
   async function failed(err: unknown, during: Action) {
     const code = codeOf(err)
+    if (code === 'reschedule_request_changed') {
+      await afterRequestChanged(booking.pendingReschedule?.id)
+      return true
+    }
     if (code === 'booking_reschedule_limit') {
       setMode({
         kind: 'view',
@@ -350,7 +417,13 @@ function ManageView({
         onChange={(fresh) => {
           // A reschedule can remove the old booking's optional conference entirely.
           // Replace the read state; retain only metadata absent from the base callback type.
-          onUpdated({ eventType: booking.eventType, hosts: booking.hosts, ...fresh })
+          onUpdated({
+            eventType: booking.eventType,
+            hosts: booking.hosts,
+            ...(fresh.id === booking.id &&
+              booking.rescheduleRequest && { rescheduleRequest: booking.rescheduleRequest }),
+            ...fresh,
+          })
           if (fresh.id !== booking.id || fresh.status !== booking.status) setMode({ kind: 'view' })
         }}
       />
@@ -407,6 +480,11 @@ function ManageView({
         </div>
       ) : (
         <div className="card public-card manage">
+          {requestNotice && (
+            <p className="notice" role="status">
+              {t(requestNotice)}
+            </p>
+          )}
           {booking.pendingReschedule && !started && booking.status === 'confirmed' && (
             <p className="notice" role="status">
               {t(
@@ -477,6 +555,7 @@ function ManageView({
                     booking.pendingReschedule?.id,
                   )
                   onCancelled({ ...booking, ...cancelled })
+                  setAnswerNotice(undefined)
                   setMode({
                     kind: 'view',
                     message: 'Your booking is cancelled.',
@@ -515,8 +594,14 @@ function ManageView({
                     slot.start,
                     booking.pendingReschedule?.id,
                   )
-                  const { pendingReschedule: _pending, ...previous } = booking
+                  // The new booking answers no request; the old link's request state is history.
+                  const {
+                    pendingReschedule: _pending,
+                    rescheduleRequest: _request,
+                    ...previous
+                  } = booking
                   onRescheduled({ ...previous, ...result.booking }, result.manageToken)
+                  setAnswerNotice(undefined)
                   setMode({
                     kind: 'view',
                     message: 'Your booking is moved to the new time.',

@@ -227,10 +227,11 @@ Every error response has the same shape:
 `error` is a stable, machine-readable snake_case code that clients may branch on; `message`
 is optional and may change. The HTTP status carries the category and the code names the
 specific case, e.g. 404 `event_type_not_found`, 409 `slot_taken`. These codes are reserved
-for the generic cases in the table below (services cannot use them): `invalid_request`,
+for the generic cases in the table below: `invalid_request`,
 `unauthorized`, `forbidden`, `not_found` (unknown endpoint), `method_not_allowed`,
 `payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
-renamed within `/api/v1`.
+renamed within `/api/v1`. Services cannot use these codes except `invalid_request` with
+an invalid-input error when enforcing the same schema validation as the transports.
 
 An optional `field` string identifies a stable validation field name. Known values are
 `successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
@@ -263,7 +264,7 @@ See [Zoom connections](/docs/zoom-connections) for callback replay and recovery 
 
 | Status | Meaning |
 |---|---|
-| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
+| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes, except shared request-schema validation |
 | 401 `unauthorized` | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer` |
 | 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
 | 403 `insufficient_scope` | The API key is valid, but its immutable scope does not allow this operation; use an appropriate replacement key |
@@ -1140,6 +1141,7 @@ root, `/{handle}` and `/{handle}/{slug}`, and the invitee's page at `/booking`:
   the order they arranged them (404 `host_not_found`).
 - `/api/v1/public/{handle}/{slug}` (event page, `/slots`, `/bookings`) for personal event types.
 - `/api/v1/bookings/manage` (`GET` shows the booking with its event type and hosts' names,
+  and, for a token from a reschedule request email, what became of that request;
   `GET …/slots` the times it can move to, `POST …/cancel`, `POST …/reschedule`)
   with the invitee's secret in the `X-Manage-Token` header. Invitee links carry it in the URL
   fragment, `https://<app>/booking#token=<token>`, which browsers never send to servers or in
@@ -1226,8 +1228,11 @@ can never be a handle: every top-level path the app or the server answers (`app`
 the product itself (`support`, `security`, `pricing`, `status`, …). The list is
 `RESERVED_NAMES` in [`packages/core/src/reserved.ts`](https://github.com/hourmere/hourmere/blob/main/packages/core/src/reserved.ts), compared case-insensitively. Setting one
 as a handle (`PUT /api/v1/profile`) is refused with 400 `handle_reserved`, and personal
-organization slugs never take one (`Admin` becomes `admin-user`). A handle stored before its
-name was reserved is not served: its host page, event pages, slots and bookings answer 404 as
+organization slugs never take one (`Admin` becomes `admin-user`). `route` is refused as a new
+or changed handle too, in any letter case (400 `handle_reserved`), although it is not in that
+list: a profile that already has the handle `route` keeps it, its pages stay served, and its
+owner can keep saving the profile with it. Once changed, it cannot be set again. A handle
+stored before its name was reserved is not served: its host page, event pages, slots and bookings answer 404 as
 if it did not exist (agents' MCP tools too), so nobody keeps a page at a path the app now
 uses. Its owner keeps the profile, and must pick a new handle the next time they save it.
 Existing bookings stay reachable through their manage links, which do not involve the handle.

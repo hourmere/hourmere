@@ -158,6 +158,8 @@ export interface JobsOptions<Defs extends readonly AnyJobDefinition[]> {
   /** pg-boss opens its own small pool on this database. */
   connectionString: string
   definitions: Defs
+  /** Remove persisted schedules for explicitly disabled features in every process role. */
+  disabledSchedules?: readonly string[] | undefined
   /** Run handlers (and pg-boss maintenance) in this process; false only enqueues. */
   work: boolean
   /** Install or upgrade the `pgboss` schema on start. When false, it must already be current. */
@@ -438,7 +440,12 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
             `background jobs require pg-boss 12.38.0; found ${pgBossPackage.version}. Review the invitation job lookup before upgrading`,
           )
         }
+        for (const name of options.disabledSchedules ?? []) {
+          if (definitions.get(name)?.schedule)
+            throw new Error(`job ${name}: cannot schedule and disable the same queue`)
+        }
         await boss.start()
+        for (const name of options.disabledSchedules ?? []) await boss.unschedule(name)
         for (const definition of definitions.values()) await syncQueue(definition)
         if (options.work) {
           for (const definition of definitions.values()) {

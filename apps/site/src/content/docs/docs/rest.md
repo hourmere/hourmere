@@ -53,6 +53,14 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Instance capabilities
+
+`GET /api/v1/instance` includes additive `ssoOidcEnabled` and `ssoSamlEnabled`
+booleans. Both are currently `false`: organization SSO is unavailable, including on
+self-hosted instances, and no environment setting enables it yet. Older servers may
+omit these fields; clients should treat absence as unknown, keep SSO entry points hidden and
+tolerate unknown response fields. No SSO operations are exposed in this release.
+
 ## Configure meeting lengths
 
 Create an event type with `POST /api/v1/event-types` or edit it with
@@ -280,7 +288,11 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged.
+reschedule retry semantics remain unchanged. An answer to a request that expired, was
+replaced or was already resolved by a move fails with `reschedule_request_changed`, as
+does a pick after cancellation. With the request email's token, REST
+`GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
+have no invitee read of a manage token.
 
 ## Configure booking limits
 

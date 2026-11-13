@@ -126,6 +126,29 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
       noShowMarkedAt: null,
       noShowMarkedBy: null,
     })
+    // REST and CLI (through MCP) record one event per change, never the replay.
+    const events = await db
+      .selectFrom('audit_events')
+      .selectAll()
+      .where('target_id', '=', bookingId)
+      .where('action', '=', 'booking.attendee_no_show_changed')
+      .orderBy('id')
+      .execute()
+    const key = caller.kind === 'api_key' ? caller.apiKeyId : ''
+    expect(events).toMatchObject(
+      ['marked', 'unmarked'].map((noShow) => ({
+        organization_id: caller.organization.id,
+        actor_type: 'api_key',
+        actor_id: key,
+        credential_type: 'api_key',
+        credential_id: key,
+        credential_scope: 'bookings',
+        target_type: 'booking',
+        details: { attendeeId, noShow },
+        request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      })),
+    )
+    expect(new Set(events.map((event) => event.request_id)).size).toBe(2)
   })
   it('returns stored attendee IDs for uppercase REST writes and replays, including webhook payloads', async () => {
     const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 9).toString('base64') }

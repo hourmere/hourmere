@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
@@ -8,6 +7,7 @@ import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import * as paths from '../../paths.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { validDefault } from '../availability/valid-default.ts'
@@ -27,15 +27,12 @@ const pageSource = source.slice(
 )
 
 function copy(code: string, exported: string, dependencies: Record<string, unknown>) {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: code.replace(/^export /gm, ''), encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(exported, code.replace(/^export /gm, ''), {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   return new Function(
     'reactRuntime',
     ...Object.keys(dependencies),

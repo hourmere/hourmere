@@ -8,6 +8,7 @@ import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { webhookAttendeeNoShowNotifier, webhookBookingNotifier } from './delivery.ts'
 import { createWebhook, WEBHOOK_EVENTS } from './service.ts'
+import { SLACK_EVENTS, slackPayload } from './slack-format.ts'
 
 const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 9).toString('base64') }
 const now = Temporal.Instant.from('2030-11-03T12:00Z')
@@ -166,8 +167,10 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
       'isImportedBooking',
       'sql',
       'WEBHOOK_DELIVERY_JOB',
+      'SLACK_EVENTS',
+      'slackPayload',
       `${mutant}; return captureBookingWebhook`,
-    )(randomUUID, isImportedBooking, sql, 'webhook-delivery')
+    )(randomUUID, isImportedBooking, sql, 'webhook-delivery', SLACK_EVENTS, slackPayload)
   }
 
   it('source-copy negative control detects a missing global capture guard', async () => {

@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import type { ComponentType } from 'react'
@@ -10,6 +9,7 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { useLoad, useMounted } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import * as paths from '../../paths.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME, PROFILE } from '../../test/fake-api.tsx'
 import { eventType, schedule } from '../../test/fixtures.ts'
 import { validDefault } from '../availability/valid-default.ts'
@@ -33,15 +33,12 @@ function copy<T>(code: string, exported: string, dependencies: Record<string, un
   const bindings = Object.entries(dependencies).filter(
     ([key]) => key !== 'default' && /^[A-Za-z_$][\w$]*$/.test(key),
   )
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: code.replace(/^export /gm, ''), encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(exported, code.replace(/^export /gm, ''), {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   return new Function(
     'reactRuntime',
     ...bindings.map(([key]) => key),

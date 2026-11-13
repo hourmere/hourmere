@@ -769,6 +769,48 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       ).rows[0],
     ).toEqual({ handle: 'kept', time_zone: 'UTC', locale: 'zh-CN' })
   })
+  it.each(['route', 'Route', 'ROUTE'])(
+    'refuses the claim-reserved personal handle %s as a resolution and writes nothing',
+    async (handle) => {
+      const f = await setup()
+      f.input.resolutions = { handles: { 1: handle } }
+      f.plan = await repreview(f)
+      expect(f.plan.blocked).toBe(true)
+      expect(f.plan.losses.map((p) => p.code)).toContain('user_handle_invalid')
+      expect(await apply(f)).toMatchObject({ status: 'failed', code: 'IMPORT_PREVIEW_BLOCKED' })
+      expect(await businessCounts(f.user.id)).toEqual(empty)
+    },
+  )
+  it('refuses a source username route and keeps a legacy route profile without renaming it', async () => {
+    const f = await setup()
+    const named = structuredClone(f.snapshot)
+    required(named.tables.users?.[0]).username = 'route'
+    const refused = await repreview(f, named)
+    expect(refused.blocked).toBe(true)
+    expect(refused.losses.map((p) => p.code)).toContain('user_handle_invalid')
+    // Stored before the claim check existed: preserved as is, and its import goes ahead.
+    await target.pool.query(
+      "INSERT INTO profiles(user_id,handle,time_zone,locale) VALUES($1,'route','UTC','en')",
+      [f.user.id],
+    )
+    f.plan = await repreview(f)
+    expect(f.plan.blocked).toBe(false)
+    expect(f.plan.addresses).toContainEqual({
+      kind: 'handle',
+      sourceId: 1,
+      old: 'owner',
+      proposed: 'route',
+      action: 'preserve',
+    })
+    expect((await apply(f)).status).toBe('applied')
+    expect(
+      (
+        await target.pool.query('SELECT handle,time_zone,locale FROM profiles WHERE user_id=$1', [
+          f.user.id,
+        ])
+      ).rows,
+    ).toEqual([{ handle: 'route', time_zone: 'UTC', locale: 'en' }])
+  })
   it.each(['booking', 'schedule', 'event_type', 'profile', 'user'] as const)(
     'retains minimal %s tombstones and never resurrects deleted targets',
     async (kind) => {
@@ -900,6 +942,25 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       expect(output.some((s) => s.includes('IMPORT_NOOP'))).toBe(true)
       expect(output.join('\n')).not.toContain(sourceOwnerEmail())
       expect(output.join('\n')).not.toMatch(/invitee@example.test|postgres:/)
+    })
+  })
+  it('refuses a route handle resolution through the operator CLI preview and apply', async () => {
+    await cliFixture(async ({ config, plan, env, fixture }) => {
+      const { connectionString: _connectionString, ...options } = fixture.input
+      await writeFile(
+        config,
+        JSON.stringify({ ...options, resolutions: { handles: { 1: 'route' } } }),
+      )
+      const output: string[] = []
+      expect(
+        await runCli(['preview', '--config', config, '--out', plan], env, (s) => output.push(s)),
+      ).toBe(2)
+      expect(output.join('\n')).toContain('user_handle_invalid')
+      expect(
+        await runCli(['apply', '--config', config, '--plan', plan], env, (s) => output.push(s)),
+      ).toBe(1)
+      expect(output.join('\n')).toContain('IMPORT_PREVIEW_BLOCKED')
+      expect(await businessCounts(fixture.user.id)).toEqual(empty)
     })
   })
   it('refuses to overwrite an existing CLI preview plan', async () => {
@@ -1069,6 +1130,68 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       )
     },
   )
+  it('refuses a genuinely incomplete batch instead of acknowledging a complete replay', async () => {
+    const f = await setup()
+    f.input.exclusions = { bookings: [1000], acknowledged: true }
+    f.plan = await repreview(f)
+    expect(await apply(f)).toMatchObject({ status: 'applied', committed: true })
+    const counts = await businessCounts(f.user.id)
+    expect(counts).toEqual({ profiles: 1, schedules: 1, events: 1, bookings: 0 })
+    expect(
+      (
+        await target.pool.query(
+          "SELECT question_crosswalk FROM import_items WHERE source_id=$1 AND entity_kind='user'",
+          [f.input.sourceId],
+        )
+      ).rows,
+    ).toEqual([{ question_crosswalk: {} }])
+
+    delete f.input.exclusions
+    f.plan = await repreview(f)
+    expect(f.plan.blocked).toBe(false)
+    expect(f.plan.entities).toContainEqual(
+      expect.objectContaining({ kind: 'booking', disposition: 'create' }),
+    )
+    expect(f.plan.entities).toContainEqual(
+      expect.objectContaining({ kind: 'user', disposition: 'noop' }),
+    )
+    const state = await readTargetState(
+      target.pool,
+      f.input.sourceId,
+      f.input.authorization,
+      f.snapshot.cutoff,
+    )
+    expect(allMappingsUnchanged(f.plan, state)).toBe(false)
+    expect(await apply(f)).toMatchObject({
+      status: 'failed',
+      code: 'IMPORT_PARTIAL_MAPPING',
+      committed: false,
+      created: [],
+      failures: [{ code: 'IMPORT_PARTIAL_MAPPING', stage: 'verify_target' }],
+    })
+    expect(await businessCounts(f.user.id)).toEqual(counts)
+    await checkSourceMutation(
+      new URL('./preview.ts', import.meta.url),
+      "preview.entities.every((e) => e.disposition === 'noop') &&",
+      '',
+      (module) => module.allMappingsUnchanged as typeof allMappingsUnchanged,
+      (unchanged) => expect(unchanged(f.plan, state)).toBe(false),
+    )
+    await checkSourceMutation(
+      new URL('./apply.ts', import.meta.url),
+      'allMappingsUnchanged(fresh, state)',
+      'true',
+      (module) => module.applyExtractedImport as typeof applyExtractedImport,
+      async (mutant) => {
+        expect(await mutant(target.pool, f.plan, f.input, async () => f.snapshot)).toMatchObject({
+          status: 'failed',
+          code: 'IMPORT_PARTIAL_MAPPING',
+          committed: false,
+        })
+      },
+    )
+    expect(await businessCounts(f.user.id)).toEqual(counts)
+  })
   it('keeps a committed lost-response replay a no-op after its start', async () => {
     const f = await expiredFixture('2041-01-01T10:00:00.000Z')
     const clock = { now: '2041-01-01T09:59:59.000Z' }
@@ -1305,7 +1428,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     await concurrentScheduleWrite()
     await checkSourceMutation(
       new URL('./apply.ts', import.meta.url),
-      'await client.query(`LOCK TABLE auth."user",auth.organization,auth.member, personal_organizations,profiles,schedules,schedule_overrides,event_types,event_type_hosts, bookings,booking_hosts,booking_attendees,import_sources,import_items,schema_migrations, waitlist_entries IN SHARE ROW EXCLUSIVE MODE`)',
+      'await client.query(`LOCK TABLE auth."user",auth.organization,auth.member, personal_organizations,profiles,schedules,schedule_overrides,event_types,event_type_hosts, bookings,booking_hosts,group_slots,booking_attendees,import_sources,import_items,schema_migrations, waitlist_entries IN SHARE ROW EXCLUSIVE MODE`)',
       '{}',
       (m) => m.applyExtractedImport as typeof applyExtractedImport,
       concurrentScheduleWrite,

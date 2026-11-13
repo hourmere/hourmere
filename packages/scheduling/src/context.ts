@@ -42,12 +42,16 @@ export type AttendeeNoShowNotifier = (
 export interface ServiceContext {
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  /** Per-process export capacity from validated server configuration; defaults to 2. */
+  bookingExportMaxConcurrent?: number | undefined
   principal: Principal
   /** The clock, injectable for tests. */
   now: () => Temporal.Instant
@@ -64,6 +68,8 @@ export interface PublicContext {
   /** Whether trusted server configuration enables SMTP; waitlist enrollment needs mail. */
   smtpConfigured?: boolean | undefined
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Shared waitlist attribution and enrollment secret, supplied only by trusted transports. */
   waitlistSecret?: string | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined

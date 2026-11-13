@@ -32,6 +32,7 @@ import type { CallerEnv } from '../caller.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { authenticated, ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
+import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 
 // Schemas shared with the public routes (public.ts).
@@ -226,6 +227,19 @@ export const ManagedBooking = Booking.extend({
   hosts: z.array(z.object({ name: z.string() })).openapi({
     description: "Who the invitee meets: each host's name",
   }),
+  rescheduleRequest: z
+    .object({
+      id: z.uuid(),
+      state: z.enum(['pending', 'expired', 'replaced', 'rescheduled', 'cancelled']).openapi({
+        description:
+          'pending: still open (also in pendingReschedule). expired: its deadline passed. replaced: the host sent a newer request. rescheduled: the booking was moved after the email was sent, by the invitee or a host. cancelled: the booking was cancelled. Clients must accept additional values.',
+      }),
+    })
+    .optional()
+    .openapi({
+      description:
+        "Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it.",
+    }),
 }).openapi('ManagedBooking')
 
 export const BookingWithToken = z
@@ -356,6 +370,7 @@ const invalidCancel = error(
 
 export interface BookingRoutesDeps {
   db: Db
+  bookingExportMaxConcurrent?: number | undefined
   bookingMaxInviteeReschedules?: number | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -377,6 +392,7 @@ export interface BookingRoutesDeps {
 export function bookingRoutes({
   db,
   bookingMaxInviteeReschedules,
+  bookingExportMaxConcurrent,
   now = () => Temporal.Now.instant(),
   notify,
   notifyAttendeeNoShow,
@@ -429,6 +445,7 @@ export function bookingRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      bookingExportMaxConcurrent,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
 
@@ -721,7 +738,7 @@ export function bookingRoutes({
           400: invalidCancel,
           404: manageNotFound,
           409: error(
-            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
+            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
@@ -733,6 +750,7 @@ export function bookingRoutes({
           publicContext,
           c.req.valid('header')['x-manage-token'],
           { reason, rescheduleRequestId },
+          publicBookingAuditOrigin(c),
         )
         return c.json(booking, 200)
       },
@@ -761,7 +779,7 @@ export function bookingRoutes({
           ),
           404: manageNotFound,
           409: error(
-            "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
+            "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
@@ -775,6 +793,7 @@ export function bookingRoutes({
             durationMinutes: c.req.valid('json').durationMinutes,
             rescheduleRequestId: c.req.valid('json').rescheduleRequestId,
           },
+          publicBookingAuditOrigin(c),
         )
         return c.json(result, 200)
       },
@@ -908,7 +927,7 @@ export function bookingRoutes({
         operationId: 'exportBookingsCsv',
         summary: 'Download bookings as CSV',
         description:
-          'Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
+          'Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization across processes, one export per user per process, and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.',
         security: authenticated,
         middleware: caller,
         request: {
@@ -935,7 +954,7 @@ export function bookingRoutes({
             'Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials',
           ),
           409: error(
-            'export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
+            'export_user_in_progress when this user already has an export in this process, export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
           ),
           429: keyRateLimited,
         },

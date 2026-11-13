@@ -43,9 +43,16 @@ export const COMMANDS = {
   'booking-attendees': 'get_booking_attendees',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
+  'slack list': 'list_slack_destinations',
+  'slack create': 'create_slack_destination',
+  'slack update': 'update_slack_destination',
+  'slack delete': 'delete_slack_destination',
+  'slack test': 'test_slack_destination',
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
+  'workflows list': 'list_workflows',
+  'workflows get': 'get_workflow',
 } as const
 
 export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' } as const
@@ -54,9 +61,14 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
+       hourmere workflows list|get [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
+Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
+Supply incoming-webhook URLs only through private JSON input; responses are masked.
+Slack events: booking.created, booking.rescheduled, booking.cancelled,
+  booking.reschedule_requested, booking.reschedule_request_expired.
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           schedule-availability, save-availability,
@@ -65,6 +77,9 @@ Commands: whoami, profile, catalog, event, create-event, update-event,
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
+Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
+           Read or full scope. Not available yet: both answer workflows_disabled until booking
+           workflows are enabled on the instance.
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
@@ -115,7 +130,9 @@ function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
-    first === 'one-time-links' || first === 'branding' ? `${first} ${parts.shift() ?? ''}` : first
+    first === 'one-time-links' || first === 'branding' || first === 'slack' || first === 'workflows'
+      ? `${first} ${parts.shift() ?? ''}`
+      : first
   const rest = parts
   if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
     throw new CliError('invalid_command')
@@ -287,6 +304,9 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    const slackUrl =
+      args.command.startsWith('slack ') && typeof input.url === 'string' ? input.url : ''
+    if (slackUrl) secrets.push(slackUrl)
     if (args.durationMinutes !== undefined) {
       if (Object.hasOwn(input, 'durationMinutes') && input.durationMinutes !== args.durationMinutes)
         throw new CliError('invalid_duration')
@@ -345,7 +365,7 @@ export async function runCli(options: {
     // Reserve the private output before making a booking: a path error must not lose its token.
     if (args.command === 'export') exportOutputPath = args.output
     if (args.output) output = await open(args.output, 'wx', 0o600)
-    called = true
+    called = args.command !== 'branding upload'
     const result =
       args.command === 'branding upload'
         ? await uploadLogo({
@@ -353,7 +373,10 @@ export async function runCli(options: {
             key,
             path: args.file ?? '',
             contentType: args.contentType ?? '',
-            fetch: options.fetch,
+            fetch: (...request) => {
+              called = true
+              return (options.fetch ?? fetch)(...request)
+            },
           })
         : await callTool({
             url,
@@ -382,7 +405,7 @@ export async function runCli(options: {
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
     if (output) {
-      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken]))
+      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken, slackUrl]))
       await output.sync()
       options.stdout('{"outputWritten":true}\n')
     } else {

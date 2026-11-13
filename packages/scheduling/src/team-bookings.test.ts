@@ -6,6 +6,7 @@ import { createDb, type Db, importedBookingIds } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
 import {
@@ -60,7 +61,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
       `${compile('packages/scheduling/src/booking-page.ts', pageReplacement)}; return { bookingPageQuery, encodeBookingCursor }`,
     )(DomainError, isUuid) as typeof page
   }
-  return new Function(
+  const list = new Function(
     'sql',
     'bookingPageQuery',
     'encodeBookingCursor',
@@ -84,6 +85,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     findPublicEventType,
     findPublicTeamEventType,
   ) as List
+  return guardCopy(list)
 }
 
 describe.skipIf(!serverUrl)('team admin booking list', () => {
@@ -552,7 +554,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
       "isRescheduled: booking.status === 'cancelled' && rescheduledIds.has(booking.id)",
       'isRescheduled: false',
     ])
-    await expect(verifyRescheduled(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verifyRescheduled)
   })
 
   it('reads real collective reschedule/cancel transitions with their saved inactive hosts', async () => {
@@ -752,7 +754,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
       const copy = sourceCopy(adjusted)
       const f = await setup()
       const ctx = await context(f)
-      await expect(expectDenied(copy, ctx)).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(copy, (read) => expectDenied(read, ctx))
     },
   )
 
@@ -781,7 +783,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     ],
   ])('detects broken %s with a real assertion failure', async (_, replacement, verify) => {
     const copy = sourceCopy(replacement)
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
   })
 
   it.each(['asc', 'desc'] as const)(
@@ -791,7 +793,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
         '[row.cursor_start, row.id]',
         '[new Date(row.cursor_start).toISOString(), row.id]',
       ])
-      await expect(verifyCursor(copy, order)).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(copy, (read) => verifyCursor(read, order))
     },
   )
 })

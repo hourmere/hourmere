@@ -21,6 +21,7 @@ import {
   summarizeAuditReports,
   summarizeFindingTypes,
 } from '../tools/e2e/reports.ts'
+import { expectKilled, guardCopy, recordCopyFault } from './source-copy-guard.ts'
 
 function sourceCopy<T>(file: string, exports: string, replacement?: [string, string]): T {
   let source = readFileSync(`tools/e2e/${file}.ts`, 'utf8')
@@ -30,7 +31,7 @@ function sourceCopy<T>(file: string, exports: string, replacement?: [string, str
   }
   source = source.replace(/^import[\s\S]*? from ['"].+?['"]\n/gm, '')
   source = stripTypeScriptTypes(source).replace(/\bexport (?=(?:async )?function|const)/g, '')
-  return new Function('AxeBuilder', `${source}; return {${exports}}`)(AxeBuilder) as T
+  return guardCopy(new Function('AxeBuilder', `${source}; return {${exports}}`)(AxeBuilder)) as T
 }
 
 function rectangle(
@@ -547,14 +548,22 @@ const verifyInformationalSummary = (summarize = auditSummary) => {
   expect(summary).toContain('Axe minor rules / Axe 轻微问题规则：skip-link, tabindex')
   expect(() => assertAuditFindings(inputs, true)).not.toThrow()
 }
-const verifyA11yReportPipeline = async (replacement?: [string, string]) => {
+const a11yReportPipeline = (replacement?: [string, string]) => {
   let source = readFileSync('tools/e2e/specs/a11y.spec.ts', 'utf8')
   if (replacement) {
     expect(source.includes(replacement[0]), 'mutation must match its source').toBe(true)
     source = source.replace(replacement[0], replacement[1])
   }
+  // The spec turns any scan error into a scan-error finding. Record the engine errors it
+  // catches there, so a broken copy is not read as a lost field.
+  const scanError = '} catch {\n            report.findings.push('
+  expect(source.includes(scanError), 'scan error anchor').toBe(true)
   source = stripTypeScriptTypes(
     source
+      .replace(
+        scanError,
+        '} catch (error) {\n            recordFault(error)\n            report.findings.push(',
+      )
       .replace(/^import[\s\S]*? from ['"].+?['"]\n/gm, '')
       .replaceAll('import.meta.url', "'file:///tmp/a11y.spec.ts'"),
   )
@@ -569,7 +578,7 @@ const verifyA11yReportPipeline = async (replacement?: [string, string]) => {
   )
   const reports: AuditReport[] = []
   new Function(
-    'test, auditPages, auditLocales, readFile, openAuditPage, scanA11y, a11yFindings, writeAuditReport, assertAuditFindings',
+    'test, auditPages, auditLocales, readFile, openAuditPage, scanA11y, a11yFindings, writeAuditReport, assertAuditFindings, recordFault',
     source,
   )(
     test,
@@ -590,8 +599,16 @@ const verifyA11yReportPipeline = async (replacement?: [string, string]) => {
     a11yFindings,
     async (report: AuditReport) => reports.push(safeAuditReport(report)),
     assertAuditFindings,
+    (error: unknown) => recordCopyFault(copy, error),
   )
-  await scans[0]?.({
+  const copy = guardCopy({ scan: scans[0] as (fixtures: unknown) => Promise<void>, reports })
+  return copy
+}
+const verifyA11yReportPipeline = async ({
+  scan,
+  reports,
+}: ReturnType<typeof a11yReportPipeline>) => {
+  await scan({
     page: { viewportSize: () => ({ width: 320, height: 568 }), emulateMedia: async () => {} },
     app: {},
   })
@@ -638,7 +655,7 @@ describe('accessibility findings and private report output', () => {
   it('summarizes moderate/minor rule ids and counts without blocking', () =>
     verifyInformationalSummary())
   it('passes incomplete rule ids from the product scan into sanitized reports', async () =>
-    verifyA11yReportPipeline())
+    verifyA11yReportPipeline(a11yReportPipeline()))
   it('includes WCAG 2.0, 2.1 and 2.2 AA tags and reports only serious/critical node counts', () => {
     expect(axeTags).toEqual(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
     verifyAxe()
@@ -775,15 +792,13 @@ describe('source-copy mutation controls', () => {
   ]
   it.each(layoutMutations)(
     'detects removal of %s protection with real behavior assertions',
-    (_name, replacement, verify) => {
+    async (_name, replacement, verify) => {
       const copy = sourceCopy<{ measureLayout: typeof measureLayout }>(
         'layout',
         'measureLayout',
         replacement,
       )
-      expect(() => verify(copy.measureLayout)).toThrow(
-        expect.objectContaining({ name: 'AssertionError' }),
-      )
+      await expectKilled(copy, (module) => verify(module.measureLayout))
     },
   )
   it('verifies unmutated source copies pass the same behavior assertions', () => {
@@ -817,7 +832,7 @@ describe('source-copy mutation controls', () => {
     verifyPrivacy(reports.safeAuditReport)
     verifyBlocking(reports.assertAuditFindings)
   })
-  it('detects loss of nested finding privacy allowlisting', () => {
+  it('detects loss of nested finding privacy allowlisting', async () => {
     const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
       'reports',
       'safeAuditReport',
@@ -826,29 +841,23 @@ describe('source-copy mutation controls', () => {
         "{ ...finding, code: codes.has(finding.code) ? finding.code : 'scan-error' }",
       ],
     )
-    expect(() => verifyPrivacy(copy.safeAuditReport)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyPrivacy(module.safeAuditReport))
   })
-  it('detects failure to reset the native sequential navigation start', () => {
+  it('detects failure to reset the native sequential navigation start', async () => {
     const copy = sourceCopy<{ resetKeyboardNavigation: typeof resetKeyboardNavigation }>(
       'layout',
       'resetKeyboardNavigation',
       ['body.focus({ preventScroll: true })', 'body.blur()'],
     )
-    expect(() => verifyKeyboardReset(copy.resetKeyboardNavigation)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyKeyboardReset(module.resetKeyboardNavigation))
   })
-  it('detects removal of focus visibility protection', () => {
+  it('detects removal of focus visibility protection', async () => {
     const copy = sourceCopy<{ focusedMeasurement: typeof focusedMeasurement }>(
       'layout',
       'focusedMeasurement',
       ['...(outside || obscured', '...(false'],
     )
-    expect(() => verifyFocus(copy.focusedMeasurement)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyFocus(module.focusedMeasurement))
   })
   it.each([
     [
@@ -867,15 +876,13 @@ describe('source-copy mutation controls', () => {
       ["('outside-viewport-focus' as const)", "('obscured-focus' as const)"],
       verifyFocusOutside,
     ],
-  ] as const)('detects removal of %s', (_name, replacement, verify) => {
+  ] as const)('detects removal of %s', async (_name, replacement, verify) => {
     const copy = sourceCopy<{ focusedMeasurement: typeof focusedMeasurement }>(
       'layout',
       'focusedMeasurement',
       [...replacement],
     )
-    expect(() => verify(copy.focusedMeasurement)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verify(module.focusedMeasurement))
   })
   it.each([
     ['passes count', ['passes: result.passes.length', 'passes: 0']],
@@ -912,40 +919,34 @@ describe('source-copy mutation controls', () => {
     ['axe selector hints', ['const tokens = [...element.classList]', 'const tokens = []']],
   ] as const)('detects removal of %s from the scan pipeline', async (_name, replacement) => {
     const copy = sourceCopy<{ scanA11y: typeof scanA11y }>('a11y', 'scanA11y', [...replacement])
-    await expect(verifyAxeScan(copy.scanA11y)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, (module) => verifyAxeScan(module.scanA11y))
   })
   it('verifies the unmutated scan pipeline source copy', async () => {
     const copy = sourceCopy<{ scanA11y: typeof scanA11y }>('a11y', 'scanA11y')
     await verifyAxeScan(copy.scanA11y)
   })
-  it('detects removal of selector privacy filtering', () => {
+  it('detects removal of selector privacy filtering', async () => {
     const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
       'reports',
       'safeAuditReport',
       ['!/(?:token|secret|canary)/i.test(selector)', 'true'],
     )
-    expect(() => verifySafeSelectors(copy.safeAuditReport)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifySafeSelectors(module.safeAuditReport))
   })
-  it('detects removal of incomplete rule id privacy filtering', () => {
+  it('detects removal of incomplete rule id privacy filtering', async () => {
     const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
       'reports',
       'safeAuditReport',
       ["typeof rule === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(rule)", 'true'],
     )
-    expect(() => verifyIncompleteRules(copy.safeAuditReport)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyIncompleteRules(module.safeAuditReport))
   })
-  it('detects removal of incomplete rule ids from the summary', () => {
+  it('detects removal of incomplete rule ids from the summary', async () => {
     const copy = sourceCopy<{ auditSummary: typeof auditSummary }>('reports', 'auditSummary', [
       '...(safe.axe?.incompleteRules ?? [])',
       '...[]',
     ])
-    expect(() => verifyIncompleteSummary(copy.auditSummary)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyIncompleteSummary(module.auditSummary))
   })
   it('verifies the unmutated incomplete report source copy', () => {
     const copy = sourceCopy<{
@@ -959,7 +960,7 @@ describe('source-copy mutation controls', () => {
   })
   it.each(['moderate', 'minor'] as const)(
     'detects loss of %s rule privacy filtering',
-    (severity) => {
+    async (severity) => {
       const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
         'reports',
         'safeAuditReport',
@@ -968,24 +969,23 @@ describe('source-copy mutation controls', () => {
           `report.axe.${severity}Rules`,
         ],
       )
-      expect(() => verifyInformationalRules(copy.safeAuditReport)).toThrow(
-        expect.objectContaining({ name: 'AssertionError' }),
-      )
+      await expectKilled(copy, (module) => verifyInformationalRules(module.safeAuditReport))
     },
   )
-  it.each(['moderate', 'minor'] as const)('detects loss of %s count validation', (severity) => {
-    const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
-      'reports',
-      'safeAuditReport',
-      [`finite(report.axe.${severity})`, 'true'],
-    )
-    expect(() => verifyInformationalRules(copy.safeAuditReport)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
-  })
+  it.each(['moderate', 'minor'] as const)(
+    'detects loss of %s count validation',
+    async (severity) => {
+      const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
+        'reports',
+        'safeAuditReport',
+        [`finite(report.axe.${severity})`, 'true'],
+      )
+      await expectKilled(copy, (module) => verifyInformationalRules(module.safeAuditReport))
+    },
+  )
   it.each(['moderate', 'minor'] as const)(
     'detects loss of %s rule ids and counts from the summary',
-    (severity) => {
+    async (severity) => {
       for (const replacement of [
         [`...(safe.axe?.${severity}Rules ?? [])`, '...[]'],
         [`total.${severity} + (safe.axe?.${severity} ?? 0)`, '0'],
@@ -995,87 +995,75 @@ describe('source-copy mutation controls', () => {
           'auditSummary',
           replacement,
         )
-        expect(() => verifyInformationalSummary(copy.auditSummary)).toThrow(
-          expect.objectContaining({ name: 'AssertionError' }),
-        )
+        await expectKilled(copy, (module) => verifyInformationalSummary(module.auditSummary))
       }
     },
   )
   it('detects loss of incomplete rule ids between the scan and report', async () => {
-    await expect(
-      verifyA11yReportPipeline(['incompleteRules: result.incompleteRules', 'incompleteRules: []']),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(
+      a11yReportPipeline(['incompleteRules: result.incompleteRules', 'incompleteRules: []']),
+      verifyA11yReportPipeline,
+    )
   })
   it.each(['moderate', 'moderateRules', 'minor', 'minorRules'] as const)(
     'detects loss of %s between the scan and report',
     async (field) => {
-      await expect(
-        verifyA11yReportPipeline([
+      await expectKilled(
+        a11yReportPipeline([
           `${field}: result.${field}`,
           `${field}: ${field.endsWith('Rules') ? '[]' : '0'}`,
         ]),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+        verifyA11yReportPipeline,
+      )
     },
   )
   it.each([
     ['button canary', ["!rules.has('button-name')", 'false']],
     ['image canary', ["!rules.has('image-alt')", 'false']],
-  ] as const)('detects removal of %s assertions', (_name, replacement) => {
+  ] as const)('detects removal of %s assertions', async (_name, replacement) => {
     const copy = sourceCopy<{ assertAxeCanary: typeof assertAxeCanary }>(
       'a11y',
       'assertAxeCanary',
       [...replacement],
     )
-    expect(() => verifyCanary(copy.assertAxeCanary)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyCanary(module.assertAxeCanary))
   })
-  it('detects loss of per-type summary counts', () => {
+  it('detects loss of per-type summary counts', async () => {
     const copy = sourceCopy<{ summarizeFindingTypes: typeof summarizeFindingTypes }>(
       'reports',
       'summarizeFindingTypes',
       ['(counts.get(finding.code) ?? 0) + (finding.count ?? 1)', '0'],
     )
-    expect(() => verifyFindingSummary(copy.summarizeFindingTypes)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyFindingSummary(module.summarizeFindingTypes))
   })
-  it('detects loss of serious axe findings', () => {
+  it('detects loss of serious axe findings', async () => {
     const copy = sourceCopy<{ a11yFindings: typeof a11yFindings }>('a11y', 'a11yFindings', [
       "violation.impact !== 'serious' && violation.impact !== 'critical'",
       "violation.impact !== 'critical'",
     ])
-    expect(() => verifyAxe(copy.a11yFindings)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyAxe(module.a11yFindings))
   })
-  it('detects removal of exemption expiry', () => {
+  it('detects removal of exemption expiry', async () => {
     const copy = sourceCopy<{ a11yFindings: typeof a11yFindings }>('a11y', 'a11yFindings', [
       'exemption.expires < today',
       'false',
     ])
-    expect(() => verifyExpiry(copy.a11yFindings)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyExpiry(module.a11yFindings))
   })
-  it('detects removal of report field allowlisting using a non-secret canary', () => {
+  it('detects removal of report field allowlisting using a non-secret canary', async () => {
     const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
       'reports',
       'safeAuditReport',
       ['version: 1,\n    kind: report.kind', '...report,\n    version: 1,\n    kind: report.kind'],
     )
-    expect(() => verifyPrivacy(copy.safeAuditReport)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyPrivacy(module.safeAuditReport))
   })
-  it('detects loss of the future blocking switch', () => {
+  it('detects loss of the future blocking switch', async () => {
     const copy = sourceCopy<{ assertAuditFindings: typeof assertAuditFindings }>(
       'reports',
       'assertAuditFindings',
       ['if (blocking && count)', 'if (false)'],
     )
-    expect(() => verifyBlocking(copy.assertAuditFindings)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(copy, (module) => verifyBlocking(module.assertAuditFindings))
   })
 })

@@ -177,6 +177,11 @@ export {
   ONE_TIME_BOOKING_LINK_LIMIT,
   ONE_TIME_BOOKING_LINK_MEMBER_LIMIT,
   ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
+  ONE_TIME_LINK_PAGE_DEFAULT,
+  ONE_TIME_LINK_PAGE_MAX,
+  ONE_TIME_LINK_PAGE_MIN,
+  ONE_TIME_LINK_PREFILL_EMAIL_MAX,
+  ONE_TIME_LINK_PREFILL_NAME_MAX,
   type OneTimeBookingLink,
   type OneTimeBookingLinkPrefill,
   type OneTimeBookingLinkState,
@@ -201,9 +206,11 @@ export {
   type PaymentContext,
 } from './payments.ts'
 export {
+  findLegacyHandleCollisions,
   getProfile,
   HANDLE_MAX_LENGTH,
   HANDLE_PATTERN,
+  type LegacyHandleCollision,
   LOCALE_MAX_LENGTH,
   type Profile,
   type ProfileInput,

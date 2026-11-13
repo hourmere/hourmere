@@ -9,6 +9,12 @@ export const common = {
     'This request has expired or changed. Reload your booking to choose what to do next.',
   'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.':
     'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
+  'This request to choose a new time has expired. Your booking stays at its original time.':
+    'This request to choose a new time has expired. Your booking stays at its original time.',
+  'Your host has sent a newer request to choose a new time, which replaces this one.':
+    'Your host has sent a newer request to choose a new time, which replaces this one.',
+  'This booking has already been moved to a new time, so this request is closed.':
+    'This booking has already been moved to a new time, so this request is closed.',
   'This waitlist is full (100 entries). Please check available times later.':
     'This waitlist is full (100 entries). Please check available times later.',
   'Waitlist email is unavailable. Please contact the host.':

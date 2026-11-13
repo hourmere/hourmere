@@ -6,6 +6,12 @@ import {
   DomainError,
   getOneTimeBookingLink,
   listOneTimeBookingLinks,
+  ONE_TIME_BOOKING_LINK_LIMIT,
+  ONE_TIME_BOOKING_LINK_MEMBER_LIMIT,
+  ONE_TIME_LINK_PAGE_MAX,
+  ONE_TIME_LINK_PAGE_MIN,
+  ONE_TIME_LINK_PREFILL_EMAIL_MAX,
+  ONE_TIME_LINK_PREFILL_NAME_MAX,
   type OneTimeBookingLink,
   revokeManagedOneTimeBookingLink,
 } from '@hourmere/scheduling'
@@ -29,8 +35,18 @@ export const CreateOneTimeLink = z
     }),
     prefill: z
       .strictObject({
-        name: z.string().nullable().optional().openapi({ maxLength: 200 }),
-        email: z.string().nullable().optional().openapi({ maxLength: 254 }),
+        name: z
+          .string()
+          .nullable()
+          .optional()
+          .openapi({ maxLength: ONE_TIME_LINK_PREFILL_NAME_MAX })
+          .meta({ maxLength: ONE_TIME_LINK_PREFILL_NAME_MAX }),
+        email: z
+          .string()
+          .nullable()
+          .optional()
+          .openapi({ maxLength: ONE_TIME_LINK_PREFILL_EMAIL_MAX })
+          .meta({ maxLength: ONE_TIME_LINK_PREFILL_EMAIL_MAX }),
       })
       .optional(),
   })
@@ -71,7 +87,7 @@ export const OneTimeLinkList = z
   })
   .openapi('OneTimeBookingLinkList')
 export const OneTimeLinkListQuery = z.object({
-  limit: z.coerce.number().int().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(ONE_TIME_LINK_PAGE_MIN).max(ONE_TIME_LINK_PAGE_MAX).optional(),
   after: z.uuid().optional(),
 })
 const EventParams = z.object({ eventTypeId: z.uuid() })
@@ -110,8 +126,7 @@ export function oneTimeLinkRoutes(deps: ServiceDeps & { publicUrl: string }): Ro
         path: '/api/v1/event-types/{eventTypeId}/one-time-links',
         operationId: 'createOneTimeBookingLink',
         summary: 'Create a private one-time booking link',
-        description:
-          'Requires bookings or full API-key scope and permission to manage this event type. Links always receive time-ordered UUIDv7 IDs; Idempotency-Key is stored separately, scoped to this caller, credential and organization. Copy the URL now: neither the URL nor token can be retrieved again. A duplicate key never mints another link while its row is retained: the same request returns 409 one_time_link_already_created because no raw-response cache is retained; changed arguments return idempotency_key_reused. Revoked or expired unused links may be removed after retention, and event deletion removes markers. Prefill remains editable and proves no invitee identity. Limits: 1000 active unexpired links per personal owner/team, with a 200-link sub-limit for ordinary team members.',
+        description: `Requires bookings or full API-key scope and permission to manage this event type. Links always receive time-ordered UUIDv7 IDs; Idempotency-Key is stored separately, scoped to this caller, credential and organization. Copy the URL now: neither the URL nor token can be retrieved again. A duplicate key never mints another link while its row is retained: the same request returns 409 one_time_link_already_created because no raw-response cache is retained; changed arguments return idempotency_key_reused. Revoked or expired unused links may be removed after retention, and event deletion removes markers. Prefill remains editable and proves no invitee identity. Limits: ${ONE_TIME_BOOKING_LINK_LIMIT} active unexpired links per personal owner/team, with a ${ONE_TIME_BOOKING_LINK_MEMBER_LIMIT}-link sub-limit for ordinary team members.`,
         request: {
           params: EventParams,
           headers: ExpectedOrganizationHeaders.extend({ 'idempotency-key': z.string().optional() }),

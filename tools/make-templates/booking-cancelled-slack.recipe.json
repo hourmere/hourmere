@@ -1,0 +1,53 @@
+{
+  "format": "hourmere.make.manual-recipe.v1",
+  "id": "booking-cancelled-slack",
+  "title": "Booking cancelled → Slack message",
+  "webhookEvents": ["booking.cancelled"],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks",
+      "body": ["url", "events", "isActive"],
+      "response": {
+        "201": ["webhook.id", "secret"]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/webhooks/{id}",
+      "body": ["isActive"]
+    }
+  ],
+  "connections": [
+    {
+      "kind": "rest-client-secret-store",
+      "purpose": "Full-scope Hourmere key read from a local file by a trusted REST client outside Make; registration only."
+    },
+    {
+      "kind": "make-data-store",
+      "purpose": "One-time webhook signing secret; scenario Keep data confidential enabled."
+    },
+    {
+      "kind": "destination-connection",
+      "purpose": "Make connection to the destination app."
+    }
+  ],
+  "settings": {
+    "documentation": "booking-cancelled-slack.md",
+    "apiKeyScope": "full (registration only); no runtime Hourmere key",
+    "signatureVerification": "Native keyed sha256 with Data store secret and Keep data confidential; compare signature and enforce 300-second tolerance before any destination action."
+  },
+  "webhookPayloadFields": [
+    "id",
+    "type",
+    "occurredAt",
+    "data.bookingId",
+    "data.organizationId",
+    "data.eventTypeId",
+    "data.start",
+    "data.end",
+    "data.status",
+    "data.source",
+    "data.rescheduledFromId"
+  ]
+}

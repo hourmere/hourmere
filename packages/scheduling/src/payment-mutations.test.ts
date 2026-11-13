@@ -5,6 +5,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { findPublicEventType, findSlots } from './availability.ts'
 import {
   canonicalJson,
@@ -45,10 +46,11 @@ async function copy(
     source = source.replace(match[0], '')
   }
   source = source.replace(/^export \{[^}]*\} from '[^']+'\n/gm, '')
-  return new Function(
+  const api = new Function(
     ...Object.keys(bindings),
     `${source.replace(/\bexport /g, '')}; return { ${exports} }`,
   )(...Object.values(bindings))
+  return guardCopy(api)
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutations', () => {
@@ -205,9 +207,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'await expirePaymentHolds({ db, hostUserId: hostId })',
       '',
     )
-    await expect(
-      groupAdmission(mutant.admitGroupSlot as typeof admitGroupSlot),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      groupAdmission(copy.admitGroupSlot as typeof admitGroupSlot),
+    )
   })
   async function notificationPolicy(api = createPaymentHold) {
     const { ctx, input, q } = await fixture()
@@ -236,9 +238,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'createNotificationSnapshot(model.notifications)',
       "createNotificationSnapshot({ reminders: [{ id: 'default-24h', offsetMinutes: 1440, recipients: { invitee: true, guests: true, host: true } }], followUps: [] })",
     )
-    await expect(
-      notificationPolicy(mutant.createPaymentHold as typeof createPaymentHold),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      notificationPolicy(copy.createPaymentHold as typeof createPaymentHold),
+    )
   })
   async function lockedReplay(api = createPaymentHold) {
     const { ctx, input, q } = await fixture(true)
@@ -301,9 +303,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       "existing.status === 'pending_payment'",
       'false',
     )
-    await expect(
-      lockedReplay(mutant.createPaymentHold as typeof createPaymentHold),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      lockedReplay(copy.createPaymentHold as typeof createPaymentHold),
+    )
   })
   async function fullHoldWindow(api = createPaymentHold) {
     const f = createFixtures(db)
@@ -350,9 +352,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'if (!hasFullPaymentWindow)',
       'if (false)',
     )
-    await expect(
-      fullHoldWindow(mutant.createPaymentHold as typeof createPaymentHold),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      fullHoldWindow(copy.createPaymentHold as typeof createPaymentHold),
+    )
   })
   it('detects disabled flag removal in an isolated source copy', async () => {
     await disabled()
@@ -362,9 +364,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'if (ctx.paidBookingsEnabled !== true) throw disabled()',
       'if (false) throw disabled()',
     )
-    await expect(
-      disabled(mutant.createPaymentHold as typeof createPaymentHold),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      disabled(copy.createPaymentHold as typeof createPaymentHold),
+    )
   })
   it('detects confirmation notification replay in an isolated source copy', async () => {
     await replay()
@@ -374,9 +376,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       "if (confirm && row.status !== 'confirmed')",
       'if (confirm)',
     )
-    await expect(
-      replay(mutant.confirmPaymentHold as typeof confirmPaymentHold),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      replay(copy.confirmPaymentHold as typeof confirmPaymentHold),
+    )
   })
   it('detects missing availability deadline in an isolated source copy', async () => {
     await deadline()
@@ -386,9 +388,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       "eb('b.payment_hold_expires_at', '>', sql<Date>`clock_timestamp()`)",
       "eb('b.payment_hold_expires_at', 'is not', null)",
     )
-    await expect(deadline(mutant.findSlots as typeof findSlots)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(mutant, (copy) => deadline(copy.findSlots as typeof findSlots))
   })
   it('detects missing admission cleanup in an isolated source copy', async () => {
     await admission()
@@ -398,9 +398,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'await expirePaymentHolds({ db, hostUserId: q.hostUserId })',
       '',
     )
-    await expect(
-      admission(mutant.requireOfferedSlot as typeof requireOfferedSlot),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      admission(copy.requireOfferedSlot as typeof requireOfferedSlot),
+    )
   })
   async function keyIsolation(api = createPaymentHold) {
     const { ctx, input } = await fixture()
@@ -440,9 +440,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'payment_idempotency_key: key, idempotency_fingerprint: fingerprint',
       "idempotency_key: 'payment:' + key, idempotency_fingerprint: fingerprint",
     )
-    await expect(
-      keyIsolation(mutant.createPaymentHold as typeof createPaymentHold),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      keyIsolation(copy.createPaymentHold as typeof createPaymentHold),
+    )
   })
   async function retention(api = eraseUnpaidHoldPersonalData) {
     const { ctx, host, q } = await fixture()
@@ -597,9 +597,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     ['location clearance', 'location=NULL,', 'location=b.location,'],
   ])('detects missing %s in a retention source copy', async (_name, before, after) => {
     const mutant = await copy('./payment-expiry.ts', 'eraseUnpaidHoldPersonalData', before, after)
-    await expect(
-      retention(mutant.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      retention(copy.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
+    )
   })
   it('preserves previously confirmed holds during retention in a source copy', async () => {
     const mutant = await copy(
@@ -608,9 +608,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'AND b.payment_confirmed_at IS NULL',
       '',
     )
-    await expect(
-      retention(mutant.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      retention(copy.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
+    )
   })
   it('erases only terminal unpaid hold personal data after seven days and preserves audit', async () => {
     await retention()
@@ -620,8 +620,8 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       'DELETE FROM booking_attendees a USING due WHERE a.booking_id=due.id',
       'DELETE FROM booking_attendees a USING due WHERE false',
     )
-    await expect(
-      retention(mutant.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(mutant, (copy) =>
+      retention(copy.eraseUnpaidHoldPersonalData as typeof eraseUnpaidHoldPersonalData),
+    )
   })
 })

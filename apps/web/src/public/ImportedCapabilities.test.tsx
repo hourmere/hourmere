@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import * as conferenceUrl from '@hourmere/core/conference-url'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -27,6 +26,7 @@ import * as calendarCopy from '../pages/bookings/CalendarCopyNotice.tsx'
 import * as noShow from '../pages/bookings/NoShowAttendees.tsx'
 import * as reschedule from '../pages/bookings/RescheduleBooking.tsx'
 import * as paths from '../paths.ts'
+import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
 import { booking, managed } from '../test/public-fixtures.ts'
 import * as text from '../text.ts'
@@ -48,15 +48,12 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     .replace('function BookingView(', 'export function BookingView(')
     .replace('function ManageBooking({', 'export function ManageBooking({')
   expect(original.includes(before), 'mutation must match source').toBe(true)
-  const code = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import {readFileSync} from 'node:fs';import {transformSync} from 'esbuild';process.stdout.write(transformSync(readFileSync(0,'utf8'),{loader:'tsx',format:'cjs',jsxFactory:'reactRuntime.createElement',jsxFragment:'reactRuntime.Fragment'}).code)",
-    ],
-    { input: original.replaceAll(before, after), encoding: 'utf8' },
-  )
+  const code = compileSourceCopy(path, original.replaceAll(before, after), {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   const dependencies: Record<string, unknown> = {
     react,
     'react-router': router,

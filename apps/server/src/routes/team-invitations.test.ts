@@ -23,6 +23,7 @@ import { createTestTeam, createTestUser, type TestUser } from '@hourmere/schedul
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy, recordCopyFault } from '../../../../scripts/source-copy-guard.ts'
 import { createApp } from '../app.ts'
 import { ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
@@ -81,11 +82,22 @@ function sourceCopy<T>(source: string, bindings: Record<string, unknown>, return
   ) as T
 }
 
+/** Hono answers a copied handler's engine error with a 500: record it for the copy first. */
+function recordedRoutes(copy: object, routes: RouteModule): RouteModule {
+  return (shared) => {
+    shared.app.use('*', async (c, next) => {
+      await next()
+      if (c.error) recordCopyFault(copy, c.error)
+    })
+    routes(shared)
+  }
+}
+
 function summarySourceCopy(replacement?: { before: string; after: string }) {
   const source = readFileSync(new URL('../team-invitations.ts', import.meta.url), 'utf8')
   if (replacement)
     expect(source.includes(replacement.before), 'summary mutation matches source').toBe(true)
-  return sourceCopy<
+  const copy = sourceCopy<
     Pick<
       typeof import('../team-invitations.ts'),
       'listTeamInvitationSummaries' | 'TeamInvitationSummarySchema'
@@ -102,6 +114,7 @@ function summarySourceCopy(replacement?: { before: string; after: string }) {
     },
     '{ listTeamInvitationSummaries, TeamInvitationSummarySchema }',
   )
+  return guardCopy(copy)
 }
 
 describe.skipIf(!serverUrl)(
@@ -996,10 +1009,9 @@ describe.skipIf(!serverUrl)(
       'detects removed %s through a real HTTP assertion failure',
       async (_label, before, after) => {
         const factory = routeSourceCopy({ file: 'summary', before, after })
-        const target = application([factory({ db, invitationMailLimits: { ...limits, secret } })])
-        await expect(verifyInviterMembership('removed', target, false)).rejects.toMatchObject({
-          name: 'AssertionError',
-        })
+        await expectKilled(factory, (copy) =>
+          verifyInviterMembership('removed', application([routeCopy(copy)]), false),
+        )
       },
     )
 
@@ -1180,11 +1192,7 @@ describe.skipIf(!serverUrl)(
         before: '!TeamInvitationSummarySchema.shape.status.safeParse(input.status).success',
         after: 'false',
       })
-      await expect(
-        verifyStatusValidation(mutant.listTeamInvitationSummaries),
-      ).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(mutant, (copy) => verifyStatusValidation(copy.listTeamInvitationSummaries))
     })
 
     it('uses stable invitation ID keysets, including ties and inserts before a page boundary', async () => {
@@ -1331,14 +1339,18 @@ describe.skipIf(!serverUrl)(
       const routeSource = readFileSync(new URL('./team-invitations.ts', import.meta.url), 'utf8')
       if (replacement?.file === 'route')
         expect(routeSource.includes(replacement.before), 'route mutation matches source').toBe(true)
-      return sourceCopy<typeof teamInvitationRoutes>(
-        replacement?.file === 'route'
-          ? routeSource.replace(replacement.before, replacement.after)
-          : routeSource,
-        { createRoute, z, ErrorBody, json, ...management, ...summary },
-        'teamInvitationRoutes',
+      return guardCopy(
+        sourceCopy<typeof teamInvitationRoutes>(
+          replacement?.file === 'route'
+            ? routeSource.replace(replacement.before, replacement.after)
+            : routeSource,
+          { createRoute, z, ErrorBody, json, ...management, ...summary },
+          'teamInvitationRoutes',
+        ),
       )
     }
+    const routeCopy = (factory: typeof teamInvitationRoutes) =>
+      recordedRoutes(factory, factory({ db, invitationMailLimits: { ...limits, secret } }))
 
     it('passes access, privacy, isolation, attempt-time and database-clock assertions with unmodified source copies', async () => {
       const factory = routeSourceCopy()
@@ -1477,8 +1489,7 @@ describe.skipIf(!serverUrl)(
       async (_label, replacement, verify) => {
         // Compile before checking the assertion failure: source/load errors cannot count as detection.
         const factory = routeSourceCopy(replacement)
-        const target = application([factory({ db, invitationMailLimits: { ...limits, secret } })])
-        await expect(verify(target)).rejects.toMatchObject({ name: 'AssertionError' })
+        await expectKilled(factory, (copy) => verify(application([routeCopy(copy)])))
       },
     )
   },

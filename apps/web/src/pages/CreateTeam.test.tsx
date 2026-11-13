@@ -61,6 +61,8 @@ function server(overrides: Routes = {}, role = 'owner') {
     ...emptyTeamLists,
     ...profile(PROFILE),
     'GET /api/v1/me': () => json(200, state.me),
+    [`GET /api/v1/organizations/${team.id}/provisioning-tokens`]: () =>
+      json(200, { tokens: [], nextCursor: null }),
     'GET /api/auth/organization/list': () => json(200, [ME.organization, team]),
     'POST /api/auth/organization/create': () => json(200, team),
     'POST /api/auth/organization/set-active': () => {

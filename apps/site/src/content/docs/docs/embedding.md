@@ -38,6 +38,11 @@ not allow `https://example.com`, `https://preview.example.com` or
 instance setting, shared by personal and team embeds; hosts cannot change it in the dialog.
 See [configuration](/docs/configuration) and [self-hosting](/docs/self-hosting) for operator setup.
 
+The allowed-origins list is not secret. Any signed-in account can read it, including
+any newly registered account when sign-up is open (`SIGNUP=open`). Do not include hostnames
+you need to keep private. The **Allowed website origins** section of the Embed dialog
+displays the list returned by `GET /api/v1/instance/embed`; see the access details below.
+
 For a local parent website running on port 4321, for example:
 
 ```dotenv
@@ -49,6 +54,10 @@ Open the parent page through its HTTP server, not a `file://` URL. `localhost` a
 `127.0.0.1` are different origins. A page on an origin outside the allow list receives a
 403 for the embed document and cannot display the booking flow. Copying code successfully
 does not verify that its destination website is allowed.
+The app's own origin has no exemption: embedding from `PUBLIC_URL` is refused unless that
+exact origin is also in `EMBED_ALLOWED_ORIGINS`, and is allowed when explicitly listed.
+The [origin check](https://github.com/hourmere/hourmere/blob/main/packages/core/src/embed.ts)
+applies the same allow-list rule to app and third-party origins.
 
 ## Content Security Policy and iframes
 
@@ -98,8 +107,15 @@ not update a snippet already pasted into your website.
 
 The dialog loads allowed website origins through the session-authenticated
 `GET /api/v1/instance/embed` endpoint. The public `GET /api/v1/instance` endpoint exposes
-only the optional `embedEnabled` flag, never the origin list. The list is available to
-signed-in hosts, including ordinary team members; API keys cannot read it.
+only the optional `embedEnabled` flag, never the origin list. Every signed-in account,
+including ordinary team members and newly registered accounts, can read the list;
+API keys and MCP OAuth tokens cannot. The
+[endpoint](https://github.com/hourmere/hourmere/blob/main/apps/server/src/routes/instance.ts)
+requires a web session and current organization membership, with no administrator role
+check. The [session resolver](https://github.com/hourmere/hourmere/blob/main/packages/auth/src/caller.ts)
+falls back to the account's personal organization, so team membership is not required.
+The [Embed dialog](https://github.com/hourmere/hourmere/blob/main/apps/web/src/pages/event-types/EventEmbedAction.tsx)
+fetches that endpoint and displays its `embedAllowedOrigins` list.
 If embedding is disabled, ask the instance operator to set `EMBED_ALLOWED_ORIGINS` using
 the example above and restart the web process. You can still copy the code while waiting
 for that configuration. A loading or unavailable configuration does not confirm whether

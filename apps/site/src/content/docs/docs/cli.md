@@ -62,6 +62,9 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 
 | Command | Tool | Arguments |
 |---|---|---|
+| `branding get` | `get_branding` | `{}`; requires `read` or `full` |
+| `branding set` | `set_branding` | optional `brandPrimaryColor` (`#RRGGBB`), `brandLogo` (uploaded hash); `null` clears; requires `full` |
+| `branding upload` | REST `POST /api/v1/branding/logo` | `--file FILE --content-type image/png` (also `image/jpeg`, `image/webp`); requires `full` |
 | `whoami` | `whoami` | `{}` |
 | `profile` | `get_profile` | `{}` |
 | `catalog` | `list_event_types` | optional `limit`, `after` |
@@ -80,6 +83,14 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
 | `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
 | `one-time-links revoke` | `revoke_one_time_link` | `eventTypeId`, `id`; requires `bookings` or `full` |
+| `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+| `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+
+`workflows list` and `workflows get` read booking workflows, which are not available yet:
+until they are enabled on the instance both exit `1` with `workflows_disabled` on stderr
+(a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
+key acts as: your personal workflows from a personal key, or a team's from a team key held by a
+current owner or admin.
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
@@ -370,7 +381,11 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged.
+reschedule retry semantics remain unchanged. An answer to a request that expired, was
+replaced or was already resolved by a move fails with `reschedule_request_changed`, as
+does a pick after cancellation. With the request email's token, REST
+`GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
+have no invitee read of a manage token.
 
 ## Configure booking limits
 

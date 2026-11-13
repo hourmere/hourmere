@@ -46,6 +46,7 @@ describe('CalDAV pinned transport', () => {
     (value: unknown) => String(value),
   ])('redacts request authorization in %s', async (render) => {
     const request = redactCalDavRequest(input())
+    expect(redactCalDavRequest(request)).toBe(request)
     const output = render(request)
     expect(output).toContain('[REDACTED]')
     expect(output).not.toContain('Basic mock')
@@ -53,6 +54,16 @@ describe('CalDAV pinned transport', () => {
     reply()
     await sendCalDav(request)
     expect(network.request.mock.calls[0]?.[1].headers.authorization).toBe('Basic mock')
+  })
+  it.each([
+    ['spread', (value: object) => ({ ...value })],
+    ['structuredClone', (value: object) => structuredClone(value)],
+  ] as const)('omits authorization from request %s copies', (_name, copy) => {
+    const request = redactCalDavRequest(input())
+    const copied = copy(request)
+    expect(copied).not.toHaveProperty('authorization')
+    expect(JSON.stringify(copied)).not.toContain('Basic mock')
+    expect(request.authorization).toBe('Basic mock')
   })
   it.each([
     '127.0.0.1',

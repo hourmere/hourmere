@@ -68,6 +68,31 @@ function rest(
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
+  rest(
+    'GET',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens',
+    'session_only',
+    'session_only',
+  ),
+  rest(
+    'POST',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens',
+    'session_only',
+    'session_only',
+  ),
+  rest(
+    'POST',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'session_only',
+    'session_only',
+  ),
+  rest(
+    'DELETE',
+    '/api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
+    'session_only',
+    'session_only',
+  ),
+
   rest('GET', '/api/v1/branding', 'other_read', 'key'),
   rest('GET', '/api/v1/branding/logo/{hash}', 'other_read', 'key'),
   rest('PATCH', '/api/v1/branding', 'other_write', 'key'),
@@ -195,12 +220,19 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('POST', '/api/v1/teams/{teamId}/leave', 'session_only', 'session_only'),
   rest('GET', '/api/v1/teams/{teamId}/member-readiness', 'session_only', 'session_only'),
   rest('GET', '/api/v1/teams/{teamId}/readiness', 'session_only', 'session_only'),
+  rest('GET', '/api/v1/slack-destinations', 'other_read', 'key'),
+  rest('POST', '/api/v1/slack-destinations', 'other_write', 'key'),
+  rest('PATCH', '/api/v1/slack-destinations/{id}', 'other_write', 'key'),
+  rest('DELETE', '/api/v1/slack-destinations/{id}', 'other_write', 'key'),
+  rest('POST', '/api/v1/slack-destinations/{id}/test', 'other_write', 'key'),
   rest('GET', '/api/v1/webhooks', 'other_read', 'key'),
   rest('POST', '/api/v1/webhooks', 'other_write', 'key'),
   rest('DELETE', '/api/v1/webhooks/{id}', 'other_write', 'key'),
   rest('PATCH', '/api/v1/webhooks/{id}', 'other_write', 'key'),
   rest('GET', '/api/v1/webhooks/{id}/deliveries', 'other_read', 'key'),
   rest('POST', '/api/v1/webhooks/{id}/rotate-secret', 'other_write', 'key'),
+  rest('GET', '/api/v1/workflows', 'other_read', 'key'),
+  rest('GET', '/api/v1/workflows/{id}', 'other_read', 'key'),
   rest('GET', '/api/v1/openapi.json', 'public_metadata', 'public_metadata'),
 ])
 
@@ -223,6 +255,11 @@ function mcp(
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
   mcp('get_branding', 'other_read', ['GET /api/v1/branding']),
   mcp('set_branding', 'other_write', ['PATCH /api/v1/branding']),
+  mcp('list_slack_destinations', 'other_read', ['GET /api/v1/slack-destinations']),
+  mcp('create_slack_destination', 'other_write', ['POST /api/v1/slack-destinations']),
+  mcp('update_slack_destination', 'other_write', ['PATCH /api/v1/slack-destinations/{id}']),
+  mcp('delete_slack_destination', 'other_write', ['DELETE /api/v1/slack-destinations/{id}']),
+  mcp('test_slack_destination', 'other_write', ['POST /api/v1/slack-destinations/{id}/test']),
   mcp('whoami', 'booking_read', ['GET /api/v1/me']),
   mcp('find_available_slots', 'booking_read', [
     'GET /api/v1/public/{handle}/{slug}/slots',
@@ -324,6 +361,8 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
       mcp(tool, 'booking_write', [team], 'team'),
     ]
   }),
+  mcp('list_workflows', 'other_read', ['GET /api/v1/workflows']),
+  mcp('get_workflow', 'other_read', ['GET /api/v1/workflows/{id}']),
 ])
 
 function cli(command: string, tool: string): ApiKeyCliOperation {
@@ -372,9 +411,16 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('join-waitlist', 'join_waitlist'),
   cli('resend-waitlist-verification', 'resend_waitlist_verification'),
   cli('open-time-snippet', 'generate_open_time_snippet'),
+  cli('slack list', 'list_slack_destinations'),
+  cli('slack create', 'create_slack_destination'),
+  cli('slack update', 'update_slack_destination'),
+  cli('slack delete', 'delete_slack_destination'),
+  cli('slack test', 'test_slack_destination'),
   cli('one-time-links create', 'create_one_time_link'),
   cli('one-time-links list', 'list_one_time_links'),
   cli('one-time-links revoke', 'revoke_one_time_link'),
+  cli('workflows list', 'list_workflows'),
+  cli('workflows get', 'get_workflow'),
 ])
 
 export type ClassifiedApiKeyOperation =
