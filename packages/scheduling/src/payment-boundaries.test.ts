@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { bookingPageQuery } from './booking-page.ts'
 import * as bookings from './bookings.ts'
+import { NO_CHANGE_CUTOFFS } from './change-deadlines.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 import { notificationSnapshot } from './notification-settings.ts'
@@ -82,6 +83,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment foundation transport boundar
         hostsUseDefaultSchedule: false,
         attendees: [],
         notificationSnapshot: notificationSnapshot(null),
+        changeCutoffs: NO_CHANGE_CUTOFFS,
         manageTokenHash: null,
         paymentHoldExpiresAt: Temporal.Now.instant().add({ minutes: 30 }).toString(),
       }),

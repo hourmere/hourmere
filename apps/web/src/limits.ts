@@ -30,6 +30,8 @@ export const RULES = {
   maxBookingsPerWeek: { min: 1, max: 1000 },
   maxBookingsPerMonth: { min: 1, max: 1000 },
   bookingWindowDays: { min: 1, max: 3650 },
+  rescheduleCutoffMinutes: { min: 1, max: 525_600 },
+  cancelCutoffMinutes: { min: 1, max: 525_600 },
 } as const
 
 export const QUESTIONS = {

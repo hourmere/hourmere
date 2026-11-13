@@ -632,6 +632,10 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   booking chain (default five, configured by `BOOKING_MAX_INVITEE_RESCHEDULES`; zero
   disables them). `booking_reschedule_limit` means contact the host to change it again.
   Cancellation remains available. Host moves are unlimited and do not consume the budget.
+- **Change deadlines:** with `manageToken`, `reschedule_booking` and `cancel_booking` fail
+  with `booking_reschedule_deadline_passed` or `booking_cancel_deadline_passed` from the
+  booking's [deadline](/docs/change-deadlines) on; the invitee should contact the host.
+  Calls with `bookingId` are not limited.
 - **Emails:** bookings made, moved or cancelled through MCP send the same emails as the
   booking page (hosts, invitee, guests; [Notifications and background jobs](/docs/notifications)).
 - **Retries:** give `create_booking` an `idempotencyKey` (a new random value per booking,
@@ -734,8 +738,9 @@ UUID to replace the outstanding request.
 The returned booking stays `confirmed`, with optional `pendingReschedule` containing
 `id`, `expiresAt` and `note`. The original time stays booked and blocks availability
 until the invitee uses their normal manage link to pick another time or cancel.
-The request expires after 48 hours or when the original meeting starts, whichever
-comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+The request expires after 48 hours, when the original meeting starts, or at the booking's
+[reschedule deadline](/docs/change-deadlines), whichever comes first; after that deadline a
+new request fails with `booking_reschedule_deadline_passed`. Expiry keeps that time and notifies the host. Imported and group-seat bookings
 cannot receive a request. Picking uses the normal availability rules and reschedule
 limit, calendar updates, conference handling and reminders.
 
@@ -763,6 +768,15 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Configure reschedule and cancel deadlines
+
+`create_event_type` and `update_event_type` accept `rescheduleCutoffMinutes` and
+`cancelCutoffMinutes`; `get_event_type` returns them. Each is a whole number from 1 to
+525600, or `null` for no deadline. From that many minutes before the start, invitee
+calls with `manageToken` can no longer reschedule or cancel; host calls with
+`bookingId` are not limited. Each booking keeps the values that applied when it was
+booked. See [reschedule and cancel deadlines](/docs/change-deadlines) for examples.
 
 ## Attendee attendance access
 

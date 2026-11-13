@@ -93,6 +93,7 @@ export default defineConfig({
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
             { label: 'Meeting location choices', link: '/docs/location-choices' },
             { label: 'Booking limits', link: '/docs/booking-limits' },
+            { label: 'Reschedule and cancel deadlines', link: '/docs/change-deadlines' },
             { label: 'One-time booking links', link: '/docs/one-time-links' },
             { label: 'Booking waitlists', link: '/docs/booking-waitlist' },
             { label: 'Open-time snippets', link: '/docs/open-time-snippets' },

@@ -677,7 +677,7 @@ export interface paths {
         put?: never;
         /**
          * Ask the invitee to choose another time
-         * @description For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused.
+         * @description For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused. The request expires after 48 hours, at the start, or at the invitee reschedule deadline of the booking, whichever comes first; once that deadline has passed the request is refused with 409 `booking_reschedule_deadline_passed` (move the booking yourself instead).
          */
         post: operations["requestReschedule"];
         delete?: never;
@@ -1017,7 +1017,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`) */
+                /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the reschedule deadline of the booking has passed (`booking_reschedule_deadline_passed`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4785,6 +4785,8 @@ export interface components {
             bufferAfterMinutes: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes: number;
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Independent of rescheduleCutoffMinutes; same snapshot and host rules. */
+            cancelCutoffMinutes: number | null;
             conferenceOrganizer: {
                 /** Format: uuid */
                 userId: string;
@@ -4916,6 +4918,8 @@ export interface components {
             /** @description Order on the page, ascending */
             position: number;
             questions: components["schemas"]["Question"][];
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = until the meeting starts. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            rescheduleCutoffMinutes: number | null;
             /** @description Explicit round-robin activation; metadata saves never enable it */
             roundRobinActive: boolean;
             /**
@@ -4968,6 +4972,8 @@ export interface components {
              * @default 0
              */
             bufferBeforeMinutes: number;
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Independent of rescheduleCutoffMinutes; same snapshot and host rules. */
+            cancelCutoffMinutes?: number | null;
             conferenceOrganizer?: {
                 userId: string;
             } | null;
@@ -5099,6 +5105,8 @@ export interface components {
             position: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = until the meeting starts. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
              * @description One of the host's schedules; null = the host's default schedule
@@ -5209,6 +5217,8 @@ export interface components {
             bufferAfterMinutes?: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes?: number;
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Independent of rescheduleCutoffMinutes; same snapshot and host rules. */
+            cancelCutoffMinutes?: number | null;
             conferenceOrganizer?: {
                 userId: string;
             } | null;
@@ -5328,6 +5338,8 @@ export interface components {
             position?: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = until the meeting starts. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
              * @description One of the host's schedules; null = the host's default schedule
@@ -5475,6 +5487,13 @@ export interface components {
             };
         };
         ManagedBooking: components["schemas"]["Booking"] & {
+            /** @description The invitee's change deadlines this booking keeps (those of its event type when it was booked; later event type changes do not affect it). From `rescheduleBy` on, rescheduling with this token fails with 409 `booking_reschedule_deadline_passed`; from `cancelBy` on, cancelling fails with 409 `booking_cancel_deadline_passed`. null = until the meeting starts. The host can still change the booking. */
+            changeDeadlines: {
+                /** Format: date-time */
+                cancelBy: string | null;
+                /** Format: date-time */
+                rescheduleBy: string | null;
+            };
             /** @description The event type as it is now; null once it is deleted. The booking start and end retain its actual length even if the default changes. */
             eventType: {
                 allowedDurationsMinutes?: number[];
@@ -7172,7 +7191,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Booking cancelled, already started, imported read-only, group-seat unsupported, idempotency key reused or organization context changed */
+            /** @description Booking cancelled, already started, the invitee reschedule deadline passed (`booking_reschedule_deadline_passed`), imported read-only, group-seat unsupported, idempotency key reused or organization context changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7425,7 +7444,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the booking's cancel deadline has passed (`booking_cancel_deadline_passed`; the host can still cancel it), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7520,7 +7539,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the booking's reschedule deadline has passed (`booking_reschedule_deadline_passed`; the host can still move it), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -29,6 +29,13 @@ import {
 } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
 import {
+  assertInviteeChangeOpen,
+  type ChangeCutoffs,
+  changeDeadline,
+  cutoffColumns,
+  cutoffsOf,
+} from './change-deadlines.ts'
+import {
   automaticMeet,
   automaticZoom,
   bookingConferenceViews,
@@ -380,6 +387,8 @@ const RESCHEDULE_COLUMNS = [
   'manage_token_hash',
   'notification_snapshot',
   'group_slot_id',
+  'reschedule_cutoff_minutes',
+  'cancel_cutoff_minutes',
 ] as const
 
 /**
@@ -939,6 +948,11 @@ interface NewBooking {
   hostsUseDefaultSchedule: boolean
   attendees: readonly Attendee[]
   notificationSnapshot: NotificationSnapshot
+  /**
+   * The invitee change deadlines this booking keeps: the event type's at booking time, or
+   * the replaced booking's on a reschedule (see change-deadlines.ts).
+   */
+  changeCutoffs: ChangeCutoffs
   /** Present only on a host move: transfer the invitee's hash without minting a token. */
   manageTokenHash?: Buffer | null | undefined
 }
@@ -980,6 +994,7 @@ export async function insertBooking(
       required_host_user_ids: [...b.hostUserIds].sort(),
       hosts_use_default_schedule: b.hostsUseDefaultSchedule,
       notification_snapshot: JSON.stringify(b.notificationSnapshot),
+      ...cutoffColumns(b.changeCutoffs),
     })
     .returning('id')
     .executeTakeFirstOrThrow()
@@ -1067,15 +1082,19 @@ async function cancelLocked(
   notify: BookingNotifier | undefined,
   origin: BookingOrigin,
   actorUserId: string | null,
+  /** Only the invitee's own link is limited by the booking's cancel deadline. */
+  asInvitee = false,
 ): Promise<Booking> {
   await assertBookingLocallyManaged(db, row.id)
   const seat = await db
     .selectFrom('bookings')
-    .select('group_slot_id')
+    .select(['group_slot_id', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
     .where('id', '=', row.id)
     .executeTakeFirst()
   if (seat?.group_slot_id && row.status === 'cancelled') return loadBooking(db, row.id)
   assertChangeable(row, now)
+  if (asInvitee && seat)
+    assertInviteeChangeOpen('cancel', toInstant(row.start_at), cutoffsOf(seat), now)
   await db
     .updateTable('bookings')
     .set({
@@ -1418,7 +1437,7 @@ async function publicBooking(
       // the policy serialized with a concurrent full configuration replacement.
       const policy = await trx
         .selectFrom('event_types')
-        .select('notifications')
+        .select(['notifications', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
         .where('id', '=', current.id)
         .executeTakeFirstOrThrow()
       const snapshot = createNotificationSnapshot(policy.notifications)
@@ -1533,6 +1552,8 @@ async function publicBooking(
         hostsUseDefaultSchedule: current.schedulingType !== 'individual',
         attendees: [invitee, ...guests],
         notificationSnapshot: snapshot,
+        // The deadlines that apply when it is booked, from the same locked row.
+        changeCutoffs: cutoffsOf(policy),
       })
       if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)
       // In this transaction, and never on the replay paths: one set of emails per booking,
@@ -1699,6 +1720,7 @@ export async function cancelManagedBooking(
       ctx.notify,
       origin,
       origin.actorUserId ?? null,
+      true,
     )
   })
 }
@@ -1844,6 +1866,9 @@ async function rescheduleLocked(
   // after that lock too, for both the lifecycle cutoff and reminder minimum gap.
   const now = ctx.now()
   assertChangeable(old, now)
+  // Hosts (carryManageToken) are never limited by the invitee's deadline.
+  if (!carryManageToken)
+    assertInviteeChangeOpen('reschedule', toInstant(old.start_at), cutoffsOf(old), now)
   if (!eventType) {
     throw new DomainError(
       'conflict',
@@ -1907,6 +1932,8 @@ async function rescheduleLocked(
     hostUserIds,
     hostsUseDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
     notificationSnapshot: notificationSnapshot(old.notification_snapshot),
+    // The meeting keeps the deadlines it was booked with, whoever moves it.
+    changeCutoffs: cutoffsOf(old),
     attendees: attendees.map((a) => ({
       name: a.name,
       email: a.email,
@@ -2140,7 +2167,10 @@ async function rescheduleGroupLocked(
     )
   if (start.equals(toInstant(old.start_at)) && end.equals(toInstant(old.end_at)))
     return { booking: await loadBooking(trx, old.id), manageToken: null }
-  if (!carry) await assertInviteeRescheduleAllowed({ ...ctx, db: trx }, old.id)
+  if (!carry) {
+    assertInviteeChangeOpen('reschedule', toInstant(old.start_at), cutoffsOf(old), now)
+    await assertInviteeRescheduleAllowed({ ...ctx, db: trx }, old.id)
+  }
   const attendees = await trx
     .selectFrom('booking_attendees')
     .selectAll()
@@ -2196,6 +2226,7 @@ async function rescheduleGroupLocked(
     hostUserIds: event.hostUserIds,
     hostsUseDefaultSchedule: false,
     notificationSnapshot: snapshot,
+    changeCutoffs: cutoffsOf(old),
     attendees: attendees.map((a) => ({
       name: a.name,
       email: a.email,
@@ -2564,7 +2595,10 @@ async function auditBooking(
   })
 }
 
-/** Requests expire after 48 hours, or at the original start, whichever comes first. */
+/**
+ * Requests expire after 48 hours, or at the original start (the booking's invitee reschedule
+ * deadline, if it has one), whichever comes first.
+ */
 export const RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48
 
 async function resolveRescheduleRequest(
@@ -2688,6 +2722,17 @@ export async function requestReschedule(
     }
     const now = ctx.now()
     assertChangeable(row, now)
+    // The invitee answers through their own link, which the booking's reschedule deadline
+    // limits: a request they could no longer answer is refused, and an open one expires at
+    // that deadline.
+    const start = toInstant(row.start_at)
+    const answerBy = changeDeadline(start, row.reschedule_cutoff_minutes) ?? start
+    if (Temporal.Instant.compare(now, answerBy) >= 0)
+      throw new DomainError(
+        'conflict',
+        'booking_reschedule_deadline_passed',
+        "The invitee's deadline for rescheduling this booking has passed. Move it yourself or contact the invitee.",
+      )
     await trx
       .updateTable('booking_reschedule_requests')
       .set({ state: 'replaced', resolved_at: now.toString() })
@@ -2695,10 +2740,7 @@ export async function requestReschedule(
       .where('state', '=', 'pending')
       .execute()
     const deadline = now.add({ hours: RESCHEDULE_REQUEST_TIMEOUT_HOURS })
-    const expires =
-      Temporal.Instant.compare(deadline, toInstant(row.start_at)) < 0
-        ? deadline
-        : toInstant(row.start_at)
+    const expires = Temporal.Instant.compare(deadline, answerBy) < 0 ? deadline : answerBy
     const request = await trx
       .insertInto('booking_reschedule_requests')
       .values({

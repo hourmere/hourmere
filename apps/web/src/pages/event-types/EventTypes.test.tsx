@@ -380,6 +380,8 @@ describe('creating an event type', () => {
     await user.type(field('Buffer before (minutes)'), '5')
     await user.clear(field('Buffer after (minutes)'))
     await user.type(field('Buffer after (minutes)'), '10')
+    await user.type(field(/Invitee reschedule deadline/), '1440')
+    await user.type(field(/Invitee cancellation deadline/), '60')
     await user.click(screen.getByRole('button', { name: 'Create event type' }))
 
     expect(await screen.findByText('Created “Intro call”.')).toBeDefined()
@@ -399,6 +401,8 @@ describe('creating an event type', () => {
         maxBookingsPerWeek: 8,
         maxBookingsPerMonth: 20,
         bookingWindowDays: 60,
+        rescheduleCutoffMinutes: 1440,
+        cancelCutoffMinutes: 60,
         location: { kind: 'phone', number: '+14155550123' },
         questions: [],
         scheduleId: OTHER_SCHEDULE_ID,
@@ -1043,6 +1047,63 @@ describe('editing an event type', () => {
     const questions = (second?.body as EventType | undefined)?.questions ?? []
     expect(questions[0]?.id).toBe('company')
     expect(questions[2]?.id).not.toBe('company')
+  })
+
+  it('loads, changes and clears invitee change deadlines, and keeps untouched ones out of metadata saves', async () => {
+    const user = userEvent.setup()
+    const api = eventTypeServer([
+      eventType({ rescheduleCutoffMinutes: 1440, cancelCutoffMinutes: 120 }),
+    ])
+    await openExisting()
+    expect(field(/Invitee reschedule deadline/).value).toBe('1440')
+    expect(field(/Invitee cancellation deadline/).value).toBe('120')
+    expect(document.getElementById('rescheduleCutoffMinutes-hint')?.textContent).toContain(
+      'Each booking keeps the deadline it was booked with',
+    )
+
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'First call')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const metadata = api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
+    expect(metadata).not.toHaveProperty('rescheduleCutoffMinutes')
+    expect(metadata).not.toHaveProperty('cancelCutoffMinutes')
+
+    await user.clear(field(/Invitee reschedule deadline/))
+    expect(document.getElementById('rescheduleCutoffMinutes-hint')?.textContent).toContain(
+      'Empty: until the meeting starts.',
+    )
+    await user.clear(field(/Invitee cancellation deadline/))
+    await user.type(field(/Invitee cancellation deadline/), '30')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() =>
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(2),
+    )
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[1]?.body).toMatchObject({
+      rescheduleCutoffMinutes: null,
+      cancelCutoffMinutes: 30,
+    })
+  })
+
+  it('refuses out-of-range invitee change deadlines before sending', async () => {
+    const user = userEvent.setup()
+    const api = eventTypeServer([eventType()])
+    await openExisting()
+    await user.type(field(/Invitee reschedule deadline/), '0')
+    await user.type(field(/Invitee cancellation deadline/), '525601')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    const summary = await screen.findByRole('alert')
+    const problems = within(summary)
+      .getAllByRole('link')
+      .map((a) => a.textContent)
+    expect(problems).toEqual([
+      'Invitee reschedule deadline: Enter a number from 1 to 525,600.',
+      'Invitee cancellation deadline: Enter a number from 1 to 525,600.',
+    ])
+    expect(field(/Invitee reschedule deadline/).getAttribute('aria-invalid')).toBe('true')
+    expect(field(/Invitee cancellation deadline/).getAttribute('aria-invalid')).toBe('true')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(0)
   })
 
   it('says when the event type does not exist', async () => {

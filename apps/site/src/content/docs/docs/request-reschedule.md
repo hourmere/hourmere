@@ -15,8 +15,11 @@ and reminders remain in effect until the meeting is moved or cancelled. This pre
 the time both sides already agreed to while the invitee considers alternatives; no
 alternative is reserved merely by opening the picker.
 
-A request expires after 48 elapsed hours, or when the original meeting starts, whichever
-comes first. If it expires, the original booking stays in place and the hosts receive an
+A request expires after 48 elapsed hours, when the original meeting starts, or at the
+booking's [reschedule deadline](/docs/change-deadlines), whichever comes first. The
+invitee answers through their management link, so once that deadline has passed a new
+request is refused with 409 `booking_reschedule_deadline_passed`; move the booking yourself
+instead. If a request expires, the original booking stays in place and the hosts receive an
 email. A delayed worker may deliver that notice later. Sending another request replaces
 the previous request. You can still move or cancel the booking yourself.
 
@@ -98,7 +101,8 @@ status `confirmed`. Neither includes the note or private management link.
 
 - Imported bookings are read-only; request a change in their original system.
 - Group-seat bookings do not support this action.
-- The timeout is fixed at 48 hours, capped by the meeting start; it is not configurable.
+- The timeout is fixed at 48 hours, capped by the meeting start and the booking's
+  reschedule deadline; it is not configurable separately.
 - Expiry keeps the original meeting. It does not cancel the meeting or free the slot.
 - Only the request email's own link knows which request it answers. A page opened from
   another management link explains a refused answer from the booking as it is now.

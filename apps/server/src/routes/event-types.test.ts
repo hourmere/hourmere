@@ -396,6 +396,8 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       maxBookingsPerDay: null,
       maxBookingsPerWeek: null,
       maxBookingsPerMonth: null,
+      rescheduleCutoffMinutes: null,
+      cancelCutoffMinutes: null,
       schedulingType: 'individual',
       roundRobinActive: false,
       conferenceOrganizer: null,

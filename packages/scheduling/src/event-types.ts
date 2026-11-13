@@ -15,6 +15,7 @@ import {
   catalogPage,
   checkedCatalogPage,
 } from './catalog-page.ts'
+import { validCutoff } from './change-deadlines.ts'
 import {
   automaticMeet,
   automaticZoom,
@@ -90,6 +91,10 @@ export interface EventType {
   maxBookingsPerWeek: number | null
   /** null = no limit; calendar months in each host's schedule time zone. */
   maxBookingsPerMonth: number | null
+  /** Minutes before the start from which the invitee may no longer reschedule; null = none. */
+  rescheduleCutoffMinutes: number | null
+  /** Minutes before the start from which the invitee may no longer cancel; null = none. */
+  cancelCutoffMinutes: number | null
   schedulingType: SchedulingType
   /** Round-robin booking requires a separate explicit activation action. */
   roundRobinActive: boolean
@@ -136,6 +141,8 @@ export interface EventTypeInput {
   maxBookingsPerDay?: number | null | undefined
   maxBookingsPerWeek?: number | null | undefined
   maxBookingsPerMonth?: number | null | undefined
+  rescheduleCutoffMinutes?: number | null | undefined
+  cancelCutoffMinutes?: number | null | undefined
   location?: LocationSettings | null | undefined
   /** Replaces the ordered list. Cannot be combined with a legacy location write. */
   locations?: LocationOption[] | null | undefined
@@ -189,6 +196,8 @@ interface Fields {
   maxBookingsPerDay: number | null
   maxBookingsPerWeek: number | null
   maxBookingsPerMonth: number | null
+  rescheduleCutoffMinutes: number | null
+  cancelCutoffMinutes: number | null
   location: LocationSettings | null
   locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
@@ -215,6 +224,8 @@ const FIELD_NAMES = [
   'maxBookingsPerDay',
   'maxBookingsPerWeek',
   'maxBookingsPerMonth',
+  'rescheduleCutoffMinutes',
+  'cancelCutoffMinutes',
   'location',
   'locations',
   'successRedirect',
@@ -235,6 +246,8 @@ const DEFAULTS = {
   maxBookingsPerDay: null,
   maxBookingsPerWeek: null,
   maxBookingsPerMonth: null,
+  rescheduleCutoffMinutes: null,
+  cancelCutoffMinutes: null,
   location: null,
   locations: null,
   successRedirect: null,
@@ -1078,6 +1091,11 @@ function validFields(
     maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
     maxBookingsPerWeek: (c.maxBookingsPerWeek ?? null) as number | null,
     maxBookingsPerMonth: (c.maxBookingsPerMonth ?? null) as number | null,
+    rescheduleCutoffMinutes: validCutoff(
+      c.rescheduleCutoffMinutes ?? null,
+      'rescheduleCutoffMinutes',
+    ),
+    cancelCutoffMinutes: validCutoff(c.cancelCutoffMinutes ?? null, 'cancelCutoffMinutes'),
     location: compatLocation(locations),
     locations,
     // A policy change must not block unrelated edits. Only an explicitly supplied
@@ -1228,6 +1246,8 @@ function fieldsOf(row: {
   max_bookings_per_day: number | null
   max_bookings_per_week: number | null
   max_bookings_per_month: number | null
+  reschedule_cutoff_minutes: number | null
+  cancel_cutoff_minutes: number | null
   location: Json | null
   locations: Json | null
   success_redirect: Json | null
@@ -1254,6 +1274,8 @@ function fieldsOf(row: {
     maxBookingsPerDay: row.max_bookings_per_day,
     maxBookingsPerWeek: row.max_bookings_per_week,
     maxBookingsPerMonth: row.max_bookings_per_month,
+    rescheduleCutoffMinutes: row.reschedule_cutoff_minutes,
+    cancelCutoffMinutes: row.cancel_cutoff_minutes,
     location: compatLocation(locations),
     locations,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -1280,6 +1302,8 @@ function columns(fields: Fields) {
     max_bookings_per_day: fields.maxBookingsPerDay,
     max_bookings_per_week: fields.maxBookingsPerWeek,
     max_bookings_per_month: fields.maxBookingsPerMonth,
+    reschedule_cutoff_minutes: fields.rescheduleCutoffMinutes,
+    cancel_cutoff_minutes: fields.cancelCutoffMinutes,
     location: fields.location === null ? null : jsonb(fields.location),
     locations: fields.locations === null ? null : jsonb(fields.locations),
     success_redirect: fields.successRedirect === null ? null : jsonb(fields.successRedirect),

@@ -7,6 +7,7 @@ import {
   intersectSlots,
   type SlotView,
   selectDurationMinutes,
+  toIso,
 } from './availability.ts'
 import {
   assertBookingLocallyManaged,
@@ -17,6 +18,7 @@ import {
   type ManagedRescheduleRequestState,
   managedLinkRescheduleRequest,
 } from './bookings.ts'
+import { assertInviteeChangeOpen, changeDeadline, cutoffsOf } from './change-deadlines.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds, resolvedBookingHosts } from './hosts.ts'
@@ -29,6 +31,12 @@ export interface ManagedBooking extends Booking {
   hosts: { name: string }[]
   /** Only for a reschedule request email's link: what became of that request. */
   rescheduleRequest?: { id: string; state: ManagedRescheduleRequestState }
+  /**
+   * The invitee's change deadlines this booking keeps (the ones that applied when it was
+   * booked): from these instants on, the invitee can no longer reschedule or cancel it
+   * through this link. null = until the meeting starts.
+   */
+  changeDeadlines: { rescheduleBy: string | null; cancelBy: string | null }
 }
 
 /** getManagedBooking plus the event type, the hosts' names and the link's own request. */
@@ -41,7 +49,7 @@ export async function getManagedBookingDetails(
   const now = ctx.now()
   const at = { ...ctx, now: () => now }
   const booking = await getManagedBooking(at, token)
-  const [eventType, hosts, rescheduleRequest] = await Promise.all([
+  const [eventType, hosts, rescheduleRequest, cutoffs] = await Promise.all([
     booking.eventTypeId === null
       ? undefined
       : ctx.db
@@ -59,7 +67,17 @@ export async function getManagedBookingDetails(
       .orderBy('bh.user_id')
       .execute(),
     managedLinkRescheduleRequest(at, token, booking.id),
+    ctx.db
+      .selectFrom('bookings')
+      .select(['reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
+      .where('id', '=', booking.id)
+      .executeTakeFirstOrThrow(),
   ])
+  const start = Temporal.Instant.from(booking.start)
+  const instant = (minutes: number | null) => {
+    const deadline = changeDeadline(start, minutes)
+    return deadline && toIso(deadline)
+  }
   return {
     ...booking,
     eventType: eventType
@@ -73,6 +91,10 @@ export async function getManagedBookingDetails(
       : null,
     hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
     ...(rescheduleRequest && { rescheduleRequest }),
+    changeDeadlines: {
+      rescheduleBy: instant(cutoffs.reschedule_cutoff_minutes),
+      cancelBy: instant(cutoffs.cancel_cutoff_minutes),
+    },
   }
 }
 
@@ -131,7 +153,20 @@ async function listBookingSlots(
   if (Temporal.Instant.compare(Temporal.Instant.from(booking.start), now) <= 0) {
     throw new DomainError('conflict', 'booking_in_past', 'This booking has already started')
   }
-  if (asInvitee) await assertInviteeRescheduleAllowed(ctx, booking.id)
+  if (asInvitee) {
+    const cutoffs = await ctx.db
+      .selectFrom('bookings')
+      .select(['reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
+      .where('id', '=', booking.id)
+      .executeTakeFirstOrThrow()
+    assertInviteeChangeOpen(
+      'reschedule',
+      Temporal.Instant.from(booking.start),
+      cutoffsOf(cutoffs),
+      now,
+    )
+    await assertInviteeRescheduleAllowed(ctx, booking.id)
+  }
   const eventType =
     booking.eventTypeId === null
       ? undefined

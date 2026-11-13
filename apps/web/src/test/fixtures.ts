@@ -27,6 +27,8 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     maxBookingsPerDay: null,
     maxBookingsPerWeek: null,
     maxBookingsPerMonth: null,
+    rescheduleCutoffMinutes: null,
+    cancelCutoffMinutes: null,
     schedulingType: 'individual',
     roundRobinActive: false,
     conferenceOrganizer: null,

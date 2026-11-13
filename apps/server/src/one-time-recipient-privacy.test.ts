@@ -223,7 +223,9 @@ describe.skipIf(!serverUrl)('one-time recipient address privacy', () => {
         200,
         fixture,
       )
-      expect(keys(managed)).toEqual([...bookingKeys, 'eventType', 'hosts'].sort())
+      expect(keys(managed)).toEqual(
+        [...bookingKeys, 'changeDeadlines', 'eventType', 'hosts'].sort(),
+      )
       expect(keys(managed.eventType as object)).toEqual(['durationMinutes', 'title'])
       expect(managed.hosts.every((host: object) => keys(host).join(',') === 'name')).toBe(true)
       const manageShell = await app.request('/booking')

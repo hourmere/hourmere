@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { listPublicTeamSlots } from './availability.ts'
 import { createPublicTeamBooking, insertBooking } from './bookings.ts'
+import { NO_CHANGE_CUTOFFS } from './change-deadlines.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { createFixtures, createTestTeam, createTestUser, testContext } from './testing.ts'
@@ -101,6 +102,7 @@ describe.skipIf(!process.env.DATABASE_URL)('round-robin payment hold admission',
             hostsUseDefaultSchedule: false,
             attendees: [],
             notificationSnapshot: notificationSnapshot(null),
+            changeCutoffs: NO_CHANGE_CUTOFFS,
             manageTokenHash: null,
             paymentHoldExpiresAt: deadline,
           }),

@@ -149,6 +149,8 @@ export function errorMessage(err: unknown): UiText {
     reschedule_request_changed:
       'This request has expired or changed. Reload your booking to choose what to do next.',
     booking_group_seat_unsupported: 'Group-seat bookings do not support reschedule requests.',
+    booking_reschedule_deadline_passed:
+      'The invitee can no longer reschedule this booking online because its deadline has passed. Move it yourself instead.',
 
     imported_booking_read_only:
       'This imported booking is read-only and managed in the original system.',

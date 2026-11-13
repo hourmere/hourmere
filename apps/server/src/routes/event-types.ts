@@ -3,6 +3,7 @@ import type { Principal } from '@hourmere/auth'
 import { EVENT_TYPE_RULE_BOUNDS, MAX_ALLOWED_DURATIONS } from '@hourmere/core'
 import {
   activateRoundRobin,
+  CHANGE_CUTOFF_MAX_MINUTES,
   createEventType,
   deleteEventType,
   EVENT_TYPE_LIMITS,
@@ -375,6 +376,14 @@ const fields = {
     'maxBookingsPerMonth',
     "Bookings per host schedule's calendar month; null = no limit. Counts confirmed bookings by local start date, for this event type and each active assigned host. Omitted on update = unchanged.",
   ).nullable(),
+  rescheduleCutoffMinutes: z.int().min(1).max(CHANGE_CUTOFF_MAX_MINUTES).nullable().openapi({
+    description:
+      'Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = until the meeting starts. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it.',
+  }),
+  cancelCutoffMinutes: z.int().min(1).max(CHANGE_CUTOFF_MAX_MINUTES).nullable().openapi({
+    description:
+      'Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Independent of rescheduleCutoffMinutes; same snapshot and host rules.',
+  }),
   location: Location,
   locations: Locations,
   allowGuests: z.boolean().openapi({
@@ -439,6 +448,8 @@ export const EventTypeInput = z
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     maxBookingsPerWeek: fields.maxBookingsPerWeek.optional(),
     maxBookingsPerMonth: fields.maxBookingsPerMonth.optional(),
+    rescheduleCutoffMinutes: fields.rescheduleCutoffMinutes.optional(),
+    cancelCutoffMinutes: fields.cancelCutoffMinutes.optional(),
     location: LocationInput.optional(),
     locations: LocationsInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
@@ -475,6 +486,8 @@ export const EventTypeUpdate = z
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     maxBookingsPerWeek: fields.maxBookingsPerWeek.optional(),
     maxBookingsPerMonth: fields.maxBookingsPerMonth.optional(),
+    rescheduleCutoffMinutes: fields.rescheduleCutoffMinutes.optional(),
+    cancelCutoffMinutes: fields.cancelCutoffMinutes.optional(),
     location: LocationInput.optional(),
     locations: LocationsInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
