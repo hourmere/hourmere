@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { setImmediate } from 'node:timers/promises'
+import { setTimeout } from 'node:timers/promises'
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   createAuth,
@@ -351,7 +351,7 @@ describe.skipIf(!bootstrap)(
           [blocker, relation],
         )
         if (result.rows[0]) return result.rows[0].pid
-        await setImmediate(undefined, { signal })
+        await setTimeout(10, undefined, { signal })
       }
     }
 
@@ -375,7 +375,7 @@ describe.skipIf(!bootstrap)(
           ).toBe('organization lock held')
           return
         }
-        await setImmediate(undefined, { signal })
+        await setTimeout(10, undefined, { signal })
       }
     }
 
