@@ -1,0 +1,24 @@
+{
+  "migration": "0083_routing_form_operations.sql",
+  "objects": {
+    "constraint public.routing_form_operations.routing_form_operations_actor_kind_check": "CHECK ((actor_kind = ANY (ARRAY['session'::text, 'api_key'::text, 'oauth'::text])))",
+    "constraint public.routing_form_operations.routing_form_operations_form_fk": "FOREIGN KEY (organization_id, form_id) REFERENCES routing_forms(organization_id, id) ON DELETE CASCADE",
+    "constraint public.routing_form_operations.routing_form_operations_operation_check": "CHECK ((operation = ANY (ARRAY['create'::text, 'publish'::text])))",
+    "constraint public.routing_form_operations.routing_form_operations_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE",
+    "constraint public.routing_form_operations.routing_form_operations_pkey": "PRIMARY KEY (id)",
+    "constraint public.routing_form_operations.routing_form_operations_request_fingerprint_check": "CHECK ((octet_length(request_fingerprint) = 32))",
+    "constraint public.routing_form_operations.routing_form_operations_request_key": "UNIQUE (organization_id, actor_kind, actor_id, request_id)",
+    "constraint public.routing_form_operations.routing_form_operations_result_key": "UNIQUE NULLS NOT DISTINCT (organization_id, form_id, version_id)",
+    "constraint public.routing_form_operations.routing_form_operations_result_shape": "CHECK (((operation = 'publish'::text) = (version_id IS NOT NULL)))",
+    "constraint public.routing_form_operations.routing_form_operations_version_fk": "FOREIGN KEY (organization_id, form_id, version_id) REFERENCES routing_form_versions(organization_id, form_id, id) ON DELETE CASCADE",
+    "not_null public.routing_form_operations.actor_id": "NOT NULL",
+    "not_null public.routing_form_operations.actor_kind": "NOT NULL",
+    "not_null public.routing_form_operations.created_at": "NOT NULL DEFAULT now()",
+    "not_null public.routing_form_operations.form_id": "NOT NULL",
+    "not_null public.routing_form_operations.operation": "NOT NULL",
+    "not_null public.routing_form_operations.organization_id": "NOT NULL",
+    "not_null public.routing_form_operations.request_fingerprint": "NOT NULL",
+    "not_null public.routing_form_operations.request_id": "NOT NULL",
+    "trigger public.routing_form_operations.routing_form_operations_guard": "CREATE TRIGGER routing_form_operations_guard BEFORE UPDATE ON public.routing_form_operations FOR EACH ROW EXECUTE FUNCTION guard_routing_form_operation() -- function SET search_path=public, pg_temp md5 80445e598bf0f7a7f145ede5e836e7e5"
+  }
+}
