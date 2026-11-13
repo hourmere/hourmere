@@ -9,9 +9,17 @@ import type { TestProject } from 'vitest/node'
 
 let template: TestDatabaseTemplate | undefined
 
-export async function setup(project: TestProject): Promise<void> {
-  const serverUrl = process.env.DATABASE_URL
-  if (!serverUrl) return
+async function dropTemplate(): Promise<void> {
+  const current = template
+  template = undefined
+  // A leftover template is removed by `npm run db:cleanup-tests`; it must not fail a green run.
+  await current?.drop().catch(() => {
+    console.warn('Could not drop the migrated test template')
+  })
+}
+
+async function prepare(project: TestProject, serverUrl: string): Promise<void> {
+  await dropTemplate()
   try {
     template = await createTestDatabaseTemplate(
       serverUrl,
@@ -24,6 +32,7 @@ export async function setup(project: TestProject): Promise<void> {
     // Database tests then migrate their own fixtures and report the real failure; tests that
     // need no database still run. Do not print the error: it can contain connection details.
     console.warn('No migrated test template; database fixtures replay every migration')
+    project.provide('migratedTestTemplate', undefined)
     return
   }
   project.provide('migratedTestTemplate', {
@@ -32,7 +41,15 @@ export async function setup(project: TestProject): Promise<void> {
   })
 }
 
+export async function setup(project: TestProject): Promise<void> {
+  const serverUrl = process.env.DATABASE_URL
+  if (!serverUrl) return
+  await prepare(project, serverUrl)
+  // Watch mode: a migration edited since the last run must not meet a template that recorded
+  // its old checksum, so every rerun starts from a freshly migrated template.
+  project.onTestsRerun(() => prepare(project, serverUrl))
+}
+
 export async function teardown(): Promise<void> {
-  await template?.drop()
-  template = undefined
+  await dropTemplate()
 }

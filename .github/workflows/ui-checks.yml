@@ -1,9 +1,10 @@
 name: UI checks
 
 on:
-  # Not required checks. Pull requests run them only when the rendered UI or its tooling
-  # changes; every push to main still runs them. Server behaviour behind the pages is covered
-  # by the required browser regressions (`e2e`) on every pull request.
+  # Not required checks. Pull requests run them only when the web app, the site, shared UI
+  # code or the browser tooling changes; every push to main still runs them. A server-only
+  # change that alters layout or accessibility is caught on main, not on its pull request;
+  # its functional browser behaviour is still covered by the required `e2e` on every PR.
   pull_request:
     paths:
       - apps/web/**

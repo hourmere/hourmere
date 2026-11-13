@@ -180,27 +180,30 @@ async function createPredecessorTemplate(
   files: MigrationFile[],
   key: string,
 ): Promise<TestDatabaseTemplate> {
+  // The template is dropped with the file's other fixtures (it owns a cleanup like any
+  // fixture). Registered first, so a cleanup that starts while the template is still being
+  // built also forgets it, and a later fixture builds a new one instead of copying a
+  // database that no longer exists.
+  const unregister = registerTestDatabaseCleanup(async () => {
+    predecessorTemplates.delete(key)
+    predecessorRequests.delete(key)
+    unregister()
+  })
   const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-'))
   try {
     for (const file of files) {
       await copyFile(join(migrationsDir, file.name), join(directory, file.name))
     }
-    const template = await createTestDatabaseTemplate(
+    return await createTestDatabaseTemplate(
       serverUrl,
       async (pool) => {
         await runMigrations(pool, directory)
       },
       { tag: 'predecessor' },
     )
-    // The template is dropped with the file's other fixtures (it owns a cleanup like any
-    // fixture); forget it then, so a later fixture builds a new one instead of copying a
-    // database that no longer exists.
-    const unregister = registerTestDatabaseCleanup(async () => {
-      predecessorTemplates.delete(key)
-      predecessorRequests.delete(key)
-      unregister()
-    })
-    return template
+  } catch (error) {
+    unregister()
+    throw error
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -252,8 +255,10 @@ async function sharedPredecessorTemplate(
     shared += 1
   }
   if (shared === 0) return undefined
-  if (shared === repository.length && shared === files.length) {
-    return migratedTemplate(serverUrl, undefined, options)
+  // Every repository migration, possibly followed by more files: the run's template applies.
+  if (shared === repository.length) {
+    const template = migratedTemplate(serverUrl, undefined, options)
+    if (template) return template
   }
   const key = `${templateServer(serverUrl)} ${shared}`
   const requests = (predecessorRequests.get(key) ?? 0) + 1

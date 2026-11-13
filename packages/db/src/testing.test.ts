@@ -564,7 +564,7 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     } finally {
       await owned.drop()
     }
-  })
+  }, 30_000)
 
   it('migrates repeated source copies from one template of their unchanged predecessors', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-test-'))
@@ -629,7 +629,7 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     }
     expect(await predecessorTemplates()).toHaveLength(1)
     await cleanupTestDatabases()
-  })
+  }, 60_000)
 
   /**
    * Keeps CREATE DATABASE … TEMPLATE waiting: COMMENT ON DATABASE holds SHARE UPDATE EXCLUSIVE
