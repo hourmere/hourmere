@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { errorMessage } from './api/errors.ts'
 import { useI18n } from './i18n/runtime.tsx'
 import type { UiText } from './i18n/translate.ts'
@@ -49,10 +49,14 @@ export function usePageTitle(title: UiText) {
  * True while the calling component is mounted. Async work (a save, a delete) checks it
  * before acting on its result: once the person has left the page, a late answer must not
  * navigate away from where they are now, or touch what they are editing there.
+ *
+ * A layout effect, so it turns false in the commit that takes the page off the screen.
+ * React runs passive (useEffect) cleanups later, and an answer that arrived in between
+ * would still find the left page "mounted".
  */
 export function useMounted() {
   const mounted = useRef(false)
-  useEffect(() => {
+  useLayoutEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
