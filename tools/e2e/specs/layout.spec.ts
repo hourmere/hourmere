@@ -179,6 +179,26 @@ test.describe('notification editor at 320px', () => {
       await expect(note).toBeVisible()
       await expect(note).toBeEditable()
       await expect(note).toHaveValue(AUDIT_HOST_NOTE)
+      const locationGroup = page.locator('.event-settings-group').filter({
+        has: page.locator('summary', {
+          hasText: locale === 'zh-CN' ? '地点选项与视频会议' : 'Location options and conferencing',
+        }),
+      })
+      const addLocation = locationGroup.getByRole('button', {
+        name: locale === 'zh-CN' ? '添加地点选项' : 'Add location option',
+        exact: true,
+        includeHidden: true,
+      })
+      expect(await addLocation.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+        0,
+      )
+      await page.evaluate(settleAuditLayout)
+      expect(await page.evaluate(measureLayout, viewport)).toEqual([])
+      await locationGroup.locator('summary').click()
+      await expect(addLocation).toBeVisible()
+      expect(
+        await addLocation.evaluate((element) => element.getBoundingClientRect().height),
+      ).toBeGreaterThanOrEqual(24)
       await page.evaluate(settleAuditLayout)
       expect(await page.evaluate(measureLayout, viewport)).toEqual([])
     })

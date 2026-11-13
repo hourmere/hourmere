@@ -1,3 +1,4 @@
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test, waitUntilAtRest } from '../fixtures.ts'
 
 test('a team owner creates a collective type and a public invitee books every required host', async ({
@@ -7,6 +8,7 @@ test('a team owner creates a collective type and a public invitee books every re
   await app.authorizeHost('owner')
   await page.goto(`${app.url}/app/event-types/new`)
   await page.getByLabel('Title', { exact: true }).fill('Panel interview')
+  await revealEventSetting(page.getByLabel('Scheduling', { exact: true }))
   await page.getByLabel('Scheduling', { exact: true }).selectOption('collective')
   await page.getByLabel('Second Required Host', { exact: true }).check()
   await page.getByRole('button', { name: 'Create event type', exact: true }).click()

@@ -333,7 +333,7 @@ describe('duration editor production-source mutation controls', () => {
       },
     },
     {
-      before: 'defaultSelect.current?.focus()',
+      before: "(defaultSelect.current ?? document.getElementById('durationMinutes'))?.focus()",
       after: 'void 0',
       check: async (user: ReturnType<typeof userEvent.setup>) => {
         await user.click(screen.getByRole('button', { name: 'Remove 30 min' }))

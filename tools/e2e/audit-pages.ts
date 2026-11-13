@@ -25,6 +25,7 @@ export const auditPages = [
   { id: 'oauth-consent', title: 'OAuth consent' },
   { id: 'event-types', title: 'Event types' },
   { id: 'event-type-editor', title: 'Event-type editor' },
+  { id: 'event-type-editor-expanded', title: 'Event-type editor with all settings expanded' },
   { id: 'availability-editor', title: 'Availability editor' },
   { id: 'bookings', title: 'Bookings list' },
   { id: 'booking-detail', title: 'Booking detail' },
@@ -116,9 +117,10 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
       await page.getByText(AUDIT_TITLE, { exact: true }).waitFor()
       break
     case 'event-type-editor':
+    case 'event-type-editor-expanded':
     case 'availability-editor': {
-      const selector = id === 'event-type-editor' ? 'input#title' : 'input#name'
-      const value = id === 'event-type-editor' ? AUDIT_TITLE : 'Synthetic working hours'
+      const selector = id !== 'availability-editor' ? 'input#title' : 'input#name'
+      const value = id !== 'availability-editor' ? AUDIT_TITLE : 'Synthetic working hours'
       await page.waitForFunction(
         ({ selector, value }) =>
           document.querySelector<HTMLInputElement>(selector)?.value === value,
@@ -204,6 +206,7 @@ export async function openAuditPage(
       'oauth-consent': '/oauth/consent',
       'event-types': '/app/event-types',
       'event-type-editor': `/app/event-types/${fixture.eventTypeId}`,
+      'event-type-editor-expanded': `/app/event-types/${fixture.eventTypeId}`,
       'availability-editor': `/app/availability/${fixture.scheduleId}`,
       bookings: '/app/bookings',
       'booking-detail': `/app/bookings/${fixture.bookingId}`,
@@ -293,6 +296,7 @@ export async function openAuditPage(
     )
     verifyAuditPath(page.url(), paths[id])
     await verifyAuditContent(page, id)
+    if (id === 'event-type-editor-expanded') await page.evaluate(expandEventSettings)
     if (
       ['booking', 'booking-form', 'booking-time-zone', 'embedded-booking', 'team-booking'].includes(
         id,
@@ -307,6 +311,13 @@ export async function openAuditPage(
     // This intentionally drops their message/cause while retaining a useful state id.
     throw new Error(`Could not prepare synthetic audit state: ${id}`)
   }
+}
+
+/** Expand every settings disclosure before layout and axe inspect this separate state. */
+export function expandEventSettings(): void {
+  const groups = document.querySelectorAll<HTMLDetailsElement>('details.event-settings-group')
+  if (groups.length === 0) throw new Error('Event settings disclosures are missing')
+  for (const group of groups) group.open = true
 }
 
 /** Runs entirely in the browser; geometry and DOM contents never leave the page. */

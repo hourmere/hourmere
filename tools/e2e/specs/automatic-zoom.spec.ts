@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, fillInvitee, pickSlot, test } from '../automatic-zoom-fixtures.ts'
+import { revealEventSetting } from '../event-settings.ts'
 
 const labels = (zh: boolean) => ({
   title: zh ? '标题' : 'Title',
@@ -46,6 +47,9 @@ for (const locale of ['en', 'zh-CN'] as const) {
     })
     await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Synthetic Zoom call')
     expect(reads).toBe(0)
+    await revealEventSetting(
+      page.getByLabel('Create a unique Zoom meeting for each booking', { exact: true }),
+    )
     app.failAccountRead(true)
     await page
       .getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' })
@@ -377,6 +381,9 @@ test.describe('automatic Zoom defaults off', () => {
     page.on('request', (r) => {
       if (new URL(r.url()).pathname.startsWith('/api/v1/conference-connections')) reads++
     })
+    await revealEventSetting(
+      page.getByLabel('Create a unique Zoom meeting for each booking', { exact: true }),
+    )
     await expect(
       page.getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' }),
     ).toBeDisabled()

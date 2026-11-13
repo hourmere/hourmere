@@ -15,7 +15,9 @@ export function DurationsEditor({
   errors,
   onChange,
   onDefaultChange,
+  showDefault = true,
 }: {
+  showDefault?: boolean
   durations: number[]
   defaultDuration: string
   errors: FieldErrors
@@ -71,7 +73,7 @@ export function DurationsEditor({
         '1': length(Number(nextDefault)),
       }),
     )
-    defaultSelect.current?.focus()
+    ;(defaultSelect.current ?? document.getElementById('durationMinutes'))?.focus()
   }
 
   return (
@@ -150,29 +152,31 @@ export function DurationsEditor({
       <button type="button" className="button button-small" onClick={() => add()}>
         {t('Add duration')}
       </button>
-      <Field
-        id="durationMinutes"
-        label={t('Default duration')}
-        error={errors.durationMinutes}
-        hint={t(
-          'Selected when an invitee opens the booking page. They can choose another offered length.',
-        )}
-      >
-        {(props) => (
-          <select
-            {...props}
-            ref={defaultSelect}
-            value={defaultDuration}
-            onChange={(event) => onDefaultChange(event.target.value)}
-          >
-            {durations.map((minutes) => (
-              <option key={minutes} value={minutes}>
-                {length(minutes)}
-              </option>
-            ))}
-          </select>
-        )}
-      </Field>
+      {showDefault && (
+        <Field
+          id="durationMinutes"
+          label={t('Default duration')}
+          error={errors.durationMinutes}
+          hint={t(
+            'Selected when an invitee opens the booking page. They can choose another offered length.',
+          )}
+        >
+          {(props) => (
+            <select
+              {...props}
+              ref={defaultSelect}
+              value={defaultDuration}
+              onChange={(event) => onDefaultChange(event.target.value)}
+            >
+              {durations.map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {length(minutes)}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
       <p className="visually-hidden" role="status" aria-atomic="true">
         {uiText(announcement)}
       </p>

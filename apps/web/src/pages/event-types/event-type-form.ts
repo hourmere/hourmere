@@ -22,6 +22,7 @@ import {
 export type QuestionType = Schemas['Question']['type']
 export type LocationKind = NonNullable<EventType['location']>['kind']
 export type EventTypeBody = Schemas['EventTypeInput']
+export type LocationOption = NonNullable<EventType['locations']>[number]
 export const SUCCESS_REDIRECT_PARAMETERS = [
   'eventTypeSlug',
   'start',
@@ -79,6 +80,8 @@ export interface EventTypeDraft {
   durationMinutes: string
   allowedDurationsMinutes: number[]
   slotStepMinutes: string
+  locationOptions: LocationOption[] | null
+  primaryLocationId: string
   locationKind: LocationKind | ''
   autoCreateZoom: boolean
   zoomConnectionId: string
@@ -136,6 +139,8 @@ export function emptyDraft(): EventTypeDraft {
     durationMinutes: '30',
     allowedDurationsMinutes: [30],
     slotStepMinutes: '',
+    locationOptions: null,
+    primaryLocationId: 'primary',
     locationKind: '',
     autoCreateZoom: false,
     zoomConnectionId: '',
@@ -180,6 +185,9 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     durationMinutes: String(e.durationMinutes),
     allowedDurationsMinutes: [...e.allowedDurationsMinutes],
     slotStepMinutes: text(e.slotStepMinutes),
+    locationOptions: e.locations?.map((option) => ({ ...option })) ?? null,
+    primaryLocationId:
+      (e.locations?.find((option) => option.isDefault) ?? e.locations?.[0])?.id ?? 'primary',
     locationKind: location?.kind ?? '',
     autoCreateZoom: location?.kind === 'zoom' && location.autoCreate === true,
     zoomConnectionId: e.zoomConnectionId ?? '',
@@ -276,7 +284,10 @@ export function allowedDurationsProblem(
   )
     return msg('Enter a number from {0} to {1}.', { '0': '1', '1': '1,440' })
   if (new Set(durations).size !== durations.length) return 'Offer each duration only once.'
-  if (!durations.includes(parseWhole(defaultDuration) as number))
+  if (
+    !wholeNumberProblem(defaultDuration, RULES.durationMinutes, true) &&
+    !durations.includes(parseWhole(defaultDuration) as number)
+  )
     return 'Include the default duration in the allowed durations.'
   return null
 }
@@ -428,6 +439,29 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
       break
   }
 
+  const locations = orderedLocations(draft)
+  const kinds = new Set<string>()
+  for (const option of locations) {
+    const field = `location-option-${option.id}`
+    if (kinds.has(option.kind)) add('location-kind', 'Choose each location type only once.')
+    kinds.add(option.kind)
+    if (option.label !== undefined)
+      add(`${field}-label`, singleLineProblem(option.label, 'a title', 100))
+    if (option.id === draft.primaryLocationId) continue
+    if (
+      option.kind === 'phone' &&
+      !option.askInvitee &&
+      !EVENT_TYPE.phonePattern.test(option.number ?? '')
+    )
+      add(`${field}-value`, 'Enter the number in international format, e.g. +14155550123.')
+    if (option.kind === 'in_person')
+      add(
+        `${field}-value`,
+        singleLineProblem(option.address, 'an address', EVENT_TYPE.addressMaxLength),
+      )
+    if (option.kind === 'link') add(`${field}-value`, urlProblem(option.url))
+  }
+
   if (draft.questions.length > QUESTIONS.maxQuestions) {
     add('questions', msg('Ask at most {0} questions.', { '0': QUESTIONS.maxQuestions }))
   }
@@ -478,30 +512,68 @@ function urlProblem(value: string): UiText | null {
 
 const whole = (value: string) => parseWhole(value)
 
+function primaryLocation(draft: EventTypeDraft): EventTypeBody['location'] {
+  switch (draft.locationKind) {
+    case '':
+      return null
+    case 'phone':
+      return draft.phoneAskInvitee && draft.phone.trim() === ''
+        ? { kind: 'phone', askInvitee: true }
+        : { kind: 'phone', number: draft.phone.trim() }
+    case 'in_person':
+      return { kind: 'in_person', address: draft.address.trim() }
+    case 'link':
+      return { kind: 'link', url: draft.url.trim() }
+    case 'zoom':
+      return draft.autoCreateZoom ? { kind: 'zoom', autoCreate: true } : { kind: 'zoom' }
+    case 'google_meet':
+      return draft.autoCreateMeet
+        ? { kind: 'google_meet', autoCreate: true }
+        : { kind: 'google_meet' }
+    default:
+      return { kind: draft.locationKind }
+  }
+}
+
+/** Replacing a choice must never reuse the identity of its previous kind. */
+export function changeLocationKind(draft: EventTypeDraft, kind: LocationKind | ''): EventTypeDraft {
+  if (kind === draft.locationKind) return draft
+  const id = `location_${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+  const options =
+    draft.locationOptions === null
+      ? null
+      : orderedLocations(draft).flatMap((option) => {
+          if (draft.primaryLocationId !== option.id) return [option]
+          return kind ? [{ ...option, id }] : []
+        })
+  return { ...draft, locationKind: kind, primaryLocationId: id, locationOptions: options }
+}
+
+/** Keep the visible choice attached to its stable option id when options are reordered. */
+export function orderedLocations(draft: EventTypeDraft): LocationOption[] {
+  const primary = primaryLocation(draft)
+  const options = draft.locationOptions ?? []
+  const found = options.some((option) => option.id === draft.primaryLocationId)
+  const result = options.flatMap((option) => {
+    if (option.id !== draft.primaryLocationId) return [option]
+    return primary
+      ? [
+          {
+            id: option.id,
+            ...(option.label && { label: option.label }),
+            ...(option.isDefault && { isDefault: true as const }),
+            ...primary,
+          },
+        ]
+      : []
+  })
+  if (!found && primary) result.unshift({ id: draft.primaryLocationId, ...primary })
+  return result
+}
+
 /** The API body for a draft that passed validateDraft. */
 export function toInput(draft: EventTypeDraft): EventTypeBody {
-  const location: EventTypeBody['location'] = (() => {
-    switch (draft.locationKind) {
-      case '':
-        return null
-      case 'phone':
-        return draft.phoneAskInvitee && draft.phone.trim() === ''
-          ? { kind: 'phone', askInvitee: true }
-          : { kind: 'phone', number: draft.phone.trim() }
-      case 'in_person':
-        return { kind: 'in_person', address: draft.address.trim() }
-      case 'link':
-        return { kind: 'link', url: draft.url.trim() }
-      case 'zoom':
-        return draft.autoCreateZoom ? { kind: 'zoom', autoCreate: true } : { kind: 'zoom' }
-      case 'google_meet':
-        return draft.autoCreateMeet
-          ? { kind: 'google_meet', autoCreate: true }
-          : { kind: 'google_meet' }
-      default:
-        return { kind: draft.locationKind }
-    }
-  })()
+  const location = primaryLocation(draft)
   return {
     ...(draft.hostUserIds.length > 0 && {
       schedulingType: draft.schedulingType,
@@ -528,7 +600,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     maxBookingsPerWeek: whole(draft.maxBookingsPerWeek),
     maxBookingsPerMonth: whole(draft.maxBookingsPerMonth),
     bookingWindowDays: whole(draft.bookingWindowDays),
-    location,
+    ...(draft.locationOptions === null && !(location?.kind === 'phone' && location.askInvitee)
+      ? { location }
+      : { locations: orderedLocations(draft).length ? orderedLocations(draft) : null }),
     questions: draft.questions.map((q) => ({
       id: q.id,
       label: q.label.trim(),
@@ -561,6 +635,8 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
   // untouched, so metadata saves also preserve options configured by a newer client.
   if (JSON.stringify(body.location) === JSON.stringify(toInput(baseline).location))
     delete body.location
+  if (JSON.stringify(orderedLocations(draft)) === JSON.stringify(orderedLocations(baseline)))
+    delete body.locations
   // A metadata save must preserve waitlist changes made outside this editor session.
   if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
   else body.waitlist = { enabled: draft.waitlistEnabled }
@@ -602,7 +678,7 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
     if (draft.locationKind === 'google_meet') delete body.location
     if (draft.scheduleId === baseline.scheduleId) delete body.scheduleId
   }
-  if (draft.schedulingType === 'round_robin' && sameHosts) delete body.scheduleId
+  if (draft.schedulingType !== 'individual' && sameHosts) delete body.scheduleId
   return body
 }
 
@@ -615,7 +691,7 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     title: 'Title',
     slug: 'Booking link',
     description: 'Description',
-    durationMinutes: 'Default duration',
+    durationMinutes: 'Duration (minutes)',
     allowedDurationsMinutes: 'Allowed durations',
     slotStepMinutes: 'Start times every',
     'location-kind': 'Location',
@@ -641,6 +717,10 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     notifications: 'Reminders and follow-ups',
     'notifications.reminders': 'Pre-meeting reminders',
     'notifications.followUps': 'Post-meeting follow-ups',
+  }
+  for (const option of orderedLocations(draft)) {
+    labels[`location-option-${option.id}-label`] = 'Location label'
+    labels[`location-option-${option.id}-value`] = 'Location'
   }
   for (const category of ['reminders', 'followUps'] as const) {
     draft.notifications[category].forEach((rule, index) => {
@@ -801,6 +881,8 @@ export function serverErrors(
       if (name === 'position') return field('position', 'Enter a whole number.')
       return { fields: {}, message: literal(detail) }
     }
+    case 'invalid_locations':
+      return field('location-kind', literal(detail))
     case 'invalid_location': {
       if (/location\.number/.test(detail)) {
         return field(
