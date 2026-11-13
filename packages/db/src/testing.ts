@@ -64,6 +64,10 @@ function adminStatementTimeout(): number {
   return milliseconds
 }
 
+// A CREATE that waits on a lock must notice a client that has gone (interrupt, worker end)
+// instead of creating an orphan database after the lock is released.
+const CLIENT_CHECK_INTERVAL_MS = 1_000
+
 function adminPool(url: string, statementTimeout = adminStatementTimeout()): pg.Pool {
   const maintenance = new URL(url)
   // node-pg gives URL parameters precedence over Pool settings. Fixture/session options
@@ -84,7 +88,7 @@ function adminPool(url: string, statementTimeout = adminStatementTimeout()): pg.
     connectionTimeoutMillis: 5_000,
     statement_timeout: statementTimeout,
     query_timeout: statementTimeout + 1_000,
-    options: `-c statement_timeout=${statementTimeout} -c lock_timeout=0`,
+    options: `-c statement_timeout=${statementTimeout} -c lock_timeout=0 -c client_connection_check_interval=${CLIENT_CHECK_INTERVAL_MS}`,
   })
   guardPoolErrors(pool)
   return pool
