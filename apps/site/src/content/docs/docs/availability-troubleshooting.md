@@ -67,8 +67,12 @@ the team’s assigned hosts with their names.
 For team event types, a time outside a host’s working hours (weekly hours or a date override)
 reports only `outside_working_hours` for that host. Their `calendar_busy`, `buffer_before`,
 `buffer_after` and `host_conflict` reasons for that time are left out, so team owners and admins
-do not learn when members are busy outside their working hours. On your own personal event types
-you still see every reason.
+do not see when members are busy outside their working hours. One exception remains: on a time
+inside working hours, a `buffer_before` or `buffer_after` reason can show where an adjacent
+off-hours commitment begins or ends, within one buffer length of the working hours. For example,
+with a 30-minute buffer and a member busy from 12:10 after hours that end at 12:00, the 11:30
+time reports `buffer_after` from 11:40 to 12:00. On your own personal event types you still see
+every reason.
 
 ## REST
 

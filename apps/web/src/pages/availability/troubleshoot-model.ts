@@ -87,19 +87,42 @@ export function zoneOffset(timeZone: string, iso: string): string {
   )
 }
 
+/** Minutes east of UTC, from a "GMT±HH:MM" offset ("GMT" alone is UTC). */
+function offsetMinutes(timeZone: string, iso: string): number {
+  const match = /^GMT([+-])(\d{2}):(\d{2})$/.exec(zoneOffset(timeZone, iso))
+  if (!match) return 0
+  return (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3]))
+}
+
+/**
+ * Whether the local wall-clock time of `iso` also occurs at another instant of the day: the
+ * same wall time under one of the day's other offsets, where the zone really has that offset.
+ */
+function repeatsLocally(timeZone: string, iso: string, dayOffsets: readonly number[]): boolean {
+  const own = offsetMinutes(timeZone, iso)
+  return dayOffsets.some((other) => {
+    if (other === own) return false
+    const twin = new Date(Date.parse(iso) + (own - other) * 60_000).toISOString()
+    return offsetMinutes(timeZone, twin) === other
+  })
+}
+
 /**
  * On a day whose clocks change, local labels repeat or run backwards (01:00 – 01:00 on the
- * autumn change). A time whose offset differs from the day's start, or changes within the
- * time, needs its zone name to be unambiguous.
+ * autumn change). A time whose offset differs from the day's start, changes within the time,
+ * or whose start wall-clock time occurs twice that day (both occurrences) needs its zone name.
  */
 export function needsZoneLabel(
   timeZone: string,
   dayStart: string,
+  dayEnd: string,
   start: string,
   end: string,
 ): boolean {
   const day = zoneOffset(timeZone, dayStart)
-  return zoneOffset(timeZone, start) !== day || zoneOffset(timeZone, end) !== day
+  if (zoneOffset(timeZone, start) !== day || zoneOffset(timeZone, end) !== day) return true
+  const offsets = [offsetMinutes(timeZone, dayStart), offsetMinutes(timeZone, dayEnd)]
+  return repeatsLocally(timeZone, start, offsets)
 }
 
 /** Event types the API will explain to this caller: their own, or any team type for owners/admins. */

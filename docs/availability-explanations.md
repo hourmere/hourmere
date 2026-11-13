@@ -118,8 +118,10 @@ Transports serialize instants as UTC RFC 3339 strings and pass reasons through a
 allowlist (`code`, `start`, `end`, optional `hostUserId`); team results add the assigned hosts'
 names for the managers who may call the service. For a team host whose reasons for a time
 include `outside_working_hours`, the transport drops that host's `calendar_busy`,
-`buffer_before`, `buffer_after` and `host_conflict` reasons for that time, so managers never
-see members' off-hours timings. Personal event types keep every reason: their only caller is
+`buffer_before`, `buffer_after` and `host_conflict` reasons for that time, so managers do not
+see members' off-hours timings, except that a buffer reason on an in-hours time can reveal the
+edge of an adjacent off-hours commitment within one buffer length (busy from 12:10 with a
+30-minute buffer gives `buffer_after` 11:40–12:00 on the 11:30 time). Personal event types keep every reason: their only caller is
 the host. The local day is
 `[date 00:00, next date 00:00)` in the requested zone (23 or 25 hours on DST days). API keys
 use the `diagnostic_read` operation class (`full` only). Localized display text belongs in the

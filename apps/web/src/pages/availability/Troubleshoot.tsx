@@ -350,7 +350,7 @@ function SlotRow({ slot, data }: { slot: TroubleshootSlot; data: Troubleshooting
   return (
     <div className="card-main">
       <h3 className="card-title">
-        {needsZoneLabel(data.timeZone, data.rangeStart, slot.start, slot.end)
+        {needsZoneLabel(data.timeZone, data.rangeStart, data.rangeEnd, slot.start, slot.end)
           ? zonedTimeRange(data.timeZone, locale, slot.start, slot.end)
           : format.timeRange(slot.start, slot.end)}
         {slot.status === 'available' ? (

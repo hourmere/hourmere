@@ -342,6 +342,54 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
     )
   })
 
+  it('keeps buffer reasons on off-hours times private; in-hours buffers are the stated exception', async () => {
+    const s = await team('collective')
+    await db
+      .updateTable('event_types')
+      .set({ buffer_before_minutes: 30, buffer_after_minutes: 30 })
+      .where('id', '=', s.event.id)
+      .execute()
+    await f.calendarBusy(s.member.id, [
+      [`${day}T12:10Z`, `${day}T12:40Z`],
+      [`${day}T20:00Z`, `${day}T20:30Z`],
+    ])
+    const memberCodes = (result: TroubleshootAvailabilityResult, time: string) =>
+      at(result, time)
+        ?.reasons.filter((reason) => reason.hostUserId === s.member.id)
+        .map((reason) => reason.code)
+    const verify = async (run: Troubleshoot) => {
+      const result = await run(s.ownerCtx, s.input)
+      // 19:30 meets the 20:00 block only through its after-buffer, 20:30 through its
+      // before-buffer: both are off-hours, so the member shows only being off-hours.
+      for (const time of ['19:30', '20:30', '12:00'])
+        expect(memberCodes(result, time), time).toEqual(['outside_working_hours'])
+      const wire = JSON.stringify(result)
+      for (const edge of ['T20:00:00Z"', 'T20:30:00Z"'])
+        expect(
+          result.slots
+            .flatMap((slot) => slot.reasons)
+            .some(
+              (reason) =>
+                reason.code.startsWith('buffer_') && JSON.stringify(reason).includes(edge),
+            ),
+          edge,
+        ).toBe(false)
+      expect(wire).not.toContain('T12:10:00Z')
+      // Documented exception: an in-hours time's buffer may show up to one buffer length of
+      // an adjacent off-hours block (busy from 12:10 → buffer_after 11:40–12:00 at 11:30).
+      expect(at(result, '11:30')?.reasons).toContainEqual({
+        code: 'buffer_after',
+        start: `${day}T11:40:00Z`,
+        end: `${day}T12:00:00Z`,
+        hostUserId: s.member.id,
+      })
+    }
+    await verify(troubleshootEventAvailability)
+    await verify(serviceCopy())
+    for (const code of ['buffer_before', 'buffer_after'])
+      await expectKilled(serviceCopy([`  '${code}',\n`, '']), verify)
+  })
+
   it('still shows hosts their own off-hours timings on personal event types', async () => {
     const s = await personal()
     await f.calendarBusy(s.host.userId, [[`${day}T20:00Z`, `${day}T20:30Z`]])

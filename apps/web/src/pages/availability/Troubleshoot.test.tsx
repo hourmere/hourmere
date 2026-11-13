@@ -2,9 +2,16 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import {
+  AppShell,
+  AvailabilityPage,
+  RequireSession,
+  SessionLayout,
+  TroubleshootPage,
+} from '../../lazy-pages.tsx'
 import {
   fakeApi,
   json,
@@ -16,8 +23,15 @@ import {
   signedInAs,
 } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType } from '../../test/fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { todayIn } from './Troubleshoot.tsx'
 import * as model from './troubleshoot-model.ts'
+
+// Route chunks load before rendering, as on a page visited earlier: a first render would
+// otherwise suspend and spend the findBy* budget on React's fallback throttle.
+beforeAll(() =>
+  resolveLazy(SessionLayout, RequireSession, AppShell, TroubleshootPage, AvailabilityPage),
+)
 
 const route = `GET /api/v1/event-types/${EVENT_TYPE_ID}/availability-troubleshooting`
 const TEAM_EVENT = 'e0000000-0000-7000-8000-000000000002'
@@ -293,14 +307,15 @@ describe('availability troubleshooting page', () => {
     }
   })
 
-  const hourly = (zone: string, rangeStart: string, starts: string[]) => ({
+  const hourly = (zone: string, rangeStart: string, starts: string[], minutes = 60) => ({
     ...personal,
     timeZone: zone,
     date: '2026-11-01',
     rangeStart,
+    rangeEnd: zone === 'Asia/Tokyo' ? '2026-11-01T15:00:00Z' : '2026-11-02T05:00:00Z',
     slots: starts.map((start) => ({
       start,
-      end: new Date(Date.parse(start) + 3_600_000).toISOString().replace('.000', ''),
+      end: new Date(Date.parse(start) + minutes * 60_000).toISOString().replace('.000', ''),
       status: 'available',
       reasons: [],
     })),
@@ -358,6 +373,47 @@ describe('availability troubleshooting page', () => {
     expect(titles[0]).not.toMatch(/GMT|EDT|EST/)
     expect(titles[1]).toBe('GMT-4 01:00–GMT-5 01:00')
   })
+
+  it.each([
+    [
+      'en',
+      'Check this day',
+      'Times on this day',
+      '1:00 AM EDT – 1:30 AM EDT',
+      '1:00 AM EST – 1:30 AM EST',
+    ],
+    ['zh-CN', '检查这一天', '这一天的时间', 'GMT-4 01:00–GMT-4 01:30', 'GMT-5 01:00–GMT-5 01:30'],
+  ] as const)(
+    'labels both occurrences of the repeated hour in a mixed-zone view (%s)',
+    async (locale, button, listName, first, second) => {
+      chooseLanguage(locale)
+      const user = userEvent.setup()
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...events,
+        [route]: () =>
+          json(
+            200,
+            hourly(
+              'America/New_York',
+              '2026-11-01T04:00:00Z',
+              ['2026-11-01T04:30:00Z', '2026-11-01T05:00:00Z', '2026-11-01T06:00:00Z'],
+              30,
+            ),
+          ),
+      })
+      renderApp('/app/availability/troubleshoot')
+      await user.click(await screen.findByRole('button', { name: button }))
+      const list = await screen.findByRole('list', { name: listName })
+      const titles = [...list.querySelectorAll('.card-title')].map((title) =>
+        title.firstChild?.textContent?.replace(/\s+/g, ' '),
+      )
+      expect(titles[0]).not.toMatch(/EDT|EST|GMT/)
+      expect(titles[1]).toBe(first)
+      expect(titles[2]).toBe(second)
+    },
+  )
 
   it('leaves times unchanged in a zone without clock changes', async () => {
     const user = userEvent.setup()
@@ -462,20 +518,68 @@ function verifyModel(m: Model) {
   expect(Object.keys(m.REASON_TEXT)).toHaveLength(15)
   const ny = 'America/New_York'
   expect(
-    m.needsZoneLabel(ny, '2026-11-01T04:00:00Z', '2026-11-01T04:00:00Z', '2026-11-01T05:00:00Z'),
+    m.needsZoneLabel(
+      ny,
+      '2026-11-01T04:00:00Z',
+      '2026-11-02T05:00:00Z',
+      '2026-11-01T04:00:00Z',
+      '2026-11-01T05:00:00Z',
+    ),
   ).toBe(false)
   expect(
-    m.needsZoneLabel(ny, '2026-11-01T04:00:00Z', '2026-11-01T05:00:00Z', '2026-11-01T06:00:00Z'),
+    m.needsZoneLabel(
+      ny,
+      '2026-11-01T04:00:00Z',
+      '2026-11-02T05:00:00Z',
+      '2026-11-01T05:00:00Z',
+      '2026-11-01T06:00:00Z',
+    ),
   ).toBe(true)
   expect(
-    m.needsZoneLabel(ny, '2026-11-01T04:00:00Z', '2026-11-01T06:00:00Z', '2026-11-01T07:00:00Z'),
+    m.needsZoneLabel(
+      ny,
+      '2026-11-01T04:00:00Z',
+      '2026-11-02T05:00:00Z',
+      '2026-11-01T06:00:00Z',
+      '2026-11-01T07:00:00Z',
+    ),
   ).toBe(true)
   expect(
     m.needsZoneLabel(
       'Asia/Tokyo',
       '2026-10-31T15:00:00Z',
+      '2026-11-01T15:00:00Z',
       '2026-11-01T05:00:00Z',
       '2026-11-01T06:00:00Z',
+    ),
+  ).toBe(false)
+  // Spring: a time that crosses the change (1:00 AM EST – 3:00 AM EDT) by its end alone.
+  expect(
+    m.needsZoneLabel(
+      ny,
+      '2026-03-08T05:00:00Z',
+      '2026-03-09T04:00:00Z',
+      '2026-03-08T06:00:00Z',
+      '2026-03-08T07:00:00Z',
+    ),
+  ).toBe(true)
+  // The first occurrence of a repeated hour, though its offset equals the day start's.
+  expect(
+    m.needsZoneLabel(
+      ny,
+      '2026-11-01T04:00:00Z',
+      '2026-11-02T05:00:00Z',
+      '2026-11-01T05:00:00Z',
+      '2026-11-01T05:30:00Z',
+    ),
+  ).toBe(true)
+  expect(
+    m.needsZoneLabel(
+      ny,
+      '2026-11-01T04:00:00Z',
+      '2026-11-02T05:00:00Z',
+      '2026-11-01T03:00:00Z',
+      '2026-11-01T03:30:00Z',
     ),
   ).toBe(false)
   const types = [{ ownerUserId: 'me' }, { ownerUserId: null }, { ownerUserId: 'someone-else' }]
@@ -531,6 +635,11 @@ describe('troubleshooting model protections', () => {
       'mixed reasons hidden with off-hours times',
       "slot.reasons.every((reason) => reason.code === 'outside_working_hours')",
       "slot.reasons.some((reason) => reason.code === 'outside_working_hours')",
+    ],
+    [
+      'first occurrence of a repeated hour left unlabelled',
+      '  return repeatsLocally(timeZone, start, offsets)\n',
+      '  return false\n',
     ],
     ['clock-change end offset ignored', ' || zoneOffset(timeZone, end) !== day', ''],
     [
