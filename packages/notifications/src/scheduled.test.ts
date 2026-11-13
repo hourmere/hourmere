@@ -289,8 +289,8 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       const invitee = messages.find((message) => message.to === 'invitee@example.com')
       expect(invitee?.text).toContain(names)
       if (scheduled.kind === 'reminder') expect(invitee?.subject).toContain(names)
-      // The organizer (first host by ID) only; the co-host's address stays private.
-      expect(invitee?.replyTo).toEqual({ name: users[0]?.name, email: users[0]?.email })
+      // No host address reaches the invitee of a collective booking.
+      expect(invitee?.replyTo).toBeUndefined()
       for (const user of users) {
         const message = messages.find((mail) => mail.to === user.email)
         const other = users.find((otherUser) => otherUser.id !== user.id)

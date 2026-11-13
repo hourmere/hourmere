@@ -321,6 +321,11 @@ export function answersOf(
 }
 
 export interface NotificationData {
+  /**
+   * Several required hosts. Invitee and guest mail then carries no host address at all:
+   * no host Reply-To and no host ATTENDEE (https://hourmere.com/docs/notifications).
+   */
+  collective: boolean
   booking: {
     id: string
     organizationId: string
@@ -405,6 +410,7 @@ export function loadNotificationData(
         'b.rescheduled_from_id',
         'et.title as event_title',
         'et.questions',
+        'et.scheduling_type',
       ])
       .where('b.id', '=', bookingId)
       .executeTakeFirst()
@@ -438,6 +444,17 @@ export function loadNotificationData(
       .where('u.emailVerified', '=', true)
       .orderBy('u.id')
       .execute()
+    // Every required host row, verified or not: a collective booking stays collective for
+    // its invitee after hosts leave, so a remaining host's address is not newly revealed.
+    const hostRows = await conn
+      .selectFrom('booking_hosts')
+      .select((eb) => eb.fn.countAll<string>().as('count'))
+      .where((eb) =>
+        b.group_slot_id
+          ? eb('group_slot_id', '=', b.group_slot_id)
+          : eb('booking_id', '=', bookingId),
+      )
+      .executeTakeFirstOrThrow()
     const attendees = await conn
       .selectFrom('booking_attendees')
       .select(['id', 'name', 'email', 'time_zone', 'locale', 'is_booker'])
@@ -501,6 +518,7 @@ export function loadNotificationData(
       .executeTakeFirst()
 
     return {
+      collective: b.scheduling_type === 'collective' || Number(hostRows.count) > 1,
       conferenceIdentity,
       conferenceRevision: conference?.revision ?? undefined,
       booking: {
@@ -844,12 +862,12 @@ async function deliverBookingNotification(
   const email: typeof bookingEmail = (...args) => ({
     ...bookingEmail(...args),
     sensitive: data.automaticConference,
-    // Invitees and guests reply to the one host a single-host booking would name (the
-    // organizer); co-host account addresses stay private to the hosts.
+    // A collective booking's invitee and guests get no host address: their replies go to
+    // MAIL_FROM, and the email says so. Single-host and round-robin reply to their host.
     replyTo:
       args[2].role === 'host'
         ? { name: invitee.name, email: invitee.email }
-        : organizer
+        : organizer && !data.collective
           ? { name: organizer.name, email: organizer.email }
           : undefined,
   })
@@ -859,7 +877,9 @@ async function deliverBookingNotification(
     // A logistical failure needs no calendar organizer and must still reach the original
     // invitee when the pinned host was deleted or is no longer verified.
     hostName: organizer?.name ?? bookingHostName(bookingLanguage),
-    hostNames: hosts.length > 1 ? hosts.map((host) => host.displayName) : undefined,
+    // Collective mail names hosts by display name only, never by an address fallback.
+    hostNames:
+      hosts.length > 1 || data.collective ? hosts.map((host) => host.displayName) : undefined,
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
     inviteeTimeZone: invitee.timeZone,
@@ -886,10 +906,15 @@ async function deliverBookingNotification(
     kind !== 'conference_failed' &&
     deps.mailer.senderEmail
   ) {
-    const candidate = {
-      name: organizer.name,
-      email: modern ? deps.mailer.senderEmail : organizer.email,
-    }
+    // A collective root never pins a host address, even a legacy (v1) one first sent now.
+    const candidate = data.collective
+      ? {
+          name:
+            hosts.find((h) => h.id === organizer.id)?.displayName ||
+            bookingHostName(bookingLanguage),
+          email: deps.mailer.senderEmail,
+        }
+      : { name: organizer.name, email: modern ? deps.mailer.senderEmail : organizer.email }
     await deps.db
       .updateTable('bookings')
       .set({ ical_organizer_name: candidate.name, ical_organizer_email: candidate.email })
@@ -906,10 +931,10 @@ async function deliverBookingNotification(
   }
   calendarOrganizer ??= organizer
   // Hosts listed with their addresses in a calendar invitation. Hosts see each other; an
-  // invitee or guest of a collective booking sees only the organizer, as with a single host,
-  // and finds every host's name in SUMMARY and DESCRIPTION.
+  // invitee or guest of a collective booking sees none (ORGANIZER stays as pinned) and finds
+  // every host's name in SUMMARY and DESCRIPTION.
   const calendarHosts = (role: 'invitee' | 'host' | 'guest') =>
-    role === 'host' || hosts.length <= 1 ? hosts : hosts.filter((h) => h.id === organizer?.id)
+    role === 'host' || !data.collective ? hosts : []
   const invitation = (
     other: string,
     language: InterfaceLanguage,
@@ -1013,6 +1038,7 @@ async function deliverBookingNotification(
           // Guests have no independent interface choice; follow the booking language.
           locale: bookingLanguage,
           manageLinks: token === undefined ? undefined : inviteeManageLinks(deps.publicUrl, token),
+          repliesNotDelivered: data.collective,
         },
         {
           attachment: invitation(

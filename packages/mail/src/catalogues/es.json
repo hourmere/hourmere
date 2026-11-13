@@ -98,5 +98,7 @@
   "rescheduleRequest.subject": "Elija otro horario: {event}",
   "rescheduleRequest.introduction": "{host} le pide que elija otro horario. Su reserva original se mantiene hasta que elija un nuevo horario o cancele. Esta solicitud vence el {expiry}; al vencer, se mantiene la reserva original.",
   "rescheduleRequest.expiredSubject": "Solicitud de cambio de horario vencida: {event}",
-  "rescheduleRequest.expiredIntroduction": "{invitee} no eligió un nuevo horario antes de que venciera la solicitud. La reserva original se mantiene."
+  "rescheduleRequest.expiredIntroduction": "{invitee} no eligió un nuevo horario antes de que venciera la solicitud. La reserva original se mantiene.",
+  "replyNotice.plain": "Las respuestas a este correo electrónico no se entregan a los anfitriones.",
+  "replyNotice.manageLinks": "Las respuestas a este correo electrónico no se entregan a los anfitriones. Para reprogramar o cancelar, utilice los enlaces de este correo."
 }

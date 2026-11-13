@@ -1082,7 +1082,8 @@ the host's mailbox. Reply-To controls ordinary email replies, not calendar respo
 Declining in a calendar neither cancels the booking nor automatically notifies its host.
 
 Keep `MAIL_FROM` monitored. Archive incoming calendar replies, identify the booking and
-contact the actual host manually. Cancel only through an explicit action in Hourmere;
+contact the actual host manually. Ordinary replies from invitees and guests of collective
+bookings also arrive there: those emails carry no host address or Reply-To. Cancel only through an explicit action in Hourmere;
 receiving a calendar reply does not change booking status.
 
 For an instance with **one fixed host**, a mail-provider filter may forward a copy of calendar

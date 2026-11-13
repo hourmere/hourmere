@@ -20,8 +20,8 @@ import {
 } from './scheduled.ts'
 import { alignSmtpDateNowWithDatabase } from './testing-clock.ts'
 
-// Invitees and guests of a collective booking reply to, and see in their calendar invitation,
-// only the organizer, as with a single host. Co-host account addresses never reach them.
+// Invitees and guests of a collective booking get no host address at all: no host Reply-To,
+// no host ATTENDEE (legacy v1 roots keep only their pinned ORGANIZER). Hosts are named.
 // Every assertion reads the raw MIME the real SMTP mailer wrote, with each part decoded.
 
 const NOW = Temporal.Instant.from('2026-11-01T12:00Z')
@@ -141,33 +141,32 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
     await fixture?.drop()
   })
 
-  /** A team with three required hosts; the organizer is the first by user ID. */
+  type Team = Awaited<ReturnType<typeof team>>
+
+  /**
+   * A team with required hosts. `hosts` is in user-ID order; `organizer` is the host the
+   * notification worker treats as organizer (the first by ID unless a conference names another).
+   */
   async function team(hostCount = 3) {
     const created = []
     for (let i = 0; i < hostCount; i++) created.push(await f.host({ name: `Host ${i}` }))
     const organizationId = (created[0] as { organizationId: string }).organizationId
     for (const extra of created.slice(1)) await f.member(extra.userId, organizationId)
     const ids = created.map((h) => h.userId).sort()
-    const names = ['Olivia Organizer', 'Carl Cohost', 'Cora Cohost']
+    const names = ['Olivia First', 'Carl Second', 'Cora Third']
     const hosts = []
     for (const [index, id] of ids.entries()) {
       // Distinct tokens: a partial or encoded leak still contains one of them.
-      const token = `${index === 0 ? 'primaryhost' : `cohostaddr${index}`}${id.slice(0, 8)}`
+      const token = `hostaddr${index}x${id.slice(0, 8)}`
       const email = `${token}@team.example.test`
       const name = names[index] as string
       await db.updateTable('auth.user').set({ name, email }).where('id', '=', id).execute()
       hosts.push({ id, email, token, name })
     }
-    const [organizer, ...coHosts] = hosts as [(typeof hosts)[number], ...typeof hosts]
-    return { organizationId, ids, organizer, coHosts, hosts }
+    return { organizationId, ids, organizer: hosts[0] as (typeof hosts)[number], hosts }
   }
 
-  async function book(
-    t: Awaited<ReturnType<typeof team>>,
-    start = START,
-    end = END,
-    rescheduledFrom?: string,
-  ) {
+  async function book(t: Team, start = START, end = END, rescheduledFrom?: string) {
     const id = await f.booking(t.organizationId, t.ids, start.toString(), end.toString(), {
       attendee: { name: 'Ivy Invitee', email: INVITEE },
     })
@@ -197,23 +196,53 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
       .where('id', '=', id)
       .execute()
 
-  const attendeeMail = () => sent.filter((m) => m.to === INVITEE || m.to === GUEST)
-  const hostMail = (email: string) => sent.filter((m) => m.to === email)
-
-  /** The privacy contract, plus positive controls that the decoded search is meaningful. */
-  function expectNoCoHostAddress(t: Awaited<ReturnType<typeof team>>, message: Raw) {
-    // Positive control: the recipient's own address is found in the decoded message.
-    expect(message.text).toContain(message.to.toLowerCase())
-    for (const coHost of t.coHosts) {
-      expect(message.text, `${coHost.email} in mail to ${message.to}`).not.toContain(
-        coHost.token.toLowerCase(),
-      )
-    }
-    for (const line of header(message, 'Reply-To'))
-      for (const coHost of t.coHosts) expect(line.toLowerCase()).not.toContain(coHost.token)
+  async function configure(id: string, settings: NotificationSettings) {
+    await db
+      .updateTable('bookings')
+      .set({ notification_snapshot: JSON.stringify(createNotificationSnapshot(settings)) })
+      .where('id', '=', id)
+      .execute()
+    const queue: Partial<ScheduledEmailQueue> = { enqueue: async () => randomUUID() }
+    await db.transaction().execute((trx) => enqueueScheduledBookingEmails(queue, trx, id, NOW))
+    return db
+      .selectFrom('booking_scheduled_messages')
+      .select(['id', 'kind', 'due_at'])
+      .where('booking_id', '=', id)
+      .orderBy('due_at')
+      .execute()
   }
 
-  it('keeps co-host addresses out of every lifecycle mail kind, headers, bodies and ICS, across a reschedule chain', async () => {
+  async function deliverScheduled(row: { id: string; due_at: Date }) {
+    now = Temporal.Instant.fromEpochMilliseconds(row.due_at.getTime())
+    await deliverScheduledBookingEmail(deps, row.id)
+    now = NOW
+  }
+
+  const attendeeMail = () => sent.filter((m) => m.to === INVITEE || m.to === GUEST)
+  const hostMail = (email: string) => sent.filter((m) => m.to === email)
+  const NOTICE = 'replies to this email are not delivered to the hosts.'
+  const NOTICE_LINKS = 'to reschedule or cancel, use the links in this email.'
+
+  /** Host addresses (by token) found anywhere in the decoded messages. */
+  function hostAddressesSeen(t: Team, messages: Raw[]) {
+    const seen = new Set<string>()
+    for (const message of messages) {
+      // Positive control: the recipient's own address is found in the decoded message.
+      expect(message.text).toContain(message.to.toLowerCase())
+      for (const host of t.hosts) if (message.text.includes(host.token)) seen.add(host.email)
+    }
+    return seen
+  }
+
+  /** Collective invitee/guest mail: no Reply-To, the notice, and links where they apply. */
+  function expectNoHostReply(message: Raw, links: boolean) {
+    expect(header(message, 'Reply-To')).toEqual([])
+    expect(message.text).toContain(NOTICE)
+    expect(message.text.includes(NOTICE_LINKS)).toBe(links)
+    expect(message.text.includes('#token=')).toBe(links)
+  }
+
+  it('sends a collective v2 invitee and guest no host address through every lifecycle kind', async () => {
     const t = await team()
     const original = await book(t)
     await sendBookingNotification(deps, original, 'confirmed')
@@ -226,35 +255,33 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
 
     // Three hosts and two attendees for each of the four kinds.
     expect(sent).toHaveLength(20)
-    const invitee = attendeeMail()
-    expect(invitee).toHaveLength(8)
-    for (const message of invitee) {
-      expectNoCoHostAddress(t, message)
-      // Reply-To is the organizer alone, as for a single host.
-      expect(header(message, 'Reply-To')).toEqual([
-        `Reply-To: ${t.organizer.name} <${t.organizer.email}>`,
-      ])
+    const attendees = attendeeMail()
+    expect(attendees).toHaveLength(8)
+    expect(hostAddressesSeen(t, attendees)).toEqual(new Set())
+    for (const [index, message] of attendees.entries()) {
+      const kind = Math.floor(index / 2)
+      expectNoHostReply(message, message.to === INVITEE && kind !== 3)
       // Every host is still named in the body.
       for (const host of t.hosts) expect(message.text).toContain(host.name.toLowerCase())
     }
 
-    // Calendar identity is unchanged: one UID; SEQUENCE follows the chain.
-    const invitations = invitee.filter((m) => m.ics)
+    // Calendar identity is unchanged: one UID, the pinned MAIL_FROM ORGANIZER, SEQUENCE
+    // following the chain. Only the invitee and guest are attendees.
+    const invitations = attendees.filter((m) => m.ics)
     expect(invitations).toHaveLength(6)
     for (const message of invitations) {
       const event = calendar(message)
       expect(event.getFirstPropertyValue('uid')).toBe(`${original}@hourmere`)
       expect(event.getFirstProperty('organizer')?.getFirstValue()).toBe(`mailto:${SENDER}`)
       expect(event.getFirstProperty('organizer')?.getParameter('cn')).toBe(t.organizer.name)
-      const attendees = event
-        .getAllProperties('attendee')
-        .map((p) => [p.getFirstValue(), p.getParameter('role'), p.getParameter('rsvp')])
-      expect(attendees).toEqual([
-        [`mailto:${t.organizer.email}`, 'CHAIR', 'FALSE'],
+      expect(
+        event
+          .getAllProperties('attendee')
+          .map((p) => [p.getFirstValue(), p.getParameter('role'), p.getParameter('rsvp')]),
+      ).toEqual([
         [`mailto:${INVITEE}`, 'REQ-PARTICIPANT', 'FALSE'],
         [`mailto:${GUEST}`, 'REQ-PARTICIPANT', 'FALSE'],
       ])
-      // Co-hosts are named, without addresses, in SUMMARY (invitee) and DESCRIPTION.
       for (const host of t.hosts)
         expect(String(event.getFirstPropertyValue('description'))).toContain(host.name)
       expect(event.getAllProperties('contact')).toHaveLength(0)
@@ -269,6 +296,7 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
       expect(mail).toHaveLength(4)
       for (const message of mail) {
         expect(header(message, 'Reply-To')).toEqual([`Reply-To: Ivy Invitee <${INVITEE}>`])
+        expect(message.text).not.toContain(NOTICE)
         for (const other of t.hosts.filter((h) => h !== host))
           expect(message.text).toContain(other.name.toLowerCase())
       }
@@ -285,7 +313,62 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
     }
   })
 
-  it('keeps co-host addresses out of the conference-failure notice', async () => {
+  it('shows no host address when the meeting organizer is not the first host, through confirmation, reminder, reschedule, follow-up and cancellation', async () => {
+    const t = await team()
+    // The conference organizer is the third host by ID, so lifecycle mail and follow-ups
+    // would pick different hosts if either still chose one.
+    const organizer = t.hosts[2] as Team['hosts'][number]
+    const roles = { host: true, invitee: true, guests: true }
+    const settings: NotificationSettings = {
+      reminders: [{ id: 'before', offsetMinutes: 120, recipients: roles }],
+      followUps: [{ id: 'after', offsetMinutes: 5, recipients: roles }],
+    }
+    const original = await book(t)
+    await db
+      .insertInto('booking_conferences')
+      .values({
+        root_booking_id: original,
+        booking_id: original,
+        organization_id: t.organizationId,
+        organizer_user_id: organizer.id,
+        invitation_organizer_name: organizer.name,
+        invitation_organizer_email: organizer.email,
+      })
+      .execute()
+    const originalRows = await configure(original, settings)
+    await sendBookingNotification(deps, original, 'confirmed')
+    await deliverScheduled(originalRows[0] as (typeof originalRows)[number])
+    await cancel(original)
+    const moved = await book(t, START.add({ hours: 24 }), END.add({ hours: 24 }), original)
+    await db
+      .updateTable('booking_conferences')
+      .set({ booking_id: moved })
+      .where('root_booking_id', '=', original)
+      .execute()
+    const movedRows = await configure(moved, settings)
+    await sendBookingNotification(deps, moved, 'rescheduled')
+    await deliverScheduled(movedRows[1] as (typeof movedRows)[number])
+    await cancel(moved)
+    await sendBookingNotification(deps, moved, 'cancelled')
+
+    const invitee = sent.filter((m) => m.to === INVITEE)
+    // confirmation, configured reminder, reschedule, follow-up, cancellation
+    expect(invitee).toHaveLength(5)
+    expect(hostAddressesSeen(t, attendeeMail())).toEqual(new Set())
+    for (const [index, message] of invitee.entries())
+      expectNoHostReply(message, index === 0 || index === 1 || index === 2)
+    for (const message of sent.filter((m) => m.to === GUEST)) expectNoHostReply(message, false)
+    for (const message of invitee.filter((m) => m.ics))
+      expect(calendar(message).getFirstProperty('organizer')?.getParameter('cn')).toBe(
+        organizer.name,
+      )
+    // Hosts' reminder and follow-up still reply to the invitee.
+    for (const host of t.hosts)
+      for (const message of hostMail(host.email))
+        expect(header(message, 'Reply-To')).toEqual([`Reply-To: Ivy Invitee <${INVITEE}>`])
+  })
+
+  it('sends no host address in the conference-failure notice', async () => {
     const t = await team()
     const id = await book(t)
     await db
@@ -307,57 +390,12 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
     await sendBookingNotification(deps, id, 'conference_failed')
     const invitee = sent.filter((m) => m.to === INVITEE)
     expect(invitee).toHaveLength(1)
-    for (const message of invitee) {
-      expectNoCoHostAddress(t, message)
-      expect(message.ics).toBeUndefined()
-      expect(header(message, 'Reply-To')).toEqual([
-        `Reply-To: ${t.organizer.name} <${t.organizer.email}>`,
-      ])
-    }
+    expect(hostAddressesSeen(t, invitee)).toEqual(new Set())
+    expect(invitee[0]?.ics).toBeUndefined()
+    expectNoHostReply(invitee[0] as Raw, true)
   })
 
-  it('keeps co-host addresses out of configured reminders and follow-ups', async () => {
-    const t = await team()
-    const id = await book(t)
-    const roles = { host: true, invitee: true, guests: true }
-    const settings: NotificationSettings = {
-      reminders: [{ id: 'before', offsetMinutes: 120, recipients: roles }],
-      followUps: [{ id: 'after', offsetMinutes: 5, recipients: roles }],
-    }
-    await db
-      .updateTable('bookings')
-      .set({ notification_snapshot: JSON.stringify(createNotificationSnapshot(settings)) })
-      .where('id', '=', id)
-      .execute()
-    const queue: Partial<ScheduledEmailQueue> = { enqueue: async () => randomUUID() }
-    await db.transaction().execute((trx) => enqueueScheduledBookingEmails(queue, trx, id, NOW))
-    const rows = await db
-      .selectFrom('booking_scheduled_messages')
-      .select(['id', 'kind', 'due_at'])
-      .where('booking_id', '=', id)
-      .orderBy('due_at')
-      .execute()
-    expect(rows.map((r) => r.kind)).toEqual(['reminder', 'follow_up'])
-    for (const row of rows) {
-      now = Temporal.Instant.fromEpochMilliseconds(row.due_at.getTime())
-      const before = sent.length
-      await deliverScheduledBookingEmail(deps, row.id)
-      const batch = sent.slice(before)
-      expect(batch).toHaveLength(5)
-      for (const message of batch.filter((m) => m.to === INVITEE || m.to === GUEST)) {
-        expectNoCoHostAddress(t, message)
-        expect(header(message, 'Reply-To')).toEqual([
-          `Reply-To: ${t.organizer.name} <${t.organizer.email}>`,
-        ])
-      }
-      for (const host of t.hosts)
-        expect(header(hostMail(host.email).at(-1) as Raw, 'Reply-To')).toEqual([
-          `Reply-To: Ivy Invitee <${INVITEE}>`,
-        ])
-    }
-  })
-
-  it('keeps co-host addresses out of the reschedule request sent to the invitee', async () => {
+  it('sends no host address in the reschedule request to the invitee', async () => {
     const t = await team()
     const id = await book(t)
     const requestId = randomUUID()
@@ -372,49 +410,83 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
       kind: 'reschedule_requested',
     })
     expect(sent.map((m) => m.to)).toEqual([INVITEE])
-    expectNoCoHostAddress(t, sent[0] as Raw)
-    expect(header(sent[0] as Raw, 'Reply-To')).toEqual([])
+    expect(hostAddressesSeen(t, sent)).toEqual(new Set())
+    expectNoHostReply(sent[0] as Raw, true)
   })
 
-  it('removes co-host addresses from later mail of a legacy (v1) collective root and keeps its pinned organizer', async () => {
+  it('shows a legacy (v1) collective invitee only its pinned organizer, also after the hosts change', async () => {
     const t = await team()
+    const pinned = t.hosts[0] as Team['hosts'][number]
     const original = await book(t)
     await db
       .updateTable('bookings')
       .set({
         ical_version: 1,
-        ical_organizer_name: t.organizer.name,
-        ical_organizer_email: t.organizer.email,
+        ical_organizer_name: pinned.name,
+        ical_organizer_email: pinned.email,
       })
       .where('id', '=', original)
       .execute()
+    // The pinned host has left: a surviving host must not be revealed in its place.
+    await db.deleteFrom('auth.member').where('userId', '=', pinned.id).execute()
+    await sendBookingNotification(deps, original, 'confirmed')
+    await sendBookingNotification(deps, original, 'reminder')
     await cancel(original)
     const moved = await book(t, START.add({ hours: 24 }), END.add({ hours: 24 }), original)
     await sendBookingNotification(deps, moved, 'rescheduled')
     await cancel(moved)
     await sendBookingNotification(deps, moved, 'cancelled')
-    const invitee = attendeeMail()
-    expect(invitee).toHaveLength(4)
-    for (const message of invitee) {
-      expectNoCoHostAddress(t, message)
+    const attendees = attendeeMail()
+    expect(attendees).toHaveLength(8)
+    expect(hostAddressesSeen(t, attendees)).toEqual(new Set([pinned.email]))
+    for (const message of attendees) expect(header(message, 'Reply-To')).toEqual([])
+    const invitations = attendees.filter((m) => m.ics)
+    for (const message of invitations) {
       const event = calendar(message)
       expect(event.getFirstPropertyValue('uid')).toBe(`${original}@hourmere`)
       // The pinned v1 ORGANIZER is retained, so clients update rather than duplicate.
-      expect(event.getFirstProperty('organizer')?.getFirstValue()).toBe(
-        `mailto:${t.organizer.email}`,
-      )
+      expect(event.getFirstProperty('organizer')?.getFirstValue()).toBe(`mailto:${pinned.email}`)
       expect(event.getFirstProperty('organizer')?.getParameter('sent-by')).toBe(`mailto:${SENDER}`)
       expect(event.getAllProperties('attendee').map((p) => p.getFirstValue())).toEqual([
         `mailto:${INVITEE}`,
         `mailto:${GUEST}`,
       ])
     }
-    expect(invitee.map((m) => calendar(m).getFirstPropertyValue('sequence'))).toEqual([1, 1, 2, 2])
+    expect(invitations.map((m) => calendar(m).getFirstPropertyValue('sequence'))).toEqual([
+      0, 0, 1, 1, 2, 2,
+    ])
     // Legacy host invitations still list the other hosts.
-    for (const host of t.hosts)
-      for (const message of hostMail(host.email))
-        for (const other of t.hosts.filter((h) => h.id !== host.id && h.id !== t.organizer.id))
-          expect(message.text).toContain(other.token)
+    const [, second, third] = t.hosts as [Team['hosts'][number], ...Team['hosts']]
+    for (const message of hostMail(second?.email ?? '').filter((m) => m.ics))
+      expect(message.text).toContain(third?.token)
+  })
+
+  it('pins the instance mailbox, not a host, for an unpinned legacy (v1) collective root', async () => {
+    const t = await team()
+    const id = await book(t)
+    await db.updateTable('bookings').set({ ical_version: 1 }).where('id', '=', id).execute()
+    await sendBookingNotification(deps, id, 'confirmed')
+    expect(hostAddressesSeen(t, attendeeMail())).toEqual(new Set())
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select(['ical_organizer_name', 'ical_organizer_email'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ ical_organizer_name: t.organizer.name, ical_organizer_email: SENDER })
+  })
+
+  it('keeps a collective booking private after it is down to one verified host', async () => {
+    const t = await team(2)
+    const id = await book(t)
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', (t.hosts[1] as Team['hosts'][number]).id)
+      .execute()
+    await sendBookingNotification(deps, id, 'confirmed')
+    expect(hostAddressesSeen(t, attendeeMail())).toEqual(new Set())
+    for (const message of attendeeMail()) expect(header(message, 'Reply-To')).toEqual([])
   })
 
   it('leaves a single assigned team host (round-robin) exactly as a personal booking', async () => {
@@ -427,6 +499,10 @@ describe.skipIf(!process.env.DATABASE_URL)('co-host addresses in invitee-facing 
     expect(header(message, 'Reply-To')).toEqual([
       `Reply-To: ${t.organizer.name} <${t.organizer.email}>`,
     ])
+    expect(message.text).not.toContain(NOTICE)
+    expect(calendar(message).getFirstProperty('organizer')?.getFirstValue()).toBe(
+      `mailto:${SENDER}`,
+    )
     expect(
       calendar(message)
         .getAllProperties('attendee')

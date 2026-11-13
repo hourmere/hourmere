@@ -98,6 +98,7 @@ export async function sendRescheduleRequestNotification(
                 timeZone: recipient.timeZone,
                 locale: recipient.locale,
                 manageLinks: token ? inviteeManageLinks(deps.publicUrl, token) : undefined,
+                repliesNotDelivered: data.collective,
               },
           {
             expired,

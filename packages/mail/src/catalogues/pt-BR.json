@@ -98,5 +98,7 @@
   "rescheduleRequest.subject": "Escolha outro horário: {event}",
   "rescheduleRequest.introduction": "{host} pede que você escolha outro horário. Sua reserva original fica mantida até você escolher um novo horário ou cancelar. Esta solicitação expira em {expiry}; após a expiração, a reserva original é mantida.",
   "rescheduleRequest.expiredSubject": "Solicitação de reagendamento expirada: {event}",
-  "rescheduleRequest.expiredIntroduction": "{invitee} não escolheu um novo horário antes de a solicitação expirar. A reserva original é mantida."
+  "rescheduleRequest.expiredIntroduction": "{invitee} não escolheu um novo horário antes de a solicitação expirar. A reserva original é mantida.",
+  "replyNotice.plain": "As respostas a este e-mail não são entregues aos anfitriões.",
+  "replyNotice.manageLinks": "As respostas a este e-mail não são entregues aos anfitriões. Para reagendar ou cancelar, use os links deste e-mail."
 }
