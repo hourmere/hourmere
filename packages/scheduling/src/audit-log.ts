@@ -114,6 +114,11 @@ const MICROSECONDS = { smallestUnit: 'microsecond', roundingMode: 'ceil' } as co
 function boundary(value: string | undefined): string | null {
   return value === undefined ? null : Temporal.Instant.from(value).toString(MICROSECONDS)
 }
+/** The instants Postgres timestamptz can hold from any input here (year 1 to 9999, UTC). */
+const EARLIEST = Temporal.Instant.from('0001-01-01T00:00:00Z')
+const LATEST = Temporal.Instant.from('9999-12-31T23:59:59.999999Z')
+const storable = (instant: string) =>
+  Temporal.Instant.compare(instant, EARLIEST) >= 0 && Temporal.Instant.compare(instant, LATEST) <= 0
 
 interface Cursor {
   t: string
@@ -144,7 +149,7 @@ function decodeCursor(value: string, key: string): Cursor {
       })
       .parse(parsed)
     if (cursor.k !== key) throw new Error()
-    Temporal.Instant.from(cursor.t)
+    if (!storable(cursor.t)) throw new Error()
     if (BigInt(cursor.i) > 9223372036854775807n) throw new Error()
     return { t: cursor.t, i: cursor.i }
   } catch {
@@ -219,6 +224,12 @@ export async function listAuditEvents(
     throw new DomainError('invalid', 'invalid_request', 'actorId requires actorType')
   const from = boundary(filters.from)
   const to = boundary(filters.to)
+  if ((from !== null && !storable(from)) || (to !== null && !storable(to)))
+    throw new DomainError(
+      'invalid',
+      'invalid_request',
+      'from and to must be between years 1 and 9999',
+    )
   if (from !== null && to !== null && Temporal.Instant.compare(from, to) >= 0)
     throw new DomainError('invalid', 'invalid_range', 'from must be before to')
   const organizationId = ctx.principal.organization.id
@@ -408,27 +419,50 @@ export async function purgeAuditEvents(
   },
 ): Promise<AuditPurgeResult> {
   const result: AuditPurgeResult = { deleted: 0, skipped: 0, more: false }
-  // The oldest possible cutoff: nothing newer than this is eligible in any organization.
-  const floor = sql`statement_timestamp() - make_interval(days => ${AUDIT_RETENTION_MIN_DAYS})`
-  // Distinct organizations with an event older than the floor, by an index skip scan over
-  // (organization_id, occurred_at); null (instance-wide rows) is handled the same way.
-  const organizations = (
-    await sql<{ organization_id: string | null }>`WITH RECURSIVE orgs AS (
-        (SELECT organization_id FROM audit_events WHERE organization_id IS NOT NULL
-          ORDER BY organization_id LIMIT 1)
-        UNION ALL
-        SELECT (SELECT organization_id FROM audit_events
-                WHERE organization_id > orgs.organization_id
-                ORDER BY organization_id LIMIT 1)
-        FROM orgs WHERE orgs.organization_id IS NOT NULL
-      )
-      SELECT organization_id FROM orgs WHERE organization_id IS NOT NULL
-        AND EXISTS (SELECT 1 FROM audit_events e WHERE e.organization_id = orgs.organization_id
-                    AND e.occurred_at < ${floor})
-      UNION ALL
-      SELECT NULL WHERE EXISTS (SELECT 1 FROM audit_events WHERE organization_id IS NULL
-                                AND occurred_at < ${floor})`.execute(db)
-  ).rows.map((row) => row.organization_id)
+  // Organizations with an event past their own retention, found by an index skip scan over
+  // (organization_id, occurred_at): only those cost a batch, so organizations that keep
+  // everything, or whose old events are still within their period, never use up a run.
+  // Null (instance-wide rows) follows the instance default.
+  const instanceDays = instance === null ? null : Math.max(instance, AUDIT_RETENTION_MIN_DAYS)
+  const discovered = await db
+    .transaction()
+    .execute(async (trx) => {
+      await sql`SET LOCAL lock_timeout = '100ms'`.execute(trx)
+      return (
+        await sql<{ organization_id: string | null }>`WITH RECURSIVE orgs AS (
+            (SELECT organization_id FROM audit_events WHERE organization_id IS NOT NULL
+              ORDER BY organization_id LIMIT 1)
+            UNION ALL
+            SELECT (SELECT organization_id FROM audit_events
+                    WHERE organization_id > orgs.organization_id
+                    ORDER BY organization_id LIMIT 1)
+            FROM orgs WHERE orgs.organization_id IS NOT NULL
+          ), kept AS (
+            SELECT orgs.organization_id,
+              CASE WHEN s.retention = 'forever' THEN NULL
+                   WHEN s.retention = 'days' THEN greatest(s.retention_days, ${AUDIT_RETENTION_MIN_DAYS})
+                   ELSE ${instanceDays}::int END AS days
+            FROM orgs LEFT JOIN audit_log_settings s ON s.organization_id = orgs.organization_id
+            WHERE orgs.organization_id IS NOT NULL
+          )
+          SELECT organization_id FROM kept WHERE days IS NOT NULL
+            AND EXISTS (SELECT 1 FROM audit_events e WHERE e.organization_id = kept.organization_id
+                        AND e.occurred_at < statement_timestamp() - make_interval(days => days))
+          UNION ALL
+          SELECT NULL WHERE ${instanceDays}::int IS NOT NULL
+            AND EXISTS (SELECT 1 FROM audit_events WHERE organization_id IS NULL
+                        AND occurred_at < statement_timestamp() - make_interval(days => ${instanceDays}::int))`.execute(
+          trx,
+        )
+      ).rows.map((row) => row.organization_id)
+    })
+    .catch((error: { code?: unknown }) => {
+      // lock_not_available: a table lock is held; try again on the next run.
+      if (error.code === '55P03') return null
+      throw error
+    })
+  if (discovered === null) return { ...result, skipped: 1, more: true }
+  const organizations = discovered
   let pending = organizations
   let batches = 0
   // One batch per organization per pass, so a large backlog cannot starve the others.

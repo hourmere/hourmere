@@ -265,6 +265,19 @@ describe.skipIf(!serverUrl)('audit log query, retention and purge (real Postgres
       expect((await domainError(() => list(team.as(owner), { from: 'yesterday' }))).code).toBe(
         'invalid_request',
       )
+      // Instants Postgres cannot store are refused as input, never answered with an error.
+      for (const query of [{ from: '0000-12-31T00:00:00Z' }, { to: '0001-01-01T00:00:00+01:00' }])
+        expect((await domainError(() => list(team.as(owner), query))).code).toBe('invalid_request')
+      const forged = Buffer.from(
+        JSON.stringify({
+          k: JSON.stringify([team.id.toLowerCase(), null, null, null, null, null]),
+          t: '0000-01-01T00:00:00.000000Z',
+          i: '1',
+        }),
+      ).toString('base64url')
+      expect((await domainError(() => list(team.as(owner), { cursor: forged }))).code).toBe(
+        'invalid_cursor',
+      )
       const { nextCursor } = await list(team.as(owner), { limit: 1 })
       expect(nextCursor).toEqual(expect.any(String))
       const cursor = nextCursor as string
@@ -638,6 +651,47 @@ describe.skipIf(!serverUrl)('audit log query, retention and purge (real Postgres
         more: false,
       })
       expect(await remaining(team.id)).toBe(1)
+    })
+
+    it('spends batches only on organizations with events past their own retention', async () => {
+      // Organizations that keep everything, or whose old events are within their period, must
+      // not use up a run: otherwise one that chose a short period could wait forever.
+      const keepers: string[] = []
+      for (let i = 0; i < 5; i += 1) {
+        const keeper = await createTestTeam(db, [{ user: outsider, role: 'owner' }])
+        keepers.push(keeper.id)
+        await insert({ organizationId: keeper.id, daysAgo: 400 })
+      }
+      await setRetention(keepers[0] as string, 'forever')
+      await setRetention(keepers[1] as string, 'days', 500)
+      await setRetention(team.id, 'days', 30)
+      await insert({ organizationId: team.id, daysAgo: 31 })
+      expect(await purgeAuditEvents(db, { instance: null, maxBatches: 1 })).toEqual({
+        deleted: 1,
+        skipped: 0,
+        more: false,
+      })
+      for (const keeper of keepers) expect(await remaining(keeper)).toBe(1)
+    })
+
+    it('does not wait when the journal is locked exclusively, even to find organizations', async () => {
+      await insert({ organizationId: team.id, daysAgo: 100 })
+      const client = await testDb.pool.connect()
+      try {
+        await client.query('BEGIN')
+        await client.query('LOCK TABLE audit_events IN ACCESS EXCLUSIVE MODE')
+        const started = Date.now()
+        expect(await purgeAuditEvents(db, { instance: 30 })).toEqual({
+          deleted: 0,
+          skipped: 1,
+          more: true,
+        })
+        expect(Date.now() - started).toBeLessThan(5000)
+      } finally {
+        await client.query('ROLLBACK').catch(() => {})
+        client.release()
+      }
+      expect(await purgeAuditEvents(db, { instance: 30 })).toMatchObject({ deleted: 1 })
     })
 
     it('gives up instead of waiting behind a table lock', async () => {

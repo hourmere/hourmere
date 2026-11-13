@@ -367,14 +367,15 @@ the instance default.
 
 The worker's `audit-log-retention-v1` job runs hourly (`purgeAuditEvents`):
 
-- It finds organizations with events older than 30 days through the organization/time index
-  (a skip scan), then deletes at most 1,000 rows per statement and 50 statements per run, one
-  batch per organization per pass so that one large backlog does not starve the others. What
-  is left is reached on the next run.
+- It finds the organizations that have events past their own retention through the
+  organization/time index (a skip scan), so organizations that keep everything cost nothing,
+  then deletes at most 1,000 rows per statement and 50 statements per run, one batch per
+  organization per pass so that one large backlog does not starve the others. What is left
+  is reached on the next run.
 - It never waits on locks: an organization whose retention is being changed (its writer holds
   the organization's retention advisory lock) is skipped until the next run; rows locked by
-  anything else are skipped (`FOR UPDATE SKIP LOCKED`); a statement that would wait for a
-  table lock gives up after 100 ms. A retention change waits at most for one running batch of
+  anything else are skipped (`FOR UPDATE SKIP LOCKED`); the search and every delete give up
+  after 100 ms behind a table lock (for example a migration) and leave the rest to the next run. A retention change waits at most for one running batch of
   its organization, so a purge sees either the old or the new choice, never a mix.
 - It is idempotent and safe to run twice at once: a repeated or concurrent run deletes nothing
   already deleted, and new events are never eligible.
