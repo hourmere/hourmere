@@ -5,6 +5,7 @@ export type ApiKeyOperationClass =
   | 'booking_write'
   | 'other_read'
   | 'other_write'
+  | 'diagnostic_read'
   | 'session_only'
   | 'public_metadata'
 
@@ -45,6 +46,8 @@ const classScopes: Readonly<Record<ApiKeyOperationClass, readonly ApiKeyScope[]>
   booking_write: Object.freeze(['full', 'bookings'] as const),
   other_read: Object.freeze(['full', 'read'] as const),
   other_write: Object.freeze(['full'] as const),
+  // Read-only, but repeated diagnostics can reveal busy timings, so only full keys.
+  diagnostic_read: Object.freeze(['full'] as const),
   session_only: Object.freeze([]),
   public_metadata: Object.freeze(['full', 'read', 'bookings'] as const),
 })
@@ -153,6 +156,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/event-types/{id}/waitlist/entries', 'other_read', 'key'),
   rest('DELETE', '/api/v1/event-types/{id}/waitlist/entries/{entryId}', 'other_write', 'key'),
   rest('POST', '/api/v1/open-time-snippets', 'booking_read', 'key'),
+  rest('GET', '/api/v1/event-types/{id}/availability-troubleshooting', 'diagnostic_read', 'key'),
   rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links', 'other_read', 'key'),
   rest('POST', '/api/v1/event-types/{eventTypeId}/one-time-links', 'booking_write', 'key'),
   rest('GET', '/api/v1/event-types/{eventTypeId}/one-time-links/{id}', 'other_read', 'key'),
@@ -334,6 +338,9 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('create_event_type', 'other_write', ['POST /api/v1/event-types']),
   mcp('update_event_type', 'other_write', ['PATCH /api/v1/event-types/{id}']),
   mcp('generate_open_time_snippet', 'booking_read', ['POST /api/v1/open-time-snippets']),
+  mcp('troubleshoot_availability', 'diagnostic_read', [
+    'GET /api/v1/event-types/{id}/availability-troubleshooting',
+  ]),
   mcp('create_one_time_link', 'booking_write', [
     'POST /api/v1/event-types/{eventTypeId}/one-time-links',
   ]),
@@ -411,6 +418,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('join-waitlist', 'join_waitlist'),
   cli('resend-waitlist-verification', 'resend_waitlist_verification'),
   cli('open-time-snippet', 'generate_open_time_snippet'),
+  cli('troubleshoot-availability', 'troubleshoot_availability'),
   cli('slack list', 'list_slack_destinations'),
   cli('slack create', 'create_slack_destination'),
   cli('slack update', 'update_slack_destination'),
