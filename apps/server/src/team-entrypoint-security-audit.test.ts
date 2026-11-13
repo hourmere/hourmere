@@ -28,8 +28,9 @@ import {
   teamSession,
   teamSessionUser,
 } from '../../../packages/auth/src/team-management.ts'
+import { expectKilled, guardCopy, recordCopyFault } from '../../../scripts/source-copy-guard.ts'
 import { createApp } from './app.ts'
-import { ErrorBody, json } from './openapi.ts'
+import { ErrorBody, json, type RouteModule } from './openapi.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { listTeamInvitationSummaries, TeamInvitationSummarySchema } from './team-invitations.ts'
 import { teamManagementAccess } from './team-management.ts'
@@ -785,12 +786,21 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
 
   async function verifyInvitationMissingContext(routes: typeof teamInvitationRoutes) {
     const f = await fixture()
+    const module = routes({ db, invitationMailLimits: { secret } })
+    // Hono answers a copied handler's engine error with a 500: record it for the copy first.
+    const recorded: RouteModule = (shared) => {
+      shared.app.use('*', async (c, next) => {
+        await next()
+        if (c.error) recordCopyFault(routes, c.error)
+      })
+      module(shared)
+    }
     const selected = createApp({
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       checkDb: async () => {},
       publicUrl: origin,
-      routes: [routes({ db, invitationMailLimits: { secret } })],
+      routes: [recorded],
     })
     expect((await invitationRequest(f, 'POST', null, { selected })).status).toBe(409)
     await unchanged(f)
@@ -823,9 +833,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       TeamInvitationSummarySchema,
       teamManagementAccess,
     }
-    return new Function(...Object.keys(bindings), `${code}; return teamInvitationRoutes`)(
-      ...Object.values(bindings),
-    ) as typeof teamInvitationRoutes
+    return guardCopy(
+      new Function(...Object.keys(bindings), `${code}; return teamInvitationRoutes`)(
+        ...Object.values(bindings),
+      ) as typeof teamInvitationRoutes,
+    )
   }
 
   it('passes invitation context recovery with the unchanged route source copy', async () => {
@@ -833,9 +845,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
   })
 
   it('detects generic validation bypassing invitation context recovery with a real assertion', async () => {
-    await expect(
-      verifyInvitationMissingContext(await invitationRouteCopy(true)),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await invitationRouteCopy(true), verifyInvitationMissingContext)
   })
 
   function sourceCopy(mutation?: 'authority' | 'identity'): typeof organizationContext {
@@ -866,9 +876,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       teamSession,
       teamSessionUser,
     }
-    return new Function(...Object.keys(bindings), `${javascript}; return organizationContext`)(
-      ...Object.values(bindings),
-    ) as typeof organizationContext
+    return guardCopy(
+      new Function(...Object.keys(bindings), `${javascript}; return organizationContext`)(
+        ...Object.values(bindings),
+      ) as typeof organizationContext,
+    )
   }
 
   async function verifyAuthority(
@@ -904,9 +916,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     async (kind) => {
       const mutation =
         kind === 'missing context' ? 'authority' : kind === 'switch identity' ? 'identity' : kind
-      await expect(verifyAuthority(sourceCopy(mutation), kind)).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(sourceCopy(mutation), (copy) => verifyAuthority(copy, kind))
     },
   )
 
@@ -959,7 +969,13 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         './hooks.ts': hooks,
       })
     )) as { createAuth: typeof createAuth }
-    return factory({
+    return copiedAuth(factory)
+  }
+
+  // A hook's engine error leaves the copied auth instance through its handler, since
+  // onAPIError.throw is on; guarding the instance records it before Hono answers 500.
+  function copiedAuth(factory: typeof createAuth) {
+    const instance = factory({
       pool,
       db,
       baseURL: origin,
@@ -967,6 +983,16 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
       signup: { mode: 'open', allowedDomains: [] },
       mailer: { send: async () => {} },
     })
+    const copy = guardCopy(instance)
+    // Better Auth answers some errors itself, such as a failed session lookup, and only logs
+    // them: record the engine errors it logs too.
+    const logger = instance.options.logger as { log: (...entry: unknown[]) => void }
+    const log = logger.log
+    logger.log = (...entry) => {
+      for (const detail of entry) recordCopyFault(copy, detail)
+      log(...entry)
+    }
+    return copy
   }
 
   it('passes native unauthenticated HTTP assertions with the original context source copy', async () => {
@@ -975,9 +1001,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
   })
 
   it('detects replacing native 401 with 403 through a real HTTP assertion', async () => {
-    await expect(
-      verifyUnauthenticated('update-member-role', await contextCopy(true)),
-    ).rejects.toMatchObject({ name: 'AssertionError', actual: 403, expected: 401 })
+    await expectKilled(
+      await contextCopy(true),
+      (copy) => verifyUnauthenticated('update-member-role', copy),
+      { outcome: { actual: 403, expected: 401 } },
+    )
   })
 
   async function policyCopy(before?: string, after = '') {
@@ -994,14 +1022,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         './team-role-policy.ts': copy,
       })
     )) as { createAuth: typeof createAuth }
-    return copiedCreateAuth({
-      pool,
-      db,
-      baseURL: origin,
-      secret,
-      signup: { mode: 'open', allowedDomains: [] },
-      mailer: { send: async () => {} },
-    })
+    return copiedAuth(copiedCreateAuth)
   }
 
   it('passes write-boundary and invitation lifecycle assertions with an original source copy', async () => {
@@ -1015,9 +1036,9 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
 
   it('detects removal of the update transaction guard through a real HTTP assertion', async () => {
     const branch = "if (ctx?.path === updateOrganization && request.model === 'organization') {"
-    await expect(
-      verifyRevocation('update', await policyCopy(branch, 'if (false) {')),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await policyCopy(branch, 'if (false) {'), (copy) =>
+      verifyRevocation('update', copy),
+    )
   })
 
   async function cancellationCopy(mutation?: 'authorization' | 'lifecycle') {
@@ -1042,6 +1063,14 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         .replace(guard, 'if (false) return invitation')
         .replace(".where('status', '=', 'pending')", '')
     }
+    // The hook answers any other error with its own 500 and drops it. Let an engine error
+    // through to the guarded handler, so a broken copy is not read as a refused write.
+    const fallback = '    if (error instanceof APIError) throw error\n'
+    expect(source.includes(fallback), 'cancellation fallback anchor').toBe(true)
+    source = source.replace(
+      fallback,
+      `${fallback}    if ([ReferenceError, SyntaxError, TypeError].some((type) => error instanceof type)) throw error\n`,
+    )
     const hooksLocation = new URL('../../../packages/auth/src/hooks.ts', import.meta.url)
     const authLocation = new URL('../../../packages/auth/src/index.ts', import.meta.url)
     const hooks = moduleUrl(readFileSync(hooksLocation, 'utf8'), hooksLocation, {
@@ -1052,14 +1081,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         './hooks.ts': hooks,
       })
     )) as { createAuth: typeof createAuth }
-    return factory({
-      pool,
-      db,
-      baseURL: origin,
-      secret,
-      signup: { mode: 'open', allowedDomains: [] },
-      mailer: { send: async () => {} },
-    })
+    return copiedAuth(factory)
   }
 
   it('passes the native cancellation boundary assertions with the original hook source copy', async () => {
@@ -1070,17 +1092,15 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
   })
 
   it('detects removal of native cancellation authorization through a real HTTP assertion', async () => {
-    await expect(
-      verifyRevocation('cancel-invitation', await cancellationCopy('authorization')),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await cancellationCopy('authorization'), (copy) =>
+      verifyRevocation('cancel-invitation', copy),
+    )
   })
 
   it.each(['accepted', 'rejected'] as const)(
     'detects cancellation overwriting %s through a real HTTP assertion',
     async (state) => {
-      await expect(
-        verifyTerminal(state, await cancellationCopy('lifecycle')),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(await cancellationCopy('lifecycle'), (copy) => verifyTerminal(state, copy))
     },
   )
 
@@ -1088,9 +1108,9 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     'detects stale rejection overwriting %s through a real HTTP assertion',
     async (terminal) => {
       const branch = "if (ctx?.path === rejectInvitation && request.model === 'invitation') {"
-      await expect(
-        verifyRejection(terminal, await policyCopy(branch, 'if (false) {')),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(await policyCopy(branch, 'if (false) {'), (copy) =>
+        verifyRejection(terminal, copy),
+      )
     },
   )
 
@@ -1099,9 +1119,11 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     async (path) => {
       const branch =
         path === 'create' ? 'ctx.path === createOrganization' : 'ctx.path === setActiveOrganization'
-      await expect(
-        verifyContextPersistence(path, await policyCopy(branch, 'false')),
-      ).rejects.toMatchObject({ name: 'AssertionError', actual: 200, expected: 403 })
+      await expectKilled(
+        await policyCopy(branch, 'false'),
+        (copy) => verifyContextPersistence(path, copy),
+        { outcome: { actual: 200, expected: 403 } },
+      )
     },
   )
 })

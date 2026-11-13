@@ -1,4 +1,4 @@
-import type { Database, Db } from '@hourmere/db'
+import { type Database, type Db, importedBookingIds } from '@hourmere/db'
 import { sql, type Transaction } from 'kysely'
 import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
@@ -31,6 +31,7 @@ export async function cancelTeamAdminBooking(
   now: () => Temporal.Instant,
   options: {
     expectedOrganizationId: string
+    sessionId?: string | undefined
     notify: BookingNotifier
     reason?: string | undefined
   },
@@ -119,6 +120,9 @@ async function pageParticipants(db: Db, teamId: string, bookingIds: string[]) {
       .innerJoin('bookings as booking', 'booking.id', 'attendee.booking_id')
       .select([
         'attendee.booking_id',
+        'attendee.id',
+        'attendee.no_show_marked_at',
+        'attendee.no_show_marked_by',
         'attendee.name',
         'attendee.email',
         'attendee.time_zone',
@@ -131,7 +135,7 @@ async function pageParticipants(db: Db, teamId: string, bookingIds: string[]) {
       .execute(),
   ])
   const byHost = new Map<string, TeamAdminBookingRecord['hosts'][number][]>()
-  const byAttendee = new Map<string, TeamAdminBookingRecord['attendees'][number][]>()
+  const byAttendee = new Map<string, (typeof attendees)[number][]>()
   for (const host of hosts) {
     const saved = byHost.get(host.booking_id) ?? []
     saved.push(host)
@@ -169,10 +173,11 @@ export async function getTeamAdminBooking(
 async function enrichTeamBookings(
   ctx: ServiceContext,
   teamId: string,
-  { data, nextCursor }: TeamAdminBookingPage,
+  { data, nextCursor, attendanceByBooking }: Awaited<ReturnType<typeof readTeamBookingPage>>,
 ): Promise<TeamAdminBookingListPage> {
   if (!data.length) return { data: [], nextCursor }
   const ids = data.map((booking) => booking.id)
+  const imported = await importedBookingIds(ctx.db, ids)
   const [hosts, events, replacements] = await Promise.all([
     ctx.db
       .selectFrom(resolvedBookingHosts(ctx.db).as('host'))
@@ -257,6 +262,19 @@ async function enrichTeamBookings(
   return {
     data: data.map((booking) => ({
       ...booking,
+      canManageNoShow:
+        booking.status === 'confirmed' &&
+        !imported.has(booking.id) &&
+        Temporal.Instant.compare(ctx.now(), Temporal.Instant.from(booking.start)) > 0,
+      attendees: (attendanceByBooking.get(booking.id) ?? []).map((attendee) => ({
+        id: attendee.id,
+        name: attendee.name,
+        email: attendee.email,
+        timeZone: attendee.time_zone,
+        isBooker: attendee.is_booker,
+        noShowMarkedAt: attendee.no_show_marked_at?.toISOString() ?? null,
+        noShowMarkedBy: attendee.no_show_marked_by,
+      })),
       isRescheduled: booking.status === 'cancelled' && rescheduledIds.has(booking.id),
       eventType:
         booking.eventType === null
@@ -334,7 +352,12 @@ export async function readTeamBookingPage(
   hostUserId?: string,
   teamEventTypesOnly = false,
   bookingId?: string,
-): Promise<TeamAdminBookingPage & { startInstants: Map<string, Temporal.Instant> }> {
+): Promise<
+  TeamAdminBookingPage & {
+    startInstants: Map<string, Temporal.Instant>
+    attendanceByBooking: Awaited<ReturnType<typeof pageParticipants>>['byAttendee']
+  }
+> {
   // Page booking rows before loading their hosts: collective meetings occupy one row.
   const { query, limit } = teamBookingQuery(
     ctx,
@@ -361,7 +384,8 @@ export async function readTeamBookingPage(
     .execute()
 
   const page = rows.slice(0, limit)
-  if (!page.length) return { data: [], nextCursor: null, startInstants: new Map() }
+  if (!page.length)
+    return { data: [], nextCursor: null, startInstants: new Map(), attendanceByBooking: new Map() }
   const last = page.at(-1)
   const { byHost, byAttendee } = await pageParticipants(
     ctx.db,
@@ -369,6 +393,7 @@ export async function readTeamBookingPage(
     page.map((row) => row.id),
   )
   return {
+    attendanceByBooking: byAttendee,
     startInstants: new Map(page.map((row) => [row.id, Temporal.Instant.from(row.cursor_start)])),
     data: page.map((row) =>
       toTeamAdminBooking({

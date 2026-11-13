@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as availability from './availability.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 import {
@@ -32,7 +33,9 @@ async function sourceCopy(file: string, before: string, after: string) {
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, url).href : specifier.startsWith('node:') ? specifier : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  )
 }
 
 const serverUrl = process.env.DATABASE_URL
@@ -578,7 +581,7 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
       '...(smtpConfigured &&\n      et.waitlistEnabled &&',
       '...(et.waitlistEnabled &&',
     )
-    await expect(assertSmtpPage(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, assertSmtpPage)
   })
 
   async function assertCapacity(join: typeof joinWaitlist) {
@@ -609,9 +612,7 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
       "throw new DomainError('conflict', 'waitlist_full')",
       'return accepted()',
     )
-    await expect(assertCapacity(copy.joinWaitlist)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (api) => assertCapacity(api.joinWaitlist))
   })
 
   it('event storage cap is atomic and delayed expiry cannot block replacement', async () => {

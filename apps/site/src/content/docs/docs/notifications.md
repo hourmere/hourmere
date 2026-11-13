@@ -32,6 +32,19 @@ The ordinary reschedule confirmation tells hosts when a time is chosen; expiry s
 host notice while keeping the original booking. Request generations deduplicate delivery
 and superseded requests are skipped. Existing mail budgets and retries apply.
 
+## Group occurrence host mail
+
+Group occurrence host mail is drained in batches during each minute's worker run;
+the batch size does not limit an instance to four messages per minute. The worker
+starts new attempts for up to 230 seconds, leaving time for a bounded SMTP attempt
+before its five-minute job expiry. A batch that makes no progress (for example, because
+all selected rows are locked by another transaction) ends the run instead of repeatedly
+polling those rows. Remaining rows stay durable for the next run.
+Shared instance hourly mail limits (including the host reserve), per-message receipts,
+coalesced calendar updates, and finite retry limits still apply. Reminders expire at
+the occurrence start, so an SMTP outage or a backlog exceeding the worker's time
+budget can still prevent delivery before that deadline.
+
 ## Imported local bookings
 
 Cal.com/cal.diy imports use durable `source=import` local-only bookings. Their empty
@@ -42,6 +55,10 @@ conference, webhook or scheduled-message delivery is produced for them. Bounded 
 exclude import-connected records before applying their page limit so ordinary work can
 continue behind stale imported intents. See the
 [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md).
+
+No-show marks are private attendance metadata. They send no email and do not reschedule,
+suppress or recreate reminders or follow-ups. Existing follow-up eligibility still uses
+the scheduled end, regardless of attendance. See [marking no-shows](/docs/no-shows).
 
 ## Configure reminders and follow-ups
 
@@ -999,3 +1016,10 @@ see [proxy behavior](/docs/self-hosting#proxy-behavior-and-an-existing-proxy).
 Public joining, host administration, REST/MCP/CLI operations, mail-link confirmations and
 optional public-booking attribution are available. See [booking waitlists](/docs/booking-waitlist)
 for setup, SMTP requirements, capacity errors and the complete lifecycle.
+
+## SMS foundation
+
+An optional [operator-configured Twilio provider](/docs/sms-provider) supplies internal
+SMS sending with durable per-number, instance and organization limits. Costs are billed
+to your Twilio account. There are no user-facing SMS reminders or workflow actions yet;
+no SMS sending jobs or status callback endpoint are enabled by configuration.

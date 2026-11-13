@@ -19,17 +19,31 @@ for the development database.
 
 ```sh
 cp .env.example .env   # set BETTER_AUTH_SECRET, e.g. `openssl rand -base64 32`
-npm install
+npm install --ignore-scripts
 npm run db:up          # Postgres 18 on localhost:5432 (docker-compose.dev.yml)
 npm run dev            # API on :3000, web app on http://localhost:5173
 ```
 
+Use `--ignore-scripts` when installing repository dependencies, as CI and Docker do.
+The n8n community node is a standalone package with its own lockfile; root installs,
+builds and tests do not install or load its development toolchain. See
+[`tools/n8n-nodes-hourmere/README.md`](tools/n8n-nodes-hourmere/README.md) for its separate
+installation and checks.
+
 The server applies database migrations when it starts. `npm run db:down` stops the database
 and keeps its data.
 
-The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with a single
-`package-lock.json` at the root. Add a dependency to the workspace that uses it, e.g.
+The main npm workspace covers `apps/*`, `packages/*`, `tools/api-types`, `tools/cli`
+and `tools/e2e`, with a `package-lock.json` at the root. The separate
+`tools/zapier-hourmere` package has its own lockfile; root installs do not download its
+Zapier Platform Agreement–licensed dependencies. Add a dependency to the workspace that uses it, e.g.
 `npm install <package> --workspace @hourmere/scheduling`, and commit the updated lockfile.
+
+The standalone n8n package uses its own committed lockfile and the separate
+`n8n-compatibility` CI job. From `tools/n8n-nodes-hourmere`, run `npm ci --ignore-scripts`,
+`npm run lint`, `npm run typecheck`, `npm run build` and `npm test`. Its OpenAPI
+contract test runs in the root suite and imports only dependency-free signature code.
+Never add the n8n toolchain to the root workspaces or root dependency tree.
 
 ## Checks
 
@@ -45,6 +59,16 @@ npm run lint        # Biome: formatting and lint rules (`npm run format` fixes m
 npm run typecheck
 npm test            # Vitest; database tests are skipped unless DATABASE_URL is set (.env sets it)
 npm run build
+```
+
+These need only the root install. `npm test` includes the Zapier app's OpenAPI contract
+test, which loads the app definition without the Zapier Platform packages. Install those
+only if you change `tools/zapier-hourmere`. CI's separate `zapier-compatibility` job runs
+the commands below, plus offline validation and the build check, on Node.js 22:
+
+```sh
+npm ci --ignore-scripts --prefix tools/zapier-hourmere
+npm --prefix tools/zapier-hourmere test # Zapier runtime and packaging tests
 ```
 
 An optional clock diagnostic runs the same suite at +7, +30, +90, +400 and +1600 days:
@@ -64,8 +88,10 @@ exercise both DB leases and Node SMTP deadlines align that narrow clock path wit
 The `security.txt` test deliberately uses actual system time: its renewal warning is an
 intentional publication deadline and remains enforced during offset runs.
 
-When you add a migration, apply it and regenerate the table types, then commit
-`packages/db/src/tables.ts` with it (CI checks that they match):
+When you add a migration, ship its constraint coverage expectation file and coverage test in
+the same change (see [Constraint coverage for new migrations](#constraint-coverage-for-new-migrations)).
+Apply it and regenerate the table types, then commit `packages/db/src/tables.ts` with it (CI
+checks that they match):
 
 ```sh
 npm run db:migrate
@@ -103,11 +129,15 @@ cleanup are best effort, bounded to 15 seconds: forced termination, worker crash
 unavailable PostgreSQL can still leave databases behind.
 
 On slow machines, set `HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS` to a positive integer
-number of milliseconds (at most 2147482647). It changes the helper's CREATE/ALTER
-statement timeout from the default 5000 ms. DROP uses at least 30000 ms, or the configured
-value when higher. Each client query timeout is its statement timeout plus 1000 ms.
+number of milliseconds (at most 2147482647). It changes the helper's ALTER DATABASE
+statement timeout from the default 5000 ms. CREATE DATABASE and DROP use at least 30000 ms,
+or the configured value when higher: copying a template can take longer than 5 seconds under
+load. Each client query timeout is its statement timeout plus 1000 ms.
 The connection timeout remains 5000 ms and shutdown cleanup still has its independent
-15-second deadline.
+15-second deadline. Administrative connections also pin `client_connection_check_interval=1000`
+(URL parameters and `PGOPTIONS` cannot change it), so the server aborts a CREATE DATABASE
+whose client has gone, within about 2 s, instead of creating an orphan database once its
+lock is released.
 
 Inspect those leftovers manually (the default is **dry run**):
 
@@ -140,6 +170,82 @@ nullable values. Preserve the snapshot of existing columns. For intentional tran
 document the reason and assert the exact expected change or backfill instead of silently
 excluding the affected columns from preservation checks. Keep migration-specific tests for
 behavior that needs additional fixtures.
+
+### Constraint coverage for new migrations
+
+A migration that adds constraints, NOT NULL columns, indexes or triggers gets a constraint
+coverage test, so none of them can be removed while every test stays green, except
+allow-listed objects that are not protections on their own.
+`checkConstraintCoverage` (`packages/db/src/testing/constraint-coverage.ts`) records the
+catalog before and after the migration and compares the objects it created or redefined,
+with their definitions, to the committed
+`packages/db/src/testing/migration-objects/<migration>.json`. It then drops each object in its
+own `CREATE DATABASE … TEMPLATE` copy and requires your assertion suite to fail:
+
+```ts
+const serverUrl = process.env.DATABASE_URL
+
+describe.skipIf(!serverUrl)('routing form constraint coverage', () => {
+  it('fails an assertion when any 0072 object is dropped', async () => {
+    const report = await checkConstraintCoverage({
+      serverUrl: serverUrl as string,
+      migration: '0072_routing_forms.sql',
+      assertions: assertRoutingFormProtections, // (pool) => Promise<void>; throws on failure
+      allowList: { 'constraint public.t.t_key': 'One-line reason it is not a protection' },
+    })
+    expect(report.problems).toEqual([])
+  }, 600_000)
+})
+```
+
+Write the suite as checks that create their own rows, because one copy serves the whole
+suite: rejected and accepted writes, cascades, defaults and, for an index that has no other
+behaviour, its definition. The verdict comes from what the database did, not from how the
+suite asserted it: the helper records every rejected query on the pool it hands over (and on
+clients from `connect()`, and on pools opened with `openRelatedPool(pool, url)`). On any copy,
+a recorded error whose SQLSTATE is not class 23, 22 or P0, or that has no SQLSTATE (lost
+connection, socket or driver error), aborts the whole run and names the object, even if the
+suite swallowed the error, turned it into a string, compared `error.code`, or used
+`toHaveProperty`, `toThrow(/…/)` or an `allSettled` result. A failure that is not an
+`AssertionError` aborts too, and an assertion whose received value or cause chain holds an
+error without an integrity code aborts. What counts is an assertion about an integrity
+rejection, or a plain value mismatch with no unrelated database error behind it. Write every
+expected success as `expect(...).resolves` and assert on the error object (`toMatchObject({
+code, constraint })`), and open any extra pool only with `openRelatedPool`; a check that must
+provoke a non-integrity error cannot be part of a coverage suite. The suite runs twice on
+unmodified copies before the drops, so a check that fails on either unmodified run aborts the
+run before any object is judged; a check that fails only sometimes can still pass both runs.
+Generate the expectation file with `HOURMERE_UPDATE_CONSTRAINT_COVERAGE=1`, review it and
+commit it; adding, removing or redefining an object later fails until the file is updated.
+Allow-list only objects that are not protections on their own, each with a reason; they are
+still dropped, and an entry whose removal does fail an assertion is reported as stale.
+`HOURMERE_CONSTRAINT_COVERAGE_REPORT=<file>` writes which assertion failed for each object.
+
+The helper sees constraints, standalone indexes, triggers (with the complete function
+definition, including `SET search_path` and `SECURITY DEFINER`) and NOT NULL columns with
+their defaults. It does not see:
+
+- defaults on nullable and primary-key columns;
+- column types (CI's `db:types -- --verify` covers the generated types);
+- row-level security policies and whether RLS is enabled;
+- whether a trigger is enabled, disabled or replica-only;
+- functions that a trigger function calls (only the trigger's own function is digested);
+- NOT NULL constraints on domains;
+- grants, privileges and ownership;
+- objects a migration drops or alters away;
+- a loosened predicate, a changed FK action or deferrability, a widened unique key or a weaker
+  trigger-function clause, which dropping an object cannot reach.
+
+Guard those with behavioural checks and source-copy mutation tests.
+`packages/db/src/meeting-poll-protections.ts` with `meeting-polls-coverage.test.ts` and
+`meeting-polls-migration.test.ts` is the reference. `createTestDatabaseTemplate` (from
+`@hourmere/db/testing`) migrates a schema once for any test that needs many copies of it.
+`packages/db/src/testing/migration-objects.test.ts` fails unless the expectation files are
+exactly the migrations that are not on its frozen legacy list, whatever their number. That list
+holds only migrations that predate the requirement (all numbered below 0071, including
+0068–0070); an entry is removed when its migration gains coverage, as 0067 did, and never
+added, so no new migration can merge without its expectation file. The guard does not check
+that a coverage test reads the file: the coverage test is what keeps the file honest.
 
 ## Browser tests
 
@@ -192,8 +298,9 @@ printing the actual token strings.
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
 The required checks are `check`, `e2e`, `docker` and `sign-off`; `cli-compatibility`
-is not required. The reusable [CI workflow](.github/workflows/ci.yml) runs the first three,
-and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Four `e2e-shard` jobs run the
+and the standalone `n8n-compatibility` and `zapier-compatibility` jobs are not required.
+The reusable [CI workflow](.github/workflows/ci.yml) runs the first three alongside those
+jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Four `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
 web and disposable site fixture and retains the browser-artifact privacy check. The separate

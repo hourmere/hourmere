@@ -3,6 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../../scripts/source-copy-guard.ts'
 import { productRoutes } from '../server.ts'
 import { TeamInvitationSummarySchema } from '../team-invitations.ts'
 import { teamInvitationRoutes } from './team-invitations.ts'
@@ -27,11 +28,12 @@ function sourceCopy(removeGuard = false): typeof teamInvitationRoutes {
       '',
     ),
   ).replace(/\bexport /g, '')
-  return new Function(
-    'z',
-    'TeamInvitationSummarySchema',
-    `${javascript}; return teamInvitationRoutes`,
-  )(z, TeamInvitationSummarySchema) as typeof teamInvitationRoutes
+  return guardCopy(
+    new Function('z', 'TeamInvitationSummarySchema', `${javascript}; return teamInvitationRoutes`)(
+      z,
+      TeamInvitationSummarySchema,
+    ) as typeof teamInvitationRoutes,
+  )
 }
 
 describe('invitation summary route registration', () => {
@@ -50,13 +52,6 @@ describe('invitation summary route registration', () => {
     verifyRequiredConfiguration(sourceCopy())
   })
 
-  it('detects a removed registration guard through a real assertion failure', () => {
-    const mutant = sourceCopy(true)
-    try {
-      verifyRequiredConfiguration(mutant)
-      throw new Error('Registration mutation escaped the assertion')
-    } catch (error) {
-      expect(error).toMatchObject({ name: 'AssertionError' })
-    }
-  })
+  it('detects a removed registration guard through a real assertion failure', () =>
+    expectKilled(sourceCopy(true), verifyRequiredConfiguration))
 })

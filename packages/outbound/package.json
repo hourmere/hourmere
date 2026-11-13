@@ -1,0 +1,13 @@
+{
+  "name": "@hourmere/outbound",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sso": "./src/sso.ts",
+    "./sso-private-targets": "./src/sso-private-targets.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

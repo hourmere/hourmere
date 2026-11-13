@@ -8,6 +8,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { manageInvitation } from '../../auth/src/invitations.ts'
 import { reserveInvitationEmailBudget } from './invitation-mail-limits.ts'
 import { deliverInvitationEmail } from './invitation-sender.ts'
@@ -33,7 +34,9 @@ async function sourceCopy(location: URL, before: string, after: string) {
       return `from '${resolved}'`
     },
   )
-  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`),
+  )
 }
 
 describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', () => {
@@ -346,9 +349,9 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         ".where('emailVerified', '=', true)",
         '',
       )
-      await expect(
-        verifyGenerationActorProof(phase, copy.deliverInvitationEmail),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(copy, (module) =>
+        verifyGenerationActorProof(phase, module.deliverInvitationEmail),
+      )
     },
   )
 
@@ -362,9 +365,9 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
     )`,
       'const authorized = true',
     )
-    await expect(
-      verifyGenerationActorProof('before claim', copy.deliverInvitationEmail),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, (module) =>
+      verifyGenerationActorProof('before claim', module.deliverInvitationEmail),
+    )
   })
 
   it('detects a removed pre-SMTP authority check through a real mailer assertion', async () => {
@@ -373,9 +376,9 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       'if (!(await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId))) {',
       'if (false) {',
     )
-    await expect(
-      verifyGenerationActorProof('after claim', copy.deliverInvitationEmail),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, (module) =>
+      verifyGenerationActorProof('after claim', module.deliverInvitationEmail),
+    )
   })
 
   async function expire(id: string) {
@@ -649,9 +652,8 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       ".select(['id', 'expiresAt'])",
       ".select(['id', 'expiresAt']).where('expiresAt', '<=', now)",
     )
-    await expect(verifyExpiryDuringBudgetWait(copy.manageInvitation)).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('the newly expired invitation is retired'),
+    await expectKilled(copy, (module) => verifyExpiryDuringBudgetWait(module.manageInvitation), {
+      outcome: { message: expect.stringContaining('the newly expired invitation is retired') },
     })
   })
 
@@ -722,12 +724,17 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         before,
         after,
       )
-      await expect(
-        verifyPostCommitReplacementId(retired, copy.manageInvitation),
-      ).rejects.toMatchObject({
-        name: 'AssertionError',
-        message: expect.stringContaining('a post-commit failure identifies the saved replacement'),
-      })
+      await expectKilled(
+        copy,
+        (module) => verifyPostCommitReplacementId(retired, module.manageInvitation),
+        {
+          outcome: {
+            message: expect.stringContaining(
+              'a post-commit failure identifies the saved replacement',
+            ),
+          },
+        },
+      )
     },
   )
 
@@ -856,19 +863,17 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       'if (Number(pending.count) >= 100)',
       'if (Number(pending.count) > 100)',
     )
-    await expect(verifyPendingLimit(copy.manageInvitation)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyPendingLimit(module.manageInvitation))
   })
 
   it.each([
     [
       'renewing an expired invitation in place',
-      '        invitation = undefined\n        delivery = undefined',
-      `        if (invitation) invitation = await trx.updateTable('auth.invitation')
-          .set({ status: 'pending', expiresAt: new Date(now.getTime() + lifetime) })
-          .where('id', '=', invitation.id).returningAll().executeTakeFirstOrThrow()
-        delivery = undefined`,
+      '    invitation = undefined\n    delivery = undefined',
+      `    if (invitation) invitation = await trx.updateTable('auth.invitation')
+      .set({ status: 'pending', expiresAt: new Date(now.getTime() + lifetime) })
+      .where('id', '=', invitation.id).returningAll().executeTakeFirstOrThrow()
+    delivery = undefined`,
       'an expired invitation requires a new ID',
     ],
     [
@@ -893,9 +898,8 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
         before,
         after,
       )
-      await expect(verifyReplacement(copy.manageInvitation)).rejects.toMatchObject({
-        name: 'AssertionError',
-        message: expect.stringContaining(assertion),
+      await expectKilled(copy, (module) => verifyReplacement(module.manageInvitation), {
+        outcome: { message: expect.stringContaining(assertion) },
       })
     },
   )
@@ -940,9 +944,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       'if (otherPending) throw conflict()',
       'void otherPending',
     )
-    await expect(verifyActiveDuplicate(copy.manageInvitation)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyActiveDuplicate(module.manageInvitation))
   })
 
   it('detects keeping the original inviter in a resend generation using the same delivery assertion', async () => {
@@ -951,9 +953,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
       'authorized_by_user_id: actor.userId,',
       'authorized_by_user_id: invitation.inviterId,',
     )
-    await expect(verifyActor(copy.manageInvitation)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyActor(module.manageInvitation))
   })
 
   it.each([
@@ -969,8 +969,8 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
     ],
   ])('detects using the original inviter for generation %s', async (_name, before, after) => {
     const copy = await sourceCopy(new URL('./invitation-sender.ts', import.meta.url), before, after)
-    await expect(verifyActor(manageInvitation, copy.deliverInvitationEmail)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) =>
+      verifyActor(manageInvitation, module.deliverInvitationEmail),
+    )
   })
 })

@@ -183,7 +183,7 @@ npm run import-calcom --workspace @hourmere/import-calcom -- apply --config /pri
 Outputs are new owner-only regular files (`0600`), created exclusively: existing files and
 symlinks are refused. Human-readable console output masks email addresses and includes
 counts by entity/reason, old/proposed addresses, UTC/local booking times, overlaps, buffers,
-daily counts, loss codes, table row counts and the zero-external-effects guarantee. Machine
+daily, weekly and monthly counts, loss codes, table row counts and the zero-external-effects guarantee. Machine
 JSON and the optional authorized private report also contain names, emails, questions,
 answers, private join links and inference-sensitive hashes: protect them as migration data.
 Neither contains DSNs, source management capabilities, credentials or provider payloads.
@@ -194,7 +194,16 @@ Review all defaults, timezone proposals, question/option conversions, omitted po
 unimportable future bookings in the private plan. Draft events always remain inactive,
 even when the source event was merely hidden. Reconnect calendars/conferences separately;
 activation requires a later explicit owner review. Historical booking times are retained
-outside current hours or across buffer/daily-limit differences, and remain busy.
+outside current hours or across buffer and daily/weekly/monthly limit differences, and remain busy.
+Limit impacts are advisory per event type and host: weeks start Monday and months are
+calendar months in the host schedule time zone, including daylight-saving transitions.
+Unrelated event types do not consume an imported event’s allowance. Source `PER_WEEK` and
+`PER_MONTH` ceilings within target bounds are proposed on inactive drafts; their source
+semantics still require review before activation. Previously imported events whose source
+had these ceilings may now report a changed proposal, requiring reviewed reconciliation
+rather than an automatic update. Existing host group-slot
+occupancy is included in overlap checks and the target fingerprint; overlaps block the batch
+and a changed group slot requires a new preview.
 
 Use a short operator-managed cutover window that freezes source changes. The importer never
 writes to the source to freeze it. Apply re-extracts with the original UTC cutoff and compares
@@ -239,6 +248,34 @@ target changes. `IMPORT_PARTIAL_MAPPING` means only part of the batch is mapped 
 attempt failed with `committed: false`; it does not describe a complete unchanged import.
 Stable refusal codes include `IMPORT_SOURCE_CHANGED`, `IMPORT_TARGET_CHANGED`,
 `IMPORT_PLAN_EXPIRED`, `IMPORT_BOOKING_OVERLAP` and `IMPORT_CONCURRENT_CHANGE`.
+
+## Complete or recover a partial import
+
+`IMPORT_PARTIAL_MAPPING` is a refusal to append to a batch with both existing unchanged
+mappings and new entities. It commits nothing in that attempt. It can occur after expanding
+an earlier successful batch that explicitly excluded bookings; it is not evidence that an
+atomic apply committed half its writes. Automatic same-owner incremental completion is not
+supported.
+
+1. Keep the source frozen and save the original protected configuration, reviewed plan and
+   report. Reuse the same `sourceId`; do not edit the ledger or delete tombstones.
+2. If the original response was lost, retry the original plan with its original decisions
+   and exclusions. A fully committed unchanged batch returns `IMPORT_NOOP`. A new preview
+   shows which entities are already mapped and which remain new or conflicted.
+3. If the remaining data belongs to owners who have never been imported, select only those
+   owners in a separate configuration, with their explicit consent and booking decisions.
+   Create and review a fresh preview under the same source namespace, then apply that plan.
+4. If one owner's earlier batch excluded data now needed, there is no supported “resume”
+   flag. To import that owner's complete selection from scratch, an operator must restore
+   a verified whole-target backup from before the first import using the normal
+   [backup/restore procedure](https://hourmere.com/docs/self-hosting#back-up-and-restore),
+   accounting for all legitimate target changes since that backup. Then re-register the
+   source only if the restored backup predates registration, preview the complete selection
+   and review it before applying. Do not restore only ledger rows or overwrite live data.
+5. If restoring the target is unacceptable, preserve the successful batch and keep the
+   remaining bookings managed in the original system. Request a separately reviewed
+   reconciliation procedure; cleanup alone cannot recreate tombstoned mappings. Resolve
+   conflicts before attempting another preview. Never use a new namespace to bypass them.
 
 Rollback is deliberately not automatic. A separately reviewed local cleanup must preview
 current target hashes, touch only this user's unchanged newly created records and produce no

@@ -12,6 +12,10 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Private per-attendee no-show marking after the scheduled start, with dashboard, REST,
+  MCP and CLI access for hosts and browser-session access for team owners/admins. Optional
+  `booking.attendee_no_show_changed` webhooks report actual changes without attendee contacts.
+
 - `security.txt` on hourmere.com and www.hourmere.com lists Hourmere's private vulnerability
   reporting channels.
 - Self-hosted operators can allow exact private webhook hosts or IP/CIDR and port ranges
@@ -80,6 +84,8 @@ must approve publication through the [release workflow](https://github.com/hourm
   alias when present and must retain support for the original code on older servers.
 
 ### Fixed
+
+- Keep concurrent MCP OAuth organization selection and consent from exhausting the application database connection pool.
 
 - Upgrade the Better Auth family and schema CLI from 1.7.12 to 1.7.16 for
   GHSA-9hm7-xhfp-cx58 (unverified OAuth email), GHSA-fvxx-76fc-893x (revoked
@@ -197,11 +203,6 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Upgrade notes
 
-- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
-  and worker process before applying the migration, then restart every role with the new
-  code. The webhook delivery uniqueness constraint changes to include the request identity;
-  old booking writers cannot use it after migration. Do not run mixed application versions.
-
 These notes apply to existing installations of the development source tree. Back up the
 full database (`auth`, `public` and `pgboss`), deployment configuration and original secrets
 before upgrading. Review [self-hosting recovery guidance](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore);
@@ -209,6 +210,53 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Audit event details (migration 0080) upgrade in place.** The migration replaces the
+  audit journal's details check: the `events` value of a webhook or Slack destination event
+  must now be an array of distinct event names from that destination's catalogue, at least
+  one and at most the catalogue size. It is safe to apply while the previous version is
+  still running, because that version records only such lists. The check is validated in
+  the migration's transaction, so writes to `audit_events` wait while existing rows are
+  checked: audited changes, including public bookings, pause for that scan, which grows with
+  the journal (about 0.1 s for 200,000 rows on a development machine). If a journal row
+  written outside the application holds another `events` value, the migration fails with
+  SQLSTATE 23514 and changes nothing. The webhook table's own check is looser, so a stored
+  event list edited outside the application (a repeated event, or a Slack destination
+  holding the attendee no-show change) passes it; after the upgrade, every audited change to
+  that webhook or Slack destination that keeps the stored list fails with 23514, including
+  a Slack test message and the delivery worker's automatic pause after Slack answers 404 or
+  410, which then leaves the destination active. Setting its events again through the API
+  ends this. See the
+  [audit event journal](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md#stable-actions-and-detail-allow-lists).
+- **Audit actions follow-ups (migration 0078) upgrade in place.** The migration replaces
+  the audit journal's details check so that attendee no-show changes can record the
+  attendee ID and the new state, and Slack destination changes their subscribed events;
+  SCIM provisioning token changes use the existing empty-details rule. It is safe to apply
+  while the previous version is still running, because that version never records these
+  actions. Apply it before starting the new version (automatic with `AUTO_MIGRATE=true`):
+  until 0078 is applied, the new version's no-show marks and Slack destination changes,
+  including the delivery worker's automatic pause after Slack answers 404 or 410, fail with
+  SQLSTATE 23514 (`audit_events_details_check`) and change nothing. Replacing the check
+  makes writes to `audit_events` wait while existing rows are validated; that time grows
+  with the journal.
+- **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
+  apply while the previous version is still running: it adds nullable attendee columns and
+  only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply
+  it before starting the new version (automatic with `AUTO_MIGRATE=true`). See the
+  [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#private-attendee-no-show-markers).
+- **Audit event journal (migration 0067) upgrades in place.** The migration adds the
+  `audit_events` table and its indexes; earlier changes are not backfilled. It is safe to
+  apply while the previous version is still running, because that version neither reads
+  nor writes the table. Old processes keep working, but the changes they make are not
+  recorded, so stop every old `web`, `all` and `worker` process during the rollout to keep
+  the journal complete. Apply the migration before starting the new version (automatic with
+  `AUTO_MIGRATE=true`): without the table, every change the new version records, including
+  public bookings, fails with SQLSTATE 42P01, because a failed audit write aborts its
+  change. The journal is recorded but not yet viewable. See the
+  [audit event journal](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md).
+- **Coordinate the reschedule-request upgrade (migration 0064).** Stop every old web/all
+  and worker process before applying the migration, then restart every role with the new
+  code. The webhook delivery uniqueness constraint changes to include the request identity;
+  old booking writers cannot use it after migration. Do not run mixed application versions.
 - **Coordinate the mail-budget upgrade (migration 0040).** Build the new application,
   stop every old `web`, `all` and `worker` process, including any on other hosts, then
   start all roles with the upgraded code: build → stop app (and any separate worker) → up.

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { registeredLocales } from '@hourmere/core/language'
 import { describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { mailCatalogueProblems, mailCatalogues } from './catalogue.ts'
 import { createLogMailer, type MailMessage } from './index.ts'
 import { waitlistNotificationEmail, waitlistVerificationEmail } from './waitlist.ts'
@@ -129,10 +130,12 @@ async function rendererCopy(replacements: Replacement[] = []): Promise<Renderers
     source = source.replace(item[0], '')
   }
   source = source.replace(/\bexport /g, '')
-  return new Function(
-    ...Object.keys(dependencies),
-    `${source}; return { verify: waitlistVerificationEmail, notice: waitlistNotificationEmail }`,
-  )(...Object.values(dependencies)) as Renderers
+  return guardCopy(
+    new Function(
+      ...Object.keys(dependencies),
+      `${source}; return { verify: waitlistVerificationEmail, notice: waitlistNotificationEmail }`,
+    )(...Object.values(dependencies)) as Renderers,
+  )
 }
 
 function verifyLinks(render = production) {
@@ -599,10 +602,7 @@ describe('waitlist email templates', () => {
   ])(
     'detects removal of %s through a real assertion failure',
     async (_name, replacement, verify) => {
-      const render = await rendererCopy([replacement])
-      await expect(Promise.resolve().then(() => verify(render))).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(await rendererCopy([replacement]), verify)
     },
   )
 })

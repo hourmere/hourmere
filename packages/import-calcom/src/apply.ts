@@ -9,13 +9,7 @@ import {
   type SourceInput,
   verifyPlanFingerprint,
 } from './preview.ts'
-import {
-  businessFingerprint,
-  entityState,
-  readTargetState,
-  TargetRefusal,
-  validateAuthorization,
-} from './target.ts'
+import { entityState, readTargetState, TargetRefusal, validateAuthorization } from './target.ts'
 import type { SourceSnapshot } from './types.ts'
 
 export interface ApplyReport {
@@ -172,13 +166,16 @@ export async function applyExtractedImport(
     inTransaction = true
     await client.query("SET LOCAL statement_timeout='30s'")
     await client.query("SET LOCAL lock_timeout='5s'")
+    // Planner statistics can price the sub-millisecond identity read past the JIT
+    // thresholds; compiling it would then stretch the time the write barrier is held.
+    await client.query('SET LOCAL jit = off')
     // A migration-only write barrier covers hash predicates as well as existing rows.
     // Ordinary profile/schedule writers do not all share one advisory-lock protocol.
     // Acquire every barrier before the first target snapshot; waiting writers resume
     // after commit/rollback. Source extraction has already closed its connection.
     await client.query(`LOCK TABLE auth."user",auth.organization,auth.member,
       personal_organizations,profiles,schedules,schedule_overrides,event_types,event_type_hosts,
-      bookings,booking_hosts,booking_attendees,import_sources,import_items,schema_migrations,
+      bookings,booking_hosts,group_slots,booking_attendees,import_sources,import_items,schema_migrations,
       waitlist_entries IN SHARE ROW EXCLUSIVE MODE`)
     await client.query(
       'SELECT id FROM auth."user" WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',
@@ -290,8 +287,8 @@ export async function applyExtractedImport(
         (organization_id,owner_user_id,slug,title,description,duration_minutes,allowed_durations_minutes,
         slot_step_minutes,buffer_before_minutes,buffer_after_minutes,minimum_notice_minutes,
         booking_window_days,max_bookings_per_day,scheduling_type,location,questions,is_active,
-        is_hidden,position,allow_guests,notifications,success_redirect)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'individual',$14,$15,false,$16,$17,$18,$19,NULL) RETURNING id`,
+        is_hidden,position,allow_guests,notifications,success_redirect,max_bookings_per_week,max_bookings_per_month)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'individual',$14,$15,false,$16,$17,$18,$19,NULL,$20,$21) RETURNING id`,
           [
             e.organizationId,
             e.targetUserId,
@@ -312,6 +309,8 @@ export async function applyExtractedImport(
             e.position,
             e.allowGuests,
             JSON.stringify(e.notifications),
+            e.maxBookingsPerWeek,
+            e.maxBookingsPerMonth,
           ],
         )
       ).rows[0]?.id as string
@@ -363,7 +362,6 @@ export async function applyExtractedImport(
     }
     stage = 'write_mappings'
     const after = await readTargetState(client, input.sourceId, input.authorization, saved.cutoff)
-    const postTargetFingerprint = businessFingerprint(after)
     for (const e of fresh.entities) {
       entity = e.kind
       sourceKey = e.sourceKey
@@ -382,9 +380,7 @@ export async function applyExtractedImport(
                   fresh.plan.bookings.find((p) => String(p.sourceId) === e.sourceKey)?.questions ??
                   [],
               }
-            : e.kind === 'user'
-              ? { postTargetFingerprint }
-              : {}
+            : {}
       await client.query(
         `INSERT INTO import_items(source_id,entity_kind,source_primary_key,source_user_primary_key,target_id,
         source_fingerprint,target_fingerprint,policy,contract_version,question_crosswalk)

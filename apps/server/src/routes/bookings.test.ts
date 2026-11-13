@@ -187,6 +187,78 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     expect((await post(path, 'request-host', { ...input, note: 'Different' })).status).toBe(409)
   })
 
+  it('tells a request email link what became of its request, and only that link', async () => {
+    const { createPublicBooking, requestReschedule } = await import('@hourmere/scheduling')
+    const { createHash, randomBytes } = await import('node:crypto')
+    const f = createFixtures(db)
+    const host = await f.host()
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'intro' })
+    const booked = await createPublicBooking(
+      { db, now: () => NOW },
+      {
+        handle: host.handle,
+        slug: 'intro',
+        start: Temporal.Instant.from('2026-11-02T09:00Z'),
+        invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+      },
+    )
+    const ctx = {
+      db,
+      now: () => NOW,
+      principal: {
+        kind: 'session' as const,
+        sessionId: 'test',
+        user: { id: host.userId, name: 'Host', email: 'host@example.test' },
+        organization: { id: host.organizationId, name: '', slug: '', personal: true },
+      },
+    }
+    const ask = async () =>
+      (await requestReschedule(ctx, booked.booking.id, { idempotencyKey: crypto.randomUUID() }))
+        .pendingReschedule?.id as string
+    const first = await ask()
+    const token = randomBytes(32).toString('base64url')
+    const attendee = await db
+      .selectFrom('booking_attendees')
+      .select('id')
+      .where('booking_id', '=', booked.booking.id)
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_notifications')
+      .values({
+        booking_id: booked.booking.id,
+        kind: 'reschedule_requested',
+        message_key: first,
+        recipient: `attendee:${attendee.id}`,
+        manage_token_hash: createHash('sha256').update(token).digest(),
+      })
+      .execute()
+    const read = async (manageToken: string) => {
+      const res = await app.request('/api/v1/bookings/manage', {
+        headers: { 'x-manage-token': manageToken },
+      })
+      expect(res.status).toBe(200)
+      return (await res.json()) as Record<string, unknown>
+    }
+    expect(await read(token)).toMatchObject({ rescheduleRequest: { id: first, state: 'pending' } })
+    const second = await ask()
+    expect(await read(token)).toMatchObject({
+      pendingReschedule: { id: second },
+      rescheduleRequest: { id: first, state: 'replaced' },
+    })
+    expect(await read(booked.manageToken as string)).not.toHaveProperty('rescheduleRequest')
+    type Schema = { properties?: object; required?: string[]; allOf?: Schema[] }
+    const document = (await (await get('/api/v1/openapi.json')).json()) as {
+      components: { schemas: Record<string, Schema> }
+    }
+    const managed = document.components.schemas.ManagedBooking as Schema
+    const parts = [managed, ...(managed.allOf ?? [])]
+    expect(parts.some((part) => part.properties && 'rescheduleRequest' in part.properties)).toBe(
+      true,
+    )
+    expect(parts.flatMap((part) => part.required ?? [])).not.toContain('rescheduleRequest')
+  })
+
   it('requires a caller', async () => {
     for (const res of [
       await get('/api/v1/bookings'),

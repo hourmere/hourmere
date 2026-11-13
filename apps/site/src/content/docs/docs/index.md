@@ -10,6 +10,10 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 - [Self-host with Docker Compose](/docs/self-hosting): install, configure email and a proxy,
   split workers, back up and upgrade.
+- [Cal.com / cal.diy import](/docs/calcom-import): preview and apply local-only busy records,
+  inspect limits and overlaps, and recover an incomplete selection.
+- [Install the app](/docs/install-app): add Hourmere to your home screen and understand
+  its offline notice and privacy boundaries.
 - [Configuration reference](/docs/configuration): environment variables and Compose behavior.
 - [Troubleshooting](/docs/troubleshooting): email delivery, workers, HTTPS, DNS and database
   startup failures.
@@ -38,12 +42,41 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application and connect,
   refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
+- [Marking no-shows](/docs/no-shows): record private attendance per invitee or guest.
 - [Booking waitlists](/docs/booking-waitlist): let invitees confirm an empty period and
   receive notification when a matching time opens; manage entries in the editor, REST,
   MCP or CLI. Available in full to self-hosters.
 
 ## Known limitations
 
+- [Audit events](/docs/audit-log) are recorded only for the management changes listed
+  there. The audit viewer, read APIs, export and retention controls are not available yet.
+- Prebuilt image installs have no runtime switch to disable app installation or the
+  offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
+  the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
+- [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
+  Users, Groups, discovery and IdP synchronization are not available yet.
+- Organization OIDC/SAML SSO is in design and is not available yet. The
+  [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
+  self-hosting, linking, enforcement and the planned implementation sequence.
+  Planned SSO is available to every instance without a paid-plan requirement.
+- [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
+  Hourmere Make app is shipped. Verify signed webhooks before any downstream action.
+- The [n8n community node](/docs/n8n) is not yet published to npm or available on n8n Cloud.
+  Self-hosters can install its local package; downstream effects need durable idempotency.
+- [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
+  can be deployed privately with your own Zapier account.
+- Booking workflows are [design only](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md).
+  Conditional email and webhook actions are not available yet, including for self-hosters.
+  During implementation, generated API-key/MCP scope tables, OpenAPI and CLI help may list
+  operations before enablement; those entries will document their disabled behavior.
+  Docker Compose may also forward workflow settings that have no effect until then.
+  Existing reminders, follow-ups and signed booking webhooks keep their current behavior.
+- [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
+  local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
+  block the batch, while daily/weekly/monthly limit differences are reported as warnings.
+- [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
+  minimal booking data and at-least-once delivery; duplicate messages are possible.
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
@@ -64,11 +97,27 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Branding settings](/docs/branding) store a logo and primary colour per space; public
   booking pages and emails do not apply them yet.
 - [CSV exports](/docs/booking-export) require a range of at most 366 elapsed days and
-  permit one active export per organization. Files contain personal data; there is no
+  permit one active export per organization. Each process also permits one export per
+  user and two exports total by default (`export_user_in_progress` / `export_busy`);
+  these concurrency limits are per process, not cluster-wide. Files contain personal data; there is no
   scheduled export or automatic delivery. Answers use a JSON column.
 - Group seats currently have internal storage and service support only. Public booking
   pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
-  this limitation applies equally to self-hosted installations.
+  this limitation applies equally to self-hosted installations. Existing occurrences retain
+  their shared location, schedule and conference settings when event settings change, and
+  continue accepting seats until full, subject to current booking cutoffs and usable pinned
+  conference resources. Later time off, external-calendar conflicts and stale calendar sync
+  do not block additional seats or moves into an existing occurrence; the host must cancel
+  it to stop admission. New occurrences check current time off, calendar conflicts and sync
+  freshness as well as the edited settings. A full occurrence gives
+  the same error for existing and unknown email addresses; exact request replays still work.
+  With spare capacity, duplicate-email rejection does not guarantee membership privacy:
+  a different email address can create a real seat and its notifications, or receive a
+  distinct pinned-Zoom failure without a committed seat. Mismatched location options
+  return the same error regardless of whether the email address already holds a seat.
+  Host occurrence mail drains batches of four for up to 230 seconds per worker run;
+  remaining due messages stay durable for the next run, subject to reminder expiry,
+  the instance email abuse budget and delivery retries.
 - Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
@@ -90,6 +139,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Follow-ups](/docs/reminders-and-follow-ups) use the scheduled end regardless of
   attendance. Invitees cannot stop them after the meeting starts; cancel in Hourmere
   before the start. Mail limits can permanently suppress a message.
+- [No-show marks](/docs/no-shows) are manual and private. They do not suppress follow-ups;
+  attendance reporting and exports are not yet available.
 - PostgreSQL 18+ is required for `uuidv7()`; [PgBouncer is unsupported](/docs/configuration#server-and-database).
   The [upgrade notes](https://github.com/hourmere/hourmere/blob/main/CHANGELOG.md#upgrade-notes)
   cover the database version requirement.
@@ -117,6 +168,10 @@ Explore these detailed guides:
   from a terminal with an API key.
 - [Booking webhooks](/docs/webhooks):
   configure signed delivery and retries.
+- [Make](/docs/make): connect booking webhooks to Sheets or Slack, or create bookings with HTTP.
+- [n8n](/docs/n8n): automate bookings with actions and signed triggers in self-hosted n8n.
+- [Zapier](/docs/zapier): connect booking triggers, actions and searches through a
+  private integration.
 - Team scheduling: [collective meetings](/docs/collective-scheduling)
   and [round-robin pools](/docs/round-robin-scheduling).
 - [Automatic Google Meet](/docs/automatic-google-meet)

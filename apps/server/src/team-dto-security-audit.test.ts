@@ -104,6 +104,7 @@ const eventKeys = [
   'updatedAt',
 ]
 const hostBookingKeys = [
+  'canManageNoShow',
   'id',
   'eventTypeId',
   'status',
@@ -122,7 +123,9 @@ const hostBookingKeys = [
   'createdAt',
 ]
 const managedBookingKeys = hostBookingKeys
-  .filter((key) => key !== 'eventTypeTitle' && key !== 'rescheduledToId')
+  .filter(
+    (key) => key !== 'eventTypeTitle' && key !== 'rescheduledToId' && key !== 'canManageNoShow',
+  )
   .concat(['eventType', 'hosts'])
 const slotRange = 'start=2026-11-04T00:00:00Z&end=2026-11-05T00:00:00Z'
 
@@ -441,12 +444,19 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     return response.json() as Promise<Json>
   }
   function assertBooking(item: Json, list = false) {
-    keys(item, list ? [...bookingKeys, 'isRescheduled'] : bookingKeys)
+    keys(item, list ? [...bookingKeys, 'isRescheduled', 'canManageNoShow'] : bookingKeys)
     if (list) expect(item.isRescheduled).toBe(false)
     keys(item.eventType, list ? ['id', 'title', 'publicBookingPath'] : ['id', 'title'])
     for (const host of item.hosts)
       keys(host, list ? ['userId', 'name', 'timeZone', 'isCurrentMember'] : ['userId', 'name'])
-    for (const attendee of item.attendees) keys(attendee, ['name', 'email', 'timeZone', 'isBooker'])
+    for (const attendee of item.attendees)
+      keys(attendee, [
+        'name',
+        'email',
+        'timeZone',
+        'isBooker',
+        ...(list ? ['id', 'noShowMarkedAt', 'noShowMarkedBy'] : []),
+      ])
     expect(JSON.stringify(item)).not.toContain(privateMarker)
   }
   function assertEvent(item: Json) {
@@ -477,7 +487,14 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     keys(item.responses, ['private'])
     expect(item.responses.private).toBe(privateMarker)
     for (const attendee of item.attendees)
-      keys(attendee, ['name', 'email', 'timeZone', 'locale', 'isBooker'])
+      keys(attendee, [
+        'name',
+        'email',
+        'timeZone',
+        'locale',
+        'isBooker',
+        ...(managed ? [] : ['id', 'noShowMarkedAt', 'noShowMarkedBy']),
+      ])
     if (managed) {
       keys(item.eventType, ['title', 'durationMinutes'])
       for (const host of item.hosts) keys(host, ['name'])

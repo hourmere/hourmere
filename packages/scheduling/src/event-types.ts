@@ -6,6 +6,7 @@
 import { requireActiveApiKey } from '@hourmere/auth'
 import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -300,6 +301,7 @@ export async function setEventTypeNotifications(
         .where('id', '=', row.id)
         .execute()
     }
+    await auditEventType(ctx, trx, row.id, 'event_type.notifications_updated')
     return notifications
   })
 }
@@ -340,6 +342,7 @@ export async function setEventTypeWaitlist(
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await waitlistManager(trx, ctx, row)
     await writeWaitlistSettings(trx, row, settings)
+    await auditEventType(ctx, trx, row.id, 'event_type.waitlist_updated')
     return settings
   })
 }
@@ -659,6 +662,7 @@ export async function createEventType(
         )
         .execute()
       if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, id), waitlist)
+      await auditEventType(ctx, trx, id, 'event_type.created')
       return toEventType(await loadEventType(trx, id))
     }),
   )
@@ -829,6 +833,7 @@ export async function updateEventType(
           .execute()
       }
       if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, row.id), waitlist)
+      await auditEventType(ctx, trx, row.id, 'event_type.updated')
       return toEventType(await loadEventType(trx, row.id))
     }),
   )
@@ -847,6 +852,7 @@ export async function deleteEventType(ctx: ServiceContext, id: string): Promise<
       .where('id', '=', row.id)
       .where('deleted_at', 'is', null)
       .execute()
+    await auditEventType(ctx, trx, row.id, 'event_type.deleted')
   })
 }
 
@@ -1382,6 +1388,7 @@ export async function activateRoundRobin(ctx: ServiceContext, id: string): Promi
       .values({ event_type_id: row.id, enabled: true })
       .onConflict((conflict) => conflict.column('event_type_id').doUpdateSet({ enabled: true }))
       .execute()
+    await auditEventType(ctx, trx, row.id, 'event_type.round_robin_activated')
     return toEventType(await loadEventType(trx, row.id))
   })
 }
@@ -1459,4 +1466,26 @@ async function validateConference(
       eventTypeId,
       ctx.automaticMeet,
     )
+}
+
+async function auditEventType(
+  ctx: ServiceContext,
+  trx: Db,
+  id: string,
+  action:
+    | 'event_type.created'
+    | 'event_type.updated'
+    | 'event_type.deleted'
+    | 'event_type.notifications_updated'
+    | 'event_type.waitlist_updated'
+    | 'event_type.round_robin_activated',
+) {
+  await writeAuditEvent(trx, {
+    organizationId: ctx.principal.organization.id,
+    ...auditActor(ctx.principal),
+    action,
+    targetType: 'event_type',
+    targetId: id,
+    requestId: ctx.requestId,
+  })
 }

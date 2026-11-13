@@ -1,0 +1,7 @@
+{
+  "migration": "0082_audit_scim_token_actor.sql",
+  "objects": {
+    "constraint public.audit_events.audit_events_actor_type_check": "CHECK ((actor_type = ANY (ARRAY['user'::text, 'api_key'::text, 'oauth_client'::text, 'system'::text, 'anonymous'::text, 'external_api_key'::text, 'external_oauth_client'::text, 'external_user'::text, 'scim_token'::text])))",
+    "constraint public.audit_events.audit_scim_token_actor_credential": "CHECK (((actor_type <> 'scim_token'::text) OR (credential_type = 'none'::text)))"
+  }
+}
