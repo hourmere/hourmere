@@ -158,6 +158,8 @@ export const admin = {
     'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.',
   'Review latest version': 'Review latest version',
   'Latest saved version': 'Latest saved version',
+  'Draft applied to the latest version. Save changes to submit it.':
+    'Draft applied to the latest version. Save changes to submit it.',
   'Apply my draft to this version': 'Apply my draft to this version',
   'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.':
     'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.',

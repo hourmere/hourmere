@@ -6,7 +6,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestUser, testContext } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { webhookAttendeeNoShowNotifier } from './delivery.ts'
+import { webhookAttendeeNoShowNotifier, webhookBookingNotifier } from './delivery.ts'
 import { createWebhook, WEBHOOK_EVENTS } from './service.ts'
 import { SLACK_EVENTS, slackPayload } from './slack-format.ts'
 
@@ -113,6 +113,48 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
     expect(await rows(webhook.id)).toEqual([])
   })
 
+  const lifecycleTypes = ['created', 'cancelled', 'rescheduled'] as const
+  async function captureLifecycleReplay(
+    type: (typeof lifecycleTypes)[number],
+    notifier = webhookBookingNotifier,
+  ) {
+    const { webhook, event } = await fixture()
+    const queue = { enqueue: vi.fn(async () => randomUUID()) }
+    const notify = notifier(queue, settings)
+    const lifecycle = { type, bookingId: event.bookingId, start: now }
+    await db.transaction().execute((trx) => notify(trx, lifecycle, now))
+    await db
+      .transaction()
+      .execute((trx) => webhookAttendeeNoShowNotifier(queue, settings)(trx, event, now))
+    await db.transaction().execute((trx) => notify(trx, lifecycle, now))
+    return { deliveries: await rows(webhook.id), queue }
+  }
+
+  function expectLifecycleDeduplication(
+    deliveries: Awaited<ReturnType<typeof rows>>,
+    type: (typeof lifecycleTypes)[number],
+  ) {
+    const lifecycle = deliveries.filter((row) => row.event_type === `booking.${type}`)
+    expect(lifecycle).toHaveLength(1)
+    expect(lifecycle[0]?.request_id).toBeNull()
+    expect(JSON.parse(lifecycle[0]?.payload ?? '{}').data).not.toHaveProperty('requestId')
+  }
+
+  it.each(lifecycleTypes)(
+    'deduplicates repeated %s capture around an attendance change with a NULL request receipt',
+    async (type) => {
+      const { deliveries, queue } = await captureLifecycleReplay(type)
+      expectLifecycleDeduplication(deliveries, type)
+      const attendance = deliveries.filter(
+        (row) => row.event_type === 'booking.attendee_no_show_changed',
+      )
+      expect(attendance).toHaveLength(1)
+      expect(attendance[0]?.request_id).toBe(attendance[0]?.event_id)
+      expect(deliveries).toHaveLength(2)
+      expect(queue.enqueue).toHaveBeenCalledTimes(2)
+    },
+  )
+
   function captureCopy(before: string, after: string) {
     const source = readFileSync(new URL('./delivery.ts', import.meta.url), 'utf8')
     const start = source.indexOf('async function captureBookingWebhook(')
@@ -170,4 +212,19 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
     const actual = await rows(webhook.id)
     expect(() => expect(actual).toHaveLength(2)).toThrow()
   })
+
+  it.each(lifecycleTypes)(
+    'source-copy negative control detects per-change receipt identities breaking %s deduplication',
+    async (type) => {
+      const capture = captureCopy(
+        "event.type === 'attendee_no_show_changed' ? eventId : requestId",
+        'eventId',
+      )
+      const { deliveries } = await captureLifecycleReplay(
+        type,
+        (queue, options) => (trx, event, at) => capture(queue, options, trx, event, at),
+      )
+      expect(() => expectLifecycleDeduplication(deliveries, type)).toThrow()
+    },
+  )
 })

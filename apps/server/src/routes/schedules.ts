@@ -449,6 +449,8 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/schedules/{id}/overrides/{date}',
         operationId: 'setScheduleOverride',
         summary: 'Set the hours of one date',
+        description:
+          'Schedules accept at most 10,000 date overrides, including past dates. Adding another date at the limit returns too_many_overrides without changes. Existing dates may still be replaced or removed.',
         request: {
           params: OverrideParams,
           body: { content: json(ScheduleOverrideInput), required: true },
@@ -457,7 +459,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
           200: { description: 'The override was replaced', content: json(ScheduleOverride) },
           201: { description: 'The override was created', content: json(ScheduleOverride) },
           ...errorResponses({
-            400: 'invalid_request, invalid_date or invalid_intervals',
+            400: 'invalid_request, invalid_date, invalid_intervals or too_many_overrides',
             403: CROSS_ORIGIN_WRITE,
             404: notFound,
           }),

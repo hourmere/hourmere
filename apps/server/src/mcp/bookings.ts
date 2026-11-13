@@ -226,8 +226,8 @@ export interface BookingToolsDeps {
   smtpConfigured?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
-  /** Queues the booking emails in the transaction of each change, as for REST. */
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
+  /** Queues the booking emails in the transaction of each change, as for REST. */
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
