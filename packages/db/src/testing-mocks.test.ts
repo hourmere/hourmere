@@ -15,7 +15,10 @@ it('lets a test file mock pg before database modules are imported', async () => 
   const pool = createPool('postgres://localhost/mock_fixture')
   try {
     expect(pg.Pool).toHaveBeenCalledOnce()
-    expect(pg.Pool).toHaveBeenCalledWith({ connectionString: 'postgres://localhost/mock_fixture' })
+    expect(pg.Pool).toHaveBeenCalledWith({
+      connectionString: 'postgres://localhost/mock_fixture',
+      connectionTimeoutMillis: 10_000,
+    })
     expect(pool).toBe(vi.mocked(pg.Pool).mock.results[0]?.value)
   } finally {
     await pool.end()
