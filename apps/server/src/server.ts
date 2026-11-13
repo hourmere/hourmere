@@ -63,7 +63,6 @@ import {
   cleanupWaitlist,
   ensureWaitlistKey,
   expirePaymentHolds,
-  leaveTeamMember,
   removeWaitlist,
   scanWaitlists,
   verifyWaitlist,
@@ -94,6 +93,7 @@ import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { workflowTools } from './mcp/workflows.ts'
+import { nativeTeamLeave } from './native-team-leave.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
@@ -531,11 +531,7 @@ export function productionAuthOptions({
   return {
     pool,
     db,
-    leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
-      leaveTeamMember(
-        { db, principal, now: () => Temporal.Now.instant() },
-        { teamId, expectedOrganizationId },
-      ),
+    leaveTeamMember: nativeTeamLeave(db),
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,

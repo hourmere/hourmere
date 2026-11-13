@@ -65,7 +65,8 @@ export function* slugCandidates(base: string, attempts = 10): Generator<string> 
 /**
  * Returns the id of the user's personal organization, creating it when it does not exist:
  * the organization, the user's `owner` membership and the `personal_organizations` marker,
- * in one transaction. Safe to call any number of times and concurrently for the same user.
+ * in one transaction (the caller's, when `db` is a transaction). Safe to call any number of
+ * times and concurrently for the same user.
  */
 export async function ensurePersonalOrganization(db: Db, userId: string): Promise<string> {
   const existing = await db
@@ -75,7 +76,10 @@ export async function ensurePersonalOrganization(db: Db, userId: string): Promis
     .executeTakeFirst()
   if (existing) return existing.organization_id
 
-  return db.transaction().execute(async (trx) => {
+  // Inside a caller's transaction (a native auth transaction), create on its connection.
+  const inTransaction = <T>(work: (trx: Db) => Promise<T>) =>
+    db.isTransaction ? work(db) : db.transaction().execute(work)
+  return inTransaction(async (trx) => {
     // Serializes concurrent calls for the same user (two sign-ins at the same moment); the
     // second one finds the organization the first created. NO KEY UPDATE does not block
     // inserts that reference the user, such as new sessions.

@@ -8,6 +8,19 @@ import { registerTestDatabaseCleanup, withDeadline } from './test-database-regis
 
 export { cleanupTestDatabases } from './test-database-registry.ts'
 
+/**
+ * Runs `fn` outside any native auth transaction the caller is in, for a test's simulated
+ * concurrent writer that deliberately commits on its own connection while a request holds
+ * one. The test-time connection-order guard (scripts/test-pool-order-setup.ts) otherwise
+ * fails a test that asks another pool for a connection inside an auth transaction.
+ */
+export function outsideAuthTransaction<T>(fn: () => T): T {
+  const held = (globalThis as { [key: symbol]: { exit<R>(callback: () => R): R } | undefined })[
+    Symbol.for('hourmere.auth-transaction')
+  ]
+  return held ? held.exit(fn) : fn()
+}
+
 export interface TestDatabase {
   /** Connection string of the throwaway database. */
   url: string

@@ -20,23 +20,27 @@ const timeoutOf = (pool: pg.Pool) =>
   (pool as unknown as { options: pg.PoolConfig }).options.connectionTimeoutMillis
 
 describe('database pool connection timeout', () => {
-  it('applies the documented default to the application, auth and lock pools', async () => {
+  it('applies the documented defaults to the application, auth and lock pools', async () => {
     const url = 'postgres://synthetic@127.0.0.1:9/synthetic'
     const signup = { mode: 'closed', allowedDomains: [] } as const
     const app = createPool(url)
     const auth = createAuthPool(url, signup)
     const configured = createAuthPool(url, signup, { connectionTimeoutMillis: 2_500 })
+    const unlimited = createAuthPool(url, signup, { connectionTimeoutMillis: 0 })
     try {
       expect(DEFAULT_CONNECTION_TIMEOUT_MS).toBe(10_000)
       expect(timeoutOf(app)).toBe(DEFAULT_CONNECTION_TIMEOUT_MS)
       expect(timeoutOf(auth)).toBe(DEFAULT_CONNECTION_TIMEOUT_MS)
       const locks = (pool: pg.Pool) =>
         (pool as unknown as { organizationLocks: pg.Pool }).organizationLocks
-      expect(timeoutOf(locks(auth))).toBe(DEFAULT_CONNECTION_TIMEOUT_MS)
+      // The lock pool is a deliberate queue: it waits three times as long.
+      expect(timeoutOf(locks(auth))).toBe(3 * DEFAULT_CONNECTION_TIMEOUT_MS)
       expect(timeoutOf(configured)).toBe(2_500)
-      expect(timeoutOf(locks(configured))).toBe(2_500)
+      expect(timeoutOf(locks(configured))).toBe(7_500)
+      // 0 still means no limit for every pool.
+      expect(timeoutOf(locks(unlimited))).toBe(0)
     } finally {
-      await Promise.all([app.end(), auth.end(), configured.end()])
+      await Promise.all([app.end(), auth.end(), configured.end(), unlimited.end()])
     }
   })
 })
@@ -127,7 +131,7 @@ describe.skipIf(!serverUrl)('exhausted database pools over HTTP', () => {
     return { outcome, elapsed: Date.now() - started }
   }
 
-  async function expectUnavailable(work: Response | Promise<Response>) {
+  async function expectUnavailable(work: Response | Promise<Response>, waited = TIMEOUT_MS) {
     const { outcome, elapsed } = await bounded(work)
     expect(outcome, 'answered before the bound').not.toBe('TIMEOUT')
     const response = outcome as Response
@@ -136,7 +140,7 @@ describe.skipIf(!serverUrl)('exhausted database pools over HTTP', () => {
     const text = await response.text()
     // The stable code only: no driver message, pool detail or stack for the client.
     expect(JSON.parse(text)).toEqual({ error: 'service_unavailable' })
-    expect(elapsed).toBeGreaterThanOrEqual(TIMEOUT_MS - 50)
+    expect(elapsed).toBeGreaterThanOrEqual(waited - 50)
     expect(errors.join('\n')).toContain('database connection unavailable')
     expect(errors.join('\n')).not.toMatch(/\n\s+at /)
   }
@@ -161,6 +165,22 @@ describe.skipIf(!serverUrl)('exhausted database pools over HTTP', () => {
           slug: `team-${randomBytes(4).toString('hex')}`,
         }),
       }),
+    )
+  }, 30_000)
+
+  it('answers a serialized team request 503 after the longer lock-pool wait', async () => {
+    const cookie = await signedIn()
+    await exhaust((authPool as unknown as { organizationLocks: pg.Pool }).organizationLocks)
+    await expectUnavailable(
+      app.request(`${BASE}/api/auth/organization/create`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Synthetic queued team',
+          slug: `team-${randomBytes(4).toString('hex')}`,
+        }),
+      }),
+      3 * TIMEOUT_MS,
     )
   }, 30_000)
 

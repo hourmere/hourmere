@@ -179,11 +179,21 @@ database answers, its workers are running and pg-boss's own pool answers, and it
 404 to everything else. Do not publish a worker's port.
 
 Database connections per process: the app pool (up to 10), Better Auth's pool (up to 10;
-not in a worker) and pg-boss's pool (up to 5). A running notification job holds at most
-two app-pool connections: one for reading the booking, one for the send transaction. With
-two notification jobs at a time, a worker or `all` process keeps most of its app pool for
-requests. Size Postgres's `max_connections` for 25 per `all` or `web` process and 15 per
+not in a worker), its organization-context lock pool (up to 2; not in a worker) and
+pg-boss's pool (up to 5). A running notification job holds at most two app-pool
+connections: one for reading the booking, one for the send transaction. With two
+notification jobs at a time, a worker or `all` process keeps most of its app pool for
+requests. Size Postgres's `max_connections` for 27 per `all` or `web` process and 15 per
 worker, plus headroom.
+
+A request that cannot get a connection from the app or Better Auth pool within
+`DATABASE_CONNECTION_TIMEOUT` (default 10 seconds) is answered `503 service_unavailable`
+with `Retry-After`. The lock pool serializes team and invitation changes (sending,
+cancelling and accepting invitations; creating, updating, switching or leaving a team;
+member removal and role changes; reading a team) two at a time per process, so it waits three times as long
+(default 30 seconds): a burst of those requests that keeps both lock connections busy for
+longer is answered 503 the same way. See
+[Troubleshooting](/docs/troubleshooting#requests-fail-with-503-service_unavailable).
 
 On SIGTERM a process stops accepting requests, then stops taking jobs and waits up to 20
 seconds for running ones. Any still running then are failed and retried later by another

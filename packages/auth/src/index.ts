@@ -125,13 +125,28 @@ export {
   type TeamMemberRemovalInput,
 } from './team-member-removal.ts'
 
+/**
+ * The organization-context lock pool waits this many times the connection timeout. It is a
+ * deliberate two-connection queue: each holder runs one serialized team or invitation
+ * request, itself bounded by the auth and application pools' timeout, and a waiter holds no
+ * other connection, so waiting longer cannot deadlock. It only lets a short burst through
+ * before requests are answered 503.
+ */
+export const ORGANIZATION_LOCK_TIMEOUT_FACTOR = 3
+
 /** Separate lock connections cannot starve the handler's auth/application query pools. */
 class AuthPool extends pg.Pool {
   readonly organizationLocks: pg.Pool
-
   constructor(config: pg.PoolConfig) {
     super(config)
-    this.organizationLocks = new pg.Pool({ ...config, max: 2 })
+    // Marks the auth pool for the test-time connection-order guard.
+    Object.defineProperty(this, Symbol.for('hourmere.auth-pool'), { value: true })
+    const timeout = config.connectionTimeoutMillis ?? 0
+    this.organizationLocks = new pg.Pool({
+      ...config,
+      max: 2,
+      connectionTimeoutMillis: timeout * ORGANIZATION_LOCK_TIMEOUT_FACTOR,
+    })
     guardPoolErrors(this.organizationLocks, ' (organization context)')
   }
 
@@ -171,7 +186,8 @@ export function createAuthPool(
   const options = ['-c search_path=auth', config.options, signupConnectionOptions(signup)]
     .filter(Boolean)
     .join(' ')
-  // The organization-context lock pool copies these settings, connection timeout included.
+  // The organization-context lock pool copies these settings; it waits longer (see
+  // ORGANIZATION_LOCK_TIMEOUT_FACTOR).
   const pool = new AuthPool({ ...(config as pg.PoolConfig), options, ...poolTimeouts(poolOptions) })
   // Same reason as createPool in @hourmere/db: an unhandled client error would kill the
   // process.
@@ -189,12 +205,17 @@ export interface AuthConfig {
   pool: pg.Pool
   /** The application database, for the personal organization and membership checks. */
   db: Db
-  /** Scheduling owns safe self departure. Omission disables native self departure. */
+  /**
+   * Scheduling owns safe self departure. Omission disables native self departure. Native
+   * departure passes its open auth transaction, which the departure must run on rather than
+   * take an application connection while that transaction holds an auth connection.
+   */
   leaveTeamMember?:
     | ((
         principal: Principal,
         teamId: string,
         expectedOrganizationId: string,
+        transaction?: Db,
       ) => Promise<{ organizationId: string }>)
     | undefined
   /** Where people reach Hourmere (PUBLIC_URL); sign-in links and cookies are built from it. */

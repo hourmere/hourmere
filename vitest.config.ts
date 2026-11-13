@@ -10,7 +10,11 @@ export default defineConfig({
       {
         test: {
           name: 'node',
-          setupFiles: ['scripts/test-clock-setup.ts', 'scripts/test-database-setup.ts'],
+          setupFiles: [
+            'scripts/test-clock-setup.ts',
+            'scripts/test-database-setup.ts',
+            'scripts/test-pool-order-setup.ts',
+          ],
           include: [
             'apps/*/src/**/*.test.{ts,tsx}',
             'packages/*/src/**/*.test.ts',

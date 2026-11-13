@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { runWithTransaction } from '@better-auth/core/context'
 import { kyselyAdapter } from '@better-auth/kysely-adapter'
 import type { Database, Db } from '@hourmere/db'
@@ -9,6 +10,8 @@ import type {
 import { sql, type Transaction } from 'kysely'
 import { withAuthAuditTransaction } from './audit.ts'
 
+const AUTH_TRANSACTION = Symbol.for('hourmere.auth-transaction')
+
 const databaseErrorCode = (error: unknown) =>
   error !== null && typeof error === 'object' && 'code' in error ? error.code : undefined
 
@@ -16,6 +19,17 @@ function isOriginalDatabaseError(error: unknown): boolean {
   const code = databaseErrorCode(error)
   return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) && code !== '25P02'
 }
+
+/**
+ * Set while code runs inside a native auth transaction. Such code must never ask another pool
+ * for a connection: the MCP OAuth broker holds an application transaction while it waits for
+ * an auth connection, so the opposite order can deadlock. Shared through a global symbol so
+ * the test-time guard (scripts/test-pool-order-setup.ts) sees it without importing this
+ * package, including in isolated source copies.
+ */
+const globalStore = globalThis as { [AUTH_TRANSACTION]?: AsyncLocalStorage<true> }
+const heldAuthTransaction = globalStore[AUTH_TRANSACTION] ?? new AsyncLocalStorage<true>()
+globalStore[AUTH_TRANSACTION] = heldAuthTransaction
 
 /** Keep the native validators, middleware, hooks, response shapes and error codes. */
 export function nativeTeamTransactions<O extends OrganizationOptions>(
@@ -55,45 +69,47 @@ export function teamTransactionAdapter(
       db
         .transaction()
         .setIsolationLevel('read committed')
-        .execute(async (trx) => {
-          // Native models resolve to auth first; the policy also reads public tables.
-          // Set this only for the transaction. A withSchema plugin would also rewrite
-          // qualified auth-table aliases in the application's existing join queries.
-          await sql`SET LOCAL search_path TO auth, public`.execute(trx)
-          let originalError: unknown
-          const transactionAdapter = new Proxy(
-            kyselyAdapter(trx, { type: 'postgres', transaction: false })(options),
-            {
-              get(target, key, receiver) {
-                const operation = Reflect.get(target, key, receiver)
-                if (typeof operation !== 'function') return operation
-                return async (...args: unknown[]) => {
-                  try {
-                    return await Reflect.apply(operation, target, args)
-                  } catch (error) {
-                    if (isOriginalDatabaseError(error)) {
-                      originalError ??= error
+        .execute((trx) =>
+          heldAuthTransaction.run(true, async () => {
+            // Native models resolve to auth first; the policy also reads public tables.
+            // Set this only for the transaction. A withSchema plugin would also rewrite
+            // qualified auth-table aliases in the application's existing join queries.
+            await sql`SET LOCAL search_path TO auth, public`.execute(trx)
+            let originalError: unknown
+            const transactionAdapter = new Proxy(
+              kyselyAdapter(trx, { type: 'postgres', transaction: false })(options),
+              {
+                get(target, key, receiver) {
+                  const operation = Reflect.get(target, key, receiver)
+                  if (typeof operation !== 'function') return operation
+                  return async (...args: unknown[]) => {
+                    try {
+                      return await Reflect.apply(operation, target, args)
+                    } catch (error) {
+                      if (isOriginalDatabaseError(error)) {
+                        originalError ??= error
+                      }
+                      throw error
                     }
-                    throw error
                   }
-                }
+                },
               },
-            },
-          )
-          try {
-            return await withAuthAuditTransaction(trx, () =>
-              runInTransaction(trx, async () => callback(transactionAdapter)),
             )
-          } catch (error) {
-            // Native invitation compensation can run after a PostgreSQL error has
-            // already aborted the transaction. Keep that original exception for the
-            // existing caller/logger, rather than its secondary 25P02 cleanup failure.
-            if (originalError !== undefined && databaseErrorCode(error) === '25P02') {
-              throw originalError
+            try {
+              return await withAuthAuditTransaction(trx, () =>
+                runInTransaction(trx, async () => callback(transactionAdapter)),
+              )
+            } catch (error) {
+              // Native invitation compensation can run after a PostgreSQL error has
+              // already aborted the transaction. Keep that original exception for the
+              // existing caller/logger, rather than its secondary 25P02 cleanup failure.
+              if (originalError !== undefined && databaseErrorCode(error) === '25P02') {
+                throw originalError
+              }
+              throw error
             }
-            throw error
-          }
-        })
+          }),
+        )
     return instance
   }
 }

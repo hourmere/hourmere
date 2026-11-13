@@ -145,6 +145,7 @@ export function createTeamRolePolicy(
     principal: Principal,
     teamId: string,
     expectedOrganizationId: string,
+    transaction?: Db,
   ) => Promise<{ organizationId: string }>,
   scimClaims?: ScimClaimCompletion,
 ) {
@@ -545,14 +546,17 @@ export function createTeamRolePolicy(
         )
           throw teamRoleDenied()
         try {
+          // Better Auth's deleteMember runs this inside its auth transaction: the departure
+          // runs on that held connection and commits with it.
           const fallback = await leaveTeamMember(
             actor,
             target.organizationId,
             ctx.request?.headers.get('x-expected-organization-id') ?? target.organizationId,
+            transactions.getStore(),
           )
           // The native handler clears the old active organization after deleteMember.
           // Refresh its request snapshot so that cleanup cannot overwrite the personal
-          // fallback already committed atomically with the membership revocation.
+          // fallback written atomically with the membership revocation.
           const session = await getSessionFromCtx(ctx)
           if (session?.session.id === actor.sessionId) {
             session.session.activeOrganizationId = fallback.organizationId

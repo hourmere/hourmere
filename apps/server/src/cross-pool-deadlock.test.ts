@@ -7,6 +7,7 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { mcpOAuthRoutes } from './mcp/oauth.ts'
+import { nativeTeamLeave } from './native-team-leave.ts'
 
 /**
  * The application pool and the auth pool must never wait on each other. The MCP OAuth
@@ -100,6 +101,7 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
       secret,
       signup,
       mailer: { send: async () => {} },
+      leaveTeamMember: nativeTeamLeave(appDb),
       mcpOAuth: true,
       mcpMetadataFetcher: async (input) =>
         String(input) === CLIENT
@@ -132,12 +134,12 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
       headers.set(CLIENT_IP_HEADER, testIp())
       return auth.handler(new Request(new URL(path, BASE), { ...init, headers }))
     }
-    const post = (path: string, cookie: string, body: object) =>
+    const post = (path: string, cookie: string, body: object, headers: object = {}) =>
       app.request(
         `${BASE}${path}`,
         {
           method: 'POST',
-          headers: { cookie, origin: BASE, 'content-type': 'application/json' },
+          headers: { ...headers, cookie, origin: BASE, 'content-type': 'application/json' },
           body: JSON.stringify(body),
         },
         { incoming: { socket: { remoteAddress: testIp() } } },
@@ -222,7 +224,7 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
     }
   }
 
-  async function account() {
+  async function account(activeOrganizationId?: string) {
     const user = await db
       .insertInto('auth.user')
       .values({
@@ -240,6 +242,7 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
         token,
         expiresAt: new Date(Date.now() + 3_600_000),
         updatedAt: new Date(),
+        activeOrganizationId,
       })
       .execute()
     return { ...user, cookie: cookieFor(token) }
@@ -273,20 +276,58 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
     return { recipient, team, body: { invitationId: invitation.id } }
   }
 
-  it('accepts invitations and finishes MCP consents while each holds one pool', async () => {
-    const target = await instance()
-    const consents = []
-    const acceptances = []
-    for (let i = 0; i < HOLDERS; i++) {
-      consents.push(await pendingConsent(target))
-      acceptances.push(await pendingAcceptance())
+  /** A member, signed in to the team, about to leave it; another owner stays. */
+  async function pendingLeave() {
+    const owner = await account()
+    const team = await db
+      .insertInto('auth.organization')
+      .values({ name: 'Synthetic departing team', slug: randomUUID(), createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const leaver = await account(team.id)
+    await db
+      .insertInto('auth.member')
+      .values([
+        { organizationId: team.id, userId: owner.id, role: 'owner', createdAt: new Date() },
+        { organizationId: team.id, userId: leaver.id, role: 'member', createdAt: new Date() },
+      ])
+      .execute()
+    return {
+      leaver,
+      team,
+      body: { organizationId: team.id },
+      headers: { 'x-expected-organization-id': team.id },
     }
+  }
 
+  /** Team memberships the leavers still hold (their personal organizations aside). */
+  async function leaveMemberships(leaves: { leaver: { id: string }; team: { id: string } }[]) {
+    return db
+      .selectFrom('auth.member')
+      .select('id')
+      .where((eb) =>
+        eb.or(
+          leaves.map((l) =>
+            eb.and([eb('userId', '=', l.leaver.id), eb('organizationId', '=', l.team.id)]),
+          ),
+        ),
+      )
+      .execute()
+  }
+
+  /**
+   * Sends the auth-side requests and the MCP consents together, holds every transaction at
+   * BEGIN until HOLDERS are open on each pool, takes the spare connections and releases them.
+   * Returns their statuses, or TIMEOUT with the pools' state when they wait on each other.
+   */
+  async function underCrossLoad(
+    target: Instance,
+    authSide: () => (Response | Promise<Response>)[],
+    consents: Awaited<ReturnType<typeof pendingConsent>>[],
+  ) {
     const { ready, release } = target.arm()
     const work = Promise.all([
-      ...acceptances.map((a) =>
-        target.post('/api/auth/organization/accept-invitation', a.recipient.cookie, a.body),
-      ),
+      ...authSide(),
       ...consents.map((c) => target.post('/api/v1/mcp-oauth/consent', c.cookie, c.body)),
     ])
     const spares: pg.PoolClient[] = []
@@ -319,6 +360,25 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
       release()
       for (const client of spares) client.release()
     }
+    return { outcome, diagnosis }
+  }
+
+  it('accepts invitations and finishes MCP consents while each holds one pool', async () => {
+    const target = await instance()
+    const consents: Awaited<ReturnType<typeof pendingConsent>>[] = []
+    const acceptances: Awaited<ReturnType<typeof pendingAcceptance>>[] = []
+    for (let i = 0; i < HOLDERS; i++) {
+      consents.push(await pendingConsent(target))
+      acceptances.push(await pendingAcceptance())
+    }
+    const { outcome, diagnosis } = await underCrossLoad(
+      target,
+      () =>
+        acceptances.map((a) =>
+          target.post('/api/auth/organization/accept-invitation', a.recipient.cookie, a.body),
+        ),
+      consents,
+    )
     expect(outcome, `acceptances then consents, within the bound. ${diagnosis}`).toEqual(
       Array(HOLDERS * 2).fill(200),
     )
@@ -334,6 +394,28 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
     expect(members.map((m) => m.organizationId).sort()).toEqual(
       acceptances.map((a) => a.team.id).sort(),
     )
+  }, 60_000)
+
+  it('lets members leave and finishes MCP consents while each holds one pool', async () => {
+    const target = await instance()
+    const consents: Awaited<ReturnType<typeof pendingConsent>>[] = []
+    const leaves: Awaited<ReturnType<typeof pendingLeave>>[] = []
+    for (let i = 0; i < HOLDERS; i++) {
+      consents.push(await pendingConsent(target))
+      leaves.push(await pendingLeave())
+    }
+    const { outcome, diagnosis } = await underCrossLoad(
+      target,
+      () =>
+        leaves.map((l) =>
+          target.post('/api/auth/organization/leave', l.leaver.cookie, l.body, l.headers),
+        ),
+      consents,
+    )
+    expect(outcome, `leaves then consents, within the bound. ${diagnosis}`).toEqual(
+      Array(HOLDERS * 2).fill(200),
+    )
+    expect(await leaveMemberships(leaves)).toEqual([])
   }, 60_000)
 
   /**
@@ -372,6 +454,7 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
       secret,
       signup,
       mailer: { send: async () => {} },
+      leaveTeamMember: nativeTeamLeave(appDb),
       socialProviders: { google: { clientId: 'synthetic', clientSecret: 'synthetic' } },
       socialProviderOptions: {
         google: {
@@ -408,6 +491,36 @@ describe.skipIf(!serverUrl)('application and auth pools under cross-pool load', 
         body: JSON.stringify(a.body),
       })
       expect(response.status).toBe(200)
+      expect(crossings, 'application connections requested inside the auth transaction').toEqual([])
+    } finally {
+      await close()
+    }
+  }, 30_000)
+
+  it('departs on the held auth connection while leaving a team', async () => {
+    const { app, crossings, close } = await witnessed()
+    try {
+      const l = await pendingLeave()
+      const response = await app.request(`${BASE}/api/auth/organization/leave`, {
+        method: 'POST',
+        headers: {
+          ...l.headers,
+          cookie: l.leaver.cookie,
+          origin: BASE,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(l.body),
+      })
+      expect(response.status).toBe(200)
+      expect(await leaveMemberships([l])).toEqual([])
+      // The departure's own records committed with it.
+      const left = await db
+        .selectFrom('organization_operations')
+        .select('operation')
+        .where('organization_id', '=', l.team.id)
+        .where('target_user_id', '=', l.leaver.id)
+        .execute()
+      expect(left).toEqual([{ operation: 'member_removed' }])
       expect(crossings, 'application connections requested inside the auth transaction').toEqual([])
     } finally {
       await close()

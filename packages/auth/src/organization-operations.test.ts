@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { setTimeout } from 'node:timers/promises'
 import { type AuthEndpointContext, runWithEndpointContext } from '@better-auth/core/context'
 import { createDb, type Db } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createTestDatabase, outsideAuthTransaction, type TestDatabase } from '@hourmere/db/testing'
 import { leaveTeamMember } from '@hourmere/scheduling'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -43,9 +43,9 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     auth = createAuth({
       pool: authPool,
       db,
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
+          { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
       baseURL: origin,
@@ -468,11 +468,13 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
               changed = true
               // Commit on a separate connection after the attribution read, before its
               // update. This makes the otherwise timing-sensitive race deterministic.
-              await db
-                .updateTable('auth.member')
-                .set({ role: 'admin' })
-                .where('id', '=', f.memberId)
-                .execute()
+              await outsideAuthTransaction(() =>
+                db
+                  .updateTable('auth.member')
+                  .set({ role: 'admin' })
+                  .where('id', '=', f.memberId)
+                  .execute(),
+              )
             }
             return snapshot
           }
@@ -506,11 +508,13 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
             request: Parameters<DBTransactionAdapter['consumeOne']>[0],
           ) => {
             if (request.model === 'member')
-              await db
-                .updateTable('auth.member')
-                .set({ role: 'admin' })
-                .where('id', '=', f.memberId)
-                .execute()
+              await outsideAuthTransaction(() =>
+                db
+                  .updateTable('auth.member')
+                  .set({ role: 'admin' })
+                  .where('id', '=', f.memberId)
+                  .execute(),
+              )
             const removed = await consumeOne<T>(request)
             if (request.model === 'member') {
               await setTimeout(15)
@@ -548,14 +552,16 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
               request: Parameters<DBTransactionAdapter['consumeOne']>[0],
             ) => {
               if (request.model === 'member')
-                await db
-                  .updateTable('auth.member')
-                  .set({
-                    [changedField]:
-                      changedField === 'organizationId' ? other.organizationId : other.owner.id,
-                  })
-                  .where('id', '=', f.memberId)
-                  .execute()
+                await outsideAuthTransaction(() =>
+                  db
+                    .updateTable('auth.member')
+                    .set({
+                      [changedField]:
+                        changedField === 'organizationId' ? other.organizationId : other.owner.id,
+                    })
+                    .where('id', '=', f.memberId)
+                    .execute(),
+                )
               return consumeOne<T>(request)
             }
             await trx.delete({ model: 'member', where: [{ field: 'id', value: f.memberId }] })
