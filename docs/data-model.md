@@ -1189,12 +1189,66 @@ populated predecessor with reminders, follow-ups, workflow definitions and the m
 to row versions, and compares fresh and upgraded schemas. A notifications test shows the core
 ledger counts and purge unchanged on the same rows across the upgrade.
 
+## Workflow creation key storage
+
+Migration 0087 installs `workflow_creation_keys`, the retained client idempotency key that
+creation in the [booking workflows design](workflows.md) requires (step 5 of its plan). Nothing
+reads or writes it yet: there is no create operation, and workflows stay hard-off behind
+`WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the workflow
+tables covers it too.
+
+- **One key per created definition.** A row names the definition a create request made
+  (`organization_id`, `workflow_id`) through a composite foreign key, so the key's organization
+  is its definition's, and a definition holds at most one key. The row keeps the client's
+  `idempotency_key` (1 to 255 printable ASCII characters, as for booking and one-time link
+  retries) and `request_fingerprint`, a 32-byte SHA-256 digest of the request's canonical input,
+  so a replay with the same input can return that definition and a changed input under the same
+  key can be refused as a conflict.
+- **Scope.** A key is unique per organization, acting user (`actor_user_id`) and credential, by
+  kind (`credential_kind`): a session principal (`session`, which names no credential record,
+  so it covers every session of that user), an API key (`api_key`) or an OAuth consent
+  (`oauth`), each named by its record ID (`credential_id`). As in booking retries, the kinds
+  never share a scope, and the unique key is `NULLS NOT DISTINCT`, so a session principal's
+  keys are unique too. Of two concurrent creates with one key, the second waits for the first
+  and, once it commits, fails with a unique violation (23505): one definition is written. A key
+  of another actor, credential, kind or organization never matches.
+- **Retained identity.** A key lives as long as its definition row, tombstone included:
+  tombstoning keeps it unchanged. It goes with the definition row (`ON DELETE CASCADE`), when
+  the tombstone is purged or with the organization or personal owner. A guard trigger refuses
+  every update of a key (`workflow_creation_keys_immutable`) and its deletion while the
+  definition row exists, tombstoned or not (`workflow_creation_keys_retained`), so only those
+  cascades remove a key and a retried create always finds it.
+- **Credential deletion.** `actor_user_id` and `credential_id` are historical identifiers
+  without foreign keys, as bookings keep `api_key_id` and `oauth_consent_id`. Revoking an API
+  key or OAuth consent, signing out or deleting the user changes no key. A later credential or
+  user gets a new random ID, so it never matches a retained key: the same client key under it
+  is a new scope. A personal owner's definitions still go with the owner, and their keys with
+  them.
+
+A key is inserted in the creating transaction after its definition and first revision. Its
+foreign key share-locks the definition row, after the organization lock that the definition
+insert takes.
+
+`workflow-storage-creation-keys-coverage.test.ts` drops every constraint, the guard trigger and
+every NOT NULL column through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0087_workflow_creation_keys.json`), and the scope
+columns, its `NULLS NOT DISTINCT`, every check, the default, the organization in the foreign
+key, the cascade on purge, each guard rule and the retention through a tombstone and credential
+deletion also have source-copy mutations (`packages/db/src/workflow-storage-creation-keys-protections.ts`),
+run against the predecessor schema. Two creates race one key, for a session principal and for
+an API key, and exactly one wins. The upgrade test preserves a populated predecessor with
+workflow definitions, revisions and execution rows down to row versions, and compares fresh and
+upgraded schemas. `packages/workflows/src/creation-key-storage.test.ts` binds the credential
+kinds to `Principal['kind']` of `@hourmere/auth`: typecheck fails when a principal kind is added
+or renamed, and the test fails until the check accepts exactly those kinds.
+
 ## Planned additions (each a new migration)
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
 email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition and execution storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage)),
+Only its definition, execution and creation key storage exist ([workflow definition
+storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
+[workflow creation key storage](#workflow-creation-key-storage)),
 with definition read operations that answer `workflows_disabled` while hard-off; no write API,
 worker or runtime enablement exists yet.
 
