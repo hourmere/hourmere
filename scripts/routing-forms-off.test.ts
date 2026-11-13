@@ -655,6 +655,7 @@ describe('routing forms are storage only', () => {
           },
           enqueueCalendarSync: async () => null,
           enqueueCalendarWritebackRecovery: async () => null,
+          mailboxProofQueue: { enqueue: async () => null },
         }),
       )
       const paths = app.routes.map(({ path }) => path)

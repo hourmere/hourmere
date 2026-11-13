@@ -197,6 +197,7 @@ function productionApp(db: ReturnType<typeof createDb>, databaseUrl: string) {
       },
       enqueueCalendarSync: async () => null,
       enqueueCalendarWritebackRecovery: async () => null,
+      mailboxProofQueue: { enqueue: async () => null },
     }),
   )
 }

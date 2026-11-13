@@ -9,8 +9,10 @@ imports it from shipped code moves it to `dependencies`. Migration 0074 adds the
 configuration storage of the Configuration storage step (see
 [Data model](data-model.md#sso-configuration-storage)) and migration 0075 the identity
 storage of the Identity storage step (see
-[Data model](data-model.md#sso-identity-storage)); no production code reads or writes
-either, and no SSO provider, route or feature flag is enabled. SSO will be available to every
+[Data model](data-model.md#sso-identity-storage)). The Mailbox proof step added the first
+code that uses that storage: the two mailbox proof endpoints, which answer `404 sso_disabled`
+while both protocols are hard-off, the worker job that delivers their email and the bounded
+cleanup of attempts. No SSO provider, sign-in route or feature flag is enabled. SSO will be available to every
 instance, including self-hosted ones; there is no license, subscription or hosted-service
 requirement.
 
@@ -278,9 +280,11 @@ audit detail includes it. The database driver's detail for a refused row repeats
 the address included, so the server's error log for failed requests omits the diagnostic
 of any error about an SSO storage table and keeps only its SQLSTATE and the table and
 constraint names; PostgreSQL's own server log can still record a refused row, as for any
-table. Only that request error path uses the recogniser today, because nothing writes these
-tables yet; the first step that writes them through Better Auth or a background job routes
-that logger's errors through it as well. On a live link it is the address last proven: a later mailbox proof replaces it,
+table. The request error path uses the recogniser, and so do the mailbox proof delivery and
+attempt cleanup jobs, which write these tables in the background: their errors carry only a
+fixed label and the recogniser's names, never the driver's message. A later step that writes
+them through Better Auth or another background job routes that logger's errors through it as
+well. On a live link it is the address last proven: a later mailbox proof replaces it,
 and nothing else changes it. A frozen link, whose provider is disabled or retired, keeps
 it unchanged, because no sign-in through that provider can prove another address. A
 retired link is immutable and keeps the address it had when it was retired. Leaving or
@@ -297,8 +301,9 @@ consumption leave the row in place. An attempt made in a signed-in session is de
 that session, by logout or the account's deletion. A sign-in attempt has no account or
 session reference, so neither the account's deletion nor logout removes it; today only the
 team's deletion does. The Mailbox proof step, the first whose code writes an attempt's
-mailbox and its token, must add the bounded cleanup that deletes expired and consumed
-attempts with their mailbox tokens, sign-in attempts included.
+token, added the bounded cleanup: a job every minute deletes at most 1000 attempts that are
+consumed or expired by the database clock, sign-in attempts included, and their mailbox
+tokens with them. It only deletes, so it runs in every flag state.
 
 An existing magic-link/Google/Microsoft account with the same email is **not**
 automatically linked to a newly configured enterprise IdP, even on a verified domain.
@@ -812,6 +817,7 @@ The stable domain codes are exactly:
 | `sso_domain_unverified` | 409 | A new link, JIT admission, provider activation or enforcement needs a domain whose verification is unexpired and whose latest recheck was positive (a failed or unknown recheck freezes them) |
 | `sso_test_required` | 409 | Activation or enforcement needs a passed test for the exact current provider revision (an owner's, for enforcement) |
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), or the last recovery owner of an enforced team tries to leave, be removed or lose the owner role |
+| `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_not_found` | 404 | Unknown, other-team or retired provider, domain, link, nomination or delegation ID, all with one identical response; a nomination addressed to another owner and another person's delegation answer the same way. Only an authorized repeat delete of the team's own retired provider succeeds idempotently |
 
 The existing leave, member-removal and role-change operations gain
@@ -944,6 +950,37 @@ protocol endpoints are the explicit auth exception, not session-only product wri
 GET email links only show an inert confirmation page; consumption requires POST.
 Every first enrollment of an IdP subject (OIDC or SAML), every changed linked email,
 every `mailbox` fresh proof and every step-up fallback uses this pair.
+
+As built in the Mailbox proof step (`apps/server/src/sso-mailbox-proof.ts`), both endpoints
+are mounted ahead of Better Auth's `/api/auth/*` in every flag state and check, in this order:
+the protocol switch (`404 sso_disabled` while both protocols are off, before anything else),
+an `Origin` exactly equal to `PUBLIC_URL`'s origin with no `Authorization` header (otherwise
+`403 forbidden`; a Referer never stands in), the strict JSON input (`400 invalid_request`) and
+the per-source limit (`429 rate_limited`). The browser binding is a cookie
+(`hourmere.sso_binding`, `__Host-` prefixed on https) whose SHA-256 the attempt stores; the
+session-bound intents (test, link, fresh proof) also need the attempt's own unexpired session
+and person, while a sign-in attempt needs only the browser. Send takes `{attemptId}` and
+always answers `202 {"status":"queued"}`: it queues one job and never reads the attempt.
+Only the worker decides: for an attempt that is unexpired, unconsumed, still awaiting its
+mailbox proof, presented by its own browser (and session) and whose provider is still at the
+frozen revision (and enabled, for a sign-in or link), it issues a 32-byte token, stores its
+SHA-256 in place of the previous one and emails the frozen mailbox a link to the inert
+`/app/mailbox-proof` page with the attempt ID and token in the URL fragment; the raw token is
+in no job payload, table or log. The message has one template that names no account, team or
+provider, and nothing looks up whether the address has an account. The token expires at the
+earlier of the attempt's expiry and issuance plus `freshAdministrationProof`. Consume takes
+`{attemptId, token}` and answers `200 {"status":"proven"}` once, recording the proof on that
+attempt (`mailbox_proven_at`, with the token's expiry as the proof's); any other outcome,
+whether unknown, expired at or after the exact instant, consumed or replayed, another
+attempt's token, another browser, session or person, or a provider no longer as frozen, is
+`400 sso_mailbox_proof_invalid`. Limits: 10 sends and 30 consumes per client address (IPv6
+/64) per minute in each process; one queued job per attempt and browser, and a new token only
+when the current one is at least 60 seconds old (database clock); per address, the existing
+mail ledger with a recipient digest of its own purpose and the sign-in caps
+(`SIGN_IN_MAIL_MAX_PER_HOUR`, `SIGN_IN_MAIL_MAX_PER_DAY`), counted in the shared instance
+`MAIL_MAX_PER_HOUR` like sign-in mail; and the fifth wrong token from the attempt's own browser
+deletes its token, so only a resend issues another. No SSO audit action describes a mailbox
+proof, so the step records none; the operation the proof is for records its own event.
 
 Protocol endpoints are outside `/api/v1`, as existing Better Auth sign-in already is:
 `POST /api/auth/sign-in/sso`, OIDC `GET /api/auth/sso/callback/{providerId}` and
@@ -1133,7 +1170,14 @@ camelCase, separators, digits, the plural or version suffix — `ssos`, `SSOv2`,
 `listSSOs` — and a short list of words run together with it: `ssoconfig`,
 `ssoprovider`, `ssologin`, `ssologout`, `ssocallback`, `ssosettings`, `ssoflow`,
 `ssodomain`, `teamsso`, `orgsso`, `getsso`) and `single sign on` in any spelling. There
-are two exemptions, each for one exact path. The existing MCP OAuth discovery route
+are three exemptions, each for exact paths. The guarded auth-protocol endpoints that a
+built step mounts while hard-off, because each must answer `404 sso_disabled` itself
+(today the Mailbox proof pair `/api/auth/sso/mailbox-proof/send` and `/consume`), are exempt
+in the route inventory and the source literals only, and only because the suite requests
+each of them in the app built from `productionAppOptions` with `SSO_OIDC_ENABLED=true` and
+`SSO_SAML_ENABLED=true` in the environment and requires `404 {"error":"sso_disabled"}` for
+every method, header set and attempt ID, with a queue, caller resolver and database that
+would fail any effect; the worker role's routes get no exemption. The existing MCP OAuth discovery route
 `/.well-known/openid-configuration/api/auth` is exempt in the route inventory and the
 source literals, and the same document's Better Auth endpoint
 `/.well-known/openid-configuration` among Better Auth endpoint paths: there Hourmere is

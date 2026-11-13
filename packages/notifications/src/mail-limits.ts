@@ -28,7 +28,7 @@ export type SuppressionReason =
 function recipientHash(
   email: string,
   secret: string,
-  purpose: 'booking' | 'sign-in' | 'invitation',
+  purpose: 'booking' | 'sign-in' | 'invitation' | 'mailbox-proof',
 ): Buffer {
   // Derive an independent key: ledger/log digests cannot be matched from an address
   // dictionary without BETTER_AUTH_SECRET, or reused in another server-secret protocol.
@@ -51,6 +51,11 @@ export function signInRecipientHash(email: string, secret: string): Buffer {
 
 export function invitationRecipientHash(email: string, secret: string): Buffer {
   return recipientHash(email, secret, 'invitation')
+}
+
+/** SSO mailbox proof mail: its own recipient budget, separate from sign-in links. */
+export function mailboxProofRecipientHash(email: string, secret: string): Buffer {
+  return recipientHash(email, secret, 'mailbox-proof')
 }
 
 /** Whole emails only: a cap of one has no fractional host allowance. */

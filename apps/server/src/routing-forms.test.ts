@@ -925,6 +925,7 @@ describe('the hard-off constant', () => {
           zoomConference: undefined,
           enqueueCalendarSync: unavailable,
           enqueueCalendarWritebackRecovery: unavailable,
+          mailboxProofQueue: { enqueue: unavailable },
         }),
       )
       const response = await app.request('/api/v1/instance')
