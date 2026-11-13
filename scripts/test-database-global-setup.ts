@@ -18,6 +18,19 @@ async function dropTemplate(): Promise<void> {
   })
 }
 
+/** The failure's code and message, with the server URL and any password removed. */
+export function templateFailure(error: unknown, serverUrl: string): string {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown }
+  let text = `${typeof code === 'string' ? `${code}: ` : ''}${typeof message === 'string' ? message : String(error)}`
+  const secrets = [serverUrl]
+  try {
+    const password = decodeURIComponent(new URL(serverUrl).password)
+    if (password) secrets.push(password)
+  } catch {}
+  for (const secret of secrets) text = text.replaceAll(secret, '[redacted]')
+  return text
+}
+
 async function prepare(project: TestProject, serverUrl: string): Promise<void> {
   await dropTemplate()
   try {
@@ -28,10 +41,13 @@ async function prepare(project: TestProject, serverUrl: string): Promise<void> {
       },
       { tag: 'migrated' },
     )
-  } catch {
+  } catch (error) {
     // Database tests then migrate their own fixtures and report the real failure; tests that
-    // need no database still run. Do not print the error: it can contain connection details.
-    console.warn('No migrated test template; database fixtures replay every migration')
+    // need no database still run. Say why, without the connection string a driver error can
+    // quote.
+    console.warn(
+      `No migrated test template (${templateFailure(error, serverUrl)}); falling back: each database fixture replays every migration`,
+    )
     project.provide('migratedTestTemplate', undefined)
     return
   }

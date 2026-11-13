@@ -3,13 +3,21 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
+interface Step {
+  name?: string
+  run?: string
+  if?: string
+  'continue-on-error'?: boolean | string
+  env?: Record<string, string>
+}
 interface Job {
   needs?: string | string[]
   if?: string
+  'continue-on-error'?: boolean | string
   env?: Record<string, string>
   services?: { postgres?: { image?: string } }
   strategy?: { 'fail-fast'?: boolean; matrix?: { shard?: number[] } }
-  steps?: { name?: string; run?: string }[]
+  steps?: Step[]
 }
 interface Workflow {
   on: Record<string, unknown>
@@ -96,6 +104,24 @@ function verify(source: string) {
   expect(suite.map((step) => step.run)).toEqual([
     `npm test -- --maxWorkers=2 ${shardOption}/${shards.length}`,
   ])
+  // A failing part must reach `needs` as a failure: no part or step may continue on error or
+  // be skipped by a condition (a skipped gate step leaves its job green).
+  for (const id of ['check', ...parts]) {
+    expect(jobs[id]?.['continue-on-error'], id).toBeUndefined()
+    for (const step of jobs[id]?.steps ?? []) {
+      expect(step['continue-on-error'], `${id}: ${step.name ?? step.run}`).toBeUndefined()
+      expect(step.if, `${id}: ${step.name ?? step.run}`).toBeUndefined()
+    }
+  }
+  // The suite keeps the proxy integration tests and the shell the deployment tests run under.
+  expect(suite[0]?.env).toEqual({ HOURMERE_PROXY_INTEGRATION: '1' })
+  const steps = tests?.steps ?? []
+  const shell = steps.findIndex(
+    (step) => step.name === 'Install the interactive deployment-test shell',
+  )
+  expect(shell).toBeGreaterThan(-1)
+  expect(steps[shell]?.run ?? '').toMatch(/apt-get .*install .*\bzsh$/)
+  expect(shell).toBeLessThan(steps.indexOf(suite[0] as Step))
   // Each shard has its own database server, with the default connection limit.
   expect(tests?.services?.postgres?.image).toBe('postgres:18-alpine')
   expect(JSON.stringify(tests?.services)).not.toContain('max_connections')
@@ -130,7 +156,49 @@ describe('required check aggregation in CI', () => {
       '      matrix:\n        shard:',
     ],
     ['the lint gate', '      - run: npm run lint\n', ''],
+    [
+      'the proxy integration environment',
+      '        env:\n          HOURMERE_PROXY_INTEGRATION: "1"\n',
+      '',
+    ],
+    [
+      'the deployment-test shell',
+      '      - name: Install the interactive deployment-test shell\n        run: sudo apt-get -o Acquire::Retries=3 update && sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y zsh\n',
+      '',
+    ],
   ])('detects removal of %s', (_name, from, to) => {
+    const mutant = ciSource.replace(from, to)
+    expect(mutant).not.toBe(ciSource)
+    expect(() => verify(mutant)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+  })
+
+  it.each([
+    [
+      'continue-on-error on the test shards',
+      '  check-tests:\n    runs-on: ubuntu-latest\n',
+      '  check-tests:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n',
+    ],
+    [
+      'continue-on-error on the static job',
+      '  check-static:\n    runs-on: ubuntu-latest\n',
+      '  check-static:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n',
+    ],
+    [
+      'continue-on-error on the suite step',
+      `      - run: npm test -- --maxWorkers=2 ${shardOption}/7\n`,
+      `      - run: npm test -- --maxWorkers=2 ${shardOption}/7\n        continue-on-error: true\n`,
+    ],
+    [
+      'continue-on-error on a static gate',
+      '      - run: npm run typecheck\n',
+      '      - run: npm run typecheck\n        continue-on-error: true\n',
+    ],
+    [
+      'a condition on the suite step',
+      `      - run: npm test -- --maxWorkers=2 ${shardOption}/7\n`,
+      `      - run: npm test -- --maxWorkers=2 ${shardOption}/7\n        if: github.event_name == 'push'\n`,
+    ],
+  ])('detects %s', (_name, from, to) => {
     const mutant = ciSource.replace(from, to)
     expect(mutant).not.toBe(ciSource)
     expect(() => verify(mutant)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
