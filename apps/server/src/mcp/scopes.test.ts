@@ -48,6 +48,7 @@ const all = [
   'delete_slack_destination',
   'test_slack_destination',
   'generate_open_time_snippet',
+  'troubleshoot_availability',
   'list_calendar_connections',
   'list_conference_connections',
   'get_event_type_waitlist',
@@ -106,13 +107,17 @@ const otherReads = new Set([
   'list_workflows',
   'get_workflow',
 ])
+// Read-only diagnostics that can reveal busy timings: full keys only.
+const fullOnlyReads = new Set(['troubleshoot_availability'])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
     scope === 'full'
       ? true
-      : scope === 'read'
-        ? !writes.has(name)
-        : !otherReads.has(name) && !configurationWrites.has(name),
+      : fullOnlyReads.has(name)
+        ? false
+        : scope === 'read'
+          ? !writes.has(name)
+          : !otherReads.has(name) && !configurationWrites.has(name),
   )
 const denial = {
   error: 'insufficient_scope',

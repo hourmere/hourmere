@@ -28,9 +28,13 @@ ending at midnight and another on the next day.
 overrides in one action. Add a date override to replace the usual hours for that
 local date; an unavailable override blocks the whole date. Removing an override
 restores the weekly hours for that date. Adding, editing and removing overrides
-only changes the draft until the main save succeeds. Upcoming dates appear in order;
-past overrides are collapsed and read-only, and are preserved unchanged when saving.
-Dates follow your interface locale, and hours use the time zone shown in the section.
+only changes the draft until the main save succeeds. Upcoming rows follow their saved
+dates, so editing a date does not move its row. New rows stay in insertion order at
+the top until you save; a successful save sorts the rows by their saved dates again.
+Past overrides are collapsed and read-only, and are preserved unchanged when saving.
+Dates, including time-field accessible names, follow your interface locale. Hours use
+the readable time-zone label shown in the section; partial time-zone searches keep
+the last valid selection until you choose another zone.
 
 The server commits everything in one database transaction. If any part fails,
 none of the changes are saved and your draft remains available to correct or retry.
@@ -39,7 +43,8 @@ A saved confirmation means both the week and the overrides were saved.
 If another tab or client changes the schedule after you opened it, saving reports
 a conflict instead of replacing that newer state. Your draft stays in the editor.
 Choose **Review latest version** to compare the saved snapshot with your draft, then
-explicitly reapply your draft after reviewing the differences. Save changes to submit
+explicitly reapply your draft after reviewing the differences. Focus moves to a
+confirmation reminding you that the draft still needs saving. Save changes to submit
 it against the reviewed version; another intervening change will conflict again. Leaving a dirty
 editor through a link, browser history, reload or closing the tab asks before
 abandoning changes. Reverting to the saved values removes that warning.
@@ -78,6 +83,9 @@ Do not retry with a fresh version without reviewing the newer state.
   clients needing atomic editing and conflict protection must use the combined API.
 - Combined saves accept at most 10,000 overrides, including past dates. More returns
   HTTP 400 `too_many_overrides` (the same error code in MCP/CLI), before any database work.
+  The single-date REST endpoint enforces the same limit when adding a date; existing
+  dates can still be replaced or removed at the limit, including on older schedules
+  that already exceed it. Concurrent additions cannot exceed the limit.
   REST accepts up to 2 MiB of JSON; larger bodies return HTTP 413 `payload_too_large`
   before saving. MCP and CLI also retain their transport limits.
 - Hours use the schedule's IANA time zone and the existing daylight-saving rules.

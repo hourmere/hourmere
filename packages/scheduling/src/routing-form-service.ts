@@ -44,6 +44,38 @@ import {
 /** Page size bounds of listRoutingForms. */
 export const ROUTING_FORM_PAGE = { default: 50, max: 100 } as const
 
+/**
+ * Derived health of a published target (docs/routing-forms.md, step a4): `ok` while routing can
+ * use it, `unavailable` while it cannot (its event type is deleted, disabled, in group mode,
+ * of an unsupported mode, requires payment or no longer exists), and `unknown` when this release
+ * cannot tell, because it does not recognise how the target is stored. Unknown is neither a
+ * broken target nor a missing one, and is never reported as either.
+ */
+export type RoutingTargetHealth = 'ok' | 'unavailable' | 'unknown'
+
+/** One rule's target, or the fallback's, in the published version. */
+export interface RoutingRuleHealth {
+  /** The rule ID, or `fallback`. */
+  ruleId: string
+  /** The target event type; null for a message target or one this release cannot read. */
+  eventTypeId: string | null
+  health: RoutingTargetHealth
+  /** Why an event target is unavailable; null when it is not. */
+  reason: RoutingTargetReason | null
+}
+
+/** Health of the published version, rederived from the current event types on every read. */
+export interface RoutingFormHealth {
+  versionId: string
+  /** `unavailable` if any target is, otherwise `unknown` if any target is, otherwise `ok`. */
+  status: RoutingTargetHealth
+  /**
+   * Every rule in order, then the fallback. A rule without a readable ID cannot be listed; it
+   * makes `status` unknown.
+   */
+  targets: RoutingRuleHealth[]
+}
+
 /** A form's draft and identity as its manager sees them. */
 export interface RoutingForm {
   id: string
@@ -58,15 +90,20 @@ export interface RoutingForm {
   enabled: boolean
   publishedVersionId: string | null
   publishedVersionNumber: number | null
+  /** Target health of the published version; null while nothing is published. */
+  health: RoutingFormHealth | null
   createdAt: string
   updatedAt: string
 }
 
-/** A list entry: the form without its draft content. */
+/** A list entry: the form without its draft content, with its health status only. */
 export type RoutingFormSummary = Omit<
   RoutingForm,
-  'description' | 'questions' | 'rules' | 'fallback'
->
+  'description' | 'questions' | 'rules' | 'fallback' | 'health'
+> & {
+  /** The published version's health status; null while nothing is published. */
+  health: RoutingTargetHealth | null
+}
 
 /** An immutable published version. */
 export interface RoutingFormVersion {
@@ -585,7 +622,7 @@ function selectForms(db: Db, organizationId: string) {
 
 type SelectedForm = Awaited<ReturnType<ReturnType<typeof selectForms>['executeTakeFirstOrThrow']>>
 
-function toSummary(row: SelectedForm, draft: Draft): RoutingFormSummary {
+function toSummary(row: SelectedForm, draft: Draft) {
   return {
     id: row.id,
     slug: row.slug,
@@ -599,10 +636,11 @@ function toSummary(row: SelectedForm, draft: Draft): RoutingFormSummary {
   }
 }
 
-function toForm(row: SelectedForm): RoutingForm {
+function toForm(row: SelectedForm, health: RoutingFormHealth | null): RoutingForm {
   const draft = storedDraft(row.draft)
   return {
     ...toSummary(row, draft),
+    health,
     description: draft.description ?? null,
     questions: draft.questions,
     rules: draft.rules,
@@ -614,7 +652,117 @@ async function loadForm(db: Db, organizationId: string, id: string): Promise<Rou
   if (!isUuid(id)) throw formNotFound()
   const row = await selectForms(db, organizationId).where('f.id', '=', id).executeTakeFirst()
   if (!row) throw formNotFound()
-  return toForm(row)
+  return toForm(row, (await formHealth(db, organizationId, [row])).get(row.id) ?? null)
+}
+
+// --- Target health -------------------------------------------------------------------------
+
+const worst = (healths: readonly RoutingTargetHealth[]): RoutingTargetHealth =>
+  healths.includes('unavailable') ? 'unavailable' : healths.includes('unknown') ? 'unknown' : 'ok'
+
+/** A stored target as this release reads it, by shape only. */
+interface StoredTarget {
+  versionId: string
+  ruleId: string | null
+  kind: string | null
+  eventTypeId: string | null
+}
+
+/**
+ * The targets of these versions, rules in order and then the fallback. The version JSON is
+ * authoritative (the dependency rows mirror it), and is read by shape so that a target this
+ * release does not know is reported, not refused.
+ */
+async function storedTargets(
+  db: Db,
+  organizationId: string,
+  versionIds: readonly string[],
+): Promise<StoredTarget[]> {
+  if (versionIds.length === 0) return []
+  const { rows } = await sql<{
+    version_id: string
+    rule_id: string | null
+    kind: string | null
+    event_type_id: string | null
+  }>`
+    SELECT v.id AS version_id, t.rule_id, t.kind, t.event_type_id
+    FROM routing_form_versions v
+    CROSS JOIN LATERAL (
+      SELECT r.ord, r.rule->>'id' AS rule_id,
+        CASE jsonb_typeof(r.rule->'target') WHEN 'object' THEN r.rule->'target'->>'kind' END AS kind,
+        CASE jsonb_typeof(r.rule->'target') WHEN 'object'
+          THEN r.rule->'target'->>'eventTypeId' END AS event_type_id
+      FROM jsonb_array_elements(v.rules) WITH ORDINALITY AS r(rule, ord)
+      UNION ALL
+      SELECT NULL, ${FALLBACK_RULE_ID}::text, v.fallback->>'kind', v.fallback->>'eventTypeId'
+    ) t
+    WHERE v.organization_id = ${organizationId} AND v.id = ANY(${versionIds}::uuid[])
+    ORDER BY v.id, t.ord NULLS LAST`.execute(db)
+  return rows.map((row) => ({
+    versionId: row.version_id,
+    ruleId: row.rule_id,
+    kind: row.kind,
+    eventTypeId: row.event_type_id,
+  }))
+}
+
+/**
+ * Rederives the health of each form's published version from the current event types, so a
+ * missed invalidation can never hide a broken target. Forms with nothing published are absent.
+ */
+async function formHealth(
+  db: Db,
+  organizationId: string,
+  forms: readonly { id: string; published_version_id: string | null }[],
+): Promise<Map<string, RoutingFormHealth>> {
+  const versionIds = forms.flatMap((form) =>
+    form.published_version_id === null ? [] : [form.published_version_id],
+  )
+  const targets = await storedTargets(db, organizationId, versionIds)
+  const events = await loadRoutingTargetEvents(
+    db,
+    targets.flatMap((target) =>
+      target.kind === 'event' && target.eventTypeId !== null ? [target.eventTypeId] : [],
+    ),
+  )
+  const byVersion = new Map<string, { health: RoutingFormHealth; unreadable: boolean }>()
+  for (const target of targets) {
+    let entry = byVersion.get(target.versionId)
+    if (!entry) {
+      entry = {
+        health: { versionId: target.versionId, status: 'ok', targets: [] },
+        unreadable: false,
+      }
+      byVersion.set(target.versionId, entry)
+    }
+    // A rule without a readable ID cannot be named; its form's health is unknown.
+    if (target.ruleId === null) entry.unreadable = true
+    else entry.health.targets.push({ ruleId: target.ruleId, ...targetHealth(target) })
+  }
+  const result = new Map<string, RoutingFormHealth>()
+  for (const form of forms) {
+    if (form.published_version_id === null) continue
+    const entry = byVersion.get(form.published_version_id)
+    const healths = entry?.health.targets.map((target) => target.health) ?? []
+    result.set(form.id, {
+      versionId: form.published_version_id,
+      status: worst(entry === undefined || entry.unreadable ? [...healths, 'unknown'] : healths),
+      targets: entry?.health.targets ?? [],
+    })
+  }
+  return result
+
+  function targetHealth(target: StoredTarget): Omit<RoutingRuleHealth, 'ruleId'> {
+    if (target.kind === 'message') return { eventTypeId: null, health: 'ok', reason: null }
+    if (target.kind === 'event' && target.eventTypeId !== null && isUuid(target.eventTypeId)) {
+      const reason = routingTargetProblem(organizationId, events.get(target.eventTypeId))
+      return reason === undefined
+        ? { eventTypeId: target.eventTypeId, health: 'ok', reason: null }
+        : { eventTypeId: target.eventTypeId, health: 'unavailable', reason }
+    }
+    // Stored by another release, say: this one cannot tell whether routing can use it.
+    return { eventTypeId: null, health: 'unknown', reason: null }
+  }
 }
 
 /** A published version as stored, so a publication and its replays return the same object. */
@@ -775,8 +923,12 @@ export async function listRoutingForms(
       .execute()
     const page = rows.slice(0, limit)
     const last = page.at(-1)
+    const health = await formHealth(trx, organizationId, page)
     return {
-      data: page.map((row) => toSummary(row, storedDraft(row.draft))),
+      data: page.map((row) => ({
+        ...toSummary(row, storedDraft(row.draft)),
+        health: health.get(row.id)?.status ?? null,
+      })),
       nextCursor: rows.length > limit && last ? encodeCursor(organizationId, last) : null,
     }
   })
