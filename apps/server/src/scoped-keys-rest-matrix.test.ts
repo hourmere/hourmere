@@ -96,7 +96,9 @@ const classes = {
     'GET /api/v1/workflows',
     'GET /api/v1/workflows/{id}',
   ],
+  audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [
+    'PUT /api/v1/audit-log/settings',
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
     'POST /api/v1/slack-destinations',
@@ -172,6 +174,7 @@ const allowed: Record<Class, readonly ApiKeyScope[]> = {
   booking_write: ['full', 'bookings'],
   other_read: ['full', 'read'],
   other_write: ['full'],
+  audit_read: ['full'],
   session_only: [],
   public_metadata: scopes,
 }
@@ -726,6 +729,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expectedStatus = 204
       }
       if (operation === 'PATCH /api/v1/branding') payload = { brandPrimaryColor: '#123456' }
+      if (operation === 'PUT /api/v1/audit-log/settings') payload = { retention: 'forever' }
       if (
         operation === 'POST /api/v1/branding/logo' ||
         operation === 'GET /api/v1/branding/logo/{hash}'
@@ -764,14 +768,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 121-operation contract and all 363 scope combinations', () => {
+    it('covers the exact 124-operation contract and all 372 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(121)
-      expect(new Set(ids).size).toBe(121)
+      expect(ids).toHaveLength(124)
+      expect(new Set(ids).size).toBe(124)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(363)
+      expect(cases).toHaveLength(372)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

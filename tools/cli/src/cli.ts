@@ -12,6 +12,9 @@ import {
 } from './client.ts'
 
 export const COMMANDS = {
+  'audit-log list': 'list_audit_events',
+  'audit-log settings': 'get_audit_log_settings',
+  'audit-log set-retention': 'set_audit_log_settings',
   'branding get': 'get_branding',
   'branding set': 'set_branding',
   whoami: 'whoami',
@@ -61,6 +64,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
+       hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
        hourmere workflows list|get [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
@@ -80,6 +84,10 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            Read or full scope. Not available yet: both answer workflows_disabled until booking
            workflows are enabled on the instance.
+Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
+           newest first, UTC times), audit-log settings, audit-log set-retention
+           ({"retention":"instance"|"forever"} or {"retention":"days","retentionDays":30–3650}).
+           Full scope; owner/admin reads, owner changes retention.
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
                 1–12 distinct lengths including the default. Requires full API key scope.
@@ -130,7 +138,11 @@ function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
-    first === 'one-time-links' || first === 'branding' || first === 'slack' || first === 'workflows'
+    first === 'one-time-links' ||
+    first === 'branding' ||
+    first === 'slack' ||
+    first === 'workflows' ||
+    first === 'audit-log'
       ? `${first} ${parts.shift() ?? ''}`
       : first
   const rest = parts

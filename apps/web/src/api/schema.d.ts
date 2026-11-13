@@ -128,6 +128,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List audit events of the current organization, newest first
+         * @description Personal space owner, or team owner/admin of the organization the caller acts in, with a session, a full-scope API key or MCP OAuth. Members, read/bookings-scope keys and stale or foreign expected organizations are refused before anything is read. Ordered by time and ID, descending. Requires full API key scope: the journal reveals who did what. Follow nextCursor with the same filters; events written after the first page never repeat or shift earlier entries. Reads are not recorded.
+         */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-log/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read audit log retention of the current organization
+         * @description Personal space owner, or team owner/admin of the organization the caller acts in, with a session, a full-scope API key or MCP OAuth. Members, read/bookings-scope keys and stale or foreign expected organizations are refused before anything is read. Requires full API key scope.
+         */
+        get: operations["getAuditLogSettings"];
+        /**
+         * Set audit log retention of the current organization
+         * @description Personal space owner or team owner only, with a session, a full-scope API key or MCP OAuth. Events older than the retention are deleted by a background job; nothing younger than 30 days is ever deleted. A change is recorded as audit_log.retention_updated; repeating the current value records nothing.
+         */
+        put: operations["setAuditLogSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/book/{token}": {
         parameters: {
             query?: never;
@@ -4473,6 +4517,68 @@ export interface components {
             noShowMarkedAt: string | null;
             noShowMarkedBy: string | null;
         };
+        /** @description One journal entry. Session IDs, secrets, token values, names and email addresses are never returned. */
+        AuditEvent: {
+            /** @description Stable dotted action, e.g. membership.role_changed. New actions may appear; ignore unknown ones. */
+            action: string;
+            actor: {
+                /** @description Stored user, API key, OAuth client or SCIM token ID, or a system service name; null for anonymous and external actors */
+                id: string | null;
+                /** @description Who acted: user, api_key, oauth_client, system, scim_token, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
+                type: string;
+            };
+            credential: {
+                apiKeyId: string | null;
+                /** @description Scope of the key used; null when unknown or not a key */
+                apiKeyScope: string | null;
+                oauthClientId: string | null;
+                oauthGrantId: string | null;
+                /** @description session, api_key, oauth or none. New types may appear. */
+                type: string;
+            };
+            /** @description The allow-listed details recorded with the action (https://hourmere.com/docs/audit-log); often empty */
+            details: {
+                [key: string]: unknown;
+            };
+            /** @description Journal ID (a decimal integer), unique per instance */
+            id: string;
+            /**
+             * @description UTC time the event was written, RFC 3339 with microseconds
+             * @example 2026-11-12T17:04:05.123456Z
+             */
+            occurredAt: string;
+            requestId: string | null;
+            target: {
+                id: string;
+                type: string;
+            };
+        };
+        AuditEventPage: {
+            data: components["schemas"]["AuditEvent"][];
+            /** @description Pass as cursor, with the same filters, for the next page; null on the last */
+            nextCursor: string | null;
+        };
+        AuditLogSettings: {
+            /** @description Whether the caller is an owner and may change retention */
+            canChangeRetention: boolean;
+            /** @description What applies to this organization; null keeps events forever */
+            effectiveRetentionDays: number | null;
+            /** @description The instance default in days; null keeps events forever */
+            instanceRetentionDays: number | null;
+            /**
+             * @description This organization's choice: follow the instance default, keep forever, or keep retentionDays days
+             * @enum {string}
+             */
+            retention: "instance" | "forever" | "days";
+            /** @description Set when retention is days */
+            retentionDays: number | null;
+        };
+        AuditLogSettingsInput: {
+            /** @enum {string} */
+            retention: "instance" | "forever" | "days";
+            /** @description Required with retention "days" and refused otherwise; 30–3650 */
+            retentionDays?: number;
+        };
         Booking: {
             /** @description The actual round-robin winner; no private host identity or availability mapping */
             assignedHost?: {
@@ -6607,6 +6713,220 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                /** @description Only this exact action, e.g. api_key.created */
+                action?: string;
+                /** @description Only events by this actor ID (requires actorType) */
+                actorId?: string;
+                /** @description Only events by this actor type */
+                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
+                /** @description nextCursor from the previous page with the same filters */
+                cursor?: string;
+                /** @description Earliest time, inclusive: RFC 3339 instant with an offset */
+                from?: string;
+                /** @description Page size, 1–100; default 50 */
+                limit?: string;
+                /** @description Latest time, exclusive: RFC 3339 instant with an offset */
+                to?: string;
+            };
+            header?: {
+                /** @description Expected organization. Optional for session reads, required for session writes; stale context is rejected. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventPage"];
+                };
+            };
+            /** @description invalid_request, invalid_range, invalid_limit or invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAuditLogSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected organization. Optional for session reads, required for session writes; stale context is rejected. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retention choice and the instance default */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogSettings"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setAuditLogSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected organization. Optional for session reads, required for session writes; stale context is rejected. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditLogSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description The retention now in effect */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogSettings"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or insufficient_role. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     createOneTimeBooking: {
         parameters: {
             query?: never;

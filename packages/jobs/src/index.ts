@@ -7,6 +7,7 @@ import pgBossPackage from 'pg-boss/package.json' with { type: 'json' }
 import type { z } from 'zod'
 
 export type { KyselyTransactionLike } from 'pg-boss'
+export { AUDIT_RETENTION_CRON, auditLogRetentionJob } from './audit-retention.ts'
 export { oneTimeBookingLinksRetentionJob } from './one-time-links-retention.ts'
 export { paymentHoldsExpiryJob } from './payment-holds.ts'
 

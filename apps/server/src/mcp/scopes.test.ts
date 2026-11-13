@@ -37,6 +37,9 @@ const all = [
   'get_schedule',
   'get_branding',
   'set_branding',
+  'list_audit_events',
+  'get_audit_log_settings',
+  'set_audit_log_settings',
   'create_event_type',
   'update_event_type',
   'create_one_time_link',
@@ -63,7 +66,10 @@ const all = [
 // check answers workflows_disabled without reaching its handler.
 const unavailable = new Set(['list_workflows', 'get_workflow'])
 const disabled = { error: 'workflows_disabled' }
+// Full scope only: audit reads reveal who did what (see api-key-operations.ts).
+const auditReads = new Set(['list_audit_events', 'get_audit_log_settings'])
 const configurationWrites = new Set([
+  'set_audit_log_settings',
   'set_branding',
   'save_schedule_availability',
   'create_slack_destination',
@@ -111,8 +117,8 @@ const expected = (scope: ApiKeyScope) =>
     scope === 'full'
       ? true
       : scope === 'read'
-        ? !writes.has(name)
-        : !otherReads.has(name) && !configurationWrites.has(name),
+        ? !writes.has(name) && !auditReads.has(name)
+        : !otherReads.has(name) && !configurationWrites.has(name) && !auditReads.has(name),
   )
 const denial = {
   error: 'insufficient_scope',
@@ -415,6 +421,9 @@ describe('MCP scoped discovery and dispatch', () => {
 
 describe('CLI scope parity', () => {
   const commands = [
+    ['audit-log list', 'list_audit_events'],
+    ['audit-log settings', 'get_audit_log_settings'],
+    ['audit-log set-retention', 'set_audit_log_settings'],
     ['branding get', 'get_branding'],
     ['branding set', 'set_branding'],
     ['whoami', 'whoami'],

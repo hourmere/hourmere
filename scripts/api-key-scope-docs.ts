@@ -33,6 +33,7 @@ const groupNames: Record<ApiKeyOperationClass, string> = {
   booking_write: 'Booking actions and repairs',
   other_read: 'Other account reads',
   other_write: 'Account settings and configuration writes',
+  audit_read: 'Audit log reads',
   session_only: 'Browser session operations',
   public_metadata: 'Public instance and API metadata',
 }

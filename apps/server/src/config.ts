@@ -50,6 +50,9 @@ const timeoutSeconds = (name: string, defaultMs: number) => {
 const BOOKING_EXPORT_LIMIT_FORMAT =
   'BOOKING_EXPORT_MAX_CONCURRENT must be a whole number from 1 to 8'
 
+const AUDIT_LOG_RETENTION_FORMAT =
+  'AUDIT_LOG_RETENTION_DAYS must be forever or a whole number of days from 30 to 3650'
+
 const HSTS_MAX_AGE_FORMAT = 'HSTS_MAX_AGE must be a whole number of seconds (0 or more)'
 
 const SMTP_URL_FORMAT =
@@ -209,6 +212,19 @@ const schema = z
         .default(2),
     ),
     BOOKING_MAX_INVITEE_RESCHEDULES: emailLimit('BOOKING_MAX_INVITEE_RESCHEDULES', 5, 0),
+    // Audit journal retention for organizations that keep the default: forever, or days.
+    AUDIT_LOG_RETENTION_DAYS: z.preprocess(
+      (value) => (value === '' || value === undefined ? 'forever' : value),
+      z
+        .string()
+        .refine(
+          (value) =>
+            value === 'forever' ||
+            (/^[0-9]{1,4}$/.test(value) && Number(value) >= 30 && Number(value) <= 3650),
+          { error: AUDIT_LOG_RETENTION_FORMAT },
+        )
+        .transform((value): number | null => (value === 'forever' ? null : Number(value))),
+    ),
     MAIL_RECIPIENT_MAX_PER_HOUR: emailLimit('MAIL_RECIPIENT_MAX_PER_HOUR', 5, 1),
     MAIL_RECIPIENT_MAX_PER_DAY: emailLimit('MAIL_RECIPIENT_MAX_PER_DAY', 20, 1),
     SIGN_IN_MAIL_MAX_PER_HOUR: emailLimit('SIGN_IN_MAIL_MAX_PER_HOUR', 5, 1),

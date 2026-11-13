@@ -123,6 +123,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | --- | --- | --- | --- |
 | Other account reads | Allowed | Allowed | — |
 | Browser session operations | — | — | — |
+| Audit log reads | Allowed | — | — |
 | Account settings and configuration writes | Allowed | — | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
 | Booking actions and repairs | Allowed | — | Allowed |
@@ -137,6 +138,9 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Browser session only | — |
 | `DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}` | Browser session only | — |
+| `GET /api/v1/audit-events` | Session or API key | `full` |
+| `GET /api/v1/audit-log/settings` | Session or API key | `full` |
+| `PUT /api/v1/audit-log/settings` | Session or API key | `full` |
 | `GET /api/v1/branding` | Session or API key | `full, read` |
 | `GET /api/v1/branding/logo/{hash}` | Session or API key | `full, read` |
 | `PATCH /api/v1/branding` | Session or API key | `full` |
@@ -258,6 +262,9 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_audit_events` | — | `audit-log list` | `full` |
+| `get_audit_log_settings` | — | `audit-log settings` | `full` |
+| `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
 | `get_branding` | — | `branding get` | `full, read` |
 | `set_branding` | — | `branding set` | `full` |
 | `list_slack_destinations` | — | `slack list` | `full, read` |

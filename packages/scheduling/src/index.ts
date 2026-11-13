@@ -10,6 +10,28 @@ export {
   MAX_ANALYTICS_DAYS,
 } from './analytics.ts'
 export {
+  AUDIT_ACTOR_TYPES,
+  AUDIT_PAGE_DEFAULT,
+  AUDIT_PAGE_MAX,
+  AUDIT_PURGE_BATCH,
+  AUDIT_PURGE_MAX_BATCHES,
+  AUDIT_RETENTION_MAX_DAYS,
+  AUDIT_RETENTION_MIN_DAYS,
+  AuditEventFilters,
+  type AuditEventQuery,
+  type AuditEventView,
+  type AuditLogSettingsContext,
+  AuditLogSettingsUpdate,
+  type AuditLogSettingsView,
+  type AuditPurgeResult,
+  type AuditRetentionDays,
+  auditRetentionLock,
+  getAuditLogSettings,
+  listAuditEvents,
+  purgeAuditEvents,
+  setAuditLogSettings,
+} from './audit-log.ts'
+export {
   type AvailabilityQuery,
   buildAvailabilityInput,
   type ExplainEventAvailabilityQuery,

@@ -54,6 +54,9 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_audit_events` | — | `audit-log list` | `full` |
+| `get_audit_log_settings` | — | `audit-log settings` | `full` |
+| `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
 | `get_branding` | — | `branding get` | `full, read` |
 | `set_branding` | — | `branding set` | `full` |
 | `list_slack_destinations` | — | `slack list` | `full, read` |
