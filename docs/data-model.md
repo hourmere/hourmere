@@ -63,7 +63,10 @@ handlers remain unregistered in production. The User creation handler, which onl
 harnesses register, writes a resource and, for its work address, one pending claim whose
 `invitation_id` names the invitation it issued or reused, or is null when the address
 already belongs to a member or another pending invitation holds it; it never sets an
-account or membership link.
+account or membership link. Claim completion, which only test harnesses wire into invitation
+acceptance, sets both links of the claim's entry when its invitation is accepted, together with
+the claim's `completed_at`; it reads live blockers, by account and by mailbox, and refuses
+admission while one exists, but never writes or clears them.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -1515,7 +1518,16 @@ The phases within that organization boundary are:
   locks: the address's pending invitation rows, their delivery rows and the mail-budget
   lock, inside a savepoint that is rolled back, releasing them, when the claim records no
   invitation. It locks no member row: the organization lock excludes membership changes while it
-  reads the earliest owner who invites.
+  reads the earliest owner who invites. When the address's pending invitation expires during
+  one of those waits, it rolls back to the savepoint and runs the invitation service once more.
+- Invitation acceptance takes the recipient's `auth.user` share lock, the organization update
+  lock, its session no-key-update lock and the invitation update lock. When SCIM claim
+  completion is wired, it then locks the claim bound to that invitation and that claim's
+  `scim_users` entry, both `FOR UPDATE`, before the native member insert; the entry's link,
+  the claim's completion and the audit event follow that insert in the same transaction. A
+  SCIM writer that takes the organization lock first therefore waits for, or is waited on by,
+  the acceptance, and never holds the claim or entry while the acceptance waits for the
+  organization.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
