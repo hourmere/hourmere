@@ -10,7 +10,7 @@ import {
   type SignupPolicy,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createTestDatabase, outsideAuthTransaction, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -842,11 +842,14 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
     hooks.beforeAcceptInvitation = async (input) => {
       const result = await original?.(input)
       if (input.invitation?.id === invitation.id) {
-        await db
-          .updateTable('auth.invitation')
-          .set({ role: 'admin' })
-          .where('id', '=', invitation.id)
-          .execute()
+        // A concurrent change on its own connection while acceptance holds one.
+        await outsideAuthTransaction(() =>
+          db
+            .updateTable('auth.invitation')
+            .set({ role: 'admin' })
+            .where('id', '=', invitation.id)
+            .execute(),
+        )
       }
       return result
     }

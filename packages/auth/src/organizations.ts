@@ -65,7 +65,8 @@ export function* slugCandidates(base: string, attempts = 10): Generator<string> 
 /**
  * Returns the id of the user's personal organization, creating it when it does not exist:
  * the organization, the user's `owner` membership and the `personal_organizations` marker,
- * in one transaction. Safe to call any number of times and concurrently for the same user.
+ * in one transaction (the caller's, when `db` is a transaction). Safe to call any number of
+ * times and concurrently for the same user.
  */
 export async function ensurePersonalOrganization(db: Db, userId: string): Promise<string> {
   const existing = await db
@@ -75,7 +76,10 @@ export async function ensurePersonalOrganization(db: Db, userId: string): Promis
     .executeTakeFirst()
   if (existing) return existing.organization_id
 
-  return db.transaction().execute(async (trx) => {
+  // Inside a caller's transaction (a native auth transaction), create on its connection.
+  const inTransaction = <T>(work: (trx: Db) => Promise<T>) =>
+    db.isTransaction ? work(db) : db.transaction().execute(work)
+  return inTransaction(async (trx) => {
     // Serializes concurrent calls for the same user (two sign-ins at the same moment); the
     // second one finds the organization the first created. NO KEY UPDATE does not block
     // inserts that reference the user, such as new sessions.
@@ -146,7 +150,13 @@ const refuse = (message: string) =>
  * session and API keys without an organization. Team work belongs in a team organization.
  * (Leaving is not hooked: Better Auth refuses to let the only owner leave.)
  */
-export function organizationGuards(db: Db): NonNullable<OrganizationOptions['organizationHooks']> {
+export function organizationGuards(
+  db: Db,
+  transaction: () => Db | undefined = () => undefined,
+): NonNullable<OrganizationOptions['organizationHooks']> {
+  // Hooks that run inside a native auth transaction (invitation acceptance) read through
+  // its connection rather than wait for an application connection while holding it.
+  const reader = () => transaction() ?? db
   const checkSlug = (slug: string | undefined) => {
     if (slug !== undefined && isReservedName(slug))
       throw new APIError('BAD_REQUEST', {
@@ -155,7 +165,7 @@ export function organizationGuards(db: Db): NonNullable<OrganizationOptions['org
       })
   }
   const isPersonal = async (organizationId: string) =>
-    (await personalOwner(db, organizationId)) !== undefined
+    (await personalOwner(reader(), organizationId)) !== undefined
   const noOneElse = async ({ organization }: { organization: { id: string } }) => {
     if (await isPersonal(organization.id)) {
       throw refuse('A personal organization has no other members; create a team organization')
@@ -175,12 +185,12 @@ export function organizationGuards(db: Db): NonNullable<OrganizationOptions['org
     beforeAcceptInvitation: noOneElse,
     beforeAddMember: noOneElse,
     beforeRemoveMember: async ({ member, organization }) => {
-      if ((await personalOwner(db, organization.id)) === member.userId) {
+      if ((await personalOwner(reader(), organization.id)) === member.userId) {
         throw refuse('The owner cannot be removed from their personal organization')
       }
     },
     beforeUpdateMemberRole: async ({ member, organization }) => {
-      if ((await personalOwner(db, organization.id)) === member.userId) {
+      if ((await personalOwner(reader(), organization.id)) === member.userId) {
         throw refuse('The owner of a personal organization keeps the owner role')
       }
     },

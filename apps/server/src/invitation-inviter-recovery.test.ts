@@ -80,9 +80,9 @@ describe.skipIf(!serverUrl)('departed original inviter recovery with PostgreSQL'
       signup: { mode: 'open', allowedDomains: [] },
       mailer: { send: async () => {} },
       enqueueInvitationEmail: enqueue,
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
+          { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
     })

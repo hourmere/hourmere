@@ -98,9 +98,9 @@ describe.skipIf(!serverUrl)(
         secret,
         signup: { mode: 'open', allowedDomains: [] },
         mailer: { send: async () => {} },
-        leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+        leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
           leaveTeamMember(
-            { db, principal, now: () => Temporal.Now.instant() },
+            { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
             { teamId, expectedOrganizationId },
           ),
       })

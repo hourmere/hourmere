@@ -390,6 +390,11 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   belonging to the host are checked by the application.
 - **Triggers pin `search_path`**, because they also run on Better Auth's auth-only
   connection (e.g. when it deletes a user).
+- **No relation name exists in both `auth` and `public`.** Native auth transactions set
+  `search_path TO auth, public` and run application code on that connection (invitation
+  acceptance, team leave with its departure-impact check, the sign-up policy), so an
+  unqualified public table name must never resolve to an `auth` relation instead.
+  `packages/db/src/schema-names.test.ts` checks this after every migration.
 - **Dates** (`DATE` columns) are returned as `YYYY-MM-DD` strings, never as `Date`
   objects shifted by the server's time zone.
 

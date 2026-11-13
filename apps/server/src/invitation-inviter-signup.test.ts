@@ -85,9 +85,9 @@ describe.skipIf(!serverUrl)('void invitations do not admit account registration'
       secret,
       signup: policy,
       mailer: { send: async (message) => void sent.push(message) },
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
+          { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
     })

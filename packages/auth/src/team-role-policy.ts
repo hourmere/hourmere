@@ -145,6 +145,7 @@ export function createTeamRolePolicy(
     principal: Principal,
     teamId: string,
     expectedOrganizationId: string,
+    transaction?: Db,
   ) => Promise<{ organizationId: string }>,
   scimClaims?: ScimClaimCompletion,
 ) {
@@ -380,6 +381,15 @@ export function createTeamRolePolicy(
     withTransaction<T>(trx: Transaction<Database>, operation: () => Promise<T>): Promise<T> {
       return transactions.run(trx, operation)
     },
+    /**
+     * The native auth transaction this code runs in, if any. Hooks called inside one read
+     * through its connection: waiting for an application connection while holding an auth
+     * connection could deadlock against the MCP OAuth broker, which holds an application
+     * transaction while it waits for an auth connection.
+     */
+    transaction(): Transaction<Database> | undefined {
+      return transactions.getStore()
+    },
     /** Run before native lookups so denied targets never reveal whether they exist. */
     async before(ctx: AuthMiddlewareContext) {
       const state = requests.getStore()
@@ -536,14 +546,17 @@ export function createTeamRolePolicy(
         )
           throw teamRoleDenied()
         try {
+          // Better Auth's deleteMember runs this inside its auth transaction: the departure
+          // runs on that held connection and commits with it.
           const fallback = await leaveTeamMember(
             actor,
             target.organizationId,
             ctx.request?.headers.get('x-expected-organization-id') ?? target.organizationId,
+            transactions.getStore(),
           )
           // The native handler clears the old active organization after deleteMember.
           // Refresh its request snapshot so that cleanup cannot overwrite the personal
-          // fallback already committed atomically with the membership revocation.
+          // fallback written atomically with the membership revocation.
           const session = await getSessionFromCtx(ctx)
           if (session?.session.id === actor.sessionId) {
             session.session.activeOrganizationId = fallback.organizationId

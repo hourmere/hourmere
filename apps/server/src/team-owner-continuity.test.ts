@@ -156,9 +156,9 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
       secret,
       signup,
       mailer: { send: async () => {} },
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         copy.leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
+          { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
     })

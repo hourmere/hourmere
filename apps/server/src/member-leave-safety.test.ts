@@ -173,9 +173,9 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       signup,
       mailer: { send: async () => {} },
       ...(withLeave && {
-        leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+        leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
           depart(
-            { db, principal, now: () => Temporal.Now.instant() },
+            { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
             { teamId, expectedOrganizationId },
           ),
       }),
