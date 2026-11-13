@@ -45,6 +45,7 @@ import {
   paymentHoldsExpiryJob,
   routingRetentionJob,
 } from '@hourmere/jobs'
+import { meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -73,6 +74,7 @@ import type { ServiceContext } from '@hourmere/scheduling'
 import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
+  cleanupMeetingPolls,
   cleanupWaitlist,
   ensureWaitlistKey,
   expirePaymentHolds,
@@ -773,6 +775,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' }),
       }),
       waitlistEmailJob(runWaitlistEmail),
+      // No installation booking-data retention exists yet, so terminal polls stay until
+      // explicit poll, linked-booking or organization deletion (docs/meeting-polls.md).
+      meetingPollCleanupJob({
+        cleanup: () => cleanupMeetingPolls(db),
+        continueCleanup: (): Promise<string | null> =>
+          jobs.enqueue('meeting-poll-cleanup-v1', {}, { singletonKey: 'continuation' }),
+      }),
       oneTimeBookingLinksRetentionJob(db),
       // Routing receipt and version cleanup runs whether or not routing is enabled.
       routingRetentionJob({
