@@ -201,7 +201,7 @@ describe('UI measurement CI contract', () => {
     ['check', 'd18968eb8cf24725d3c282e48bf92a300db6dd99208ef74bd8bcdde56f063b1e'],
     // The suite runs in sharded jobs; the stable required job aggregates them with the static checks.
     ['check-static', '3bce9a980ab6c404fbf4ccc83607a7da40b8feb11e75b4918e8fe9c2057d5a0c'],
-    ['check-tests', '8650b11062354b77329078510eba4d1dec85df88e346d1dc049221020b35843c'],
+    ['check-tests', '65308b7f42b4185b4361e703050c88357bdb4375e61756ebcbcdc26a61c08a1a'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],

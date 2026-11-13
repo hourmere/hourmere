@@ -121,9 +121,9 @@ describe('required check aggregation in CI', () => {
     ['a part from needs', 'needs: [check-static, check-tests]', 'needs: [check-tests]'],
     ['the static result', 'test "$STATIC_RESULT" = success && ', ''],
     ['the success comparison', 'test "$TESTS_RESULT" = success', 'test "$TESTS_RESULT" != failure'],
-    ['a shard from the matrix', 'shard: [1, 2, 3, 4]', 'shard: [1, 2, 3]'],
-    ['the shard count in the command', `${shardOption}/4`, `${shardOption}/5`],
-    ['the shard option', ` ${shardOption}/4`, ''],
+    ['a shard from the matrix', 'shard: [1, 2, 3, 4, 5, 6, 7]', 'shard: [1, 2, 3, 4, 5, 6]'],
+    ['the shard count in the command', `${shardOption}/7`, `${shardOption}/8`],
+    ['the shard option', ` ${shardOption}/7`, ''],
     [
       'fail-fast: false',
       '      fail-fast: false\n      matrix:\n        shard:',
