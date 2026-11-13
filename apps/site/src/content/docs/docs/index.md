@@ -112,9 +112,10 @@ The website at hourmere.com is separate from your Hourmere instance.
   freshness as well as the edited settings. A full occurrence gives
   the same error for existing and unknown email addresses; exact request replays still work.
   With spare capacity, duplicate-email rejection does not guarantee membership privacy:
-  a different email address can create a real seat and its notifications, or receive a
-  distinct pinned-Zoom failure without a committed seat. Mismatched location options
-  return the same error regardless of whether the email address already holds a seat.
+  a different email address can create a real seat and its notifications. Every refusal
+  that does not create a seat (mismatched location options, cutoffs, an unusable pinned
+  Zoom or Google Meet resource) returns the same error whether or not the email address
+  already holds a seat.
   Host occurrence mail drains batches of four for up to 230 seconds per worker run;
   remaining due messages stay durable for the next run, subject to reminder expiry,
   the instance email abuse budget and delivery retries.
