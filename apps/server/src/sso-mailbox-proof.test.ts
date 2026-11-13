@@ -376,14 +376,15 @@ const scenarios = {
     const who = browser()
     const a = await attempt('sign_in', who)
     const h = harness(M)
-    for (const extra of [
+    const extras: Record<string, string>[] = [
       { origin: '' },
       { origin: 'null' },
       { origin: 'https://attacker.example' },
       { origin: `${ORIGIN}/` },
       { origin: 'http://localhost:4322' },
       { authorization: 'Bearer hm_synthetic' },
-    ]) {
+    ]
+    for (const extra of extras) {
       for (const response of [
         await send(h, a.id, who, extra),
         await consume(h, a.id, 'token', who, extra),
