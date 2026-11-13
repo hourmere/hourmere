@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { SSO_AUDIT_LIMITS } from '../packages/db/src/sso-audit.ts'
 import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
 
 const source = readFileSync(new URL('../docs/sso.md', import.meta.url), 'utf8')
@@ -119,6 +120,70 @@ describe('SSO transport limits (bound to the runtime constants)', () => {
       assertTransportLimits(source.replace('### Transport limits\n', '### Other limits\n')),
     ).toThrow()
     assertTransportLimits(source)
+  })
+})
+
+// The security-failure bound of the SSO audit writer is a runtime constant too: the table is
+// bound to its object, so changing either side alone fails.
+const auditUnits: Record<keyof typeof SSO_AUDIT_LIMITS, string> = {
+  ssoSecurityFailureEvents: 'events',
+  ssoSecurityFailureWindow: 'seconds',
+}
+
+function assertAuditLimits(
+  document: string,
+  limits: Readonly<Record<string, number>> = SSO_AUDIT_LIMITS,
+) {
+  const section = document.split('## Pinned operational limits')[1]?.split('\n## ')[0] ?? ''
+  const table = section.split('\n### Audit limits\n')[1]?.split('\n### ')[0] ?? ''
+  const rows = table.split('\n').filter((line) => line.startsWith('| `'))
+  const entries = rows.map((line) => {
+    const match = /^\| `([A-Za-z]+)` \| (\d+) \| ([a-z]+) \|$/.exec(line)
+    expect(match, line).not.toBeNull()
+    return [match?.[1], `${match?.[2]} ${match?.[3]}`]
+  })
+  expect(entries).toHaveLength(Object.keys(limits).length)
+  expect(Object.fromEntries(entries)).toEqual(
+    Object.fromEntries(
+      Object.entries(limits).map(([name, value]) => [
+        name,
+        `${value} ${auditUnits[name as keyof typeof auditUnits]}`,
+      ]),
+    ),
+  )
+}
+
+describe('SSO audit limits (bound to the runtime constants)', () => {
+  it('documents exactly the audit writer constants with their units', () => {
+    expect(Object.keys(auditUnits).sort()).toEqual(Object.keys(SSO_AUDIT_LIMITS).sort())
+    assertAuditLimits(source)
+  })
+
+  it.each(Object.entries(SSO_AUDIT_LIMITS))(
+    'rejects a source-copy change to %s on either side',
+    (name, value) => {
+      const unit = auditUnits[name as keyof typeof auditUnits]
+      const row = `| \`${name}\` | ${value} | ${unit} |`
+      expect(source).toContain(row)
+      expect(() =>
+        assertAuditLimits(source.replace(row, `| \`${name}\` | ${value + 1} | ${unit} |`)),
+      ).toThrow()
+      expect(() =>
+        assertAuditLimits(source.replace(row, `| \`${name}\` | ${value} | requests |`)),
+      ).toThrow()
+      expect(() => assertAuditLimits(source, { ...SSO_AUDIT_LIMITS, [name]: value + 1 })).toThrow()
+      assertAuditLimits(source)
+    },
+  )
+
+  it('rejects a removed or duplicated audit limit row', () => {
+    const row = '| `ssoSecurityFailureEvents` | 20 | events |'
+    expect(() => assertAuditLimits(source.replace(row, ''))).toThrow()
+    expect(() => assertAuditLimits(source.replace(row, `${row}\n${row}`))).toThrow()
+    expect(() =>
+      assertAuditLimits(source.replace('### Audit limits\n', '### Other limits\n')),
+    ).toThrow()
+    assertAuditLimits(source)
   })
 })
 

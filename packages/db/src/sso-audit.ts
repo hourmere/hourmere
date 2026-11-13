@@ -1,0 +1,264 @@
+/**
+ * SSO audit actions and their detail allow-lists (docs/audit-log.md, "SSO actions"; docs/sso.md,
+ * "Fetching, credentials and audit"). No production code records them yet. Each later SSO step
+ * records the events of the changes it builds with `writeSsoAuditEvent` inside that change's
+ * transaction, and its security failures with `writeSsoSecurityFailure` (both in audit.ts).
+ * Migration 0085 checks the same keys and values in the database; sso-audit-binding.test.ts
+ * binds the two.
+ *
+ * Details hold only the protocol, a provider ID, a configuration revision, an outcome or reason
+ * code from a closed list, and a correlation ID. Provider and correlation IDs must be IDs the
+ * database generated (`uuidv7()`); the checks enforce only that shape, which refuses any secret,
+ * token, assertion, mailbox capability, address or IdP subject in another shape (OIDC subjects
+ * are often random version 4 GUIDs).
+ */
+
+/** Pinned in docs/sso.md, "Audit limits" (scripts/sso-doc-facts.test.ts). */
+export const SSO_AUDIT_LIMITS = Object.freeze({
+  /** Security-failure events recorded per provider and source within one window. */
+  ssoSecurityFailureEvents: 20,
+  /** The sliding window those events are counted in, in seconds. */
+  ssoSecurityFailureWindow: 3600,
+})
+
+export const SSO_AUDIT_METHODS = ['oidc', 'saml'] as const
+export type SsoAuditMethod = (typeof SSO_AUDIT_METHODS)[number]
+
+/** Safe reason codes. Anything else is recorded as `unclassified` or refused, never copied. */
+export const SSO_AUDIT_REASONS = [
+  // The attempt and the browser that started it.
+  'attempt_invalid',
+  'attempt_expired',
+  'browser_mismatch',
+  // The provider's answer. Its error description, body and claims are never recorded.
+  'provider_error',
+  'provider_unreachable',
+  'token_exchange_failed',
+  'response_malformed',
+  'signature_invalid',
+  'algorithm_refused',
+  'issuer_mismatch',
+  'audience_mismatch',
+  'destination_mismatch',
+  'nonce_mismatch',
+  'timing_invalid',
+  'subject_invalid',
+  'authentication_stale',
+  // Hourmere's own state.
+  'configuration_changed',
+  'provider_disabled',
+  'domain_unverified',
+  'mailbox_unproven',
+  'jit_disabled',
+  // The redaction of a code that is not listed.
+  'unclassified',
+] as const
+export type SsoAuditReason = (typeof SSO_AUDIT_REASONS)[number]
+
+export type SsoAuditDetailKey =
+  | 'method'
+  | 'providerId'
+  | 'revision'
+  | 'outcome'
+  | 'reason'
+  | 'correlationId'
+
+interface DetailSpec {
+  readonly required: readonly SsoAuditDetailKey[]
+  readonly optional: readonly SsoAuditDetailKey[]
+  readonly outcomes?: readonly string[]
+}
+
+/** A provider's configuration as it now stands: protocol, provider and its revision. */
+const providerChange = { required: ['method', 'providerId', 'revision'], optional: [] } as const
+/** An event about one provider: protocol and provider, plus revision and attempt when known. */
+const providerEvent = {
+  required: ['method', 'providerId'],
+  optional: ['revision', 'correlationId'],
+} as const
+/** A refusal: as a provider event, with a listed reason. */
+const providerRefusal = {
+  required: ['method', 'providerId', 'reason'],
+  optional: ['revision', 'correlationId'],
+} as const
+/** An enforcement policy change: the policy revision it produced. */
+const policyChange = { required: ['revision'], optional: [] } as const
+const empty = { required: [], optional: [] } as const
+
+export const ssoAuditDetails = {
+  // Providers.
+  'sso_provider.created': providerChange,
+  'sso_provider.updated': providerChange,
+  'sso_provider.tested': {
+    required: ['method', 'providerId', 'revision', 'outcome'],
+    optional: ['reason', 'correlationId'],
+    outcomes: ['passed', 'failed'],
+  },
+  'sso_provider.enabled': providerChange,
+  'sso_provider.disabled': providerChange,
+  'sso_provider.deleted': providerChange,
+  'sso_provider.secret_rotated': providerChange,
+  'sso_provider.certificate_rotated': providerChange,
+  // Domains. The domain is the target; its name and DNS challenge value are never details.
+  'sso_domain.challenged': empty,
+  'sso_domain.verified': empty,
+  'sso_domain.renewed': {
+    required: ['outcome'],
+    optional: [],
+    outcomes: ['passed', 'failed', 'unknown'],
+  },
+  'sso_domain.expired': empty,
+  'sso_domain.released': empty,
+  // Identity links.
+  'sso_link.linked': providerEvent,
+  'sso_link.unlinked': providerEvent,
+  'sso_link.conflicted': providerEvent,
+  // Sign-in and step-up ceremonies.
+  'sso_authentication.succeeded': providerEvent,
+  'sso_authentication.failed': providerRefusal,
+  'sso_authentication.replay_rejected': providerEvent,
+  // Just-in-time admission.
+  'sso_jit.admitted': providerEvent,
+  'sso_jit.refused': providerRefusal,
+  // Enforcement and delegated bindings.
+  'sso_enforcement.enabled': policyChange,
+  'sso_enforcement.disabled': policyChange,
+  'sso_enforcement.updated': policyChange,
+  'sso_delegation.bound': providerEvent,
+  'sso_delegation.revoked': providerEvent,
+  // Proofs.
+  'sso_proof.revoked': providerEvent,
+  // Recovery. A use names the mailbox ceremony's attempt, never its capability.
+  'sso_recovery.nominated': empty,
+  'sso_recovery.enrolled': empty,
+  'sso_recovery.used': { required: [], optional: ['correlationId'] },
+  // Operator maintenance commands.
+  'sso_maintenance.enforcement_disabled': policyChange,
+  'sso_maintenance.domain_retired': empty,
+  'sso_maintenance.key_rotated': providerChange,
+  // Member and SCIM suspension and reinstatement.
+  'sso_member.suspended': empty,
+  'sso_member.reinstated': empty,
+  'sso_member.scim_suspended': empty,
+  'sso_member.scim_reinstated': empty,
+} as const satisfies Record<string, DetailSpec>
+
+export type SsoAuditAction = keyof typeof ssoAuditDetails
+
+/**
+ * Security failures have no business transaction. They are written only by
+ * `writeSsoSecurityFailure`, in a short transaction of their own and bounded per provider and
+ * source; the source is the failure action.
+ */
+export const SSO_SECURITY_FAILURE_ACTIONS = [
+  'sso_authentication.failed',
+  'sso_authentication.replay_rejected',
+  'sso_jit.refused',
+  'sso_link.conflicted',
+] as const satisfies readonly SsoAuditAction[]
+export type SsoSecurityFailureAction = (typeof SSO_SECURITY_FAILURE_ACTIONS)[number]
+/** The actions that later steps record inside the transaction of the change they describe. */
+export type SsoChangeAction = Exclude<SsoAuditAction, SsoSecurityFailureAction>
+
+type Spec<A extends SsoAuditAction> = (typeof ssoAuditDetails)[A]
+interface DetailValues<A extends SsoAuditAction> {
+  method: SsoAuditMethod
+  providerId: string
+  revision: number
+  outcome: Spec<A> extends { outcomes: readonly (infer O)[] } ? O : never
+  reason: SsoAuditReason
+  correlationId: string
+}
+/** The details one SSO action takes: its required keys, and its optional keys when known. */
+export type SsoAuditDetails<A extends SsoAuditAction> = {
+  [K in Spec<A>['required'][number]]: DetailValues<A>[K]
+} & { [K in Spec<A>['optional'][number]]?: DetailValues<A>[K] }
+
+/** A lowercase UUIDv7, the shape of the provider and attempt IDs `uuidv7()` generates. */
+export const SSO_AUDIT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+/**
+ * An SSO event's target: the stored ID (a lowercase UUID) of the provider, domain, link, attempt,
+ * binding, team or member it concerns, never an IdP subject, an address or a name.
+ */
+export const SSO_AUDIT_TARGET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+/** The largest configuration revision: provider and policy revisions are `integer` columns. */
+export const SSO_AUDIT_MAX_REVISION = 2_147_483_647
+
+export const isSsoAuditAction = (action: unknown): action is SsoAuditAction =>
+  typeof action === 'string' && Object.hasOwn(ssoAuditDetails, action)
+export const isSsoSecurityFailureAction = (action: unknown): action is SsoSecurityFailureAction =>
+  (SSO_SECURITY_FAILURE_ACTIONS as readonly unknown[]).includes(action)
+
+const validValue: Record<SsoAuditDetailKey, (value: unknown, spec: DetailSpec) => boolean> = {
+  method: (value) => (SSO_AUDIT_METHODS as readonly unknown[]).includes(value),
+  providerId: (value) => typeof value === 'string' && SSO_AUDIT_ID.test(value),
+  revision: (value) =>
+    Number.isSafeInteger(value) &&
+    (value as number) >= 1 &&
+    (value as number) <= SSO_AUDIT_MAX_REVISION,
+  outcome: (value, spec) => (spec.outcomes ?? []).includes(value as string),
+  reason: (value) => (SSO_AUDIT_REASONS as readonly unknown[]).includes(value),
+  correlationId: (value) => typeof value === 'string' && SSO_AUDIT_ID.test(value),
+}
+
+/**
+ * Why `details` cannot be recorded for an SSO action: `keys` when a key is not allow-listed or a
+ * required key is missing, `values` when a value is not a safe one, otherwise null. It never
+ * echoes a key or value, which may be the very secret being refused.
+ */
+export function ssoAuditDetailsProblem(
+  action: SsoAuditAction,
+  details: unknown,
+): 'keys' | 'values' | null {
+  if (!isSsoAuditAction(action)) return 'keys'
+  if (typeof details !== 'object' || details === null || Array.isArray(details)) return 'keys'
+  const spec: DetailSpec = ssoAuditDetails[action]
+  const allowed: readonly string[] = [...spec.required, ...spec.optional]
+  const keys = Object.keys(details)
+  if (keys.some((key) => !allowed.includes(key))) return 'keys'
+  if (spec.required.some((key) => !Object.hasOwn(details, key))) return 'keys'
+  const values = details as Record<string, unknown>
+  if (keys.some((key) => !validValue[key as SsoAuditDetailKey](values[key], spec))) return 'values'
+  return null
+}
+
+export interface SsoSecurityFailureInput {
+  action: SsoSecurityFailureAction
+  /** The loaded provider's protocol, never one the request names. */
+  method: SsoAuditMethod
+  /** The loaded provider's ID, never one taken from the request path or body. */
+  providerId: string
+  /** The provider revision the loaded attempt was bound to; left out unless a valid revision. */
+  revision?: number
+  /** A failure code from any source; recorded only when listed, otherwise `unclassified`. */
+  reason?: unknown
+  /** The loaded attempt's ID; left out unless it has the shape of one (a UUIDv7). */
+  correlationId?: string
+}
+
+/**
+ * The details a security failure records. The protocol and provider must be valid. The reason
+ * may come from a verifier, a library or the provider's answer, and the revision and attempt ID
+ * describe an attempt that just failed, so these are redacted rather than refused: an unlisted
+ * reason becomes `unclassified`, and a revision or correlation ID that is not a valid value is
+ * left out. A reason is recorded only for the failures whose action takes one.
+ */
+export function redactSsoSecurityFailure(
+  failure: SsoSecurityFailureInput,
+): Record<string, string | number> {
+  if (!isSsoSecurityFailureAction(failure.action))
+    throw new Error('Audit details are not allow-listed for this action')
+  const spec: DetailSpec = ssoAuditDetails[failure.action]
+  const details: Record<string, string | number> = {
+    method: failure.method,
+    providerId: failure.providerId,
+  }
+  if (validValue.revision(failure.revision, spec)) details.revision = failure.revision as number
+  if (spec.required.includes('reason'))
+    details.reason = validValue.reason(failure.reason, spec)
+      ? (failure.reason as SsoAuditReason)
+      : 'unclassified'
+  if (validValue.correlationId(failure.correlationId, spec))
+    details.correlationId = failure.correlationId as string
+  return details
+}
