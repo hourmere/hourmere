@@ -147,6 +147,7 @@ const restContract = {
     'PATCH /api/v1/webhooks/{id}',
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
+  diagnostic_read: ['GET /api/v1/event-types/{id}/availability-troubleshooting'],
   public_metadata: ['GET /api/v1/instance', 'GET /api/v1/openapi.json'],
 } as const
 
@@ -156,6 +157,7 @@ const allowedClasses: Record<ApiKeyScope, readonly string[]> = {
     'booking_write',
     'other_read',
     'other_write',
+    'diagnostic_read',
     'session_only',
     'public_metadata',
   ],
@@ -362,6 +364,7 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'troubleshoot_availability',
         'get_branding',
         'set_branding',
         'save_schedule_availability',
@@ -761,5 +764,45 @@ describe('branding scope source-copy protections', () => {
     expect(() => verify(sourceCopyRegistry([before, after]))).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+})
+
+describe('availability troubleshooting scope source-copy protections', () => {
+  const ids = [
+    'GET /api/v1/event-types/{id}/availability-troubleshooting',
+    'mcp:troubleshoot_availability',
+    'cli:troubleshoot-availability',
+  ]
+  function verify(allows: Allows) {
+    for (const id of ids) {
+      expect(allows({ kind: 'api_key', apiKeyScope: 'full' }, id), id).toBe(true)
+      expect(allows({ kind: 'api_key', apiKeyScope: 'read' }, id), id).toBe(false)
+      expect(allows({ kind: 'api_key', apiKeyScope: 'bookings' }, id), id).toBe(false)
+    }
+  }
+
+  it('keeps read-only diagnostics full-scope only', () => verify(apiKeyAllows))
+
+  it.each([
+    [
+      "rest('GET', '/api/v1/event-types/{id}/availability-troubleshooting', 'diagnostic_read', 'key')",
+      "rest('GET', '/api/v1/event-types/{id}/availability-troubleshooting', 'other_read', 'key')",
+    ],
+    [
+      "mcp('troubleshoot_availability', 'diagnostic_read'",
+      "mcp('troubleshoot_availability', 'booking_read'",
+    ],
+    [
+      "cli('troubleshoot-availability', 'troubleshoot_availability')",
+      "cli('troubleshoot-availability', 'whoami')",
+    ],
+    [
+      "  diagnostic_read: Object.freeze(['full'] as const),",
+      "  diagnostic_read: Object.freeze(['full', 'read'] as const),",
+    ],
+  ] as const)('kills broadened diagnostics: %s', (before, after) => {
+    const mutant = sourceCopyPolicy(undefined, sourceCopyRegistry([before, after]))
+    expect(() => verify(mutant)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    verify(sourceCopyPolicy(undefined, sourceCopyRegistry()))
   })
 })

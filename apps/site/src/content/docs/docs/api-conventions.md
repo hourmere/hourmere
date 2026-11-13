@@ -6,6 +6,8 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## Attendance API compatibility
+
 ### Webhook event compatibility
 
 `booking.attendee_no_show_changed` extends the webhook subscription `events` and delivery
@@ -364,6 +366,14 @@ capability, reserving a time or changing configuration. The shared service also 
 MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
 [request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
 for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
+
+`GET /api/v1/event-types/{id}/availability-troubleshooting` is a read-only diagnostic that
+only `full` keys may call (operation group "Availability diagnostics"), with personal-owner or
+team-owner/admin permission. Repeated explanations can reveal when a host is busy, so `read`
+and `bookings` keys get `403 insufficient_scope`. The shared service also serves MCP
+`troubleshoot_availability` and CLI `troubleshoot-availability`. Its reason `code` is an open
+string: new codes may be added within `/api/v1`, and clients must show unknown codes neutrally.
+See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
 
 Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
 `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.

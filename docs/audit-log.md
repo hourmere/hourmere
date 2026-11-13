@@ -48,6 +48,8 @@ asynchronous queue or best-effort fallback. Native credential and session operat
 also enumerate and lock their affected rows before mutation so concurrent revocations
 cannot invent events or omit targets beyond a pagination boundary; bulk operations
 therefore incur these snapshot reads and one audit INSERT per affected entity.
+The one exception is the bounded SSO security-failure writer, which has no business
+transaction and may drop failures past its bound (see [SSO actions](#sso-actions)).
 
 ## Stable actions and detail allow-lists
 
@@ -65,7 +67,8 @@ stored ID, a lowercase UUID) and `noShow` (`marked` or `unmarked`); the database
 both values. Every other action, including the SCIM provisioning token and User actions,
 requires an empty object. No key or token names, webhook or Slack URLs, secrets,
 images, logo hashes, colours, attendee names, email addresses or free text are
-recorded. New detail keys require deliberate schema and documentation review.
+recorded. New detail keys require deliberate schema and documentation review. The
+[SSO actions](#sso-actions) have their own allow-lists and value checks.
 
 | Area | Actions |
 | --- | --- |
@@ -73,7 +76,7 @@ recorded. New detail keys require deliberate schema and documentation review.
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
-| SCIM Users | `scim_user.created` |
+| SCIM Users | `scim_user.created`, `scim_user.claimed` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
@@ -179,10 +182,79 @@ name or other attribute value is recorded. The invitation it issues records
 creates the entry, its claim and the invitation, so a create that fails or is refused records
 nothing.
 
+Accepting the invitation of a SCIM User's pending claim (which production does not wire yet)
+completes the claim and records `scim_user.claimed` on the resource ID, beside the usual
+`membership.accepted`, both attributed to the accepting person's session, with empty details.
+They are written in the acceptance transaction, with the new membership and the link, so a
+refused or failed acceptance records neither. An acceptance that admits without completing a
+claim (an expired claim, or a claim without an invitation) records only `membership.accepted`.
+
 An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity by its stored ID, whatever UUID
 spelling the request used; removal events preserve those IDs after the entity
 disappears.
+
+## SSO actions
+
+The [organization SSO](sso.md) actions are defined, with their detail allow-lists in the
+application (`packages/db/src/sso-audit.ts`) and in the database check (migration 0085), but
+nothing records them yet: no SSO write path exists, and both protocols are off. Each later
+SSO step records the events of the changes it builds with `writeSsoAuditEvent`, inside the
+transaction of that change, so the event and the change commit or roll back together, and its
+security failures with `writeSsoSecurityFailure`. The existing actions above are unchanged.
+
+Details hold only these keys, each with a checked value:
+
+- `method`: the protocol, `oidc` or `saml`;
+- `providerId`: the provider's ID;
+- `revision`: a configuration revision from 1 to 2147483647, the provider's revision, or the
+  policy revision for enforcement changes;
+- `outcome`: the result of a provider test or a domain renewal check;
+- `reason`: a reason code from the list below;
+- `correlationId`: the ID of the SSO attempt (sign-in, test, link or mailbox ceremony).
+
+Provider and attempt IDs must be IDs the database generated (lowercase UUIDv7 values). The
+checks enforce that shape, so a secret, a token, an assertion, a mailbox capability, an address
+or an IdP subject in any other shape is refused in their place; they cannot tell a stored ID
+from another value of the same shape, so writers pass the IDs of the rows they loaded. Extra
+keys, missing required keys and any other value fail in the application and in the database.
+The application also requires the target to be a stored ID (a lowercase UUID) with a type
+name, and a user, API key or system actor to be a stored ID or a service name. No issuer,
+client ID, domain name, DNS challenge, email address, subject, provider error text or request
+body is recorded.
+
+| Actions | Required | Optional | Outcomes |
+| --- | --- | --- | --- |
+| `sso_provider.created`, `sso_provider.updated`, `sso_provider.enabled`, `sso_provider.disabled`, `sso_provider.deleted`, `sso_provider.secret_rotated`, `sso_provider.certificate_rotated`, `sso_maintenance.key_rotated` | `method`, `providerId`, `revision` | | |
+| `sso_provider.tested` | `method`, `providerId`, `revision`, `outcome` | `reason`, `correlationId` | `passed`, `failed` |
+| `sso_domain.renewed` | `outcome` | | `passed`, `failed`, `unknown` |
+| `sso_link.linked`, `sso_link.unlinked`, `sso_link.conflicted`, `sso_authentication.succeeded`, `sso_authentication.replay_rejected`, `sso_jit.admitted`, `sso_delegation.bound`, `sso_delegation.revoked`, `sso_proof.revoked` | `method`, `providerId` | `revision`, `correlationId` | |
+| `sso_authentication.failed`, `sso_jit.refused` | `method`, `providerId`, `reason` | `revision`, `correlationId` | |
+| `sso_enforcement.enabled`, `sso_enforcement.disabled`, `sso_enforcement.updated`, `sso_maintenance.enforcement_disabled` | `revision` | | |
+| `sso_recovery.used` | | `correlationId` | |
+| `sso_domain.challenged`, `sso_domain.verified`, `sso_domain.expired`, `sso_domain.released`, `sso_maintenance.domain_retired`, `sso_recovery.nominated`, `sso_recovery.enrolled`, `sso_member.suspended`, `sso_member.reinstated`, `sso_member.scim_suspended`, `sso_member.scim_reinstated` | | | |
+
+Reason codes: `attempt_invalid`, `attempt_expired`, `browser_mismatch`, `provider_error`,
+`provider_unreachable`, `token_exchange_failed`, `response_malformed`, `signature_invalid`,
+`algorithm_refused`, `issuer_mismatch`, `audience_mismatch`, `destination_mismatch`,
+`nonce_mismatch`, `timing_invalid`, `subject_invalid`, `authentication_stale`,
+`configuration_changed`, `provider_disabled`, `domain_unverified`, `mailbox_unproven`,
+`jit_disabled`, `unclassified`.
+
+Security failures (`sso_authentication.failed`, `sso_authentication.replay_rejected`,
+`sso_jit.refused` and `sso_link.conflicted`) have no business transaction, so
+`writeSsoSecurityFailure` writes each in a short transaction of its own, with the provider as
+target, once the request's own transaction has settled, never inside it; the request's
+rollback does not remove it, and the change writer refuses these actions. The actor is
+anonymous, an external user or the signed-in user, with no credential or that user's session.
+Their details are redacted: a reason that is not on the list, such as a provider error, is
+recorded as `unclassified`, and a revision or correlation ID that is not a valid value is left
+out. At most 20 failures are recorded per provider and source (the failure action) in any 3,600
+seconds ([Audit limits](sso.md#audit-limits)); later failures in that window are dropped, so
+failed attempts cannot flood the journal. The tradeoff is that junk failures can fill a window
+and hide later failures of the same source until it slides; the writer reports each drop to
+its caller. When later steps emit them, SSO sign-ins and these bounded failures are the
+exception to the access-log exclusion under [Not recorded](#not-recorded).
 
 ## Privacy, append-only behavior, and exclusions
 
@@ -232,4 +304,6 @@ operator database changes.
 This is a management journal, not an access log: reads (including CSV booking
 exports), failed attempts, ordinary sign-ins and session refreshes, third-party
 provider internals, email contents, and database changes made directly by an operator
-are not recorded. Existing booking provenance columns remain intact.
+are not recorded. Existing booking provenance columns remain intact. Once later SSO steps
+emit them, SSO sign-ins and bounded SSO security failures are the exception
+([SSO actions](#sso-actions)); today nothing records them.

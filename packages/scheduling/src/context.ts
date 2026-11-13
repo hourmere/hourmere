@@ -24,10 +24,6 @@ export type BookingEvent =
  */
 export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Instant) => Promise<void>
 
-/**
- * What a service function receives for an authenticated call. REST routes and MCP tools
- * build it the same way, so people and agents get exactly the same behavior.
- */
 export type AttendeeNoShowNotifier = (
   trx: Db,
   event: {
@@ -39,6 +35,10 @@ export type AttendeeNoShowNotifier = (
   now: Temporal.Instant,
 ) => Promise<void>
 
+/**
+ * What a service function receives for an authenticated call. REST routes and MCP tools
+ * build it the same way, so people and agents get exactly the same behavior.
+ */
 export interface ServiceContext {
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   db: Db

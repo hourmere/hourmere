@@ -624,13 +624,19 @@ the profile, so today it routes nothing. Each of at most 32 entries is one exact
 IP entry must be RFC1918, loopback or IPv6 unique-local space, never metadata or
 link-local. A request URL's exact host and port must match an entry, so a different port,
 or another name that resolves to the same address, does not. The operator trusts that
-exact target, so its DNS answers may be of either kind: every answer eligible private or
-loopback space, or every answer public. The second is how a public IdP on a non-default
-port, such as `https://idp.example.com:8443`, is reached. Answers that mix the two, or that
-include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts that
-are not listed keep the default rules above: public answers only, on the default port only,
-and no private routing. HTTPS stays required, and a listed target is fetched like any other:
-the validated address is pinned to the socket and TLS verifies the original hostname.
+exact target, so every DNS answer may be eligible private or loopback space. A listed name
+with public syntax, a dotted DNS name without a special-use suffix, may instead have every
+answer public: that is how a public IdP on a non-default port, such as
+`https://idp.example.com:8443`, is reached. A listed name without public syntax, a single
+label such as `keycloak` or a name under `.local`, `.internal`, `.localhost`, `.home.arpa`,
+`.test`, `.example`, `.invalid` or `.onion`, accepts only private or loopback answers. If a
+search domain, wildcard DNS or NXDOMAIN rewriting expands such a name to a public address,
+the request is therefore refused before any connection opens. Answers that mix the two, or
+that include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts
+that are not listed keep the default rules above: public answers only, on the default port
+only, and no private routing. HTTPS stays required, and a listed target is fetched like any
+other: the validated address is pinned to the socket and TLS verifies the original
+hostname.
 Loopback HTTP is allowed only for an explicitly configured local trial: the profile's
 separate trial input, which no production caller passes and no setting enables yet, admits
 plain HTTP only to a listed `localhost` or loopback literal whose every answer is loopback.
@@ -675,12 +681,23 @@ with a bounded count per provider and source so failed attempts cannot flood the
 journal. The journal is local to the instance database, so emergency recovery never
 waits for a third-party audit sink.
 
+The Audit actions step built this vocabulary and records nothing itself: the
+[SSO actions](audit-log.md#sso-actions) are defined in `packages/db/src/sso-audit.ts`
+and checked by migration 0085, and no production code emits one yet. Later steps call
+`writeSsoAuditEvent` inside the transaction of the change they record, so a rollback removes
+the event with the change, and `writeSsoSecurityFailure` for a security failure. The
+provider and correlation IDs must be stored provider and attempt IDs (UUIDv7); the checks
+enforce that shape, which refuses a secret, a token, an assertion, a mailbox capability or an
+IdP subject of any other shape. The source of a security failure is its action: a failed
+sign-in, a rejected replay, a JIT refusal or a link conflict. Audit limits below pins the
+bound.
+
 ## Pinned operational limits
 
 These are initial design commitments, not current runtime settings. The doc-fact test
 pins this table; implementation must import its eventual constants into that test.
-The SSO transport limits are runtime constants already and have their own table below.
-Other resource limits must be selected with fixtures before their release.
+The SSO transport and audit limits are runtime constants already and have their own
+tables below. Other resource limits must be selected with fixtures before their release.
 
 | Limit | Value | Unit |
 |---|---:|---|
@@ -727,6 +744,29 @@ setting step, the constants and this table change together.
 response headers and the entire decoded body. `ssoMaximumResponseBytes` bounds the bytes on
 the wire and, separately, the decoded bytes. The concurrency limits count in-flight requests
 per server process, in total and per origin (scheme, host and port).
+
+### Audit limits
+
+The Audit actions step chose the bound on security-failure events. The values are the runtime
+constants `SSO_AUDIT_LIMITS` in `packages/db/src/sso-audit.ts`, which the doc-fact test
+imports to pin this table.
+
+| Limit | Value | Unit |
+|---|---:|---|
+| `ssoSecurityFailureEvents` | 20 | events |
+| `ssoSecurityFailureWindow` | 3600 | seconds |
+
+`writeSsoSecurityFailure` records a failure only while fewer than `ssoSecurityFailureEvents`
+failures of the same provider and source were recorded in the last `ssoSecurityFailureWindow`
+seconds, by the database clock; it drops the rest and reports that it did. With four sources, one
+provider records at most 80 failures an hour, however many attempts fail. A transaction-level
+advisory lock per provider and source serializes the count and the insert, so a burst of
+parallel failures cannot exceed the bound, and a failure already past the bound is dropped from
+an unlocked count without waiting for that lock. Callers write a failure after the request's
+own transaction has settled, with the team, provider and protocol of the provider they loaded.
+A provider's successes and changes are never dropped: only security failures are bounded. The
+cost is that junk failures can fill a window and hide later failures of the same source until
+the window slides.
 
 ## Proposed REST, MCP and CLI contracts
 
@@ -975,7 +1015,9 @@ Known compatibility limitations:
   only through its exact `SSO_PRIVATE_TARGETS` entry, and still requires HTTPS: the
   setting permits that routing, not plaintext transport. `http://keycloak:8080` on a
   compose network is refused; only the separately acknowledged loopback trial exception
-  permits HTTP.
+  permits HTTP. Only an entry with a public DNS name may resolve publicly; a listed
+  single-label or special-use name such as `keycloak:8443` or `idp.internal:8443` must
+  resolve to private or loopback addresses.
 
 Register the exact OIDC callback above in the IdP (no wildcard), and for SAML register
 the exact ACS and the stable entity ID published by the SP metadata endpoint. Derive

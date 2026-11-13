@@ -375,8 +375,8 @@ export interface BookingRoutesDeps {
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
-  /** Queues the booking emails in the transaction of each change; none are sent without it. */
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
+  /** Queues the booking emails in the transaction of each change; none are sent without it. */
   notify?: BookingNotifier | undefined
   /** Replaces PUBLIC_RATE_LIMITS.manage (and .slots for the reschedule slots), e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>

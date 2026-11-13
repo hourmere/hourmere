@@ -266,6 +266,11 @@ describe.skipIf(!serverUrl)('private attendee no-show', () => {
       .executeTakeFirstOrThrow()
     expect(row.status).toBe('confirmed')
     expect(row.payment_confirmed_at).toBeInstanceOf(Date)
+    expect((await getHostBooking(paid.ctx, paid.bookingId)).canManageNoShow).toBe(false)
+    expect(
+      (await listHostBookings(paid.ctx)).data.find((booking) => booking.id === paid.bookingId)
+        ?.canManageNoShow,
+    ).toBe(false)
     expect(
       (await listBookingAttendeeNoShows(paid.ctx, paid.bookingId)).map((attendee) => attendee.id),
     ).toContain(paid.attendeeId)

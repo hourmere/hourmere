@@ -428,6 +428,24 @@ export async function putScheduleOverride(
   return ctx.db.transaction().execute(async (trx) => {
     await lockSchedulesOf(trx, ctx.principal.user.id)
     const schedule = await ownSchedule(trx, ctx, scheduleId)
+    const existing = await trx
+      .selectFrom('schedule_overrides')
+      .select('date')
+      .where('schedule_id', '=', schedule.id)
+      .where('date', '=', day)
+      .executeTakeFirst()
+    // The shared writer lock keeps concurrent inserts from both taking the last slot.
+    // Replacing an existing date remains possible even for older oversized schedules.
+    if (!existing) {
+      const { count } = await trx
+        .selectFrom('schedule_overrides')
+        .select((eb) => eb.fn.countAll<string>().as('count'))
+        .where('schedule_id', '=', schedule.id)
+        .executeTakeFirstOrThrow()
+      if (Number(count) >= MAX_SCHEDULE_OVERRIDES) {
+        throw new DomainError('invalid', 'too_many_overrides')
+      }
+    }
     const row = await trx
       .insertInto('schedule_overrides')
       .values({ schedule_id: schedule.id, date: day, intervals: hours })

@@ -12,6 +12,7 @@ import {
   SsoTransportError,
   sendSsoRequest,
   ssoAnswersPermitted,
+  ssoPublicName,
   ssoUrl,
 } from './sso.ts'
 import { parseSsoPrivateTargets, type SsoPrivateTarget } from './sso-private-targets.ts'
@@ -699,6 +700,121 @@ describe('an operator-listed IdP served publicly on a non-default port', () => {
   })
 })
 
+// A search domain or wildcard DNS can expand the name of a missing internal service to a
+// public host. Only a listed name with public syntax may resolve publicly.
+describe('a listed name without public syntax', () => {
+  const listed = parseSsoPrivateTargets('keycloak:8443,idp.internal:8443,localhost:8443')
+  const hosts = ['keycloak', 'idp.internal', 'localhost']
+  const request = (host: string) => ({
+    url: `https://${host}:8443/realms/a/.well-known/openid-configuration`,
+    privateTargets: listed,
+  })
+
+  it.each(
+    hosts.flatMap((host) =>
+      [['8.8.8.8'], ['2606:4700:4700::1111'], ['1.1.1.1', '8.8.8.8']].map(
+        (addresses) => [host, addresses] as const,
+      ),
+    ),
+  )(
+    'refuses the listed %s:8443 resolving to public %j before any socket',
+    async (host, addresses) => {
+      network.lookup.mockResolvedValue(addresses.map(answer))
+      respond(network.request)
+      expect(ssoUrl(request(host).url, listed)).toBeDefined()
+      expect(await refusal(sendSsoRequest(request(host)))).toBe('destination_refused')
+      expect(network.lookup).toHaveBeenCalledExactlyOnceWith(host, { all: true, verbatim: true })
+      expect(network.request).not.toHaveBeenCalled()
+      expect(network.httpRequest).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each(
+    hosts.flatMap((host) =>
+      [['10.0.0.5'], ['127.0.0.1'], ['fd12::5', '::1']].map(
+        (addresses) => [host, addresses] as const,
+      ),
+    ),
+  )('still reaches the listed %s:8443 resolving to private %j, pinned', async (host, addresses) => {
+    network.lookup.mockResolvedValue(addresses.map(answer))
+    respond(network.request)
+    expect((await sendSsoRequest(request(host))).status).toBe(200)
+    const [target, options] = network.request.mock.calls[0] ?? []
+    expect(target.href).toBe(request(host).url)
+    const first = answer(addresses[0] ?? '')
+    expect(options).toMatchObject({ servername: host, rejectUnauthorized: true })
+    const pinned = vi.fn()
+    options.lookup(host, {}, pinned)
+    expect(pinned).toHaveBeenCalledExactlyOnceWith(null, first.address, first.family)
+  })
+
+  it.each(hosts)('refuses the listed %s:8443 resolving to a mix', async (host) => {
+    respond(network.request)
+    for (const addresses of [
+      ['10.0.0.5', '8.8.8.8'],
+      ['8.8.8.8', '127.0.0.1'],
+      ['fd12::5', '2606:4700:4700::1111'],
+    ]) {
+      network.lookup.mockResolvedValue(addresses.map(answer))
+      expect(await refusal(sendSsoRequest(request(host)))).toBe('destination_refused')
+    }
+    expect(network.lookup).toHaveBeenCalledTimes(3)
+    expect(network.request).not.toHaveBeenCalled()
+  })
+
+  it('refuses a listed special-use name on the default port resolving publicly', async () => {
+    const privateTargets = parseSsoPrivateTargets('idp.internal:443,keycloak:443')
+    network.lookup.mockResolvedValue([answer('8.8.8.8')])
+    respond(network.request)
+    for (const url of ['https://idp.internal/', 'https://keycloak/'])
+      expect(await refusal(sendSsoRequest({ url, privateTargets }))).toBe('destination_refused')
+    network.lookup.mockResolvedValue([answer('10.0.0.5')])
+    for (const url of ['https://idp.internal/', 'https://keycloak/'])
+      expect((await sendSsoRequest({ url, privateTargets })).status).toBe(200)
+    expect(network.request).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('SSO public name syntax', () => {
+  it.each([
+    'https://idp.example.com/',
+    'https://idp.example.com:8443/',
+    'http://idp.example.com:8443/',
+    'https://IDP.Example.COM:8443/',
+    'https://sso.internal.example.com:8443/',
+    'https://local.example.net:8443/',
+    'https://idp.localhost.example.org:8443/',
+    'https://home.arpa.example.com:8443/',
+    'https://idp.home-arpa.com:8443/',
+  ])('treats %s as a public name', (url) => {
+    expect(ssoPublicName(new URL(url))).toBe(true)
+  })
+
+  it.each([
+    'https://keycloak:8443/',
+    'https://localhost:8443/',
+    'https://idp.localhost:8443/',
+    'https://idp.local:8443/',
+    'https://idp.internal:8443/',
+    'https://internal:8443/',
+    'https://idp.test:8443/',
+    'https://idp.example:8443/',
+    'https://idp.invalid:8443/',
+    'https://xyz.onion:8443/',
+    'https://home.arpa:8443/',
+    'https://idp.home.arpa:8443/',
+    'https://IDP.HOME.ARPA:8443/',
+    'https://sso.idp.home.arpa/',
+    'https://idp.internal/',
+    'https://keycloak/',
+    'https://10.0.0.5:8443/',
+    'https://127.0.0.1:8443/',
+    'https://[fd12::5]:8443/',
+  ])('treats %s as a name without public syntax', (url) => {
+    expect(ssoPublicName(new URL(url))).toBe(false)
+  })
+})
+
 // The answer policy checks the answers again after ssoUrl, so each rule is checked here
 // directly as well, including URLs that ssoUrl already refuses.
 describe('SSO answer policy', () => {
@@ -765,6 +881,43 @@ describe('SSO answer policy', () => {
       listedPublic,
       ['::ffff:8.8.8.8'],
       false,
+    ],
+    ...[
+      ['a listed single-label', 'keycloak'],
+      ['a listed .internal', 'idp.internal'],
+      ['a listed localhost', 'localhost'],
+      ['a listed .local', 'idp.local'],
+      ['a listed .localhost', 'idp.localhost'],
+      ['a listed .home.arpa', 'idp.home.arpa'],
+      ['a listed .test', 'idp.test'],
+      ['a listed .example', 'idp.example'],
+      ['a listed .invalid', 'idp.invalid'],
+    ].flatMap(
+      ([kind, host]): [string, string, readonly SsoPrivateTarget[], string[], boolean][] => {
+        const targets = parseSsoPrivateTargets(`${host}:8443`)
+        const url = `https://${host}:8443/`
+        return [
+          [`${kind} host:port, public answers`, url, targets, ['8.8.8.8'], false],
+          [`${kind} host:port, public IPv6 answers`, url, targets, ['2606:4700:4700::1111'], false],
+          [`${kind} host:port, private answers`, url, targets, ['10.0.0.5', 'fd12::5'], true],
+          [`${kind} host:port, loopback answers`, url, targets, ['127.0.0.1', '::1'], true],
+          [`${kind} host:port, mixed answers`, url, targets, ['10.0.0.5', '8.8.8.8'], false],
+        ]
+      },
+    ),
+    [
+      'a listed special-use name on the default port, public answers',
+      'https://idp.internal/',
+      parseSsoPrivateTargets('idp.internal:443'),
+      ['8.8.8.8'],
+      false,
+    ],
+    [
+      'a listed public-syntax name with a special-use label inside, public answers',
+      'https://sso.internal.example.com:8443/',
+      parseSsoPrivateTargets('sso.internal.example.com:8443'),
+      ['8.8.8.8'],
+      true,
     ],
     [
       'listed plain HTTP, public answers',
