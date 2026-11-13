@@ -57,7 +57,7 @@ includes PostgreSQL 18.
 | `WEBHOOKS_ENABLED` | `false` | Capture and deliver organization booking events for outbound HTTPS webhooks and Slack. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled or to configure [Slack notifications](/docs/slack). Encrypts signing secrets and Slack URLs; keep stable and backed up. Slack capture and delivery also require `WEBHOOKS_ENABLED=true`. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
-| `SSO_PRIVATE_TARGETS` | Unset | Reserved for organization SSO, which is not available yet: validated at startup and otherwise unused. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for identity providers on a private network or on a port other than 443. HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`; see [private identity providers](#private-identity-providers). |
+| `SSO_PRIVATE_TARGETS` | Unset | Reserved for organization SSO, which is not available yet: validated at startup and otherwise unused. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for identity providers on a private network, or public ones on a port other than 443 listed by their public DNS name. HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`; see [private identity providers](#private-identity-providers). |
 | `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
@@ -151,12 +151,17 @@ unique-local space; link-local, metadata, IPv4-mapped and public addresses are r
 startup, with the same rules as private webhook receivers. Only that exact host and port
 match: a different port, or another hostname that resolves to the same address, does not.
 When SSO uses an entry, the host's DNS answers are checked again on every request. They
-must all be eligible private or loopback space, or all be public. The second is how a
+must all be eligible private or loopback space. An entry whose hostname has public syntax,
+a dotted name without a special-use suffix, may instead have them all public. That is how a
 public identity provider on a non-default port, such as `idp.example.com:8443`, is reached;
-list it by hostname, since public IP entries are refused. Answers that mix the two, or
-include metadata, link-local or other reserved addresses, are refused, and the checked
-address is pinned to the socket. A hostname that is not listed keeps the default rules:
-public addresses only, on port 443 only.
+list it by hostname, since public IP entries are refused. A single-label entry such as
+`keycloak:8443` or `localhost:8443`, or one under `.local`, `.internal`, `.localhost`,
+`.home.arpa`, `.test`, `.example`, `.invalid` or `.onion` such as `idp.internal:8443`,
+accepts only private or loopback answers. So if a search domain or wildcard DNS expands
+such a name to a public address, the request is refused before any connection. Answers that
+mix the two, or include metadata, link-local or other reserved addresses, are refused, and
+the checked address is pinned to the socket. A hostname that is not listed keeps the
+default rules: public addresses only, on port 443 only.
 
 The setting permits these exact destinations, not plain HTTP: identity providers still need
 HTTPS with a certificate for their hostname that the server process trusts, and

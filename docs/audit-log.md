@@ -73,7 +73,7 @@ recorded. New detail keys require deliberate schema and documentation review.
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
-| SCIM Users | `scim_user.created` |
+| SCIM Users | `scim_user.created`, `scim_user.claimed` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
@@ -178,6 +178,13 @@ name or other attribute value is recorded. The invitation it issues records
 `scim_user.created`. Both are written in the transaction that
 creates the entry, its claim and the invitation, so a create that fails or is refused records
 nothing.
+
+Accepting the invitation of a SCIM User's pending claim (which production does not wire yet)
+completes the claim and records `scim_user.claimed` on the resource ID, beside the usual
+`membership.accepted`, both attributed to the accepting person's session, with empty details.
+They are written in the acceptance transaction, with the new membership and the link, so a
+refused or failed acceptance records neither. An acceptance that admits without completing a
+claim (an expired claim, or a claim without an invitation) records only `membership.accepted`.
 
 An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity by its stored ID, whatever UUID

@@ -12,7 +12,7 @@ import {
   reserveInvitationEmailBudget,
 } from '@hourmere/notifications'
 import { type KyselyPlugin, sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { manageInvitation } from '../../../packages/auth/src/invitations.ts'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
@@ -1584,7 +1584,123 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     }
   }
 
+  /**
+   * The address's pending invitation expires while the create waits for its delivery row (the
+   * inviting owner's invitation sent from the app), for the mail budget (the owner's legacy
+   * invitation without a delivery) or for another administrator's invitation's delivery row.
+   * Admission runs once more: the expired invitation is retired and the claim gets a new
+   * invitation and its email, never a claim without one.
+   */
+  async function verifyExpiryRace(create: Create) {
+    for (const variant of ['delivery', 'budget', 'administrator'] as const) {
+      const organization = await team()
+      const { post } = await httpClient(create, organization)
+      const address = `expiring-${variant}-${unique()}@example.com`
+      const pending =
+        variant === 'budget'
+          ? (
+              await db
+                .insertInto('auth.invitation')
+                .values({
+                  organizationId: organization.id,
+                  inviterId: organization.people.owner,
+                  email: address,
+                  role: 'member',
+                  status: 'pending',
+                  expiresAt: new Date(Date.now() + 3_600_000),
+                })
+                .returning('id')
+                .executeTakeFirstOrThrow()
+            ).id
+          : (
+              await native(
+                variant === 'delivery' ? organization.people.owner : organization.people.admin,
+                await session(
+                  variant === 'delivery' ? organization.people.owner : organization.people.admin,
+                  organization.id,
+                ),
+                organization.id,
+                address,
+              )
+            ).id
+      const holder = await owned.pool.connect()
+      let answer: ReturnType<typeof post> | undefined
+      try {
+        await holder.query('BEGIN')
+        if (variant === 'budget')
+          await holder.query('SELECT pg_advisory_xact_lock(1852798057, 1835100524)')
+        else
+          await holder.query(
+            'SELECT 1 FROM invitation_deliveries WHERE invitation_id = $1 FOR UPDATE',
+            [pending],
+          )
+        const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+          ?.pid as number
+        // Expires by the database clock while the create waits for the held lock.
+        const { expiresAt } = await db
+          .updateTable('auth.invitation')
+          .set({ expiresAt: sql<Date>`clock_timestamp() + interval '2 seconds'` })
+          .where('id', '=', pending)
+          .returning('expiresAt')
+          .executeTakeFirstOrThrow()
+        answer = post(user(`expiring-${unique()}`, work(address)))
+        await vi.waitFor(
+          async () => {
+            const { rows } = await holder.query<{ n: number }>(
+              `SELECT count(*)::int AS n FROM pg_stat_activity
+                WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
+              [pid],
+            )
+            expect(rows[0]?.n).toBeGreaterThan(0)
+          },
+          { timeout: 10_000, interval: 20 },
+        )
+        await vi.waitFor(
+          async () => {
+            const { rows } = await holder.query<{ lapsed: boolean }>(
+              'SELECT clock_timestamp() > $1 AS lapsed',
+              [expiresAt],
+            )
+            expect(rows[0]?.lapsed).toBe(true)
+          },
+          { timeout: 10_000, interval: 50 },
+        )
+        await holder.query('COMMIT')
+      } finally {
+        await holder.query('ROLLBACK')
+        holder.release()
+      }
+      const created = await answer
+      expect(created?.status, variant).toBe(201)
+      const invitations = await db
+        .selectFrom('auth.invitation')
+        .selectAll()
+        .where('organizationId', '=', organization.id)
+        .execute()
+      expect(invitations.find((row) => row.id === pending)?.status, variant).toBe('canceled')
+      const fresh = invitations.filter((row) => row.id !== pending)
+      expect(fresh, variant).toEqual([
+        expect.objectContaining({
+          email: address,
+          status: 'pending',
+          role: 'member',
+          inviterId: organization.people.owner,
+        }),
+      ])
+      const issued = fresh[0] as (typeof fresh)[number]
+      const claim = await db
+        .selectFrom('scim_user_claims')
+        .selectAll()
+        .where('scim_user_id', '=', created?.body?.id as string)
+        .executeTakeFirstOrThrow()
+      expect(claim.invitation_id, variant).toBe(issued.id)
+      expect(claim.expires_at).toEqual(issued.expiresAt)
+      expect(enqueued, variant).toContainEqual({ invitationId: issued.id, generation: 1 })
+    }
+  }
+
   const verifiers = {
+    expiry: verifyExpiryRace,
     creation: verifyCreation,
     emails: verifyEmailChoice,
     held: verifyHeldAddresses,
@@ -1640,6 +1756,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
   it('commits the entry, claim, invitation and audit events together', () =>
     verifyAtomicity(scimUserCreation))
   it('refuses a token revoked while the create waits', () => verifyRevocation(scimUserCreation))
+  it(
+    'issues a new invitation when the pending one expires during the wait',
+    () => verifyExpiryRace(scimUserCreation),
+    60_000,
+  )
   it('lets the earliest owner with a verified address invite', () =>
     verifyInviter(scimUserCreation))
   it('still answers 201 when the queue is down after commit', () =>
@@ -1696,6 +1817,22 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       ['held', ["  'TEAM_MANAGEMENT_ACCESS_DENIED',\n", '']],
       ['held', ["  'INVITATION_CONFLICT',\n", '']],
       ['held', ["  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n", '']],
+      // An invitation that expired during the wait swallowed into a claim without an
+      // invitation, or answered as a server error without a second admission.
+      [
+        'expiry',
+        [
+          "  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n",
+          "  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n  'INVITATION_INELIGIBLE',\n",
+        ],
+      ],
+      [
+        'expiry',
+        [
+          '            await sql`ROLLBACK TO SAVEPOINT scim_user_invitation`.execute(trx)\n            admitted = await admit()\n',
+          '            throw error\n',
+        ],
+      ],
       // An admission that is not linked kept anyway (its budget and delivery generation).
       [
         'held',

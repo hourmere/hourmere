@@ -230,17 +230,26 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
     }
   }
 
-  async function failedReadRollsBack(preview = previewImport) {
+  // Preview reads identities once in the extraction transaction, then once in its snapshot
+  // transaction. The chosen read fails and its ROLLBACK succeeds, so the session goes back
+  // to the pool and the next caller reuses the same backend.
+  async function failedReadRollsBack(identityRead: 1 | 2 = 1, preview = previewImport) {
     const f = await setup()
     const pool = jitSession(target.url)
     try {
-      const recorder = record(pool, { identityRead: 1 })
+      // max: 1, so the importer runs on this session.
+      const before = await session(pool)
+      const recorder = record(pool, { identityRead })
       await expect(preview(recorder.pool, f.input)).rejects.toThrow(
         'synthetic identity read failure',
       )
-      expect(recorder.afterTransaction).toEqual(['on'])
-      // The pooled session left no open transaction and kept its own setting.
-      expect((await pool.query('SHOW jit')).rows).toEqual([{ jit: 'on' }])
+      // A failing snapshot read comes after the extraction transaction committed.
+      expect(recorder.afterTransaction).toEqual(identityRead === 2 ? ['on', 'on'] : ['on'])
+      // The session was pooled, not replaced, and left no open transaction.
+      expect(pool.totalCount).toBe(1)
+      const next = await session(pool)
+      expect(next.pid).toBe(before.pid)
+      expect(next).toMatchObject({ jit: 'on', readOnly: 'off' })
     } finally {
       await pool.end()
     }
@@ -304,6 +313,9 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
   it('rolls back a failed identity read and returns a clean pooled session', async () => {
     await failedReadRollsBack()
   }, 20_000)
+  it('rolls back a failed preview snapshot read and returns a clean pooled session', async () => {
+    await failedReadRollsBack(2)
+  }, 20_000)
   it('discards the extraction session when its rollback fails', async () => {
     await failedRollbackDiscards(1)
   }, 20_000)
@@ -365,7 +377,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Cal.com importer identity reads with
       before:
         "await client.query('ROLLBACK').catch(() => { discard = true }) throw error } finally { // A session whose rollback failed",
       after: 'throw error } finally { // A session whose rollback failed',
-      run: failedReadRollsBack,
+      run: (preview: typeof previewImport) => failedReadRollsBack(1, preview),
     },
     {
       name: 'a pooled extraction session after a failed rollback',
