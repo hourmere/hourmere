@@ -118,23 +118,117 @@ describe('CalDAV discovery mock server', () => {
     ).rejects.toMatchObject({ code })
   })
   it.each([
-    ['https://dav.example.com/remote.php/dav', '/remote.php/dav/'],
-    ['https://dav.example.com', '/context/'],
-  ])('accepts canonical Depth:0 href for %s', async (serverUrl, canonical) => {
+    ['https://dav.example.com/remote.php/dav', '/remote.php/dav/', '/remote.php/principals/host/'],
+    ['https://dav.example.com', '/context/', '/.well-known/principals/host/'],
+  ])('accepts canonical Depth:0 href for %s', async (serverUrl, canonical, principalPath) => {
     const transport = mock([
       response(
         canonical,
         '<d:current-user-principal><d:href>principals/host/</d:href></d:current-user-principal>',
       ),
       response(
-        `${canonical}principals/host/`,
+        principalPath,
         '<c:calendar-home-set><d:href>calendars/</d:href></c:calendar-home-set>',
       ),
       calendar,
     ])
     const result = await createCalDavDiscovery(transport).discover({ ...credentials, serverUrl })
-    expect(result.principalUrl).toBe(`https://dav.example.com${canonical}principals/host/`)
+    expect(result.principalUrl).toBe(`https://dav.example.com${principalPath}`)
     expect(result.calendarHomeUrl).toBe(`${result.principalUrl}calendars/`)
+  })
+  it.each([
+    ['/nested/request/start', '../calendars/x/', '/nested/calendars/x/'],
+    ['/nested/request/start', 'x/', '/nested/request/x/'],
+    ['/nested/request/start', '/abs/', '/abs/'],
+    ['/nested/request/start/', '../calendars/x/', '/nested/request/calendars/x/'],
+    ['/nested/request/start/', 'x/', '/nested/request/start/x/'],
+    ['/nested/request/start/', '/abs/', '/abs/'],
+    ['/.well-known/caldav', '../calendars/x/', '/calendars/x/'],
+    ['/.well-known/caldav', 'x/', '/.well-known/x/'],
+    ['/.well-known/caldav', '/abs/', '/abs/'],
+  ])('resolves property href %s + %s against each request URI', async (path, href, expected) => {
+    // Different response paths ensure neither property borrows the canonical response URL.
+    const transport = mock([
+      response(
+        '/canonical/entry/',
+        `<d:current-user-principal><d:href>${href}</d:href></d:current-user-principal>`,
+      ),
+      response(
+        '/canonical/principal/',
+        `<c:calendar-home-set><d:href>${href}</d:href></c:calendar-home-set>`,
+      ),
+      calendar,
+    ])
+    const serverUrl = `https://dav.example.com${path}`
+    const result = await createCalDavDiscovery(transport).discover({ ...credentials, serverUrl })
+    expect(result.principalUrl).toBe(`https://dav.example.com${expected}`)
+    expect(result.calendarHomeUrl).toBe(new URL(href, result.principalUrl).href)
+    expect(transport.mock.calls.map(([request]) => request.url)).toEqual([
+      serverUrl,
+      result.principalUrl,
+      result.calendarHomeUrl,
+    ])
+  })
+  it('discovers a redirect-free server with hrefs relative to nested request paths', async () => {
+    const routes: Record<string, string> = {
+      '/dav/nested/bootstrap': response(
+        '/canonical/bootstrap/',
+        '<d:current-user-principal><d:href>x/</d:href></d:current-user-principal>',
+      ),
+      '/dav/nested/x/': response(
+        '/canonical/principal/',
+        '<c:calendar-home-set><d:href>../calendars/x/</d:href></c:calendar-home-set>',
+      ),
+      '/dav/nested/calendars/x/': response(
+        'work/',
+        '<d:resourcetype><d:collection/><c:calendar/></d:resourcetype>',
+      ),
+    }
+    const transport = vi.fn<CalDavTransport>().mockImplementation(async ({ url }) => {
+      const body = routes[new URL(url).pathname]
+      return body ? { status: 207, body } : { status: 404, body: '' }
+    })
+    const result = await createCalDavDiscovery(transport).discover({
+      ...credentials,
+      serverUrl: 'https://dav.example.com/dav/nested/bootstrap',
+    })
+    expect(result).toMatchObject({
+      principalUrl: 'https://dav.example.com/dav/nested/x/',
+      calendarHomeUrl: 'https://dav.example.com/dav/nested/calendars/x/',
+      calendars: [{ url: 'https://dav.example.com/dav/nested/calendars/x/work/' }],
+    })
+    expect(transport).toHaveBeenCalledTimes(3)
+  })
+  it('uses the final request URI after redirects for relative properties', async () => {
+    const transport = vi
+      .fn<CalDavTransport>()
+      .mockResolvedValueOnce({ status: 302, body: '', location: '/redirected/bootstrap' })
+      .mockResolvedValueOnce({
+        status: 207,
+        body: response(
+          '/canonical/bootstrap/',
+          '<d:current-user-principal><d:href>x/</d:href></d:current-user-principal>',
+        ),
+      })
+      .mockResolvedValueOnce({ status: 307, body: '', location: '/another/principals/host/' })
+      .mockResolvedValueOnce({
+        status: 207,
+        body: response(
+          '/canonical/principal/',
+          '<c:calendar-home-set><d:href>../calendars/x/</d:href></c:calendar-home-set>',
+        ),
+      })
+      .mockResolvedValueOnce({ status: 207, body: calendar })
+    const result = await createCalDavDiscovery(transport).discover(credentials)
+    expect(result.principalUrl).toBe('https://dav.example.com/redirected/x/')
+    expect(result.calendarHomeUrl).toBe('https://dav.example.com/another/principals/calendars/x/')
+    expect(transport.mock.calls.map(([request]) => new URL(request.url).pathname)).toEqual([
+      '/.well-known/caldav',
+      '/redirected/bootstrap',
+      '/redirected/x/',
+      '/another/principals/host/',
+      '/another/principals/calendars/x/',
+    ])
   })
   it('selects a trailing-slash match among multiple responses', async () => {
     const canonical = entry.replace('/.well-known/caldav', '/.well-known/caldav/')
