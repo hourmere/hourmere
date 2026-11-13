@@ -66,6 +66,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const STORAGE_SUPPORT = [
   'packages/db/src/workflow-storage-protections.ts',
   'packages/db/src/workflow-storage-execution-protections.ts',
+  'packages/db/src/workflow-storage-lock-order.ts',
 ]
 const isStorageLayer = (file: string) =>
   file.startsWith('packages/db/migrations/') ||
