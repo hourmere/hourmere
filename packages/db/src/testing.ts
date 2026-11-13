@@ -21,6 +21,17 @@ export function outsideAuthTransaction<T>(fn: () => T): T {
   return held ? held.exit(fn) : fn()
 }
 
+/**
+ * Returns and clears the connection-order violations recorded so far, for a mutation test
+ * whose broken source copy reproduces that wait on purpose. Other tests fail on them.
+ */
+export function takePoolOrderViolations(): string[] {
+  const recorded = (globalThis as { [key: symbol]: string[] | undefined })[
+    Symbol.for('hourmere.pool-order-violations')
+  ]
+  return recorded ? recorded.splice(0) : []
+}
+
 export interface TestDatabase {
   /** Connection string of the throwaway database. */
   url: string

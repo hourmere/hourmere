@@ -13,7 +13,11 @@ import {
   scimClaimCompletion,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import {
+  createTestDatabase,
+  type TestDatabase,
+  takePoolOrderViolations,
+} from '@hourmere/db/testing'
 import { reserveInvitationEmailBudget } from '@hourmere/notifications'
 import { sql } from 'kysely'
 import type pg from 'pg'
@@ -1298,6 +1302,9 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     if (replay !== 'killed') survivors.push(`replay: every recheck removed (${replay})`)
     delete (globalThis as Record<string, unknown>)[apart]
     expect(survivors).toEqual([])
+    // The atomicity mutant writes its event on a separate application connection inside the
+    // acceptance transaction; that wait is what it breaks, and this test asserts it differently.
+    takePoolOrderViolations()
   }, 600_000)
 
   // The production assembly, as startServer builds it: productionAuthOptions for Better Auth

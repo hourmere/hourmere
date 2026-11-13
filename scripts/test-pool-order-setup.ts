@@ -16,7 +16,12 @@ const AUTH_TRANSACTION = Symbol.for('hourmere.auth-transaction')
 const AUTH_POOL = Symbol.for('hourmere.auth-pool')
 
 type Connect = (this: pg.Pool, ...args: unknown[]) => unknown
-const violations: string[] = []
+const VIOLATIONS = Symbol.for('hourmere.pool-order-violations')
+// Shared with takePoolOrderViolations in @hourmere/db/testing, for mutation tests that
+// reproduce this wait on purpose.
+const store = globalThis as { [VIOLATIONS]?: string[] }
+const violations = store[VIOLATIONS] ?? []
+store[VIOLATIONS] = violations
 const prototype = pg.Pool.prototype as unknown as { connect: Connect }
 const connect = prototype.connect
 const marker = Symbol.for('hourmere.pool-order-guard')

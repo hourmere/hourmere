@@ -4,7 +4,11 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import {
+  createTestDatabase,
+  type TestDatabase,
+  takePoolOrderViolations,
+} from '@hourmere/db/testing'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -689,6 +693,8 @@ describe.skipIf(!serverUrl)('native team write durability through HTTP and Postg
         'member removal rolls back with the joined native transaction',
       ),
     })
+    // The detached copy also takes connections out of order; this test asserts its own failure.
+    takePoolOrderViolations()
   })
 
   it('detects session SHARE lock upgrades with ten real database races', async () => {
@@ -822,6 +828,8 @@ describe.skipIf(!serverUrl)('native team write durability through HTTP and Postg
         name: 'AssertionError',
         message: expect.stringContaining(message),
       })
+      // A broken copy may also take connections out of order; this test asserts its own failure.
+      takePoolOrderViolations()
     },
   )
 })
