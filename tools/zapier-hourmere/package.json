@@ -72,9 +72,13 @@
     "tinybench": "6.2.2",
     "tslib": "2.8.1",
     "vite": "8.3.5",
-    "yeoman-environment": "6.0.1",
+    "yeoman-environment": {
+      ".": "6.0.1",
+      "minimatch": "11.0.8"
+    },
     "simple-git": "4.0.2",
     "tmp": "0.2.7",
-    "minimatch@>=7 <11.0.1": "11.0.8"
+    "minimatch@^9": "11.0.8",
+    "minimatch@^10": "11.0.8"
   }
 }
