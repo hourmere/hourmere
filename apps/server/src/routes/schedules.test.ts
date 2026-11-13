@@ -367,6 +367,34 @@ describe.skipIf(!serverUrl)('schedule routes', () => {
     })
   })
 
+  it('returns the same count-limit error for single-date writes while permitting replacements', async () => {
+    const user = await createTestUser(t.db)
+    const client = api(user)
+    const { id } = (await client.post('/api/v1/schedules', body())).body as { id: string }
+    await t.db
+      .insertInto('schedule_overrides')
+      .values(
+        Array.from({ length: MAX_SCHEDULE_OVERRIDES }, (_, days) => ({
+          schedule_id: id,
+          date: Temporal.PlainDate.from('1980-01-01').add({ days }).toString(),
+          intervals: '[]',
+        })),
+      )
+      .execute()
+    const path = `/api/v1/schedules/${id}/availability`
+    const before = await client.get(path)
+    expect(
+      await client.put(`/api/v1/schedules/${id}/overrides/2099-01-01`, { intervals: [] }),
+    ).toEqual({
+      status: 400,
+      body: { error: 'too_many_overrides' },
+    })
+    expect(await client.get(path)).toEqual(before)
+    expect(
+      await client.put(`/api/v1/schedules/${id}/overrides/1980-01-01`, { intervals: [] }),
+    ).toMatchObject({ status: 200 })
+  })
+
   it('sets, lists and removes date overrides', async () => {
     const user = await createTestUser(t.db)
     const { id } = (await api(user).post('/api/v1/schedules', body())).body as { id: string }
