@@ -18,14 +18,14 @@
     "build:verify": "DISABLE_ZAPIER_ANALYTICS=1 NO_UPDATE_NOTIFIER=1 node scripts/verify-build.js"
   },
   "dependencies": {
-    "zapier-platform-core": "19.2.1"
+    "zapier-platform-core": "19.3.0"
   },
   "devDependencies": {
-    "zapier-platform-cli": "19.2.1",
+    "@types/node": "26.6.6",
     "nock": "15.0.5",
-    "vitest": "5.0.5",
     "typescript": "7.0.2",
-    "@types/node": "26.6.5"
+    "vitest": "5.1.0",
+    "zapier-platform-cli": "19.3.0"
   },
   "license": "AGPL-3.0-only",
   "overrides": {
@@ -71,6 +71,10 @@
     "rolldown": "1.2.15",
     "tinybench": "6.2.2",
     "tslib": "2.8.1",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "yeoman-environment": "6.0.1",
+    "simple-git": "4.0.2",
+    "tmp": "0.2.7",
+    "minimatch@>=7 <11.0.1": "11.0.8"
   }
 }
