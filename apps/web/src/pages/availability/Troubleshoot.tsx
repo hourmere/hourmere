@@ -1,6 +1,8 @@
 import { type FormEvent, useCallback, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import { getActiveOrganizationMember } from '../../api/auth.ts'
 import { api, unwrap } from '../../api/client.ts'
+import { RequestError } from '../../api/errors.ts'
 import { type EventType, loadEventTypes, loadProfile } from '../../api/resources.ts'
 import { ErrorSummary, Field, type FieldErrors } from '../../components/forms.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
@@ -10,14 +12,17 @@ import { browserTimeZone, isKnownTimeZone, zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { PATHS } from '../../paths.ts'
+import { type Me, useMe } from '../../session.tsx'
 import {
   classifyFailure,
   type Failure,
+  needsZoneLabel,
   onlyOutsideHours,
   reasonHost,
   reasonText,
   type Troubleshooting,
   type TroubleshootSlot,
+  troubleshootableEventTypes,
 } from './troubleshoot-model.ts'
 
 interface Request {
@@ -44,14 +49,41 @@ function validDate(value: string): boolean {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
-async function loadSetup(signal: AbortSignal) {
-  const [eventTypes, profile] = await Promise.all([loadEventTypes(signal), loadProfile(signal)])
-  return { eventTypes, timeZone: profile?.timeZone ?? browserTimeZone() }
+/** The caller's roles in the team they act in; none in a personal space or without membership. */
+async function teamRoles(me: Me, signal: AbortSignal): Promise<string[]> {
+  if (me.organization.personal) return []
+  try {
+    const member = await getActiveOrganizationMember(signal)
+    if (member.organizationId !== me.organization.id || member.userId !== me.user.id) return []
+    return member.role.split(',').map((role) => role.trim())
+  } catch (error) {
+    if (error instanceof RequestError && error.status === 404) return []
+    throw error
+  }
 }
 
 export function TroubleshootPage() {
   const { t, ui } = useI18n()
   usePageTitle('Troubleshoot availability')
+  const me = useMe()
+  const loadSetup = useCallback(
+    async (signal: AbortSignal) => {
+      const [eventTypes, profile, roles] = await Promise.all([
+        loadEventTypes(signal),
+        loadProfile(signal),
+        teamRoles(me, signal),
+      ])
+      return {
+        ...troubleshootableEventTypes(
+          eventTypes,
+          { userId: me.user.id, personalSpace: me.organization.personal },
+          roles,
+        ),
+        timeZone: profile?.timeZone ?? browserTimeZone(),
+      }
+    },
+    [me],
+  )
   const [setup, reload] = useLoad(loadSetup)
   return (
     <>
@@ -76,13 +108,22 @@ export function TroubleshootPage() {
           </button>
         </div>
       )}
+      {setup.status === 'ready' && setup.data.hiddenTeamTypes > 0 && (
+        <p className="hint" data-testid="troubleshoot-hidden-team-types">
+          {t(
+            'Team event types are not listed: only team owners and admins can see why their times are unavailable.',
+          )}
+        </p>
+      )}
       {setup.status === 'ready' &&
-        (setup.data.eventTypes.length === 0 ? (
-          <p className="alert alert-info">
-            {t('There are no event types in this space to check.')}
-          </p>
+        (setup.data.offered.length === 0 ? (
+          setup.data.hiddenTeamTypes === 0 && (
+            <p className="alert alert-info">
+              {t('There are no event types in this space to check.')}
+            </p>
+          )
         ) : (
-          <TroubleshootForm eventTypes={setup.data.eventTypes} timeZone={setup.data.timeZone} />
+          <TroubleshootForm eventTypes={setup.data.offered} timeZone={setup.data.timeZone} />
         ))}
     </>
   )
@@ -290,13 +331,28 @@ function DayReport({ data }: { data: Troubleshooting }) {
   )
 }
 
+/** "1:00 AM EDT – 1:00 AM EST": both ends carry their zone name on clock-change days. */
+function zonedTimeRange(timeZone: string, locale: string, start: string, end: string): string {
+  const chinese = locale.startsWith('zh')
+  const time = new Intl.DateTimeFormat(locale, {
+    timeZone,
+    hour: chinese ? '2-digit' : 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+    ...(chinese && { hourCycle: 'h23' }),
+  })
+  return `${time.format(new Date(start))}${chinese ? '–' : ' – '}${time.format(new Date(end))}`
+}
+
 function SlotRow({ slot, data }: { slot: TroubleshootSlot; data: Troubleshooting }) {
   const { t, locale } = useI18n()
   const format = zoned(data.timeZone, locale)
   return (
     <div className="card-main">
       <h3 className="card-title">
-        {format.timeRange(slot.start, slot.end)}
+        {needsZoneLabel(data.timeZone, data.rangeStart, slot.start, slot.end)
+          ? zonedTimeRange(data.timeZone, locale, slot.start, slot.end)
+          : format.timeRange(slot.start, slot.end)}
         {slot.status === 'available' ? (
           <span className="badge badge-success">{t('Bookable')}</span>
         ) : (

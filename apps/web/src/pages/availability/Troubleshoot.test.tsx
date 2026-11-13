@@ -5,7 +5,16 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
-import { fakeApi, json, later, profile, renderApp, signedIn } from '../../test/fake-api.tsx'
+import {
+  fakeApi,
+  json,
+  later,
+  ME,
+  profile,
+  renderApp,
+  signedIn,
+  signedInAs,
+} from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType } from '../../test/fixtures.ts'
 import { todayIn } from './Troubleshoot.tsx'
 import * as model from './troubleshoot-model.ts'
@@ -14,6 +23,26 @@ const route = `GET /api/v1/event-types/${EVENT_TYPE_ID}/availability-troubleshoo
 const TEAM_EVENT = 'e0000000-0000-7000-8000-000000000002'
 const teamRoute = `GET /api/v1/event-types/${TEAM_EVENT}/availability-troubleshooting`
 const day = '2030-11-04'
+const TEAM_ME = {
+  ...ME,
+  organization: {
+    id: '00000000-0000-7000-8000-0000000000aa',
+    name: 'Team',
+    slug: 'team',
+    personal: false,
+  },
+}
+const teamAs = (role: string) => ({
+  ...signedInAs(TEAM_ME),
+  'GET /api/auth/organization/get-active-member': () =>
+    json(200, {
+      id: 'membership-1',
+      organizationId: TEAM_ME.organization.id,
+      userId: TEAM_ME.user.id,
+      role,
+      createdAt: '2026-10-01T09:00:00.000Z',
+    }),
+})
 const query = (path: string) => Object.fromEntries(new URL(path, 'http://x').searchParams)
 
 const slot = (time: string, status: 'available' | 'unavailable', reasons: object[] = []) => {
@@ -126,7 +155,7 @@ describe('availability troubleshooting page', () => {
 
   it('names team hosts only from the response and never shows raw ids', async () => {
     const user = userEvent.setup()
-    fakeApi({ ...signedIn, ...profile(), ...events, [teamRoute]: () => json(200, team) })
+    fakeApi({ ...teamAs('owner'), ...profile(), ...events, [teamRoute]: () => json(200, team) })
     renderApp(`/app/availability/troubleshoot?eventTypeId=${TEAM_EVENT}`)
     expect(((await screen.findByLabelText('Event type')) as HTMLSelectElement).value).toBe(
       TEAM_EVENT,
@@ -211,7 +240,7 @@ describe('availability troubleshooting page', () => {
   it('reads naturally in Chinese with full-width punctuation', async () => {
     chooseLanguage('zh-CN')
     const user = userEvent.setup()
-    fakeApi({ ...signedIn, ...profile(), ...events, [teamRoute]: () => json(200, team) })
+    fakeApi({ ...teamAs('admin'), ...profile(), ...events, [teamRoute]: () => json(200, team) })
     renderApp(`/app/availability/troubleshoot?eventTypeId=${TEAM_EVENT}`)
     expect(await screen.findByRole('heading', { name: '排查可预约时间', level: 1 })).toBeDefined()
     await user.click(await screen.findByRole('button', { name: '检查这一天' }))
@@ -220,6 +249,138 @@ describe('availability troubleshooting page', () => {
     expect(within(list).getByText('已连接的日历显示这个时间忙碌。')).toBeDefined()
     expect(within(list).getByText('并非所有必需的主持人都有空。')).toBeDefined()
     expect(screen.getByText('1 个可能的时间中有 0 个可以预约。时间按 UTC 显示。')).toBeDefined()
+  })
+
+  it('offers ordinary team members only the event types they may troubleshoot', async () => {
+    const api = fakeApi({ ...teamAs('member'), ...profile(), ...events })
+    renderApp(`/app/availability/troubleshoot?eventTypeId=${TEAM_EVENT}`)
+    const picker = (await screen.findByLabelText('Event type')) as HTMLSelectElement
+    expect([...picker.options].map((option) => option.textContent)).toEqual(['Intro call'])
+    expect(picker.value).toBe(EVENT_TYPE_ID)
+    expect(screen.getByTestId('troubleshoot-hidden-team-types').textContent).toBe(
+      'Team event types are not listed: only team owners and admins can see why their times are unavailable.',
+    )
+    expect(api.to(teamRoute)).toHaveLength(0)
+  })
+
+  it('explains, in Chinese too, when a member has only team event types', async () => {
+    chooseLanguage('zh-CN')
+    fakeApi({
+      ...teamAs('member'),
+      ...profile(),
+      'GET /api/v1/event-types': () =>
+        json(200, { data: [eventType({ id: TEAM_EVENT, ownerUserId: null, title: 'Team sync' })] }),
+    })
+    renderApp('/app/availability/troubleshoot')
+    expect((await screen.findByTestId('troubleshoot-hidden-team-types')).textContent).toBe(
+      '未列出团队活动类型：只有团队所有者和管理员才能查看这些时间无法预约的原因。',
+    )
+    expect(screen.queryByLabelText('活动类型')).toBeNull()
+    expect(document.body.textContent).not.toContain('暂无可检查的活动类型')
+  })
+
+  it('keeps team event types for owners and admins', async () => {
+    for (const role of ['owner', 'admin', 'member,admin']) {
+      fakeApi({ ...teamAs(role), ...profile(), ...events })
+      const view = renderApp('/app/availability/troubleshoot')
+      const picker = (await screen.findByLabelText('Event type')) as HTMLSelectElement
+      expect(
+        [...picker.options].map((option) => option.textContent),
+        role,
+      ).toContain('Team sync')
+      expect(screen.queryByTestId('troubleshoot-hidden-team-types')).toBeNull()
+      view.unmount()
+    }
+  })
+
+  const hourly = (zone: string, rangeStart: string, starts: string[]) => ({
+    ...personal,
+    timeZone: zone,
+    date: '2026-11-01',
+    rangeStart,
+    slots: starts.map((start) => ({
+      start,
+      end: new Date(Date.parse(start) + 3_600_000).toISOString().replace('.000', ''),
+      status: 'available',
+      reasons: [],
+    })),
+  })
+
+  it('names the zone on times around the autumn clock change in New York', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      ...events,
+      [route]: () =>
+        json(
+          200,
+          hourly('America/New_York', '2026-11-01T04:00:00Z', [
+            '2026-11-01T04:00:00Z',
+            '2026-11-01T05:00:00Z',
+            '2026-11-01T06:00:00Z',
+          ]),
+        ),
+    })
+    renderApp('/app/availability/troubleshoot')
+    await check(user)
+    const list = await screen.findByRole('list', { name: 'Times on this day' })
+    const titles = [...list.querySelectorAll('.card-title')].map((title) =>
+      title.firstChild?.textContent?.replace(/\s+/g, ' '),
+    )
+    expect(titles[0]).not.toMatch(/EDT|EST|GMT/)
+    expect(titles[1]).toMatch(/^1:00 AM EDT – 1:00 AM EST$/)
+    expect(titles[2]).toMatch(/^1:00 AM EST – 2:00 AM EST$/)
+  })
+
+  it('names the zone on the repeated hour in Chinese as well', async () => {
+    chooseLanguage('zh-CN')
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      ...events,
+      [route]: () =>
+        json(
+          200,
+          hourly('America/New_York', '2026-11-01T04:00:00Z', [
+            '2026-11-01T04:00:00Z',
+            '2026-11-01T05:00:00Z',
+          ]),
+        ),
+    })
+    renderApp('/app/availability/troubleshoot')
+    await user.click(await screen.findByRole('button', { name: '检查这一天' }))
+    const list = await screen.findByRole('list', { name: '这一天的时间' })
+    const titles = [...list.querySelectorAll('.card-title')].map(
+      (title) => title.firstChild?.textContent ?? '',
+    )
+    expect(titles[0]).not.toMatch(/GMT|EDT|EST/)
+    expect(titles[1]).toBe('GMT-4 01:00–GMT-5 01:00')
+  })
+
+  it('leaves times unchanged in a zone without clock changes', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      ...events,
+      [route]: () =>
+        json(
+          200,
+          hourly('Asia/Tokyo', '2026-10-31T15:00:00Z', [
+            '2026-10-31T15:00:00Z',
+            '2026-11-01T05:00:00Z',
+            '2026-11-01T14:00:00Z',
+          ]),
+        ),
+    })
+    renderApp('/app/availability/troubleshoot')
+    await check(user)
+    const list = await screen.findByRole('list', { name: 'Times on this day' })
+    const text = list.textContent ?? ''
+    expect(text).not.toMatch(/JST|GMT|UTC/)
+    expect(text).toContain('12:00 AM – 1:00 AM')
   })
 
   it('is linked from the availability page', async () => {
@@ -250,7 +411,7 @@ function modelCopy(change?: [string, string]): Model {
   )
   return new Function(
     'RequestError',
-    `${source}; return { REASON_TEXT, reasonText, reasonHost, onlyOutsideHours, classifyFailure }`,
+    `${source}; return { REASON_TEXT, reasonText, reasonHost, onlyOutsideHours, classifyFailure, zoneOffset, needsZoneLabel, troubleshootableEventTypes }`,
   )(RequestError) as Model
 }
 
@@ -299,6 +460,35 @@ function verifyModel(m: Model) {
   ])
     expect(m.reasonText(code), code).not.toBe('Another scheduling rule applies.')
   expect(Object.keys(m.REASON_TEXT)).toHaveLength(15)
+  const ny = 'America/New_York'
+  expect(
+    m.needsZoneLabel(ny, '2026-11-01T04:00:00Z', '2026-11-01T04:00:00Z', '2026-11-01T05:00:00Z'),
+  ).toBe(false)
+  expect(
+    m.needsZoneLabel(ny, '2026-11-01T04:00:00Z', '2026-11-01T05:00:00Z', '2026-11-01T06:00:00Z'),
+  ).toBe(true)
+  expect(
+    m.needsZoneLabel(ny, '2026-11-01T04:00:00Z', '2026-11-01T06:00:00Z', '2026-11-01T07:00:00Z'),
+  ).toBe(true)
+  expect(
+    m.needsZoneLabel(
+      'Asia/Tokyo',
+      '2026-10-31T15:00:00Z',
+      '2026-11-01T05:00:00Z',
+      '2026-11-01T06:00:00Z',
+    ),
+  ).toBe(false)
+  const types = [{ ownerUserId: 'me' }, { ownerUserId: null }, { ownerUserId: 'someone-else' }]
+  const me = { userId: 'me', personalSpace: false }
+  expect(m.troubleshootableEventTypes(types, me, ['member'])).toEqual({
+    offered: [{ ownerUserId: 'me' }],
+    hiddenTeamTypes: 1,
+  })
+  expect(m.troubleshootableEventTypes(types, me, ['admin']).offered).toHaveLength(2)
+  expect(m.troubleshootableEventTypes(types, { ...me, personalSpace: true }, ['owner'])).toEqual({
+    offered: [{ ownerUserId: 'me' }],
+    hiddenTeamTypes: 1,
+  })
 }
 
 describe('troubleshooting model protections', () => {
@@ -342,6 +532,18 @@ describe('troubleshooting model protections', () => {
       "slot.reasons.every((reason) => reason.code === 'outside_working_hours')",
       "slot.reasons.some((reason) => reason.code === 'outside_working_hours')",
     ],
+    ['clock-change end offset ignored', ' || zoneOffset(timeZone, end) !== day', ''],
+    [
+      'plain members offered team types',
+      "teamRoles.some((role) => role === 'owner' || role === 'admin')",
+      'teamRoles.length > 0',
+    ],
+    [
+      'team types offered in a personal space',
+      'const manager = !me.personalSpace && ',
+      'const manager = ',
+    ],
+    ["other hosts' personal types offered", ': event.ownerUserId === me.userId,', ': true,'],
   ] as const)('kills: %s', (_name, before, after) => {
     expect(() => verifyModel(modelCopy([before, after]))).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),

@@ -116,7 +116,11 @@ order, explained-rules inventory and parity generator together.
 
 Transports serialize instants as UTC RFC 3339 strings and pass reasons through an explicit
 allowlist (`code`, `start`, `end`, optional `hostUserId`); team results add the assigned hosts'
-names for the managers who may call the service. The local day is
+names for the managers who may call the service. For a team host whose reasons for a time
+include `outside_working_hours`, the transport drops that host's `calendar_busy`,
+`buffer_before`, `buffer_after` and `host_conflict` reasons for that time, so managers never
+see members' off-hours timings. Personal event types keep every reason: their only caller is
+the host. The local day is
 `[date 00:00, next date 00:00)` in the requested zone (23 or 25 hours on DST days). API keys
 use the `diagnostic_read` operation class (`full` only). Localized display text belongs in the
 admin page; engine reason codes are machine-readable values and the published `code` field is an

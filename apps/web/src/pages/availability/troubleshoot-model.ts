@@ -77,3 +77,44 @@ export function classifyFailure(error: unknown): Failure {
   if (error.status === 400) return { kind: 'invalid', code: error.code }
   return { kind: 'error' }
 }
+
+/** The UTC offset of `timeZone` at `iso`, e.g. "GMT-04:00". */
+export function zoneOffset(timeZone: string, iso: string): string {
+  return (
+    new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+      .formatToParts(new Date(iso))
+      .find((part) => part.type === 'timeZoneName')?.value ?? ''
+  )
+}
+
+/**
+ * On a day whose clocks change, local labels repeat or run backwards (01:00 – 01:00 on the
+ * autumn change). A time whose offset differs from the day's start, or changes within the
+ * time, needs its zone name to be unambiguous.
+ */
+export function needsZoneLabel(
+  timeZone: string,
+  dayStart: string,
+  start: string,
+  end: string,
+): boolean {
+  const day = zoneOffset(timeZone, dayStart)
+  return zoneOffset(timeZone, start) !== day || zoneOffset(timeZone, end) !== day
+}
+
+/** Event types the API will explain to this caller: their own, or any team type for owners/admins. */
+export function troubleshootableEventTypes<T extends { ownerUserId: string | null }>(
+  eventTypes: readonly T[],
+  me: { userId: string; personalSpace: boolean },
+  teamRoles: readonly string[],
+): { offered: T[]; hiddenTeamTypes: number } {
+  const manager =
+    !me.personalSpace && teamRoles.some((role) => role === 'owner' || role === 'admin')
+  const offered = eventTypes.filter((event) =>
+    event.ownerUserId === null ? manager : event.ownerUserId === me.userId,
+  )
+  return {
+    offered,
+    hiddenTeamTypes: eventTypes.filter((event) => event.ownerUserId === null && !manager).length,
+  }
+}

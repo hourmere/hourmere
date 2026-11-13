@@ -1,4 +1,4 @@
-import type { AvailabilityReasonCode } from '@hourmere/core'
+import type { AvailabilityReason, AvailabilityReasonCode } from '@hourmere/core'
 import { explainEventAvailability } from './availability.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -41,6 +41,36 @@ export interface TroubleshootAvailabilityResult {
   /** Team event types: assigned hosts with display names. Empty for personal event types. */
   hosts: { userId: string; name: string }[]
   slots: TroubleshootSlot[]
+}
+
+/** Reasons that reveal when a team host is busy, rather than how the event is configured. */
+const PRIVATE_TIMING_CODES: ReadonlySet<AvailabilityReasonCode> = new Set([
+  'calendar_busy',
+  'buffer_before',
+  'buffer_after',
+  'host_conflict',
+])
+
+/**
+ * A team manager learns that a time is outside a host's working hours, but not what that host
+ * does then: for such a host and time, busy, buffer and booking-conflict reasons (and their
+ * minute-precise intervals) are dropped. Personal event types carry no hostUserId; their
+ * only caller is the host themself.
+ */
+function withoutPrivateOffHours(reasons: readonly AvailabilityReason[]): AvailabilityReason[] {
+  const offHours = new Set(
+    reasons
+      .filter(
+        (reason) => reason.code === 'outside_working_hours' && reason.hostUserId !== undefined,
+      )
+      .map((reason) => reason.hostUserId),
+  )
+  return reasons.filter(
+    (reason) =>
+      reason.hostUserId === undefined ||
+      !offHours.has(reason.hostUserId) ||
+      !PRIVATE_TIMING_CODES.has(reason.code),
+  )
 }
 
 const DATE = /^(?!0000)\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/
@@ -119,7 +149,7 @@ export async function troubleshootEventAvailability(
       start: iso(slot.start),
       end: iso(slot.end),
       status: slot.status,
-      reasons: slot.reasons.map((reason) => ({
+      reasons: withoutPrivateOffHours(slot.reasons).map((reason) => ({
         code: reason.code,
         start: iso(reason.interval.start),
         end: iso(reason.interval.end),

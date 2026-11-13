@@ -1947,5 +1947,7 @@ export const admin = {
   'Another booking already takes this time.': '这个时间已有其他预约。',
   'Not every required host is free.': '并非所有必需的主持人都有空。',
   'No host in the rotation is free.': '轮询中的主持人都没有空。',
+  'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
+    '未列出团队活动类型：只有团队所有者和管理员才能查看这些时间无法预约的原因。',
   'Another scheduling rule applies.': '受其他排期规则限制。',
 } as const

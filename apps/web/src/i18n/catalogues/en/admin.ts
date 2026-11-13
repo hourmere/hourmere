@@ -2049,5 +2049,7 @@ export const admin = {
   'Another booking already takes this time.': 'Another booking already takes this time.',
   'Not every required host is free.': 'Not every required host is free.',
   'No host in the rotation is free.': 'No host in the rotation is free.',
+  'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
+    'Team event types are not listed: only team owners and admins can see why their times are unavailable.',
   'Another scheduling rule applies.': 'Another scheduling rule applies.',
 } as const

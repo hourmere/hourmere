@@ -29,8 +29,12 @@ setup problem.
    read the day as an invitee elsewhere would.
 3. Choose **Check this day**.
 
-Times that are only outside your available hours are hidden by default; clear the checkbox to
-see them. Team event types name the host each reason belongs to. A reason that affects only part
+The event type list offers only the event types you may troubleshoot: your own, and in a team
+also the team’s event types when you are a team owner or admin. Ordinary team members see a
+note instead of team event types they cannot check. Times that are only outside your available
+hours are hidden by default; clear the checkbox to see them. On a day when the clocks change,
+times whose UTC offset differs from the start of the day show their zone (for example
+“1:00 AM EDT – 1:00 AM EST”), so a repeated hour is never ambiguous. Team event types name the host each reason belongs to. A reason that affects only part
 of a time (a buffer, for example) shows the affected range.
 
 ## Reasons
@@ -59,6 +63,12 @@ New codes may be added; clients should show unknown codes neutrally. Reasons nev
 calendar event titles, attendees, locations, calendar or event IDs, or booking details: only the
 code, the affected interval and, for team event types, the host’s user ID. The response lists
 the team’s assigned hosts with their names.
+
+For team event types, a time outside a host’s working hours (weekly hours or a date override)
+reports only `outside_working_hours` for that host. Their `calendar_busy`, `buffer_before`,
+`buffer_after` and `host_conflict` reasons for that time are left out, so team owners and admins
+do not learn when members are busy outside their working hours. On your own personal event types
+you still see every reason.
 
 ## REST
 
@@ -120,6 +130,8 @@ The CLI prints the same JSON. It needs a `full` key.
   calendars; if a calendar cannot be read, you get `calendar_sync_unavailable` instead of reasons.
 - `outside_working_hours` does not say whether weekly hours or a date override closed the time;
   check both on the schedule.
+- For a team host, a time that is even partly outside their working hours shows only
+  `outside_working_hours` for that host, even if a busy block also falls inside their hours.
 - The admin page explains the event’s default meeting length and default location. Use REST,
   MCP or the CLI with `durationMinutes` for another offered length.
 - Event types with a very fine slot step over many hosts can exceed the candidate budget and

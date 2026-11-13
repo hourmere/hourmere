@@ -294,6 +294,61 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
     })
   })
 
+  it("keeps a team host's off-hours timings private from managers", async () => {
+    const s = await team('collective')
+    await f.calendarBusy(s.member.id, [
+      [`${day}T10:00Z`, `${day}T10:30Z`],
+      [`${day}T20:07Z`, `${day}T20:23Z`],
+    ])
+    await f.booking(s.t.id, [s.member.id], `${day}T21:00Z`, `${day}T21:30Z`)
+    const verify = async (run: Troubleshoot) => {
+      const result = await run(s.ownerCtx, s.input)
+      // Inside working hours the busy block is the reason, with its host.
+      expect(at(result, '10:00')?.reasons).toContainEqual({
+        code: 'calendar_busy',
+        start: `${day}T10:00:00Z`,
+        end: `${day}T10:30:00Z`,
+        hostUserId: s.member.id,
+      })
+      // Outside them, managers learn only that: no busy, buffer or conflict timings.
+      for (const time of ['20:00', '21:00']) {
+        const memberReasons = at(result, time)?.reasons.filter(
+          (reason) => reason.hostUserId === s.member.id,
+        )
+        expect(
+          memberReasons?.map((reason) => reason.code),
+          time,
+        ).toEqual(['outside_working_hours'])
+      }
+      const wire = JSON.stringify(result)
+      expect(wire).not.toContain('20:07')
+      expect(wire).not.toContain('20:23')
+    }
+    await verify(troubleshootEventAvailability)
+    await verify(serviceCopy())
+    await expectKilled(
+      serviceCopy([
+        '      reasons: withoutPrivateOffHours(slot.reasons).map((reason) => ({',
+        '      reasons: slot.reasons.map((reason) => ({ // Mutation: keep off-hours timings.',
+      ]),
+      verify,
+    )
+    await expectKilled(
+      serviceCopy([
+        "  'calendar_busy',\n  'buffer_before',",
+        "  'buffer_before', // Mutation: forget calendar busy.",
+      ]),
+      verify,
+    )
+  })
+
+  it('still shows hosts their own off-hours timings on personal event types', async () => {
+    const s = await personal()
+    await f.calendarBusy(s.host.userId, [[`${day}T20:00Z`, `${day}T20:30Z`]])
+    const result = await troubleshootEventAvailability(s.ctx, s.input)
+    expect(codes(result, '20:00')).toEqual(['outside_working_hours', 'calendar_busy'])
+  })
+
   it('matches ordinary availability for the requested local day', async () => {
     const s = await personal({}, { timeZone: 'Asia/Tokyo' })
     const result = await troubleshootEventAvailability(s.ctx, {
@@ -429,8 +484,8 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
     await verify(serviceCopy())
     await expectKilled(
       serviceCopy([
-        '      reasons: slot.reasons.map((reason) => ({\n',
-        '      reasons: slot.reasons.map((reason) => ({\n        ...reason, // Mutation: copy engine fields.\n',
+        '      reasons: withoutPrivateOffHours(slot.reasons).map((reason) => ({\n',
+        '      reasons: withoutPrivateOffHours(slot.reasons).map((reason) => ({\n        ...reason, // Mutation: copy engine fields.\n',
       ]),
       verify,
     )
