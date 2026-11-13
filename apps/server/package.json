@@ -23,7 +23,7 @@
     "@hourmere/webhooks": "*",
     "@hourmere/workflows": "*",
     "@modelcontextprotocol/server": "2.4.0",
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "kysely": "0.29.7",
     "zod": "4.6.7"
   },
