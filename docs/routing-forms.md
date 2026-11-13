@@ -4,7 +4,9 @@ Status: storage and internal services only; no routing form is available yet. Mi
 0072 adds the five storage tables and migration 0083 their idempotency records; no routes,
 UI, execution path or plan checks exist. The shared validator, evaluator and target checks
 (step a2) and the configuration and publication services (steps a3 and a3b) exist as
-internal functions that no transport calls yet.
+internal functions that no transport calls yet. Target invalidation and retention cleanup
+(step a4) run inside existing event-type and member-removal mutations and in a background
+job; with no routing form they change nothing.
 The eventual feature is free on self-hosted and Cloud alike,
 and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),
@@ -64,9 +66,9 @@ old paths without redirect aliases. Drafts are private; publishing is explicit.
 Questions are ordered arrays with stable opaque IDs allocated on creation. Reordering or
 renaming retains identity; changing type or deleting/recreating allocates a new identity.
 Choice options also have stable IDs and public labels: rename does not change a match.
-IDs cannot be reused within a form's history. `required` defaults to false. Unknown answer
-IDs and unknown fields are rejected, and optional blank values are omitted. Required
-means a nonblank text value or a selected option, not merely a present JSON key.
+IDs cannot be reused within a form's retained versions. `required` defaults to false.
+Unknown answer IDs and unknown fields are rejected, and optional blank values are omitted.
+Required means a nonblank text value or a selected option, not merely a present JSON key.
 
 Initial types: `short_text`, `select` (single choice), `email`. These cover names,
 company, contact and explicit qualification categories while reusing familiar booking
@@ -187,7 +189,42 @@ omitted, `null` or blank description alike); for publication it is the form ID a
 `expectedRevision`. The same key with other input, or for the other operation, returns
 `idempotency_key_reused`. Concurrent retries of one key queue on a per-key transaction advisory
 lock, so one writes and each returns its result. Authorization runs first, so a retry by an
-actor who lost access is refused like any write.
+actor who lost access is refused like any write. A publication's key lasts only as long as the
+version it published: once a later publication supersedes that version, the next cleanup
+run, normally within 15 minutes, deletes it with its record unless a receipt references it.
+A retry with that key then gets `routing_revision_conflict` instead of the stored version, and
+it never publishes twice.
+
+Target lifecycle and retention (step a4, `packages/db/src/routing-lifecycle.ts`,
+`packages/scheduling/src/routing-target-lifecycle.ts` and the `routing-retention-v1` job) add no
+operation. Event-type deletion and every event-type update, disabling included, rederive that
+event type's eligibility and set the health marker of its dependency rows; administrative
+member removal marks the targets on the event types it deactivates `unavailable`. Each does so
+in its own transaction under the organization and event-type locks it already holds, marks rule
+and fallback targets alike, and touches only the current published version of each live form
+(at most 100 forms of 51 event targets each). Marking takes no form or receipt lock, so a
+publication and one of these mutations wait for each other on the event type or the
+organization and never deadlock. Routing never blocks a deletion, deactivation or departure,
+and no routing row goes with one. Self departure is refused while the member hosts an event
+type, so it changes no target. No service changes booking mode yet: one that does calls the
+same refresh, and reads see the change at once. Reads never trust a marker but rederive health
+from the current event types: `get` returns each rule's and the fallback's target in the
+published version as `ok`, `unavailable` (with the eligibility reason) or `unknown`, and `list`
+the worst of them; a form with nothing published has no health (null). `unknown` means this
+release does not recognise how a target is stored. It is never reported as unavailable or as
+missing configuration.
+
+Cleanup runs every 15 minutes, also while routing is off. Each transaction deletes at most 500
+receipts that expired unconsumed, oldest first, together with their encrypted answers, or
+examines at most 1000 versions and deletes at most 100 that are neither their form's current
+version nor referenced by a receipt, with their dependency rows and publication records. A
+run stops after 100 transactions or 45 seconds and queues one successor for the rest.
+Consumed receipts are never touched; they keep their version until their booking is deleted.
+Cleanup locks only its own rows, with `SKIP LOCKED`, and never waits: a version whose
+dependency rows or publication record another transaction holds, such as a replay returning
+that version, is left for a later sweep. With no routing data it finds nothing and writes
+nothing. Once a version is deleted, its question, option and rule IDs no longer constrain
+publication; booking snapshots carry their own labels.
 
 Publishing atomically inserts an immutable version (questions, order, rules, targets,
 mappings and labels) and switches the pointer. Versions have monotonically increasing
@@ -757,10 +794,10 @@ Each implementation step adds assertion-failing source-copy mutations for its pr
 and owns its focused tests and generated artifacts. The final e5 step runs the full release
 matrix rather than deferring missing implementation to acceptance. This design's doc-fact
 test checks only the numeric register, the unescaped and fully escaped maximum submission
-against the cap and the server's default body limit, and mutation controls; it does not
-claim to test routing behavior that does not exist yet. The design PR introduced no schema
-changes or product surfaces; the storage steps now install migrations 0072 and 0083 without
-adding product strings or UI.
+against the cap and the server's default body limit, the cleanup bounds of step a4 against
+their code constants, and mutation controls; it does not claim to test routing behavior that
+does not exist yet. The design PR introduced no schema changes or product surfaces; the
+storage steps now install migrations 0072 and 0083 without adding product strings or UI.
 
 ## Out of scope and known limitations
 

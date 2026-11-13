@@ -1594,6 +1594,13 @@ The phases within that organization boundary are:
   that record finishes first. Only routing takes that lock, always after the
   organization and before event types, so it adds no cycle; concurrent retries of one key
   queue on it, and each finds the record the first one committed.
+- Routing target invalidation runs inside event-type deletion and updates and administrative
+  member removal, after their organization and event-type locks. It updates the dependency
+  rows of current published versions only and takes no form or receipt lock. Routing cleanup
+  locks receipt, version, dependency and `routing_form_operations` rows with `SKIP LOCKED` in
+  bounded batches and takes no organization, event-type, host or form lock, so it never
+  waits: a version whose dependency row or publication record another transaction holds (a
+  replay reading that record, say) is left for a later sweep.
 - SCIM User creation takes the organization update lock first, like membership management,
   then a key share lock on its provisioning token row (revocation and rotation take the
   organization lock before their token update lock), then the shared invitation service's
