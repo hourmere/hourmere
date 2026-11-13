@@ -93,6 +93,9 @@ export const signedInAs = (me: Schemas['Me']): Routes => ({
       signIn: { email: true, google: false, microsoft: false },
     }),
   'GET /api/v1/me': () => json(200, me),
+  // Token inspection remains available in team settings when SCIM issuance is disabled.
+  [`GET /api/v1/organizations/${me.organization.id}/provisioning-tokens`]: () =>
+    json(200, { tokens: [], nextCursor: null }),
   'GET /api/auth/organization/get-active-member': () =>
     json(200, {
       id: 'membership-1',

@@ -10,6 +10,30 @@ closed response validators must add `"import"` before reading imported bookings.
 Regenerate clients from the current OpenAPI document; do not infer write permissions
 from source attribution. Imported booking mutations return `imported_booking_read_only`.
 
+### Webhook event compatibility
+
+`booking.attendee_no_show_changed` extends the webhook subscription `events` and delivery
+`eventType` response enums within `/api/v1`. Regenerate clients from the current OpenAPI
+document and update closed validators. Consumers must ignore unknown event types rather
+than reject otherwise valid responses. Existing subscriptions are unchanged; attendance
+notifications require explicit subscription to the new event.
+
+### Attendance access and team booking fields
+
+Actual booking hosts may read attendees and mark or unmark no-shows. Team owners/admins
+who do not host the booking may do so only through a browser session. API keys of any
+scope and MCP OAuth have host-only access in the current organization, including REST
+`GET /api/v1/bookings/{id}/attendees`, the marking endpoint, MCP attendance tools and CLI
+attendance commands. Non-host bookings return the same `booking_not_found` response as
+missing bookings, without revealing whether they exist.
+
+The team booking list/detail whitelist adds `canManageNoShow` and attendee `id`,
+`noShowMarkedAt` and `noShowMarkedBy` to the existing team booking fields. The marker
+fields are nullable; each attendee ID identifies its own row even if multiple attendees
+share an email address.
+Clients must tolerate absent additive fields from older servers. These fields remain
+private and are absent from public and invitee-management responses.
+
 ### Validation error fields
 
 An optional `field` string identifies a stable validation field name. Known values are
@@ -34,6 +58,14 @@ capability, reserving a time or changing configuration. The shared service also 
 MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
 [request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
 for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
+
+`GET /api/v1/event-types/{id}/availability-troubleshooting` is a read-only diagnostic that
+only `full` keys may call (operation group "Availability diagnostics"), with personal-owner or
+team-owner/admin permission. Repeated explanations can reveal when a host is busy, so `read`
+and `bookings` keys get `403 insufficient_scope`. The shared service also serves MCP
+`troubleshoot_availability` and CLI `troubleshoot-availability`. Its reason `code` is an open
+string: new codes may be added within `/api/v1`, and clients must show unknown codes neutrally.
+See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
 
 Native creation accepts `metadata.scope` with exactly `full`, `read` or `bookings`;
 omitting it keeps `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.

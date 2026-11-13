@@ -1,5 +1,44 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'SCIM provisioning tokens': 'SCIM provisioning tokens',
+  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
+    'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',
+  'Tokens only authorize SCIM for this organization. Keep them private.':
+    'Tokens only authorize SCIM for this organization. Keep them private.',
+  'Could not update provisioning tokens. Check the token list before trying again.':
+    'Could not update provisioning tokens. Check the token list before trying again.',
+  'New provisioning token': 'New provisioning token',
+  'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
+    'Copy this token now. It will not be shown again after you dismiss it or leave this view.',
+  'Copy token': 'Copy token',
+  'Dismiss token': 'Dismiss token',
+  'Provisioning token name': 'Provisioning token name',
+  'Create provisioning token': 'Create provisioning token',
+  'Loading provisioning tokens…': 'Loading provisioning tokens…',
+  'Could not load provisioning tokens.': 'Could not load provisioning tokens.',
+  'No provisioning tokens.': 'No provisioning tokens.',
+  'Previous token valid until: {date}': 'Previous token valid until: {date}',
+  'Last used: {date}': 'Last used: {date}',
+  'Rotate token': 'Rotate token',
+  'Revoke token': 'Revoke token',
+  'Confirm token change': 'Confirm token change',
+  'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.':
+    'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.',
+  'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.':
+    'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.',
+
+  'No-shows': 'No-shows',
+  'No-show': 'No-show',
+  'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
+    'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.',
+  'Clear no-show for {name}': 'Clear no-show for {name}',
+  'Mark {name} as a no-show': 'Mark {name} as a no-show',
+  'Clear no-show': 'Clear no-show',
+  'Mark no-show': 'Mark no-show',
+  'Could not update the no-show mark. Refresh the booking and try again.':
+    'Could not update the no-show mark. Refresh the booking and try again.',
+  'No-show mark updated.': 'No-show mark updated.',
+
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
   'Loading logo preview…': 'Loading logo preview…',
@@ -35,6 +74,47 @@ export const admin = {
   White: 'White',
   'Branding saved. Booking pages and emails are unchanged.':
     'Branding saved. Booking pages and emails are unchanged.',
+  'Event type filter': 'Event type filter',
+  'All event types': 'All event types',
+  'Saved event type — details unavailable': 'Saved event type — details unavailable',
+  'Loading event type choices…': 'Loading event type choices…',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    'Could not load event type choices. Your saved filter is unchanged.',
+
+  Integrations: 'Integrations',
+  'Slack booking notifications': 'Slack booking notifications',
+  'Booking created': 'Booking created',
+  'Booking cancelled': 'Booking cancelled',
+  'Booking rescheduled': 'Booking rescheduled',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.',
+  'Loading Slack notifications…': 'Loading Slack notifications…',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    'Could not load Slack notifications. Only organization owners and admins can manage them.',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    'Could not update Slack notifications. Check your access and settings, then try again.',
+  'No Slack destination yet.': 'No Slack destination yet.',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.',
+  'Slack notifications are paused.': 'Slack notifications are paused.',
+  'Slack destination saved.': 'Slack destination saved.',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack test message queued. This does not confirm delivery.',
+  'Send test message': 'Send test message',
+  'Delete this Slack destination and its delivery history?':
+    'Delete this Slack destination and its delivery history?',
+  'Delete Slack destination': 'Delete Slack destination',
+  'Slack destination deleted.': 'Slack destination deleted.',
+  'Configure Slack notifications': 'Configure Slack notifications',
+  'Enter a Slack webhook URL and choose at least one event.':
+    'Enter a Slack webhook URL and choose at least one event.',
+  'Replacement Slack webhook URL': 'Replacement Slack webhook URL',
+  'Slack incoming-webhook URL': 'Slack incoming-webhook URL',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.',
+  'Events to post': 'Events to post',
+  'Enable Slack notifications': 'Enable Slack notifications',
+  'Save Slack destination': 'Save Slack destination',
   'Group-seat bookings do not support reschedule requests.':
     'Group-seat bookings do not support reschedule requests.',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
@@ -68,6 +148,8 @@ export const admin = {
   'Include UTF-8 BOM for Excel': 'Include UTF-8 BOM for Excel',
   'Could not download CSV. Check the booking range and try again shortly.':
     'Could not download CSV. Check the booking range and try again shortly.',
+  'An export is already running for your account. Wait for it to finish and try again.':
+    'An export is already running for your account. Wait for it to finish and try again.',
   'Download CSV': 'Download CSV',
 
   'Past date overrides ({0})': 'Past date overrides ({0})',
@@ -76,6 +158,8 @@ export const admin = {
     'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.',
   'Review latest version': 'Review latest version',
   'Latest saved version': 'Latest saved version',
+  'Draft applied to the latest version. Save changes to submit it.':
+    'Draft applied to the latest version. Save changes to submit it.',
   'Apply my draft to this version': 'Apply my draft to this version',
   'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.':
     'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.',
@@ -136,6 +220,7 @@ export const admin = {
     'Remove this waitlist entry? Their contact details will be cleared. No email will be sent.',
   'Could not remove the waitlist entry.': 'Could not remove the waitlist entry.',
   'Back to first page': 'Back to first page',
+  'Previous page': 'Previous page',
   'Next page': 'Next page',
   Refresh: 'Refresh',
 
@@ -1906,4 +1991,67 @@ export const admin = {
     'The saved booking link is invalid. Reload the saved event type and try again.',
   'The email preview could not be created. Reload the saved event type and try again.':
     'The email preview could not be created. Reload the saved event type and try again.',
+
+  // Availability troubleshooting
+  'Troubleshoot availability': 'Troubleshoot availability',
+  'Pick an event type and a day to see which times can be booked, and why the others cannot.':
+    'Pick an event type and a day to see which times can be booked, and why the others cannot.',
+  'There are no event types in this space to check.':
+    'There are no event types in this space to check.',
+  'Enter a valid date.': 'Enter a valid date.',
+  'Check this day': 'Check this day',
+  'Checking this day…': 'Checking this day…',
+  'Could not check this day.': 'Could not check this day.',
+  'You cannot troubleshoot this event type with your current access. Only its owner, or a team owner or admin, can see why times are unavailable.':
+    'You cannot troubleshoot this event type with your current access. Only its owner, or a team owner or admin, can see why times are unavailable.',
+  'Connected calendars could not be read just now, so this day cannot be explained yet. Try again shortly.':
+    'Connected calendars could not be read just now, so this day cannot be explained yet. Try again shortly.',
+  'The default location of this event type cannot be offered right now, so no times can be checked.':
+    'The default location of this event type cannot be offered right now, so no times can be checked.',
+  'This day has too many possible start times to check at once.':
+    'This day has too many possible start times to check at once.',
+  'This day could not be checked. Check the date and time zone.':
+    'This day could not be checked. Check the date and time zone.',
+  '{available} of {total} possible times can be booked. Times are shown in {zone}.':
+    '{available} of {total} possible times can be booked. Times are shown in {zone}.',
+  'Hide times that are only outside the available hours':
+    'Hide times that are only outside the available hours',
+  '{count} times outside the available hours are hidden.':
+    '{count} times outside the available hours are hidden.',
+  'There are no possible start times on this day.':
+    'There are no possible start times on this day.',
+  'Times on this day': 'Times on this day',
+  Bookable: 'Bookable',
+  'Not bookable': 'Not bookable',
+  '{name}:': '{name}:',
+  'A team host:': 'A team host:',
+  '(affects {range})': '(affects {range})',
+  'This time has already passed.': 'This time has already passed.',
+  'This meeting length is not offered for this event type.':
+    'This meeting length is not offered for this event type.',
+  'Outside the available hours (weekly hours or a date override).':
+    'Outside the available hours (weekly hours or a date override).',
+  'Inside the available hours, but not one of the offered start times.':
+    'Inside the available hours, but not one of the offered start times.',
+  'Too soon: the minimum notice before a booking has not been met.':
+    'Too soon: the minimum notice before a booking has not been met.',
+  'Too far ahead: beyond how far in advance people can book.':
+    'Too far ahead: beyond how far in advance people can book.',
+  'A connected calendar shows this time as busy.': 'A connected calendar shows this time as busy.',
+  'The buffer before the meeting overlaps another commitment.':
+    'The buffer before the meeting overlaps another commitment.',
+  'The buffer after the meeting overlaps another commitment.':
+    'The buffer after the meeting overlaps another commitment.',
+  'The daily booking limit for this event type has been reached.':
+    'The daily booking limit for this event type has been reached.',
+  'The weekly booking limit for this event type has been reached.':
+    'The weekly booking limit for this event type has been reached.',
+  'The monthly booking limit for this event type has been reached.':
+    'The monthly booking limit for this event type has been reached.',
+  'Another booking already takes this time.': 'Another booking already takes this time.',
+  'Not every required host is free.': 'Not every required host is free.',
+  'No host in the rotation is free.': 'No host in the rotation is free.',
+  'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
+    'Team event types are not listed: only team owners and admins can see why their times are unavailable.',
+  'Another scheduling rule applies.': 'Another scheduling rule applies.',
 } as const

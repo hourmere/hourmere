@@ -11,7 +11,10 @@ import {
   type MailMessage,
   MailRejectedError,
 } from '@hourmere/mail'
-import type { NotificationSnapshot } from '@hourmere/scheduling/notification-settings'
+import {
+  type NotificationSnapshot,
+  REMINDER_MIN_GAP,
+} from '@hourmere/scheduling/notification-settings'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -25,11 +28,8 @@ import {
   sendOnce,
 } from './index.ts'
 
-/**
- * No reminder when it would go out this soon or sooner after the booking or reschedule. Shared by
- * the default 24-hour reminder and configured reminders, and pinned by the public docs test.
- */
-export const REMINDER_MIN_GAP = { hours: 1 } as const
+/** The strict reminder gap, defined beside the reminder rules in @hourmere/scheduling. */
+export { REMINDER_MIN_GAP }
 
 export const SCHEDULED_BOOKING_EMAIL_JOB = 'scheduled-booking-email'
 export const ScheduledBookingEmailPayload = z.strictObject({ messageId: z.uuid() })

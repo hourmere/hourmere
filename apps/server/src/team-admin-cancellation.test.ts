@@ -7,6 +7,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type BookingNotifier, cancelTeamAdminBooking } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy, mutatedPair } from '../../../scripts/source-copy-guard.ts'
 import { teamManagementAccess } from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -35,13 +36,13 @@ function sourceCopyUrl(
   return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
 }
 
-async function sourceCopy<T>(
+async function sourceCopy<T extends object>(
   path: string,
   before: string,
   after: string,
   imports: Record<string, string> = {},
 ): Promise<T> {
-  return import(sourceCopyUrl(path, before, after, imports))
+  return guardCopy<T>(await import(sourceCopyUrl(path, before, after, imports)))
 }
 
 function sharedCheckCopy(before: string, after: string) {
@@ -532,9 +533,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
         `error.code === '${code}'`,
         'false',
       )
-      await expect(verifyTargetDenial(copy.cancelTeamAdminBooking)).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(copy, (module) => verifyTargetDenial(module.cancelTeamAdminBooking))
     },
   )
 
@@ -544,9 +543,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       "'booking_already_cancelled'",
       "'booking_cancelled'",
     )
-    await expect(verifyTargetDenial(copy.cancelTeamAdminBooking)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyTargetDenial(module.cancelTeamAdminBooking))
   })
 
   it.each([
@@ -556,13 +553,15 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       'options.expectedOrganizationId.toLowerCase() !== actor.organizationId.toLowerCase()',
     ],
   ])('detects missing service %s in a source copy', async (_label, source) => {
-    const copy = await sourceCopy<{ cancelTeamAdminBooking: Cancel }>(
-      '../../../packages/scheduling/src/team-bookings.ts',
-      source,
+    const path = '../../../packages/scheduling/src/team-bookings.ts'
+    const { copy, unmutated } = await mutatedPair(
+      (after: string) => sourceCopy<{ cancelTeamAdminBooking: Cancel }>(path, source, after),
       'false',
+      source,
     )
-    await expect(verifyServiceContext(copy.cancelTeamAdminBooking)).rejects.toMatchObject({
-      name: 'AssertionError',
+    // Without validation, a missing options object crashes with a TypeError instead.
+    await expectKilled(copy, (module) => verifyServiceContext(module.cancelTeamAdminBooking), {
+      unmutated,
     })
   })
 
@@ -572,9 +571,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       "if (typeof options.notify !== 'function')",
       'if (false)',
     )
-    await expect(verifyRequiredNotifier(copy.cancelTeamAdminBooking)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyRequiredNotifier(module.cancelTeamAdminBooking))
   })
 
   it('detects missing expected-organization forwarding in the shared writer source copy', async () => {
@@ -583,9 +580,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       'options && {\n              expectedOrganizationId: options.expectedOrganizationId,\n              allowPersonal: false,\n            }',
       'undefined',
     )
-    await expect(verifyContext(copy.teamManagementAccess)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyContext(module.teamManagementAccess))
   })
 
   it('detects missing live-session context comparison in the shared check source copy', async () => {
@@ -593,9 +588,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       'if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase())',
       'if (false)',
     )
-    await expect(verifyContext(copy.teamManagementAccess)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyContext(module.teamManagementAccess))
   })
 
   it('detects personal-organization admission in the shared writer source copy', async () => {
@@ -604,8 +597,6 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       'expectedOrganizationId: options.expectedOrganizationId,\n              allowPersonal: false',
       'expectedOrganizationId: options.expectedOrganizationId,\n              allowPersonal: true',
     )
-    await expect(verifyPersonalContext(copy.teamManagementAccess)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(copy, (module) => verifyPersonalContext(module.teamManagementAccess))
   })
 })

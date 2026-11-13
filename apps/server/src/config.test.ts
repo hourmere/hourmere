@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
+import { parseSsoPrivateTargets } from '@hourmere/outbound/sso-private-targets'
 import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from './config.ts'
@@ -8,6 +11,53 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  function verifyExportLimit(load: typeof loadConfig) {
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const env = { ...base, HOURMERE_ROLE }
+      for (const value of [undefined, ''])
+        expect(
+          load({ ...env, BOOKING_EXPORT_MAX_CONCURRENT: value }).BOOKING_EXPORT_MAX_CONCURRENT,
+        ).toBe(2)
+      for (const value of ['1', '2', '8'])
+        expect(
+          load({ ...env, BOOKING_EXPORT_MAX_CONCURRENT: value }).BOOKING_EXPORT_MAX_CONCURRENT,
+        ).toBe(Number(value))
+      for (const value of ['0', '-1', '9', '1.5', 'NaN', 'Infinity', 'off', ' ', '2slots'])
+        expect(() => load({ ...env, BOOKING_EXPORT_MAX_CONCURRENT: value })).toThrow(
+          /BOOKING_EXPORT_MAX_CONCURRENT must be a whole number from 1 to 8/,
+        )
+    }
+  }
+
+  it('validates CSV export capacity before startup in every process role', () => {
+    verifyExportLimit(loadConfig)
+  })
+
+  it.each([
+    ['integer check', '.int({ error: BOOKING_EXPORT_LIMIT_FORMAT })', ''],
+    ['lower bound', '.min(1, { error: BOOKING_EXPORT_LIMIT_FORMAT })', ''],
+    ['upper bound', '.max(8, { error: BOOKING_EXPORT_LIMIT_FORMAT })', ''],
+    ['invalid-value rejection', '.default(2),', '.default(2).catch(2),'],
+    ['default capacity', '.default(2),', '.default(1),'],
+  ])('detects a removed CSV export config protection: %s', async (_name, before, after) => {
+    const location = new URL('./config.ts', import.meta.url)
+    const source = readFileSync(location, 'utf8')
+    expect(source.split(before)).toHaveLength(2)
+    const javascript = stripTypeScriptTypes(source.replace(before, after)).replace(
+      /((?:from|import)\s*)'([^']+)'/g,
+      (_, prefix: string, specifier: string) => {
+        const resolved = specifier.startsWith('.')
+          ? new URL(specifier, location).href
+          : import.meta.resolve(specifier)
+        return `${prefix}'${resolved}'`
+      },
+    )
+    const mutant: typeof import('./config.ts') = await import(
+      `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+    )
+    expect(() => verifyExportLimit(mutant.loadConfig)).toThrow()
+  })
+
   it('requires explicit opt-in for paid booking foundation in every process role', () => {
     for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
       const env = { ...base, HOURMERE_ROLE }
@@ -170,6 +220,42 @@ describe('loadConfig', () => {
     }
     expect(() =>
       loadConfig({ ...base, WEBHOOK_PRIVATE_TARGETS: 'untrusted-private-value' }),
+    ).not.toThrow(/untrusted-private-value/)
+  })
+  it('reads SSO_PRIVATE_TARGETS on its own, empty by default, and validates it in every role', () => {
+    expect(loadConfig(base).SSO_PRIVATE_TARGETS).toEqual([])
+    expect(loadConfig({ ...base, SSO_PRIVATE_TARGETS: '' }).SSO_PRIVATE_TARGETS).toEqual([])
+    const value = 'keycloak.internal:8443,10.0.0.5:9443,[fd12::5]:443'
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const config = loadConfig({
+        ...base,
+        HOURMERE_ROLE,
+        SSO_PRIVATE_TARGETS: value,
+        SSO_OIDC_ENABLED: 'true',
+        SSO_SAML_ENABLED: 'true',
+      })
+      expect(config.SSO_PRIVATE_TARGETS).toEqual(parseSsoPrivateTargets(value))
+      // Never the webhook allowlist, in either direction.
+      expect(config.WEBHOOK_PRIVATE_TARGETS).toEqual([])
+      expect(
+        loadConfig({ ...base, HOURMERE_ROLE, WEBHOOK_PRIVATE_TARGETS: 'keycloak.internal:8443' })
+          .SSO_PRIVATE_TARGETS,
+      ).toEqual([])
+      for (const SSO_PRIVATE_TARGETS of [
+        'keycloak.internal',
+        'keycloak.internal:8443-8444',
+        '10.0.0.0/8:443',
+        '8.8.8.8:443',
+        '169.254.169.254:80',
+        '[fd00:ec2::254]:80',
+        Array.from({ length: 33 }, (_, i) => `synthetic${i}:8443`).join(','),
+      ])
+        expect(() => loadConfig({ ...base, HOURMERE_ROLE, SSO_PRIVATE_TARGETS })).toThrow(
+          /SSO_PRIVATE_TARGETS/,
+        )
+    }
+    expect(() =>
+      loadConfig({ ...base, SSO_PRIVATE_TARGETS: 'untrusted-private-value' }),
     ).not.toThrow(/untrusted-private-value/)
   })
   it('requires calendar encryption to be independent of authentication and webhook keys', () => {

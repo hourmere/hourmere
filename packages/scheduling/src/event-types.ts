@@ -6,6 +6,7 @@
 import { requireActiveApiKey } from '@hourmere/auth'
 import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -50,6 +51,7 @@ import {
   validateNotifications,
 } from './notification-settings.ts'
 import { parseQuestions, type Question, validateQuestions } from './questions.ts'
+import { refreshRoutingTargetHealth } from './routing-target-lifecycle.ts'
 import {
   type SuccessRedirect,
   type SuccessRedirectInput,
@@ -300,6 +302,7 @@ export async function setEventTypeNotifications(
         .where('id', '=', row.id)
         .execute()
     }
+    await auditEventType(ctx, trx, row.id, 'event_type.notifications_updated')
     return notifications
   })
 }
@@ -340,6 +343,7 @@ export async function setEventTypeWaitlist(
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await waitlistManager(trx, ctx, row)
     await writeWaitlistSettings(trx, row, settings)
+    await auditEventType(ctx, trx, row.id, 'event_type.waitlist_updated')
     return settings
   })
 }
@@ -659,6 +663,7 @@ export async function createEventType(
         )
         .execute()
       if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, id), waitlist)
+      await auditEventType(ctx, trx, id, 'event_type.created')
       return toEventType(await loadEventType(trx, id))
     }),
   )
@@ -829,24 +834,38 @@ export async function updateEventType(
           .execute()
       }
       if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, row.id), waitlist)
+      // Routing targets on this event type follow its updated row, disabling included.
+      await refreshRoutingTargetHealth(
+        trx,
+        row.organization_id,
+        [row.id],
+        new Date(ctx.now().epochMilliseconds),
+      )
+      await auditEventType(ctx, trx, row.id, 'event_type.updated')
       return toEventType(await loadEventType(trx, row.id))
     }),
   )
 }
 
-/** Marks the event type deleted; its slug becomes free and its bookings keep it. */
+/**
+ * Marks the event type deleted; its slug becomes free and its bookings keep it. Routing forms
+ * never block deletion: their targets on it are marked unavailable in the same transaction.
+ */
 export async function deleteEventType(ctx: ServiceContext, id: string): Promise<void> {
   await ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await assertCanWrite(trx, ctx, row, true)
+    const deletedAt = new Date(ctx.now().epochMilliseconds)
     await trx
       .updateTable('event_types')
-      .set({ deleted_at: new Date(ctx.now().epochMilliseconds) })
+      .set({ deleted_at: deletedAt })
       .where('id', '=', row.id)
       .where('deleted_at', 'is', null)
       .execute()
+    await refreshRoutingTargetHealth(trx, row.organization_id, [row.id], deletedAt)
+    await auditEventType(ctx, trx, row.id, 'event_type.deleted')
   })
 }
 
@@ -1382,6 +1401,7 @@ export async function activateRoundRobin(ctx: ServiceContext, id: string): Promi
       .values({ event_type_id: row.id, enabled: true })
       .onConflict((conflict) => conflict.column('event_type_id').doUpdateSet({ enabled: true }))
       .execute()
+    await auditEventType(ctx, trx, row.id, 'event_type.round_robin_activated')
     return toEventType(await loadEventType(trx, row.id))
   })
 }
@@ -1398,6 +1418,12 @@ function validZoomConnection(value: unknown): string | null | undefined {
     throw new DomainError('invalid', 'invalid_zoom_connection', 'Choose your own Zoom connection.')
   return (value as string).toLowerCase()
 }
+// REST and MCP create/update share this validation; the CLI delegates to MCP.
+// Cal.com imports only static locations (or null), never automatic providers. Older
+// writes rejected multi-host automatic Meet before organizers were introduced, and
+// automatic Zoom has always required an individual host. Thus collective Meet with
+// no organizer and round-robin automatic Zoom cannot originate from supported writes;
+// booking readiness need not preserve historical error codes for those invalid rows.
 async function validateConference(
   db: Db,
   ctx: ServiceContext,
@@ -1459,4 +1485,26 @@ async function validateConference(
       eventTypeId,
       ctx.automaticMeet,
     )
+}
+
+async function auditEventType(
+  ctx: ServiceContext,
+  trx: Db,
+  id: string,
+  action:
+    | 'event_type.created'
+    | 'event_type.updated'
+    | 'event_type.deleted'
+    | 'event_type.notifications_updated'
+    | 'event_type.waitlist_updated'
+    | 'event_type.round_robin_activated',
+) {
+  await writeAuditEvent(trx, {
+    organizationId: ctx.principal.organization.id,
+    ...auditActor(ctx.principal),
+    action,
+    targetType: 'event_type',
+    targetId: id,
+    requestId: ctx.requestId,
+  })
 }

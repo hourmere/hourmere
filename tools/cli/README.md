@@ -171,6 +171,18 @@ also reported as not enabled. Ask the operator to upgrade that server before ena
 `SLOT_SNIPPETS_ENABLED`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for
 response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
 
+## Explain why times cannot be booked
+
+```sh
+echo '{"eventTypeId":"…","date":"2026-11-16","timeZone":"Europe/Berlin"}' |
+  hourmere troubleshoot-availability --input -
+```
+
+The output lists every possible start time of that local day with `status` and reason codes
+(for example `outside_working_hours`, `calendar_busy`, `daily_limit`), identical to REST and MCP.
+It needs a `full` key and personal-owner or team-owner/admin permission; otherwise it fails with
+`event_type_not_found`. See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting) for the reason codes.
+
 ## Configure meeting lengths
 
 Use `create-event` or `update-event` with a `full` API key to configure event types.
@@ -242,6 +254,11 @@ was created, or from the list with a read/full key. Used links remain used. Exis
 ownership and team permissions still apply. See the
 [one-time link guide](https://hourmere.com/docs/one-time-links) for limits and retention.
 
+`workflows list` (JSON `owner` as `{"kind":"personal","id":USER_ID}` or
+`{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)
+read booking workflows with a `read` or `full` key. Booking workflows are not available yet:
+until they are enabled on the instance both commands exit `1` with `workflows_disabled`.
+
 Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking list's
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.
 Exit codes: `0` success, `1` usage/input/domain/protocol error, `3` transport failure.
@@ -288,6 +305,41 @@ for argument tables, private results, pagination and recovery, and the
 [MCP guide](https://hourmere.com/docs/mcp) for tool semantics.
 Report bugs on [GitHub](https://github.com/hourmere/hourmere/issues).
 
+### Mark attendee no-shows
+
+`set-no-show` uses JSON input with `bookingId`, `attendeeId` and `noShow` (`true`
+to mark, `false` to unmark). Read attendee IDs from authenticated booking lists.
+It requires `bookings` or `full` scope and booked-host authority in the current organization.
+Only bookings whose scheduled start has passed can be changed; cancelled and imported
+records refuse changes. Repeating the same state preserves its timestamp and actor.
+No invitee email or manage-page indicator is added, and existing follow-ups remain scheduled.
+
+`booking-attendees` takes `{ "bookingId": "…" }` and returns attendee IDs and
+markers. It accepts `read`, `bookings` or `full` keys with the same booked-host
+permission. Team owner/admin status does not grant CLI access to bookings hosted by
+other members: these return `booking_not_found`, just as missing bookings do. Non-host
+team administration requires a browser session. Reads are available before the start
+and after cancellation.
+
+## Organization branding
+
+```sh
+hourmere branding get
+printf '%s' '{"brandPrimaryColor":"#123456"}' | hourmere branding set --input -
+hourmere branding upload --file logo.png --content-type image/png
+```
+
+Reads require `read` or `full` API key scope; writes require `full`. The personal owner
+or team owner/admin must own the key. `branding set` accepts an uploaded `brandLogo`
+SHA-256 reference and/or `brandPrimaryColor` (`#RRGGBB`); omission preserves a field,
+and `null` clears it. Black or white button text is chosen for readable contrast.
+
+`branding upload` sends raw bytes over REST, immediately attaches the image and prints
+the saved settings. PNG, JPEG and WebP are accepted, at most 512 KiB and 2048 pixels per
+side; images are decoded and re-encoded as PNG. SVG and animation are rejected. The
+server enforces all limits. These settings are stored only; public booking pages and
+emails do not yet apply the theme.
+
 ## License
 
 GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
@@ -312,21 +364,3 @@ team owner/admin permissions. The MCP call returns a small pointer; the CLI stre
 its same-instance authenticated REST download without buffering the CSV in memory.
 Files contain attendee personal data; store and share them privately. See
 [CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
-## Organization branding
-
-```sh
-hourmere branding get
-printf '%s' '{"brandPrimaryColor":"#123456"}' | hourmere branding set --input -
-hourmere branding upload --file logo.png --content-type image/png
-```
-
-Reads require `read` or `full` API key scope; writes require `full`. The personal owner
-or team owner/admin must own the key. `branding set` accepts an uploaded `brandLogo`
-SHA-256 reference and/or `brandPrimaryColor` (`#RRGGBB`); omission preserves a field,
-and `null` clears it. Black or white button text is chosen for readable contrast.
-
-`branding upload` sends raw bytes over REST, immediately attaches the image and prints
-the saved settings. PNG, JPEG and WebP are accepted, at most 512 KiB and 2048 pixels per
-side; images are decoded and re-encoded as PNG. SVG and animation are rejected. The
-server enforces all limits. These settings are stored only; public booking pages and
-emails do not yet apply the theme.

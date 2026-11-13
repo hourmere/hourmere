@@ -43,8 +43,13 @@ never credentials. Do not put passwords, Authorization headers, XML bodies, prov
 response bodies or credential-bearing URLs into logs, telemetry, error causes, jobs or
 API responses. The internal reader necessarily exposes plaintext to trusted calling
 code; it is not a public API. Decrypted credential objects and discovery request
-objects redact password/Authorization fields under `JSON.stringify`, `util.inspect`
-and `String()`. Direct field access remains usable internally and must not be logged.
+objects redact username/password and Authorization fields under `JSON.stringify`,
+`util.inspect` and `String()`. Protected fields use non-enumerable getters: object
+spread, `Object.entries` and `structuredClone` omit them. Repeated redaction is safe.
+Direct field access remains usable internally and must not be logged; explicitly
+copying those field values creates unprotected plaintext. These protections apply to
+objects returned by the credential reader and wrapped discovery requests, not raw
+caller-supplied credential literals.
 Keep plaintext lifetime short; JavaScript does not provide
 a reliable guarantee of memory zeroization. Back up the encryption key separately from
 the database. Losing it requires reconnecting; rotation must explicitly decrypt and
@@ -77,7 +82,10 @@ These steps follow [RFC 6764 service discovery](https://www.rfc-editor.org/rfc/r
 Do not construct a principal path from an email address or assume a collection is called
 “Default.” Preserve escaped paths. Depth:0 accepts a matching response href modulo
 one trailing slash, or a single same-origin response with a canonical context path.
-Resolve subsequent relative property hrefs against that canonical response href.
+Resolve relative response and property hrefs against the URI of the request that
+returned the multistatus (after any redirects), following RFC 4918 §8.3. A canonical
+response href selects the property group but does not change that base URI; this also
+applies when a nested endpoint returns a 207 directly without a redirect.
 The foundation intentionally does not implement DNS SRV/TXT discovery and uses only
 the first returned calendar-home-set href; accounts with multiple homes need further
 adapter work. The result does not establish read access to event bodies.

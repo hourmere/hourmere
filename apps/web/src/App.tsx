@@ -40,9 +40,11 @@ import {
   SignInPage,
   TeamBookingPage,
   TeamBookingsPage,
+  TroubleshootPage,
 } from './lazy-pages.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { PATHS } from './paths.ts'
+import { useAdminPwa } from './pwa.ts'
 
 export const appRoutes = createRoutesFromElements(
   <>
@@ -70,6 +72,7 @@ export const appRoutes = createRoutesFromElements(
           <Route path="event-types/:id" element={<EventTypeEditorPage />} />
           <Route path="availability" element={<AvailabilityPage />} />
           <Route path="availability/new" element={<ScheduleEditorPage />} />
+          <Route path="availability/troubleshoot" element={<TroubleshootPage />} />
           <Route path="availability/:id" element={<ScheduleEditorPage />} />
           <Route path="bookings" element={<BookingsPage />} />
           <Route path="team/bookings" element={<TeamBookingsPage />} />
@@ -128,6 +131,7 @@ function RouteLoadingStatus() {
  */
 export function App() {
   const { pathname } = useLocation()
+  useAdminPwa(pathname)
   const admin = matchRoutes(appRoutes, pathname)?.some(
     ({ route }) => route.handle?.surface === 'admin',
   )

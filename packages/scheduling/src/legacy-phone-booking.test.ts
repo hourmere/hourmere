@@ -157,6 +157,8 @@ function copiedBooking(change?: readonly [string, string]) {
     toIso: (value: Temporal.Instant) => value.toString(),
     insertBooking: async () => ({ id: 'synthetic-booking', manageToken: null }),
     prepareBookingConference: noop,
+    // This isolated guard fixture stubs all persistence; real audit writes are covered separately.
+    auditBooking: noop,
     admitGroupSlot: noop,
     loadBooking: async () => ({}),
     pgError: () => ({}),
@@ -213,8 +215,8 @@ describe('invitee phone booking source-copy controls', () => {
     ],
     [
       'choice resolution before persistence',
-      'const choice = await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)',
-      'const choice = { location: null, locationOption: null }',
+      'await resolveBookingLocation(ctx, trx, current, selectedHostIds, input)',
+      '{ location: null, locationOption: null }',
     ],
   ])('detects removal of %s', async (_name, before, after) => {
     await verifyLockedPhoneGuard(copiedBooking())

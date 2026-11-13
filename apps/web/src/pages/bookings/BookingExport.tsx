@@ -34,6 +34,7 @@ export function BookingExport({
   const [bom, setBom] = useState(true)
   const [downloading, setDownloading] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [userBusy, setUserBusy] = useState(false)
   const start = from ? Date.parse(`${from}Z`) : Number.NaN
   const end = to ? Date.parse(`${to}Z`) : Number.NaN
   const overlaps =
@@ -71,6 +72,7 @@ export function BookingExport({
   }
   async function download() {
     setFailed(false)
+    setUserBusy(false)
     setDownloading(true)
     try {
       const response = await fetch(`/api/v1/bookings/export.csv?${query}`, {
@@ -80,7 +82,22 @@ export function BookingExport({
         headers: { accept: 'text/csv' },
       })
       if (!response.ok || response.headers.get('content-type')?.split(';')[0] !== 'text/csv') {
-        await response.body?.cancel()
+        if (
+          response.status === 409 &&
+          response.headers.get('content-type')?.includes('application/json')
+        ) {
+          const error: unknown = await response.json()
+          if (
+            error &&
+            typeof error === 'object' &&
+            'error' in error &&
+            error.error === 'export_user_in_progress'
+          ) {
+            setUserBusy(true)
+          }
+        } else {
+          await response.body?.cancel()
+        }
         throw new Error('download_failed')
       }
       const url = URL.createObjectURL(await response.blob())
@@ -142,7 +159,11 @@ export function BookingExport({
         </label>
         {failed && (
           <p className="alert alert-error" role="alert">
-            {t('Could not download CSV. Check the booking range and try again shortly.')}
+            {userBusy
+              ? t(
+                  'An export is already running for your account. Wait for it to finish and try again.',
+                )
+              : t('Could not download CSV. Check the booking range and try again shortly.')}
           </p>
         )}
         <div className="form-actions">

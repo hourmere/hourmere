@@ -426,6 +426,72 @@ describe('pinned private webhook transport', () => {
   })
 })
 
+describe('a destination admitted only by a network target', () => {
+  // Neither URL has public syntax (a non-default port, plain HTTP): only a CIDR entry admits
+  // it, so an answer outside that network must be refused, never routed as public.
+  it.each([
+    ['https://hooks.example.com:8443/receive', { address: '8.8.8.8', family: 4 }],
+    ['https://hooks.example.com:8443/receive', { address: '2606:4700:4700::1111', family: 6 }],
+    ['http://crm.example.com:8080/receive', { address: '8.8.8.8', family: 4 }],
+    ['http://crm.example.com:8080/receive', { address: '2606:4700:4700::1111', family: 6 }],
+  ])('refuses %s when DNS answers with the public address %j', async (url, answer) => {
+    expect(webhookUrl(url)).toBeUndefined()
+    expect(webhookUrl(url, privateTargets)).toBe(url)
+    network.lookup.mockResolvedValue([answer])
+    respondWith(204)
+    respondHttp()
+    await expect(sendWebhook(privateInput(url))).rejects.toThrow('refused')
+    expect(network.lookup).toHaveBeenCalledOnce()
+    expect(network.request).not.toHaveBeenCalled()
+    expect(network.httpRequest).not.toHaveBeenCalled()
+  })
+  it.each([
+    ['https://hooks.example.com:8443/receive', { address: 'fd12::5', family: 6 }],
+    ['http://crm.example.com:8080/receive', { address: '192.168.1.5', family: 4 }],
+  ])('delivers %s when every answer is inside the network, here %j', async (url, answer) => {
+    network.lookup.mockResolvedValue([answer])
+    respondWith(204)
+    respondHttp()
+    expect(await sendWebhook(privateInput(url))).toBe(204)
+    expect([...network.request.mock.calls, ...network.httpRequest.mock.calls]).toHaveLength(1)
+  })
+})
+
+describe('webhook request headers', () => {
+  const body = '{"type":"booking.created","name":"é"}'
+  const signed = {
+    'webhook-id': 'msg_synthetic',
+    'webhook-event-id': 'evt_synthetic',
+    'webhook-timestamp': '1700000000',
+    'webhook-signature': 'v1,synthetic',
+  }
+  const sentHeaders = async (headers: Record<string, string>) => {
+    network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
+    respondWith(204)
+    expect(await sendWebhook({ ...input(), body, headers })).toBe(204)
+    return Object.entries(network.request.mock.calls[0]?.[1].headers)
+  }
+  const fixed = [
+    ['content-type', 'application/json'],
+    ['content-length', String(Buffer.byteLength(body))],
+    ['user-agent', 'Hourmere-Webhooks/1'],
+  ]
+
+  it('sends the caller headers first, in their order, and then the fixed headers', async () => {
+    expect(await sentHeaders(signed)).toEqual([...Object.entries(signed), ...fixed])
+  })
+  it('never lets a caller header override the content type, length or user agent', async () => {
+    expect(
+      await sentHeaders({
+        ...signed,
+        'content-type': 'text/plain',
+        'content-length': '1',
+        'user-agent': 'synthetic-caller/1',
+      }),
+    ).toEqual([...Object.entries(signed), ...fixed])
+  })
+})
+
 describe('authoritative exact-host private policy', () => {
   it('refuses a dotted HTTPS host rebinding from private to public despite public URL syntax', async () => {
     const request = {

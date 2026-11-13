@@ -62,6 +62,9 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 
 | Command | Tool | Arguments |
 |---|---|---|
+| `branding get` | `get_branding` | `{}`; requires `read` or `full` |
+| `branding set` | `set_branding` | optional `brandPrimaryColor` (`#RRGGBB`), `brandLogo` (uploaded hash); `null` clears; requires `full` |
+| `branding upload` | REST `POST /api/v1/branding/logo` | `--file FILE --content-type image/png` (also `image/jpeg`, `image/webp`); requires `full` |
 | `whoami` | `whoami` | `{}` |
 | `profile` | `get_profile` | `{}` |
 | `catalog` | `list_event_types` | optional `limit`, `after` |
@@ -72,6 +75,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `schedules` | `list_schedules` | optional `limit`, `after` |
 | `schedule` | `get_schedule` | `id` from `schedules` |
 | `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `durationMinutes`, `maxSlots`, `after` |
+| `troubleshoot-availability` | `troubleshoot_availability` | `eventTypeId`, `date`; optional `timeZone`, `durationMinutes` |
 | `open-time-snippet` | `generate_open_time_snippet` | exactly one of `eventTypeId`, `slug`; `from`, `to`; optional `count`, `locale`, `displayTimeZone`, `durationMinutes` |
 | `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `durationMinutes`, `responses`, `guests` |
 | `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
@@ -80,6 +84,14 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
 | `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
 | `one-time-links revoke` | `revoke_one_time_link` | `eventTypeId`, `id`; requires `bookings` or `full` |
+| `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+| `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+
+`workflows list` and `workflows get` read booking workflows, which are not available yet:
+until they are enabled on the instance both exit `1` with `workflows_disabled` on stderr
+(a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
+key acts as: your personal workflows from a personal key, or a team's from a team key held by a
+current owner or admin.
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
@@ -203,6 +215,18 @@ A server that predates open-time snippets returns the same unknown-tool response
 also reported as not enabled. Ask the operator to upgrade that server before enabling
 `SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for
 response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
+
+## Explain why times cannot be booked
+
+```sh
+echo '{"eventTypeId":"…","date":"2026-11-16","timeZone":"Europe/Berlin"}' |
+  hourmere troubleshoot-availability --input -
+```
+
+The output lists every possible start time of that local day with `status` and reason codes
+(for example `outside_working_hours`, `calendar_busy`, `daily_limit`), identical to REST and MCP.
+It needs a `full` key and personal-owner or team-owner/admin permission; otherwise it fails with
+`event_type_not_found`. See [Troubleshoot availability](/docs/availability-troubleshooting) for the reason codes.
 
 ## Configure meeting lengths
 
@@ -382,7 +406,11 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged.
+reschedule retry semantics remain unchanged. An answer to a request that expired, was
+replaced or was already resolved by a move fails with `reschedule_request_changed`, as
+does a pick after cancellation. With the request email's token, REST
+`GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
+have no invitee read of a manage token.
 
 ## Configure booking limits
 
@@ -399,6 +427,17 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Record attendee no-shows
+
+[Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
+scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
+MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
+`noShow`. API keys require `bookings` or `full` plus booked-host authority. API keys
+of every scope and MCP OAuth can read or mark attendees only on bookings the caller
+hosts in the current organization. Non-host team owners/admins need a browser session;
+agent credentials receive `booking_not_found`, just as for a missing booking.
+Invitee pages and messages are unchanged, including scheduled follow-ups.
 
 ## Booking waitlists
 

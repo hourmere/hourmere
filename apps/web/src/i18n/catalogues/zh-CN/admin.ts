@@ -1,5 +1,44 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'SCIM provisioning tokens': 'SCIM 预配令牌',
+  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
+    '预配功能尚未开放。这些令牌用于为组织未来的 SCIM 连接做准备。',
+  'Tokens only authorize SCIM for this organization. Keep them private.':
+    '令牌仅授权访问此组织的 SCIM 服务。请妥善保管。',
+  'Could not update provisioning tokens. Check the token list before trying again.':
+    '无法更新预配令牌。请先查看令牌列表，再重试。',
+  'New provisioning token': '新预配令牌',
+  'Copy this token now. It will not be shown again after you dismiss it or leave this view.':
+    '请立即复制此令牌。隐藏令牌或离开此视图后，将无法再次查看。',
+  'Copy token': '复制令牌',
+  'Dismiss token': '隐藏令牌',
+  'Provisioning token name': '预配令牌名称',
+  'Create provisioning token': '创建预配令牌',
+  'Loading provisioning tokens…': '正在加载预配令牌……',
+  'Could not load provisioning tokens.': '无法加载预配令牌。',
+  'No provisioning tokens.': '暂无预配令牌。',
+  'Previous token valid until: {date}': '旧令牌有效期至：{date}',
+  'Last used: {date}': '上次使用时间：{date}',
+  'Rotate token': '轮换令牌',
+  'Revoke token': '撤销令牌',
+  'Confirm token change': '确认令牌更改',
+  'The old token will remain valid for one hour. Update your identity provider with the new token during this time. You cannot rotate again until the overlap ends.':
+    '旧令牌将继续有效一小时。请在此期间将身份提供方中的令牌更新为新令牌。重叠有效期结束前无法再次轮换。',
+  'Revoking this token stops access for both the current token and its previous version immediately. This cannot be undone.':
+    '撤销后，当前令牌及其上一版本将立即失效。此操作不可恢复。',
+
+  'No-shows': '未出席记录',
+  'No-show': '未出席',
+  'Only hosts and team administrators can see these marks. No email is sent, and scheduled follow-ups stay unchanged.':
+    '这些标记仅供主持人和团队管理员查看。不会发送邮件，已安排的会后消息也不会改变。',
+  'Clear no-show for {name}': '清除{name}的未出席标记',
+  'Mark {name} as a no-show': '将{name}标记为未出席',
+  'Clear no-show': '清除未出席标记',
+  'Mark no-show': '标记为未出席',
+  'Could not update the no-show mark. Refresh the booking and try again.':
+    '无法更新未出席标记。请刷新预约后重试。',
+  'No-show mark updated.': '未出席标记已更新。',
+
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
   'Loading logo preview…': '正在加载标志预览…',
@@ -35,6 +74,46 @@ export const admin = {
   White: '白色',
   'Branding saved. Booking pages and emails are unchanged.':
     '品牌设置已保存。预约页面和邮件暂不受影响。',
+  'Event type filter': '按活动类型筛选',
+  'All event types': '所有活动类型',
+  'Saved event type — details unavailable': '已保存的活动类型（详情暂不可用）',
+  'Loading event type choices…': '正在加载活动类型选项……',
+  'Could not load event type choices. Your saved filter is unchanged.':
+    '无法加载活动类型选项。已保存的筛选条件保持不变。',
+
+  Integrations: '集成',
+  'Slack booking notifications': 'Slack 预约通知',
+  'Booking created': '预约已创建',
+  'Booking cancelled': '预约已取消',
+  'Booking rescheduled': '预约已改期',
+  'Send event titles, booking IDs, times, status and admin links to Slack. Personal destinations also include the invitee name. Email addresses, custom answers and meeting links are never included.':
+    '向 Slack 发送活动标题、预约编号、时间、状态和后台链接。个人接收地址还包含受邀人姓名，不包含邮箱、自定义答案或会议链接。',
+  'Loading Slack notifications…': '正在加载 Slack 通知……',
+  'Could not load Slack notifications. Only organization owners and admins can manage them.':
+    '无法加载 Slack 通知。只有组织所有者和管理员可以管理通知。',
+  'Could not update Slack notifications. Check your access and settings, then try again.':
+    '无法更新 Slack 通知。请检查权限和设置，然后重试。',
+  'No Slack destination yet.': '尚未设置 Slack 接收地址。',
+  'Slack rejected this webhook URL, so notifications are paused. Replace the URL, then enable notifications.':
+    'Slack 拒绝了此 Webhook 地址，通知已暂停。请先更换地址，再启用通知。',
+  'Slack notifications are paused.': 'Slack 通知已暂停。',
+  'Slack destination saved.': '已保存 Slack 接收地址。',
+  'Slack test message queued. This does not confirm delivery.':
+    'Slack 测试消息已加入发送队列。这不代表消息已送达。',
+  'Send test message': '发送测试消息',
+  'Delete this Slack destination and its delivery history?': '删除此 Slack 接收地址及其发送记录？',
+  'Delete Slack destination': '删除 Slack 接收地址',
+  'Slack destination deleted.': '已删除 Slack 接收地址。',
+  'Configure Slack notifications': '配置 Slack 通知',
+  'Enter a Slack webhook URL and choose at least one event.':
+    '请输入 Slack Webhook 地址，并至少选择一种事件。',
+  'Replacement Slack webhook URL': '新的 Slack Webhook 地址',
+  'Slack incoming-webhook URL': 'Slack 传入 Webhook 地址',
+  'Use an HTTPS incoming-webhook URL from hooks.slack.com. Keep it private. Leave replacement blank to keep the saved URL.':
+    '请使用 hooks.slack.com 的 HTTPS 传入 Webhook 地址，并妥善保密。无需更换时，请将新地址留空。',
+  'Events to post': '要发送的事件',
+  'Enable Slack notifications': '启用 Slack 通知',
+  'Save Slack destination': '保存 Slack 接收地址',
   'Group-seat bookings do not support reschedule requests.': '团体席位预约不支持请求改期。',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
     '请使用最多 2000 个字符的纯文本，不可包含制表符和控制字符。',
@@ -67,14 +146,18 @@ export const admin = {
   'Include UTF-8 BOM for Excel': '包含 UTF-8 BOM，便于 Excel 读取',
   'Could not download CSV. Check the booking range and try again shortly.':
     '无法下载 CSV。请检查预约时间范围，稍后重试。',
+  'An export is already running for your account. Wait for it to finish and try again.':
+    '你的账户已有导出正在进行。请等待导出完成后重试。',
   'Download CSV': '下载 CSV',
 
   'Past date overrides ({0})': '过去的特定日期安排（{0}）',
-  'Times are in {0}.': '时间均以{0}时区显示。',
+  'Times are in {0}.': '时间均按{0}显示。',
   'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.':
     '此日程已在其他标签页中或通过 API、MCP 或 CLI 客户端更改。你的更改仍保留在此页面。请先查看最新版本，再重新应用你的草稿。',
   'Review latest version': '查看最新版本',
   'Latest saved version': '最新保存的版本',
+  'Draft applied to the latest version. Save changes to submit it.':
+    '草稿已应用到最新版本。请点击保存更改以提交。',
   'Apply my draft to this version': '将我的草稿应用到此版本',
   'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.':
     '应用你的草稿将替换最新的每周时间段和特定日期安排。保存前请对照查看最新版本和你的草稿。',
@@ -133,6 +216,7 @@ export const admin = {
     '要移除此候补条目吗？联系信息将被清除，不会发送邮件。',
   'Could not remove the waitlist entry.': '无法移除此候补条目。',
   'Back to first page': '返回第一页',
+  'Previous page': '上一页',
   'Next page': '下一页',
   Refresh: '刷新',
 
@@ -1812,4 +1896,60 @@ export const admin = {
     '已保存的预约链接无效。请重新加载已保存的活动类型后重试。',
   'The email preview could not be created. Reload the saved event type and try again.':
     '无法创建邮件预览。请重新加载已保存的活动类型后重试。',
+
+  // Availability troubleshooting
+  'Troubleshoot availability': '排查可预约时间',
+  'Pick an event type and a day to see which times can be booked, and why the others cannot.':
+    '选择活动类型和日期，查看哪些时间可以预约，以及其余时间为什么无法预约。',
+  'There are no event types in this space to check.': '此空间中暂无可检查的活动类型。',
+  'Enter a valid date.': '请输入有效的日期。',
+  'Check this day': '检查这一天',
+  'Checking this day…': '正在检查这一天…',
+  'Could not check this day.': '无法检查这一天。',
+  'You cannot troubleshoot this event type with your current access. Only its owner, or a team owner or admin, can see why times are unavailable.':
+    '以你当前的权限无法排查此活动类型。只有其所有者，或团队所有者、管理员，才能查看时间无法预约的原因。',
+  'Connected calendars could not be read just now, so this day cannot be explained yet. Try again shortly.':
+    '暂时无法读取已连接的日历，因此还无法说明这一天的情况。请稍后重试。',
+  'The default location of this event type cannot be offered right now, so no times can be checked.':
+    '此活动类型的默认地点目前无法提供，因此无法检查任何时间。',
+  'This day has too many possible start times to check at once.':
+    '这一天可能的开始时间过多，无法一次检查。',
+  'This day could not be checked. Check the date and time zone.':
+    '无法检查这一天。请核对日期和时区。',
+  '{available} of {total} possible times can be booked. Times are shown in {zone}.':
+    '{total}个可能的时间中有{available}个可以预约。时间按{zone}显示。',
+  'Hide times that are only outside the available hours':
+    '隐藏仅因不在可预约时段内而无法预约的时间',
+  '{count} times outside the available hours are hidden.':
+    '已隐藏{count}个不在可预约时段内的时间。',
+  'There are no possible start times on this day.': '这一天没有可能的开始时间。',
+  'Times on this day': '这一天的时间',
+  Bookable: '可预约',
+  'Not bookable': '不可预约',
+  '{name}:': '{name}：',
+  'A team host:': '一位团队主持人：',
+  '(affects {range})': '（影响{range}）',
+  'This time has already passed.': '这个时间已经过去。',
+  'This meeting length is not offered for this event type.': '此活动类型不提供这个会议时长。',
+  'Outside the available hours (weekly hours or a date override).':
+    '不在可预约时段内（每周时间段或特定日期安排）。',
+  'Inside the available hours, but not one of the offered start times.':
+    '在可预约时段内，但不是提供的开始时间之一。',
+  'Too soon: the minimum notice before a booking has not been met.':
+    '太早：未达到最短提前预约时间。',
+  'Too far ahead: beyond how far in advance people can book.': '太远：超出了可提前预约的范围。',
+  'A connected calendar shows this time as busy.': '已连接的日历显示这个时间忙碌。',
+  'The buffer before the meeting overlaps another commitment.': '会前缓冲与其他安排重叠。',
+  'The buffer after the meeting overlaps another commitment.': '会后缓冲与其他安排重叠。',
+  'The daily booking limit for this event type has been reached.': '此活动类型已达到每日预约上限。',
+  'The weekly booking limit for this event type has been reached.':
+    '此活动类型已达到每周预约上限。',
+  'The monthly booking limit for this event type has been reached.':
+    '此活动类型已达到每月预约上限。',
+  'Another booking already takes this time.': '这个时间已有其他预约。',
+  'Not every required host is free.': '并非所有必需的主持人都有空。',
+  'No host in the rotation is free.': '轮询中的主持人都没有空。',
+  'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
+    '未列出团队活动类型：只有团队所有者和管理员才能查看这些时间无法预约的原因。',
+  'Another scheduling rule applies.': '受其他排期规则限制。',
 } as const

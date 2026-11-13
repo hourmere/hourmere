@@ -7,6 +7,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as Availability from './availability.ts'
 import * as Bookings from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
@@ -33,7 +34,9 @@ async function sourceCopy<T>(name: string, change?: Change): Promise<T> {
     (_, specifier: string) =>
       `from '${specifier.startsWith('node:') ? specifier : specifier.startsWith('.') ? new URL(specifier, location).href : pathToFileURL(createRequire(location).resolve(specifier)).href}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  )
 }
 
 async function failure(fn: () => Promise<unknown>) {
@@ -553,7 +556,9 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
       (result) => result,
       (error: unknown) => error,
     )
-    await reached
+    // A copy that fails before its read settles at once instead of pausing there.
+    await Promise.race([reached, pending])
+    expect(held, 'the first call must pause at its credential read').toBe(true)
     let winner: Bookings.CreateBookingResult
     try {
       winner = await module.createOneTimeBooking(ctx, input)
@@ -718,7 +723,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
   async function mutation(change: Change, verify: (module: typeof Bookings) => Promise<void>) {
     await verify(Bookings)
     const copy = await sourceCopy<typeof Bookings>('./bookings.ts', change)
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
   }
 
   it('detects a removed atomic claim with a real concurrency assertion failure', async () => {
@@ -744,7 +749,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
         'if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)',
         '',
       ])
-      await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError', actual, expected })
+      await expectKilled(copy, verify, { outcome: { actual, expected } })
       expect(hash(), 'production source remains byte-identical after the isolated mutation').toBe(
         original,
       )
@@ -792,7 +797,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
       'prefill: link.prefill',
       'prefill: { name: null, email: null }',
     ])
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
   })
 
   it.each(['personal address', 'team address'] as const)(
@@ -837,7 +842,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
           ? ['title: page.title,', '...page, title: page.title,']
           : ['team: { name: page.team.name }', 'team: page.team'],
       )
-      await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(copy, verify)
       await verify(Availability)
     },
   )
@@ -867,7 +872,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
       'if (servedHandle(row.handle) === undefined) return undefined',
       '',
     ])
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
   })
 
   it('detects a removed locked link reread before availability with a real race assertion failure', async () => {

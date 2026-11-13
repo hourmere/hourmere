@@ -1,4 +1,4 @@
-import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
+import { expect, fillInvitee, pickSlot, test, waitUntilAtRest } from '../fixtures.ts'
 
 test('a team owner creates a collective type and a public invitee books every required host', async ({
   page,
@@ -47,7 +47,9 @@ test('a collective popup embeds the shared slots and records both hosts with sou
     const days = frame.locator('button.day-available')
     if (await days.count()) {
       await days.last().click()
-      await frame.locator('.slots button').first().click()
+      const slot = frame.locator('.slots button').first()
+      await waitUntilAtRest(slot, page)
+      await slot.click()
       break
     }
     await frame.getByRole('button', { name: 'Next month', exact: true }).click()

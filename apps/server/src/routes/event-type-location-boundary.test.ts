@@ -517,6 +517,7 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
       location: created.location,
     })
     expect(restCreated.status).toBe(201)
+    expect(undeclared(restCreated.body)).toEqual([])
     expect(restCreated.body).toHaveProperty('locations')
     const responses = [
       await s.read('REST', created.id),
@@ -560,16 +561,20 @@ describe.skipIf(!process.env.DATABASE_URL)('location compatibility over REST and
     await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     await verifyBoundary(await sourceCopy())
   })
-  it.each(['deleted_at', 'zoomCredentialCiphertext'])(
-    'detects a REST response leak of %s introduced after its projection',
-    async (field) => {
+  it.each([
+    [200, 'deleted_at'],
+    [200, 'zoomCredentialCiphertext'],
+    [201, 'hostNotes'],
+  ] as const)(
+    'detects an undeclared field in a REST %s response after its projection (%s)',
+    async (status, field) => {
       await verifyBoundary(await sourceCopy())
       const mutant = await sourceCopy([
         'return ({ app, caller }) => {',
         `return ({ app, caller }) => {
       app.use('/api/v1/event-types*', async (c, next) => {
         await next()
-        if (c.res.status === 200) c.res = Response.json({ ...await c.res.json(), ${field}: null })
+        if (c.res.status === ${status}) c.res = Response.json({ ...await c.res.json(), ${field}: null }, { status: ${status} })
       })`,
       ])
       await expect(verifyBoundary(mutant)).rejects.toMatchObject({ name: 'AssertionError' })

@@ -36,6 +36,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'SignInPage',
     'TeamBookingPage',
     'TeamBookingsPage',
+    'TroubleshootPage',
   ]
   return Object.fromEntries(names.map((name) => [name, Pending]))
 })

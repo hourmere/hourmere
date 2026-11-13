@@ -490,6 +490,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read attendees and no-show markers for a booking
+         * @description Booked hosts and browser-session team owners/admins only. API keys of every scope and MCP OAuth may read only bookings they host; other bookings return booking_not_found. Team administrators can obtain booking IDs from the team dashboard. No general listing visibility is expanded.
+         */
+        get: operations["getBookingAttendees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}/attendees/{attendeeId}/no-show": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Mark or unmark one attendee as a no-show
+         * @description Only booked hosts and browser-session team owners/admins, after the scheduled start. API keys of every scope and MCP OAuth are host-only; other bookings return booking_not_found. Imported and cancelled bookings are read-only for this action. Repeating the desired state preserves the marker. No invitee email, manage-page change or follow-up schedule change occurs.
+         */
+        patch: operations["setAttendeeNoShow"];
+        trace?: never;
+    };
     "/api/v1/bookings/{id}/calendar-copy/retry": {
         parameters: {
             query?: never;
@@ -778,7 +818,7 @@ export interface paths {
         };
         /**
          * Download bookings as CSV
-         * @description Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.
+         * @description Personal owners keep the full column set with a browser session or read/full API key. Team owners/admins require a current verified browser session; API keys and OAuth cannot export teams. Team columns follow the team-admin read whitelist: no booking title, custom answers, location, source, created_at or host email addresses. A repeatable-read snapshot streams 100-row keyset pages; one export per organization across processes, one export per user per process, and BOOKING_EXPORT_MAX_CONCURRENT per process (default 2), a 30-second stalled-reader timeout and five-minute deadline. Required [from,to) start range at most 366 days. UTF-8 without BOM by default; bom=true supports Excel. Personal JSON answers retain stable question IDs. Contains personal data; keep downloaded files private.
          */
         get: operations["exportBookingsCsv"];
         put?: never;
@@ -1866,6 +1906,26 @@ export interface paths {
         patch: operations["updateEventType"];
         trace?: never;
     };
+    "/api/v1/event-types/{id}/availability-troubleshooting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explain which times of one day can be booked, and why others cannot
+         * @description Read-only diagnostics for the personal owner or a verified team owner/admin; API keys need full scope. Every other caller, including ordinary team members, gets the same 404 event_type_not_found as a missing event type. Lists every candidate time of the local day, including past and non-working times, with status and ordered reason codes. Reasons carry only a code, the affected interval and, for team event types, the host id; never calendar event titles, attendees or booking details. Calendars that cannot be read right now answer 409 calendar_sync_unavailable rather than a reason.
+         */
+        get: operations["troubleshootAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/event-types/{id}/notifications": {
         parameters: {
             query?: never;
@@ -2297,6 +2357,70 @@ export interface paths {
          * @description Read-only generation for personal owners and team owners/admins; read, bookings and full API keys are accepted. Requires SLOT_SNIPPETS_ENABLED. Chooses the earliest available alternatives, up to count, from a range of at most 31 elapsed days. Uses the ordinary slot engine and shared email formatter. Active hidden events are allowed; links can be forwarded. No booking, reservation or private capability is created. Taken links offer the ordinary booking page to choose another time. Omitted locale and displayTimeZone use profile preferences; duration defaults to the event length.
          */
         post: operations["generateOpenTimeSnippet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List provisioning token metadata
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        get: operations["listScimProvisioningTokens"];
+        put?: never;
+        /**
+         * Create a provisioning token
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        post: operations["createScimProvisioningToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Permanently revoke both token generations
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        delete: operations["revokeScimProvisioningToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a provisioning token with bounded overlap
+         * @description Browser-session-only provisioning credential administration. Requires a current verified owner/admin of the active non-personal organization; creating and rotating require an owner. Listing and revoking remain available when SCIM is disabled. Any Authorization header is refused. Writes require X-Expected-Organization-Id equal to the path organization. Secrets appear only in create/rotate responses; no SCIM resources are available yet.
+         */
+        post: operations["rotateScimProvisioningToken"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3293,7 +3417,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set the hours of one date */
+        /**
+         * Set the hours of one date
+         * @description Schedules accept at most 10,000 date overrides, including past dates. Adding another date at the limit returns too_many_overrides without changes. Existing dates may still be replaced or removed.
+         */
         put: operations["setScheduleOverride"];
         post?: never;
         /**
@@ -3320,6 +3447,65 @@ export interface paths {
          * @description After profile and display name setup, creates a default Mon–Fri 09:00–17:00 schedule in the stored profile time zone only when the caller has no schedules. An existing default is returned unchanged. Existing non-default schedules require an explicit default choice in Availability.
          */
         post: operations["confirmDefaultSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/slack-destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the current organization’s Slack destinations (owner/admin) */
+        get: operations["listSlackDestinations"];
+        put?: never;
+        /**
+         * Create a Slack destination; always return a masked URL
+         * @description Only supported Slack incoming-webhook HTTPS URLs are accepted. Every delivery revalidates the URL and all resolved addresses; redirects are never followed.
+         */
+        post: operations["createSlackDestination"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/slack-destinations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a Slack destination and its retained deliveries */
+        delete: operations["deleteSlackDestination"];
+        options?: never;
+        head?: never;
+        /** Change a Slack destination or its subscriptions */
+        patch: operations["updateSlackDestination"];
+        trace?: never;
+    };
+    "/api/v1/slack-destinations/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue one sample notification through the delivery outbox
+         * @description At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
+         */
+        post: operations["testSlackDestination"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4232,18 +4418,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the booking workflows of the owner the caller acts as
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
+         */
+        get: operations["listWorkflows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workflows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one booking workflow
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
+         */
+        get: operations["getWorkflow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         Attendee: {
             email: string;
+            /**
+             * Format: uuid
+             * @description Authenticated reads only: attendee identifier for host actions.
+             */
+            id?: string;
             /** @description The invitee who made the booking; the others are guests they added */
             isBooker: boolean;
             /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
             locale: string | null;
             name: string;
+            /**
+             * Format: date-time
+             * @description Authenticated reads only: when this attendee was marked as a no-show.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            noShowMarkedAt?: string | null;
+            /** @description Authenticated reads only: the user who marked this attendee. */
+            noShowMarkedBy?: string | null;
             /** @description IANA time zone */
+            timeZone: string;
+        };
+        AttendeeNoShow: {
+            /** Format: uuid */
+            attendeeId: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            noShowMarkedAt: string | null;
+            noShowMarkedBy: string | null;
+        };
+        AvailabilityTroubleshooting: {
+            /** Format: date */
+            date: string;
+            /** @description The requested length; null means the event’s default length. */
+            durationMinutes: number | null;
+            eventTypeId: string;
+            /** @description Team event types: assigned hosts. Empty for personal types. */
+            hosts: {
+                name: string;
+                userId: string;
+            }[];
+            /**
+             * Format: date-time
+             * @description Exclusive. 23 or 25 hours after rangeStart on DST change days.
+             */
+            rangeEnd: string;
+            /** Format: date-time */
+            rangeStart: string;
+            slots: {
+                /** Format: date-time */
+                end: string;
+                reasons: {
+                    /** @description Stable reason code. Known values, in this order: past, duration_not_offered, outside_working_hours, off_slot_grid, minimum_notice, booking_window, calendar_busy, buffer_before, buffer_after, daily_limit, weekly_limit, monthly_limit, host_conflict, collective_member_unavailable, no_eligible_round_robin_host. New codes may be added within /api/v1; show unknown codes neutrally. */
+                    code: string;
+                    /**
+                     * Format: date-time
+                     * @description The affected part of this time, clipped to it.
+                     */
+                    end: string;
+                    /** @description Team event types only: the host this reason concerns. */
+                    hostUserId?: string;
+                    /** Format: date-time */
+                    start: string;
+                }[];
+                /** Format: date-time */
+                start: string;
+                /** @enum {string} */
+                status: "available" | "unavailable";
+            }[];
             timeZone: string;
         };
         Booking: {
@@ -4268,6 +4559,8 @@ export interface components {
              */
             cancelledAt: string | null;
             cancelReason: string | null;
+            /** @description Authenticated reads only: whether this caller can change attendee no-show markers now. */
+            canManageNoShow?: boolean;
             /** @description Authenticated host reads only: the other booked hosts’ names, with no email addresses or internal identifiers. Omitted for single-host bookings. */
             coHosts?: {
                 name: string;
@@ -4370,6 +4663,22 @@ export interface components {
                 rescheduled: number;
             };
         };
+        BookingAttendees: {
+            data: {
+                email: string;
+                /** Format: uuid */
+                id: string;
+                isBooker: boolean;
+                name: string;
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                noShowMarkedAt: string | null;
+                noShowMarkedBy: string | null;
+            }[];
+        };
         /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link) */
         BookingLocation: ({
             /** @enum {string} */
@@ -4388,6 +4697,7 @@ export interface components {
             manageToken: string | null;
         };
         Branding: {
+            /** @description WCAG contrast against white (#FFFFFF), not light or dark page themes */
             backgroundContrast: number | null;
             brandLogo: string | null;
             brandPrimaryColor: string | null;
@@ -5174,6 +5484,10 @@ export interface components {
              * @description The public origin of this instance, configured by its operator
              */
             publicUrl: string;
+            /** @description Whether routing forms are enabled; absent when unknown */
+            routingFormsEnabled?: boolean;
+            /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
+            scimProvisioningEnabled?: boolean;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5183,11 +5497,21 @@ export interface components {
             };
             /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
             slotSnippetsEnabled?: boolean;
+            /** @description Whether OIDC SSO is enabled; absent when unknown */
+            ssoOidcEnabled?: boolean;
+            /** @description Whether SAML SSO is enabled; absent when unknown */
+            ssoSamlEnabled?: boolean;
             /**
              * Format: uri
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
+            /** @description Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers */
+            workflowsEnabled?: boolean;
+        };
+        IssuedScimProvisioningToken: {
+            secret: string;
+            token: components["schemas"]["ScimProvisioningToken"];
         };
         /** @description Request verification for an empty future window of at most 62 days. Nothing is reserved; the first successful ordinary booking wins. The personal event owner or authorized team owners/admins can see the submitted email, optional name and requested period. Contact details are erased on removal; separate pseudonymous abuse and exact-slot deduplication records have bounded retention. */
         JoinWaitlist: {
@@ -5225,6 +5549,16 @@ export interface components {
             hosts: {
                 name: string;
             }[];
+            /** @description Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it. */
+            rescheduleRequest?: {
+                /** Format: uuid */
+                id: string;
+                /**
+                 * @description pending: still open (also in pendingReschedule). expired: its deadline passed. replaced: the host sent a newer request. rescheduled: the booking was moved after the email was sent, by the invitee or a host. cancelled: the booking was cancelled. Clients must accept additional values.
+                 * @enum {string}
+                 */
+                state: "pending" | "expired" | "replaced" | "rescheduled" | "cancelled";
+            };
         };
         Me: {
             /** @description The organization the caller acts in */
@@ -5272,12 +5606,19 @@ export interface components {
                 data: {
                     attendees: {
                         email: string;
+                        /** Format: uuid */
+                        id?: string;
                         isBooker: boolean;
                         name: string;
+                        /** Format: date-time */
+                        noShowMarkedAt?: string | null;
+                        /** Format: uuid */
+                        noShowMarkedBy?: string | null;
                         timeZone: string;
                     }[];
                     /** Format: date-time */
                     cancelledAt: string | null;
+                    canManageNoShow?: boolean;
                     /** Format: date-time */
                     end: string;
                     eventType: {
@@ -5361,12 +5702,19 @@ export interface components {
                 data: {
                     attendees: {
                         email: string;
+                        /** Format: uuid */
+                        id?: string;
                         isBooker: boolean;
                         name: string;
+                        /** Format: date-time */
+                        noShowMarkedAt?: string | null;
+                        /** Format: uuid */
+                        noShowMarkedBy?: string | null;
                         timeZone: string;
                     }[];
                     /** Format: date-time */
                     cancelledAt: string | null;
+                    canManageNoShow?: boolean;
                     /** Format: date-time */
                     end: string;
                     eventType: {
@@ -5756,6 +6104,21 @@ export interface components {
             timeZone?: string;
             weeklyHours?: components["schemas"]["WeeklyHoursInput"];
         };
+        ScimProvisioningToken: {
+            createdAt: string;
+            createdByUserId: string | null;
+            expiresAt: string | null;
+            /** Format: uuid */
+            id: string;
+            lastUsedAt: string | null;
+            name: string;
+            /** Format: uuid */
+            organizationId: string;
+            previousValidUntil: string | null;
+            revokedAt: string | null;
+            rotatedAt: string | null;
+            rotatedByUserId: string | null;
+        };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         SelfReadinessPage: {
             eventTypes: {
@@ -5893,6 +6256,23 @@ export interface components {
                 summary: "disabled" | "needs_activation" | "configuration_blocked" | "dependency_unavailable" | "check_failed" | "not_checked" | "checks_passed" | "partial_pool";
             };
         };
+        SlackDestination: {
+            /** Format: date-time */
+            createdAt: string;
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+            /** Format: uuid */
+            eventTypeId: string | null;
+            /** Format: uuid */
+            id: string;
+            isActive: boolean;
+            /** Format: uuid */
+            organizationId: string;
+            /** @description Why delivery paused this destination: `url_rejected` after Slack answered 404 or 410 for its URL. It stays until the URL is replaced or the destination is enabled; other edits, including another pause, keep it. Null while active and after pausing an active destination. Open string: new values may appear and still mean paused. */
+            pauseReason: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+            url: string;
+        };
         Slot: {
             /**
              * Format: date-time
@@ -5910,12 +6290,19 @@ export interface components {
         TeamAdminBooking: {
             attendees: {
                 email: string;
+                /** Format: uuid */
+                id?: string;
                 isBooker: boolean;
                 name: string;
+                /** Format: date-time */
+                noShowMarkedAt?: string | null;
+                /** Format: uuid */
+                noShowMarkedBy?: string | null;
                 timeZone: string;
             }[];
             /** Format: date-time */
             cancelledAt: string | null;
+            canManageNoShow?: boolean;
             /** Format: date-time */
             end: string;
             eventType: {
@@ -6096,7 +6483,7 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
-            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
             /** Format: uuid */
             id: string;
             isActive: boolean;
@@ -6117,7 +6504,7 @@ export interface components {
             /** Format: uuid */
             eventId: string;
             /** @enum {string} */
-            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired";
+            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed";
             httpStatus: number | null;
             /** Format: uuid */
             id: string;
@@ -6146,6 +6533,134 @@ export interface components {
             thursday?: components["schemas"]["WallClockIntervalInput"][];
             tuesday?: components["schemas"]["WallClockIntervalInput"][];
             wednesday?: components["schemas"]["WallClockIntervalInput"][];
+        };
+        /** @description A booking workflow: its current revision's definition and its live enabled flag */
+        Workflow: {
+            actions: components["schemas"]["WorkflowAction"][];
+            conditions: components["schemas"]["WorkflowCondition"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Whether the workflow runs for new bookings */
+            enabled: boolean;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            owner: components["schemas"]["WorkflowOwner"];
+            /** @description The current revision; later updates name it as their expected revision */
+            revision: number;
+            scope: components["schemas"]["WorkflowScope"];
+            trigger: components["schemas"]["WorkflowTrigger"];
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        WorkflowAction: {
+            /** @description Custom subject and body per locale; other locales use the built-in template */
+            content?: {
+                de?: {
+                    body: string;
+                    subject: string;
+                };
+                en?: {
+                    body: string;
+                    subject: string;
+                };
+                es?: {
+                    body: string;
+                    subject: string;
+                };
+                fr?: {
+                    body: string;
+                    subject: string;
+                };
+                "pt-BR"?: {
+                    body: string;
+                    subject: string;
+                };
+                "zh-CN"?: {
+                    body: string;
+                    subject: string;
+                };
+            };
+            recipients: ("booker" | "guests" | "hosts")[];
+            /** @enum {string} */
+            type: "email";
+        } | {
+            /** @enum {string} */
+            type: "webhook";
+            /** Format: uuid */
+            webhookId: string;
+        };
+        /** @description A predicate; all conditions must hold */
+        WorkflowCondition: {
+            /** @enum {string} */
+            field: "event_type";
+            /** @enum {string} */
+            operator: "equals";
+            /** Format: uuid */
+            value: string;
+        } | {
+            /** @enum {string} */
+            field: "booking_source";
+            /** @enum {string} */
+            operator: "equals";
+            /** @enum {string} */
+            value: "web" | "embed" | "api" | "mcp";
+        } | {
+            /** @enum {string} */
+            field: "answer";
+            /** @enum {string} */
+            operator: "equals";
+            questionId: string;
+            value: string | boolean;
+        } | {
+            /** @enum {string} */
+            field: "location_kind";
+            /** @enum {string} */
+            operator: "equals";
+            /** @enum {string} */
+            value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+        } | {
+            /** @enum {string} */
+            field: "guest_count";
+            /** @enum {string} */
+            operator: "equals" | "at_least" | "at_most";
+            value: number;
+        };
+        /** @description Who owns the workflow: a person in their personal organization, or a team */
+        WorkflowOwner: {
+            /**
+             * Format: uuid
+             * @description The user for a personal owner; the team organization for a team
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "personal" | "team";
+        };
+        WorkflowPage: {
+            data: components["schemas"]["Workflow"][];
+            /** @description Pass as `cursor`, with the same owner, for the next page; null on the last page */
+            nextCursor: string | null;
+        };
+        /** @description One of the owner's event types, or all of its current and future event types */
+        WorkflowScope: {
+            /** @enum {string} */
+            type: "all_event_types";
+        } | {
+            /** Format: uuid */
+            eventTypeId: string;
+            /** @enum {string} */
+            type: "event_type";
+        };
+        WorkflowTrigger: {
+            /** @description Minutes after the booking change; 0 runs right after it commits */
+            delayMinutes: number;
+            /** @enum {string} */
+            type: "booking.created" | "booking.cancelled" | "booking.rescheduled";
+        } | {
+            /** @description Minutes before the start or after the end */
+            offsetMinutes: number;
+            /** @enum {string} */
+            type: "before_start" | "after_end";
         };
     };
     responses: never;
@@ -6268,6 +6783,159 @@ export interface operations {
                 };
             };
             /** @description Too many requests; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBookingAttendees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attendee identifiers and attendance metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingAttendees"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setAttendeeNoShow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                attendeeId: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    noShow: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The current attendee no-show marker */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttendeeNoShow"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden or insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_not_found (also used for an unknown attendee) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_not_started, booking_cancelled, imported_booking_read_only or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6733,7 +7401,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed */
+            /** @description export_user_in_progress when this user already has an export in this process, export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6821,7 +7489,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6916,7 +7584,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6957,7 +7625,7 @@ export interface operations {
                     "application/json": components["schemas"]["Branding"];
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7041,7 +7709,7 @@ export interface operations {
                     "application/json": components["schemas"]["Branding"];
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7124,7 +7792,7 @@ export interface operations {
                     "application/json": components["schemas"]["Branding"];
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7212,7 +7880,7 @@ export interface operations {
                     "image/png": string;
                 };
             };
-            /** @description invalid_brand_color, invalid_brand_logo, brand_logo_too_large or invalid_request */
+            /** @description invalid_brand_logo, brand_logo_too_large or invalid_request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8619,6 +9287,88 @@ export interface operations {
             };
         };
     };
+    troubleshootAvailability: {
+        parameters: {
+            query: {
+                /** @description Local calendar date (YYYY-MM-DD) to explain, read in timeZone. */
+                date: string;
+                durationMinutes?: number;
+                /** @description IANA time zone for the day’s bounds. Defaults to the caller’s profile time zone, else UTC. */
+                timeZone?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The day’s candidate times with status and reasons, ordered by start */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvailabilityTroubleshooting"];
+                };
+            };
+            /** @description invalid_request, invalid_date, invalid_time_zone, invalid_duration, invalid_range, range_too_long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope: API keys need full scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found (also for event types the caller may not manage) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_sync_unavailable, location_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     setEventTypeNotifications: {
         parameters: {
             query?: never;
@@ -9450,6 +10200,340 @@ export interface operations {
                 };
             };
             /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listScimProvisioningTokens: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Metadata only; never secrets or hashes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        nextCursor: string | null;
+                        tokens: components["schemas"]["ScimProvisioningToken"][];
+                    };
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Save this secret now; it cannot be retrieved again */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedScimProvisioningToken"];
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked metadata; revocation is idempotent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: components["schemas"]["ScimProvisioningToken"];
+                    };
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rotateScimProvisioningToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @default 3600 */
+                    overlapSeconds?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description One-time replacement secret; previous secret accepted until previousValidUntil */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedScimProvisioningToken"];
+                };
+            };
+            /** @description invalid_request or scim_token_invalid_input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description unauthorized: a valid browser session is required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_provisioning_disabled or scim_token_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or scim_token_conflict (active token limit, revoked token or active rotation overlap) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: request budget exhausted; retry after Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -10514,7 +11598,7 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleOverride"];
                 };
             };
-            /** @description invalid_request, invalid_date or invalid_intervals */
+            /** @description invalid_request, invalid_date, invalid_intervals or too_many_overrides */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10702,6 +11786,418 @@ export interface operations {
                 };
             };
             /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSlackDestinations: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional organization where the page opened. Session reads return 409 organization_context_changed for a still-authorized expected team after switching spaces, or uniform 403 team_management_access_denied for inaccessible expected teams and any different expected personal organization. Omitted headers preserve current-organization reads. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Endpoints, without secrets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlackDestination"][];
+                };
+            };
+            /** @description invalid_slack_destination or invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_destination_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createSlackDestination: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    /** Format: uuid */
+                    eventTypeId?: string | null;
+                    isActive?: boolean;
+                    url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Destination with masked URL */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlackDestination"];
+                };
+            };
+            /** @description invalid_slack_destination or invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_destination_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteSlackDestination: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted; pending delivery jobs safely skip */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_slack_destination or invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_destination_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateSlackDestination: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    /** Format: uuid */
+                    eventTypeId?: string | null;
+                    isActive?: boolean;
+                    url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlackDestination"];
+                };
+            };
+            /** @description invalid_slack_destination or invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_destination_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    testSlackDestination: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization where the action opened. Required for session writes, including personal organizations; missing or malformed context returns 409 organization_context_changed. A stale expected team the caller still owns/administers, or the caller’s own personal organization, returns 409. Inaccessible expected teams and another user’s personal organization receive uniform 403 team_management_access_denied. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sample queued; delivery is asynchronous */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        deliveryId: string;
+                    };
+                };
+            };
+            /** @description invalid_slack_destination or invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_destination_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slack_unavailable, slack_destination_exists, slack_destination_disabled, slack_test_pending or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After gives seconds to wait */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -11078,7 +12574,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
                     isActive?: boolean;
                     url: string;
                 };
@@ -11246,7 +12742,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired")[];
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
                     isActive?: boolean;
                 };
             };
@@ -11465,6 +12961,137 @@ export interface operations {
             };
             /** @description webhooks_disabled, webhook_limit_reached or organization_context_changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listWorkflows: {
+        parameters: {
+            query: {
+                cursor?: string;
+                /** @description Page size, 1–100 (default 50) */
+                limit?: number;
+                /** @description Your user ID (personal) or the team organization ID (team): the owner the caller acts as in its current organization */
+                ownerId: string;
+                /** @description personal for your own workflows, team for a team you own or administer */
+                ownerKind: "personal" | "team";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The owner's workflows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowPage"];
+                };
+            };
+            /** @description invalid_request or invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: the owner is not the personal owner or a team the caller owns or administers in the organization it acts in. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled: workflows are not available on this instance */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workflow */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workflow"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled: workflows are not available on this instance; workflow_not_found: no such workflow of the owner the caller acts as */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

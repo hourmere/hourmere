@@ -22,6 +22,7 @@ const restContract = {
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/bookings/export.csv',
+    'GET /api/v1/slack-destinations',
     'GET /api/v1/analytics/bookings',
     'GET /api/v1/calendar-connections',
     'GET /api/v1/conference-connections',
@@ -36,12 +37,15 @@ const restContract = {
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
+    'GET /api/v1/workflows',
+    'GET /api/v1/workflows/{id}',
   ],
   booking_read: [
     'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
+    'GET /api/v1/bookings/{id}/attendees',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
     'GET /api/v1/bookings/manage',
@@ -62,6 +66,7 @@ const restContract = {
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
+    'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
     'POST /api/v1/bookings/{id}/request-reschedule',
@@ -75,6 +80,10 @@ const restContract = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   session_only: [
+    'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
@@ -110,6 +119,10 @@ const restContract = {
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
     'PUT /api/v1/schedules/{id}/availability',
+    'POST /api/v1/slack-destinations',
+    'PATCH /api/v1/slack-destinations/{id}',
+    'DELETE /api/v1/slack-destinations/{id}',
+    'POST /api/v1/slack-destinations/{id}/test',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -134,6 +147,7 @@ const restContract = {
     'PATCH /api/v1/webhooks/{id}',
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
+  diagnostic_read: ['GET /api/v1/event-types/{id}/availability-troubleshooting'],
   public_metadata: ['GET /api/v1/instance', 'GET /api/v1/openapi.json'],
 } as const
 
@@ -143,6 +157,7 @@ const allowedClasses: Record<ApiKeyScope, readonly string[]> = {
     'booking_write',
     'other_read',
     'other_write',
+    'diagnostic_read',
     'session_only',
     'public_metadata',
   ],
@@ -349,9 +364,15 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'troubleshoot_availability',
         'get_branding',
         'set_branding',
         'save_schedule_availability',
+        'list_slack_destinations',
+        'create_slack_destination',
+        'update_slack_destination',
+        'delete_slack_destination',
+        'test_slack_destination',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
@@ -360,9 +381,11 @@ describe('shared API-key scope policy', () => {
         'request_reschedule',
         'cancel_booking',
         'list_bookings',
+        'get_booking_attendees',
         'export_bookings',
         'retry_conference',
         'retry_calendar_copy',
+        'set_attendee_no_show',
         'get_profile',
         'list_event_types',
         'get_event_type',
@@ -383,13 +406,17 @@ describe('shared API-key scope policy', () => {
         'remove_waitlist_entry',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_workflows',
+        'get_workflow',
       ],
       read: [
         'get_branding',
+        'list_slack_destinations',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',
         'list_bookings',
+        'get_booking_attendees',
         'export_bookings',
         'get_profile',
         'list_event_types',
@@ -402,6 +429,8 @@ describe('shared API-key scope policy', () => {
         'list_conference_connections',
         'get_event_type_waitlist',
         'list_waitlist_entries',
+        'list_workflows',
+        'get_workflow',
       ],
       bookings: [
         'create_one_time_link',
@@ -414,8 +443,10 @@ describe('shared API-key scope policy', () => {
         'request_reschedule',
         'cancel_booking',
         'list_bookings',
+        'get_booking_attendees',
         'retry_conference',
         'retry_calendar_copy',
+        'set_attendee_no_show',
         'get_profile',
         'list_event_types',
         'get_event_type',
@@ -733,5 +764,45 @@ describe('branding scope source-copy protections', () => {
     expect(() => verify(sourceCopyRegistry([before, after]))).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+})
+
+describe('availability troubleshooting scope source-copy protections', () => {
+  const ids = [
+    'GET /api/v1/event-types/{id}/availability-troubleshooting',
+    'mcp:troubleshoot_availability',
+    'cli:troubleshoot-availability',
+  ]
+  function verify(allows: Allows) {
+    for (const id of ids) {
+      expect(allows({ kind: 'api_key', apiKeyScope: 'full' }, id), id).toBe(true)
+      expect(allows({ kind: 'api_key', apiKeyScope: 'read' }, id), id).toBe(false)
+      expect(allows({ kind: 'api_key', apiKeyScope: 'bookings' }, id), id).toBe(false)
+    }
+  }
+
+  it('keeps read-only diagnostics full-scope only', () => verify(apiKeyAllows))
+
+  it.each([
+    [
+      "rest('GET', '/api/v1/event-types/{id}/availability-troubleshooting', 'diagnostic_read', 'key')",
+      "rest('GET', '/api/v1/event-types/{id}/availability-troubleshooting', 'other_read', 'key')",
+    ],
+    [
+      "mcp('troubleshoot_availability', 'diagnostic_read'",
+      "mcp('troubleshoot_availability', 'booking_read'",
+    ],
+    [
+      "cli('troubleshoot-availability', 'troubleshoot_availability')",
+      "cli('troubleshoot-availability', 'whoami')",
+    ],
+    [
+      "  diagnostic_read: Object.freeze(['full'] as const),",
+      "  diagnostic_read: Object.freeze(['full', 'read'] as const),",
+    ],
+  ] as const)('kills broadened diagnostics: %s', (before, after) => {
+    const mutant = sourceCopyPolicy(undefined, sourceCopyRegistry([before, after]))
+    expect(() => verify(mutant)).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    verify(sourceCopyPolicy(undefined, sourceCopyRegistry()))
   })
 })

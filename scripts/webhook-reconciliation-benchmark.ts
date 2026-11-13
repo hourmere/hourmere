@@ -4,6 +4,9 @@
 //   node scripts/webhook-reconciliation-benchmark.ts --output=/tmp/webhook-reconciliation.json
 // Defaults: 300k and 1M jobs, 5k pending deliveries, mixed queues and an all-webhook stress case.
 // Use --pending=1000,50000,200000 for the scale matrix; three measured samples per variant.
+// createTestDatabase sets jit=off on its databases, so these timings exclude the JIT
+// compilation a default PostgreSQL 18 (jit=on) may add; every result records the measuring
+// session's `jit` value (from SHOW jit) in its environment and printed line.
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
@@ -350,7 +353,9 @@ for (const { jobsCount, pendingCount } of scales) {
       const plans: Record<string, ExplainResult[]> = { baseline: [], current: [], inline: [] }
       const wallTimes: Record<string, number[]> = { baseline: [], current: [], inline: [] }
       const client = await testDb.pool.connect()
+      let jit: string | undefined
       try {
+        jit = (await client.query<{ jit: string }>('SHOW jit')).rows[0]?.jit
         // One warmup per variant; alternate sample ordering to reduce cache/order bias.
         for (let sample = -1; sample < samples; sample++) {
           for (const variant of sample % 2 === 0 ? [...variants].reverse() : variants) {
@@ -406,14 +411,16 @@ for (const { jobsCount, pendingCount } of scales) {
         pendingCount,
         processedRows,
         database: databaseName,
-        environment: { ...environment, benchmark_work_mem: '4MB' },
+        environment: { ...environment, benchmark_work_mem: '4MB', jit },
         distribution,
         comparisons,
         queries: variantQueries,
         plans,
         wallTimes,
       })
-      console.log(JSON.stringify({ jobsCount, layout, pendingCount, processedRows, comparisons }))
+      console.log(
+        JSON.stringify({ jobsCount, layout, pendingCount, processedRows, jit, comparisons }),
+      )
       if (output) await writeFile(output, `${JSON.stringify(results, null, 2)}\n`)
     } finally {
       try {

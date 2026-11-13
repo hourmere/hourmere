@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rmdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setImmediate } from 'node:timers/promises'
+import { setTimeout } from 'node:timers/promises'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type pg from 'pg'
@@ -41,7 +41,8 @@ interface TestState {
 const testStorage = new AsyncLocalStorage<TestState>()
 const testStates: TestState[] = []
 const fixtureState = () => required(testStorage.getStore())
-const sourceOwnerEmail = () => fixtureState().ownerEmail.replace('owner-', 'Owner-')
+const sourceOwnerEmail = () =>
+  ` ${fixtureState().ownerEmail.replace('owner-', 'Owner-').replace('@example.test', '@Example.test')} `
 const pendingTests = new Set<Promise<void>>()
 function newTestState(signal: AbortSignal): TestState {
   const suffix = randomUUID()
@@ -310,7 +311,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       let connections = 1
       while (connections) {
         fixtureState().signal.throwIfAborted()
-        await setImmediate()
+        await setTimeout(10, undefined, { signal: fixtureState().signal })
         connections = (
           await target.pool.query('SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid=$1', [
             pid,
@@ -769,6 +770,48 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       ).rows[0],
     ).toEqual({ handle: 'kept', time_zone: 'UTC', locale: 'zh-CN' })
   })
+  it.each(['route', 'Route', 'ROUTE'])(
+    'refuses the claim-reserved personal handle %s as a resolution and writes nothing',
+    async (handle) => {
+      const f = await setup()
+      f.input.resolutions = { handles: { 1: handle } }
+      f.plan = await repreview(f)
+      expect(f.plan.blocked).toBe(true)
+      expect(f.plan.losses.map((p) => p.code)).toContain('user_handle_invalid')
+      expect(await apply(f)).toMatchObject({ status: 'failed', code: 'IMPORT_PREVIEW_BLOCKED' })
+      expect(await businessCounts(f.user.id)).toEqual(empty)
+    },
+  )
+  it('refuses a source username route and keeps a legacy route profile without renaming it', async () => {
+    const f = await setup()
+    const named = structuredClone(f.snapshot)
+    required(named.tables.users?.[0]).username = 'route'
+    const refused = await repreview(f, named)
+    expect(refused.blocked).toBe(true)
+    expect(refused.losses.map((p) => p.code)).toContain('user_handle_invalid')
+    // Stored before the claim check existed: preserved as is, and its import goes ahead.
+    await target.pool.query(
+      "INSERT INTO profiles(user_id,handle,time_zone,locale) VALUES($1,'route','UTC','en')",
+      [f.user.id],
+    )
+    f.plan = await repreview(f)
+    expect(f.plan.blocked).toBe(false)
+    expect(f.plan.addresses).toContainEqual({
+      kind: 'handle',
+      sourceId: 1,
+      old: 'owner',
+      proposed: 'route',
+      action: 'preserve',
+    })
+    expect((await apply(f)).status).toBe('applied')
+    expect(
+      (
+        await target.pool.query('SELECT handle,time_zone,locale FROM profiles WHERE user_id=$1', [
+          f.user.id,
+        ])
+      ).rows,
+    ).toEqual([{ handle: 'route', time_zone: 'UTC', locale: 'en' }])
+  })
   it.each(['booking', 'schedule', 'event_type', 'profile', 'user'] as const)(
     'retains minimal %s tombstones and never resurrects deleted targets',
     async (kind) => {
@@ -832,11 +875,20 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
   })
   it('masks emails in human output and exposes full email only in the authorized private report', async () => {
     const f = await setup()
-    expect(renderPreview(f.plan)).not.toContain(sourceOwnerEmail())
+    expect(renderPreview(f.plan)).not.toContain(sourceOwnerEmail().trim())
     expect(renderPreview(f.plan)).not.toContain('invitee@example')
     expect(renderPreview(f.plan)).toContain('O***@***')
     expect(renderPreview(f.plan, 'zh-CN')).toContain('零外部副作用')
-    expect(renderPreview(f.plan, 'en', true)).toContain(sourceOwnerEmail())
+    expect(renderPreview(f.plan, 'en', true)).toContain(sourceOwnerEmail().trim())
+    await checkSourceMutation(
+      new URL('./operator-cli.ts', import.meta.url),
+      'i.email.trim().slice(0, 1)',
+      'i.email.slice(0, 1)',
+      (module) => module.renderPreview as typeof renderPreview,
+      (render) => {
+        expect(render(f.plan)).toContain('O***@***')
+      },
+    )
     expect(JSON.stringify(f.plan)).not.toMatch(
       /postgres:|NEVER_READ|"credentials":|oneTimePassword|meetingPassword/,
     )
@@ -865,26 +917,48 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       await rmdir(directory)
     }
   }
-  it('writes protected CLI preview files without logging private emails or credentials', async () => {
+  async function cliPreviewReplay(cli = runCli) {
     await cliFixture(async ({ config, plan, report, env, fixture }) => {
       const output: string[] = []
       expect(
-        await runCli(['preview', '--config', config, '--out', plan, '--report', report], env, (s) =>
+        await cli(['preview', '--config', config, '--out', plan, '--report', report], env, (s) =>
           output.push(s),
         ),
       ).toBe(0)
       expect((await stat(plan)).mode & 0o077).toBe(0)
       expect((await stat(report)).mode & 0o077).toBe(0)
-      expect(await readFile(report, 'utf8')).toContain(sourceOwnerEmail())
-      expect(output.join('\n')).not.toContain(sourceOwnerEmail())
+      expect(await readFile(report, 'utf8')).toContain(sourceOwnerEmail().trim())
+      expect(output.join('\n')).not.toContain(sourceOwnerEmail().trim())
       expect(output.join('\n')).not.toMatch(/invitee@example.test|postgres:/)
       expect(await readFile(plan, 'utf8')).not.toContain(fixture.input.connectionString)
       // The CLI's own serialized preview must be consumable by its apply command.
       expect(
-        await runCli(['apply', '--config', config, '--plan', plan], env, (s) => output.push(s)),
+        await cli(['apply', '--config', config, '--plan', plan], env, (s) => output.push(s)),
       ).toBe(0)
       expect(output.some((s) => s.includes('IMPORT_APPLIED'))).toBe(true)
+      output.length = 0
+      expect(
+        await cli(['apply', '--config', config, '--plan', plan], env, (s) => output.push(s)),
+      ).toBe(0)
+      expect(JSON.parse(required(output[0]))).toMatchObject({
+        status: 'noop',
+        code: 'IMPORT_NOOP',
+      })
+      expect(output.join('\n')).not.toMatch(/invitee@example.test|postgres:/)
     })
+  }
+  it('writes protected CLI preview files and replays that same plan without private logs', async () => {
+    await cliPreviewReplay()
+  })
+  it('detects a broken CLI-written plan replay in an isolated source copy', async () => {
+    await checkSourceMutation(
+      new URL('./operator-cli.ts', import.meta.url),
+      'const report = await applyImport(pool, plan, input)',
+      `const report = await applyImport(pool, plan, input)
+       if (report.status === 'noop') report.code = 'IMPORT_APPLIED'`,
+      (module) => module.runDatabaseCli as typeof runCli,
+      cliPreviewReplay,
+    )
   })
   it('applies and replays a protected CLI plan without credential logs', async () => {
     await cliFixture(async ({ config, plan, env, fixture }) => {
@@ -898,8 +972,27 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
         await runCli(['apply', '--config', config, '--plan', plan], env, (s) => output.push(s)),
       ).toBe(0)
       expect(output.some((s) => s.includes('IMPORT_NOOP'))).toBe(true)
-      expect(output.join('\n')).not.toContain(sourceOwnerEmail())
+      expect(output.join('\n')).not.toContain(sourceOwnerEmail().trim())
       expect(output.join('\n')).not.toMatch(/invitee@example.test|postgres:/)
+    })
+  })
+  it('refuses a route handle resolution through the operator CLI preview and apply', async () => {
+    await cliFixture(async ({ config, plan, env, fixture }) => {
+      const { connectionString: _connectionString, ...options } = fixture.input
+      await writeFile(
+        config,
+        JSON.stringify({ ...options, resolutions: { handles: { 1: 'route' } } }),
+      )
+      const output: string[] = []
+      expect(
+        await runCli(['preview', '--config', config, '--out', plan], env, (s) => output.push(s)),
+      ).toBe(2)
+      expect(output.join('\n')).toContain('user_handle_invalid')
+      expect(
+        await runCli(['apply', '--config', config, '--plan', plan], env, (s) => output.push(s)),
+      ).toBe(1)
+      expect(output.join('\n')).toContain('IMPORT_PREVIEW_BLOCKED')
+      expect(await businessCounts(fixture.user.id)).toEqual(empty)
     })
   })
   it('refuses to overwrite an existing CLI preview plan', async () => {
@@ -1069,6 +1162,68 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
       )
     },
   )
+  it('refuses a genuinely incomplete batch instead of acknowledging a complete replay', async () => {
+    const f = await setup()
+    f.input.exclusions = { bookings: [1000], acknowledged: true }
+    f.plan = await repreview(f)
+    expect(await apply(f)).toMatchObject({ status: 'applied', committed: true })
+    const counts = await businessCounts(f.user.id)
+    expect(counts).toEqual({ profiles: 1, schedules: 1, events: 1, bookings: 0 })
+    expect(
+      (
+        await target.pool.query(
+          "SELECT question_crosswalk FROM import_items WHERE source_id=$1 AND entity_kind='user'",
+          [f.input.sourceId],
+        )
+      ).rows,
+    ).toEqual([{ question_crosswalk: {} }])
+
+    delete f.input.exclusions
+    f.plan = await repreview(f)
+    expect(f.plan.blocked).toBe(false)
+    expect(f.plan.entities).toContainEqual(
+      expect.objectContaining({ kind: 'booking', disposition: 'create' }),
+    )
+    expect(f.plan.entities).toContainEqual(
+      expect.objectContaining({ kind: 'user', disposition: 'noop' }),
+    )
+    const state = await readTargetState(
+      target.pool,
+      f.input.sourceId,
+      f.input.authorization,
+      f.snapshot.cutoff,
+    )
+    expect(allMappingsUnchanged(f.plan, state)).toBe(false)
+    expect(await apply(f)).toMatchObject({
+      status: 'failed',
+      code: 'IMPORT_PARTIAL_MAPPING',
+      committed: false,
+      created: [],
+      failures: [{ code: 'IMPORT_PARTIAL_MAPPING', stage: 'verify_target' }],
+    })
+    expect(await businessCounts(f.user.id)).toEqual(counts)
+    await checkSourceMutation(
+      new URL('./preview.ts', import.meta.url),
+      "preview.entities.every((e) => e.disposition === 'noop') &&",
+      '',
+      (module) => module.allMappingsUnchanged as typeof allMappingsUnchanged,
+      (unchanged) => expect(unchanged(f.plan, state)).toBe(false),
+    )
+    await checkSourceMutation(
+      new URL('./apply.ts', import.meta.url),
+      'allMappingsUnchanged(fresh, state)',
+      'true',
+      (module) => module.applyExtractedImport as typeof applyExtractedImport,
+      async (mutant) => {
+        expect(await mutant(target.pool, f.plan, f.input, async () => f.snapshot)).toMatchObject({
+          status: 'failed',
+          code: 'IMPORT_PARTIAL_MAPPING',
+          committed: false,
+        })
+      },
+    )
+    expect(await businessCounts(f.user.id)).toEqual(counts)
+  })
   it('keeps a committed lost-response replay a no-op after its start', async () => {
     const f = await expiredFixture('2041-01-01T10:00:00.000Z')
     const clock = { now: '2041-01-01T09:59:59.000Z' }
@@ -1270,7 +1425,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
                         })
                       while (!writerDone && !blocked) {
                         fixtureState().signal.throwIfAborted()
-                        await setImmediate()
+                        await setTimeout(10, undefined, { signal: fixtureState().signal })
                         const probe = await target.pool.query<{ blocked: boolean }>(
                           'SELECT cardinality(pg_blocking_pids($1)) > 0 AS blocked',
                           [writerPid],
@@ -1305,7 +1460,7 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     await concurrentScheduleWrite()
     await checkSourceMutation(
       new URL('./apply.ts', import.meta.url),
-      'await client.query(`LOCK TABLE auth."user",auth.organization,auth.member, personal_organizations,profiles,schedules,schedule_overrides,event_types,event_type_hosts, bookings,booking_hosts,booking_attendees,import_sources,import_items,schema_migrations, waitlist_entries IN SHARE ROW EXCLUSIVE MODE`)',
+      'await client.query(`LOCK TABLE auth."user",auth.organization,auth.member, personal_organizations,profiles,schedules,schedule_overrides,event_types,event_type_hosts, bookings,booking_hosts,group_slots,booking_attendees,import_sources,import_items,schema_migrations, waitlist_entries IN SHARE ROW EXCLUSIVE MODE`)',
       '{}',
       (m) => m.applyExtractedImport as typeof applyExtractedImport,
       concurrentScheduleWrite,

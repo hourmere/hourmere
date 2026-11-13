@@ -141,6 +141,11 @@ export function rateLimit(
   return Object.assign(middleware, { [LIMITER]: declaration })
 }
 
+/** Whether a route middleware is a rateLimit declaration, which createApp counts up front. */
+export function isRouteRateLimit(handler: unknown): boolean {
+  return typeof handler === 'function' && LIMITER in handler
+}
+
 /**
  * Applies the rate limits of the matched route (its rateLimit middleware) up front, before
  * any app-wide middleware reads, parses or checks the body.

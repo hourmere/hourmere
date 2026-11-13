@@ -6,6 +6,31 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## Attendance API compatibility
+
+### Webhook event compatibility
+
+`booking.attendee_no_show_changed` extends the webhook subscription `events` and delivery
+`eventType` response enums within `/api/v1`. Regenerate clients from the current OpenAPI
+document and update closed validators. Consumers must ignore unknown event types rather
+than reject otherwise valid responses. Existing subscriptions are unchanged; attendance
+notifications require explicit subscription to the new event.
+
+### Attendance access and team booking fields
+
+Actual booking hosts may read attendees and mark or unmark no-shows. Team owners/admins
+who do not host the booking may do so only through a browser session. API keys of any
+scope and MCP OAuth have host-only access in the current organization, including REST
+`GET /api/v1/bookings/{id}/attendees`, the marking endpoint, MCP attendance tools and CLI
+attendance commands. Non-host bookings return the same `booking_not_found` response as
+missing bookings, without revealing whether they exist.
+
+The team booking list/detail whitelist adds `canManageNoShow` and attendee `id`,
+`noShowMarkedAt` and `noShowMarkedBy` to the existing team booking fields. The marker
+fields are nullable; each attendee ID identifies its own row even if multiple attendees
+share an email address.
+Clients must tolerate absent additive fields from older servers. These fields remain
+private and are absent from public and invitee-management responses.
 ## CSV booking export
 
 `GET /api/v1/bookings/export.csv` adds an authenticated UTF-8 CSV download. Personal
@@ -202,10 +227,11 @@ Every error response has the same shape:
 `error` is a stable, machine-readable snake_case code that clients may branch on; `message`
 is optional and may change. The HTTP status carries the category and the code names the
 specific case, e.g. 404 `event_type_not_found`, 409 `slot_taken`. These codes are reserved
-for the generic cases in the table below (services cannot use them): `invalid_request`,
+for the generic cases in the table below: `invalid_request`,
 `unauthorized`, `forbidden`, `not_found` (unknown endpoint), `method_not_allowed`,
 `payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
-renamed within `/api/v1`.
+renamed within `/api/v1`. Services cannot use these codes except `invalid_request` with
+an invalid-input error when enforcing the same schema validation as the transports.
 
 An optional `field` string identifies a stable validation field name. Known values are
 `successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
@@ -238,7 +264,7 @@ See [Zoom connections](/docs/zoom-connections) for callback replay and recovery 
 
 | Status | Meaning |
 |---|---|
-| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
+| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes, except shared request-schema validation |
 | 401 `unauthorized` | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer` |
 | 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
 | 403 `insufficient_scope` | The API key is valid, but its immutable scope does not allow this operation; use an appropriate replacement key |
@@ -340,6 +366,14 @@ capability, reserving a time or changing configuration. The shared service also 
 MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
 [request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
 for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
+
+`GET /api/v1/event-types/{id}/availability-troubleshooting` is a read-only diagnostic that
+only `full` keys may call (operation group "Availability diagnostics"), with personal-owner or
+team-owner/admin permission. Repeated explanations can reveal when a host is busy, so `read`
+and `bookings` keys get `403 insufficient_scope`. The shared service also serves MCP
+`troubleshoot_availability` and CLI `troubleshoot-availability`. Its reason `code` is an open
+string: new codes may be added within `/api/v1`, and clients must show unknown codes neutrally.
+See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
 
 Native creation accepts `metadata.scope` with exactly `full`, `read` or `bookings`;
 omitting it keeps `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
@@ -926,11 +960,15 @@ appear after it. Missing or invalid sessions, personal organizations, ordinary o
 members and API-key/OAuth callers receive the same `403 team_management_access_denied`,
 without revealing team existence. Any Authorization header is denied even alongside a
 valid owner/admin session cookie. The route uses the shared team-management access check
-and caller Origin/Referer handling. Responses contain only ID, status, start/end,
+and caller Origin/Referer handling. Responses contain only ID, status, `isRescheduled`, start/end,
 `cancelledAt`, associated `eventType: {id,title,publicBookingPath}` (null title after deletion), saved
-`hosts: [{userId,name,timeZone,isCurrentMember}]` and `attendees: [{name,email,timeZone,isBooker}]`, inside
-`{data,nextCursor}`. The read-only `timeZone`, `isCurrentMember` and `publicBookingPath` fields
-are additive and nullable. Host zones come only from public profiles; a missing profile
+`canManageNoShow`, `hosts: [{userId,name,timeZone,isCurrentMember}]` and
+`attendees: [{id,name,email,timeZone,isBooker,noShowMarkedAt,noShowMarkedBy}]`, inside
+`{data,nextCursor}`. Attendee IDs identify individual rows even when emails match; the
+nullable marker fields record the marking instant and account ID. `canManageNoShow`
+indicates whether attendance can currently be changed. These fields are additive and
+clients must tolerate their absence from older servers. The read-only `timeZone`,
+`isCurrentMember` and `publicBookingPath` fields are additive and nullable. Host zones come only from public profiles; a missing profile
 returns null. Membership refers to the booking's team, including false for saved hosts who
 left. The public path is present only while the event type exists, is enabled and its
 current configuration is publicly bookable; otherwise it is null. These additions apply
@@ -938,6 +976,12 @@ only to this list, without expanding member-departure or removal previews. No an
 free-text titles/reasons, management capabilities, calendar
 copies, conference URLs or reschedule-chain IDs are included. Cancelled reschedule
 predecessors and their successors are separate rows.
+
+For attendee reads and marking, non-host team owners/admins likewise need a browser
+session. API keys of every scope and MCP OAuth may read or mark only attendees of bookings
+they host in the current organization. REST attendance endpoints, MCP attendance tools
+and CLI attendance commands return `booking_not_found` for other bookings, exactly as
+for a missing booking. See [marking no-shows](/docs/no-shows).
 
 `POST /api/v1/team/bookings/{id}/cancel` lets the same current verified owner/admin browser
 session cancel a booking of its current team before the booking starts. Send
@@ -1105,6 +1149,7 @@ root, `/{handle}` and `/{handle}/{slug}`, and the invitee's page at `/booking`:
   the order they arranged them (404 `host_not_found`).
 - `/api/v1/public/{handle}/{slug}` (event page, `/slots`, `/bookings`) for personal event types.
 - `/api/v1/bookings/manage` (`GET` shows the booking with its event type and hosts' names,
+  and, for a token from a reschedule request email, what became of that request;
   `GET …/slots` the times it can move to, `POST …/cancel`, `POST …/reschedule`)
   with the invitee's secret in the `X-Manage-Token` header. Invitee links carry it in the URL
   fragment, `https://<app>/booking#token=<token>`, which browsers never send to servers or in
@@ -1191,8 +1236,11 @@ can never be a handle: every top-level path the app or the server answers (`app`
 the product itself (`support`, `security`, `pricing`, `status`, …). The list is
 `RESERVED_NAMES` in [`packages/core/src/reserved.ts`](https://github.com/hourmere/hourmere/blob/main/packages/core/src/reserved.ts), compared case-insensitively. Setting one
 as a handle (`PUT /api/v1/profile`) is refused with 400 `handle_reserved`, and personal
-organization slugs never take one (`Admin` becomes `admin-user`). A handle stored before its
-name was reserved is not served: its host page, event pages, slots and bookings answer 404 as
+organization slugs never take one (`Admin` becomes `admin-user`). `route` is refused as a new
+or changed handle too, in any letter case (400 `handle_reserved`), although it is not in that
+list: a profile that already has the handle `route` keeps it, its pages stay served, and its
+owner can keep saving the profile with it. Once changed, it cannot be set again. A handle
+stored before its name was reserved is not served: its host page, event pages, slots and bookings answer 404 as
 if it did not exist (agents' MCP tools too), so nobody keeps a page at a path the app now
 uses. Its owner keeps the profile, and must pick a new handle the next time they save it.
 Existing bookings stay reachable through their manage links, which do not involve the handle.

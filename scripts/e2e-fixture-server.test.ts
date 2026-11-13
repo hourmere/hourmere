@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { startServer } from '../apps/server/src/server.ts'
 import { startFixtureServer } from '../tools/e2e/fixture-server.ts'
 import { listenOwned, trackOwned } from '../tools/e2e/listeners.ts'
+import { expectKilled, guardCopy } from './source-copy-guard.ts'
 
 type Start = typeof startFixtureServer
 function sourceCopy(replacement: [string, string]): Start {
@@ -15,15 +16,17 @@ function sourceCopy(replacement: [string, string]): Start {
   expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
   source = source.replace(...replacement).replace(/^import .*\n/gm, '')
   source = stripTypeScriptTypes(source).replace(/\bexport (?=(?:async )?function)/g, '')
-  return new Function(
-    'AsyncLocalStorage',
-    'tracingChannel',
-    'HttpServer',
-    'createConnection',
-    'trackOwned',
-    'startServer',
-    `${source}; return startFixtureServer`,
-  )(AsyncLocalStorage, tracingChannel, HttpServer, createConnection, trackOwned, undefined) as Start
+  return guardCopy(
+    new Function(
+      'AsyncLocalStorage',
+      'tracingChannel',
+      'HttpServer',
+      'createConnection',
+      'trackOwned',
+      'startServer',
+      `${source}; return startFixtureServer`,
+    )(AsyncLocalStorage, tracingChannel, HttpServer, createConnection, trackOwned, undefined),
+  ) as Start
 }
 
 async function exercise(start: Start = startFixtureServer, leaveBackendOpen = false) {
@@ -193,16 +196,24 @@ describe('production fixture source-copy negative controls', () => {
     ['mismatch', 'address.port !== running.port', 'false'],
     ['forbidden', '[3000, 3998].includes(address.port)', 'false'],
   ] as const)('detects removal of the %s backend protection', async (mode, before, after) => {
-    await expect(verifyBackendValidation(mode, sourceCopy([before, after]))).rejects.toThrow()
+    const copy = sourceCopy([before, after])
+    await expectKilled(copy, (start) => verifyBackendValidation(mode, start))
   })
   it('detects handing the retained frontend port to a second binder', async () => {
     const copy = sourceCopy(["PORT: '0'", 'PORT: String(listener.port)'])
-    await expect(exercise(copy)).rejects.toThrow('backend port')
+    await expectKilled(copy, (start) => exercise(start), {
+      outcome: { message: expect.stringContaining('backend port') },
+    })
   })
   it('detects capturing another concurrently starting fixture', async () => {
     const copy = sourceCopy(['startupScope.getStore() === scope && ', ''])
-    await expect(Promise.all(Array.from({ length: 4 }, () => exercise(copy)))).rejects.toThrow(
-      'exactly one',
+    await expectKilled(
+      copy,
+      (start) =>
+        expect(Promise.all(Array.from({ length: 4 }, () => exercise(start)))).resolves.toHaveLength(
+          4,
+        ),
+      { outcome: { message: expect.stringContaining('exactly one') } },
     )
   })
   it('detects removal of the owned backend closure guard', async () => {
@@ -210,6 +221,6 @@ describe('production fixture source-copy negative controls', () => {
       'await backend.close(() => running.close())\n          await backend.assertClosed()',
       'await running.close()',
     ])
-    await expect(exercise(copy, true)).rejects.toThrow()
+    await expectKilled(copy, (start) => exercise(start, true))
   })
 })

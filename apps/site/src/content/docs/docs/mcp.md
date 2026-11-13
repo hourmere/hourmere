@@ -78,6 +78,11 @@ notifications and trigger configured integrations.
 | --- | --- | --- | --- |
 | `get_branding` | — | `branding get` | `full, read` |
 | `set_branding` | — | `branding set` | `full` |
+| `list_slack_destinations` | — | `slack list` | `full, read` |
+| `create_slack_destination` | — | `slack create` | `full` |
+| `update_slack_destination` | — | `slack update` | `full` |
+| `delete_slack_destination` | — | `slack delete` | `full` |
+| `test_slack_destination` | — | `slack test` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -94,6 +99,8 @@ notifications and trigger configured integrations.
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
+| `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
@@ -108,6 +115,7 @@ notifications and trigger configured integrations.
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
+| `troubleshoot_availability` | — | `troubleshoot-availability` | `full` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
@@ -123,8 +131,15 @@ notifications and trigger configured integrations.
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `list_workflows` | — | `workflows list` | `full, read` |
+| `get_workflow` | — | `workflows get` | `full, read` |
 
 <!-- api-key-scope-table:end -->
+
+`list_workflows` and `get_workflow` are listed before booking workflows are available:
+until they are enabled, `tools/list` omits them and a direct call by a `read` or `full` key
+returns `isError: true` with `workflows_disabled` (a `bookings` key still gets
+`insufficient_scope`). `workflows list` and `workflows get` report the same codes.
 
 Scope is immutable: use **Create replacement** on `/app/api-keys`, update the client and
 revoke the old key. Legacy keys and native API creations that omit `metadata.scope` retain
@@ -151,6 +166,16 @@ or an authorized `mcp:tools` OAuth connection. The instance must enable
 from `tools/list`; a direct call returns JSON-RPC error `-32602` with
 `Tool generate_open_time_snippet not found`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
 profile defaults, empty-result handling, DST boundaries and taken-time fallback.
+
+## Explain why times cannot be booked
+
+Call `troubleshoot_availability` with `eventTypeId` and a local `date` (`YYYY-MM-DD`), plus
+optional `timeZone` and `durationMinutes`. It returns every possible start time of that day
+with `status` and ordered reason codes, the same object as the REST endpoint. Only personal
+owners and team owners/admins may call it, with a `full` key or an `mcp:tools` OAuth grant;
+anything else answers `event_type_not_found`. `calendar_sync_unavailable` means connected
+calendars could not be read right now. See [Troubleshoot availability](/docs/availability-troubleshooting) for every reason
+code and the known limitations.
 
 ## Configure an after-booking redirect
 
@@ -512,6 +537,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
 | `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
+| `troubleshoot_availability` | Every possible start time of one local day with bookable status and plain reason codes; owner/admin and `full` keys only, no calendar or booking details | read-only |
 | `generate_open_time_snippet` | Earliest open alternatives with direct booking links and localized text/HTML for an email draft; owner/admin only, no reservation | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |
@@ -575,6 +601,14 @@ organization that the caller also hosts, or null when none is available. It is r
 when the successor falls outside the current page or filters. Public/manage responses omit
 it. The predecessor's `status` remains `cancelled`; use `rescheduledToId` to distinguish a
 reschedule from a cancellation, and `rescheduledFromId` to trace back to its predecessor.
+
+`list_workflows` and `get_workflow` read booking workflows, which are not available yet. They
+stay out of `tools/list`, and a direct call answers `workflows_disabled`, until workflows are
+enabled on the instance; discover availability with `workflowsEnabled` from
+`GET /api/v1/instance`. Once enabled, `list_workflows` takes the explicit owner you act as
+(`{kind: "personal", id: your user ID}` in your personal organization, or
+`{kind: "team", id: team ID}` as a current team owner or admin), and both return the current
+revision's definition with its enabled flag.
 
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as
@@ -723,7 +757,11 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged.
+reschedule retry semantics remain unchanged. An answer to a request that expired, was
+replaced or was already resolved by a move fails with `reschedule_request_changed`, as
+does a pick after cancellation. With the request email's token, REST
+`GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
+have no invitee read of a manage token.
 
 ## Configure booking limits
 
@@ -739,6 +777,15 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Attendee attendance access
+
+`get_booking_attendees` and `set_attendee_no_show` require the caller to host the booking
+in the current organization, for API keys of every scope and MCP OAuth alike. Team
+owner/admin status does not grant access to bookings hosted by other members through
+MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
+Non-host team administrators must use a browser session. See the
+[no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.
 
 ## Booking waitlists
 

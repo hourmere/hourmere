@@ -1,6 +1,6 @@
 import type { Db } from '@hourmere/db'
-import { createTestUser } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   createTestApp,
   escapedJson,
@@ -197,6 +197,97 @@ describe.skipIf(!serverUrl)('profile routes', () => {
     expect(await t.as(b.principal).put('/api/v1/profile', { ...valid, handle: 'taken' })).toEqual({
       status: 409,
       body: { error: 'handle_taken', message: 'This handle is already taken' },
+    })
+  })
+
+  describe('the claim-reserved handle route', () => {
+    const reserved = {
+      status: 400,
+      body: { error: 'handle_reserved', message: 'This handle is reserved' },
+    }
+    const stored = (userId: string) =>
+      t.db
+        .selectFrom('profiles')
+        .select(['handle', 'time_zone', 'locale'])
+        .where('user_id', '=', userId)
+        .executeTakeFirst()
+
+    afterEach(async () => {
+      await t.db.deleteFrom('profiles').where('handle', '=', 'route').execute()
+      await t.db.deleteFrom('auth.organization').where('slug', '=', 'route').execute()
+    })
+
+    it.each(['route', 'Route', 'ROUTE'])(
+      'refuses %s as a first handle and as a changed handle, writing nothing',
+      async (handle) => {
+        const fresh = await createTestUser(t.db)
+        expect(await t.as(fresh.principal).put('/api/v1/profile', { ...valid, handle })).toEqual(
+          reserved,
+        )
+        expect((await t.as(fresh.principal).get('/api/v1/profile')).status).toBe(404)
+
+        const editor = await createTestUser(t.db)
+        const api = t.as(editor.principal)
+        const own = `own-${editor.id.slice(0, 8)}`
+        expect((await api.put('/api/v1/profile', { ...valid, handle: own })).status).toBe(201)
+        expect(await api.put('/api/v1/profile', { ...valid, handle, locale: 'de' })).toEqual(
+          reserved,
+        )
+        expect(await stored(editor.id)).toEqual({
+          handle: own,
+          time_zone: 'Europe/Berlin',
+          locale: 'en-GB',
+        })
+      },
+    )
+
+    it("keeps a legacy route owner's handle, pages and saves, and never gives route back", async () => {
+      const f = createFixtures(t.db)
+      const owner = await createTestUser(t.db, 'Legacy route owner')
+      await t.db
+        .insertInto('profiles')
+        .values({ user_id: owner.id, handle: 'route', time_zone: 'UTC', locale: 'en' })
+        .execute()
+      await f.schedule(owner.id, { timeZone: 'UTC' })
+      await f.eventType(owner.principal.organization.id, owner.id, { slug: 'intro' })
+      const api = t.as(owner.principal)
+      expect((await t.anonymous.get('/api/v1/public/route/intro')).status).toBe(200)
+
+      const saved = await api.put('/api/v1/profile', {
+        handle: 'route',
+        timeZone: 'america/new_york',
+        locale: 'de',
+      })
+      expect(saved).toMatchObject({
+        status: 200,
+        body: { handle: 'route', timeZone: 'America/New_York', locale: 'de' },
+      })
+      expect(await api.put('/api/v1/profile', { ...valid, handle: 'Route' })).toEqual(reserved)
+      const other = await createTestUser(t.db)
+      expect(
+        await t.as(other.principal).put('/api/v1/profile', { ...valid, handle: 'route' }),
+      ).toEqual(reserved)
+      expect((await t.anonymous.get('/api/v1/public/route/intro')).status).toBe(200)
+
+      const away = `away-${owner.id.slice(0, 8)}`
+      expect((await api.put('/api/v1/profile', { ...valid, handle: away })).status).toBe(200)
+      expect(await api.put('/api/v1/profile', { ...valid, handle: 'route' })).toEqual(reserved)
+      expect(await stored(owner.id)).toMatchObject({ handle: away })
+      expect((await t.anonymous.get('/api/v1/public/route/intro')).status).toBe(404)
+      expect((await t.anonymous.get(`/api/v1/public/${away}/intro`)).status).toBe(200)
+    })
+
+    it('leaves the team slug route to teams', async () => {
+      const f = createFixtures(t.db)
+      const host = await f.host({ timeZone: 'UTC' })
+      await f.schedule(host.userId, { timeZone: 'UTC' })
+      const team = await f.organization('route')
+      await f.member(host.userId, team, 'owner')
+      await f.eventType(team, null, { slug: 'intro', hosts: [{ userId: host.userId }] })
+      expect(await t.anonymous.get('/api/v1/public/teams/route/intro')).toMatchObject({
+        status: 200,
+        body: { slug: 'intro' },
+      })
     })
   })
 

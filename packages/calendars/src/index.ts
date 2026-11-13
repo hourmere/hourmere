@@ -25,7 +25,7 @@ import {
 } from './provider.ts'
 
 export { calendarBookingNotifier, redispatchBookingCalendar } from './booking-events.ts'
-export { calendarEncryptionKey } from './credentials.ts'
+export { calendarEncryptionKey, decryptCredential, encryptCredential } from './credentials.ts'
 export {
   createGoogleCalendarClient,
   GOOGLE_CALENDAR_CALLBACK,

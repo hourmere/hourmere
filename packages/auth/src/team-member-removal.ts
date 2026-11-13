@@ -1,4 +1,5 @@
-import type { Database, Db } from '@hourmere/db'
+import { type Database, type Db, setRoutingTargetHealth } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
 import { isUuid } from './organizations.ts'
@@ -103,6 +104,14 @@ async function removeTeamMemberInTransaction(
       .execute()
     deactivatedEventTypeIds.push(event.id)
   }
+  // Routing forms never block removal: their targets on a deactivated event type, fallback
+  // included, are marked unavailable under the organization and event-type locks held here.
+  await setRoutingTargetHealth(
+    trx,
+    actor.organizationId,
+    deactivatedEventTypeIds.map((eventTypeId) => ({ eventTypeId, health: 'unavailable' })),
+    new Date(),
+  )
 
   await trx
     .deleteFrom('auth.member')
@@ -139,7 +148,15 @@ export function removeTeamMember(
       allowPersonal: false,
     })
     if (actor.role === 'member') throw teamManagementDenied()
-    return removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
+    const result = await removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
+    await writeAuditEvent(trx, {
+      organizationId: actor.organizationId,
+      ...auditActor(principal),
+      action: 'membership.removed',
+      targetType: 'user',
+      targetId: result.memberUserId,
+    })
+    return result
   }
   return db.isTransaction
     ? write(db as Transaction<Database>)

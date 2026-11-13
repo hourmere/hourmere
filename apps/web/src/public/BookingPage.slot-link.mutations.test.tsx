@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import * as language from '@hourmere/core/language'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -16,6 +15,7 @@ import * as duration from '../i18n/duration.ts'
 import * as formatting from '../i18n/formatting.ts'
 import * as runtime from '../i18n/runtime.tsx'
 import * as translate from '../i18n/translate.ts'
+import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import { type Call, fakeApi, json, later, type Routes } from '../test/fake-api.tsx'
 import { booking, EVENT, slot, slotsAnswer } from '../test/public-fixtures.ts'
 import * as calendar from './AddToCalendar.tsx'
@@ -61,16 +61,13 @@ beforeEach(() => {
 })
 
 /** Execute changed production copies; leave repository source untouched. */
-function compile<T>(text: string, dependencies: Record<string, unknown>): T {
-  const code = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: text, encoding: 'utf8' },
-  )
+function compile<T>(file: string, text: string, dependencies: Record<string, unknown>): T {
+  const code = compileSourceCopy(file, text, {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   const module = { exports: {} }
   new Function('require', 'module', 'exports', 'reactRuntime', code)(
     (name: string) => {
@@ -85,7 +82,7 @@ function compile<T>(text: string, dependencies: Record<string, unknown>): T {
 }
 
 function pageCopy(text = source): Pages {
-  return compile<Pages>(text, {
+  return compile<Pages>('apps/web/src/public/BookingPage.tsx', text, {
     '@hourmere/core/language': language,
     react,
     'react-router': router,
@@ -697,7 +694,7 @@ it('detects dropping the selected location from slot availability', async () => 
   }
   await killed(
     assertion,
-    'eventSlots(handle, slug, team, duration, locationOptionId)',
+    'eventSlots(handle, slug, team, duration, requestedLocationOptionId)',
     'eventSlots(handle, slug, team, duration)',
   )
 })
@@ -707,7 +704,7 @@ it('detects rejecting formatted international phone input in the public form', (
   const before = "(values.inviteePhone ?? '').replace(/[ ().-]/g, '')"
   expect(original.split(before)).toHaveLength(2)
   const assertion = (text: string) => {
-    const copied = compile<typeof form>(text, {
+    const copied = compile<typeof form>('apps/web/src/public/BookingForm.tsx', text, {
       react,
       '../components/forms.tsx': formComponents,
       '../i18n/runtime.tsx': runtime,
@@ -792,4 +789,85 @@ it('detects keeping an unchecked time after changing the location', async () => 
     'selectedLocation(event.locations ?? [], next.locationOptionId)?.id !==\n                    locationOptionId',
     'false',
   )
+})
+
+describe('singleton location source-copy controls', () => {
+  it('detects sending a singleton choice when loading slots', async () => {
+    async function assertion(text: string) {
+      const api = fakeApi(routes())
+      const view = display(text, '/ada/intro')
+      try {
+        await waitFor(() => expect(api.to(`GET ${API}/slots`).length).toBeGreaterThan(0))
+        expect(query(api.to(`GET ${API}/slots`)[0] as Call).has('locationOptionId')).toBe(false)
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(
+      assertion,
+      'eventSlots(handle, slug, team, duration, requestedLocationOptionId)',
+      'eventSlots(handle, slug, team, duration, locationOptionId)',
+    )
+  })
+
+  it('detects omitting a choice when multiple locations are offered', async () => {
+    async function assertion(text: string) {
+      const api = fakeApi(
+        routes({
+          [`GET ${API}`]: () =>
+            json(200, {
+              ...EVENT,
+              locations: [
+                { id: 'office', kind: 'in_person', isDefault: true },
+                { id: 'meet', kind: 'google_meet' },
+              ],
+            }),
+        }),
+      )
+      const view = display(text)
+      try {
+        await fill()
+        await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
+        await screen.findByRole('heading', { name: 'You’re booked' })
+        expect(api.to(`POST ${API}/bookings`)[0]?.body).toHaveProperty('locationOptionId', 'office')
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(
+      assertion,
+      '(event.locations?.length ?? 0) > 1 ? locationOptionId : undefined',
+      'undefined',
+    )
+  })
+
+  it.each([
+    [
+      'slot requests',
+      '(event.locations?.length ?? 0) > 1 ? locationOptionId : undefined',
+      'locationOptionId',
+    ],
+    [
+      'booking requests',
+      '...(requestedLocationOptionId && { locationOptionId: requestedLocationOptionId }),',
+      '...(chosenLocation && { locationOptionId: chosenLocation.id }),',
+    ],
+  ])('detects sending a singleton choice in %s', async (_name, before, after) => {
+    async function assertion(text: string) {
+      const api = fakeApi(routes())
+      const view = display(text)
+      try {
+        await fill()
+        await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
+        await screen.findByRole('heading', { name: 'You’re booked' })
+        for (const call of api.to(`GET ${API}/slots`)) {
+          expect(query(call).has('locationOptionId')).toBe(false)
+        }
+        expect(api.to(`POST ${API}/bookings`)[0]?.body).not.toHaveProperty('locationOptionId')
+      } finally {
+        view.unmount()
+      }
+    }
+    await killed(assertion, before, after)
+  })
 })

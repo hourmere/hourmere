@@ -2,10 +2,11 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, importedBookingIds } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
 import {
@@ -23,7 +24,7 @@ import {
   TeamAdminBookingListPageSchema as TeamAdminBookingPageSchema,
   toTeamAdminBooking,
 } from './team-admin-booking.ts'
-import { listTeamAdminBookings } from './team-bookings.ts'
+import { getTeamAdminBooking, listTeamAdminBookings } from './team-bookings.ts'
 import {
   createFixtures,
   createTestTeam,
@@ -60,13 +61,14 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
       `${compile('packages/scheduling/src/booking-page.ts', pageReplacement)}; return { bookingPageQuery, encodeBookingCursor }`,
     )(DomainError, isUuid) as typeof page
   }
-  return new Function(
+  const list = new Function(
     'sql',
     'bookingPageQuery',
     'encodeBookingCursor',
     'DomainError',
     'isUuid',
     'resolvedBookingHosts',
+    'importedBookingIds',
     'toTeamAdminBooking',
     'findPublicEventType',
     'findPublicTeamEventType',
@@ -78,10 +80,12 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     DomainError,
     isUuid,
     resolvedBookingHosts,
+    importedBookingIds,
     toTeamAdminBooking,
     findPublicEventType,
     findPublicTeamEventType,
   ) as List
+  return guardCopy(list)
 }
 
 describe.skipIf(!serverUrl)('team admin booking list', () => {
@@ -133,6 +137,38 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     })
     return { owner, admin, member, host, team, ownerCtx, adminCtx, memberCtx, eventId }
   }
+  it('keeps confirmed paid bookings readable without no-show management in lists and details', async () => {
+    const f = await setup()
+    const id = await booking(f, '2026-10-31T09:00Z')
+    expect((await getTeamAdminBooking(f.adminCtx, id)).canManageNoShow).toBe(true)
+    await db
+      .updateTable('bookings')
+      .set({
+        payment_hold_expires_at: '2026-10-31T08:00Z',
+        payment_reference: 'pi_paid_controls',
+      })
+      .where('id', '=', id)
+      .execute()
+    const paid = await db
+      .selectFrom('bookings')
+      .select(['status', 'payment_confirmed_at'])
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()
+    expect(paid.status).toBe('confirmed')
+    expect(paid.payment_confirmed_at).toBeInstanceOf(Date)
+    const verify = async (list: List) => {
+      expect((await list(f.adminCtx)).data.find((item) => item.id === id)?.canManageNoShow).toBe(
+        false,
+      )
+    }
+    await verify(listTeamAdminBookings)
+    expect((await getTeamAdminBooking(f.adminCtx, id)).canManageNoShow).toBe(false)
+    await expect(verify(sourceCopy(['!paidIds.has(booking.id) &&', '']))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await verify(listTeamAdminBookings)
+  })
+
   type Fixture = Awaited<ReturnType<typeof setup>>
 
   async function booking(
@@ -257,6 +293,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
         id,
         status: 'confirmed',
         isRescheduled: false,
+        canManageNoShow: false,
         start: '2026-11-02T09:00:00.000Z',
         end: '2026-11-02T09:30:00.000Z',
         cancelledAt: null,
@@ -265,8 +302,24 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
           { userId: f.member.id, name: f.member.name, timeZone: null, isCurrentMember: true },
         ],
         attendees: [
-          { name: 'Booker', email: 'booker@example.com', timeZone: 'UTC', isBooker: true },
-          { name: 'Guest', email: 'guest@example.com', timeZone: 'UTC', isBooker: false },
+          {
+            id: expect.any(String),
+            noShowMarkedAt: null,
+            noShowMarkedBy: null,
+            name: 'Booker',
+            email: 'booker@example.com',
+            timeZone: 'UTC',
+            isBooker: true,
+          },
+          {
+            id: expect.any(String),
+            noShowMarkedAt: null,
+            noShowMarkedBy: null,
+            name: 'Guest',
+            email: 'guest@example.com',
+            timeZone: 'UTC',
+            isBooker: false,
+          },
         ],
       },
     ])
@@ -501,7 +554,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
       "isRescheduled: booking.status === 'cancelled' && rescheduledIds.has(booking.id)",
       'isRescheduled: false',
     ])
-    await expect(verifyRescheduled(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verifyRescheduled)
   })
 
   it('reads real collective reschedule/cancel transitions with their saved inactive hosts', async () => {
@@ -701,7 +754,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
       const copy = sourceCopy(adjusted)
       const f = await setup()
       const ctx = await context(f)
-      await expect(expectDenied(copy, ctx)).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(copy, (read) => expectDenied(read, ctx))
     },
   )
 
@@ -730,7 +783,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     ],
   ])('detects broken %s with a real assertion failure', async (_, replacement, verify) => {
     const copy = sourceCopy(replacement)
-    await expect(verify(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(copy, verify)
   })
 
   it.each(['asc', 'desc'] as const)(
@@ -740,7 +793,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
         '[row.cursor_start, row.id]',
         '[new Date(row.cursor_start).toISOString(), row.id]',
       ])
-      await expect(verifyCursor(copy, order)).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(copy, (read) => verifyCursor(read, order))
     },
   )
 })

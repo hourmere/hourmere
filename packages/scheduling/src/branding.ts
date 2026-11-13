@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { brandContrast } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import sharp from 'sharp'
 import { z } from 'zod'
 import type { ServiceContext } from './context.ts'
@@ -83,9 +84,28 @@ export async function getBranding(ctx: ServiceContext) {
   await authorize(ctx.db, ctx)
   return read(ctx.db, ctx.principal.organization.id)
 }
+/** Records which settings changed and how; never the image, its hash or the colour. */
+async function auditBranding(
+  ctx: BrandingContext,
+  trx: Db,
+  details: { logo?: 'uploaded' | 'selected' | 'removed'; primaryColor?: 'set' | 'cleared' },
+) {
+  await writeAuditEvent(trx, {
+    organizationId: ctx.principal.organization.id,
+    ...auditActor(ctx.principal),
+    action: 'organization.branding_updated',
+    targetType: 'organization',
+    targetId: ctx.principal.organization.id,
+    details,
+    requestId: ctx.requestId,
+  })
+}
 async function write<T>(ctx: BrandingContext, action: (trx: Db) => Promise<T>) {
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
+    // Reject non-admin callers before they can contend with booking writes.
+    if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
+      await authorize(trx, ctx)
     const user = await trx
       .selectFrom('auth.user')
       .select('id')
@@ -142,6 +162,14 @@ export async function setBranding(ctx: BrandingContext, input: unknown) {
     }
     if (brandLogo === null)
       await trx.deleteFrom('organization_brand_logos').where('organization_id', '=', org).execute()
+    // An empty update changes nothing and records nothing.
+    if (brandLogo !== undefined || brandPrimaryColor !== undefined)
+      await auditBranding(ctx, trx, {
+        ...(brandLogo !== undefined ? { logo: brandLogo === null ? 'removed' : 'selected' } : {}),
+        ...(brandPrimaryColor !== undefined
+          ? { primaryColor: brandPrimaryColor === null ? 'cleared' : 'set' }
+          : {}),
+      })
     return read(trx, org)
   })
 }
@@ -202,6 +230,7 @@ export async function uploadBrandLogo(ctx: BrandingContext, data: Buffer, conten
       .values({ organization_id: org, brand_logo: hash })
       .onConflict((oc) => oc.column('organization_id').doUpdateSet({ brand_logo: hash }))
       .execute()
+    await auditBranding(ctx, trx, { logo: 'uploaded' })
     return read(trx, org)
   })
 }

@@ -3,7 +3,8 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, setRoutingTargetHealth } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
@@ -12,6 +13,7 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { organization } from 'better-auth/plugins/organization'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../apps/server/src/app.ts'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { createCallerResolver } from './caller.ts'
 import { beforeHook } from './hooks.ts'
 import * as authExports from './index.ts'
@@ -53,21 +55,28 @@ function sourceCopy(replacement?: Replacement): Remove {
     '',
   )
   const bindings = {
+    auditActor,
+    writeAuditEvent,
     assertTeamOwnerRemains,
     checkTeamManagementAccess,
     isUuid,
     personalOwner,
     teamManagementDenied,
     teamRoles,
+    setRoutingTargetHealth,
   }
-  return new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
-    ...Object.values(bindings),
-  ) as Remove
+  return guardCopy(
+    new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
+      ...Object.values(bindings),
+    ) as Remove,
+  )
 }
 
+/** `partOf`: the guarded removal copy this policy copy calls, so they share faults. */
 function policySourceCopy(
   replacement?: Replacement,
   remove: Remove = removeTeamMember,
+  partOf?: object,
 ): typeof createTeamRolePolicy {
   let source = readFileSync('packages/auth/src/team-role-policy.ts', 'utf8')
   if (replacement) {
@@ -79,6 +88,8 @@ function policySourceCopy(
     '',
   )
   const bindings = {
+    auditActor,
+    writeAuditEvent,
     AsyncLocalStorage,
     assertTeamOwnerRemains,
     tryGetCurrentAuthEndpointContext,
@@ -97,9 +108,12 @@ function policySourceCopy(
     removeTeamMember: remove,
     teamMemberRemovalTarget,
   }
-  return new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(
-    ...Object.values(bindings),
-  ) as typeof createTeamRolePolicy
+  return guardCopy(
+    new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(
+      ...Object.values(bindings),
+    ) as typeof createTeamRolePolicy,
+    { partOf },
+  )
 }
 
 async function sourceExportCopy(reexportTransactionHelper = false) {
@@ -111,7 +125,9 @@ async function sourceExportCopy(reexportTransactionHelper = false) {
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  )
 }
 
 function verifyExportBoundary(module: Record<string, unknown>) {
@@ -127,10 +143,7 @@ describe('member removal exports', () => {
   })
 
   it('detects a transaction helper export from a source copy with a real assertion', async () => {
-    const copy = await sourceExportCopy(true)
-    expect(() => verifyExportBoundary(copy)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(await sourceExportCopy(true), verifyExportBoundary)
   })
 })
 
@@ -265,8 +278,8 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     )
   }
 
-  function copiedNativePolicy(replacement?: Replacement, remove: Remove = removeTeamMember) {
-    const policy = policySourceCopy(replacement, remove)(db)
+  function copiedNativePolicy(createPolicy = policySourceCopy()) {
+    const policy = createPolicy(db)
     // Use the real pinned native endpoint, auth adapter transaction and recorder. Only
     // the policy is a source copy; the removed protection must fail a behavior assertion.
     const copiedAuth = betterAuth({
@@ -349,9 +362,10 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     verifyCallerTransaction())
 
   it('detects a nested removal transaction in a source copy with a real assertion', async () => {
-    await expect(
-      verifyCallerTransaction(sourceCopy(['return db.isTransaction', 'return false'])),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(
+      sourceCopy(['return db.isTransaction', 'return false']),
+      verifyCallerTransaction,
+    )
   })
 
   it.each(['owner', 'member, admin'])(
@@ -442,8 +456,9 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
       "if (!ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {",
       "if (true || !ctx || !selfDeparturePaths.has(ctx.path) || request.model !== 'member') {",
     ]
-    const handler = copiedNativePolicy(mutation)
-    await expect(verifyNativeBoundary(handler)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(policySourceCopy(mutation), (copy) =>
+      verifyNativeBoundary(copiedNativePolicy(copy)),
+    )
   })
 
   async function verifyNativeRecheck(
@@ -509,29 +524,27 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   it.each(['role', 'context'] as const)(
     'detects missing locked native %s rechecks with a real assertion',
     async (change) => {
-      await expect(
-        verifyNativeRecheck(
-          change,
-          copiedNativePolicy(
-            [
-              `const { actor, member, principal, expectedOrganizationId } = await removal(
+      const remove = sourceCopy([
+        'checkTeamManagementAccess(trx, principal, input.teamId, true, {',
+        'checkTeamManagementAccess(trx, principal, input.teamId, false, {',
+      ])
+      const policy = policySourceCopy(
+        [
+          `const { actor, member, principal, expectedOrganizationId } = await removal(
               ctx,
               trx,
               true,
             )`,
-              `const { actor, member, principal, expectedOrganizationId } = await removal(
+          `const { actor, member, principal, expectedOrganizationId } = await removal(
               ctx,
               trx,
               false,
             )`,
-            ],
-            sourceCopy([
-              'checkTeamManagementAccess(trx, principal, input.teamId, true, {',
-              'checkTeamManagementAccess(trx, principal, input.teamId, false, {',
-            ]),
-          ),
-        ),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+        ],
+        remove,
+        remove,
+      )
+      await expectKilled(policy, (copy) => verifyNativeRecheck(change, copiedNativePolicy(copy)))
     },
   )
 
@@ -820,9 +833,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   it.each(mutations)(
     'detects broken $name with a real HTTP assertion',
     async ({ replacement, verify }) => {
-      await expect(verify(sourceCopy(replacement))).rejects.toMatchObject({
-        name: 'AssertionError',
-      })
+      await expectKilled(sourceCopy(replacement), verify)
     },
   )
 })

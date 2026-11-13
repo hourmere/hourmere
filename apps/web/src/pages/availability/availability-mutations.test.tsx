@@ -1,5 +1,4 @@
 import '../../i18n/admin.ts'
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -18,6 +17,7 @@ import { InterfaceScope, useI18n } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
 import * as translate from '../../i18n/translate.ts'
 import * as paths from '../../paths.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json } from '../../test/fake-api.tsx'
 import { SCHEDULE_ID, schedule } from '../../test/fixtures.ts'
 import * as unsaved from '../../unsaved-changes.tsx'
@@ -52,15 +52,12 @@ const dependencies = {
 
 /** Compile an in-memory source copy; production files are never changed by mutation checks. */
 function copy<T>(source: string, name: string): T {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import {readFileSync} from 'node:fs';import {transformSync} from 'esbuild';process.stdout.write(transformSync(readFileSync(0,'utf8'),{loader:'tsx',format:'cjs',jsxFactory:'reactRuntime.createElement',jsxFragment:'reactRuntime.Fragment'}).code)",
-    ],
-    { input: source.replace(/^export /gm, ''), encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(name, source.replace(/^export /gm, ''), {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   return new Function(
     'reactRuntime',
     ...Object.keys(dependencies).filter(

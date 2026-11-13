@@ -353,8 +353,8 @@ describe.skipIf(!process.env.DATABASE_URL)('production snippet route and tool fl
     await verifyStartup(false, control.startServer)
     await verifyStartup(true, control.startServer)
     for (const anchor of [
+      '      slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,',
       '        slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,',
-      '          slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,',
     ]) {
       for (const hardcoded of [true, false]) {
         const mutant = await sourceCopy<typeof server>('./server.ts', [

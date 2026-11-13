@@ -19,6 +19,8 @@ import { PATHS } from '../paths.ts'
 import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 import { BrandSettings } from './BrandSettings.tsx'
+import { ProvisioningTokens } from './ProvisioningTokens.tsx'
+import { SlackIntegrations } from './SlackIntegrations.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -124,6 +126,14 @@ export function SettingsPage() {
               : null
         }
       />
+      <SlackIntegrations key={`slack-${organizationId}`} organizationId={organizationId} />
+      {!personal && me.principal.kind === 'session' && (
+        <ProvisioningTokens
+          organizationId={organizationId}
+          timeZone={profile.status === 'ready' ? profile.data?.timeZone : undefined}
+          role={role.status === 'ready' ? role.data : null}
+        />
+      )}
       {!personal && (
         <TeamMembers
           key={organizationId}

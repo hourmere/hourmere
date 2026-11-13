@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import type { ServiceContext } from './context.ts'
 import * as events from './event-types.ts'
 import { jsonb } from './internal.ts'
@@ -61,10 +62,12 @@ async function sourceCopy(change?: Change, locationChange?: Change): Promise<Sou
     source = source.replace(imported[0], '')
   }
   source = source.replace(/\bexport /g, '')
-  return new Function(
-    ...Object.keys(bindings),
-    `${source}; return { createEventType, updateEventType, getEventType, listEventTypes, normalize: (input) => validFields({...DEFAULTS, ...defined(input)}), project: fieldsOf }`,
-  )(...Object.values(bindings)) as SourceCopy
+  return guardCopy(
+    new Function(
+      ...Object.keys(bindings),
+      `${source}; return { createEventType, updateEventType, getEventType, listEventTypes, normalize: (input) => validFields({...DEFAULTS, ...defined(input)}), project: fieldsOf }`,
+    )(...Object.values(bindings)) as SourceCopy,
+  )
 }
 
 const databaseUrl = process.env.DATABASE_URL
@@ -467,6 +470,40 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
     }
   }
 
+  async function verifyUnsupportedSingletons(api: Services = events) {
+    for (const schedulingType of ['collective', 'round_robin'] as const) {
+      const { owner, host, ctx } = await teamContext()
+      const hosts = [{ userId: owner.id }, { userId: host.id }]
+      const option = schedulingType === 'collective' ? meet : zoom
+      const code =
+        schedulingType === 'collective'
+          ? 'invalid_conference_organizer'
+          : 'automatic_zoom_host_policy'
+      const existing = await api.createEventType(ctx, {
+        ...base,
+        schedulingType,
+        hosts,
+        locations: [link],
+      })
+      const { id: _id, ...location } = option
+      for (const patch of [{ location }, { locations: [option] }]) {
+        await expect(
+          api.createEventType(ctx, {
+            ...base,
+            slug: `rejected-${randomUUID()}`,
+            schedulingType,
+            hosts,
+            ...patch,
+          }),
+        ).rejects.toMatchObject({ code })
+        await expect(api.updateEventType(ctx, existing.id, patch)).rejects.toMatchObject({ code })
+        expect((await stored(existing.id)).locations).toEqual([link])
+      }
+    }
+  }
+  it('rejects unsupported singleton conference configurations on legacy and option-list creates and updates', () =>
+    verifyUnsupportedSingletons())
+
   async function verifyMeet(api: Services = events) {
     const { owner, host, ctx } = await teamContext()
     const hosts = [{ userId: owner.id }, { userId: host.id }]
@@ -643,6 +680,7 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
       verifyValidation,
       verifyProjection,
       verifyMeet,
+      verifyUnsupportedSingletons,
       verifyConferenceEcho,
       verifyZoom,
       verifyBothConferences,
@@ -653,7 +691,7 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
 
   it('detects removing the multiple-unlabelled-option conflict with a real service assertion', async () => {
     const api = await sourceCopy(undefined, ['locations.length > 1 ||', 'false ||'])
-    await expect(verifyLegacyConflict(api)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(api, verifyLegacyConflict)
   })
 
   it.each<[string, Change, (api: Services) => Promise<void>]>([
@@ -765,6 +803,21 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
       verifyConferenceEcho,
     ],
     [
+      'singleton configuration update validation',
+      ['changes.locations !== undefined ||', 'false ||'],
+      verifyUnsupportedSingletons,
+    ],
+    [
+      'collective singleton organizer validation',
+      ['if (!locations?.some(automaticMeet)) return', 'return'],
+      verifyUnsupportedSingletons,
+    ],
+    [
+      'round-robin singleton Zoom validation',
+      ['if (locations?.some(automaticZoom)) {', 'if (false) {'],
+      verifyUnsupportedSingletons,
+    ],
+    [
       'all-option Meet rules',
       [
         'if (!locations?.some(automaticMeet)) return',
@@ -799,6 +852,6 @@ describe.skipIf(!databaseUrl)('event type location options (real Postgres)', () 
       verifyZoom,
     ],
   ])('detects removing %s with a real assertion failure', async (_name, change, verify) => {
-    await expect(verify(await sourceCopy(change))).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(await sourceCopy(change), verify)
   })
 })

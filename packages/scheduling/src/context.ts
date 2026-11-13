@@ -24,18 +24,34 @@ export type BookingEvent =
  */
 export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Instant) => Promise<void>
 
+export type AttendeeNoShowNotifier = (
+  trx: Db,
+  event: {
+    bookingId: string
+    attendeeId: string
+    noShowMarkedAt: string | null
+    noShowMarkedBy: string | null
+  },
+  now: Temporal.Instant,
+) => Promise<void>
+
 /**
  * What a service function receives for an authenticated call. REST routes and MCP tools
  * build it the same way, so people and agents get exactly the same behavior.
  */
 export interface ServiceContext {
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  /** Per-process export capacity from validated server configuration; defaults to 2. */
+  bookingExportMaxConcurrent?: number | undefined
   principal: Principal
   /** The clock, injectable for tests. */
   now: () => Temporal.Instant
@@ -52,6 +68,8 @@ export interface PublicContext {
   /** Whether trusted server configuration enables SMTP; waitlist enrollment needs mail. */
   smtpConfigured?: boolean | undefined
   db: Db
+  /** Server-generated correlation ID; never a raw header value. */
+  requestId?: string | undefined
   /** Shared waitlist attribution and enrollment secret, supplied only by trusted transports. */
   waitlistSecret?: string | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined

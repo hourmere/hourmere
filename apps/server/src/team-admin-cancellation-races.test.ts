@@ -1,11 +1,17 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { setImmediate } from 'node:timers/promises'
+import { setTimeout } from 'node:timers/promises'
 import { createRoute, z } from '@hono/zod-openapi'
-import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+  parsePersistedApiKeyMetadata,
+} from '@hourmere/auth'
 import * as calendars from '@hourmere/calendars'
 import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
@@ -39,6 +45,7 @@ import { createApp } from './app.ts'
 import { localeDescription } from './i18n/locale-description.ts'
 import * as openapi from './openapi.ts'
 import * as rateLimit from './rate-limit.ts'
+import { publicBookingAuditOrigin } from './rest-scopes.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import * as management from './team-management.ts'
@@ -73,6 +80,9 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
   const copy = sourceCopy<Record<string, unknown>>(
     service.replace(before, after),
     {
+      auditActor,
+      writeAuditEvent,
+      parsePersistedApiKeyMetadata,
       createHash,
       randomBytes,
       importedBookingIds,
@@ -97,6 +107,7 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
   return sourceCopy<{ bookingRoutes: GuestRoutes }>(
     readFileSync(routeLocation, 'utf8'),
     {
+      publicBookingAuditOrigin,
       createRoute,
       z,
       ...calendars,
@@ -340,7 +351,7 @@ describe.skipIf(!bootstrap)(
           [blocker, relation],
         )
         if (result.rows[0]) return result.rows[0].pid
-        await setImmediate(undefined, { signal })
+        await setTimeout(10, undefined, { signal })
       }
     }
 
@@ -364,7 +375,7 @@ describe.skipIf(!bootstrap)(
           ).toBe('organization lock held')
           return
         }
-        await setImmediate(undefined, { signal })
+        await setTimeout(10, undefined, { signal })
       }
     }
 

@@ -4,7 +4,19 @@ import type { DB } from './tables.ts'
 
 export { importedBookingCondition } from './imported-booking-condition.ts'
 export { importedBookingIds, isImportedBooking } from './imported-bookings.ts'
+export type * from './meeting-poll-types.ts'
 export { runMigrations } from './migrate.ts'
+export {
+  deleteUnreferencedRoutingVersions,
+  purgeExpiredRoutingReceipts,
+  ROUTING_RECEIPT_PURGE_BATCH,
+  ROUTING_VERSION_CLEANUP_BATCH,
+  ROUTING_VERSION_SCAN_BATCH,
+  type RoutingTargetHealthCode,
+  type RoutingVersionCleanup,
+  routingTargetsInUse,
+  setRoutingTargetHealth,
+} from './routing-lifecycle.ts'
 export type * from './tables.ts'
 
 // Generated from the migrated database by `npm run db:types`; CI fails if it is stale.

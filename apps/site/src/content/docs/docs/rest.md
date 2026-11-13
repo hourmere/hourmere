@@ -53,6 +53,14 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Instance capabilities
+
+`GET /api/v1/instance` includes additive `ssoOidcEnabled` and `ssoSamlEnabled`
+booleans. Both are currently `false`: organization SSO is unavailable, including on
+self-hosted instances, and no environment setting enables it yet. Older servers may
+omit these fields; clients should treat absence as unknown, keep SSO entry points hidden and
+tolerate unknown response fields. No SSO operations are exposed in this release.
+
 ## Configure meeting lengths
 
 Create an event type with `POST /api/v1/event-types` or edit it with
@@ -122,6 +130,16 @@ When off (the default), a valid authenticated request returns HTTP 404 with
 `{"error":"slot_snippets_disabled"}`.
 See [the agent guide](/docs/open-time-snippets) for a complete curl example, response
 fields, date boundaries and taken-time fallback.
+
+## Explain why times cannot be booked
+
+`GET /api/v1/event-types/{id}/availability-troubleshooting?date=YYYY-MM-DD` lists every
+possible start time of one local day with `status` and ordered reason codes such as
+`outside_working_hours`, `calendar_busy`, `buffer_after` or `daily_limit`. Optional
+`timeZone` (default: your profile time zone) and `durationMinutes`. Personal owners and team
+owners/admins only, with a `full` key; everyone else gets `404 event_type_not_found`. Reasons
+never include calendar event titles or booking details. See
+[Troubleshoot availability](/docs/availability-troubleshooting) for the response and limitations.
 
 ## Find a time
 
@@ -282,7 +300,11 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged.
+reschedule retry semantics remain unchanged. An answer to a request that expired, was
+replaced or was already resolved by a move fails with `reschedule_request_changed`, as
+does a pick after cancellation. With the request email's token, REST
+`GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
+have no invitee read of a manage token.
 
 ## Configure booking limits
 
@@ -294,6 +316,17 @@ weekly limit. Event-type reads return all three settings. API keys need `full` s
 for configuration writes. See [booking limits](/docs/booking-limits) for REST, MCP and
 CLI examples, host schedule time zones, Monday-based weeks, calendar months and
 counting rules. Lowering a ceiling does not cancel existing bookings.
+
+## Record attendee no-shows
+
+[Marking no-shows](/docs/no-shows) records private per-attendee attendance after the
+scheduled start. Use REST `PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show`,
+MCP `set_attendee_no_show`, or CLI `set-no-show` with `bookingId`, `attendeeId` and
+`noShow`. API keys require `bookings` or `full` plus booked-host authority. API keys
+of every scope and MCP OAuth can read or mark attendees only on bookings the caller
+hosts in the current organization. Non-host team owners/admins need a browser session;
+agent credentials receive `booking_not_found`, just as for a missing booking.
+Invitee pages and messages are unchanged, including scheduled follow-ups.
 
 ## Booking waitlists
 

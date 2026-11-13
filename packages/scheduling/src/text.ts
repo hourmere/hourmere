@@ -51,6 +51,18 @@ export function cleanText(value: unknown, { multiline = false, min = 1, max }: T
   return (multiline ? isMultiLineText(text) : isSingleLineText(text)) ? text : undefined
 }
 
+const MAX_EMAIL = 254
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * The invitee email rule: one trimmed line of at most 254 characters with the address shape.
+ * Returns the trimmed address, or undefined when the value fails the rule.
+ */
+export function cleanInviteeEmail(value: unknown): string | undefined {
+  const email = cleanText(value, { max: MAX_EMAIL })
+  return email !== undefined && EMAIL.test(email) ? email : undefined
+}
+
 /** A zod string that is trimmed and must pass cleanText's rules. */
 export function textSchema({ multiline = false, min = 1, max }: TextRules) {
   return z

@@ -3,7 +3,9 @@
 import { z } from '@hono/zod-openapi'
 import { retryBookingConference, retryConferenceMirror } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import {
+  type AttendeeNoShowNotifier,
   type BookingNotifier,
   type BookingOrigin,
   cancelHostBooking,
@@ -14,6 +16,7 @@ import {
   DomainError,
   getPublicEventType,
   getPublicTeamEventType,
+  listBookingAttendeeNoShows,
   listHostBookings,
   listPublicSlots,
   listPublicTeamSlots,
@@ -24,11 +27,14 @@ import {
   rescheduleHostBooking,
   rescheduleManagedBooking,
   type ServiceContext,
+  setAttendeeNoShow,
   validTimeZone,
 } from '@hourmere/scheduling'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit } from '../rate-limit.ts'
 import {
+  AttendeeNoShow,
   Booking,
+  BookingAttendees,
   BookingPage,
   BookingWithToken,
   CancelBody,
@@ -220,6 +226,7 @@ export interface BookingToolsDeps {
   smtpConfigured?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
+  notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   /** Queues the booking emails in the transaction of each change, as for REST. */
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
@@ -245,6 +252,7 @@ export function bookingTools({
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
+  notifyAttendeeNoShow,
   automaticMeet,
   automaticZoom,
   rateLimits = {},
@@ -262,6 +270,7 @@ export function bookingTools({
   const context = (caller: McpCaller): ServiceContext => ({
     db,
     principal: caller,
+    notifyAttendeeNoShow,
     now,
     notify,
     automaticMeet,
@@ -269,6 +278,7 @@ export function bookingTools({
   })
   const origin = (caller: McpCaller): BookingOrigin => ({
     source: 'mcp',
+    audit: auditActor(caller),
     apiKeyId: caller.kind === 'api_key' ? caller.apiKeyId : null,
     oauthConsentId: caller.kind === 'oauth' ? caller.oauthConsentId : null,
     actorUserId: caller.user.id,
@@ -538,6 +548,40 @@ export function bookingTools({
     },
   })
 
+  const getAttendees = defineTool({
+    name: 'get_booking_attendees',
+    title: 'Read booking attendees',
+    description:
+      'Read attendee identifiers and no-show markers for a known booking ID. Only booked hosts may read via API keys or OAuth. Non-host team administrators must use the browser dashboard; other bookings return booking_not_found.',
+    input: z.strictObject({ bookingId: z.uuid() }),
+    output: BookingAttendees,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return { data: await listBookingAttendeeNoShows(context(call.caller), args.bookingId) }
+    },
+  })
+  const setNoShow = defineTool({
+    name: 'set_attendee_no_show',
+    title: 'Mark or unmark an attendee no-show',
+    description:
+      'Set noShow true to mark or false to unmark one attendee after the scheduled start. Only booked hosts may act via API keys or OAuth. Non-host team administrators must use the browser dashboard; other bookings return booking_not_found. Imported and cancelled bookings refuse changes. Replays preserve the original marker. Invitee pages, email and scheduled follow-ups are unchanged. Get attendeeId from authenticated booking reads.',
+    input: z.strictObject({ bookingId: z.uuid(), attendeeId: z.uuid(), noShow: z.boolean() }),
+    output: AttendeeNoShow,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return setAttendeeNoShow(context(call.caller), args.bookingId, args.attendeeId, args.noShow)
+    },
+  })
   const exportBookings = defineTool({
     name: 'export_bookings',
     title: 'Export bookings as CSV',
@@ -625,5 +669,7 @@ export function bookingTools({
     exportBookings,
     retryConference,
     retryCalendarCopy,
+    setNoShow,
+    getAttendees,
   ]
 }

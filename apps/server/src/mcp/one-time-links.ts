@@ -3,6 +3,10 @@ import type { Db } from '@hourmere/db'
 import {
   createOneTimeBookingLink,
   listOneTimeBookingLinks,
+  ONE_TIME_BOOKING_LINK_LIMIT,
+  ONE_TIME_BOOKING_LINK_MEMBER_LIMIT,
+  ONE_TIME_LINK_PAGE_MAX,
+  ONE_TIME_LINK_PAGE_MIN,
   revokeManagedOneTimeBookingLink,
   type ServiceContext,
 } from '@hourmere/scheduling'
@@ -34,8 +38,7 @@ export function oneTimeLinkTools({
     defineTool({
       name: 'create_one_time_link',
       title: 'Create a one-time booking link',
-      description:
-        'Creates a private link for one event type you can manage. Requires a bookings/full API key or an authorized MCP OAuth connection. The booking URL is shown only in this create response: copy it now and keep it private. List/get cannot recover it. expiresAt is an optional future RFC 3339 instant with an offset; omission or null means no expiry. Optional invitee name/email prefill is editable and does not prove identity. Requires a retained random idempotencyKey. Repeating the same key and normalized arguments returns one_time_link_already_created without another token; no response cache recovers the URL. Changed arguments return idempotency_key_reused. Retention or event deletion can remove the marker. Team links belong to the team after their creator leaves. Limits: 1000 active unexpired links per personal owner/team, and 200 per ordinary team member. No private labels are stored.',
+      description: `Creates a private link for one event type you can manage. Requires a bookings/full API key or an authorized MCP OAuth connection. The booking URL is shown only in this create response: copy it now and keep it private. List/get cannot recover it. expiresAt is an optional future RFC 3339 instant with an offset; omission or null means no expiry. Optional invitee name/email prefill is editable and does not prove identity. Requires a retained random idempotencyKey. Repeating the same key and normalized arguments returns one_time_link_already_created without another token; no response cache recovers the URL. Changed arguments return idempotency_key_reused. Retention or event deletion can remove the marker. Team links belong to the team after their creator leaves. Limits: ${ONE_TIME_BOOKING_LINK_LIMIT} active unexpired links per personal owner/team, and ${ONE_TIME_BOOKING_LINK_MEMBER_LIMIT} per ordinary team member. No private labels are stored.`,
       input: CreateOneTimeLink.extend({
         eventTypeId,
         idempotencyKey: z
@@ -67,7 +70,7 @@ export function oneTimeLinkTools({
       input: OneTimeLinkListQuery.extend({
         eventTypeId,
         // HTTP query strings are coerced by REST; MCP advertises and accepts JSON integers.
-        limit: z.number().int().min(1).max(100).optional(),
+        limit: z.number().int().min(ONE_TIME_LINK_PAGE_MIN).max(ONE_TIME_LINK_PAGE_MAX).optional(),
       }).strict(),
       output: OneTimeLinkList,
       privateInput: () => true,
