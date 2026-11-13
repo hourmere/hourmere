@@ -82,7 +82,7 @@ export const common = {
   'This booking has been rescheduled the maximum number of times. Contact the host to change it again.':
     'Este agendamento atingiu o limite de reagendamentos. Entre em contato com o anfitrião para alterá-lo novamente.',
   'You can reschedule this booking online until {date} at {time}.':
-    'Você pode reagendar on-line até {date}, às {time}.',
+    'Você pode reagendar este agendamento on-line até {date}, às {time}.',
   'You can cancel this booking online until {date} at {time}.':
     'Você pode cancelar este agendamento on-line até {date}, às {time}.',
   'Online rescheduling closed on {date} at {time}. Contact your host to change this booking.':
@@ -90,7 +90,7 @@ export const common = {
   'Online cancellation closed on {date} at {time}. Contact your host to cancel this booking.':
     'O cancelamento on-line foi encerrado em {date}, às {time}. Entre em contato com o anfitrião para cancelar este agendamento.',
   'The deadline for rescheduling this booking online has passed. Contact your host to change it.':
-    'O prazo para reagendar on-line já passou. Entre em contato com o anfitrião para alterar este agendamento.',
+    'O prazo para reagendar este agendamento on-line já passou. Entre em contato com o anfitrião para alterar este agendamento.',
   'The deadline for cancelling this booking online has passed. Contact your host to cancel it.':
     'O prazo para cancelar este agendamento on-line já passou. Entre em contato com o anfitrião para cancelá-lo.',
   'Skip to content': 'Pular para o conteúdo',

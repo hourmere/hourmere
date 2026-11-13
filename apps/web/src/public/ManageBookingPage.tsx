@@ -564,13 +564,16 @@ function ManageView({
               {t(requestNotice)}
             </p>
           )}
-          {booking.pendingReschedule && !started && booking.status === 'confirmed' && (
-            <p className="notice" role="status">
-              {t(
-                'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
-              )}
-            </p>
-          )}
+          {booking.pendingReschedule &&
+            !started &&
+            booking.status === 'confirmed' &&
+            !rescheduleClosed && (
+              <p className="notice" role="status">
+                {t(
+                  'Your host has asked you to choose a new time. The original booking stays in place until you reschedule or cancel.',
+                )}
+              </p>
+            )}
           {mode.kind === 'view' && (
             <BookingSummary
               booking={booking}

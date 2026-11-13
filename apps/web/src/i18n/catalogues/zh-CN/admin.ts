@@ -115,7 +115,7 @@ export const admin = {
   'Enable Slack notifications': '启用 Slack 通知',
   'Save Slack destination': '保存 Slack 接收地址',
   'The invitee can no longer reschedule this booking online because its deadline has passed. Move it yourself instead.':
-    '受邀人的在线改期截止时间已过，无法再改期此预约。请您自行改期。',
+    '受邀人的在线改期截止时间已过，已无法自行改期此预约。请你直接改期。',
   'Group-seat bookings do not support reschedule requests.': '团体席位预约不支持请求改期。',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
     '请使用最多 2000 个字符的纯文本，不可包含制表符和控制字符。',
@@ -1900,7 +1900,7 @@ export const admin = {
   'Invitee cancellation deadline': '受邀人取消截止时间',
   'until the meeting starts': '会议开始前均可操作',
   'How long before the start invitees can no longer reschedule with their booking link. Each booking keeps the deadline it was booked with, and you can still change it yourself.':
-    '会议开始前多久起，受邀人无法再通过预约链接改期。每个预约沿用预约时的截止时间；你自己仍可随时更改预约。',
+    '会议开始前多久起，受邀人无法再通过预约链接改期。每个预约沿用预约时的截止时间；你自己仍可更改预约。',
   'How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself.':
-    '会议开始前多久起，受邀人无法再通过预约链接取消。每个预约沿用预约时的截止时间；你自己仍可随时取消预约。',
+    '会议开始前多久起，受邀人无法再通过预约链接取消。每个预约沿用预约时的截止时间；你自己仍可取消预约。',
 } as const

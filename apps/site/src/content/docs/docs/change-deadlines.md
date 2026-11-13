@@ -140,7 +140,9 @@ first. Once that deadline has passed, sending a request is refused with
 
 Other checks come first: an unknown token returns `404 booking_not_found`, a cancelled
 booking `409 booking_cancelled`, and a booking that has started `409 booking_in_past`.
-MCP and CLI return the same codes as REST.
+MCP and CLI return the same codes as REST. An answer to a host's request that carries
+`rescheduleRequestId` gets `409 reschedule_request_changed` instead once the reschedule
+deadline has passed, because the request expired at that deadline; load the booking again.
 
 ## Known limitations
 

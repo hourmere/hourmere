@@ -654,7 +654,7 @@ export async function createEventType(
       const { id } = await trx
         .insertInto('event_types')
         .values({
-          ...columns(fields),
+          ...insertColumns(fields),
           ...(notifications === undefined ? {} : { notifications: jsonb(notifications) }),
           organization_id: ctx.principal.organization.id,
           owner_user_id: personalOwnerId,
@@ -1284,6 +1284,20 @@ function fieldsOf(row: {
     isHidden: row.is_hidden,
     allowGuests: row.allow_guests,
     position: row.position,
+  }
+}
+
+/**
+ * The columns of a new event type. Unset change deadlines are left to the column default
+ * (NULL), so creation writes nothing the schema before them lacks (upgrade tests write
+ * through the application at earlier schema versions).
+ */
+function insertColumns(fields: Fields) {
+  const { reschedule_cutoff_minutes, cancel_cutoff_minutes, ...rest } = columns(fields)
+  return {
+    ...rest,
+    ...(reschedule_cutoff_minutes !== null && { reschedule_cutoff_minutes }),
+    ...(cancel_cutoff_minutes !== null && { cancel_cutoff_minutes }),
   }
 }
 
