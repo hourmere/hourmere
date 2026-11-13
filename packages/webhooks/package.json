@@ -13,6 +13,7 @@
   "dependencies": {
     "@hourmere/db": "*",
     "@hourmere/jobs": "*",
+    "@hourmere/outbound": "*",
     "@hourmere/scheduling": "*",
     "kysely": "0.29.7",
     "zod": "4.6.7"

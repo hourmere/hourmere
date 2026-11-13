@@ -1,10 +1,10 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import { parseWhole, wholeNumberProblem } from '../../components/forms.tsx'
 import { literal, msg } from '../../i18n/translate.ts'
 import { EVENT_TYPE, QUESTIONS, RULES } from '../../limits.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { eventType } from '../../test/fixtures.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 import type * as formFunctions from './event-type-form.ts'
@@ -14,17 +14,10 @@ const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', '
 
 /** Execute only source copies, keeping production files restored throughout each control. */
 function buildForm(source: string): typeof formFunctions {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import {readFileSync} from 'node:fs'; import {transformSync} from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), {loader:'ts',format:'cjs'}).code)",
-    ],
-    {
-      input: source.replace(/^import[\s\S]*?from '[^']+'$/gm, '').replace(/^export /gm, ''),
-      encoding: 'utf8',
-    },
+  const compiled = compileSourceCopy(
+    'apps/web/src/pages/event-types/event-type-form.ts',
+    source.replace(/^import[\s\S]*?from '[^']+'$/gm, '').replace(/^export /gm, ''),
+    { loader: 'ts', format: 'cjs' },
   )
   const dependencies = {
     ...notificationFunctions,

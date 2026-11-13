@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { revealEventSetting } from '../event-settings.ts'
+import { waitUntilAtRest } from '../fixtures.ts'
 import { selectPublicLanguage } from '../public-language.ts'
 import {
   expect,
@@ -13,7 +14,9 @@ import {
 async function chooseDay(page: Page, date: string) {
   await expect(page.locator('.calendar-grid[aria-busy="true"]')).toHaveCount(0)
   await page.locator(`button.day-available[data-day="${date}"]`).click()
-  await page.locator('.slots button').first().click()
+  const slot = page.locator('.slots button').first()
+  await waitUntilAtRest(slot, page)
+  await slot.click()
 }
 
 function expectedSchedule(start: string, end: string): ScheduledMessageState[] {

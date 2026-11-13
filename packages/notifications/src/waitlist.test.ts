@@ -11,6 +11,7 @@ import { createFixtures, type Fixtures, weekdays } from '@hourmere/scheduling/te
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as limits from './mail-limits.ts'
 import {
   createWaitlistEmailWorker,
@@ -31,6 +32,7 @@ function sourceCopy(
   before: string,
   after: string,
   extra: [string, string][] = [],
+  partOf?: object,
 ): Sender & { worker: typeof createWaitlistEmailWorker } {
   let source = readFileSync(new URL('./waitlist.ts', import.meta.url), 'utf8')
   for (const [target, replacement] of [[before, after], ...extra]) {
@@ -54,10 +56,13 @@ function sourceCopy(
     ...scheduling,
     ...limits,
   }
-  return new Function(
-    ...Object.keys(bindings),
-    `${source}; return Object.assign(deliverWaitlistEmail, {worker:createWaitlistEmailWorker})`,
-  )(...Object.values(bindings))
+  return guardCopy(
+    new Function(
+      ...Object.keys(bindings),
+      `${source}; return Object.assign(deliverWaitlistEmail, {worker:createWaitlistEmailWorker})`,
+    )(...Object.values(bindings)),
+    { partOf },
+  )
 }
 
 describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
@@ -242,11 +247,10 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('passes the stored recipient time zone to verification mail', async () =>
     verificationTimeZoneScenario(deliverWaitlistEmail))
   it('detects source-copy replacement of the stored verification time zone', async () => {
-    await expect(
-      verificationTimeZoneScenario(
-        sourceCopy('timeZone: prepared.entry.time_zone as string', "timeZone: 'UTC'"),
-      ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(
+      sourceCopy('timeZone: prepared.entry.time_zone as string', "timeZone: 'UTC'"),
+      verificationTimeZoneScenario,
+    )
   })
 
   async function budgetScenario(send: Sender) {
@@ -283,25 +287,23 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('partially delivers a broadcast at the exact shared instance cap, without reserve or backfill', async () =>
     budgetScenario(deliverWaitlistEmail))
   it('detects source-copy removal of budget suppression', async () => {
-    await expect(
-      budgetScenario(
-        sourceCopy(
-          "if (suppressed) return finish(db, claim, row, 'suppressed', at, suppressed)",
-          'if (false && suppressed) return',
-        ),
+    await expectKilled(
+      sourceCopy(
+        "if (suppressed) return finish(db, claim, row, 'suppressed', at, suppressed)",
+        'if (false && suppressed) return',
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+      budgetScenario,
+    )
   })
 
   it('detects source-copy removal of committed shared-budget charging', async () => {
-    await expect(
-      budgetScenario(
-        sourceCopy(
-          "await db\n          .insertInto('notification_email_sends')\n          .values({ recipient_hash: hash, sent_at: sentAt })\n          .execute()",
-          '',
-        ),
+    await expectKilled(
+      sourceCopy(
+        "await db\n          .insertInto('notification_email_sends')\n          .values({ recipient_hash: hash, sent_at: sentAt })\n          .execute()",
+        '',
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+      budgetScenario,
+    )
   })
 
   it('detects source-copy removal of the cross-worker budget fence', async () => {
@@ -322,16 +324,15 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
       clearTimeout(timer)
     }
     try {
-      await expect(
-        budgetScenario(
-          sourceCopy('await lockNotificationEmailBudget(db)', '', [
-            [
-              'const suppressed = await notificationEmailBudget(db, deps, hash, true, at)',
-              'const suppressed = await notificationEmailBudget(db, deps, hash, true, at)\n      await globalThis.__waitlistBudgetBarrier()',
-            ],
-          ]),
-        ),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+      await expectKilled(
+        sourceCopy('await lockNotificationEmailBudget(db)', '', [
+          [
+            'const suppressed = await notificationEmailBudget(db, deps, hash, true, at)',
+            'const suppressed = await notificationEmailBudget(db, deps, hash, true, at)\n      await globalThis.__waitlistBudgetBarrier()',
+          ],
+        ]),
+        budgetScenario,
+      )
       expect(arrived).toBe(2)
     } finally {
       delete barrier.__waitlistBudgetBarrier
@@ -391,9 +392,10 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('refuses an older verification generation even if its ciphertext and capability remain valid', async () =>
     generationScenario(deliverWaitlistEmail))
   it('detects source-copy removal of verification generation binding', async () => {
-    await expect(
-      generationScenario(sourceCopy('entry.verification_generation !== row.generation', 'false')),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(
+      sourceCopy('entry.verification_generation !== row.generation', 'false'),
+      generationScenario,
+    )
   })
 
   async function verifiedScenario(send: Sender) {
@@ -411,14 +413,13 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('rechecks email verification instead of trusting stale discovery candidates', async () =>
     verifiedScenario(deliverWaitlistEmail))
   it('detects source-copy removal of the verified-entry requirement', async () => {
-    await expect(
-      verifiedScenario(
-        sourceCopy(
-          "!entry.verified_at ||\n    !['active', 'notified'].includes(entry.status) ||",
-          '',
-        ),
+    await expectKilled(
+      sourceCopy(
+        "!entry.verified_at ||\n    !['active', 'notified'].includes(entry.status) ||",
+        '',
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+      verifiedScenario,
+    )
   })
 
   it('deduplicates accepted candidates across concurrent deliveries, scans and a fresh worker', async () => {
@@ -516,9 +517,10 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('rechecks all exact suggestions before SMTP and never backfills a vanished slot', async () =>
     staleScenario(deliverWaitlistEmail))
   it('detects source-copy removal of exact availability revalidation', async () => {
-    await expect(
-      staleScenario(sourceCopy('!slots.every((slot) =>', 'false && !slots.every((slot) =>')),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(
+      sourceCopy('!slots.every((slot) =>', 'false && !slots.every((slot) =>'),
+      staleScenario,
+    )
   })
 
   it('rereads slot availability after waiting for another sender to release the shared budget lock', async () => {
@@ -696,14 +698,13 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('keeps a receipt committing after lease expiry from being replaced by a successor', async () =>
     leaseCommitScenario(deliverWaitlistEmail))
   it('detects source-copy takeover of an accepted receipt blocked after lease expiry', async () => {
-    await expect(
-      leaseCommitScenario(
-        sourceCopy(
-          'await lockNotificationEmailBudget(db)\n    const row = await workRow(db, request, true)',
-          'const row = await workRow(db, request, true)',
-        ),
+    await expectKilled(
+      sourceCopy(
+        'await lockNotificationEmailBudget(db)\n    const row = await workRow(db, request, true)',
+        'const row = await workRow(db, request, true)',
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+      leaseCommitScenario,
+    )
   })
 
   async function expiryScenario(send: Sender) {
@@ -793,15 +794,11 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('persists exactly three attempts and 60/120-second retries, with fixed safe errors', async () =>
     retriesScenario(deliverWaitlistEmail))
   it('detects source-copy removal of the retry deadline', async () => {
-    await expect(
-      retriesScenario(sourceCopy(' || row.next_attempt_at > at', '')),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(sourceCopy(' || row.next_attempt_at > at', ''), retriesScenario)
   })
 
   it('detects source-copy removal of the finite attempt outcome', async () => {
-    await expect(
-      retriesScenario(sourceCopy('claim.attempt >= MAX_ATTEMPTS', 'false')),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(sourceCopy('claim.attempt >= MAX_ATTEMPTS', 'false'), retriesScenario)
   })
 
   async function liveClaimScenario(send: Sender) {
@@ -824,14 +821,13 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('does not steal a still-live attempt from another worker', async () =>
     liveClaimScenario(deliverWaitlistEmail))
   it('detects source-copy removal of the live lease fence', async () => {
-    await expect(
-      liveClaimScenario(
-        sourceCopy(
-          "if (row.state === 'processing' && row.lease_until && row.lease_until > at) return",
-          '',
-        ),
+    await expectKilled(
+      sourceCopy(
+        "if (row.state === 'processing' && row.lease_until && row.lease_until > at) return",
+        '',
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+      liveClaimScenario,
+    )
   })
 
   async function notificationDeadlineScenario(send: Sender) {
@@ -843,13 +839,12 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     expect(s.messages).toHaveLength(0)
   }
   it('detects source-copy removal of notification deadline checks', async () => {
-    await expect(
-      notificationDeadlineScenario(
-        sourceCopy('row.expires_at <= at', 'false', [
-          ['row.expires_at.getTime(),', 'Number.POSITIVE_INFINITY,'],
-        ]),
-      ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(
+      sourceCopy('row.expires_at <= at', 'false', [
+        ['row.expires_at.getTime(),', 'Number.POSITIVE_INFINITY,'],
+      ]),
+      notificationDeadlineScenario,
+    )
   })
 
   it('recovers spent crash claims once after lease expiry, never resetting attempts on worker restart', async () => {
@@ -886,7 +881,12 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     ).toEqual({ state: 'accepted', attempts: 2 })
   })
 
-  async function crashExhaustionScenario(send: Sender, kind: 'verification' | 'notification') {
+  // A control passes its copy as `control`: the interrupted copy's faults are the control's too.
+  async function crashExhaustionScenario(
+    send: Sender,
+    kind: 'verification' | 'notification',
+    control?: object,
+  ) {
     const s = await setup()
     const entry = kind === 'verification' ? await s.join() : await s.activate()
     const id = kind === 'verification' ? entry.outboxId : ((await s.open())[0]?.id as string)
@@ -895,6 +895,8 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     const interrupted = sourceCopy(
       'await deps.db.transaction().execute(async (db) => {\n      const { ensureWaitlistKey }',
       "throw new Error('simulated_crash_after_claim'); await deps.db.transaction().execute(async (db) => {\n      const { ensureWaitlistKey }",
+      [],
+      control,
     )
     for (let attempt = 1; attempt <= 3; attempt++) {
       await expect(interrupted(s.deps, request)).rejects.toThrow(
@@ -955,15 +957,13 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it.each(['verification', 'notification'] as const)(
     'detects source-copy omission of final %s crash retirement',
     async (kind) => {
-      await expect(
-        crashExhaustionScenario(
-          sourceCopy(
-            'if (!claim.attempt) return retireUnsendable(deps, request)',
-            'if (!claim.attempt) return',
-          ),
-          kind,
+      await expectKilled(
+        sourceCopy(
+          'if (!claim.attempt) return retireUnsendable(deps, request)',
+          'if (!claim.attempt) return',
         ),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
+        (copy) => crashExhaustionScenario(copy, kind, copy),
+      )
     },
   )
 
@@ -1011,14 +1011,13 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('never treats a resolving development log mailer as SMTP acceptance', async () =>
     noSmtpScenario(deliverWaitlistEmail))
   it('detects source-copy removal of SMTP configuration eligibility', async () => {
-    await expect(
-      noSmtpScenario(
-        sourceCopy(
-          "if (!deps.smtpConfigured) return finish(db, claim, row, 'failed', at, 'smtp_not_configured')",
-          '',
-        ),
+    await expectKilled(
+      sourceCopy(
+        "if (!deps.smtpConfigured) return finish(db, claim, row, 'failed', at, 'smtp_not_configured')",
+        '',
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+      noSmtpScenario,
+    )
   })
 
   async function projectionScenario(factory: typeof createWaitlistEmailWorker) {
@@ -1057,9 +1056,9 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('returns notified entries to waiting when every advertised suggestion disappears before its deadline', async () =>
     projectionScenario(createWaitlistEmailWorker))
   it('detects source-copy removal of current suggestion projection', async () => {
-    await expect(
-      projectionScenario(sourceCopy('if (offered) continue', 'if (true) continue').worker),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(sourceCopy('if (offered) continue', 'if (true) continue'), (copy) =>
+      projectionScenario(copy.worker),
+    )
   })
 
   async function unknownProjectionScenario(factory: typeof createWaitlistEmailWorker) {
@@ -1091,14 +1090,13 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
   it('keeps unknown calendar readiness neutral while projecting delivered suggestions', async () =>
     unknownProjectionScenario(createWaitlistEmailWorker))
   it('detects source-copy treating calendar failure as missing suggestions', async () => {
-    await expect(
-      unknownProjectionScenario(
-        sourceCopy(
-          '// Keep the delivered marker and move on; a later pass will check again.',
-          "await deps.db.updateTable('waitlist_entries').set({ status:'active' }).where('id','=',entry.id).execute()",
-        ).worker,
+    await expectKilled(
+      sourceCopy(
+        '// Keep the delivered marker and move on; a later pass will check again.',
+        "await deps.db.updateTable('waitlist_entries').set({ status:'active' }).where('id','=',entry.id).execute()",
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+      (copy) => unknownProjectionScenario(copy.worker),
+    )
   })
 
   it('runs the delivery worker from the real jobs pipeline and stores no capability in queue payloads', async () => {

@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -11,6 +10,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import { literal, msg } from '../../i18n/translate.ts'
 import { EVENT_TYPE, QUESTIONS, RULES } from '../../limits.ts'
 import styles from '../../styles.css?raw'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { eventType } from '../../test/fixtures.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 import type { DurationsEditor } from './DurationsEditor.tsx'
@@ -22,16 +22,14 @@ const editor = readFileSync('apps/web/src/pages/event-types/DurationsEditor.tsx'
 
 /** Execute source copies; each mutant must fail a real state or DOM assertion. */
 function copy<T>(source: string, exported: string, dependencies: Record<string, unknown>): T {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import {readFileSync} from 'node:fs'; import {transformSync} from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), {loader:'tsx',format:'cjs',jsxFactory:'react.createElement',jsxFragment:'react.Fragment'}).code)",
-    ],
+  const compiled = compileSourceCopy(
+    exported,
+    source.replace(/^import[\s\S]*?from '[^']+'$/gm, '').replace(/^export /gm, ''),
     {
-      input: source.replace(/^import[\s\S]*?from '[^']+'$/gm, '').replace(/^export /gm, ''),
-      encoding: 'utf8',
+      loader: 'tsx',
+      format: 'cjs',
+      jsxFactory: 'react.createElement',
+      jsxFragment: 'react.Fragment',
     },
   )
   return new Function(...Object.keys(dependencies), `${compiled}; return ${exported}`)(

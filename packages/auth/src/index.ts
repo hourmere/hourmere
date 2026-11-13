@@ -11,6 +11,7 @@ import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-provide
 import pg from 'pg'
 import { parse } from 'pg-connection-string'
 import { API_KEY_RATE_LIMIT } from './api-keys.ts'
+import { authAuditRecords } from './audit.ts'
 import type { Principal } from './caller.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { sanitizeInitialDisplayName } from './display-name.ts'
@@ -75,6 +76,16 @@ export {
   type ResendInvitation,
   type ResendInvitationDelivery,
 } from './invitation-resend.ts'
+export {
+  admitInvitation,
+  type EnqueueInvitationEmail,
+  type InvitationAdmission,
+  type InvitationIssuer,
+  invitationEmailAccepted,
+  invitationLifetimeMs,
+  invitationRefusalCode,
+  type ReserveInvitationEmail,
+} from './invitations.ts'
 export { escapeControlCharacters, redactLogDetails } from './log.ts'
 export { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from './magic-link.ts'
 export {
@@ -426,6 +437,7 @@ export function createAuth({
         },
       },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
+      authAuditRecords(),
       organizationOperationRecords(),
       {
         id: 'team-role-policy',
@@ -502,3 +514,15 @@ export function createAuth({
 }
 
 export type Auth = ReturnType<typeof createAuth>
+
+export {
+  authenticateScimToken,
+  createScimToken,
+  listScimTokens,
+  revokeScimToken,
+  rotateScimToken,
+  SCIM_MAX_OVERLAP_SECONDS,
+  SCIM_TOKEN_PREFIX,
+  type ScimTokenActor,
+  ScimTokenError,
+} from './scim-tokens.ts'

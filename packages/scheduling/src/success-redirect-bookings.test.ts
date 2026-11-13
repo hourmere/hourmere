@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { getPublicEventType, getPublicTeamEventType } from './availability.ts'
 import {
   cancelManagedBooking,
@@ -45,9 +46,9 @@ async function sourceCopy<T = typeof import('./bookings.ts')>(
     (_, specifier: string) =>
       `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(
-    `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
-  ) as Promise<T>
+  return guardCopy(
+    await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`),
+  ) as T
 }
 
 describe.skipIf(!serverUrl)('public booking success redirects', () => {
@@ -179,9 +180,7 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
         'throw error',
       ),
     )
-    await expect(verify(broken.createPublicBooking)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(broken, (copy) => verify(copy.createPublicBooking))
   })
   it('detects revalidation of untouched redirects with a real assertion failure', async () => {
     async function verify(update: typeof updateEventType) {
@@ -195,7 +194,7 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
       (source) => source.replace('input.successRedirect !== undefined,', 'true,'),
       './event-types.ts',
     )
-    await expect(verify(broken.updateEventType)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expectKilled(broken, (copy) => verify(copy.updateEventType))
   })
   it.each([
     { name: 'missing host diagnostics', replacement: 'void current.id' },
@@ -223,9 +222,7 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
         replacement,
       ),
     )
-    await expect(verify(broken.createPublicBooking)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(broken, (copy) => verify(copy.createPublicBooking))
   })
   it('does not swallow unexpected validator failures and detects an overbroad catch', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -248,9 +245,7 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
         'if (false)',
       ),
     )
-    await expect(verify(broken.createPublicBooking)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(broken, (copy) => verify(copy.createPublicBooking))
   })
   it('keeps the ordinary confirmation when unset and ignores request targets', async () => {
     const s = await setup()
@@ -484,9 +479,10 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
       const broken = await sourceCopy((source) =>
         replayPath(source).replace('...(row.success_redirect && {', '...(false && {'),
       )
-      const badResult = await broken.createPublicBooking(s.pub, input)
-      expect(() => expect(badResult.successRedirect).toEqual(first.successRedirect)).toThrow(
-        expect.objectContaining({ name: 'AssertionError' }),
+      await expectKilled(broken, async (copy) =>
+        expect((await copy.createPublicBooking(s.pub, input)).successRedirect).toEqual(
+          first.successRedirect,
+        ),
       )
       expect(s.notify).toHaveBeenCalledTimes(1)
     },
@@ -505,10 +501,10 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
       invitee,
       successRedirect: { url: 'https://attacker.example' },
     }
-    const bad = await broken.createPublicBooking(s.pub, input)
-    expect(() =>
-      expect(new URL(bad.successRedirect?.url as string).origin).toBe('https://target.example'),
-    ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    await expectKilled(broken, async (copy) => {
+      const bad = await copy.createPublicBooking(s.pub, input)
+      expect(new URL(bad.successRedirect?.url as string).origin).toBe('https://target.example')
+    })
   })
   it('detects missing transactional snapshot storage in a source copy', async () => {
     const s = await setup({ url: 'https://target.example/saved' })
@@ -519,11 +515,11 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
       ),
     )
     const input = { ...s.target, start, invitee, idempotencyKey: randomUUID() }
-    const first = await broken.createPublicBooking(s.pub, input)
-    const replay = await broken.createPublicBooking(s.pub, input)
-    expect(() => expect(replay.successRedirect).toEqual(first.successRedirect)).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
-    )
+    await expectKilled(broken, async (copy) => {
+      const first = await copy.createPublicBooking(s.pub, input)
+      const replay = await copy.createPublicBooking(s.pub, input)
+      expect(replay.successRedirect).toEqual(first.successRedirect)
+    })
   })
   it('rechecks saved settings after waiting for the host lock and detects a stale-settings source copy', async () => {
     const broken = await sourceCopy((source) =>
@@ -562,9 +558,10 @@ describe.skipIf(!serverUrl)('public booking success redirects', () => {
     expect((await waitingBooking(createPublicBooking)).successRedirect?.url).toBe(
       'https://target.example/current',
     )
-    const bad = await waitingBooking(broken.createPublicBooking)
-    expect(() => expect(bad.successRedirect?.url).toBe('https://target.example/current')).toThrow(
-      expect.objectContaining({ name: 'AssertionError' }),
+    await expectKilled(broken, async (copy) =>
+      expect((await waitingBooking(copy.createPublicBooking)).successRedirect?.url).toBe(
+        'https://target.example/current',
+      ),
     )
   }, 10_000)
 })

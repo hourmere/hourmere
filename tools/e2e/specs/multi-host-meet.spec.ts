@@ -1,6 +1,6 @@
 import type { FrameLocator, Page } from '@playwright/test'
 import { revealEventSetting } from '../event-settings.ts'
-import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
+import { expect, fillInvitee, pickSlot, test, waitUntilAtRest } from '../fixtures.ts'
 
 test.use({ automaticMeet: true, multiHostMeet: true })
 async function confirm(page: Page, scope: Page | FrameLocator, label: string) {
@@ -124,7 +124,9 @@ for (const language of ['en', 'zh-CN'] as const) {
       const days = frame.locator('button.day-available')
       if (await days.count()) {
         await days.last().click()
-        await frame.locator('.slots button').first().click()
+        const slot = frame.locator('.slots button').first()
+        await waitUntilAtRest(slot, page)
+        await slot.click()
         break
       }
       await frame.getByRole('button', { name: zh ? '下个月' : 'Next month', exact: true }).click()

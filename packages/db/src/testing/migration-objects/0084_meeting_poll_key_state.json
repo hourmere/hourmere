@@ -1,0 +1,10 @@
+{
+  "migration": "0084_meeting_poll_key_state.sql",
+  "objects": {
+    "constraint public.meeting_poll_key_state.meeting_poll_key_state_fingerprint_length": "CHECK ((octet_length(secret_fingerprint) = 32))",
+    "constraint public.meeting_poll_key_state.meeting_poll_key_state_pkey": "PRIMARY KEY (singleton)",
+    "constraint public.meeting_poll_key_state.meeting_poll_key_state_singleton": "CHECK (singleton)",
+    "not_null public.meeting_poll_key_state.secret_fingerprint": "NOT NULL",
+    "not_null public.meeting_poll_key_state.updated_at": "NOT NULL DEFAULT now()"
+  }
+}

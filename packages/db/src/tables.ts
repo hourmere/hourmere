@@ -25,6 +25,24 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface AuditEvents {
+  action: string;
+  actor_id: string | null;
+  actor_type: string;
+  credential_id: string | null;
+  credential_scope: string | null;
+  credential_type: string;
+  details: Generated<Json>;
+  id: Generated<Int8>;
+  oauth_client_id: string | null;
+  oauth_grant_id: string | null;
+  occurred_at: Generated<Timestamp>;
+  organization_id: string | null;
+  request_id: string | null;
+  target_id: string;
+  target_type: string;
+}
+
 export interface AuthAccount {
   accessToken: string | null;
   accessTokenExpiresAt: Timestamp | null;
@@ -263,6 +281,8 @@ export interface BookingAttendees {
   is_booker: Generated<boolean>;
   locale: string | null;
   name: string;
+  no_show_marked_at: Timestamp | null;
+  no_show_marked_by: string | null;
   time_zone: string;
 }
 
@@ -389,6 +409,18 @@ export interface BookingRescheduleRequests {
   picked_booking_id: string | null;
   resolved_at: Timestamp | null;
   state: Generated<string>;
+}
+
+export interface BookingRouting {
+  answers: Json;
+  booking_id: string;
+  form_id: string;
+  matched_rule_id: string;
+  organization_id: string;
+  questions: Json;
+  resolved_rule_id: string;
+  version_id: string;
+  version_number: number;
 }
 
 export interface Bookings {
@@ -783,9 +815,157 @@ export interface McpOauthIntents {
   user_id: string;
 }
 
+export interface MeetingPollCapabilities {
+  capability_ciphertext: Buffer | null;
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  generation: Generated<number>;
+  id: Generated<string>;
+  organization_id: string;
+  poll_id: string;
+  purpose: string;
+  revoked_at: Timestamp | null;
+  token_digest: Buffer;
+  updated_at: Generated<Timestamp>;
+  voter_id: string;
+}
+
+export interface MeetingPollDeliveries {
+  attempts: Generated<number>;
+  capability_ciphertext: Buffer | null;
+  created_at: Generated<Timestamp>;
+  due_at: Generated<Timestamp>;
+  error_class: string | null;
+  generation: Generated<number>;
+  host_user_id: string | null;
+  id: Generated<string>;
+  kind: string;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  organization_id: string;
+  poll_id: string;
+  sequence: Generated<number>;
+  state: Generated<string>;
+  terminal_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+  voter_id: string | null;
+}
+
+export interface MeetingPollKeyState {
+  secret_fingerprint: Buffer;
+  singleton: Generated<boolean>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MeetingPollMailboxCounters {
+  created_at: Generated<Timestamp>;
+  email_key: Buffer;
+  id: Generated<string>;
+  last_recovery_at: Timestamp | null;
+  last_resend_at: Timestamp | null;
+  organization_id: string;
+  poll_id: string;
+  purge_at: Timestamp | null;
+  recovery_count: Generated<number>;
+  reminder_consumed_at: Timestamp | null;
+  reminder_opted_out_at: Timestamp | null;
+  removed_at: Timestamp | null;
+  resend_count: Generated<number>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MeetingPollOperations {
+  actor_scope_digest: Buffer;
+  booking_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  idempotency_key_digest: Buffer;
+  operation: string;
+  organization_id: string;
+  poll_id: string | null;
+  purge_at: Timestamp | null;
+  request_fingerprint: Buffer;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MeetingPolls {
+  admission_mode: string;
+  api_key_id: string | null;
+  booking_id: string | null;
+  canceled_at: Timestamp | null;
+  chosen_slot_id: string | null;
+  closed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  deadline_at: Timestamp;
+  display_time_zone: string;
+  duration_minutes: number;
+  event_type_id: string;
+  host_revision: Generated<number>;
+  id: Generated<string>;
+  organization_id: string;
+  public_token_digest: Buffer | null;
+  results_revision: Generated<number>;
+  scheduled_at: Timestamp | null;
+  settings_fingerprint: Buffer;
+  settings_snapshot: Json;
+  source: Generated<string>;
+  status: Generated<string>;
+  title: string;
+  updated_at: Generated<Timestamp>;
+  visibility: Generated<string>;
+}
+
+export interface MeetingPollSlots {
+  created_at: Generated<Timestamp>;
+  end_at: Timestamp;
+  id: Generated<string>;
+  organization_id: string;
+  poll_id: string;
+  position: number;
+  start_at: Timestamp;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface MeetingPollVoters {
+  admission_ip_digest: Buffer | null;
+  ballot_revision: Generated<number>;
+  ballot_submitted_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  email: string;
+  email_key: Buffer;
+  id: Generated<string>;
+  invited_at: Timestamp | null;
+  join_consent_at: Timestamp | null;
+  locale: string;
+  name: string;
+  organization_id: string;
+  pending_expires_at: Timestamp | null;
+  poll_id: string;
+  responses: Generated<Json>;
+  selected_booking_role: string | null;
+  time_zone: string;
+  updated_at: Generated<Timestamp>;
+  verified_at: Timestamp | null;
+  withdrawn_at: Timestamp | null;
+}
+
+export interface MeetingPollVotes {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  organization_id: string;
+  poll_id: string;
+  slot_id: string;
+  updated_at: Generated<Timestamp>;
+  value: string;
+  voter_id: string;
+}
+
 export interface NotificationEmailSends {
   recipient_hash: Buffer | null;
   sent_at: Timestamp;
+  workflow_reservation_id: string | null;
 }
 
 export interface OneTimeBookingLinks {
@@ -857,6 +1037,57 @@ export interface RoundRobinState {
   next_sequence: Generated<Int8>;
 }
 
+export interface RoutingForms {
+  archived_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string;
+  draft: Json;
+  draft_revision: Generated<number>;
+  enabled: Generated<boolean>;
+  id: Generated<string>;
+  last_version_number: Generated<number>;
+  organization_id: string;
+  published_version_id: string | null;
+  slug: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface RoutingFormVersions {
+  fallback: Json;
+  form_id: string;
+  id: Generated<string>;
+  organization_id: string;
+  published_at: Generated<Timestamp>;
+  published_by_user_id: string;
+  questions: Json;
+  rules: Json;
+  version_number: number;
+}
+
+export interface RoutingReceipts {
+  answers_ciphertext: Buffer | null;
+  consumed_booking_id: string | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  form_id: string;
+  id: Generated<string>;
+  matched_rule_id: string;
+  organization_id: string;
+  resolved_rule_id: string;
+  resolved_target: Json;
+  token_hash: string;
+  version_id: string;
+}
+
+export interface RoutingTargetDependencies {
+  event_type_id: string;
+  health_checked_at: Timestamp | null;
+  health_code: Generated<string>;
+  organization_id: string;
+  rule_id: string;
+  version_id: string;
+}
+
 export interface ScheduleOverrides {
   date: string;
   intervals: Json;
@@ -874,11 +1105,263 @@ export interface Schedules {
   weekly_hours: Json;
 }
 
+export interface ScimConnections {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  organization_id: string;
+}
+
+export interface ScimMembershipBlocks {
+  cleared_at: Timestamp | null;
+  connection_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  identity_email: string | null;
+  kind: string;
+  organization_id: string;
+  scim_user_id: string | null;
+  source: string;
+  user_id: string | null;
+}
+
+export interface ScimProvisioningTokens {
+  created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
+  id: Generated<string>;
+  last_used_at: Timestamp | null;
+  name: string;
+  organization_id: string;
+  previous_token_hash: string | null;
+  previous_valid_until: Timestamp | null;
+  revoked_at: Timestamp | null;
+  rotated_at: Timestamp | null;
+  rotated_by_user_id: string | null;
+  token_hash: string | null;
+}
+
+export interface ScimTokenConnections {
+  connection_id: string;
+  organization_id: string;
+  token_id: string;
+}
+
+export interface ScimUserClaims {
+  completed_at: Timestamp | null;
+  connection_id: string;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  invalidated_at: Timestamp | null;
+  invitation_id: string | null;
+  organization_id: string;
+  scim_user_id: string;
+  work_email: string;
+}
+
+export interface ScimUsers {
+  active: Generated<boolean>;
+  connection_id: string;
+  cost_center: string | null;
+  created_at: Generated<Timestamp>;
+  department: string | null;
+  display_name: string | null;
+  division: string | null;
+  employee_number: string | null;
+  enterprise_organization: string | null;
+  external_id: string | null;
+  family_name: string | null;
+  formatted_name: string | null;
+  given_name: string | null;
+  id: Generated<string>;
+  linked_member_id: string | null;
+  linked_user_id: string | null;
+  locale: string | null;
+  manager_id: string | null;
+  nick_name: string | null;
+  normalized_user_name: Generated<string | null>;
+  organization_id: string;
+  retired_at: Timestamp | null;
+  timezone: string | null;
+  title: string | null;
+  updated_at: Generated<Timestamp>;
+  user_name: string;
+  user_type: string | null;
+  work_email: string | null;
+}
+
 export interface SignInEmails {
   created_at: Generated<Timestamp>;
   encrypted_payload: Buffer;
   expires_at: Timestamp;
   id: string;
+}
+
+export interface SmsDeliveries {
+  created_at: Generated<Timestamp>;
+  key_hash: Buffer;
+  organization_id: string | null;
+  provider_message_id: string | null;
+  recipient_hash: Buffer | null;
+  recipient_mask: string | null;
+  request_hash: Buffer | null;
+  retry_not_before: Timestamp | null;
+  status: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface SsoAttempts {
+  browser_binding_digest: string;
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  input_digest: string;
+  kind: string;
+  mailbox: string | null;
+  mailbox_proof_expires_at: Timestamp | null;
+  mailbox_proven_at: Timestamp | null;
+  operation: string;
+  organization_id: string;
+  provider_id: string | null;
+  provider_revision: number | null;
+  requires_mailbox: Generated<boolean>;
+  requires_sso: Generated<boolean>;
+  session_id: string | null;
+  step_up_authenticated_at: Timestamp | null;
+  step_up_link_id: string | null;
+  step_up_proof_expires_at: Timestamp | null;
+  step_up_provider_id: string | null;
+  step_up_trust_generation: number | null;
+  user_id: string | null;
+}
+
+export interface SsoBrowserProofs {
+  created_at: Generated<Timestamp>;
+  domain_generation: number;
+  domain_id: string;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  link_generation: number;
+  link_id: string;
+  member_id: string;
+  organization_id: string;
+  provider_id: string;
+  session_id: string;
+  trust_generation: number;
+  user_id: string;
+}
+
+export interface SsoDelegationBindings {
+  api_key_id: string | null;
+  created_at: Generated<Timestamp>;
+  domain_generation: number;
+  domain_id: string;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  link_generation: number;
+  link_id: string;
+  member_id: string;
+  oauth_grant_id: string | null;
+  organization_id: string;
+  provider_id: string;
+  trust_generation: number;
+  user_id: string;
+}
+
+export interface SsoDomains {
+  challenge_digest: string;
+  challenge_expires_at: Timestamp;
+  claimed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  generation: Generated<number>;
+  id: Generated<string>;
+  last_check_outcome: string | null;
+  last_checked_at: Timestamp | null;
+  name: string;
+  next_check_at: Timestamp | null;
+  organization_id: string;
+  retired_at: Timestamp | null;
+  verification_expires_at: Timestamp | null;
+  verified_at: Timestamp | null;
+}
+
+export interface SsoIdentityLinks {
+  created_at: Generated<Timestamp>;
+  email_proven_at: Timestamp;
+  generation: Generated<number>;
+  id: Generated<string>;
+  issuer: string;
+  organization_id: string;
+  proven_email: string;
+  provider_id: string;
+  retired_at: Timestamp | null;
+  subject: string;
+  user_id: string;
+}
+
+export interface SsoMailboxTokens {
+  attempt_id: string;
+  consumed_at: Timestamp | null;
+  expires_at: Timestamp;
+  issued_at: Generated<Timestamp>;
+  organization_id: string;
+  token_digest: string;
+}
+
+export interface SsoPolicies {
+  admission: Generated<string>;
+  created_at: Generated<Timestamp>;
+  organization_id: string;
+  policy_revision: Generated<number>;
+  require_sso: Generated<boolean>;
+  trust_generation: Generated<number>;
+}
+
+export interface SsoProviderDomains {
+  domain_id: string;
+  organization_id: string;
+  provider_id: string;
+}
+
+export interface SsoProviders {
+  client_id: string | null;
+  configuration: Buffer;
+  created_at: Generated<Timestamp>;
+  display_name: string;
+  enabled: Generated<boolean>;
+  id: Generated<string>;
+  issuer: string;
+  organization_id: string;
+  protocol: string;
+  retired_at: Timestamp | null;
+  revision: Generated<number>;
+}
+
+export interface SsoRecoveryNominations {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  member_id: string;
+  nominated_by_user_id: string;
+  organization_id: string;
+  user_id: string;
+}
+
+export interface SsoRecoveryOwners {
+  accepted_at: Generated<Timestamp>;
+  member_id: string;
+  nominated_by_user_id: string;
+  organization_id: string;
+  user_id: string;
+}
+
+export interface SsoReplayCache {
+  consumed_at: Generated<Timestamp>;
+  key_digest: string;
+  kind: string;
+  organization_id: string;
+  provider_id: string;
+  retain_until: Timestamp;
 }
 
 export interface WaitlistCandidates {
@@ -1014,7 +1497,7 @@ export interface WaitlistVerificationRequests {
 
 export interface WebhookDeliveries {
   attempts: Generated<number>;
-  booking_id: string;
+  booking_id: string | null;
   created_at: Generated<Timestamp>;
   delivered_at: Timestamp | null;
   event_id: string;
@@ -1032,16 +1515,110 @@ export interface WebhookDeliveries {
 
 export interface Webhooks {
   created_at: Generated<Timestamp>;
+  destination_kind: Generated<string>;
+  event_type_id: string | null;
   events: string[];
   id: Generated<string>;
   is_active: Generated<boolean>;
   organization_id: string;
+  pause_reason: string | null;
   secret_ciphertext: Buffer;
   updated_at: Generated<Timestamp>;
   url: string;
+  url_ciphertext: Buffer | null;
+}
+
+export interface WorkflowDefinitions {
+  created_at: Generated<Timestamp>;
+  deleted_at: Timestamp | null;
+  enabled: Generated<boolean>;
+  id: Generated<string>;
+  organization_id: string;
+  owner_user_id: string | null;
+  revision: Generated<number>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface WorkflowEnrollments {
+  booking_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  occurrence: string;
+  organization_id: string;
+  revision: number;
+  trigger: string;
+  workflow_id: string;
+}
+
+export interface WorkflowMailReservations {
+  claim_id: string;
+  id: Generated<string>;
+  organization_id: string;
+  reserved_at: Timestamp;
+  run_id: string;
+}
+
+export interface WorkflowRecipientClaims {
+  attempts: Generated<number>;
+  booking_id: string;
+  claim_token: string | null;
+  created_at: Generated<Timestamp>;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  intent_kind: string | null;
+  intent_offset_minutes: number | null;
+  next_attempt_at: Timestamp | null;
+  organization_id: string;
+  recipient: string;
+  recipient_hash: Buffer;
+  run_id: string;
+  skip_reason: string | null;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface WorkflowRevisions {
+  created_at: Generated<Timestamp>;
+  definition: Json;
+  organization_id: string;
+  revision: number;
+  workflow_id: string;
+}
+
+export interface WorkflowRunHistory {
+  delivery_unknown: Generated<number>;
+  due_at: Timestamp;
+  finished_at: Timestamp;
+  organization_id: string;
+  outcome: string;
+  reason: string | null;
+  rejected: Generated<number>;
+  revision: number;
+  run_id: string;
+  sent: Generated<number>;
+  skipped: Generated<number>;
+  trigger: string;
+  workflow_id: string;
+}
+
+export interface WorkflowRuns {
+  booking_id: string;
+  claim_token: string | null;
+  created_at: Generated<Timestamp>;
+  due_at: Timestamp;
+  enrollment_id: string;
+  expires_at: Timestamp;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  lease_until: Timestamp | null;
+  organization_id: string;
+  skip_reason: string | null;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface DB {
+  audit_events: AuditEvents;
   "auth.account": AuthAccount;
   "auth.apikey": AuthApikey;
   "auth.invitation": AuthInvitation;
@@ -1068,6 +1645,7 @@ export interface DB {
   booking_notification_conference_context: BookingNotificationConferenceContext;
   booking_notifications: BookingNotifications;
   booking_reschedule_requests: BookingRescheduleRequests;
+  booking_routing: BookingRouting;
   booking_scheduled_messages: BookingScheduledMessages;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
@@ -1093,6 +1671,15 @@ export interface DB {
   mcp_oauth_client_activity: McpOauthClientActivity;
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;
+  meeting_poll_capabilities: MeetingPollCapabilities;
+  meeting_poll_deliveries: MeetingPollDeliveries;
+  meeting_poll_key_state: MeetingPollKeyState;
+  meeting_poll_mailbox_counters: MeetingPollMailboxCounters;
+  meeting_poll_operations: MeetingPollOperations;
+  meeting_poll_slots: MeetingPollSlots;
+  meeting_poll_voters: MeetingPollVoters;
+  meeting_poll_votes: MeetingPollVotes;
+  meeting_polls: MeetingPolls;
   notification_email_sends: NotificationEmailSends;
   one_time_booking_links: OneTimeBookingLinks;
   organization_brand_logos: OrganizationBrandLogos;
@@ -1101,9 +1688,32 @@ export interface DB {
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;
+  routing_form_versions: RoutingFormVersions;
+  routing_forms: RoutingForms;
+  routing_receipts: RoutingReceipts;
+  routing_target_dependencies: RoutingTargetDependencies;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
+  scim_connections: ScimConnections;
+  scim_membership_blocks: ScimMembershipBlocks;
+  scim_provisioning_tokens: ScimProvisioningTokens;
+  scim_token_connections: ScimTokenConnections;
+  scim_user_claims: ScimUserClaims;
+  scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
+  sms_deliveries: SmsDeliveries;
+  sso_attempts: SsoAttempts;
+  sso_browser_proofs: SsoBrowserProofs;
+  sso_delegation_bindings: SsoDelegationBindings;
+  sso_domains: SsoDomains;
+  sso_identity_links: SsoIdentityLinks;
+  sso_mailbox_tokens: SsoMailboxTokens;
+  sso_policies: SsoPolicies;
+  sso_provider_domains: SsoProviderDomains;
+  sso_providers: SsoProviders;
+  sso_recovery_nominations: SsoRecoveryNominations;
+  sso_recovery_owners: SsoRecoveryOwners;
+  sso_replay_cache: SsoReplayCache;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;
@@ -1117,4 +1727,11 @@ export interface DB {
   waitlist_verification_requests: WaitlistVerificationRequests;
   webhook_deliveries: WebhookDeliveries;
   webhooks: Webhooks;
+  workflow_definitions: WorkflowDefinitions;
+  workflow_enrollments: WorkflowEnrollments;
+  workflow_mail_reservations: WorkflowMailReservations;
+  workflow_recipient_claims: WorkflowRecipientClaims;
+  workflow_revisions: WorkflowRevisions;
+  workflow_run_history: WorkflowRunHistory;
+  workflow_runs: WorkflowRuns;
 }

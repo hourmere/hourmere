@@ -1,7 +1,11 @@
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
-import { findSlots, type PublicEventTypeRecord, parseLocation } from './availability.ts'
-import { canonicalJson } from './bookings.ts'
+import {
+  findSlots,
+  type PublicEventTypeRecord,
+  parseLocation,
+  selectBookableLocationOption,
+} from './availability.ts'
 import { DomainError } from './errors.ts'
 import { createNotificationSnapshot, type NotificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
@@ -15,11 +19,13 @@ export async function lockGroupBooking(
   bookingId: string,
   start?: Temporal.Instant,
   durationMinutes?: number,
+  organizationId?: string,
 ): Promise<void> {
   const seat = await db
     .selectFrom('bookings')
     .select(['group_slot_id', 'start_at', 'end_at'])
     .where('id', '=', bookingId)
+    .$if(organizationId !== undefined, (q) => q.where('organization_id', '=', organizationId!))
     .executeTakeFirst()
   if (!seat?.group_slot_id) return
   const slot = await db
@@ -69,6 +75,7 @@ export async function admitGroupSlot(
     bookerEmail: string
     preserveDurationBookingId?: string | undefined
     sourceSlotId?: string | undefined
+    locationOptionId?: string | undefined
     expectedSlotId?: string | undefined
   },
 ) {
@@ -118,6 +125,22 @@ export async function admitGroupSlot(
       'group_slot_changed',
       'This slot changed; choose a time again',
     )
+  if (slot && slot.active_seats >= slot.capacity)
+    throw Object.assign(
+      new DomainError('conflict', 'slot_taken', 'Someone else just booked this time'),
+      { errorAlias: 'group_slot_full' },
+    )
+  // Reject caller-selected logistics before looking up mailbox membership.
+  if (
+    slot &&
+    q.locationOptionId !== undefined &&
+    (slot.location_option as { id?: string } | null)?.id !== q.locationOptionId
+  )
+    throw new DomainError(
+      'conflict',
+      'location_unavailable',
+      'Group seats share the configured location.',
+    )
   if (
     slot &&
     (await db
@@ -129,18 +152,34 @@ export async function admitGroupSlot(
       .executeTakeFirst())
   )
     throw groupUnavailable()
-  if (
-    slot &&
-    (slot.host_user_id !== hostId ||
-      canonicalJson(slot.location) !== canonicalJson(config.location) ||
-      canonicalJson(slot.location_option) !== canonicalJson(option) ||
-      slot.host_schedule_id !== host.schedule_id ||
-      slot.zoom_connection_id !== config.zoom_connection_id)
-  )
-    throw groupUnavailable()
+  if (slot && slot.host_user_id !== hostId) throw groupUnavailable()
   const duration = q.end.since(q.start).total({ unit: 'minutes' })
   if (slot && !q.preserveDurationBookingId && !config.allowed_durations_minutes.includes(duration))
     throw groupUnavailable()
+  if (slot) {
+    // This interval already reserves the host. Logistics edits govern new occurrences,
+    // not additional seats in an immutable existing occurrence.
+    if (
+      Temporal.Instant.compare(q.start, q.now.add({ minutes: config.minimum_notice_minutes })) <
+        0 ||
+      (config.booking_window_days !== null &&
+        Temporal.Instant.compare(
+          q.start,
+          q.now
+            .toZonedDateTimeISO(slot.host_time_zone)
+            .add({ days: config.booking_window_days })
+            .toInstant(),
+        ) > 0)
+    )
+      throw groupUnavailable()
+    return {
+      existing: true,
+      id: slot.id,
+      location: parseLocation(slot.location),
+      locationOption: slot.location_option,
+    }
+  }
+  selectBookableLocationOption(q.event, q.locationOptionId)
   const source = q.sourceSlotId
     ? await db
         .selectFrom('group_slots')
@@ -148,10 +187,7 @@ export async function admitGroupSlot(
         .where('id', '=', q.sourceSlotId)
         .executeTakeFirst()
     : undefined
-  const exclusions = [
-    ...(slot ? [slot.id] : []),
-    ...(source?.state === 'retired' ? [source.id] : []),
-  ]
+  const exclusions = [...(source?.state === 'retired' ? [source.id] : [])]
   await expirePaymentHolds({ db, hostUserId: hostId })
   const offered = await findSlots(db, {
     eventTypeId: config.id,
@@ -164,17 +200,6 @@ export async function admitGroupSlot(
     excludeGroupSlotIds: exclusions,
   })
   if (!offered.some((s) => s.start.equals(q.start) && s.end.equals(q.end))) throw groupUnavailable()
-  if (slot && slot.active_seats >= slot.capacity)
-    throw Object.assign(
-      new DomainError('conflict', 'slot_taken', 'Someone else just booked this time'),
-      { errorAlias: 'group_slot_full' },
-    )
-  if (slot)
-    return {
-      id: slot.id,
-      location: parseLocation(slot.location),
-      locationOption: slot.location_option,
-    }
   const created = await db
     .insertInto('group_slots')
     .values({
@@ -206,6 +231,7 @@ export async function admitGroupSlot(
     .values({ group_slot_id: created.id, user_id: hostId })
     .execute()
   return {
+    existing: false,
     id: created.id,
     location: parseLocation(config.location),
     locationOption: option as Json | null,

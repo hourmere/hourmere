@@ -200,6 +200,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'createMiddleware',
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
+        'isSlackDestinationPath',
         'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
@@ -211,6 +212,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         createMiddleware,
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
+        (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         routePath,
         /x^/,
       )
@@ -246,6 +248,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'createMiddleware',
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
+        'isSlackDestinationPath',
         'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
@@ -257,6 +260,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         createMiddleware,
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
+        (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         routePath,
         /x^/,
       )

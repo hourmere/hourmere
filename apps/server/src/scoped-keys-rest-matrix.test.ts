@@ -20,7 +20,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { getScheduleAvailability } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
-import { createWebhook } from '@hourmere/webhooks'
+import { createSlackDestination, createWebhook } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../../packages/calendars/src/google.ts'
 import {
@@ -40,6 +40,7 @@ const classes = {
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
+    'GET /api/v1/bookings/{id}/attendees',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
     'GET /api/v1/bookings/manage',
@@ -60,6 +61,7 @@ const classes = {
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
+    'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
     'POST /api/v1/bookings/{id}/request-reschedule',
@@ -76,6 +78,7 @@ const classes = {
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/bookings/export.csv',
+    'GET /api/v1/slack-destinations',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links',
     'GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'GET /api/v1/analytics/bookings',
@@ -90,10 +93,16 @@ const classes = {
     'GET /api/v1/schedules/{id}/overrides',
     'GET /api/v1/webhooks',
     'GET /api/v1/webhooks/{id}/deliveries',
+    'GET /api/v1/workflows',
+    'GET /api/v1/workflows/{id}',
   ],
   other_write: [
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
+    'POST /api/v1/slack-destinations',
+    'PATCH /api/v1/slack-destinations/{id}',
+    'DELETE /api/v1/slack-destinations/{id}',
+    'POST /api/v1/slack-destinations/{id}/test',
     'POST /api/v1/calendar-connections/{id}/refresh',
     'PUT /api/v1/calendar-destination',
     'PATCH /api/v1/calendars/{id}',
@@ -120,6 +129,10 @@ const classes = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   session_only: [
+    'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
+    'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
+    'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
     'POST /api/v1/calendar-connections/google/authorize',
@@ -295,6 +308,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           slotSnippetsEnabled: true,
+          scimProvisioningEnabled: true,
           mcpAuth: auth,
           publicUrl,
           googleCalendar: calendar.google,
@@ -303,6 +317,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           waitlistSecret: secret,
           smtpConfigured: true,
           webhooks: webhookSettings,
+          webhookQueue: { enqueue: async () => randomUUID() },
         }),
       })
     }, 30_000)
@@ -333,6 +348,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
+          .replaceAll('{organizationId}', teamId)
         const error =
           template === '/api/v1/bookings/{id}/organization'
             ? 'booking_not_found'
@@ -376,6 +392,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .where('id', '=', id)
           .execute()
         headers['x-manage-token'] = token
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (template.endsWith('/request-reschedule')) payload = { idempotencyKey: randomUUID() }
         if (template.endsWith('/reschedule')) payload = { start: `${date}T10:00:00Z` }
@@ -420,6 +450,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
         )
         cleanupOneTimeLink = link.id
         path = path.replace('{token}', link.token)
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (method === 'POST') {
           payload = {
@@ -433,6 +477,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
         path = path
           .replace('{handle}', team ? 'rest-scoped-team' : 'rest-scoped-host')
           .replace('{slug}', 'intro')
+        if (template.endsWith('/no-show')) {
+          await db
+            .updateTable('bookings')
+            .set({ start_at: '2020-01-01T09:00:00Z', end_at: '2020-01-01T09:30:00Z' })
+            .where('id', '=', id)
+            .execute()
+          const attendee = await db
+            .selectFrom('booking_attendees')
+            .select('id')
+            .where('booking_id', '=', id)
+            .executeTakeFirstOrThrow()
+          path = path.replace('{attendeeId}', attendee.id)
+          payload = { noShow: true }
+        }
         if (template.endsWith('/slots')) path += `?start=${start}&end=${end}`
         if (method === 'POST') {
           cleanupEvent = await f.eventType(
@@ -597,6 +655,29 @@ describe.skipIf(!process.env.DATABASE_URL)(
           path = path.replace('{entryId}', entry.id)
           expectedStatus = 200
         }
+      } else if (template.startsWith('/api/v1/slack-destinations')) {
+        if (template.includes('{id}')) {
+          const destination = await createSlackDestination(
+            { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+            webhookSettings,
+            {
+              url: 'https://hooks.slack.com/services/Tfixture/Bfixture/matrix-secret',
+              events: ['booking.created'],
+            },
+          )
+          id = destination.id
+          cleanupWebhook = id
+        }
+        if (operation === 'POST /api/v1/slack-destinations') {
+          payload = {
+            url: 'https://hooks.slack.com/services/Tfixture/Bfixture/matrix-secret',
+            events: ['booking.created'],
+          }
+          expectedStatus = 201
+        }
+        if (method === 'PATCH') payload = { isActive: false }
+        if (method === 'DELETE') expectedStatus = 204
+        if (operation === 'POST /api/v1/slack-destinations/{id}/test') expectedStatus = 202
       } else if (template.startsWith('/api/v1/webhooks')) {
         id = mainWebhook
         if (method !== 'GET' && template.includes('{id}'))
@@ -614,6 +695,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
         }
         if (method === 'PATCH') payload = { isActive: false }
         if (method === 'DELETE') expectedStatus = 204
+      } else if (template.startsWith('/api/v1/workflows')) {
+        // Booking workflows are hard-off: an allowed key gets 404 workflows_disabled.
+        if (template === '/api/v1/workflows') path += `?ownerKind=team&ownerId=${teamId}`
+        id = randomUUID()
+        expectedStatus = 404
       } else if (operation === 'GET /api/v1/analytics/bookings')
         path += `?startDate=${date}&endDate=${date}&timeZone=UTC`
       else if (operation === 'PUT /api/v1/profile')
@@ -678,14 +764,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 108-operation contract and all 324 scope combinations', () => {
+    it('covers the exact 121-operation contract and all 363 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(108)
-      expect(new Set(ids).size).toBe(108)
+      expect(ids).toHaveLength(121)
+      expect(new Set(ids).size).toBe(121)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(324)
+      expect(cases).toHaveLength(363)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -740,6 +826,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
           } else if (operation === 'GET /api/v1/bookings/export.csv') {
             expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
+          } else if (operation.startsWith('GET /api/v1/workflows')) {
+            expect(await response.json()).toEqual({ error: 'workflows_disabled' })
           } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
@@ -769,6 +857,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
             if (operation === 'POST /api/v1/schedules')
               await db
                 .deleteFrom('schedules')
+                .where('id', '=', (data as { id: string }).id)
+                .execute()
+            if (
+              operation.startsWith('POST /api/v1/slack-destinations') ||
+              operation === 'GET /api/v1/slack-destinations' ||
+              operation === 'PATCH /api/v1/slack-destinations/{id}'
+            )
+              expect(JSON.stringify(data)).not.toContain('matrix-secret')
+            if (operation === 'POST /api/v1/slack-destinations')
+              await db
+                .deleteFrom('webhooks')
                 .where('id', '=', (data as { id: string }).id)
                 .execute()
             if (operation === 'POST /api/v1/webhooks')
@@ -803,6 +902,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         }
         expect(response.headers.get('cache-control')).toBe(
           operation === 'GET /api/v1/instance/embed' ||
+            operation.includes('/provisioning-tokens') ||
             (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
             ? 'private, no-store'
             : 'no-store',

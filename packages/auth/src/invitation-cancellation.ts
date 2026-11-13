@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { writeAuditEvent } from '@hourmere/db/audit'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import { isUuid } from './organizations.ts'
@@ -10,7 +11,11 @@ import {
 import { teamRoleDenied } from './team-role-policy.ts'
 
 /** The caller holds the shared actor/team locks in the same transaction. */
-export async function cancelTeamInvitation(db: Db, actor: TeamManager, invitationId: string) {
+export async function cancelTeamInvitation(
+  db: Db,
+  actor: TeamManager & { sessionId?: string },
+  invitationId: string,
+) {
   const invitation = await db
     .selectFrom('auth.invitation')
     .selectAll()
@@ -22,13 +27,22 @@ export async function cancelTeamInvitation(db: Db, actor: TeamManager, invitatio
   // Acceptance owns the same team/invitation locks. A completed acceptance wins;
   // cancelling its old invitation never changes the joined membership.
   if (invitation.status !== 'pending') return invitation
-  return db
+  const cancelled = await db
     .updateTable('auth.invitation')
     .set({ status: 'canceled' })
     .where('id', '=', invitation.id)
     .where('status', '=', 'pending')
     .returningAll()
     .executeTakeFirstOrThrow()
+  await writeAuditEvent(db, {
+    organizationId: actor.organizationId,
+    actor: { type: 'user', id: actor.userId },
+    credential: { type: 'session', id: actor.sessionId },
+    action: 'membership.invitation_cancelled',
+    targetType: 'invitation',
+    targetId: invitation.id,
+  })
+  return cancelled
 }
 
 /** Protect native HTTP and trusted auth.api cancellation with the same locked write. */
@@ -73,7 +87,11 @@ export async function invitationCancellationRules(ctx: AuthMiddlewareContext, db
             : undefined,
         )
         if (facts.role === 'member') throw teamRoleDenied()
-        return cancelTeamInvitation(trx, { ...facts, role: facts.role }, invitationId)
+        return cancelTeamInvitation(
+          trx,
+          { ...facts, role: facts.role, sessionId: session.session.id },
+          invitationId,
+        )
       })
     return ctx.json(invitation)
   } catch (error) {

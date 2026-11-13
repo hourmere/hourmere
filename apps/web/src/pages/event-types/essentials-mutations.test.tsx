@@ -1,21 +1,17 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { render } from '@testing-library/react'
 import * as react from 'react'
 import { describe, expect, it } from 'vitest'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { emptyDraft } from './event-type-form.ts'
 
 const source = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
 function compile<T>(code: string, name: string, dependencies: Record<string, unknown> = {}): T {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement' }).code)",
-    ],
-    { input: code, encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(name, code, {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+  })
   return new Function('reactRuntime', ...Object.keys(dependencies), `${compiled}; return ${name}`)(
     react,
     ...Object.values(dependencies),

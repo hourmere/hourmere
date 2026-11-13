@@ -6,6 +6,7 @@ import {
   TeamManagementError,
   teamRoles,
 } from '@hourmere/auth'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { getTeamMemberDepartureImpact } from './member-departure-impact.ts'
@@ -84,6 +85,14 @@ export async function leaveTeamMember(
         .where('id', '=', principal.sessionId)
         .where('userId', '=', actor.userId)
         .execute()
+      await writeAuditEvent(trx, {
+        organizationId: actor.organizationId,
+        ...auditActor(principal),
+        action: 'membership.left',
+        targetType: 'user',
+        targetId: actor.userId,
+        requestId: ctx.requestId,
+      })
       return { organizationId: personalId }
     })
     .catch((error: unknown) => {

@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
 import { resolveBookingOrganization } from './booking-organization.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
-import { getManagedBooking } from './bookings.ts'
+import { getManagedBooking, managedLinkRescheduleRequest } from './bookings.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -204,7 +204,7 @@ describe.skipIf(!serverUrl)('group seat read models', () => {
     const read = copy<typeof getManagedBookingDetails>(
       'manage',
       'getManagedBookingDetails',
-      { getManagedBooking, resolvedBookingHosts },
+      { getManagedBooking, managedLinkRescheduleRequest, resolvedBookingHosts },
       true,
     )
     await expect(verifyManage(read)).rejects.toMatchObject({ name: 'AssertionError' })

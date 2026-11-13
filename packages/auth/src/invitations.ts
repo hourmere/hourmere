@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { type AuditEvent, writeAuditEvent } from '@hourmere/db/audit'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -49,7 +50,9 @@ const contextChanged = () =>
     message: 'Your team context changed. Reload this page before trying again.',
   })
 
-const lifetime = 48 * 3_600_000
+/** How long a new invitation stays pending; SCIM claims without an invitation last as long. */
+export const invitationLifetimeMs = 48 * 3_600_000
+const lifetime = invitationLifetimeMs
 const wallClock = async (db: Db) =>
   (await db.selectNoFrom(sql<Date>`clock_timestamp()`.as('now')).executeTakeFirstOrThrow()).now
 
@@ -101,26 +104,13 @@ export async function manageInvitation(
           'invitationId',
         ].includes(key),
     ) ||
-    typeof input.email !== 'string' ||
-    input.email.length > 254 ||
-    !z.email().safeParse(input.email.trim()).success ||
-    Array.from(input.email).some(
-      (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-    ) ||
-    !input.email.isWellFormed() ||
+    !invitationEmailAccepted(input.email) ||
     (input.resend !== undefined && typeof input.resend !== 'boolean') ||
     (input.invitationId !== undefined &&
       (typeof input.invitationId !== 'string' || !isUuid(input.invitationId)))
   )
     throw invalid()
   const resend = input.resend === true
-  const eligibilityDenial = (
-    invitation: Parameters<typeof invitationEligibilityDenial>[0],
-    now: Date,
-  ) =>
-    resend
-      ? invitationRecoveryEligibilityDenial(invitation)
-      : invitationEligibilityDenial(invitation, now)
   if (
     resend &&
     (typeof input.invitationId !== 'string' ||
@@ -173,7 +163,7 @@ export async function manageInvitation(
         .where('id', '=', actor.sessionId)
         .where('userId', '=', actor.userId)
         .executeTakeFirst()
-      let now = await wallClock(trx)
+      const now = await wallClock(trx)
       if (!session || session.expiresAt <= now) throw denied()
       if (
         options.requireContext &&
@@ -182,233 +172,29 @@ export async function manageInvitation(
       )
         throw contextChanged()
 
-      // Team admins may already list their own members. This fixed refusal reveals
-      // no account existence outside that team and prevents duplicate memberships.
-      const recipient = await invitationRecipientIsMember(trx, organizationId, email)
-      if (recipient) throw recipientAlreadyMember()
-
-      let query = trx
-        .selectFrom('auth.invitation')
-        .selectAll()
-        .where('organizationId', '=', organizationId)
-        .where(sql<string>`lower(btrim(email))`, '=', email)
-      if (typeof input.invitationId === 'string') query = query.where('id', '=', input.invitationId)
-      else query = query.where('status', '=', 'pending').where('expiresAt', '>', now)
-      const candidates = await query.orderBy('id').limit(2).forUpdate().execute()
-      if (candidates.length > 1) throw conflict()
-      let invitation = candidates[0]
-      const existing = Boolean(invitation)
-      // Preserve the role refusal before waiting for a delivery lock.
-      if (invitation && eligibilityDenial(invitation, now) === 'TEAM_MANAGEMENT_ACCESS_DENIED')
-        throw denied()
-      if (!invitation && (resend || input.invitationId !== undefined)) throw ineligible()
-      // The original inviter remains this link's authority even when another admin
-      // authorizes a delivery generation. The team lock serializes departure/removal.
-      if (
-        invitation &&
-        !(await trx
-          .selectFrom('auth.member')
-          .select('id')
-          .where('organizationId', '=', organizationId)
-          .where('userId', '=', invitation.inviterId)
-          .executeTakeFirst())
+      const { invitation, delivery, existing, replacingExpired } = await admitInvitation(
+        trx,
+        {
+          userId: actor.userId,
+          audit: {
+            actor: { type: 'user', id: actor.userId },
+            credential: { type: 'session', id: actor.sessionId },
+          },
+          // Row locks can wait beyond the session's remaining lifetime.
+          current: (at) => {
+            if (session.expiresAt <= at) throw denied()
+          },
+        },
+        {
+          organizationId,
+          email,
+          resend,
+          invitationId: input.invitationId as string | undefined,
+          expectedGeneration: input.expectedGeneration as number | undefined,
+          requestId,
+        },
+        { reserve: options.reserve },
       )
-        throw new APIError('CONFLICT', {
-          code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
-          message:
-            'The original inviter is no longer a team member. Send a new invitation instead.',
-        })
-      let delivery = invitation
-        ? await trx
-            .selectFrom('invitation_deliveries')
-            .selectAll()
-            .where('invitation_id', '=', invitation.id)
-            .forUpdate()
-            .executeTakeFirst()
-        : undefined
-      // Row locks can wait beyond the invitation or session's remaining lifetime.
-      now = await wallClock(trx)
-      if (session.expiresAt <= now) throw denied()
-      if (invitation && eligibilityDenial(invitation, now) === 'INVITATION_INELIGIBLE')
-        throw ineligible()
-
-      if (resend) {
-        if (!invitation) throw ineligible()
-        const generation = delivery?.generation ?? 1
-        if (
-          delivery &&
-          delivery?.resend_request_id === requestId &&
-          generation === (input.expectedGeneration as number) + 1
-        )
-          return result(invitation, delivery, existing)
-        if (generation !== input.expectedGeneration || delivery?.resend_request_id === requestId)
-          throw conflict()
-        const resendDenial =
-          invitation.expiresAt <= now
-            ? null
-            : invitationResendDeliveryDenial(invitation, delivery, now)
-        if (resendDenial === 'INVITATION_GENERATION_LIMIT')
-          throw new APIError('CONFLICT', {
-            code: 'INVITATION_GENERATION_LIMIT',
-            message: 'This invitation has reached its resend limit.',
-          })
-        if (resendDenial === 'INVITATION_DELIVERY_BUSY')
-          throw new APIError('CONFLICT', {
-            code: 'INVITATION_DELIVERY_BUSY',
-            message: 'Invitation delivery is in progress. Try again shortly.',
-          })
-        if (resendDenial === 'INVITATION_RESEND_COOLDOWN')
-          throw new APIError(
-            'TOO_MANY_REQUESTS',
-            {
-              code: 'INVITATION_RESEND_COOLDOWN',
-              message: 'Wait 60 seconds before resending this invitation.',
-              retryAfterSeconds: 60,
-            },
-            { 'Retry-After': '60' },
-          )
-      }
-      // Ordinary retries retain the current generation, including terminal tombstones.
-      if (invitation && !resend && invitation.inviterId !== actor.userId)
-        throw new APIError('CONFLICT', {
-          code: 'INVITATION_ALREADY_PENDING',
-          message: 'An invitation is already pending. Reload before trying again.',
-        })
-      if (invitation && delivery && !resend) return result(invitation, delivery, existing)
-      // Lock every potentially expiring row before the shared mail-budget lock.
-      // A live invitation can expire while admission waits for that shared budget.
-      const retiringCandidates = await trx
-        .selectFrom('auth.invitation')
-        .select(['id', 'expiresAt'])
-        .where('organizationId', '=', organizationId)
-        .where(sql<string>`lower(btrim(email))`, '=', email)
-        .where('status', '=', 'pending')
-        .orderBy('id')
-        .forUpdate()
-        .execute()
-      for (const old of retiringCandidates) {
-        await trx
-          .selectFrom('invitation_deliveries')
-          .select('invitation_id')
-          .where('invitation_id', '=', old.id)
-          .forUpdate()
-          .execute()
-      }
-      if (
-        options.reserve &&
-        !(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now))
-      )
-        throw new APIError('TOO_MANY_REQUESTS', {
-          code: 'INVITATION_RATE_LIMITED',
-          message: 'Invitation requests are temporarily limited. Try again later.',
-        })
-      // A shared mail-budget lock may have waited behind another bounded send.
-      now = await wallClock(trx)
-      if (session.expiresAt <= now) throw denied()
-      const admissionDenial = invitation ? eligibilityDenial(invitation, now) : null
-      if (admissionDenial === 'INVITATION_INELIGIBLE') throw ineligible()
-      if (!invitation || (resend && invitation.expiresAt <= now)) {
-        if (invitation) {
-          const otherPending = await trx
-            .selectFrom('auth.invitation')
-            .select('id')
-            .where('organizationId', '=', organizationId)
-            .where(sql<string>`lower(btrim(email))`, '=', email)
-            .where('status', '=', 'pending')
-            .where('expiresAt', '>', now)
-            .where('id', '!=', invitation.id)
-            .executeTakeFirst()
-          if (otherPending) throw conflict()
-        }
-        const pending = await trx
-          .selectFrom('auth.invitation')
-          .select(({ fn }) => fn.countAll<string>().as('count'))
-          .where('organizationId', '=', organizationId)
-          .where('status', '=', 'pending')
-          .where('expiresAt', '>', now)
-          .executeTakeFirstOrThrow()
-        if (Number(pending.count) >= 100)
-          throw new APIError('CONFLICT', {
-            code: 'INVITATION_PENDING_LIMIT',
-            message: 'This team has reached its pending invitation limit.',
-          })
-      }
-      const replacingExpired = Boolean(resend && invitation && invitation.expiresAt <= now)
-      if (!invitation || replacingExpired) {
-        // Both the row action and the invite form use this atomic replacement path.
-        // The team lock serializes double clicks before an old link can be retired.
-        for (const old of retiringCandidates) {
-          if (old.expiresAt > now) continue
-          await trx
-            .updateTable('auth.invitation')
-            .set({ status: 'canceled' })
-            .where('id', '=', old.id)
-            .execute()
-          // Preserve completed mail outcomes, but retire work that can no longer send.
-          await trx
-            .updateTable('invitation_deliveries')
-            .set({
-              state: 'skipped',
-              last_error_code: 'invitation_ineligible',
-              lease_id: null,
-              lease_until: null,
-              updated_at: now,
-            })
-            .where('invitation_id', '=', old.id)
-            .where('state', 'in', ['queued', 'sending'])
-            .execute()
-        }
-        invitation = undefined
-        delivery = undefined
-      }
-      if (!invitation) {
-        invitation = await trx
-          .insertInto('auth.invitation')
-          .values({
-            organizationId,
-            inviterId: actor.userId,
-            email,
-            role: 'member',
-            status: 'pending',
-            createdAt: now,
-            expiresAt: new Date(now.getTime() + lifetime),
-          })
-          .returningAll()
-          .executeTakeFirstOrThrow()
-      }
-      // Legacy native resends changed expiresAt without changing createdAt. Missing
-      // metadata uses the known 48-hour creator policy, never their inflated difference.
-      const duration = Number(delivery?.expiry_duration_ms ?? lifetime)
-      if (resend && !replacingExpired) {
-        invitation = await trx
-          .updateTable('auth.invitation')
-          .set({ expiresAt: new Date(now.getTime() + duration) })
-          .where('id', '=', invitation.id)
-          .returningAll()
-          .executeTakeFirstOrThrow()
-      }
-      const values = {
-        authorized_by_user_id: actor.userId,
-        generation: (delivery?.generation ?? (resend && !replacingExpired ? 1 : 0)) + 1,
-        state: 'queued',
-        attempts: 0,
-        due_at: now,
-        generation_started_at: now,
-        expiry_duration_ms: duration,
-        lease_id: null,
-        lease_until: null,
-        last_job_id: null,
-        resend_request_id: resend ? (requestId as string) : null,
-        smtp_accepted_at: null,
-        last_error_code: null,
-        updated_at: now,
-      }
-      delivery = await trx
-        .insertInto('invitation_deliveries')
-        .values({ invitation_id: invitation.id, ...values })
-        .onConflict((oc) => oc.column('invitation_id').doUpdateSet(values))
-        .returningAll()
-        .executeTakeFirstOrThrow()
       return result(invitation, delivery, existing && !replacingExpired)
     })
   // Admission is already committed: queue failure must not discard the invitation or
@@ -443,6 +229,310 @@ export async function manageInvitation(
     }
   }
   return admitted
+}
+
+/**
+ * The invitation address rule, shared with SCIM User creation: at most 254 characters, an
+ * email address once trimmed, no control characters, well-formed UTF-16. Callers store the
+ * trimmed, lower-cased form.
+ */
+export function invitationEmailAccepted(email: unknown): email is string {
+  return (
+    typeof email === 'string' &&
+    email.length <= 254 &&
+    z.email().safeParse(email.trim()).success &&
+    !Array.from(email).some(
+      (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+    ) &&
+    email.isWellFormed()
+  )
+}
+
+/** The fixed code of a refusal that admitInvitation threw, for callers outside this package. */
+export function invitationRefusalCode(error: unknown): string | undefined {
+  return error instanceof APIError && typeof error.body?.code === 'string'
+    ? error.body.code
+    : undefined
+}
+
+/** Who issues an invitation inside admitInvitation. */
+export interface InvitationIssuer {
+  /** The inviter a new invitation records and the administrator authorizing its generation. */
+  userId: string
+  /** Attribution of the membership.invited event a new invitation records. */
+  audit: Pick<AuditEvent, 'actor' | 'credential'>
+  /** Throws once the issuer's own authority has lapsed at this database time (lock waits). */
+  current?: ((now: Date) => void) | undefined
+}
+
+/** A validated creation, or a resend of an explicit invitation and generation. */
+export interface InvitationAdmission {
+  organizationId: string
+  /** Trimmed and lower-cased. */
+  email: string
+  resend: boolean
+  invitationId?: string | undefined
+  expectedGeneration?: number | undefined
+  requestId?: string | undefined
+}
+
+/**
+ * Invitation issuance shared by the session entrance (manageInvitation) and SCIM User
+ * creation. The caller has authorized the issuer and holds the organization update lock
+ * that team management takes, in a read-committed transaction that it commits; it queues a
+ * returned queued generation only after that commit. No global recipient account lookup or
+ * sign-up-policy decision participates in admission. An existing pending invitation of the
+ * same inviter is returned as it is, so a retry never starts a second generation.
+ */
+export async function admitInvitation(
+  trx: Db,
+  actor: InvitationIssuer,
+  input: InvitationAdmission,
+  options: { reserve?: ReserveInvitationEmail | undefined } = {},
+) {
+  const { organizationId, email, resend, requestId } = input
+  const eligibilityDenial = (
+    invitation: Parameters<typeof invitationEligibilityDenial>[0],
+    now: Date,
+  ) =>
+    resend
+      ? invitationRecoveryEligibilityDenial(invitation)
+      : invitationEligibilityDenial(invitation, now)
+  let now = await wallClock(trx)
+
+  // Team admins may already list their own members. This fixed refusal reveals
+  // no account existence outside that team and prevents duplicate memberships.
+  const recipient = await invitationRecipientIsMember(trx, organizationId, email)
+  if (recipient) throw recipientAlreadyMember()
+
+  let query = trx
+    .selectFrom('auth.invitation')
+    .selectAll()
+    .where('organizationId', '=', organizationId)
+    .where(sql<string>`lower(btrim(email))`, '=', email)
+  if (typeof input.invitationId === 'string') query = query.where('id', '=', input.invitationId)
+  else query = query.where('status', '=', 'pending').where('expiresAt', '>', now)
+  const candidates = await query.orderBy('id').limit(2).forUpdate().execute()
+  if (candidates.length > 1) throw conflict()
+  let invitation = candidates[0]
+  const existing = Boolean(invitation)
+  // Preserve the role refusal before waiting for a delivery lock.
+  if (invitation && eligibilityDenial(invitation, now) === 'TEAM_MANAGEMENT_ACCESS_DENIED')
+    throw denied()
+  if (!invitation && (resend || input.invitationId !== undefined)) throw ineligible()
+  // The original inviter remains this link's authority even when another admin
+  // authorizes a delivery generation. The team lock serializes departure/removal.
+  if (
+    invitation &&
+    !(await trx
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', organizationId)
+      .where('userId', '=', invitation.inviterId)
+      .executeTakeFirst())
+  )
+    throw new APIError('CONFLICT', {
+      code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+      message: 'The original inviter is no longer a team member. Send a new invitation instead.',
+    })
+  let delivery = invitation
+    ? await trx
+        .selectFrom('invitation_deliveries')
+        .selectAll()
+        .where('invitation_id', '=', invitation.id)
+        .forUpdate()
+        .executeTakeFirst()
+    : undefined
+  // Row locks can wait beyond the invitation or session's remaining lifetime.
+  now = await wallClock(trx)
+  actor.current?.(now)
+  if (invitation && eligibilityDenial(invitation, now) === 'INVITATION_INELIGIBLE')
+    throw ineligible()
+
+  if (resend) {
+    if (!invitation) throw ineligible()
+    const generation = delivery?.generation ?? 1
+    if (
+      delivery &&
+      delivery?.resend_request_id === requestId &&
+      generation === (input.expectedGeneration as number) + 1
+    )
+      return { invitation, delivery, existing, replacingExpired: false }
+    if (generation !== input.expectedGeneration || delivery?.resend_request_id === requestId)
+      throw conflict()
+    const resendDenial =
+      invitation.expiresAt <= now ? null : invitationResendDeliveryDenial(invitation, delivery, now)
+    if (resendDenial === 'INVITATION_GENERATION_LIMIT')
+      throw new APIError('CONFLICT', {
+        code: 'INVITATION_GENERATION_LIMIT',
+        message: 'This invitation has reached its resend limit.',
+      })
+    if (resendDenial === 'INVITATION_DELIVERY_BUSY')
+      throw new APIError('CONFLICT', {
+        code: 'INVITATION_DELIVERY_BUSY',
+        message: 'Invitation delivery is in progress. Try again shortly.',
+      })
+    if (resendDenial === 'INVITATION_RESEND_COOLDOWN')
+      throw new APIError(
+        'TOO_MANY_REQUESTS',
+        {
+          code: 'INVITATION_RESEND_COOLDOWN',
+          message: 'Wait 60 seconds before resending this invitation.',
+          retryAfterSeconds: 60,
+        },
+        { 'Retry-After': '60' },
+      )
+  }
+  // Ordinary retries retain the current generation, including terminal tombstones.
+  if (invitation && !resend && invitation.inviterId !== actor.userId)
+    throw new APIError('CONFLICT', {
+      code: 'INVITATION_ALREADY_PENDING',
+      message: 'An invitation is already pending. Reload before trying again.',
+    })
+  if (invitation && delivery && !resend)
+    return { invitation, delivery, existing, replacingExpired: false }
+  // Lock every potentially expiring row before the shared mail-budget lock.
+  // A live invitation can expire while admission waits for that shared budget.
+  const retiringCandidates = await trx
+    .selectFrom('auth.invitation')
+    .select(['id', 'expiresAt'])
+    .where('organizationId', '=', organizationId)
+    .where(sql<string>`lower(btrim(email))`, '=', email)
+    .where('status', '=', 'pending')
+    .orderBy('id')
+    .forUpdate()
+    .execute()
+  for (const old of retiringCandidates) {
+    await trx
+      .selectFrom('invitation_deliveries')
+      .select('invitation_id')
+      .where('invitation_id', '=', old.id)
+      .forUpdate()
+      .execute()
+  }
+  if (
+    options.reserve &&
+    !(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now))
+  )
+    throw new APIError('TOO_MANY_REQUESTS', {
+      code: 'INVITATION_RATE_LIMITED',
+      message: 'Invitation requests are temporarily limited. Try again later.',
+    })
+  // A shared mail-budget lock may have waited behind another bounded send.
+  now = await wallClock(trx)
+  actor.current?.(now)
+  const admissionDenial = invitation ? eligibilityDenial(invitation, now) : null
+  if (admissionDenial === 'INVITATION_INELIGIBLE') throw ineligible()
+  if (!invitation || (resend && invitation.expiresAt <= now)) {
+    if (invitation) {
+      const otherPending = await trx
+        .selectFrom('auth.invitation')
+        .select('id')
+        .where('organizationId', '=', organizationId)
+        .where(sql<string>`lower(btrim(email))`, '=', email)
+        .where('status', '=', 'pending')
+        .where('expiresAt', '>', now)
+        .where('id', '!=', invitation.id)
+        .executeTakeFirst()
+      if (otherPending) throw conflict()
+    }
+    const pending = await trx
+      .selectFrom('auth.invitation')
+      .select(({ fn }) => fn.countAll<string>().as('count'))
+      .where('organizationId', '=', organizationId)
+      .where('status', '=', 'pending')
+      .where('expiresAt', '>', now)
+      .executeTakeFirstOrThrow()
+    if (Number(pending.count) >= 100)
+      throw new APIError('CONFLICT', {
+        code: 'INVITATION_PENDING_LIMIT',
+        message: 'This team has reached its pending invitation limit.',
+      })
+  }
+  const replacingExpired = Boolean(resend && invitation && invitation.expiresAt <= now)
+  if (!invitation || replacingExpired) {
+    // Both the row action and the invite form use this atomic replacement path.
+    // The team lock serializes double clicks before an old link can be retired.
+    for (const old of retiringCandidates) {
+      if (old.expiresAt > now) continue
+      await trx
+        .updateTable('auth.invitation')
+        .set({ status: 'canceled' })
+        .where('id', '=', old.id)
+        .execute()
+      // Preserve completed mail outcomes, but retire work that can no longer send.
+      await trx
+        .updateTable('invitation_deliveries')
+        .set({
+          state: 'skipped',
+          last_error_code: 'invitation_ineligible',
+          lease_id: null,
+          lease_until: null,
+          updated_at: now,
+        })
+        .where('invitation_id', '=', old.id)
+        .where('state', 'in', ['queued', 'sending'])
+        .execute()
+    }
+    invitation = undefined
+    delivery = undefined
+  }
+  if (!invitation) {
+    invitation = await trx
+      .insertInto('auth.invitation')
+      .values({
+        organizationId,
+        inviterId: actor.userId,
+        email,
+        role: 'member',
+        status: 'pending',
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + lifetime),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    await writeAuditEvent(trx, {
+      organizationId,
+      ...actor.audit,
+      action: 'membership.invited',
+      targetType: 'invitation',
+      targetId: invitation.id,
+    })
+  }
+  // Legacy native resends changed expiresAt without changing createdAt. Missing
+  // metadata uses the known 48-hour creator policy, never their inflated difference.
+  const duration = Number(delivery?.expiry_duration_ms ?? lifetime)
+  if (resend && !replacingExpired) {
+    invitation = await trx
+      .updateTable('auth.invitation')
+      .set({ expiresAt: new Date(now.getTime() + duration) })
+      .where('id', '=', invitation.id)
+      .returningAll()
+      .executeTakeFirstOrThrow()
+  }
+  const values = {
+    authorized_by_user_id: actor.userId,
+    generation: (delivery?.generation ?? (resend && !replacingExpired ? 1 : 0)) + 1,
+    state: 'queued',
+    attempts: 0,
+    due_at: now,
+    generation_started_at: now,
+    expiry_duration_ms: duration,
+    lease_id: null,
+    lease_until: null,
+    last_job_id: null,
+    resend_request_id: resend ? (requestId as string) : null,
+    smtp_accepted_at: null,
+    last_error_code: null,
+    updated_at: now,
+  }
+  delivery = await trx
+    .insertInto('invitation_deliveries')
+    .values({ invitation_id: invitation.id, ...values })
+    .onConflict((oc) => oc.column('invitation_id').doUpdateSet(values))
+    .returningAll()
+    .executeTakeFirstOrThrow()
+  return { invitation, delivery, existing, replacingExpired }
 }
 
 function result<T>(

@@ -1,7 +1,13 @@
 // The caller's profile: the public handle in their booking URLs (/{handle}/{slug}), their
 // time zone and locale. It belongs to the user, not to an organization.
 import { DISPLAY_NAME_MAX_LENGTH } from '@hourmere/auth'
-import { isReservedName, RESERVED_NAMES } from '@hourmere/core'
+import {
+  CLAIM_RESERVED_HANDLES,
+  isClaimReservedHandle,
+  isReservedName,
+  RESERVED_NAMES,
+} from '@hourmere/core'
+import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -37,6 +43,8 @@ export const LOCALE_MAX_LENGTH = 35
  */
 export const RESERVED_HANDLES: ReadonlySet<string> = RESERVED_NAMES
 
+const reserved = () => new DomainError('invalid', 'handle_reserved', 'This handle is reserved')
+
 const notFound = () =>
   new DomainError('not_found', 'profile_not_found', 'Create a profile with PUT /api/v1/profile')
 
@@ -63,17 +71,45 @@ export async function putProfile(
   const handle = validHandle(input.handle)
   const timeZone = validTimeZone(input.timeZone)
   const locale = validLocale(input.locale)
+  const userId = ctx.principal.user.id
+  // A claim-reserved handle (`route`) is never newly claimed, but whoever already holds it
+  // keeps it on every save. Both checks compare with the stored handle inside this one upsert:
+  // the row is proposed only if the caller holds the handle in the statement's snapshot, and
+  // ON CONFLICT checks again on the locked, latest row, so a rename committed in between is
+  // never undone. No row back means the handle was refused. A profile is only deleted with
+  // its user (ON DELETE CASCADE), so a save that finds the row gone fails on the user foreign
+  // key instead of inserting the handle anew.
+  const keptOnly = isClaimReservedHandle(handle)
+  const proposed = ctx.db.selectNoFrom((eb) => [
+    eb.cast<string>(eb.val(userId), 'uuid').as('user_id'),
+    eb.val(handle).as('handle'),
+    eb.val(timeZone).as('time_zone'),
+    eb.val(locale).as('locale'),
+  ])
   try {
     const row = await ctx.db
       .insertInto('profiles')
-      .values({ user_id: ctx.principal.user.id, handle, time_zone: timeZone, locale })
-      .onConflict((oc) =>
-        oc.column('user_id').doUpdateSet((eb) => ({
+      .columns(['user_id', 'handle', 'time_zone', 'locale'])
+      .expression(
+        keptOnly
+          ? proposed.where(({ exists, selectFrom }) =>
+              exists(
+                selectFrom('profiles')
+                  .select('user_id')
+                  .where('user_id', '=', userId)
+                  .where('handle', '=', handle),
+              ),
+            )
+          : proposed,
+      )
+      .onConflict((oc) => {
+        const update = oc.column('user_id').doUpdateSet((eb) => ({
           handle: eb.ref('excluded.handle'),
           time_zone: eb.ref('excluded.time_zone'),
           locale: eb.ref('excluded.locale'),
-        })),
-      )
+        }))
+        return keptOnly ? update.whereRef('profiles.handle', '=', 'excluded.handle') : update
+      })
       // PostgreSQL 18: `old` is NULL for a row the statement inserted.
       .returning([
         'handle',
@@ -83,7 +119,8 @@ export async function putProfile(
         'updated_at',
         sql<boolean>`old.user_id IS NULL`.as('created'),
       ])
-      .executeTakeFirstOrThrow()
+      .executeTakeFirst()
+    if (!row) throw reserved()
     return { profile: toProfile(row), created: row.created }
   } catch (error) {
     if (isConstraintViolation(error, SQLSTATE.uniqueViolation, 'profiles_handle_key')) {
@@ -118,10 +155,39 @@ export async function updateDisplayName(
   return row
 }
 
+/** A stored personal handle equal to a claim-reserved name; see findLegacyHandleCollisions. */
+export interface LegacyHandleCollision {
+  userId: string
+  handle: string
+}
+
+/**
+ * The legacy collision detector: stored personal handles equal to a claim-reserved name
+ * (`route`, see isClaimReservedHandle), compared case-insensitively. putProfile and the
+ * Cal.com import refuse new claims, so only a handle stored before that can be found. Its
+ * pages keep being served and nothing here renames it. Routing forms stay effectively off
+ * while one exists, until an operator-led rename with the owner and a server restart; the
+ * startup check that computes the effective state calls this (docs/routing-forms.md,
+ * Effective state).
+ */
+export async function findLegacyHandleCollisions(db: Db): Promise<LegacyHandleCollision[]> {
+  const rows = await db
+    .selectFrom('profiles')
+    .select(['user_id', 'handle'])
+    .where((eb) => eb(eb.fn('lower', ['handle']), 'in', [...CLAIM_RESERVED_HANDLES]))
+    .orderBy('handle')
+    .orderBy('user_id')
+    .execute()
+  return rows.map((row) => ({ userId: row.user_id, handle: row.handle }))
+}
+
 function validHandle(value: unknown): string {
   // First, and regardless of case: `Admin` is refused as reserved, not just as uppercase.
-  if (typeof value === 'string' && isReservedName(value)) {
-    throw new DomainError('invalid', 'handle_reserved', 'This handle is reserved')
+  if (typeof value === 'string' && isReservedName(value)) throw reserved()
+  // So are `Route` and `ROUTE`. Only the lowercase form can be someone's stored handle, which
+  // putProfile lets its holder keep.
+  if (typeof value === 'string' && isClaimReservedHandle(value) && !HANDLE_PATTERN.test(value)) {
+    throw reserved()
   }
   if (typeof value !== 'string' || !HANDLE_PATTERN.test(value)) {
     throw new DomainError(

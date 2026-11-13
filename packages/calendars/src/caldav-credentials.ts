@@ -66,7 +66,12 @@ export function createCalDavCredentialRecord(
 ): Insertable<CalendarConnections> & CalDavCredentialRecord {
   try {
     if (!userId) throw new Error()
-    const parsed = payload.safeParse({ ...input, version: 1 })
+    const parsed = payload.safeParse({
+      serverUrl: input.serverUrl,
+      username: input.username,
+      password: input.password,
+      version: 1,
+    })
     if (!parsed.success) throw new Error()
     const value = { ...parsed.data, serverUrl: canonicalServerUrl(parsed.data.serverUrl) }
     const record = {
@@ -107,7 +112,10 @@ export function readCalDavCredentials(
     ) {
       throw new Error()
     }
-    return redactCalDavField({ serverUrl, username, password }, 'password')
+    return redactCalDavField(
+      redactCalDavField({ serverUrl, username, password }, 'password'),
+      'username',
+    )
   } catch {
     throw new Error('CalDAV credentials could not be decrypted')
   }

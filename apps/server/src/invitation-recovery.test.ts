@@ -9,11 +9,13 @@ import {
   TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { deliverInvitationEmail } from '@hourmere/notifications'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { createApp } from './app.ts'
 import { withDatabaseClock } from './database-clock-testing.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
@@ -550,22 +552,24 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
     const javascript = stripTypeScriptTypes(
       source.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
     ).replace(/\bexport /g, '')
-    return new Function('TeamManagementError', `${javascript}; return cancelTeamInvitation`)(
-      TeamManagementError,
-    ) as typeof cancelTeamInvitation
+    return guardCopy(
+      new Function(
+        'TeamManagementError',
+        'writeAuditEvent',
+        `${javascript}; return cancelTeamInvitation`,
+      )(TeamManagementError, writeAuditEvent) as typeof cancelTeamInvitation,
+    )
   }
   it('keeps a joined membership through the unchanged cancellation source copy', () =>
     verifyJoinedMember(cancellationCopy()))
   it('detects a cancellation that removes a joined member through a real assertion failure', async () => {
-    await expect(verifyJoinedMember(cancellationCopy('member'))).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('cancel never removes a joined member'),
+    await expectKilled(cancellationCopy('member'), verifyJoinedMember, {
+      outcome: { message: expect.stringContaining('cancel never removes a joined member') },
     })
   })
   it('detects cancellation overwriting a completed acceptance through a real assertion failure', async () => {
-    await expect(verifyJoinedMember(cancellationCopy('lifecycle'))).rejects.toMatchObject({
-      name: 'AssertionError',
-      message: expect.stringContaining('cancel preserves completed acceptance'),
+    await expectKilled(cancellationCopy('lifecycle'), verifyJoinedMember, {
+      outcome: { message: expect.stringContaining('cancel preserves completed acceptance') },
     })
   })
   async function verifyTargetTeam(cancelOperation = cancelTeamInvitation) {
@@ -587,8 +591,6 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
   it('scopes the unchanged cancellation source copy to its authorized team', () =>
     verifyTargetTeam(cancellationCopy()))
   it('detects cancellation crossing teams through a real assertion failure', async () => {
-    await expect(verifyTargetTeam(cancellationCopy('team'))).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
+    await expectKilled(cancellationCopy('team'), verifyTargetTeam)
   })
 })

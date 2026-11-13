@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { isPublicTeamSlug, isReservedName } from '@hourmere/core/reserved'
 import { render, screen } from '@testing-library/react'
@@ -11,6 +10,7 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { parseWhole } from '../../components/forms.tsx'
 import { EVENT_TYPE, PROFILE as PROFILE_RULES } from '../../limits.ts'
 import * as paths from '../../paths.ts'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { validSchedule } from '../availability/valid-default.ts'
@@ -27,15 +27,12 @@ const EmptySlotPicker = () => null
 
 /** Only in-memory copies are mutated; the production files stay intact. */
 function copy<T>(source: string, exported: string, dependencies: Record<string, unknown> = {}): T {
-  const compiled = execFileSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import { readFileSync } from 'node:fs'; import { transformSync } from 'esbuild'; process.stdout.write(transformSync(readFileSync(0, 'utf8'), { loader: 'tsx', format: 'cjs', jsxFactory: 'reactRuntime.createElement', jsxFragment: 'reactRuntime.Fragment' }).code)",
-    ],
-    { input: source.replace(/^export /gm, ''), encoding: 'utf8' },
-  )
+  const compiled = compileSourceCopy(exported, source.replace(/^export /gm, ''), {
+    loader: 'tsx',
+    format: 'cjs',
+    jsxFactory: 'reactRuntime.createElement',
+    jsxFragment: 'reactRuntime.Fragment',
+  })
   return new Function(
     'reactRuntime',
     ...Object.keys(dependencies),
