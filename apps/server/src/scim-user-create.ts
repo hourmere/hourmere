@@ -460,23 +460,38 @@ async function create(
           if (!inviter) throw noInviter()
           // Whatever admission does is kept only when the claim links its invitation.
           await sql`SAVEPOINT scim_user_invitation`.execute(trx)
+          const admit = async () => {
+            try {
+              // No `current` check: the token was rechecked under the organization lock, so
+              // TEAM_MANAGEMENT_ACCESS_DENIED can only be the refusal of a legacy role.
+              return await admitInvitation(
+                trx,
+                { userId: inviter.userId, audit },
+                {
+                  organizationId: principal.organizationId,
+                  email: mailbox,
+                  resend: false,
+                },
+                { reserve: deps.reserve },
+              )
+            } catch (error) {
+              const code = invitationRefusalCode(error)
+              if (code === undefined || !HELD_ELSEWHERE.includes(code)) throw error
+              return undefined
+            }
+          }
           let admitted: Awaited<ReturnType<typeof admitInvitation>> | undefined
           try {
-            // No `current` check: the token was rechecked under the organization lock, so
-            // TEAM_MANAGEMENT_ACCESS_DENIED can only be the refusal of a legacy role.
-            admitted = await admitInvitation(
-              trx,
-              { userId: inviter.userId, audit },
-              {
-                organizationId: principal.organizationId,
-                email: mailbox,
-                resend: false,
-              },
-              { reserve: deps.reserve },
-            )
+            admitted = await admit()
           } catch (error) {
-            const code = invitationRefusalCode(error)
-            if (code === undefined || !HELD_ELSEWHERE.includes(code)) throw error
+            // A pending invitation for the address expired while admission waited for its
+            // delivery row, the mail budget or another administrator's invitation. Admission
+            // runs once more from the savepoint: it then skips the expired invitation and
+            // issues a new one, as the provider's retry would. It is never a claim without
+            // an invitation, which would leave the person without an email.
+            if (invitationRefusalCode(error) !== 'INVITATION_INELIGIBLE') throw error
+            await sql`ROLLBACK TO SAVEPOINT scim_user_invitation`.execute(trx)
+            admitted = await admit()
           }
           // A pending invitation another entry's claim already holds is not shared.
           if (
@@ -491,8 +506,8 @@ async function create(
           if (!admitted) await sql`ROLLBACK TO SAVEPOINT scim_user_invitation`.execute(trx)
           await sql`RELEASE SAVEPOINT scim_user_invitation`.execute(trx)
           // The same pending claim either way. Without an invitation nothing is sent and
-          // the claim lasts as long as an invitation would; claim completion proves and
-          // links the person's own account.
+          // the claim lasts as long as an invitation would; the SSO linking completion step
+          // proves and links the person's own account.
           await trx
             .insertInto('scim_user_claims')
             .values({
@@ -524,8 +539,7 @@ async function create(
     const code = invitationRefusalCode(error)
     if (code === 'INVITATION_RATE_LIMITED' || code === 'INVITATION_PENDING_LIMIT')
       return invitationsLimited().reply
-    // Anything else, such as the inviting owner's invitation expiring while the create
-    // waited for its locks, rolls everything back as a server error the provider retries.
+    // Anything else rolls everything back as a server error the provider retries.
     throw error
   }
   // The entry and its delivery intent are committed. A queue outage leaves that generation

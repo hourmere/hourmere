@@ -63,7 +63,10 @@ handlers remain unregistered in production. The User creation handler, which onl
 harnesses register, writes a resource and, for its work address, one pending claim whose
 `invitation_id` names the invitation it issued or reused, or is null when the address
 already belongs to a member or another pending invitation holds it; it never sets an
-account or membership link.
+account or membership link. Claim completion, which only test harnesses wire into invitation
+acceptance, sets both links of the claim's entry when its invitation is accepted, together with
+the claim's `completed_at`; it reads live blockers, by account and by mailbox, and refuses
+admission while one exists, but never writes or clears them.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -902,6 +905,20 @@ receipts. Dependency identity (organization, version, rule and event type) is im
 only health metadata changes, with `health_code` restricted to `ok`, `unavailable` or `unknown`. Receipt issuance bindings and nonnull answer ciphertext cannot change; ciphertext can
 only be erased. A null ciphertext also permits expiry purge without consuming a receipt.
 Consumed receipt evidence cannot be rebound or revived.
+
+Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
+publication requests that carry a client `requestId`. A record holds the organization, the
+operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
+`oauth`) and UUID (the session's user, the API key or the OAuth grant; historical, with no
+foreign key, so deleting a key or grant never lets a retained request write again), the
+request UUID, a 32-byte SHA-256 fingerprint of the canonical validated input alone and the
+result: the form, plus the version exactly for a publication. The request key is unique per
+organization and credential kind and ID across both operations. The
+result is unique with nulls not distinct, so a form has at most one creation record and a
+version at most one publication record. Composite organization foreign keys keep the form and
+version in the record's organization and cascade, so a record goes with its form (and
+organization) or its version and never blocks version cleanup; retention is therefore bounded
+by the form and version quotas, with no purge job of its own. Records reject every update.
 Question/rule/target semantics remain the future shared validator's responsibility.
 Unconsumed receipt indexes support bounded expiry cleanup and form/instance admission
 counts; receipt lifetime, encryption and admission services land in later steps.
@@ -1034,7 +1051,11 @@ they answer `workflows_disabled` while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`; nothing writes them yet, and no worker or setting uses them.
 A test keeps every other production module outside the storage layer from naming them.
 
-- **Definitions** have an immutable ID, organization, owner and creation time. A personal
+- **Definitions** have an immutable ID, organization, owner and creation time. Definition IDs
+  are server-generated: every definition takes the column's `uuidv7()` default, and callers
+  never supply one. Storage accepts an explicit ID, and if a purged workflow's ID were reused,
+  a retained enrollment of it that has no run could get one, so creation never passes an ID
+  from a request, tool or command. A personal
   definition belongs to its user in that user's personal organization (`owner_user_id`); a
   team definition (`owner_user_id` NULL) belongs to the team organization, never to the member
   who created it, and is refused in a personal organization. The owner is checked when the
@@ -1126,6 +1147,30 @@ organization lock, so a transaction that claims a run and then adds a recipient 
 organization first. Child rows carry their organization in composite foreign keys (as
 revisions do), and reservations, which have no parent row, reference the organization
 directly.
+
+Two rules order the later workflow writers against each other and against the existing writers
+that share their locks:
+
+- **Organization first.** Every workflow writer takes the organization lock first, before the
+  mail-budget lock and before any definition or run row. First means first among the workflow
+  locks: identity locks that the existing order puts before the organization, such as the
+  personal owner's user row that `lockOrganization` share-locks, still come before it. A mail
+  admission, including a
+  retry's re-admission, locks the owner organization (`FOR KEY SHARE`) before
+  `lockNotificationEmailBudget`. Invitation creation holds its team `FOR UPDATE` and then
+  takes the budget lock, so an admission that reached the organization only through its
+  reservation's foreign key, after the budget lock, would deadlock with it.
+- **Definition before runs.** Writers that touch both definitions and runs lock the definition
+  before its runs. A deletion tombstones the definition and then retires its pending runs; if
+  it retired first, it would miss a pending run that a concurrent capture commits. A
+  reschedule or cancellation share-locks the live definitions it may capture, after the
+  organization and in ID order, before it retires or writes any run. A reschedule that retired
+  the predecessor's run and then carried its timer would wait for the definition in the
+  enrollment guard while the deletion, holding the tombstone, waits for that run.
+
+`workflow-storage-lock-order.test.ts` races each reversed order on two connections into a
+deadlock (40P01) and each documented order to completion, with the lock statements of
+`workflow-storage-lock-order.ts` that later steps reuse.
 
 Execution identity outlives a definition's content. Enrollments name their workflow and
 revision without a foreign key to the definition, and enrollments, runs and recipient claims
@@ -1492,14 +1537,31 @@ The phases within that organization boundary are:
   actor and member share locks. Creation next takes the form-admission advisory lock;
   publication share-locks its target event types in ID order; each write then locks the
   form row. Publication therefore waits for membership management and event-type edits
-  instead of deadlocking with them. Preview takes no lock and runs read-only.
+  instead of deadlocking with them. Preview takes no lock and runs read-only. A create or
+  publish that carries a `requestId` takes the transaction advisory lock
+  `hashtextextended('hourmere.routing-form-request:<organizationId>:<actorKind>:<actorId>:<requestId>', 0)`,
+  with the UUIDs in lowercase (creation after form admission, publication right after the
+  actor, member and API-key checks, both before any event-type or form row lock), and then
+  share-locks its existing `routing_form_operations` record, so a version cleanup deleting
+  that record finishes first. Only routing takes that lock, always after the
+  organization and before event types, so it adds no cycle; concurrent retries of one key
+  queue on it, and each finds the record the first one committed.
 - SCIM User creation takes the organization update lock first, like membership management,
   then a key share lock on its provisioning token row (revocation and rotation take the
   organization lock before their token update lock), then the shared invitation service's
   locks: the address's pending invitation rows, their delivery rows and the mail-budget
   lock, inside a savepoint that is rolled back, releasing them, when the claim records no
   invitation. It locks no member row: the organization lock excludes membership changes while it
-  reads the earliest owner who invites.
+  reads the earliest owner who invites. When the address's pending invitation expires during
+  one of those waits, it rolls back to the savepoint and runs the invitation service once more.
+- Invitation acceptance takes the recipient's `auth.user` share lock, the organization update
+  lock, its session no-key-update lock and the invitation update lock. When SCIM claim
+  completion is wired, it then locks the claim bound to that invitation and that claim's
+  `scim_users` entry, both `FOR UPDATE`, before the native member insert; the entry's link,
+  the claim's completion and the audit event follow that insert in the same transaction. A
+  SCIM writer that takes the organization lock first therefore waits for, or is waited on by,
+  the acceptance, and never holds the claim or entry while the acceptance waits for the
+  organization.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in
