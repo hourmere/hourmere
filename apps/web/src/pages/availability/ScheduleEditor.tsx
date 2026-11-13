@@ -9,7 +9,7 @@ import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { TimeZonePicker } from '../../components/TimeZonePicker.tsx'
 import { flash, useFlash } from '../../flash.ts'
-import { browserTimeZone } from '../../format.ts'
+import { browserTimeZone, isKnownTimeZone } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
@@ -143,6 +143,7 @@ function ScheduleForm({
     schedule ? draftFromSchedule(schedule) : newScheduleDraft(defaultTimeZone),
   )
   const [draft, setDraft] = useState(baseline)
+  const [displayTimeZone, setDisplayTimeZone] = useState(baseline.timeZone)
   const [conflict, setConflict] = useState(false)
   const [latest, setLatest] = useState<{
     schedule: Schedule
@@ -178,6 +179,7 @@ function ScheduleForm({
 
   function set<K extends 'name' | 'timeZone'>(name: K, value: ScheduleDraft[K]) {
     setDraft((d) => ({ ...d, [name]: value }))
+    if (name === 'timeZone' && isKnownTimeZone(value)) setDisplayTimeZone(value)
     setStatus('')
   }
 
@@ -373,6 +375,8 @@ function ScheduleForm({
                     setConflict(false)
                     setLatest(null)
                     setFormError(null)
+                    setStatus('Draft applied to the latest version. Save changes to submit it.')
+                    statusRef.current?.focus()
                   }}
                 >
                   {t('Apply my draft to this version')}
@@ -486,7 +490,7 @@ function ScheduleForm({
           </section>
           {saved && (
             <Overrides
-              timeZone={draft.timeZone}
+              timeZone={displayTimeZone}
               drafts={overrideDrafts}
               onChange={(next) => {
                 setOverrideDrafts(next)

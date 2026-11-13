@@ -6,6 +6,8 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## Attendance API compatibility
+
 ### Webhook event compatibility
 
 `booking.attendee_no_show_changed` extends the webhook subscription `events` and delivery

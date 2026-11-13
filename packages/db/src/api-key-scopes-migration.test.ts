@@ -429,11 +429,11 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
   )
 
   it('canonicalizes direct inserts and refuses invalid, changed or removed scopes while allowing native maintenance', async () => {
-    const directory = await predecessorDirectory()
     let database: TestDatabase | undefined
     try {
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      database = await fixtureDatabase(directory)
+      // Install the current schema once, reusing the existing bounded pool. Later
+      // migrations must not silently weaken the direct-SQL scope guard.
+      database = await fixtureDatabase(migrationsDir)
       const pool = database.pool
       const insert = (metadata: string | null) =>
         pool.query(
@@ -480,7 +480,6 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
       }
     } finally {
       await database?.drop()
-      await rm(directory, { recursive: true, force: true })
     }
   })
   describe.each([

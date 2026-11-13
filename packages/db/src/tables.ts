@@ -1541,6 +1541,17 @@ export interface Webhooks {
   url_ciphertext: Buffer | null;
 }
 
+export interface WorkflowCreationKeys {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  credential_id: string | null;
+  credential_kind: string;
+  idempotency_key: string;
+  organization_id: string;
+  request_fingerprint: Buffer;
+  workflow_id: string;
+}
+
 export interface WorkflowDefinitions {
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
@@ -1741,6 +1752,7 @@ export interface DB {
   waitlist_verification_requests: WaitlistVerificationRequests;
   webhook_deliveries: WebhookDeliveries;
   webhooks: Webhooks;
+  workflow_creation_keys: WorkflowCreationKeys;
   workflow_definitions: WorkflowDefinitions;
   workflow_enrollments: WorkflowEnrollments;
   workflow_mail_reservations: WorkflowMailReservations;

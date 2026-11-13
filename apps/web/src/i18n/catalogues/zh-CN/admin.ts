@@ -151,11 +151,13 @@ export const admin = {
   'Download CSV': '下载 CSV',
 
   'Past date overrides ({0})': '过去的特定日期安排（{0}）',
-  'Times are in {0}.': '时间均以{0}时区显示。',
+  'Times are in {0}.': '时间均按{0}显示。',
   'This schedule changed in another tab or from an API, MCP or CLI client. Your changes are still here. Review the latest version before applying your draft again.':
     '此日程已在其他标签页中或通过 API、MCP 或 CLI 客户端更改。你的更改仍保留在此页面。请先查看最新版本，再重新应用你的草稿。',
   'Review latest version': '查看最新版本',
   'Latest saved version': '最新保存的版本',
+  'Draft applied to the latest version. Save changes to submit it.':
+    '草稿已应用到最新版本。请点击保存更改以提交。',
   'Apply my draft to this version': '将我的草稿应用到此版本',
   'Applying your draft replaces the latest weekly hours and date overrides. Review both before saving.':
     '应用你的草稿将替换最新的每周时间段和特定日期安排。保存前请对照查看最新版本和你的草稿。',
