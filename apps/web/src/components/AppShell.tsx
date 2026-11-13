@@ -23,6 +23,7 @@ export const NAV_ITEMS = [
   { to: PATHS.calendars, label: 'Calendars' },
   { to: PATHS.apiKeys, label: 'API keys' },
   { to: PATHS.connectedApps, label: 'Connected apps' },
+  { to: PATHS.auditLog, label: 'Audit log' },
   { to: PATHS.settings, label: 'Settings' },
 ] as const
 
@@ -187,10 +188,13 @@ function Shell() {
           data-scroll-end={navEdges.end}
         >
           <ul data-layout-scroll="horizontal">
-            {NAV_ITEMS.filter(
-              (item) =>
-                item.to !== PATHS.teamBookings ||
-                (teamAccess.status === 'ready' && teamAccess.role !== null),
+            {NAV_ITEMS.filter((item) =>
+              item.to === PATHS.teamBookings
+                ? teamAccess.status === 'ready' && teamAccess.role !== null
+                : item.to === PATHS.auditLog
+                  ? teamAccess.status === 'ready' &&
+                    teamAccess.roles?.some((role) => role === 'owner' || role === 'admin') === true
+                  : true,
             ).map((item) => (
               <li key={item.to}>
                 <NavLink to={item.to}>{ui(item.label)}</NavLink>

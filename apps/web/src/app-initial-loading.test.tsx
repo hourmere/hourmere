@@ -13,6 +13,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'AnalyticsPage',
     'ApiKeysPage',
     'AppShell',
+    'AuditLogPage',
     'AvailabilityPage',
     'BookingDetailPage',
     'BookingPage',

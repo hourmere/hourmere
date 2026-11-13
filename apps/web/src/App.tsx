@@ -17,6 +17,7 @@ import {
   AnalyticsPage,
   ApiKeysPage,
   AppShell,
+  AuditLogPage,
   AvailabilityPage,
   BookingDetailPage,
   BookingPage,
@@ -80,6 +81,7 @@ export const appRoutes = createRoutesFromElements(
           <Route path="calendars" element={<CalendarsPage />} />
           <Route path="connected-apps" element={<ConnectedAppsPage />} />
           <Route path="api-keys" element={<ApiKeysPage />} />
+          <Route path="audit-log" element={<AuditLogPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="teams/new" element={<CreateTeamPage />} />
           <Route path="*" element={<AppNotFoundPage />} />
