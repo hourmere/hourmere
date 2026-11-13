@@ -128,7 +128,7 @@ all-or-nothing rule, and the 202 response reports each entry's outcome without s
 | Unexpired public pending enrollee | Upgraded to an invitation: pending expiry and IP digest cleared, verification credential revoked, invitation mail with a voting credential; still one place |
 | Withdrawn voter | Unchanged: withdrawal opted out of poll mail; only the voter's own capability can reactivate. A host who removes and then re-invites the address overrides this deliberately and sends one invitation; a reminder opt-out still applies |
 | Expired public pending enrollee | Invited as new: the expired row is replaced and a new place is reserved |
-| Removed mailbox | Re-invited: the host's explicit invitation clears the removal tombstone and reserves a new place; mailbox counters persist |
+| Removed mailbox | Re-invited: the host's explicit invitation clears the removal tombstone and reserves a new place; mailbox counters persist, and the invitation spends one resend under the resend cooldown and cap |
 
 The A3a enrollment and verification service implements these rules with the internal
 choices below; later transport steps map them, and the error codes stay as listed here.
@@ -260,8 +260,10 @@ later transport steps map them, and the error codes stay as listed here.
   revision. The roster lists every voter with name, mailbox, status, zone, locale, invitation,
   verification, withdrawal and pending-expiry instants, ballot revision, submission and
   consent instants, votes and answers; removed voters and expired public reservations are
-  absent, and no credential or digest appears. Advisory availability is added by the
-  results transport (D1).
+  absent, and no credential or digest appears. Advisory availability is not part of this
+  projection: D1 extends the results service with it, computed after the locked results read
+  and never under the poll lock, and shared by REST, MCP and CLI rather than built by each
+  transport.
 - Removal works while the poll is open or closed, including closure by the deadline and a
   soft-deleted event; a scheduled poll gets 409 `poll_already_scheduled` and a canceled one
   409 `poll_canceled`. The voter lookup precedes the `expectedHostRevision` check, so a
@@ -278,9 +280,53 @@ later transport steps map them, and the error codes stay as listed here.
   anything to remove. It has no replay key, so a retry after a lost response gets 409
   `poll_changed` and the host rereads the results.
 - Re-invitation of a removed mailbox is the invitation service's `invited` outcome: a new
-  voter ID, a new place under the cap and one invitation mail. The tombstone clears; resend
-  count and cooldown, reminder receipt and opt-out stay, and the recovery count restarts
-  because a new credential was mailed.
+  voter ID, a new place under the cap and one invitation mail. Because it mails the mailbox
+  again, it is a resend: it needs the mailbox's resend budget, which removal never resets (at
+  most three per poll and mailbox, one per 15 minutes), spends one resend and restarts the
+  cooldown. Over budget, the whole batch is refused with 429 `rate_limited`, after the
+  capacity check and without rows or mail, with Retry-After only when every refused mailbox
+  is cooling down rather than capped. Otherwise the tombstone clears; reminder receipt and
+  opt-out stay, and the recovery count restarts because a new credential was mailed.
+- Removal is refused on canceled and scheduled polls, so erasing one voter's data there
+  needs whole-poll deletion (a known limitation). Expired public reservations are erased by
+  the cleanup below.
+
+The A4b cleanup and deletion services implement the storage policy and privacy deletion
+below with these internal choices; no transport is added.
+
+- `cleanupMeetingPolls` in `packages/scheduling/src/meeting-poll-cleanup.ts` runs one bounded
+  page per call, each part in its own transaction of up to `MEETING_POLL_RETENTION.batchSize` rows: expired public
+  pending voters, terminal polls past retention (at most 10 polls per transaction, each
+  bounded by the admission caps) and the replay tombstones of deleted polls once their purge
+  instant has passed. The hourly worker job `meeting-poll-cleanup-v1` runs up to 50 pages
+  in at most 45 seconds and then queues one successor for a backlog.
+- Cleanup never waits for a lock. It takes the public voter order, a personal owner's user
+  and then the organization `FOR SHARE`, then the poll `FOR UPDATE`, each with `SKIP
+  LOCKED`, reads the database clock once after them, and deletes voter rows only under
+  their poll's lock. A poll that a ballot, host write, booking or organization deletion
+  holds is skipped and found on a later run. Organization deletion holds the organization
+  and then cascades through voter rows before the poll, so cleanup must never lock a poll
+  without its organization; receipts are taken with `SKIP LOCKED` alone. Cleanup moves no
+  revision and needs no installation secret, so it takes no key fence.
+- An expired reservation already stopped counting toward capacity, an IP's pending
+  allowance and the results at its expiry instant, so a delayed worker never retains one.
+  Cleanup deletes the voter row with its votes, credentials and deliveries; the mailbox
+  counter row stays for the poll's lifetime without a removal mark, so the mailbox may
+  enroll again.
+- Terminal cleanup measures retention from scheduling, cancellation or closure, and from
+  the deadline for an open poll whose deadline passed. It takes the installation's
+  booking-data retention in days; the repository has none, so the worker passes none and
+  terminal polls stay until explicit poll, linked-booking or organization deletion.
+- Poll deletion (A2's `deleteMeetingPoll`) needs only `expectedHostRevision` and the host
+  order, so ballot churn never makes it fail with `poll_changed`; voter and host writes
+  queued behind it get 404 `poll_not_found`. It takes no key fence either, which keeps the
+  invalidation procedure of the key-fence section available under a new secret. Deletion,
+  terminal cleanup and the linked-booking trigger delete the poll row, and the 0071 cascades
+  remove candidates, voters, votes, credentials, deliveries and mailbox counters; receipts
+  keep only the organization ID and the unkeyed actor digest, with poll and booking
+  references cleared and a purge instant 90 days later. A linked booking is never deleted
+  by poll deletion; deleting it first deletes the poll the same way. Booking deletion locks
+  the booking and then the poll, and nothing locks a poll and then its booking before C2.
 
 Privacy default is `private`: voters see only their own choices and the candidate list,
 not other names, email addresses, answers or totals. A host can choose `aggregate` at
@@ -730,8 +776,11 @@ reservation's capacity, or extends credential validity. The schedule is:
 | Operation receipts | Keep minimal receipts while their poll is retained. On poll deletion erase poll/booking references (`poll_id` and `booking_id`); keep only pseudonymous replay digests for 90 days from deletion (the organization ID and an unkeyed digest of the acting user, API key or OAuth grant), then delete in the first hourly sweep at or after `purge_at`. Organization deletion cascades immediately. |
 | Recipient deliveries | Erase ciphertext immediately on sent/suppressed/skipped terminal transition. Retain the minimal terminal recipient receipt for the poll lifetime to prevent duplicate reminders/outcomes; voter/poll deletion cascades. Expired claims keep their attempt count; allow at most 5 attempts with a 5-minute lease, then terminally skip and clear ciphertext. |
 
-Workers and retention-policy integration land in the later cleanup and delivery steps;
-no background expiry or mail delivery is introduced by this storage migration. A poll
+The A4b cleanup job deletes expired public pending voters, terminal polls past an
+installation retention and due replay tombstones (see the A4b choices above). It does not
+yet persist deadline closure or clear expired capability ciphertext; those sweeps stay open
+for the delivery and reminder steps (B1, B4). No mail delivery is introduced by the storage
+steps. A poll
 privacy deletion never deletes its booking. Deleting a linked booking deletes its poll
 history first, preserving the scheduled-pair invariant and clearing receipt references.
 Installation policies must delete poll history alongside due booking history rather than
@@ -832,7 +881,7 @@ so every available creation surface has a working results destination without a 
 | C2a Host picks a time: atomic finalize | C1 | None; internal finalize service only | No flag; no new transport | Service selects eligible booker/attendees and commits booking, poll, receipts and delivery intents together. Test MAX_GUESTS + 1, locked event settings, guest permission/answers, conditional consent, strict availability/limits/buffers, safe projection and exact/changed replay. Inject failure after booking insertion and assert complete rollback. |
 | C2b Host picks a time: concurrency and scheduling modes | C2a | None; internal service tests only | No flag; no new transport | Harden and test vote/finalize, two-finalizer and ordinary-booking collisions: finalize while open with a stale results revision returns `poll_changed`, and finalize after close succeeds even when a voter edited every second until closure. Test collective rollback and round-robin fairness; group/one-time-link rejection without seat/link mutation. This is a required integration gate before exposing finalize. |
 | C3 Host picks a time: outcomes | C2b | None; internal notification delivery only | No flag; no new transport | Notifications to all eligible retained voters and ordinary selected-attendee/host booking mail. Test unverified invited recipient, locale/zone, cancellation/update, conference readiness, deletion/withdrawal and replay dedupe. No nonselected ICS/join/manage capability; host finalize projection never includes manageToken; source is the finalizing transport. |
-| D1 Agent and host access: read and lifecycle transports | C3 | Host list/read/results/close/cancel/delete/finalize REST, MCP and CLI together | No flag; host lifecycle transports available, no creation transport yet | Matching thin adapters, OpenAPI/generated types and scope registry, tested on service-created polls. CLI reads secrets from stdin from introduction. Test session context, key scopes, invalid bearer, pagination, tenant boundaries, secret-free metadata, conditional selection, revision/error parity and no returned manage capabilities. |
+| D1 Agent and host access: read and lifecycle transports | C3 | Host list/read/results/close/cancel/delete/finalize REST, MCP and CLI together | No flag; host lifecycle transports available, no creation transport yet | Matching thin adapters, OpenAPI/generated types and scope registry, tested on service-created polls. Extends the results service with advisory availability, computed after the locked results read (never under the poll lock) and shared by REST, MCP and CLI. CLI reads secrets from stdin from introduction. Test session context, key scopes, invalid bearer, pagination, tenant boundaries, secret-free metadata, conditional selection, revision/error parity and no returned manage capabilities. |
 | D2 Agent and host access: creation and roster transports | D1 | Host create/invite/resend/remove/remove-unverified/rotate-link REST, MCP and CLI together | No flag; host creation transports available with every lifecycle operation | Matching thin adapters; CLI reads secrets from stdin from introduction. Test one-time link return, invitation outcomes, create/invite/rotate replay, mutation authority, `poll_link_unavailable` in invited mode and replay/error parity; regenerate OpenAPI/types. |
 | D3 Agent and host access: agent UX and contracts | D2 | No operations added; polish landed MCP/CLI adapters | No flag; existing transports available | Polish CLI help and MCP discovery; end-to-end contract coverage for host and public adapters already shipped. Stdin secret handling is already mandatory in B2/D1/D2. Exercise create, results and finalize across surfaces, insufficient scopes, public capability access and redacted diagnostics. |
 | D4a Agent and host access: list, results and lifecycle UI | D3 | None added; consumes D1 REST | No flag; host results and lifecycle UI available | Poll list, results matrix with advisory availability, booker/attendee selection, conditional acknowledgment/finalize, close/cancel/delete confirmations and booking link, for polls created through D2 transports. Switches the B4 deadline-mail results link from the D1 REST endpoint to this page. Test en/zh-CN, stale results/lost finalize responses, unavailable slots, attendee cap, aggregate inference explanations and the switched mail link. |

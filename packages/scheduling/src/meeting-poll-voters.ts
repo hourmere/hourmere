@@ -540,8 +540,10 @@ export async function recoverMeetingPollVoter(
  * resolved first: active invitees, verified voters and withdrawn voters are unchanged; a
  * live public reservation becomes an invitation in its place; an expired reservation or a
  * removed mailbox is invited as new. If the new places exceed the free ones, the whole
- * batch is refused with 409 `poll_full` and nothing is written or mailed. An exact replay
- * mails nothing and reports each mailbox's current roster state.
+ * batch is refused with 409 `poll_full`; if a removed mailbox's resend budget is spent or
+ * cooling down, with 429 `rate_limited`. Either way nothing is written or mailed. A
+ * re-invited removed mailbox spends one resend. An exact replay mails nothing and reports
+ * each mailbox's current roster state.
  */
 export async function inviteMeetingPollVoters(
   ctx: MeetingPollHostContext,
@@ -594,6 +596,12 @@ export async function inviteMeetingPollVoters(
       // All or nothing: no prefix of a batch that does not fit is admitted.
       if (active + added > MEETING_POLL_LIMITS.maxEnrollments) throw pollFull()
     }
+    // Then the resend budget of re-invited removed mailboxes, also all or nothing.
+    const reinvited = await reinvitationBudget(
+      trx,
+      poll,
+      plan.filter((entry) => entry.outcome === 'invited').map((entry) => entry.key),
+    )
     const entries: MeetingPollInvitationEntry[] = []
     for (const { invitee, key, voter, outcome } of plan) {
       if (outcome === 'unchanged' && voter) {
@@ -637,8 +645,12 @@ export async function inviteMeetingPollVoters(
       }
       const credential = await issueCredential(trx, poll, voterId, 'voting', poll.deadline, secret)
       await queueCredentialMail(trx, poll, voterId, 'invitation', credential, 'first')
-      // A host's explicit invitation also clears a removal tombstone.
-      await newCurrentCredential(trx, poll, key, { clearRemoval: true })
+      // A host's explicit invitation also clears a removal tombstone; re-inviting a removed
+      // mailbox spends one of its resends.
+      await newCurrentCredential(trx, poll, key, {
+        clearRemoval: true,
+        resend: reinvited.some((removed) => removed.equals(key)),
+      })
       entries.push({
         email: invitee.email,
         outcome,
@@ -1070,13 +1082,14 @@ async function queueCredentialMail(
 /**
  * A new credential was mailed to the mailbox (enrollment, invitation or verification), so
  * its recovery count restarts; resend does the same in its own counter update. Resend
- * counts, reminder receipts and opt-outs never reset.
+ * counts, reminder receipts and opt-outs never reset. A re-invitation of a removed mailbox
+ * (`resend`) counts as one resend and restarts its cooldown.
  */
 async function newCurrentCredential(
   trx: Db,
   poll: VoterPoll,
   emailKey: Buffer,
-  { clearRemoval }: { clearRemoval: boolean },
+  { clearRemoval, resend = false }: { clearRemoval: boolean; resend?: boolean },
 ) {
   await trx
     .insertInto('meeting_poll_mailbox_counters')
@@ -1091,11 +1104,58 @@ async function newCurrentCredential(
       conflict.columns(['poll_id', 'email_key']).doUpdateSet({
         recovery_count: 0,
         last_recovery_at: null,
+        ...(resend
+          ? {
+              resend_count: sql<number>`meeting_poll_mailbox_counters.resend_count + 1`,
+              last_resend_at: poll.at,
+            }
+          : {}),
         ...(clearRemoval ? { removed_at: null } : {}),
         updated_at: poll.at,
       }),
     )
     .execute()
+}
+
+/**
+ * Re-inviting a removed mailbox mails it again, so it follows the resend budget the mailbox
+ * kept across removal: at most three per poll and mailbox and one per 15 minutes, judged at
+ * `poll.at`. Any re-invitation over budget refuses the whole batch with 429 `rate_limited`
+ * (Retry-After only when every refusal is a cooldown). Returns the removed mailboxes among
+ * `keys`, each of which then spends one resend.
+ */
+async function reinvitationBudget(
+  trx: Db,
+  poll: VoterPoll,
+  keys: readonly Buffer[],
+): Promise<Buffer[]> {
+  if (keys.length === 0) return []
+  const resendCooldown = MEETING_POLL_LIMITS.resendCooldownSeconds
+  const removed = await trx
+    .selectFrom('meeting_poll_mailbox_counters')
+    .select([
+      'email_key',
+      'resend_count',
+      sql<string | null>`CASE WHEN last_resend_at + make_interval(secs => ${resendCooldown})
+        > ${poll.at}::timestamptz THEN ceil(extract(epoch FROM last_resend_at
+        + make_interval(secs => ${resendCooldown}) - ${poll.at}::timestamptz))::text END`.as(
+        'resendRetryAfter',
+      ),
+    ])
+    .where('poll_id', '=', poll.id)
+    .where('email_key', 'in', keys)
+    .where('removed_at', 'is not', null)
+    .execute()
+  let capped = false
+  let retryAfter = 0
+  for (const counter of removed) {
+    if (counter.resend_count >= MEETING_POLL_LIMITS.maxResendsPerMailbox) capped = true
+    else if (counter.resendRetryAfter !== null)
+      retryAfter = Math.max(retryAfter, Math.max(1, Number(counter.resendRetryAfter)))
+  }
+  if (capped) throw new MeetingPollRateLimitError()
+  if (retryAfter > 0) throw new MeetingPollRateLimitError(retryAfter)
+  return removed.map((counter) => counter.email_key)
 }
 
 /** The mailbox's counter row, created when missing, with cooldowns judged at `poll.at`. */

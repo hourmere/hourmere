@@ -119,6 +119,12 @@ unverified public enrollees. Removal deletes the voter row with its votes, crede
 deliveries and marks the mailbox counter row removed, which alone outlives it with its mail
 counts and opt-out. Removal checks only the host revision and advances the host and results
 revisions, so voter activity cannot make it fail.
+The internal cleanup service in `packages/scheduling/src/meeting-poll-cleanup.ts`, run by the
+hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending voters and
+replay tombstones past their purge instant (and terminal polls once an installation
+retention is supplied) in bounded batches that skip locked rows instead of waiting. Poll
+deletion and cleanup leave no voter data behind: only the receipts' pseudonymous replay
+tombstones remain after a poll is deleted.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.

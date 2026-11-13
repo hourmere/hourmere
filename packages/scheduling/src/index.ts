@@ -150,6 +150,11 @@ export {
   type ManagedBooking,
 } from './manage.ts'
 export {
+  cleanupMeetingPolls,
+  type MeetingPollCleanupOptions,
+  type MeetingPollCleanupResult,
+} from './meeting-poll-cleanup.ts'
+export {
   getTeamMemberDepartureImpact,
   MemberDepartureBookingSchema,
   MemberDepartureEventTypeSchema,
