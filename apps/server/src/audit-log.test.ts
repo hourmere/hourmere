@@ -22,6 +22,12 @@ import { instanceRoutes } from './routes/instance.ts'
 import { openApiDocument, productApp, responseAndRequestStrictness } from './routes/test-app.ts'
 
 const serverUrl = process.env.DATABASE_URL
+type Body = {
+  data: { occurredAt: string; actor: { id: string } }[]
+  nextCursor: string | null
+  error?: string
+  [field: string]: unknown
+}
 const URL = 'http://localhost:4187'
 
 describe('audit log OpenAPI', () => {
@@ -94,7 +100,7 @@ describe.skipIf(!serverUrl)('audit log over REST, MCP and the CLI (real Postgres
       },
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     })
-    return { status: response.status, body: await response.json() }
+    return { status: response.status, body: (await response.json()) as Body }
   }
   async function mcp(token: string, method: string, params: object = {}) {
     const res = await app.request('/mcp', {

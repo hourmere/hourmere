@@ -179,6 +179,7 @@ describe.skipIf(!serverUrl)('audit log protections under source-copy mutation', 
     ],
     [
       'organizationScoped',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text of the protection
       'const conditions = [sql`organization_id = ${organizationId}`]',
       'const conditions = [sql`true`]',
     ],
