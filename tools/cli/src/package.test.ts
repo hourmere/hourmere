@@ -157,7 +157,7 @@ describe('CLI npm packaging protections', () => {
     expect(job.if).toBeUndefined()
     const actions = job.steps.filter((step: { uses?: string }) => step.uses)
     expect(actions.map((step: { uses: string }) => step.uses)).toEqual(
-      workflow.jobs.check.steps
+      workflow.jobs['check-static'].steps
         .filter((step: { uses?: string }) => step.uses)
         .map((step: { uses: string }) => step.uses),
     )
