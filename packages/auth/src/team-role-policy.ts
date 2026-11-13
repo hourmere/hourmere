@@ -356,6 +356,15 @@ export function createTeamRolePolicy(
     withTransaction<T>(trx: Transaction<Database>, operation: () => Promise<T>): Promise<T> {
       return transactions.run(trx, operation)
     },
+    /**
+     * The native auth transaction this code runs in, if any. Hooks called inside one read
+     * through its connection: waiting for an application connection while holding an auth
+     * connection could deadlock against the MCP OAuth broker, which holds an application
+     * transaction while it waits for an auth connection.
+     */
+    transaction(): Transaction<Database> | undefined {
+      return transactions.getStore()
+    },
     /** Run before native lookups so denied targets never reveal whether they exist. */
     async before(ctx: AuthMiddlewareContext) {
       const state = requests.getStore()

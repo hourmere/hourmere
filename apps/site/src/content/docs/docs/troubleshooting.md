@@ -107,6 +107,23 @@ in `.env` does not change an already initialized database role's password. See
 [server and database configuration](/docs/configuration#server-and-database) and
 [upgrade guidance](/docs/self-hosting#upgrade-and-roll-back). Keep the database volume intact.
 
+## Requests fail with 503 service_unavailable
+
+Each server process takes PostgreSQL connections from pools of ten: one for the application
+and, except in a worker, one for sign-in. A request that cannot get a connection within
+`DATABASE_CONNECTION_TIMEOUT` (default 10 seconds) is answered `503` with
+`{ "error": "service_unavailable" }` and `Retry-After: 5`, and the server logs one
+`database connection unavailable` line. Retry after the given seconds; as with any error
+response, check whether an earlier step of a write already took effect before repeating it.
+
+Occasional lines during a burst of traffic or long CSV exports are expected. If they
+continue, check that PostgreSQL is running and answering (`docker compose logs --tail=100 db`),
+that `max_connections` leaves room for every server process (see
+[connection sizing](/docs/notifications)), and look for sessions that stay
+`idle in transaction` in `pg_stat_activity`. Raising the timeout only makes requests wait
+longer before the same answer. See
+[server and database configuration](/docs/configuration#server-and-database).
+
 ## Read logs and check health
 
 ```sh

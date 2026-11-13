@@ -1,6 +1,6 @@
 import { apiKey } from '@better-auth/api-key'
 import { type InterfaceLanguage, resolveAdminLanguage } from '@hourmere/core/language'
-import { createDb, type Db, guardPoolErrors } from '@hourmere/db'
+import { createDb, type Db, guardPoolErrors, type PoolOptions, poolTimeouts } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
@@ -156,7 +156,11 @@ class AuthPool extends pg.Pool {
  * inserted; pass createAuth the same policy, and check the settings arrive with
  * assertSignupEnforced before serving requests.
  */
-export function createAuthPool(databaseUrl: string, signup: SignupPolicy): pg.Pool {
+export function createAuthPool(
+  databaseUrl: string,
+  signup: SignupPolicy,
+  poolOptions: PoolOptions = {},
+): pg.Pool {
   // Parsed here, the way node-postgres parses it, instead of passed as connectionString:
   // node-postgres lets an `options` parameter in the URL replace the options given beside it,
   // which would drop the sign-up settings and turn the database check off. The URL's options
@@ -166,7 +170,8 @@ export function createAuthPool(databaseUrl: string, signup: SignupPolicy): pg.Po
   const options = ['-c search_path=auth', config.options, signupConnectionOptions(signup)]
     .filter(Boolean)
     .join(' ')
-  const pool = new AuthPool({ ...(config as pg.PoolConfig), options })
+  // The organization-context lock pool copies these settings, connection timeout included.
+  const pool = new AuthPool({ ...(config as pg.PoolConfig), options, ...poolTimeouts(poolOptions) })
   // Same reason as createPool in @hourmere/db: an unhandled client error would kill the
   // process.
   guardPoolErrors(pool, ' (auth)')
@@ -357,10 +362,13 @@ export function createAuth({
         create: {
           before: async (user) => {
             // Every new user passes here, whatever the route (email link, Google, Microsoft),
-            // so this is where the sign-up policy applies. Better Auth runs this outside the
-            // insert's transaction, so two first sign-ups at the same moment could both pass;
-            // the database checks again inside it (migration 0006) and lets only one through.
-            if (!(await maySignUp(db, signup, user.email))) {
+            // so this is where the sign-up policy applies. The check is not serialized with
+            // the insert, so two first sign-ups at the same moment could both pass; the
+            // database checks again inside the insert (migration 0006) and lets only one
+            // through. A social sign-up runs this inside Better Auth's user/account
+            // transaction on the auth pool: read through that connection rather than wait
+            // for an application connection while holding it.
+            if (!(await maySignUp(teamRolePolicy.transaction() ?? db, signup, user.email))) {
               throw new APIError('FORBIDDEN', {
                 code: 'SIGNUP_DISABLED',
                 message:
@@ -458,7 +466,7 @@ export function createAuth({
           // An invitation is accepted only by someone who proved they own the invited address.
           requireEmailVerificationOnInvitation: true,
           membershipLimit: teamMembershipLimit,
-          organizationHooks: organizationGuards(db),
+          organizationHooks: organizationGuards(db, teamRolePolicy.transaction),
         }),
       ),
       memberReadPrivacy(db),

@@ -146,7 +146,13 @@ const refuse = (message: string) =>
  * session and API keys without an organization. Team work belongs in a team organization.
  * (Leaving is not hooked: Better Auth refuses to let the only owner leave.)
  */
-export function organizationGuards(db: Db): NonNullable<OrganizationOptions['organizationHooks']> {
+export function organizationGuards(
+  db: Db,
+  transaction: () => Db | undefined = () => undefined,
+): NonNullable<OrganizationOptions['organizationHooks']> {
+  // Hooks that run inside a native auth transaction (invitation acceptance) read through
+  // its connection rather than wait for an application connection while holding it.
+  const reader = () => transaction() ?? db
   const checkSlug = (slug: string | undefined) => {
     if (slug !== undefined && isReservedName(slug))
       throw new APIError('BAD_REQUEST', {
@@ -155,7 +161,7 @@ export function organizationGuards(db: Db): NonNullable<OrganizationOptions['org
       })
   }
   const isPersonal = async (organizationId: string) =>
-    (await personalOwner(db, organizationId)) !== undefined
+    (await personalOwner(reader(), organizationId)) !== undefined
   const noOneElse = async ({ organization }: { organization: { id: string } }) => {
     if (await isPersonal(organization.id)) {
       throw refuse('A personal organization has no other members; create a team organization')
@@ -175,12 +181,12 @@ export function organizationGuards(db: Db): NonNullable<OrganizationOptions['org
     beforeAcceptInvitation: noOneElse,
     beforeAddMember: noOneElse,
     beforeRemoveMember: async ({ member, organization }) => {
-      if ((await personalOwner(db, organization.id)) === member.userId) {
+      if ((await personalOwner(reader(), organization.id)) === member.userId) {
         throw refuse('The owner cannot be removed from their personal organization')
       }
     },
     beforeUpdateMemberRole: async ({ member, organization }) => {
-      if ((await personalOwner(db, organization.id)) === member.userId) {
+      if ((await personalOwner(reader(), organization.id)) === member.userId) {
         throw refuse('The owner of a personal organization keeps the owner role')
       }
     },

@@ -2,6 +2,7 @@ import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
 import { calendarEncryptionKey } from '@hourmere/calendars'
 import { conferenceEncryptionKey } from '@hourmere/conferences'
 import { embedOrigin } from '@hourmere/core/embed'
+import { DEFAULT_CONNECTION_TIMEOUT_MS } from '@hourmere/db'
 import { parseSsoPrivateTargets } from '@hourmere/outbound/sso-private-targets'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
@@ -81,6 +82,11 @@ const schema = z
         message:
           'DATABASE_URL is not a valid URL (percent-encode special characters in the password, or leave the password out and set PGPASSWORD)',
       }),
+    // How long a request waits for a database connection before it is answered 503.
+    DATABASE_CONNECTION_TIMEOUT: timeoutSeconds(
+      'DATABASE_CONNECTION_TIMEOUT',
+      DEFAULT_CONNECTION_TIMEOUT_MS,
+    ),
     EMBED_ALLOWED_ORIGINS: optional(
       z
         .string()
@@ -575,12 +581,15 @@ export type Config = Omit<
   | 'HTTP_HEADERS_TIMEOUT'
   | 'HTTP_REQUEST_TIMEOUT'
   | 'HTTP_KEEP_ALIVE_TIMEOUT'
+  | 'DATABASE_CONNECTION_TIMEOUT'
 > & {
   PUBLIC_URL: string
   trustedProxies: string[]
   signup: SignupPolicy
   /** HTTP_*_TIMEOUT, in milliseconds. */
   httpTimeouts: HttpTimeouts
+  /** DATABASE_CONNECTION_TIMEOUT, in milliseconds, for the application and auth pools. */
+  databaseConnectionTimeout: number
   /** Social sign-in providers whose credentials are set. */
   socialProviders: { google?: OAuthClient; microsoft?: OAuthClient }
 }
@@ -604,6 +613,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     HTTP_HEADERS_TIMEOUT,
     HTTP_REQUEST_TIMEOUT,
     HTTP_KEEP_ALIVE_TIMEOUT,
+    DATABASE_CONNECTION_TIMEOUT,
     ...rest
   } = c
   return {
@@ -615,6 +625,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       request: HTTP_REQUEST_TIMEOUT * 1000,
       keepAlive: HTTP_KEEP_ALIVE_TIMEOUT * 1000,
     },
+    databaseConnectionTimeout: DATABASE_CONNECTION_TIMEOUT * 1000,
     PUBLIC_URL: c.PUBLIC_URL ? new URL(c.PUBLIC_URL).origin : `http://localhost:${c.PORT}`,
     socialProviders: { ...(google && { google }), ...(microsoft && { microsoft }) },
   }

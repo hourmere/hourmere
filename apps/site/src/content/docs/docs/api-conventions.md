@@ -227,7 +227,8 @@ is optional and may change. The HTTP status carries the category and the code na
 specific case, e.g. 404 `event_type_not_found`, 409 `slot_taken`. These codes are reserved
 for the generic cases in the table below: `invalid_request`,
 `unauthorized`, `forbidden`, `not_found` (unknown endpoint), `method_not_allowed`,
-`payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
+`payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`,
+`service_unavailable`. Codes are never
 renamed within `/api/v1`. Services cannot use these codes except `invalid_request` with
 an invalid-input error when enforcing the same schema validation as the transports.
 
@@ -271,6 +272,7 @@ See [Zoom connections](/docs/zoom-connections) for callback replay and recovery 
 | 405 `method_not_allowed`, 413 `payload_too_large`, 415 `unsupported_media_type` | Raised by the HTTP layer for the obvious cases; any other 4xx from it is `invalid_request` |
 | 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
 | 500 `internal_error` | An unexpected server error; details go to the server log only |
+| 503 `service_unavailable` | The server could not get a database connection in time (`DATABASE_CONNECTION_TIMEOUT`). Temporary: retry after `Retry-After` seconds. Like a 500, it does not say whether an earlier step of the request took effect |
 
 `message` is written for people and is safe to show: it never contains internal error text.
 

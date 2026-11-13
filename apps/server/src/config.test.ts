@@ -564,6 +564,22 @@ describe('loadConfig', () => {
     ).toBe(20_000)
   })
 
+  it('takes the database connection timeout in whole seconds, 10 unless set', () => {
+    expect(loadConfig(base).databaseConnectionTimeout).toBe(10_000)
+    expect(loadConfig({ ...base, DATABASE_CONNECTION_TIMEOUT: '' }).databaseConnectionTimeout).toBe(
+      10_000,
+    )
+    expect(
+      loadConfig({ ...base, DATABASE_CONNECTION_TIMEOUT: '30' }).databaseConnectionTimeout,
+    ).toBe(30_000)
+    // Zero would turn the limit off and let an exhausted pool queue requests forever.
+    for (const bad of ['0', '10000', '0.5', '-1', '10s']) {
+      expect(() => loadConfig({ ...base, DATABASE_CONNECTION_TIMEOUT: bad }), bad).toThrow(
+        /DATABASE_CONNECTION_TIMEOUT must be a whole number of seconds from 1 to 3600/,
+      )
+    }
+  })
+
   describe('sign-up', () => {
     it('defaults to first-user, also when compose passes the variables empty', () => {
       const policy = { mode: 'first-user', allowedDomains: [] }

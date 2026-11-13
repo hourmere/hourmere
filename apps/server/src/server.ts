@@ -503,7 +503,7 @@ export function productionAppOptions({
 /** What the running server's Better Auth options need beyond the configuration. */
 export interface ProductionAuthDeps {
   config: Config
-  /** createAuthPool(config.DATABASE_URL, config.signup). */
+  /** createAuthPool(config.DATABASE_URL, config.signup, its connection timeout). */
   pool: AuthConfig['pool']
   db: Db
   mailer: Mailer
@@ -580,7 +580,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
     )
-  const pool = createPool(config.DATABASE_URL)
+  const poolOptions = { connectionTimeoutMillis: config.databaseConnectionTimeout }
+  const pool = createPool(config.DATABASE_URL, poolOptions)
   const db = createDb(pool)
 
   if (config.AUTO_MIGRATE) {
@@ -631,7 +632,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const role = config.HOURMERE_ROLE
   // A worker serves only /api/health, for the container health check: no sign-in, no API.
   const authPool =
-    role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup)
+    role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup, poolOptions)
   if (authPool) {
     try {
       await assertSignupEnforced(authPool, config.signup)
