@@ -1,9 +1,10 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import * as formatting from '../../format.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { AppShell, RequireSession, SessionLayout, TeamBookingsPage } from '../../lazy-pages.tsx'
 import styles from '../../styles.css?raw'
 import {
   fakeApi,
@@ -16,9 +17,12 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import bookingStyles from './team-bookings.css?raw'
 
 const PAGE = '/app/team/bookings'
+// Every test opens the page with its route chunks loaded, the first one included.
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, TeamBookingsPage))
 beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z')))
 const LIST = 'GET /api/v1/team/bookings'
 const FIRST_ID = 'b0000000-0000-7000-8000-000000000001'
