@@ -169,6 +169,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
           now: ctx.now(),
           snapshot: notificationSnapshot(null),
           bookerEmail: 'group-copy@example.com',
+          conference: {},
         })
         if (!slot) throw new Error('Missing group slot')
         return insertBooking(trx, {

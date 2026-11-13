@@ -594,10 +594,62 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
       .set({ status: 'needs_reauth', credentials: null })
       .where('id', '=', connection.id)
       .execute()
-    await expect(s.book('c@example.test', START, randomUUID(), c)).rejects.toMatchObject({
-      code: 'automatic_zoom_unavailable',
-    })
+    // A visitor joining an existing occurrence never sees a host-facing provider hint, and
+    // gets the same answer as a mailbox that already holds a seat there.
+    for (const email of ['c@example.test', 'a@example.test'])
+      await expect(s.book(email, START, randomUUID(), c)).rejects.toMatchObject({
+        code: 'slot_unavailable',
+        message: 'This time is not available',
+      })
     expect((await state(s.eventId))[0]!.active_seats).toBe(2)
+  })
+  it('keeps the public answer when conference readiness changes after admission', async () => {
+    const s = await setup(3)
+    const connection = await db
+      .insertInto('conference_connections')
+      .values({
+        user_id: s.userId,
+        provider: 'zoom',
+        mode: 'meetings',
+        external_user_id: randomUUID(),
+        status: 'active',
+        credentials: Buffer.from('synthetic'),
+        scopes: [
+          'user:read:user',
+          'meeting:write:meeting',
+          'meeting:read:meeting',
+          'meeting:update:meeting',
+          'meeting:delete:meeting',
+        ],
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('event_types')
+      .set({
+        location: JSON.stringify({ kind: 'zoom', autoCreate: true }),
+        zoom_connection_id: connection.id,
+      })
+      .where('id', '=', s.eventId)
+      .execute()
+    await s.book('a@example.test', START, randomUUID(), { ...ctx, automaticZoom: true })
+    const slot = (await state(s.eventId))[0]!
+    // An occurrence whose resource row is not there yet takes the first-seat preparation
+    // path. The instance switch flips between the admission check and that preparation.
+    await db.deleteFrom('group_slot_conferences').where('group_slot_id', '=', slot.id).execute()
+    let reads = 0
+    const racing: PublicContext = {
+      ...ctx,
+      get automaticZoom() {
+        return reads++ === 0
+      },
+    }
+    await expect(s.book('b@example.test', START, randomUUID(), racing)).rejects.toMatchObject({
+      code: 'slot_unavailable',
+      message: 'This time is not available',
+    })
+    expect(reads).toBeGreaterThan(1)
+    expect((await state(s.eventId))[0]!.active_seats).toBe(1)
   })
   it('keeps current notice and booking-window cutoffs on occupied occurrences', async () => {
     const s = await setup(3)

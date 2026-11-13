@@ -6,7 +6,9 @@ import {
   parseLocation,
   selectBookableLocationOption,
 } from './availability.ts'
+import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { requireGroupSlotConferenceUsable } from './group-conferences.ts'
 import { createNotificationSnapshot, type NotificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 
@@ -77,6 +79,8 @@ export async function admitGroupSlot(
     sourceSlotId?: string | undefined
     locationOptionId?: string | undefined
     expectedSlotId?: string | undefined
+    /** Instance switches for the pinned conference preflight of an existing occurrence. */
+    conference: Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>
   },
 ) {
   const config = await db
@@ -141,22 +145,14 @@ export async function admitGroupSlot(
       'location_unavailable',
       'Group seats share the configured location.',
     )
-  if (
-    slot &&
-    (await db
-      .selectFrom('bookings')
-      .select('id')
-      .where('group_slot_id', '=', slot.id)
-      .where('status', '=', 'confirmed')
-      .where('group_booker_key', '=', sql<string>`normalize_group_booker_key(${q.bookerEmail})`)
-      .executeTakeFirst())
-  )
-    throw groupUnavailable()
-  if (slot && slot.host_user_id !== hostId) throw groupUnavailable()
-  const duration = q.end.since(q.start).total({ unit: 'minutes' })
-  if (slot && !q.preserveDurationBookingId && !config.allowed_durations_minutes.includes(duration))
-    throw groupUnavailable()
   if (slot) {
+    // Every remaining check of an existing occurrence depends only on the occurrence, never
+    // on the mailbox, and runs before the mailbox lookup: a seat holder and a stranger must
+    // reach the same answer through the same queries. The lookup is deliberately last.
+    if (slot.host_user_id !== hostId) throw groupUnavailable()
+    const duration = q.end.since(q.start).total({ unit: 'minutes' })
+    if (!q.preserveDurationBookingId && !config.allowed_durations_minutes.includes(duration))
+      throw groupUnavailable()
     // This interval already reserves the host. Logistics edits govern new occurrences,
     // not additional seats in an immutable existing occurrence.
     if (
@@ -172,13 +168,28 @@ export async function admitGroupSlot(
         ) > 0)
     )
       throw groupUnavailable()
+    const location = parseLocation(slot.location)
+    // A shared occurrence cannot collect a phone number per seat.
+    if (location?.kind === 'phone' && location.askInvitee === true) throw groupUnavailable()
+    await requireGroupSlotConferenceUsable(q.conference, db, slot)
+    if (
+      await db
+        .selectFrom('bookings')
+        .select('id')
+        .where('group_slot_id', '=', slot.id)
+        .where('status', '=', 'confirmed')
+        .where('group_booker_key', '=', sql<string>`normalize_group_booker_key(${q.bookerEmail})`)
+        .executeTakeFirst()
+    )
+      throw groupUnavailable()
     return {
       existing: true,
       id: slot.id,
-      location: parseLocation(slot.location),
+      location,
       locationOption: slot.location_option,
     }
   }
+  const duration = q.end.since(q.start).total({ unit: 'minutes' })
   selectBookableLocationOption(q.event, q.locationOptionId)
   const source = q.sourceSlotId
     ? await db
