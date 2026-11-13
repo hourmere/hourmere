@@ -1,10 +1,19 @@
 // Test support: isolated databases, never the data in the development database.
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { copyFile, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { setTimeout } from 'node:timers/promises'
 import pg from 'pg'
 import { createPool, guardPoolErrors } from './index.ts'
-import { runMigrations } from './migrate.ts'
-import { registerTestDatabaseCleanup, withDeadline } from './test-database-registry.ts'
+import { migrationsDir, runMigrations } from './migrate.ts'
+import {
+  MIGRATED_TEMPLATE_ENV,
+  MIGRATED_TEMPLATE_SERVER_ENV,
+  registerTestDatabaseCleanup,
+  templateServer,
+  withDeadline,
+} from './test-database-registry.ts'
 
 export { cleanupTestDatabases } from './test-database-registry.ts'
 
@@ -25,6 +34,10 @@ export interface TestDatabaseOptions {
    * Copies this test template database (see `createTestDatabaseTemplate`) instead of
    * `template1`. Migrations still run unless `migrate` is false; already applied files are
    * skipped, so a clone of a predecessor template applies only the newer migrations.
+   *
+   * Without this option, a fixture that migrates with the repository's migrations copies the
+   * test run's migrated template when one exists on the same server (see
+   * scripts/test-database-global-setup.ts); the migration run then only verifies checksums.
    */
   template?: string
 }
@@ -126,6 +139,141 @@ async function dropDatabase(maintenanceUrl: string, name: string): Promise<void>
   }
 }
 
+/** The run's migrated template, when this fixture would otherwise replay every migration. */
+function migratedTemplate(
+  serverUrl: string,
+  migrationsDirectory: string | undefined,
+  options: TestDatabaseOptions,
+): string | undefined {
+  if (options.template !== undefined || options.migrate === false) return undefined
+  if (migrationsDirectory !== undefined && resolve(migrationsDirectory) !== resolve(migrationsDir))
+    return undefined
+  const name = process.env[MIGRATED_TEMPLATE_ENV]
+  if (name === undefined || !TEMPLATE_NAME.test(name)) return undefined
+  return process.env[MIGRATED_TEMPLATE_SERVER_ENV] === templateServer(serverUrl) ? name : undefined
+}
+
+interface MigrationFile {
+  name: string
+  checksum: string
+}
+
+/** The `.sql` files of a directory in run order, with the checksum `runMigrations` records. */
+async function migrationFiles(directory: string): Promise<MigrationFile[]> {
+  const names = (await readdir(directory)).filter((file) => file.endsWith('.sql')).sort()
+  return Promise.all(
+    names.map(async (name) => ({
+      name,
+      checksum: createHash('sha256')
+        .update((await readFile(join(directory, name), 'utf8')).replaceAll('\r\n', '\n'))
+        .digest('hex'),
+    })),
+  )
+}
+
+let repositoryMigrations: Promise<MigrationFile[]> | undefined
+const predecessorRequests = new Map<string, number>()
+const predecessorTemplates = new Map<string, Promise<TestDatabaseTemplate>>()
+
+async function createPredecessorTemplate(
+  serverUrl: string,
+  files: MigrationFile[],
+  key: string,
+): Promise<TestDatabaseTemplate> {
+  const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-'))
+  try {
+    for (const file of files) {
+      await copyFile(join(migrationsDir, file.name), join(directory, file.name))
+    }
+    const template = await createTestDatabaseTemplate(
+      serverUrl,
+      async (pool) => {
+        await runMigrations(pool, directory)
+      },
+      { tag: 'predecessor' },
+    )
+    // The template is dropped with the file's other fixtures (it owns a cleanup like any
+    // fixture); forget it then, so a later fixture builds a new one instead of copying a
+    // database that no longer exists.
+    const unregister = registerTestDatabaseCleanup(async () => {
+      predecessorTemplates.delete(key)
+      predecessorRequests.delete(key)
+      unregister()
+    })
+    return template
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Source-copy and upgrade tests migrate a directory that starts with byte-identical copies of
+ * the repository's first migrations and then holds a changed or later file. From the second
+ * such fixture in a test file on, the shared leading migrations are applied once to a
+ * template and copied; `runMigrations` then verifies their checksums and applies only the
+ * rest, so each fixture ends in the same state as a full replay.
+ */
+function predecessorTemplate(
+  serverUrl: string,
+  migrationsDirectory: string | undefined,
+  options: TestDatabaseOptions,
+): Promise<string | undefined> | undefined {
+  // Decided synchronously when it cannot apply, so other fixtures start CREATE at once.
+  if (options.template !== undefined || options.migrate === false) return undefined
+  if (migrationsDirectory === undefined) return undefined
+  if (resolve(migrationsDirectory) === resolve(migrationsDir)) return undefined
+  return sharedPredecessorTemplate(serverUrl, migrationsDirectory, options)
+}
+
+async function sharedPredecessorTemplate(
+  serverUrl: string,
+  migrationsDirectory: string,
+  options: TestDatabaseOptions,
+): Promise<string | undefined> {
+  let files: MigrationFile[]
+  let repository: MigrationFile[]
+  try {
+    repositoryMigrations ??= migrationFiles(migrationsDir)
+    ;[files, repository] = await Promise.all([
+      migrationFiles(migrationsDirectory),
+      repositoryMigrations,
+    ])
+  } catch {
+    // Unreadable directories fail in runMigrations with their real error.
+    return undefined
+  }
+  let shared = 0
+  while (
+    shared < files.length &&
+    shared < repository.length &&
+    files[shared]?.name === repository[shared]?.name &&
+    files[shared]?.checksum === repository[shared]?.checksum
+  ) {
+    shared += 1
+  }
+  if (shared === 0) return undefined
+  if (shared === repository.length && shared === files.length) {
+    return migratedTemplate(serverUrl, undefined, options)
+  }
+  const key = `${templateServer(serverUrl)} ${shared}`
+  const requests = (predecessorRequests.get(key) ?? 0) + 1
+  predecessorRequests.set(key, requests)
+  // A single fixture replays as before; only repeated fixtures pay for a template.
+  if (requests < 2) return undefined
+  let template = predecessorTemplates.get(key)
+  if (!template) {
+    template = createPredecessorTemplate(serverUrl, repository.slice(0, shared), key)
+    predecessorTemplates.set(key, template)
+  }
+  try {
+    return (await template).name
+  } catch {
+    predecessorTemplates.delete(key)
+    // The fixture replays every migration and reports a real setup failure itself.
+    return undefined
+  }
+}
+
 /** Creates a new database on serverUrl's server, using postgres only for maintenance. */
 export async function createTestDatabase(
   serverUrl: string,
@@ -183,6 +331,13 @@ export async function createTestDatabase(
   // still leaves an owner able to clean up. The runner registers cleanupTestDatabases.
   const unregister = registerTestDatabaseCleanup(drop)
   setup = (async () => {
+    // Resolved after registration: a signal while a predecessor template is built still
+    // finds this fixture's owner.
+    let template = options.template ?? migratedTemplate(serverUrl, migrationsDirectory, options)
+    const predecessor = template
+      ? undefined
+      : predecessorTemplate(serverUrl, migrationsDirectory, options)
+    if (predecessor) template = await predecessor
     // CREATE copies its whole template and waits for conflicting locks on it; under CI load
     // that can outlast the default admin timeout. Like DROP, only this statement waits longer.
     const creator = adminPool(
@@ -190,9 +345,7 @@ export async function createTestDatabase(
       Math.max(adminStatementTimeout(), CREATE_STATEMENT_TIMEOUT_MS),
     )
     try {
-      await creator.query(
-        `CREATE DATABASE ${name}${options.template ? ` TEMPLATE ${options.template}` : ''}`,
-      )
+      await creator.query(`CREATE DATABASE ${name}${template ? ` TEMPLATE ${template}` : ''}`)
       created = true
     } finally {
       await creator.end()

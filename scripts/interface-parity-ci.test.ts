@@ -11,18 +11,18 @@ const mergeBase = 'c'.repeat(40)
 function verify(copy: string) {
   const { jobs } = parse(copy) as {
     jobs: {
-      check: {
+      'check-tests': {
         env: { HOURMERE_PARITY_BASE: string }
         steps: { uses?: string; with?: { 'fetch-depth'?: number } }[]
       }
     }
   }
   expect(
-    jobs.check.steps.find(({ uses }) => uses?.startsWith('actions/checkout@'))?.with,
+    jobs['check-tests'].steps.find(({ uses }) => uses?.startsWith('actions/checkout@'))?.with,
   ).toMatchObject({
     'fetch-depth': 0,
   })
-  const expression = jobs.check.env.HOURMERE_PARITY_BASE.match(/^\$\{\{(.*)\}\}$/)?.[1]
+  const expression = jobs['check-tests'].env.HOURMERE_PARITY_BASE.match(/^\$\{\{(.*)\}\}$/)?.[1]
   expect(expression).toBeDefined()
   // This workflow expression uses only property access, string equality, &&/|| and
   // startsWith, whose string-input semantics match JavaScript for these event fixtures.

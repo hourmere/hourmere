@@ -1,7 +1,19 @@
 name: UI checks
 
 on:
+  # Not required checks. Pull requests run them only when the rendered UI or its tooling
+  # changes; every push to main still runs them. Server behaviour behind the pages is covered
+  # by the required browser regressions (`e2e`) on every pull request.
   pull_request:
+    paths:
+      - apps/web/**
+      - apps/site/**
+      - packages/core/**
+      - tools/e2e/**
+      - .github/workflows/ui-checks.yml
+      - package.json
+      - package-lock.json
+      - .node-version
   push:
     branches: [main]
   workflow_dispatch:

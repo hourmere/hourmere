@@ -3,7 +3,21 @@ name: CodeQL
 on:
   push:
     branches: [main]
+  # Not a required check. Pull requests that change no analysed source skip it; pushes to
+  # main and the weekly schedule still analyse everything.
   pull_request:
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.mts"
+      - "**/*.cts"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.mjs"
+      - "**/*.cjs"
+      - "**/*.astro"
+      - "**/*.html"
+      - .github/workflows/codeql.yml
   schedule:
     - cron: "27 4 * * 1"
 

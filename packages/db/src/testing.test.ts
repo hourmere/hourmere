@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -317,6 +317,60 @@ describe('test database ownership', () => {
     await owned.drop()
   })
 
+  describe("the run's migrated template", () => {
+    const shared = 'hourmere_test_migrated_42_0123456789abcdef'
+    const created = () => events.find((sql) => sql.startsWith('CREATE DATABASE'))
+
+    beforeEach(() => {
+      vi.stubEnv('HOURMERE_TEST_MIGRATED_TEMPLATE', shared)
+      vi.stubEnv('HOURMERE_TEST_MIGRATED_TEMPLATE_SERVER', 'postgres://test@localhost:5432')
+    })
+
+    it.each([
+      ['the default directory', undefined],
+      ['the repository directory by path', migrationModule.migrationsDir],
+    ])('is copied for %s and the copy still runs the migrations', async (_label, directory) => {
+      const owned = await createTestDatabase(
+        'postgresql://test:password@localhost:5432/hourmere',
+        directory,
+      )
+      expect(created()).toMatch(new RegExp(` TEMPLATE ${shared}$`))
+      expect(migrationModule.runMigrations).toHaveBeenCalledWith(pool, directory)
+      await owned.drop()
+    })
+
+    it.each([
+      ['another server', 'postgres://test:password@otherhost/hourmere', undefined, {}],
+      ['another user', 'postgres://other:password@localhost/hourmere', undefined, {}],
+      ['another port', 'postgres://test:password@localhost:5433/hourmere', undefined, {}],
+      [
+        'an empty fixture',
+        'postgres://test:password@localhost/hourmere',
+        undefined,
+        { migrate: false },
+      ],
+      ['another directory', 'postgres://test:password@localhost/hourmere', '/migrations', {}],
+    ] as const)('is not used for %s', async (_label, url, directory, options) => {
+      const owned = await createTestDatabase(url, directory, options)
+      expect(created()).toMatch(/^CREATE DATABASE hourmere_test_\d+_[a-f0-9]{16}$/)
+      await owned.drop()
+    })
+
+    it('gives way to an explicit template and ignores an unsafe name', async () => {
+      const explicit = 'hourmere_test_coverage_42_0123456789abcdef'
+      const owned = await createTestDatabase('postgres://test@localhost/hourmere', undefined, {
+        template: explicit,
+      })
+      expect(created()).toMatch(new RegExp(` TEMPLATE ${explicit}$`))
+      await owned.drop()
+      events.length = 0
+      vi.stubEnv('HOURMERE_TEST_MIGRATED_TEMPLATE', 'template1')
+      const plain = await createTestDatabase('postgres://test@localhost/hourmere')
+      expect(created()).toMatch(/^CREATE DATABASE hourmere_test_\d+_[a-f0-9]{16}$/)
+      await plain.drop()
+    })
+  })
+
   it.each(['hourmere', 'template1', 'hourmere_test_x; DROP DATABASE hourmere'])(
     'rejects the non-test template %s before creating a pool',
     async (template) => {
@@ -472,6 +526,110 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     const result = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [name])
     return result.rowCount !== 0
   }
+
+  /** Migration ledger of a fixture, and whether its first entry predates `since`. */
+  async function ledger(owned: TestDatabase, since: Date) {
+    const rows = (
+      await owned.pool.query<{ name: string; checksum: string; applied_at: Date }>(
+        'SELECT name, checksum, applied_at FROM schema_migrations ORDER BY name',
+      )
+    ).rows
+    return {
+      entries: rows.map(({ name, checksum }) => [name, checksum]),
+      copied: (rows[0]?.applied_at.getTime() ?? Number.POSITIVE_INFINITY) < since.getTime(),
+      /** When each migration was applied: equal times mean a copy of the same template. */
+      appliedAt: rows.map(({ applied_at }) => applied_at.toISOString()),
+    }
+  }
+
+  const predecessorTemplates = async () =>
+    (
+      await admin.query<{ datname: string }>(
+        'SELECT datname FROM pg_database WHERE datname LIKE $1',
+        [`hourmere_test_predecessor_${process.pid}_%`],
+      )
+    ).rows.map((row) => row.datname)
+
+  it("copies the run's migrated template for repository migrations", async () => {
+    expect(process.env.HOURMERE_TEST_MIGRATED_TEMPLATE).toMatch(/^hourmere_test_migrated_\d+_/)
+    const since = new Date()
+    const owned = await createTestDatabase(serverUrl as string)
+    try {
+      const { entries, copied } = await ledger(owned, since)
+      const repository = (await readdir(migrationModule.migrationsDir))
+        .filter((file) => file.endsWith('.sql'))
+        .sort()
+      expect(entries.map(([name]) => name)).toEqual(repository)
+      expect(copied).toBe(true)
+    } finally {
+      await owned.drop()
+    }
+  })
+
+  it('migrates repeated source copies from one template of their unchanged predecessors', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-test-'))
+    directories.push(directory)
+    const repository = (await readdir(migrationModule.migrationsDir))
+      .filter((file) => file.endsWith('.sql'))
+      .sort()
+      .slice(0, 3)
+    for (const file of repository) {
+      await copyFile(join(migrationModule.migrationsDir, file), join(directory, file))
+    }
+    await writeFile(join(directory, '9999_probe.sql'), 'CREATE TABLE probe (id integer);')
+    expect(await predecessorTemplates()).toEqual([])
+    const fixtures: TestDatabase[] = []
+    try {
+      const results = []
+      for (let copy = 0; copy < 3; copy += 1) {
+        const since = new Date()
+        const owned = await createTestDatabase(serverUrl as string, directory)
+        fixtures.push(owned)
+        await owned.pool.query('INSERT INTO probe VALUES (1)')
+        results.push(await ledger(owned, since))
+      }
+      // The first fixture replays as before; later ones copy one template of 0001..0003, so
+      // they share its application times, and each applies only the probe itself.
+      const predecessors = results.map(({ appliedAt }) => appliedAt.slice(0, 3))
+      expect(results[0]?.copied).toBe(false)
+      expect(predecessors[1]).not.toEqual(predecessors[0])
+      expect(predecessors[2]).toEqual(predecessors[1])
+      expect(results[2]?.appliedAt[3]).not.toBe(results[1]?.appliedAt[3])
+      expect(results[1]?.entries).toEqual(results[0]?.entries)
+      expect(results[2]?.entries).toEqual(results[0]?.entries)
+      expect(results[0]?.entries.map(([name]) => name)).toEqual([...repository, '9999_probe.sql'])
+      expect(await predecessorTemplates()).toHaveLength(1)
+      // A changed predecessor file is never taken from the template.
+      await writeFile(
+        join(directory, repository[2] as string),
+        'CREATE TABLE changed (id integer);',
+      )
+      const since = new Date()
+      const changed = await createTestDatabase(serverUrl as string, directory)
+      fixtures.push(changed)
+      expect((await ledger(changed, since)).copied).toBe(false)
+      await changed.pool.query('SELECT FROM changed')
+    } finally {
+      for (const fixture of fixtures) await fixture.drop()
+    }
+    await cleanupTestDatabases()
+    expect(await predecessorTemplates()).toEqual([])
+    // After cleanup, repeated copies build a new template instead of naming the dropped one.
+    await copyFile(
+      join(migrationModule.migrationsDir, repository[2] as string),
+      join(directory, repository[2] as string),
+    )
+    for (let copy = 0; copy < 2; copy += 1) {
+      const owned = await createTestDatabase(serverUrl as string, directory)
+      try {
+        await owned.pool.query('INSERT INTO probe VALUES (1)')
+      } finally {
+        await owned.drop()
+      }
+    }
+    expect(await predecessorTemplates()).toHaveLength(1)
+    await cleanupTestDatabases()
+  })
 
   /**
    * Keeps CREATE DATABASE … TEMPLATE waiting: COMMENT ON DATABASE holds SHARE UPDATE EXCLUSIVE

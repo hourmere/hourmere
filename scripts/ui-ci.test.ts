@@ -131,6 +131,19 @@ describe('UI measurement CI contract', () => {
   it('runs UI measurements only for pull requests, main pushes and manual baseline review', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     expect(workflow.on.push).toEqual({ branches: ['main'] })
+    // Pull requests run the advisory UI checks only when the UI or its tooling changes.
+    expect(workflow.on.pull_request).toEqual({
+      paths: [
+        'apps/web/**',
+        'apps/site/**',
+        'packages/core/**',
+        'tools/e2e/**',
+        '.github/workflows/ui-checks.yml',
+        'package.json',
+        'package-lock.json',
+        '.node-version',
+      ],
+    })
     expect(workflow.on.workflow_dispatch).toEqual({
       inputs: {
         visual_baselines: {
@@ -164,6 +177,8 @@ describe('UI measurement CI contract', () => {
   it('isolates UI jobs from reusable CI and releases', () => {
     expect(Object.keys(requiredWorkflow.jobs).sort()).toEqual([
       'check',
+      'check-static',
+      'check-tests',
       'cli-compatibility',
       'docker',
       'e2e',
@@ -183,7 +198,10 @@ describe('UI measurement CI contract', () => {
   // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
     // Also run the isolated Caddy upgrade integration; PostgreSQL limits stay unchanged.
-    ['check', '108d0bfde8853d30249ccbb817b61152784571bb04f1c623a465b5371b7896f4'],
+    ['check', 'd18968eb8cf24725d3c282e48bf92a300db6dd99208ef74bd8bcdde56f063b1e'],
+    // The suite runs in sharded jobs; the stable required job aggregates them with the static checks.
+    ['check-static', '3bce9a980ab6c404fbf4ccc83607a7da40b8feb11e75b4918e8fe9c2057d5a0c'],
+    ['check-tests', '8650b11062354b77329078510eba4d1dec85df88e346d1dc049221020b35843c'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],
