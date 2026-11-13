@@ -127,7 +127,10 @@ hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending vote
 replay tombstones past their purge instant (and terminal polls once an installation
 retention is supplied) in bounded batches that skip locked rows instead of waiting. Poll
 deletion and cleanup leave no voter data behind: only the receipts' pseudonymous replay
-tombstones remain after a poll is deleted.
+tombstones remain after a poll is deleted. Migration `0088_meeting_poll_receipt_tombstones.sql`
+makes the deletion trigger also replace the request fingerprint of every receipt but `create`
+(an invitation's covers invitee names and mailboxes) with a constant, and clears existing
+tombstones the same way.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.

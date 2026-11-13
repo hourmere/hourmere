@@ -661,6 +661,32 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
     ).map((row) => row.id)
   }
 
+  /**
+   * The request fingerprints of the poll's receipts other than `create`, as stored, and the
+   * invitation fingerprints recomputed from the poll ID and each invitee's name and mailbox,
+   * as anyone holding them could. Each recomputed one must match a stored receipt.
+   */
+  async function fingerprints(p: Awaited<ReturnType<typeof populated>>) {
+    const stored = (
+      await db
+        .selectFrom('meeting_poll_operations')
+        .select('request_fingerprint')
+        .where('poll_id', '=', p.pollId)
+        .where('operation', '!=', 'create')
+        .execute()
+    ).map((row) => row.request_fingerprint.toString('hex'))
+    const recomputed = ['invited', 'withdrawn', 'removed'].map((who) =>
+      Polls.receiptIdentity(p.ctx, 'invite', randomUUID(), {
+        pollId: p.pollId.toLowerCase(),
+        invitees: [{ name: p.name(who), email: p.email(who) }],
+      }).fingerprint.toString('hex'),
+    )
+    for (const fingerprint of recomputed)
+      expect(stored, 'the recomputed invitation fingerprint is stored').toContain(fingerprint)
+    expect(stored.length, 'invitations, a resend and a rotation').toBeGreaterThan(4)
+    return stored
+  }
+
   // --- Concurrency helpers ----------------------------------------------------------------
 
   /** Waits until `count` sessions of this database wait for a lock; false after 10 seconds. */
@@ -1150,7 +1176,7 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
   async function verifyDeletionPrivacy(M: Modules) {
     for (const state of ['open', 'closed', 'canceled', 'scheduled'] as const) {
       const p = await populated(M)
-      const values = await needles(p.pollId)
+      const values = [...(await needles(p.pollId)), ...(await fingerprints(p))]
       expect(values.length, 'non-vacuous').toBeGreaterThan(40)
       expect(Object.keys(await scan(values)).sort(), 'the scan sees stored data').toEqual(
         expect.arrayContaining([
@@ -1219,7 +1245,11 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
     await age(recent, 'closed', 29)
     const live = await populated(M, s)
     const due = [closed, canceled, abandoned, scheduled]
-    const values = (await Promise.all(due.map((p) => needles(p.pollId)))).flat()
+    const values = (
+      await Promise.all(
+        due.map(async (p) => [...(await needles(p.pollId)), ...(await fingerprints(p))]),
+      )
+    ).flat()
     const receipts = (await Promise.all(due.map((p) => receiptIds(p.pollId)))).flat()
 
     // No installation retention: terminal history stays.
@@ -1247,7 +1277,7 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
   async function verifyBookingDeletion(M: Modules) {
     const p = await populated(M)
     const bookingId = await schedule(p)
-    const values = await needles(p.pollId)
+    const values = [...(await needles(p.pollId)), ...(await fingerprints(p))]
     const receipts = await receiptIds(p.pollId)
     await succeeds(() => db.deleteFrom('bookings').where('id', '=', bookingId).execute())
     const deletedAt = await databaseNow()
@@ -1311,6 +1341,41 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
     expect(settled.map(outcome)).toEqual(['fulfilled', { code: 'team_management_access_denied' }])
   }
 
+  /**
+   * After the installation secret changed, voter services are refused, but cleanup and poll
+   * deletion still work: they read and write no keyed data, and deleting polls is how an
+   * operator invalidates data written under a lost secret.
+   */
+  async function verifyAfterKeyRotation(M: Modules) {
+    await drain(M)
+    const p = await open()
+    await succeeds(() => enroll(M, p, 'rotated-expired@example.com', '192.0.2.81'))
+    await expirePending(p, 'rotated-expired@example.com')
+    await invitee(M, p, 'rotated-invitee@example.com')
+    const state = await db
+      .selectFrom('meeting_poll_key_state')
+      .select('secret_fingerprint')
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('meeting_poll_key_state')
+      .set({ secret_fingerprint: randomBytes(32) })
+      .execute()
+    try {
+      expect(await failure(() => invite(M, p, ['after-rotation@example.com']))).toMatchObject({
+        name: 'MeetingPollKeyMismatchError',
+      })
+      expect(await succeeds(() => cleanup(M))).toMatchObject({ expiredReservations: 1 })
+      expect(await voterCount(p, 'rotated-expired@example.com')).toBe(0)
+      await succeeds(async () => deletePoll(M, p, (await revisions(p)).host_revision))
+      expect(await pollExists(p.pollId), 'deletion works under another secret').toBe(false)
+    } finally {
+      await db
+        .updateTable('meeting_poll_key_state')
+        .set({ secret_fingerprint: state.secret_fingerprint })
+        .execute()
+    }
+  }
+
   // --- Behaviour ---------------------------------------------------------------------------
 
   const REAL: Modules = { K: Key, P: Polls, V: Voters, B: Ballots, R: Results, C: Cleanup }
@@ -1351,6 +1416,10 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
     await verifyBookingDeletion(REAL)
   }, 120_000)
 
+  it('cleans up and deletes after the installation secret changed', async () => {
+    await verifyAfterKeyRotation(REAL)
+  }, 60_000)
+
   it('waits for the organization before the poll on deletion', async () => {
     await verifyDeletionLockOrder(REAL)
   }, 60_000)
@@ -1368,6 +1437,7 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
     verifyTerminalCleanup,
     verifyBookingDeletion,
     verifyDeletionLockOrder,
+    verifyAfterKeyRotation,
   ]
 
   it('passes every protection check through unmodified source copies', async () => {
@@ -1571,6 +1641,19 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
     ],
   ]
 
+  mutants.push([
+    'deletion takes the key fence',
+    verifyAfterKeyRotation,
+    {
+      polls: [
+        [
+          DELETE_OPENING,
+          `    await (await import('${new URL('./meeting-poll-key.ts', import.meta.url).href}')).ensureMeetingPollKey(trx, (ctx as { meetingPollSecret: string }).meetingPollSecret)\n${DELETE_OPENING}`,
+        ],
+      ],
+    },
+  ])
+
   // Only a failed assertion counts: a mutant that crashes or cannot load is not a detection.
   it.each(mutants)(
     'detects the mutation: %s',
@@ -1602,12 +1685,23 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
     }
   }
 
+  /** The tombstone trigger function as 0071 wrote it: it keeps every request fingerprint. */
+  const KEEP_FINGERPRINTS = `CREATE OR REPLACE FUNCTION retain_meeting_poll_tombstones() RETURNS trigger
+    LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+    BEGIN
+      UPDATE meeting_poll_operations SET poll_id=NULL,booking_id=NULL,
+        purge_at=clock_timestamp()+interval '90 days',updated_at=clock_timestamp() WHERE poll_id=OLD.id;
+      RETURN OLD;
+    END $$`
+  /** The current definition, from migration 0088. */
+  const CLEAR_FINGERPRINTS = readFileSync(
+    new URL('../../db/migrations/0088_meeting_poll_receipt_tombstones.sql', import.meta.url),
+    'utf8',
+  ).split('-- Tombstones written before this migration.')[0] as string
+
   /** Database cascades the services rely on, each broken in this throwaway database. */
-  const schemaMutants: [
-    string,
-    (M: Modules) => Promise<void>,
-    () => Promise<() => Promise<void>>,
-  ][] = [
+  type SchemaMutant = [string, (M: Modules) => Promise<void>, () => Promise<() => Promise<void>>]
+  const schemaMutants: SchemaMutant[] = [
     [
       'mailbox counters outlive their poll',
       verifyDeletionPrivacy,
@@ -1618,6 +1712,19 @@ describe.skipIf(!serverUrl)('meeting poll cleanup and deletion', () => {
       verifyExpiryCleanup,
       () => dropForeignKey('meeting_poll_capabilities', 'meeting_poll_voters'),
     ],
+    ...(['verifyDeletionPrivacy', 'verifyTerminalCleanup', 'verifyBookingDeletion'] as const).map(
+      (check) =>
+        [
+          `deletion tombstones keep invitation fingerprints (${check})`,
+          { verifyDeletionPrivacy, verifyTerminalCleanup, verifyBookingDeletion }[check],
+          async () => {
+            await sql.raw(KEEP_FINGERPRINTS).execute(db)
+            return async () => {
+              await sql.raw(CLEAR_FINGERPRINTS).execute(db)
+            }
+          },
+        ] as SchemaMutant,
+    ),
     [
       'booking deletion keeps its poll history',
       verifyBookingDeletion,
