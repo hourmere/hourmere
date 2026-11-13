@@ -2112,7 +2112,11 @@ gets its own delivery, while lifecycle receipts (NULL request) and reschedule-re
 does not identify a reschedule request and attendance payloads never include
 `data.requestId`. Existing subscription arrays and delivery snapshots are preserved. The
 migration is safe to apply while the previous version runs: old code writes only the five
-older events and keeps its arbiter. Apply it before starting the new version.
+older events and keeps its arbiter. Apply it before starting the new version. Adding the
+checks takes an `ACCESS EXCLUSIVE` lock and scans `booking_attendees`, `webhooks` and
+`webhook_deliveries`. The locks last until the migration transaction commits; concurrent
+reads and writes can briefly queue, with longer pauses on large tables. Plan the migration
+for a quiet period on large installations.
 
 ## Group slots and independent seats
 

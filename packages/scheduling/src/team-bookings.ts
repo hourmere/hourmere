@@ -218,7 +218,7 @@ async function enrichTeamBookings(
       .execute(),
     ctx.db
       .selectFrom('bookings as booking')
-      .select('booking.id')
+      .select(['booking.id', 'booking.payment_hold_expires_at'])
       .select((eb) =>
         eb
           .exists(
@@ -237,6 +237,11 @@ async function enrichTeamBookings(
   const hostFacts = new Map(hosts.map((host) => [`${host.booking_id}:${host.user_id}`, host]))
   const rescheduledIds = new Set(
     replacements.filter((booking) => booking.is_rescheduled).map((booking) => booking.id),
+  )
+  const paidIds = new Set(
+    replacements
+      .filter((booking) => booking.payment_hold_expires_at !== null)
+      .map((booking) => booking.id),
   )
   // Reuse public resolution, including current configured hosts and round-robin activation.
   // Deduplicate events before resolving so repeated bookings share one lookup per page.
@@ -264,6 +269,7 @@ async function enrichTeamBookings(
       ...booking,
       canManageNoShow:
         booking.status === 'confirmed' &&
+        !paidIds.has(booking.id) &&
         !imported.has(booking.id) &&
         Temporal.Instant.compare(ctx.now(), Temporal.Instant.from(booking.start)) > 0,
       attendees: (attendanceByBooking.get(booking.id) ?? []).map((attendee) => ({

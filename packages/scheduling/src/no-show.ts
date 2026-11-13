@@ -47,13 +47,13 @@ export async function setAttendeeNoShow(
       .executeTakeFirst()
     if (!attendee) throw missing()
     const current: AttendeeNoShow = {
-      attendeeId,
+      attendeeId: attendee.id,
       noShowMarkedAt: attendee.no_show_marked_at?.toISOString() ?? null,
       noShowMarkedBy: attendee.no_show_marked_by,
     }
     if ((current.noShowMarkedAt !== null) === noShow) return current
     const result: AttendeeNoShow = {
-      attendeeId,
+      attendeeId: attendee.id,
       noShowMarkedAt: noShow ? new Date(now.epochMilliseconds).toISOString() : null,
       noShowMarkedBy: noShow ? ctx.principal.user.id : null,
     }

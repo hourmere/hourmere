@@ -24,7 +24,7 @@ import {
   TeamAdminBookingListPageSchema as TeamAdminBookingPageSchema,
   toTeamAdminBooking,
 } from './team-admin-booking.ts'
-import { listTeamAdminBookings } from './team-bookings.ts'
+import { getTeamAdminBooking, listTeamAdminBookings } from './team-bookings.ts'
 import {
   createFixtures,
   createTestTeam,
@@ -137,6 +137,38 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     })
     return { owner, admin, member, host, team, ownerCtx, adminCtx, memberCtx, eventId }
   }
+  it('keeps confirmed paid bookings readable without no-show management in lists and details', async () => {
+    const f = await setup()
+    const id = await booking(f, '2026-10-31T09:00Z')
+    expect((await getTeamAdminBooking(f.adminCtx, id)).canManageNoShow).toBe(true)
+    await db
+      .updateTable('bookings')
+      .set({
+        payment_hold_expires_at: '2026-10-31T08:00Z',
+        payment_reference: 'pi_paid_controls',
+      })
+      .where('id', '=', id)
+      .execute()
+    const paid = await db
+      .selectFrom('bookings')
+      .select(['status', 'payment_confirmed_at'])
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()
+    expect(paid.status).toBe('confirmed')
+    expect(paid.payment_confirmed_at).toBeInstanceOf(Date)
+    const verify = async (list: List) => {
+      expect((await list(f.adminCtx)).data.find((item) => item.id === id)?.canManageNoShow).toBe(
+        false,
+      )
+    }
+    await verify(listTeamAdminBookings)
+    expect((await getTeamAdminBooking(f.adminCtx, id)).canManageNoShow).toBe(false)
+    await expect(verify(sourceCopy(['!paidIds.has(booking.id) &&', '']))).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+    await verify(listTeamAdminBookings)
+  })
+
   type Fixture = Awaited<ReturnType<typeof setup>>
 
   async function booking(
