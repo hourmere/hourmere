@@ -123,12 +123,31 @@ export function ssoUrl(
 }
 
 /**
+ * Public DNS syntax for the URL's host, whatever its scheme and port: the shared
+ * `isPublicHttpsUrl` check on the bare host (a dotted name, never an IP literal, a single
+ * label, or a `.localhost`, `.local`, `.internal`, `.test`, `.invalid`, `.example` or
+ * `.onion` name), and never a name under `home.arpa`, which that check does not list.
+ */
+export function ssoPublicName(url: URL): boolean {
+  const hostname = urlHostname(url)
+  return (
+    isPublicHttpsUrl(new URL(`https://${url.hostname}/`)) &&
+    hostname !== 'home.arpa' &&
+    !hostname.endsWith('.home.arpa')
+  )
+}
+
+/**
  * The DNS answer policy, applied on every request after `ssoUrl` admitted the URL. It looks
  * up the exact listed target for the URL's host and port itself and checks the answers:
  * - an unlisted host needs public HTTPS syntax and only public answers;
- * - an exact listed host:port is operator-trusted for either kind: every answer ordinary
- *   private or loopback space, or every answer public. This deliberately widens the shared
- *   check, where an exact-host target never falls back to public routing;
+ * - an exact listed host:port is operator-trusted for every answer ordinary private or
+ *   loopback space;
+ * - a listed host with public syntax (`ssoPublicName`) may instead have every answer public.
+ *   This deliberately widens the shared check, where an exact-host target never falls back
+ *   to public routing. A listed single-label or special-use name never does, so a missing
+ *   internal service whose name a search domain or wildcard DNS expands to a public host is
+ *   refused before any socket opens;
  * - answers that mix kinds, or include metadata, link-local, mapped or other reserved
  *   space, are refused;
  * - plain HTTP also needs every answer to be loopback, so public answers are only ever
@@ -147,7 +166,9 @@ export function ssoAnswersPermitted(
       publicUrl: isPublicHttpsUrl(url),
       candidates: target ? [asPrivateTarget(target)] : [],
     }) ||
-      (target !== undefined && answers.every(({ address }) => isPublicAddress(address)))) &&
+      (target !== undefined &&
+        ssoPublicName(url) &&
+        answers.every(({ address }) => isPublicAddress(address)))) &&
     (url.protocol === 'https:' || answers.every(({ address }) => isLoopbackAddress(address)))
   )
 }
