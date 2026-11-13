@@ -10,6 +10,6 @@ CREATE TABLE audit_log_settings (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT audit_log_settings_retention CHECK (
     (retention = 'forever' AND retention_days IS NULL) OR
-    (retention = 'days' AND retention_days BETWEEN 30 AND 3650)
+    (retention = 'days' AND retention_days IS NOT NULL AND retention_days BETWEEN 30 AND 3650)
   )
 );

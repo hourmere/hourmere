@@ -1,0 +1,10 @@
+{
+  "migration": "0090_audit_log_retention.sql",
+  "objects": {
+    "constraint public.audit_log_settings.audit_log_settings_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE",
+    "constraint public.audit_log_settings.audit_log_settings_pkey": "PRIMARY KEY (organization_id)",
+    "constraint public.audit_log_settings.audit_log_settings_retention": "CHECK ((((retention = 'forever'::text) AND (retention_days IS NULL)) OR ((retention = 'days'::text) AND (retention_days IS NOT NULL) AND ((retention_days >= 30) AND (retention_days <= 3650)))))",
+    "not_null public.audit_log_settings.retention": "NOT NULL",
+    "not_null public.audit_log_settings.updated_at": "NOT NULL DEFAULT now()"
+  }
+}
