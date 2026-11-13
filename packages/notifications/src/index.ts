@@ -844,17 +844,14 @@ async function deliverBookingNotification(
   const email: typeof bookingEmail = (...args) => ({
     ...bookingEmail(...args),
     sensitive: data.automaticConference,
+    // Invitees and guests reply to the one host a single-host booking would name (the
+    // organizer); co-host account addresses stay private to the hosts.
     replyTo:
       args[2].role === 'host'
         ? { name: invitee.name, email: invitee.email }
-        : hosts.length > 1
-          ? hosts.map(({ displayName, email }) => ({
-              name: displayName || bookingHostName(args[2].locale),
-              email,
-            }))
-          : organizer
-            ? { name: organizer.name, email: organizer.email }
-            : undefined,
+        : organizer
+          ? { name: organizer.name, email: organizer.email }
+          : undefined,
   })
 
   const meeting: BookingEmailMeeting = {
@@ -908,6 +905,11 @@ async function deliverBookingNotification(
       calendarOrganizer = { name: pinned.ical_organizer_name, email: pinned.ical_organizer_email }
   }
   calendarOrganizer ??= organizer
+  // Hosts listed with their addresses in a calendar invitation. Hosts see each other; an
+  // invitee or guest of a collective booking sees only the organizer, as with a single host,
+  // and finds every host's name in SUMMARY and DESCRIPTION.
+  const calendarHosts = (role: 'invitee' | 'host' | 'guest') =>
+    role === 'host' || hosts.length <= 1 ? hosts : hosts.filter((h) => h.id === organizer?.id)
   const invitation = (
     other: string,
     language: InterfaceLanguage,
@@ -964,7 +966,7 @@ async function deliverBookingNotification(
           },
           attendees: modern
             ? [
-                ...hosts.map(({ id, name, email }) => ({
+                ...calendarHosts(role).map(({ id, name, email }) => ({
                   name,
                   email,
                   role: id === organizer?.id ? ('CHAIR' as const) : ('REQ-PARTICIPANT' as const),
@@ -982,7 +984,7 @@ async function deliverBookingNotification(
               )
             : [
                 ...attendees.map(({ name, email }) => ({ name, email })),
-                ...hosts
+                ...calendarHosts(role)
                   .filter((h) => h.id !== organizer?.id)
                   .map(({ name, email }) => ({ name, email })),
               ],

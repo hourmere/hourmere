@@ -11,3 +11,9 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
+
+Invitee and guest booking emails never contain co-host account addresses. For a collective
+booking, Reply-To and the calendar invitation's host attendee are the primary host only,
+as for a single host; every host is still named. Host emails and host calendar copies still
+list every host. Invitees cannot reply directly to an individual co-host. See
+[Email headers, MIME and replies](https://hourmere.com/docs/notifications#email-headers-mime-and-replies).

@@ -5,7 +5,6 @@ import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
 import {
   bookingEmail,
-  bookingHostName,
   bookingLocationForRecipient,
   followUpEmail,
   type MailMessage,
@@ -376,16 +375,12 @@ export async function deliverScheduledBookingEmail(
           },
           recipient.links,
           (token): MailMessage => {
+            // Invitees and guests reply to the organizer only, never to co-hosts.
             const replyTo = recipient.host
               ? booker
                 ? { name: booker.name, email: booker.email }
                 : undefined
-              : data.hosts.length > 1
-                ? data.hosts.map(({ displayName, email }) => ({
-                    name: displayName || bookingHostName(recipient.locale),
-                    email,
-                  }))
-                : { name: organizer.name, email: organizer.email }
+              : { name: organizer.name, email: organizer.email }
             const recipientMeeting = {
               ...meeting,
               location: bookingLocationForRecipient(

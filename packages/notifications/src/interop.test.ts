@@ -183,12 +183,8 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
           expect(message.replyTo).toEqual(
             role === 'host'
               ? { name: 'Ada Lovelace', email: 'ada@outlook.com' }
-              : multi
-                ? [
-                    { name: 'Grace Hopper', email: hostEmail },
-                    { name: 'Alan Turing', email: 'alan@example.net' },
-                  ]
-                : { name: 'Grace Hopper', email: hostEmail },
+              : // A collective booking replies to its organizer only, like a single host.
+                { name: 'Grace Hopper', email: hostEmail },
           )
           const content = message.attachments?.[0]?.content.replaceAll(info.booking, 'ROOT-BOOKING')
           expect(content).toBe(

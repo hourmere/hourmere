@@ -16,8 +16,6 @@ DESCRIPTION:Booked with Grace Hopper and Alan Turing using Hourmere.\n\nAcc
 ORGANIZER;CN="Grace Hopper":mailto:calendar@scheduler.example.org
 ATTENDEE;CN="Grace Hopper";ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE:mailto:g
  race@gmail.com
-ATTENDEE;CN="Alan Turing";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=FALSE
- :mailto:alan@example.net
 ATTENDEE;CN="Ada Lovelace";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=
  FALSE:mailto:ada@outlook.com
 STATUS:CONFIRMED
