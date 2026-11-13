@@ -98,5 +98,7 @@
   "rescheduleRequest.subject": "Bitte wählen Sie einen anderen Termin: {event}",
   "rescheduleRequest.introduction": "{host} bittet Sie, einen anderen Termin zu wählen. Ihre ursprüngliche Buchung bleibt reserviert, bis Sie einen neuen Termin wählen oder stornieren. Diese Anfrage läuft am {expiry} ab; danach bleibt die ursprüngliche Buchung bestehen.",
   "rescheduleRequest.expiredSubject": "Terminänderungsanfrage abgelaufen: {event}",
-  "rescheduleRequest.expiredIntroduction": "{invitee} hat vor Ablauf der Anfrage keinen neuen Termin gewählt. Die ursprüngliche Buchung bleibt bestehen."
+  "rescheduleRequest.expiredIntroduction": "{invitee} hat vor Ablauf der Anfrage keinen neuen Termin gewählt. Die ursprüngliche Buchung bleibt bestehen.",
+  "replyNotice.plain": "Antworten auf diese E-Mail werden nicht an die gastgebenden Personen zugestellt.",
+  "replyNotice.manageLinks": "Antworten auf diese E-Mail werden nicht an die gastgebenden Personen zugestellt. Um den Termin zu verschieben oder zu stornieren, verwenden Sie die Links in dieser E-Mail."
 }

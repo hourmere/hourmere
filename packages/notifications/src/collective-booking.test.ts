@@ -111,10 +111,8 @@ describe.skipIf(!process.env.DATABASE_URL)('collective booking notification deli
         if (message.to === 'ivy@example.test') {
           expect(message.subject).toContain(names)
           expect(message.text).toContain(names)
-          expect(message.replyTo).toEqual([
-            { name: 'Liam LA', email: `liam-${liam}@example.test` },
-            { name: 'Berta Berlin', email: `berta-${berta}@example.test` },
-          ])
+          // No host address reaches the invitee of a collective booking.
+          expect(message.replyTo).toBeUndefined()
         } else {
           expect(message.text).toContain(coHostLabel)
           expect(message.text).toContain(
@@ -135,7 +133,9 @@ describe.skipIf(!process.env.DATABASE_URL)('collective booking notification deli
           expect(component.getFirstProperty('organizer')?.getFirstValue()).toBe(
             'mailto:calendar@example.test',
           )
-          expect(component.getAllProperties('attendee')).toHaveLength(3)
+          expect(component.getAllProperties('attendee')).toHaveLength(
+            message.to === 'ivy@example.test' ? 1 : 3,
+          )
         }
       }
     },

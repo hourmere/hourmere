@@ -62,6 +62,11 @@ export interface AttendeeRecipient {
   timeZone: string
   locale?: string | null | undefined
   manageLinks?: ManageLinks | undefined
+  /**
+   * Replies to this email reach the instance sender, not a host (a collective booking's
+   * invitee and guests get no host address); the email says so.
+   */
+  repliesNotDelivered?: boolean | undefined
 }
 
 export interface HostRecipient {
@@ -302,6 +307,8 @@ interface Content {
   bookingUrl?: string | undefined
   manageLinks?: ManageLinks | undefined
   footer?: { language: InterfaceLanguage; text: string } | undefined
+  /** Replies to this email do not reach the hosts. */
+  replyNotice?: string | undefined
   receivedWhy: string
 }
 
@@ -337,6 +344,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     ...(c.bookingUrl ? ['', textField(t('Open in Hourmere'), c.bookingUrl, c.language)] : []),
     ...actionText,
     ...(c.footer && !c.manageLinks ? ['', c.footer.text] : []),
+    ...(c.replyNotice ? ['', c.replyNotice] : []),
     '',
     c.receivedWhy,
   ].join('\n')
@@ -389,6 +397,9 @@ ${emailButton(c.join.label, c.join.url, false, c.language)}
     bookingLink,
     links,
     ...(!c.manageLinks ? [footer] : []),
+    c.replyNotice
+      ? `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(c.replyNotice)}</p>`
+      : '',
     `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(c.receivedWhy)}</p>`,
   ]
     .filter(Boolean)
@@ -447,6 +458,7 @@ export function followUpEmail(
     answers: [],
     bookingUrl,
     hostNote: note ? { label: t('followUp.hostNote'), text: note } : undefined,
+    replyNotice: replyNotice(recipient, undefined, language),
     receivedWhy: t(receivedWhy, { host, invitee }),
   }
   return { ...render(recipient.email, content), sensitive: true }
@@ -493,6 +505,11 @@ export function rescheduleRequestEmail(
     answers: [],
     hostNote: !expired && note ? { label: t('followUp.hostNote'), text: note } : undefined,
     manageLinks: !expired && recipient.role === 'attendee' ? recipient.manageLinks : undefined,
+    replyNotice: replyNotice(
+      recipient,
+      !expired && recipient.role === 'attendee' ? recipient.manageLinks : undefined,
+      language,
+    ),
     bookingUrl:
       expired && recipient.role === 'host' && options.bookingUrl
         ? linkableUrl(options.bookingUrl)
@@ -510,6 +527,16 @@ export function rescheduleRequestEmail(
 // --- Emails -------------------------------------------------------------------------------
 
 const field = (label: string, text: string) => ({ label, text })
+
+/** Says where replies go when no host address is offered, and how to make changes. */
+function replyNotice(
+  recipient: BookingEmailRecipient,
+  manageLinks: ManageLinks | undefined,
+  language: InterfaceLanguage,
+): string | undefined {
+  if (recipient.role !== 'attendee' || !recipient.repliesNotDelivered) return undefined
+  return message(language, manageLinks ? 'replyNotice.manageLinks' : 'replyNotice.plain')
+}
 
 /**
  * The email about a booking event for one recipient, with times in the recipient's zone.
@@ -658,6 +685,7 @@ export function bookingEmail(
       bookingUrl,
       manageLinks,
       footer,
+      replyNotice: replyNotice(recipient, manageLinks, language),
       receivedWhy: t(receivedWhy, { host, invitee }),
     },
     options.attachment,

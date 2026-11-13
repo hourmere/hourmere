@@ -460,7 +460,7 @@ including processes on other hosts, then restart every role with the new code. M
 
 | Recipient | New root (v2, SMTP configured) | Legacy root (v1) |
 |---|---|---|
-| Invitee and guests | REQUEST/CANCEL; invitee/guests are `NEEDS-ACTION;RSVP=FALSE` | REQUEST/CANCEL with original `ACCEPTED;RSVP=FALSE` policy |
+| Invitee and guests | REQUEST/CANCEL; invitee/guests are `NEEDS-ACTION;RSVP=FALSE`; a collective booking lists no host | REQUEST/CANCEL with original `ACCEPTED;RSVP=FALSE` policy; a collective booking lists no host besides the pinned ORGANIZER |
 | Host without a pinned provider copy | Same REQUEST/CANCEL; primary host is `CHAIR;PARTSTAT=ACCEPTED`, other hosts accepted required participants | Original host notification REQUEST/CANCEL |
 | Host with a pinned provider copy | Ordinary email; provider writeback updates/removes its calendar item | Keep REQUEST/CANCEL to update an existing emailed copy |
 | Reminder, follow-up or conference failure | Ordinary email, no calendar part | Ordinary email, no calendar part |
@@ -468,6 +468,18 @@ including processes on other hosts, then restart every role with the new code. M
 New invitations use the single mailbox from `MAIL_FROM` as ORGANIZER, with the verified
 primary host's name as CN. Hosts also appear as attendees; duplicate addresses are collapsed,
 including when the booker is a host or the sending mailbox is the host's own address.
+Host account addresses of a **collective** booking (an event type that requires several hosts,
+or a booking with several required hosts) are private to the hosts. The invitee's and guests'
+copies list only the invitee and guests as attendees; ORGANIZER stays the pinned `MAIL_FROM`
+mailbox, and every host is named in SUMMARY and DESCRIPTION without an address. A legacy (v1)
+collective root keeps its pinned ORGANIZER, which may be a host address the invitee already
+received, but lists no other host; an unpinned v1 collective root pins `MAIL_FROM`. Hosts' own
+copies still list every host. Hosts are omitted rather than listed under a non-`mailto:`
+address, which Gmail, Outlook and Apple Calendar do not handle consistently, and an ORGANIZER
+that is not an attendee is ordinary iTIP. UID, SEQUENCE and ORGANIZER are unchanged, so an
+update or cancellation of a booking made before this rule replaces the existing calendar
+entry. Mail sent before the change cannot be recalled. A collective booking stays collective
+after hosts leave or lose verification, so a remaining host's address is not revealed.
 Invitee/guest summaries name every required host of a collective booking; host summaries name
 the invitee. Every recipient gets a neutral DESCRIPTION naming all required hosts and Hourmere.
 Single-host and round-robin bookings continue to name their one assigned host. REQUEST descriptions also explain that
@@ -504,11 +516,25 @@ replace the REQUEST/CANCEL scheduling lifecycle.
 
 From always remains the authenticated, operator-configured `MAIL_FROM`; Hourmere does not
 impersonate a host's mailbox. No redundant Sender header is added. Ordinary email Reply-To
-is every current verified required host for collective invitee/guest mail, and the booker
-for host mail. Single-host and round-robin mail still reply to their one assigned host.
-Collective addresses are separate structured mailboxes, with duplicate addresses collapsed;
-the configured From and pinned calendar ORGANIZER do not change. This does not route calendar status replies: iTIP clients send those to ORGANIZER, even with SENT-BY.
+is the booker for host mail. Single-host and round-robin invitee and guest mail replies to
+the one assigned host; that host's address (also the calendar attendee) is the only host
+address it contains. Collective invitee and guest mail carries no host address at all and no
+Reply-To, so replies go to `MAIL_FROM`. This covers confirmations, reschedules,
+cancellations, default and configured reminders, follow-ups, conference-failure notices and
+reschedule requests, which add one sentence saying that replies are not delivered to the
+hosts; where the email carries the invitee's management links, it points to them for
+rescheduling or cancelling. The configured From and pinned calendar ORGANIZER do not change.
+This does not route calendar status replies: iTIP clients send those to ORGANIZER, even with
+SENT-BY.
 Invalid Reply-To addresses are omitted individually without blocking notification delivery.
+
+**Known limitation:** invitees and guests of a collective booking cannot reply to any host.
+Replies to these emails go to the `MAIL_FROM` mailbox, which an operator may not read; the
+hosts see the invitee's address in their own notices and can write to the invitee directly.
+Invitees reschedule or cancel with the management links in their confirmation, reminder and
+reschedule emails; cancellations and follow-ups carry no new management link, and guests
+never receive one. The same rule applies to bookings made before this change: their later
+emails omit host addresses, except the pinned ORGANIZER of a legacy (v1) booking.
 
 Collective booking emails use a locale-aware list of host names in the subject, introduction
 and Host field. Subjects with more than three hosts show the first three names and a localized
