@@ -79,6 +79,9 @@
     "simple-git": "4.0.2",
     "tmp": "0.2.7",
     "minimatch@^9": "11.0.8",
-    "minimatch@^10": "11.0.8"
+    "minimatch@^10": "11.0.8",
+    "archiver-utils": {
+      "glob": "13.0.7"
+    }
   }
 }
