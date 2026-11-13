@@ -1989,4 +1989,65 @@ export const admin = {
     'The saved booking link is invalid. Reload the saved event type and try again.',
   'The email preview could not be created. Reload the saved event type and try again.':
     'The email preview could not be created. Reload the saved event type and try again.',
+
+  // Availability troubleshooting
+  'Troubleshoot availability': 'Troubleshoot availability',
+  'Pick an event type and a day to see which times can be booked, and why the others cannot.':
+    'Pick an event type and a day to see which times can be booked, and why the others cannot.',
+  'There are no event types in this space to check.':
+    'There are no event types in this space to check.',
+  'Enter a valid date.': 'Enter a valid date.',
+  'Check this day': 'Check this day',
+  'Checking this day…': 'Checking this day…',
+  'Could not check this day.': 'Could not check this day.',
+  'You cannot troubleshoot this event type with your current access. Only its owner, or a team owner or admin, can see why times are unavailable.':
+    'You cannot troubleshoot this event type with your current access. Only its owner, or a team owner or admin, can see why times are unavailable.',
+  'Connected calendars could not be read just now, so this day cannot be explained yet. Try again shortly.':
+    'Connected calendars could not be read just now, so this day cannot be explained yet. Try again shortly.',
+  'The default location of this event type cannot be offered right now, so no times can be checked.':
+    'The default location of this event type cannot be offered right now, so no times can be checked.',
+  'This day has too many possible start times to check at once.':
+    'This day has too many possible start times to check at once.',
+  'This day could not be checked. Check the date and time zone.':
+    'This day could not be checked. Check the date and time zone.',
+  '{available} of {total} possible times can be booked. Times are shown in {zone}.':
+    '{available} of {total} possible times can be booked. Times are shown in {zone}.',
+  'Hide times that are only outside the available hours':
+    'Hide times that are only outside the available hours',
+  '{count} times outside the available hours are hidden.':
+    '{count} times outside the available hours are hidden.',
+  'There are no possible start times on this day.':
+    'There are no possible start times on this day.',
+  'Times on this day': 'Times on this day',
+  Bookable: 'Bookable',
+  'Not bookable': 'Not bookable',
+  '{name}:': '{name}:',
+  'A team host:': 'A team host:',
+  '(affects {range})': '(affects {range})',
+  'This time has already passed.': 'This time has already passed.',
+  'This meeting length is not offered for this event type.':
+    'This meeting length is not offered for this event type.',
+  'Outside the available hours (weekly hours or a date override).':
+    'Outside the available hours (weekly hours or a date override).',
+  'Inside the available hours, but not one of the offered start times.':
+    'Inside the available hours, but not one of the offered start times.',
+  'Too soon: the minimum notice before a booking has not been met.':
+    'Too soon: the minimum notice before a booking has not been met.',
+  'Too far ahead: beyond how far in advance people can book.':
+    'Too far ahead: beyond how far in advance people can book.',
+  'A connected calendar shows this time as busy.': 'A connected calendar shows this time as busy.',
+  'The buffer before the meeting overlaps another commitment.':
+    'The buffer before the meeting overlaps another commitment.',
+  'The buffer after the meeting overlaps another commitment.':
+    'The buffer after the meeting overlaps another commitment.',
+  'The daily booking limit for this event type has been reached.':
+    'The daily booking limit for this event type has been reached.',
+  'The weekly booking limit for this event type has been reached.':
+    'The weekly booking limit for this event type has been reached.',
+  'The monthly booking limit for this event type has been reached.':
+    'The monthly booking limit for this event type has been reached.',
+  'Another booking already takes this time.': 'Another booking already takes this time.',
+  'Not every required host is free.': 'Not every required host is free.',
+  'No host in the rotation is free.': 'No host in the rotation is free.',
+  'Another scheduling rule applies.': 'Another scheduling rule applies.',
 } as const
