@@ -5,6 +5,7 @@ import {
   type CalendarDeps,
   finishGoogleConnection,
 } from '@hourmere/calendars'
+import { createCalDavCredentialRecord } from '@hourmere/calendars/caldav'
 import {
   beginZoomConnection,
   type ConferenceDeps,
@@ -138,6 +139,23 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
           .executeTakeFirstOrThrow()
       ).id,
     )
+    // Internal CalDAV persistence must not enable application/agent discovery.
+    for (const principal of [owner, other]) {
+      await db
+        .insertInto('calendar_connections')
+        .values(
+          createCalDavCredentialRecord(
+            Buffer.from(TEST_CALENDAR_KEY, 'base64'),
+            principal.user.id,
+            {
+              serverUrl: 'https://dav.example.com/',
+              username: 'synthetic-caldav-user',
+              password: 'synthetic-caldav-password',
+            },
+          ),
+        )
+        .execute()
+    }
     // A browser-only pending attempt must not appear in agent discovery.
     await beginZoomConnection(conference, owner)
     app = createApp({

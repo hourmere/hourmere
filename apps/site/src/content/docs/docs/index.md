@@ -153,7 +153,7 @@ configuration remain unavailable in the editor, as described below.
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
 - CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
-  The [design and credential/discovery foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
+  The [design and internal connection foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
   adds no busy-time sync, event writes or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
 - [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe

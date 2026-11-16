@@ -42,6 +42,7 @@ describe('CalDAV discovery mock server', () => {
         {
           url: 'https://dav.example.com/calendars/host/work/',
           displayName: 'Work & home',
+          color: null,
           supportsEvents: true,
           canWrite: true,
         },
@@ -62,6 +63,154 @@ describe('CalDAV discovery mock server', () => {
       expect(render(request)).not.toContain(request?.authorization)
       expect(render(request)).not.toContain(credentials.password)
     }
+  })
+  it('discovers Nextcloud-style collections with mixed properties and relative hrefs', async () => {
+    const home = '/remote.php/dav/calendars/host/'
+    const collection = (href: string, props: string) =>
+      response(href, props).match(/<d:response>[\s\S]*<\/d:response>/)?.[0] ?? ''
+    const calendarType = '<d:resourcetype><d:collection/><c:calendar/></d:resourcetype>'
+    const inventory = response(home, '<d:resourcetype><d:collection/></d:resourcetype>').replace(
+      '</d:multistatus>',
+      [
+        collection(
+          'personal/',
+          `${calendarType}<d:displayname>Personal</d:displayname><a:calendar-color xmlns:a="http://apple.com/ns/ical/">#aabbccff</a:calendar-color><d:current-user-privilege-set><d:privilege><d:all/></d:privilege></d:current-user-privilege-set>`,
+        ),
+        collection('shared/', calendarType).replace(
+          '</d:response>',
+          '<d:propstat><d:prop><d:displayname>Denied name</d:displayname><a:calendar-color xmlns:a="http://apple.com/ns/ical/">#112233</a:calendar-color><d:current-user-privilege-set><d:privilege><d:write/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 403 Forbidden</d:status></d:propstat></d:response>',
+        ),
+        collection(
+          'tasks/',
+          `${calendarType}<c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set>`,
+        ),
+        '</d:multistatus>',
+      ].join(''),
+    )
+    const transport = vi
+      .fn<CalDavTransport>()
+      .mockResolvedValueOnce({ status: 301, body: '', location: '/remote.php/dav/' })
+      .mockResolvedValueOnce({
+        status: 207,
+        body: response(
+          '/remote.php/dav/',
+          '<d:current-user-principal><d:href>principals/users/host/</d:href></d:current-user-principal>',
+        ),
+      })
+      .mockResolvedValueOnce({
+        status: 207,
+        body: response(
+          '/remote.php/dav/principals/users/host/',
+          `<c:calendar-home-set><d:href>${home}</d:href></c:calendar-home-set>`,
+        ),
+      })
+      .mockResolvedValueOnce({ status: 207, body: inventory })
+    const result = await createCalDavDiscovery(transport).discover(credentials)
+    expect(result.calendars).toEqual([
+      {
+        url: `https://dav.example.com${home}personal/`,
+        displayName: 'Personal',
+        color: '#AABBCCFF',
+        supportsEvents: true,
+        canWrite: true,
+      },
+      {
+        url: `https://dav.example.com${home}shared/`,
+        displayName: null,
+        color: null,
+        supportsEvents: true,
+        canWrite: false,
+      },
+      {
+        url: `https://dav.example.com${home}tasks/`,
+        displayName: null,
+        color: null,
+        supportsEvents: false,
+        canWrite: false,
+      },
+    ])
+    expect(transport.mock.calls[3]?.[0].body).toContain('<a:calendar-color/>')
+    expect(transport.mock.calls[3]?.[0].depth).toBe('1')
+  })
+  it('discovers an explicitly trusted iCloud-style principal on another host', async () => {
+    const shard = 'https://p42-caldav.icloud.com'
+    const transport = mock([
+      response(
+        '/.well-known/caldav',
+        `<d:current-user-principal><d:href>${shard}/123/principal/</d:href></d:current-user-principal>`,
+      ),
+      response(
+        '/123/principal/',
+        '<c:calendar-home-set><d:href>../calendars/</d:href></c:calendar-home-set>',
+      ),
+      response(
+        'home/',
+        '<d:resourcetype><c:calendar/></d:resourcetype><d:displayname>Home</d:displayname><i:calendar-color xmlns:i="http://apple.com/ns/ical/">#ffcc00</i:calendar-color><c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>',
+      ),
+    ])
+    const result = await createCalDavDiscovery(transport, { allowedOrigins: [shard] }).discover({
+      ...credentials,
+      serverUrl: 'https://caldav.icloud.com',
+    })
+    expect(result).toEqual({
+      principalUrl: `${shard}/123/principal/`,
+      calendarHomeUrl: `${shard}/123/calendars/`,
+      calendars: [
+        {
+          url: `${shard}/123/calendars/home/`,
+          displayName: 'Home',
+          color: '#FFCC00',
+          supportsEvents: true,
+          canWrite: false,
+        },
+      ],
+    })
+    expect(transport.mock.calls.map(([request]) => request.url)).toEqual([
+      'https://caldav.icloud.com/.well-known/caldav',
+      result.principalUrl,
+      result.calendarHomeUrl,
+    ])
+  })
+  it.each(['https://p43-caldav.icloud.com', 'https://p42-caldav.icloud.com.evil.example'])(
+    'refuses an iCloud-style principal outside exact trusted origins: %s',
+    async (shard) => {
+      const transport = mock([
+        response(
+          '/.well-known/caldav',
+          `<d:current-user-principal><d:href>${shard}/123/principal/</d:href></d:current-user-principal>`,
+        ),
+      ])
+      await expect(
+        createCalDavDiscovery(transport, {
+          allowedOrigins: ['https://p42-caldav.icloud.com'],
+        }).discover({ ...credentials, serverUrl: 'https://caldav.icloud.com' }),
+      ).rejects.toMatchObject({ code: 'destination_refused' })
+      expect(transport).toHaveBeenCalledTimes(1)
+    },
+  )
+  it.each(['red', '#123', '#123456789', 'url(https://example.com)', ''])(
+    'ignores unsupported calendar color %s',
+    async (color) => {
+      const result = await createCalDavDiscovery(
+        mock([
+          entry,
+          principal,
+          calendar.replace(
+            '</d:prop>',
+            `<a:calendar-color xmlns:a="http://apple.com/ns/ical/">${color}</a:calendar-color></d:prop>`,
+          ),
+        ]),
+      ).discover(credentials)
+      expect(result.calendars[0]?.color).toBeNull()
+    },
+  )
+  it.each([
+    [response('/.well-known/caldav', ''), principal],
+    [entry, response('/principals/host/', '')],
+  ])('refuses an incomplete principal/home discovery', async (entryBody, principalBody) => {
+    await expect(
+      createCalDavDiscovery(mock([entryBody, principalBody, calendar])).discover(credentials),
+    ).rejects.toMatchObject({ code: 'invalid_response' })
   })
   it.each(['http://dav.example.com', 'https://127.0.0.1', 'https://user:pass@dav.example.com'])(
     'refuses unsafe initial URL %s',
