@@ -84,6 +84,15 @@ for (const mode of ['inline', 'popup', 'iframe'] as const) {
     }
     await frame.locator(`[data-day="${date}"]`).click()
     await expect(frame.locator('.slots button')).not.toHaveCount(0)
-    await expect(frame.locator('.slots button').filter({ hasText: time as string })).toHaveCount(0)
+    // Compare complete time labels: "2:30 PM" must not match an available "12:30 PM".
+    await expect
+      .poll(() =>
+        frame
+          .locator('.slots button')
+          .evaluateAll((buttons) =>
+            buttons.map((button) => button.firstChild?.textContent?.trim() ?? ''),
+          ),
+      )
+      .not.toContain(time)
   })
 }
