@@ -31,7 +31,9 @@ function must<T>(value: T | undefined): T {
 function sourceCopy(change?: [string, string], bindings: Record<string, unknown> = {}) {
   let source = readFileSync('packages/notifications/src/group-host-mail.ts', 'utf8')
   if (change) {
-    expect(source).toContain(change[0])
+    // A missing target is a broken test, never a killed mutant: throw a plain Error, which
+    // no negative control below accepts.
+    if (!source.includes(change[0])) throw new Error(`Mutation target not found: ${change[0]}`)
     source = source.replace(...change)
   }
   source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
@@ -155,7 +157,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
     const f = await dueReminders(9)
     const job = makeJob(f.deps)
     await job.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
-    expect(f.sent).toHaveLength(9)
+    expect(f.sent, 'one worker run drains every due reminder').toHaveLength(9)
     for (const occurrence of f.fixtures)
       expect((await rows(occurrence.slot)).find((row) => row.kind === 'reminder')?.state).toBe(
         'sent',
@@ -175,7 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
           'if (performance.now() < deadline) {',
         ]).groupHostMailJob,
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('one worker run drains every due reminder')
   })
   async function verifyWorkerDeadline(change?: [string, string]) {
     const f = await dueReminders(5)
@@ -186,7 +188,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
     }
     const job = sourceCopy(change, { performance: { now: () => elapsed } }).groupHostMailJob(f.deps)
     await job.handler({}, { id: randomUUID(), attempt: 1, signal: new AbortController().signal })
-    expect(f.sent).toHaveLength(1)
+    expect(f.sent, 'the worker starts no delivery after its deadline').toHaveLength(1)
     const pending = await db
       .selectFrom('group_slot_host_messages')
       .select(['state', 'attempts'])
@@ -206,7 +208,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
   it('kills ignoring the worker deadline between deliveries with a real assertion', async () => {
     await expect(
       verifyWorkerDeadline(['if (performance.now() >= deadline) return', 'if (false) return']),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('the worker starts no delivery after its deadline')
   })
   async function verifyLockedBatch(change?: [string, string]) {
     const f = await dueReminders(1)
@@ -250,7 +252,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
   it('kills busy-polling a locked batch with a real assertion', async () => {
     await expect(
       verifyLockedBatch(['if (!progressed) return', 'if (false) return']),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('a locked batch must stop before exhausting the worker deadline')
   })
   it('keeps one immutable host schedule per slot and gives calendar only the shared UID', async () => {
     const f = await fixture()
@@ -335,7 +337,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
     await deliverGroupHostMail(f.deps, reminder.id)
     let source = readFileSync('packages/notifications/src/group-host-mail.ts', 'utf8')
     const before = 'ON CONFLICT(group_slot_id,kind,rule_id) DO NOTHING'
-    expect(source).toContain(before)
+    if (!source.includes(before)) throw new Error(`Mutation target not found: ${before}`)
     source = source.replace(
       before,
       "ON CONFLICT(group_slot_id,kind,rule_id) DO UPDATE SET state='pending',attempts=0",
@@ -351,9 +353,12 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
     await mutate(db, must(f.bookings[1]), must(f.deps.now)())
     await expect(
       (async () => {
-        expect((await rows(f.slot)).find((r) => r.kind === 'reminder')?.state).toBe('sent')
+        expect(
+          (await rows(f.slot)).find((r) => r.kind === 'reminder')?.state,
+          'a later seat must not reset a delivered host reminder',
+        ).toBe('sent')
       })(),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('a later seat must not reset a delivered host reminder')
   })
   async function verifyBudget(deliver: typeof deliverGroupHostMail) {
     const f = await fixture()
@@ -364,19 +369,21 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
       .execute()
     f.deps.mailMaxPerHour = 1
     await deliver(f.deps, must((await rows(f.slot)).find((r) => r.kind === 'calendar')).id)
-    expect(f.sent).toHaveLength(0)
+    expect(f.sent, 'the shared instance budget suppresses host mail').toHaveLength(0)
   }
   it('kills bypassing the shared host mail budget with a real assertion', async () => {
     await verifyBudget(sourceCopy().deliverGroupHostMail)
     await expect(
       verifyBudget(sourceCopy(['if (reason) {', 'if (false) {']).deliverGroupHostMail),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('the shared instance budget suppresses host mail')
   })
   async function verifyUid(deliver: typeof deliverGroupHostMail) {
     const f = await fixture()
     await enqueueGroupHostMail(db, must(f.bookings[0]), f.now)
     await deliver(f.deps, must((await rows(f.slot)).find((r) => r.kind === 'calendar')).id)
-    expect(f.sent[0]?.attachments?.[0]?.content).toContain(`UID:group-${f.slot}@hourmere`)
+    expect(f.sent[0]?.attachments?.[0]?.content, 'host ICS uses the slot UID').toContain(
+      `UID:group-${f.slot}@hourmere`,
+    )
   }
   it('kills replacing the shared calendar UID with a real assertion', async () => {
     await verifyUid(sourceCopy().deliverGroupHostMail)
@@ -386,7 +393,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
         sourceCopy(['uid: `group-${row.id}@hourmere`', 'uid: `seat-${row.id}@hourmere`'])
           .deliverGroupHostMail,
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('host ICS uses the slot UID')
   })
   it('rechecks retired slot after waiting for the mail budget', async () => {
     const f = await fixture()
@@ -452,7 +459,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
       .where('id', '=', f.f.host)
       .execute()
     await deliver(f.deps, reminder.id)
-    expect(f.sent).toHaveLength(0)
+    expect(f.sent, 'no host reminder while the pinned organizer identity differs').toHaveLength(0)
     await db.updateTable('auth.user').set({ email: hostEmail }).where('id', '=', f.f.host).execute()
     await sql`UPDATE group_slot_host_messages SET next_attempt_at=${new Date(must(f.deps.now)().epochMilliseconds)} WHERE id=${reminder.id}`.execute(
       db,
@@ -468,7 +475,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
       verifyLogistics(
         sourceCopy(['AND c.invitation_organizer_email=u.email', '']).deliverGroupHostMail,
       ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('no host reminder while the pinned organizer identity differs')
   })
   it('keeps the configured provider target as the only host calendar copy', async () => {
     const f = await fixture({ destination_calendar_id: randomUUID() })
@@ -509,7 +516,7 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
       },
     })
     await copy.deliverGroupHostMail(f.deps, calendar.id)
-    expect(f.sent).toHaveLength(0)
+    expect(f.sent, 'no SMTP without the claim safety margin').toHaveLength(0)
     expect((await rows(f.slot)).find((r) => r.kind === 'calendar')?.state).toBe('pending')
   }
   it('refuses SMTP when a budget wait leaves less than the claim safety margin', () =>
@@ -517,6 +524,6 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
   it('kills ignoring the remaining claim time with a real assertion', async () => {
     await expect(
       verifyLease(['row.lease_until.getTime() - row.wall_now.getTime() - 1_000', '60_000']),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    ).rejects.toThrow('no SMTP without the claim safety margin')
   })
 })

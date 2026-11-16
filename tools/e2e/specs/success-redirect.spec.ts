@@ -1,3 +1,4 @@
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 for (const embedded of [false, true]) {
@@ -19,6 +20,7 @@ for (const embedded of [false, true]) {
     expect(Boolean(event)).toBe(true)
     if (!event) return
     await page.goto(`${app.url}/app/event-types/${event.id}`)
+    await revealEventSetting(page.getByLabel(/^Continue to URL/))
     await expect(page.getByRole('heading', { name: 'After booking', exact: true })).toBeVisible()
     if (!embedded) {
       await page.getByLabel(/^Continue to URL/).fill('http://continuation.example/thanks')

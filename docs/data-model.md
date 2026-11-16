@@ -402,6 +402,11 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   belonging to the host are checked by the application.
 - **Triggers pin `search_path`**, because they also run on Better Auth's auth-only
   connection (e.g. when it deletes a user).
+- **No relation name exists in both `auth` and `public`.** Native auth transactions set
+  `search_path TO auth, public` and run application code on that connection (invitation
+  acceptance, team leave with its departure-impact check, the sign-up policy), so an
+  unqualified public table name must never resolve to an `auth` relation instead.
+  `packages/db/src/schema-names.test.ts` checks this after every migration.
 - **Dates** (`DATE` columns) are returned as `YYYY-MM-DD` strings, never as `Date`
   objects shifted by the server's time zone.
 
@@ -2239,9 +2244,15 @@ unknown mailboxes before checking mailbox duplication. An exact authorized idemp
 still returns its original seat without consuming capacity or sending another notification.
 For occurrences with spare capacity, duplicate-mailbox rejection is not a non-enumeration
 guarantee: a different mailbox can create a real booking and trigger its notifications.
-A later failure of the pinned Zoom resource can also return a different error to a new
-mailbox while rolling back its tentative seat. Snapshot location-option mismatches are
-checked before mailbox duplication and return the same error to both callers.
+Snapshot location-option mismatches are checked before mailbox duplication and return the
+same error to both callers. Every other check of an existing occurrence (pinned host,
+allowed duration, notice and booking window, a shared phone location, and the usability of
+its pinned Zoom or Google Meet resource and organizer) also runs before the mailbox lookup,
+which is the last admission step. These refusals are all `slot_unavailable`, read only the
+occurrence, and write nothing, so a seat holder and a new mailbox take the same statements
+to the same answer. A pinned-resource readiness change between admission and conference
+preparation is mapped to the same `slot_unavailable`; joining an existing occurrence never
+returns a host-facing `automatic_zoom_*` or `automatic_meet_*` code.
 
 Moving one seat cancels its predecessor and creates a successor in the same transaction,
 so capacity is released/taken atomically and surviving source seats retain their resources.
@@ -2288,7 +2299,8 @@ revision and records terminal suppression under the existing instance mail budge
 minute dispatcher recovers pending and expired claims directly from durable due rows.
 It rechecks slot lifecycle, host membership and conference readiness after budget waits;
 SMTP never holds slot or booking row locks. Host calendar organizer name/mailbox are
-pinned on the slot before the first host ICS. A host reminder contains title, time and
+pinned on the slot before the first host ICS; as for seat invitations, a later `MAIL_FROM`
+signs that item as `SENT-BY` instead of replacing its organizer. A host reminder contains title, time and
 current seat count only; follow-ups contain no capabilities, join links or calendar files.
 
 Migration 0061 adds the shared location-option snapshot, slot-owned calendar/conference

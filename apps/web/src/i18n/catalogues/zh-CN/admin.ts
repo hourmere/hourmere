@@ -1,5 +1,19 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Location options': '地点选项',
+  'Default location': '默认地点',
+  'Location label': '地点名称',
+  'Add location option': '添加地点选项',
+  'Remove location option': '移除地点选项',
+  'Move location up': '上移地点',
+  'Move location down': '下移地点',
+  'Choose each location type only once.': '每种地点类型只能选择一次。',
+  'Invitee provides a phone number': '由受邀人提供电话号码',
+
+  'Description and visibility': '说明与显示设置',
+  'Additional durations': '更多时长',
+  'Location options and conferencing': '地点选项与视频会议',
+  'Duration (minutes)': '时长（分钟）',
   'SCIM provisioning tokens': 'SCIM 预配令牌',
   'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
     '预配功能尚未开放。这些令牌用于为组织未来的 SCIM 连接做准备。',
@@ -1896,6 +1910,16 @@ export const admin = {
     '已保存的预约链接无效。请重新加载已保存的活动类型后重试。',
   'The email preview could not be created. Reload the saved event type and try again.':
     '无法创建邮件预览。请重新加载已保存的活动类型后重试。',
+  'Cancelled bookings': '已取消的预约',
+  'No cancelled bookings.': '没有已取消的预约。',
+  'Search bookings': '搜索预约',
+  'Invitee name or email, or event type.': '受邀人姓名或邮箱，或活动类型。',
+  'No bookings match your search.': '没有符合搜索条件的预约。',
+  'Try another name, email address or event type.': '请尝试其他姓名、邮箱地址或活动类型。',
+  'Clear search': '清除搜索',
+  'Matching bookings: {0}.': '找到{0}个符合条件的预约。',
+  'Matching bookings shown: {0}. More are available.': '已显示{0}个符合条件的预约，还有更多。',
+  'Clear the search to export bookings as CSV.': '清除搜索后即可将预约导出为 CSV。',
 
   // Audit log
   'Audit log': '审计日志',

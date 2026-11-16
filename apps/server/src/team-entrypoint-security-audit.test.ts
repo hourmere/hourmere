@@ -11,7 +11,12 @@ import {
   createCallerResolver,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import {
+  createTestDatabase,
+  outsideAuthTransaction,
+  type TestDatabase,
+  takePoolOrderViolations,
+} from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
@@ -365,7 +370,9 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     const selected = application(selectedAuth)
     const adapter = (await selectedAuth.$context).adapter
     let entered = false
-    const revoke = async () => {
+    // Commits on an independent connection, deliberately while the request holds one.
+    const revoke = () => outsideAuthTransaction(revokeOnce)
+    const revokeOnce = async () => {
       if (!entered) {
         entered = true
         if (path === 'create')
@@ -1124,6 +1131,8 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         (copy) => verifyContextPersistence(path, copy),
         { outcome: { actual: 200, expected: 403 } },
       )
+      // A broken copy may also take connections out of order; this test asserts its own failure.
+      takePoolOrderViolations()
     },
   )
 })

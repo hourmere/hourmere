@@ -91,4 +91,111 @@ describe('open-time snippet documentation facts', () => {
     ).toThrow(assertion)
     expect(route).toContain("409: 'no_available_slots, calendar_sync_unavailable'")
   })
+
+  it.each([
+    [
+      'open-time-snippets',
+      [
+        'REST',
+        'HTTP 404',
+        '{"error":"slot_snippets_disabled"}',
+        'MCP',
+        'absent from tools/list',
+        '{"code":-32602,"message":"Tool generate_open_time_snippet not found"}',
+        'CLI',
+        'exits 1',
+        'stderr',
+        'stdout empty',
+        'without outcomeMayBeUnknown',
+      ],
+    ],
+    ['rest', ['HTTP 404', '{"error":"slot_snippets_disabled"}']],
+    ['mcp', ['absent from tools/list', '-32602', 'Tool generate_open_time_snippet not found']],
+    [
+      'cli',
+      [
+        'exits 1',
+        '{ "error": "slot_snippets_disabled" }',
+        'stderr',
+        'empty stdout',
+        'without outcomeMayBeUnknown',
+      ],
+    ],
+  ] as const)('%s describes its disabled-feature response', (name, required) => {
+    const source = prose(read(`apps/site/src/content/docs/docs/${name}.md`))
+    const checkDisabled = (text: string) => {
+      for (const fact of required) expect(text).toContain(fact)
+    }
+    checkDisabled(source)
+    for (const fact of required) {
+      expect(() => checkDisabled(source.replaceAll(fact, 'changed response'))).toThrow(assertion)
+    }
+  })
+
+  it.each([
+    'apps/site/src/content/docs/docs/cli.md',
+    'apps/site/src/content/docs/docs/open-time-snippets.md',
+    'tools/cli/README.md',
+  ])('%s quotes CLI stderr formatting and older-server recovery', (path) => {
+    const source = read(path)
+    const checkCli = (text: string) => {
+      expect(text).toContain(`\`\`\`json
+${JSON.stringify({ error: 'slot_snippets_disabled' }, null, 2)}
+\`\`\``)
+      expect(prose(text)).toContain(
+        'predates open-time snippets returns the same unknown-tool response',
+      )
+      expect(prose(text)).toContain('upgrade that server before enabling')
+      expect(prose(text)).toContain('without outcomeMayBeUnknown')
+    }
+    checkCli(source)
+    for (const [before, after] of [
+      ['  "error": "slot_snippets_disabled"', '"error":"slot_snippets_disabled"'],
+      ['predates open-time snippets', 'supports open-time snippets'],
+      ['upgrade that server before enabling', 'enable'],
+      ['without `outcomeMayBeUnknown`', 'with `outcomeMayBeUnknown`'],
+    ] as const) {
+      expect(() => checkCli(source.replaceAll(before, after))).toThrow(assertion)
+    }
+  })
+
+  it('documents the snippets exception in general failure recovery', () => {
+    const source =
+      read('apps/site/src/content/docs/docs/cli.md').split('## Failures and recovery')[1] ?? ''
+    const sentence =
+      'except slot_snippets_disabled from open-time-snippet, which is a definite failure'
+    expect(prose(source)).toContain(sentence)
+    expect(() =>
+      expect(prose(source.replace('except\n', 'including\n'))).toContain(sentence),
+    ).toThrow(assertion)
+  })
+
+  it('keeps the repository MCP guide explicit about hidden tools', () => {
+    const source = prose(read('docs/mcp.md'))
+    for (const fact of [
+      'absent from tools/list',
+      '-32602',
+      'Tool generate_open_time_snippet not found',
+    ]) {
+      expect(source).toContain(fact)
+      expect(() => expect(source.replaceAll(fact, '')).toContain(fact)).toThrow(assertion)
+    }
+  })
+
+  it.each(['docs/api-conventions.md', 'apps/site/src/content/docs/docs/api-conventions.md'])(
+    '%s names the accepted native scope values without a dangling reference',
+    (path) => {
+      const source = prose(read(path))
+      const sentence = 'Native creation accepts metadata.scope with exactly full, read or bookings;'
+      expect(source).toContain(sentence)
+      expect(() =>
+        expect(
+          source.replace(
+            sentence,
+            'Native creation accepts metadata.scope with one of those exact values;',
+          ),
+        ).toContain(sentence),
+      ).toThrow(assertion)
+    },
+  )
 })

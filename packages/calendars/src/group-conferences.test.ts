@@ -42,7 +42,7 @@ function prepareCopy(change?: readonly [string, string]): typeof prepareGroupSlo
     'utf8',
   )
   let source = original.slice(
-    original.indexOf('export async function prepareGroupSlotConference'),
+    original.indexOf('type ConferenceFlags'),
     original.indexOf('/** Count-only exits'),
   )
   if (change) {

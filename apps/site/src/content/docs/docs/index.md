@@ -49,6 +49,30 @@ The website at hourmere.com is separate from your Hourmere instance.
   receive notification when a matching time opens; manage entries in the editor, REST,
   MCP or CLI. Available in full to self-hosters.
 
+## Create an event type
+
+Open **Event types**, then **New event type** in your Hourmere instance. Start with four
+things: **Title**, **Booking link**, **Duration (minutes)** and **Where the meeting happens**. The link follows your title and
+meeting length until you edit it yourself. A location can be left unset; phone, address
+and meeting-link choices ask for the details needed for that choice.
+
+The other settings are grouped in closed disclosures. Open a group to configure
+availability, booking limits, notice and buffers, multiple meeting lengths, additional
+locations, hosts, questions, guests, notifications, waitlists or the after-booking redirect.
+You can create immediately using the existing defaults, then adjust these settings later.
+A team event initially selects you as its host. Availability still depends on the host's
+configured working hours; creating an event does not create a schedule.
+
+When editing, groups with saved non-default values open automatically so you can review
+them. Closing a group keeps its values. A validation error in a closed group opens that
+group and moves focus to the affected field. Saving a title change preserves other saved
+configuration, including settings configured through REST, MCP or CLI.
+
+After saving, use **View and share** to open or copy the saved booking link. Round-robin
+pools still require explicit activation. These form changes are included in self-hosting;
+REST, MCP and CLI defaults and permissions are unchanged. Group seats and paid-booking
+configuration remain unavailable in the editor, as described below.
+
 ## Known limitations
 
 - [Audit events](/docs/audit-log) are recorded only for the management changes listed
@@ -115,9 +139,10 @@ The website at hourmere.com is separate from your Hourmere instance.
   freshness as well as the edited settings. A full occurrence gives
   the same error for existing and unknown email addresses; exact request replays still work.
   With spare capacity, duplicate-email rejection does not guarantee membership privacy:
-  a different email address can create a real seat and its notifications, or receive a
-  distinct pinned-Zoom failure without a committed seat. Mismatched location options
-  return the same error regardless of whether the email address already holds a seat.
+  a different email address can create a real seat and its notifications. Every refusal
+  that does not create a seat (mismatched location options, cutoffs, an unusable pinned
+  Zoom or Google Meet resource) returns the same error whether or not the email address
+  already holds a seat.
   Host occurrence mail drains batches of four for up to 230 seconds per worker run;
   remaining due messages stay durable for the next run, subject to reminder expiry,
   the instance email abuse budget and delivery retries.
@@ -131,8 +156,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
-- [Meeting location choices](/docs/location-choices) are configured through REST, MCP or CLI;
-  the editor does not yet offer a multiple-location editor. Rescheduling preserves the choice.
+- [Meeting location choices](/docs/location-choices) support up to five distinct kinds
+  in the editor, REST, MCP and CLI. Rescheduling preserves the original choice.
 - [Multiple meeting lengths](/docs/multiple-durations) share one set of hosts, location
   and booking rules; per-length overrides are unavailable. Web rescheduling keeps the
   original length; changing it requires REST, MCP or CLI.
