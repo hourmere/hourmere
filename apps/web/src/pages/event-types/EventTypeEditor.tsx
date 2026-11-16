@@ -63,6 +63,7 @@ import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
 import { SuccessRedirectEditor } from './SuccessRedirectEditor.tsx'
+import { TimeUnitField } from './TimeUnitField.tsx'
 import { WaitlistEditor } from './WaitlistEditor.tsx'
 import { ZoomMeetingFields } from './ZoomMeetingFields.tsx'
 
@@ -244,6 +245,8 @@ function EventTypeForm({
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    // Display-unit choices are local presentation, not a reason to write stale settings.
+    if (saved && !dirty) return
     setAttempt((n) => n + 1)
     setFormError(null)
     setStatus('')
@@ -602,6 +605,49 @@ function EventTypeForm({
                   </p>
                 )}
               </div>
+              <fieldset className="duration-presets">
+                <legend>{t('Default duration presets')}</legend>
+                {[15, 30, 45, 60].map((minutes) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    className="button button-small"
+                    aria-pressed={Number(draft.durationMinutes) === minutes}
+                    disabled={
+                      draft.allowedDurationsMinutes.length >= EVENT_TYPE.maxAllowedDurations &&
+                      !draft.allowedDurationsMinutes.includes(minutes)
+                    }
+                    onClick={() => {
+                      set('durationMinutes', String(minutes))
+                      if (draft.allowedDurationsMinutes.length <= 1)
+                        set('allowedDurationsMinutes', [minutes])
+                      else if (!draft.allowedDurationsMinutes.includes(minutes))
+                        set(
+                          'allowedDurationsMinutes',
+                          [...draft.allowedDurationsMinutes, minutes].sort((a, b) => a - b),
+                        )
+                    }}
+                  >
+                    {t('{minutes} minutes', { minutes })}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="button button-small"
+                  onClick={() => {
+                    const inputId =
+                      draft.allowedDurationsMinutes.length > 1
+                        ? 'duration-to-add'
+                        : 'durationMinutes'
+                    const input = document.getElementById(inputId)
+                    const details = input?.closest('details')
+                    if (details) details.open = true
+                    input?.focus()
+                  }}
+                >
+                  {t('Custom duration')}
+                </button>
+              </fieldset>
               <Field
                 id="durationMinutes"
                 label={t('Duration (minutes)')}
@@ -1062,34 +1108,25 @@ function EventTypeForm({
                         : t('the duration')
                     }
                   />
-                  <MinutesField
+                  <TimeUnitField
                     id="minimumNoticeMinutes"
                     label={t('Minimum notice')}
                     value={draft.minimumNoticeMinutes}
                     error={errors.minimumNoticeMinutes}
                     onChange={(v) => set('minimumNoticeMinutes', v)}
                     rule={RULES.minimumNoticeMinutes}
-                    extra="How far ahead a meeting must be booked."
+                    extra={t('How far ahead a meeting must be booked.')}
                   />
-                  <Field
+                  <TimeUnitField
                     id="bookingWindowDays"
                     label={t('Booking window')}
                     optional
+                    storageUnit="days"
+                    value={draft.bookingWindowDays}
+                    onChange={(value) => set('bookingWindowDays', value)}
                     error={errors.bookingWindowDays}
-                    hint={t('Days ahead people can book, {0}–{1}. Empty: no limit.', {
-                      '0': RULES.bookingWindowDays.min,
-                      '1': RULES.bookingWindowDays.max,
-                    })}
-                  >
-                    {(props) => (
-                      <input
-                        {...props}
-                        inputMode="numeric"
-                        value={draft.bookingWindowDays}
-                        onChange={(e) => set('bookingWindowDays', e.target.value)}
-                      />
-                    )}
-                  </Field>
+                    rule={RULES.bookingWindowDays}
+                  />
                   <Field
                     id="maxBookingsPerDay"
                     label={t('Daily limit')}
@@ -1147,23 +1184,23 @@ function EventTypeForm({
                       />
                     )}
                   </Field>
-                  <MinutesField
+                  <TimeUnitField
                     id="bufferBeforeMinutes"
                     label={t('Buffer before')}
                     value={draft.bufferBeforeMinutes}
                     error={errors.bufferBeforeMinutes}
                     onChange={(v) => set('bufferBeforeMinutes', v)}
                     rule={RULES.bufferBeforeMinutes}
-                    extra="Free time kept before each meeting."
+                    extra={t('Free time kept before each meeting.')}
                   />
-                  <MinutesField
+                  <TimeUnitField
                     id="bufferAfterMinutes"
                     label={t('Buffer after')}
                     value={draft.bufferAfterMinutes}
                     error={errors.bufferAfterMinutes}
                     onChange={(v) => set('bufferAfterMinutes', v)}
                     rule={RULES.bufferAfterMinutes}
-                    extra="Free time kept after each meeting."
+                    extra={t('Free time kept after each meeting.')}
                   />
                   <MinutesField
                     id="rescheduleCutoffMinutes"
