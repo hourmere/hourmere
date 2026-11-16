@@ -61,6 +61,8 @@ function productSourceCopy(change?: Change): Factory {
     openTimeSnippetTools: () => [],
     availabilityTroubleshootingTools: () => [],
     workflowTools: () => [],
+    routingFormsEnabled: false,
+    routingFormConfigurationTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),
