@@ -554,7 +554,7 @@ describe('booking limit drafts', () => {
 })
 
 it.each(['', 'google_meet', 'zoom', 'phone', 'in_person', 'link'] as const)(
-  'keeps the legacy essentials request byte-identical for %s',
+  'keeps the essentials request with additive default deadlines byte-identical for %s',
   (locationKind) => {
     const location =
       locationKind === ''
@@ -592,6 +592,8 @@ it.each(['', 'google_meet', 'zoom', 'phone', 'in_person', 'link'] as const)(
         maxBookingsPerWeek: null,
         maxBookingsPerMonth: null,
         bookingWindowDays: null,
+        rescheduleCutoffMinutes: null,
+        cancelCutoffMinutes: null,
         location,
         questions: [],
         scheduleId: null,

@@ -115,7 +115,9 @@ const restContract = {
     'GET /api/v1/teams/{teamId}/member-readiness',
     'GET /api/v1/teams/{teamId}/readiness',
   ],
+  audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [
+    'PUT /api/v1/audit-log/settings',
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
     'PUT /api/v1/schedules/{id}/availability',
@@ -157,6 +159,7 @@ const allowedClasses: Record<ApiKeyScope, readonly string[]> = {
     'booking_write',
     'other_read',
     'other_write',
+    'audit_read',
     'diagnostic_read',
     'session_only',
     'public_metadata',
@@ -364,6 +367,9 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'list_audit_events',
+        'get_audit_log_settings',
+        'set_audit_log_settings',
         'troubleshoot_availability',
         'get_branding',
         'set_branding',

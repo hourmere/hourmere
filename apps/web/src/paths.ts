@@ -19,6 +19,7 @@ export const PATHS = {
   calendars: `${APP_BASE}/calendars`,
   connectedApps: `${APP_BASE}/connected-apps`,
   apiKeys: `${APP_BASE}/api-keys`,
+  auditLog: `${APP_BASE}/audit-log`,
   settings: `${APP_BASE}/settings`,
   newTeam: `${APP_BASE}/teams/new`,
   signIn: '/sign-in',

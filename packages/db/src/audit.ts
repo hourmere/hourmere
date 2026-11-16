@@ -74,6 +74,7 @@ export const auditDetails = {
   'event_type.notifications_updated': [],
   'event_type.waitlist_updated': [],
   'event_type.round_robin_activated': [],
+  'audit_log.retention_updated': [],
 } as const
 export type AuditAction = keyof typeof auditDetails
 export interface AuditActor {

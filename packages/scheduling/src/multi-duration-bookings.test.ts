@@ -23,6 +23,7 @@ import {
   rescheduleHostBooking,
   rescheduleManagedBooking,
 } from './bookings.ts'
+import * as changeDeadlines from './change-deadlines.ts'
 import * as conferences from './conferences.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -82,6 +83,7 @@ function manageSourceCopy(...changes: Change[]): ManageApi {
     assertInviteeRescheduleAllowed,
     getHostBooking,
     getManagedBooking,
+    ...changeDeadlines,
     DomainError,
     ...hosts,
   }
@@ -113,6 +115,7 @@ function sourceCopy(...changes: Change[]): Api {
     z,
     ...availability,
     ...bookingPage,
+    ...changeDeadlines,
     ...conferences,
     ...locationOptions,
     ...groupSeatAdmission,

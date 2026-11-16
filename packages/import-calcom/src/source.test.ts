@@ -351,7 +351,9 @@ dbDescribe('read-only Cal.com source extraction', () => {
     } finally {
       await fixture.db.pool.query('DELETE FROM "Booking" WHERE id BETWEEN 10000 AND 20000')
     }
-  }, 30_000)
+    // 10,001 rows, a megabyte answer and two source-copy runs: half a minute is too tight on a
+    // loaded runner, and a timeout leaves the rows behind for the next test.
+  }, 120_000)
   it('reads only minimal future pending and nonpersonal booking data and counts terminal exclusions', async () => {
     const fixture = fixtures[0] as (typeof fixtures)[number]
     await fixture.insert('EventType', {

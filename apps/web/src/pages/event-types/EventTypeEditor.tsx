@@ -1165,6 +1165,31 @@ function EventTypeForm({
                     rule={RULES.bufferAfterMinutes}
                     extra="Free time kept after each meeting."
                   />
+                  <MinutesField
+                    id="rescheduleCutoffMinutes"
+                    label={t('Invitee reschedule deadline')}
+                    optional
+                    value={draft.rescheduleCutoffMinutes}
+                    error={errors.rescheduleCutoffMinutes}
+                    onChange={(v) => set('rescheduleCutoffMinutes', v)}
+                    rule={RULES.rescheduleCutoffMinutes}
+                    empty={t('until the meeting starts')}
+                    extra="How long before the start invitees can no longer reschedule with their booking link. Each booking keeps the deadline it was booked with, and you can still change it yourself."
+                  />
+                  <MinutesField
+                    id="cancelCutoffMinutes"
+                    label={t('Invitee cancellation deadline')}
+                    optional
+                    value={draft.cancelCutoffMinutes}
+                    error={errors.cancelCutoffMinutes}
+                    onChange={(v) => set('cancelCutoffMinutes', v)}
+                    rule={RULES.cancelCutoffMinutes}
+                    empty={t('until the meeting starts')}
+                    extra="How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself."
+                  />
+                  <p className="field-hint">
+                    {t('Rescheduling also closes when the cancellation deadline passes.')}
+                  </p>
                 </div>
               </div>
             </section>

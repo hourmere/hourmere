@@ -62,6 +62,9 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 
 | Command | Tool | Arguments |
 |---|---|---|
+| `audit-log list` | `list_audit_events` | optional `from`, `to`, `actorType`, `actorId`, `action`, `limit`, `cursor`; requires `full`; [audit log](/docs/audit-log) |
+| `audit-log settings` | `get_audit_log_settings` | `{}`; requires `full` |
+| `audit-log set-retention` | `set_audit_log_settings` | `retention` and, for `days`, `retentionDays`; requires `full` and owner |
 | `branding get` | `get_branding` | `{}`; requires `read` or `full` |
 | `branding set` | `set_branding` | optional `brandPrimaryColor` (`#RRGGBB`), `brandLogo` (uploaded hash); `null` clears; requires `full` |
 | `branding upload` | REST `POST /api/v1/branding/logo` | `--file FILE --content-type image/png` (also `image/jpeg`, `image/webp`); requires `full` |
@@ -398,8 +401,10 @@ UUID to replace the outstanding request.
 The returned booking stays `confirmed`, with optional `pendingReschedule` containing
 `id`, `expiresAt` and `note`. The original time stays booked and blocks availability
 until the invitee uses their normal manage link to pick another time or cancel.
-The request expires after 48 hours or when the original meeting starts, whichever
-comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+The request expires after 48 hours, when the original meeting starts, or at the booking's
+[effective reschedule deadline](/docs/change-deadlines) (the earlier of its
+reschedule and cancel instants), whichever comes first; after that deadline a
+new request fails with `booking_reschedule_deadline_passed`. Expiry keeps that time and notifies the host. Imported and group-seat bookings
 cannot receive a request. Picking uses the normal availability rules and reschedule
 limit, calendar updates, conference handling and reminders.
 
@@ -428,6 +433,22 @@ day ≤ week ≤ month, comparing each pair that is set, including day/month wit
 weekly limit. See [booking limits](/docs/booking-limits) for examples, host schedule
 time zones, Monday-based weeks, calendar months and counting rules. Lowering a
 ceiling does not cancel existing bookings.
+
+## Configure reschedule and cancel deadlines
+
+Put `rescheduleCutoffMinutes` and `cancelCutoffMinutes` in the same `create-event` or
+`update-event` JSON file, for example
+`{ "id": "EVENT_TYPE_ID", "rescheduleCutoffMinutes": 2880, "cancelCutoffMinutes": 1440 }`.
+Each is a whole number from 1 to 525600, or `null` for no deadline. From that many
+minutes before the start, the invitee can no longer reschedule or cancel through their
+link; `reschedule` and `cancel` with `bookingId` are not limited. See
+[reschedule and cancel deadlines](/docs/change-deadlines) for the full rules.
+
+Invitee rescheduling closes at the earlier of the reschedule and cancel deadline
+instants, using the booking's snapshot; null contributes no limit from that side.
+A refusal caused only by the cancel deadline still returns
+`booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
+deadline, and new requests are refused once it is reached.
 
 ## Record attendee no-shows
 

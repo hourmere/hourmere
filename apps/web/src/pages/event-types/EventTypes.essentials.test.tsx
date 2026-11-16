@@ -50,7 +50,7 @@ it('shows precisely four editable controls outside closed settings on create', a
     expect(group.querySelector('summary')?.textContent?.trim()).toBeTruthy()
 })
 
-it('submits the exact pre-disclosure create body when only essentials are filled', async () => {
+it('submits the essentials create body with default deadlines when only essentials are filled', async () => {
   chooseLanguage('en')
   const api = setup()
   const user = userEvent.setup()
@@ -59,7 +59,7 @@ it('submits the exact pre-disclosure create body when only essentials are filled
   await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'google_meet')
   await user.click(screen.getByRole('button', { name: 'Create event type' }))
   await waitFor(() => expect(api.to('POST /api/v1/event-types')).toHaveLength(1))
-  // Literal captured from the old form's emptyDraft/toInput contract, not computed by new code.
+  // Literal essentials contract, including additive default deadline settings.
   expect(api.to('POST /api/v1/event-types')[0]?.body).toEqual({
     title: 'Intro',
     slug: 'intro',
@@ -73,6 +73,8 @@ it('submits the exact pre-disclosure create body when only essentials are filled
     maxBookingsPerWeek: null,
     maxBookingsPerMonth: null,
     bookingWindowDays: null,
+    rescheduleCutoffMinutes: null,
+    cancelCutoffMinutes: null,
     location: { kind: 'google_meet' },
     questions: [],
     scheduleId: null,

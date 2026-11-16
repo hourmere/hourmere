@@ -5,6 +5,8 @@ export type ApiKeyOperationClass =
   | 'booking_write'
   | 'other_read'
   | 'other_write'
+  /** Reads of the audit journal: who did what. Full-scope keys only. */
+  | 'audit_read'
   | 'diagnostic_read'
   | 'session_only'
   | 'public_metadata'
@@ -46,6 +48,7 @@ const classScopes: Readonly<Record<ApiKeyOperationClass, readonly ApiKeyScope[]>
   booking_write: Object.freeze(['full', 'bookings'] as const),
   other_read: Object.freeze(['full', 'read'] as const),
   other_write: Object.freeze(['full'] as const),
+  audit_read: Object.freeze(['full'] as const),
   // Read-only, but repeated diagnostics can reveal busy timings, so only full keys.
   diagnostic_read: Object.freeze(['full'] as const),
   session_only: Object.freeze([]),
@@ -96,6 +99,9 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
     'session_only',
   ),
 
+  rest('GET', '/api/v1/audit-events', 'audit_read', 'key'),
+  rest('GET', '/api/v1/audit-log/settings', 'audit_read', 'key'),
+  rest('PUT', '/api/v1/audit-log/settings', 'other_write', 'key'),
   rest('GET', '/api/v1/branding', 'other_read', 'key'),
   rest('GET', '/api/v1/branding/logo/{hash}', 'other_read', 'key'),
   rest('PATCH', '/api/v1/branding', 'other_write', 'key'),
@@ -257,6 +263,9 @@ function mcp(
 }
 
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
+  mcp('list_audit_events', 'audit_read', ['GET /api/v1/audit-events']),
+  mcp('get_audit_log_settings', 'audit_read', ['GET /api/v1/audit-log/settings']),
+  mcp('set_audit_log_settings', 'other_write', ['PUT /api/v1/audit-log/settings']),
   mcp('get_branding', 'other_read', ['GET /api/v1/branding']),
   mcp('set_branding', 'other_write', ['PATCH /api/v1/branding']),
   mcp('list_slack_destinations', 'other_read', ['GET /api/v1/slack-destinations']),
@@ -389,6 +398,9 @@ function cli(command: string, tool: string): ApiKeyCliOperation {
 
 export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.freeze([
   cli('whoami', 'whoami'),
+  cli('audit-log list', 'list_audit_events'),
+  cli('audit-log settings', 'get_audit_log_settings'),
+  cli('audit-log set-retention', 'set_audit_log_settings'),
   cli('branding get', 'get_branding'),
   cli('branding set', 'set_branding'),
   cli('profile', 'get_profile'),

@@ -328,6 +328,8 @@ describe.skipIf(!serverUrl)('event type service', () => {
         maxBookingsPerDay: null,
         maxBookingsPerWeek: null,
         maxBookingsPerMonth: null,
+        rescheduleCutoffMinutes: null,
+        cancelCutoffMinutes: null,
         schedulingType: 'individual',
         roundRobinActive: false,
         conferenceOrganizer: null,

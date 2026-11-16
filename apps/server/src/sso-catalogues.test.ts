@@ -15,6 +15,7 @@ import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productionAppOptions, productionAuthOptions, productRoutes } from './server.ts'
+import { MAILBOX_PROOF_CONSUME_PATH, MAILBOX_PROOF_SEND_PATH } from './sso-mailbox-proof.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
@@ -74,6 +75,22 @@ function expectNoSsoRoutes(paths: string[]) {
   expectNoSso(paths.filter((path) => path !== MCP_OAUTH_DISCOVERY_PATH))
 }
 
+// The SSO auth-protocol endpoints that are built and mounted while hard-off, because each must
+// answer `404 sso_disabled` itself (docs/sso.md, Hard-off behaviour): today only the Mailbox
+// proof pair. They are exempt by exact path from the production route inventory and the source
+// literals only, and only because the suite below proves that each answers
+// `404 {"error":"sso_disabled"}` in the app production assembles, before any other check.
+const GUARDED_SSO_AUTH_PATHS = [
+  '/api/auth/sso/mailbox-proof/send',
+  '/api/auth/sso/mailbox-proof/consume',
+] as const
+
+function expectNoUnguardedSsoRoutes(paths: string[]) {
+  expectNoSsoRoutes(
+    paths.filter((path) => !(GUARDED_SSO_AUTH_PATHS as readonly string[]).includes(path)),
+  )
+}
+
 // The createApp and createAuth options exactly as startServer assembles them
 // (productionAppOptions and productionAuthOptions in apps/server/src/server.ts), from a
 // configuration that turns on every optional group: MCP OAuth, SCIM, the built web app, the
@@ -119,6 +136,7 @@ function productionOptions(db: Db) {
     zoomConference: undefined,
     enqueueCalendarSync: unavailable,
     enqueueCalendarWritebackRecovery: unavailable,
+    mailboxProofQueue: { enqueue: unavailable },
   })
 }
 // HOURMERE_ROLE=worker serves this app instead of createApp; its routes are inventoried too.
@@ -418,7 +436,8 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       expect(productionPaths).toEqual(
         expect.arrayContaining([...documentPaths, ...productionOnlyPaths]),
       )
-      expectNoSsoRoutes(productionPaths)
+      expect(productionPaths).toEqual(expect.arrayContaining([...GUARDED_SSO_AUTH_PATHS]))
+      expectNoUnguardedSsoRoutes(productionPaths)
       const worker = workerPaths()
       expect(worker).toContain('/api/health')
       expectNoSsoRoutes(worker)
@@ -432,6 +451,76 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     expect(() => expectNoSsoRoutes(plainRoutes.routes.map(({ path }) => path))).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+
+  it('exempts exactly the guarded mailbox proof endpoints and nothing else', () => {
+    const rejects = (check: () => void) =>
+      expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
+    // The exemption is the endpoints' own published paths, nothing broader.
+    expect([MAILBOX_PROOF_SEND_PATH, MAILBOX_PROOF_CONSUME_PATH]).toEqual([
+      ...GUARDED_SSO_AUTH_PATHS,
+    ])
+    expectNoUnguardedSsoRoutes([...GUARDED_SSO_AUTH_PATHS])
+    // The ordinary rule is unchanged: the same paths fail every other check.
+    for (const path of GUARDED_SSO_AUTH_PATHS) {
+      rejects(() => expectNoSso([path]))
+      rejects(() => expectNoSsoRoutes([path]))
+      rejects(() => expectNoSsoAuthEndpoints([path]))
+      rejects(() => expectNoSsoOperations({ paths: { [path]: { post: {} } } }))
+    }
+    for (const path of [
+      `${MAILBOX_PROOF_SEND_PATH}/`,
+      ` ${MAILBOX_PROOF_SEND_PATH}`,
+      MAILBOX_PROOF_SEND_PATH.toUpperCase(),
+      '/api/auth/sso/mailbox-proof',
+      '/api/auth/sso/mailbox-proof/*',
+      '/api/auth/sso/mailbox-proof/resend',
+      '/api/auth/sso/*',
+      '/api/v1/sso/mailbox-proof/send',
+      '/sso/mailbox-proof/consume',
+    ]) {
+      rejects(() => expectNoUnguardedSsoRoutes([path]))
+      rejects(() => expectNoUnguardedSsoRoutes([...GUARDED_SSO_AUTH_PATHS, path]))
+    }
+    // The worker serves health only: no exemption applies there.
+    rejects(() => expectNoSsoRoutes([...workerPaths(), MAILBOX_PROOF_SEND_PATH]))
+  })
+
+  it('answers 404 sso_disabled on every exempt endpoint as production assembles the app', async () => {
+    const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
+    const previous = { oidc: process.env.SSO_OIDC_ENABLED, saml: process.env.SSO_SAML_ENABLED }
+    process.env.SSO_OIDC_ENABLED = 'true'
+    process.env.SSO_SAML_ENABLED = 'true'
+    try {
+      // The queue, the caller resolver and the database all refuse: an effect would be a 500.
+      const app = createApp(productionOptions(db))
+      for (const path of GUARDED_SSO_AUTH_PATHS)
+        for (const method of ['POST', 'GET', 'PUT'])
+          for (const headers of [
+            {},
+            { origin: 'http://localhost', 'content-type': 'application/json' },
+            { origin: 'https://attacker.example', authorization: 'Bearer hm_x', cookie: 'a=b' },
+          ])
+            for (const attemptId of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id']) {
+              const response = await app.request(path, {
+                method,
+                headers,
+                ...(method === 'GET'
+                  ? {}
+                  : { body: JSON.stringify({ attemptId, token: 'synthetic' }) }),
+              })
+              expect(response.status, `${method} ${path}`).toBe(404)
+              expect(await response.json()).toEqual({ error: 'sso_disabled' })
+            }
+    } finally {
+      for (const [name, value] of [
+        ['SSO_OIDC_ENABLED', previous.oidc],
+        ['SSO_SAML_ENABLED', previous.saml],
+      ] as const)
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      await db.destroy()
+    }
   })
 
   it('exempts exactly the MCP OAuth discovery route and nothing else', () => {
@@ -579,8 +668,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
         MCP_OAUTH_DISCOVERY_PATH,
       ]),
     )
-    expectNoSsoRoutes(literals)
-    expect(() => expectNoSsoRoutes([...literals, '/sso/callback'])).toThrow(
+    expect(literals).toEqual(expect.arrayContaining([...GUARDED_SSO_AUTH_PATHS]))
+    expectNoUnguardedSsoRoutes(literals)
+    expect(() => expectNoUnguardedSsoRoutes([...literals, '/sso/callback'])).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
     // The SSO plugin package is a development dependency, for evaluation only (docs/sso.md);

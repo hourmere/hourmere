@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { validateEventTypeRules } from '@hourmere/core'
 import { describe, expect, it } from 'vitest'
+import { validCutoff } from './change-deadlines.ts'
 import { EVENT_TYPE_LIMITS } from './event-types.ts'
 import { engineValidation } from './internal.ts'
 import {
@@ -28,6 +29,7 @@ const bindings = {
   compatLocation,
   locationOptionsFromLegacy,
   validateLocationOptions,
+  validCutoff,
 }
 
 function sourceCopy(start: string, end: string, change?: Change) {

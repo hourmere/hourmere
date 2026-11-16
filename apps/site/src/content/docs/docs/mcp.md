@@ -76,6 +76,9 @@ notifications and trigger configured integrations.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_audit_events` | — | `audit-log list` | `full` |
+| `get_audit_log_settings` | — | `audit-log settings` | `full` |
+| `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
 | `get_branding` | — | `branding get` | `full, read` |
 | `set_branding` | — | `branding set` | `full` |
 | `list_slack_destinations` | — | `slack list` | `full, read` |
@@ -652,6 +655,10 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   booking chain (default five, configured by `BOOKING_MAX_INVITEE_RESCHEDULES`; zero
   disables them). `booking_reschedule_limit` means contact the host to change it again.
   Cancellation remains available. Host moves are unlimited and do not consume the budget.
+- **Change deadlines:** with `manageToken`, `reschedule_booking` and `cancel_booking` fail
+  with `booking_reschedule_deadline_passed` or `booking_cancel_deadline_passed` from the
+  booking's [deadline](/docs/change-deadlines) on; the invitee should contact the host.
+  Calls with `bookingId` are not limited.
 - **Emails:** bookings made, moved or cancelled through MCP send the same emails as the
   booking page (hosts, invitee, guests; [Notifications and background jobs](/docs/notifications)).
 - **Retries:** give `create_booking` an `idempotencyKey` (a new random value per booking,
@@ -754,8 +761,10 @@ UUID to replace the outstanding request.
 The returned booking stays `confirmed`, with optional `pendingReschedule` containing
 `id`, `expiresAt` and `note`. The original time stays booked and blocks availability
 until the invitee uses their normal manage link to pick another time or cancel.
-The request expires after 48 hours or when the original meeting starts, whichever
-comes first. Expiry keeps that time and notifies the host. Imported and group-seat bookings
+The request expires after 48 hours, when the original meeting starts, or at the booking's
+[effective reschedule deadline](/docs/change-deadlines) (the earlier of its
+reschedule and cancel instants), whichever comes first; after that deadline a
+new request fails with `booking_reschedule_deadline_passed`. Expiry keeps that time and notifies the host. Imported and group-seat bookings
 cannot receive a request. Picking uses the normal availability rules and reschedule
 limit, calendar updates, conference handling and reminders.
 
@@ -793,6 +802,21 @@ requires the personal owner or a current team owner/admin (`insufficient_role` o
 and an API key with `read` or `full` scope. `noShows` counts each attendee currently marked
 as a no-show on still-confirmed bookings, by the local date of the scheduled start; see
 [booking activity](https://hourmere.com/docs/analytics) for the full definition.
+
+## Configure reschedule and cancel deadlines
+
+`create_event_type` and `update_event_type` accept `rescheduleCutoffMinutes` and
+`cancelCutoffMinutes`; `get_event_type` returns them. Each is a whole number from 1 to
+525600, or `null` for no deadline. From that many minutes before the start, invitee
+calls with `manageToken` can no longer reschedule or cancel; host calls with
+`bookingId` are not limited. Each booking keeps the values that applied when it was
+booked. See [reschedule and cancel deadlines](/docs/change-deadlines) for examples.
+
+Invitee rescheduling closes at the earlier of the reschedule and cancel deadline
+instants, using the booking's snapshot; null contributes no limit from that side.
+A refusal caused only by the cancel deadline still returns
+`booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
+deadline, and new requests are refused once it is reached.
 
 ## Attendee attendance access
 

@@ -216,7 +216,7 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
       expect(managed.status).toBe(200)
       const details = (await managed.json()) as ManagedBooking
       expect(Object.keys(details).sort()).toEqual(
-        [...Object.keys(result.booking), 'eventType', 'hosts'].sort(),
+        [...Object.keys(result.booking), 'eventType', 'hosts', 'changeDeadlines'].sort(),
       )
       expect(Object.keys(details.eventType ?? {}).sort()).toEqual([
         'allowedDurationsMinutes',

@@ -95,6 +95,10 @@ export const AnalyticsPage = page(
   () => import('./pages/Analytics.tsx'),
   (m) => m.AnalyticsPage,
 )
+export const AuditLogPage = page(
+  () => import('./pages/AuditLog.tsx'),
+  (m) => m.AuditLogPage,
+)
 
 // Public pages: booking pages and the invitee's manage page.
 

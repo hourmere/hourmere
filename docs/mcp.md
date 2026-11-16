@@ -54,6 +54,9 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_audit_events` | — | `audit-log list` | `full` |
+| `get_audit_log_settings` | — | `audit-log settings` | `full` |
+| `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
 | `get_branding` | — | `branding get` | `full, read` |
 | `set_branding` | — | `branding set` | `full` |
 | `list_slack_destinations` | — | `slack list` | `full, read` |
@@ -230,6 +233,26 @@ explicit null clears a ceiling. Day ≤ week, week ≤ month and day ≤ month a
 whenever each pair is configured. The same REST permissions and validation apply.
 See [booking limits](https://hourmere.com/docs/booking-limits) for examples, host
 time zones, Monday-based weeks, calendar months and cancellation/reschedule behavior.
+
+## Configure reschedule and cancel deadlines
+
+`create_event_type` and `update_event_type` accept nullable `rescheduleCutoffMinutes` and
+`cancelCutoffMinutes` (whole minutes from 1 to 525600); `get_event_type` returns them.
+Omitted update fields are preserved and explicit null removes a deadline. Each booking
+keeps the values that applied when it was booked. `reschedule_booking` and
+`cancel_booking` called with `manageToken` fail with `booking_reschedule_deadline_passed`
+or `booking_cancel_deadline_passed` at or after the booking's deadline; calls with
+`bookingId` are not limited. `request_reschedule` fails with
+`booking_reschedule_deadline_passed` once the invitee can no longer reschedule, and an open
+request expires at that deadline. See
+[reschedule and cancel deadlines](https://hourmere.com/docs/change-deadlines).
+
+Invitee rescheduling closes at the earlier of the reschedule and cancel deadline
+instants, using the booking's snapshot; null contributes no limit from that side.
+A refusal caused only by the cancel deadline still returns
+`booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
+deadline, and new requests are refused once it is reached.
+
 ## Export bookings without filling agent context
 
 `export_bookings` validates the same bounded range and permissions as REST, then

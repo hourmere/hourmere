@@ -129,6 +129,8 @@ export const admin = {
   'Events to post': 'Events to post',
   'Enable Slack notifications': 'Enable Slack notifications',
   'Save Slack destination': 'Save Slack destination',
+  'The invitee can no longer reschedule this booking online because its deadline has passed. Move it yourself instead.':
+    'The invitee can no longer reschedule this booking online because its deadline has passed. Move it yourself instead.',
   'Group-seat bookings do not support reschedule requests.':
     'Group-seat bookings do not support reschedule requests.',
   'Use plain text with at most 2000 characters. Tabs and control characters are not allowed.':
@@ -2007,6 +2009,15 @@ export const admin = {
     'The saved booking link is invalid. Reload the saved event type and try again.',
   'The email preview could not be created. Reload the saved event type and try again.':
     'The email preview could not be created. Reload the saved event type and try again.',
+  'Rescheduling also closes when the cancellation deadline passes.':
+    'Rescheduling also closes when the cancellation deadline passes.',
+  'Invitee reschedule deadline': 'Invitee reschedule deadline',
+  'Invitee cancellation deadline': 'Invitee cancellation deadline',
+  'until the meeting starts': 'until the meeting starts',
+  'How long before the start invitees can no longer reschedule with their booking link. Each booking keeps the deadline it was booked with, and you can still change it yourself.':
+    'How long before the start invitees can no longer reschedule with their booking link. Each booking keeps the deadline it was booked with, and you can still change it yourself.',
+  'How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself.':
+    'How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself.',
   'Cancelled bookings': 'Cancelled bookings',
   'No cancelled bookings.': 'No cancelled bookings.',
   'Search bookings': 'Search bookings',
@@ -2020,6 +2031,87 @@ export const admin = {
     'Matching bookings shown: {0}. More are available.',
   'Clear the search to export bookings as CSV.': 'Clear the search to export bookings as CSV.',
 
+  // Audit log
+  'Audit log': 'Audit log',
+  'Loading audit log…': 'Loading audit log…',
+  'Who changed what in this space: members, keys, integrations, bookings and settings.':
+    'Who changed what in this space: members, keys, integrations, bookings and settings.',
+  'Could not load your profile time zone.': 'Could not load your profile time zone.',
+  'Times are shown in {zone} (your profile time zone).':
+    'Times are shown in {zone} (your profile time zone).',
+  'Times are shown in UTC.': 'Times are shown in UTC.',
+  Retention: 'Retention',
+  'Loading retention…': 'Loading retention…',
+  'Could not load retention.': 'Could not load retention.',
+  'Your space changed. Reload the page.': 'Your space changed. Reload the page.',
+  'Only owners and admins of this space can view its audit log.':
+    'Only owners and admins of this space can view its audit log.',
+  'Audit log filters': 'Audit log filters',
+  'Both dates are included, as local days in the time zone above.':
+    'Both dates are included, as local days in the time zone above.',
+  'The end date must be on or after the start date.':
+    'The end date must be on or after the start date.',
+  Actor: 'Actor',
+  Anyone: 'Anyone',
+  Person: 'Person',
+  'API key': 'API key',
+  'OAuth client': 'OAuth client',
+  System: 'System',
+  'SCIM token': 'SCIM token',
+  Anonymous: 'Anonymous',
+  'External API key': 'External API key',
+  'External OAuth client': 'External OAuth client',
+  'External person': 'External person',
+  'Actor ID': 'Actor ID',
+  'Choose an actor type first to narrow it to one ID.':
+    'Choose an actor type first to narrow it to one ID.',
+  Action: 'Action',
+  'Any action': 'Any action',
+  Members: 'Members',
+  Space: 'Space',
+  'SCIM provisioning': 'SCIM provisioning',
+  Webhooks: 'Webhooks',
+  Slack: 'Slack',
+  'Sign-in and access': 'Sign-in and access',
+  'Reset filters': 'Reset filters',
+  'Loading audit events…': 'Loading audit events…',
+  'Could not load audit events.': 'Could not load audit events.',
+  'These filters could not be used. Check the dates, actor and action, then apply them again.':
+    'These filters could not be used. Check the dates, actor and action, then apply them again.',
+  'Audit events': 'Audit events',
+  'No audit events match these filters.': 'No audit events match these filters.',
+  'Events older than {days} days may have been deleted by the retention setting.':
+    'Events older than {days} days may have been deleted by the retention setting.',
+  'Audit events, newest first': 'Audit events, newest first',
+  Time: 'Time',
+  Credential: 'Credential',
+  Target: 'Target',
+  Details: 'Details',
+  'Browser session': 'Browser session',
+  OAuth: 'OAuth',
+  'No credential': 'No credential',
+  'Show only this actor': 'Show only this actor',
+  'Key:': 'Key:',
+  'Scope:': 'Scope:',
+  'Kept forever': 'Kept forever',
+  'Kept for {days} days': 'Kept for {days} days',
+  'Current retention': 'Current retention',
+  'Instance default': 'Instance default',
+  'This space follows the instance default.': 'This space follows the instance default.',
+  'This space has its own retention setting.': 'This space has its own retention setting.',
+  'Events older than the retention are deleted every hour. Events younger than 30 days are never deleted.':
+    'Events older than the retention are deleted every hour. Events younger than 30 days are never deleted.',
+  'Only owners can change retention.': 'Only owners can change retention.',
+  'Enter a whole number of days from 30 to 3650.': 'Enter a whole number of days from 30 to 3650.',
+  'Could not save retention. {0}': 'Could not save retention. {0}',
+  'Keep audit events': 'Keep audit events',
+  'Follow the instance default': 'Follow the instance default',
+  'Keep forever': 'Keep forever',
+  'Keep for a number of days': 'Keep for a number of days',
+  'Number of days': 'Number of days',
+  'From 30 to 3650 days.': 'From 30 to 3650 days.',
+  'Retention saved.': 'Retention saved.',
+  'Save retention': 'Save retention',
   // Availability troubleshooting
   'Troubleshoot availability': 'Troubleshoot availability',
   'Pick an event type and a day to see which times can be booked, and why the others cannot.':

@@ -9,6 +9,7 @@ import { expect } from 'vitest'
 import * as Zod from 'zod'
 import * as Availability from './availability.ts'
 import * as BookingPage from './booking-page.ts'
+import * as ChangeDeadlines from './change-deadlines.ts'
 import * as Conferences from './conferences.ts'
 import * as Errors from './errors.ts'
 import * as GroupSeatAdmission from './group-seat-admission.ts'
@@ -42,6 +43,7 @@ const dependencies: Record<string, object> = {
   '@hourmere/db/audit': HourmereAudit,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
+  './change-deadlines.ts': ChangeDeadlines,
   './conferences.ts': Conferences,
   './errors.ts': Errors,
   './hosts.ts': Hosts,

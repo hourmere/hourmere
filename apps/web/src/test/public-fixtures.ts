@@ -82,6 +82,7 @@ export function managed(overrides: Partial<Schemas['Booking']> = {}): Schemas['M
     ...booking(overrides),
     eventType: { title: 'Intro call', durationMinutes: 30 },
     hosts: [{ name: 'Ada Lovelace' }],
+    changeDeadlines: { rescheduleBy: null, cancelBy: null },
   }
 }
 

@@ -49,6 +49,7 @@ import {
   strictTransportSecurity,
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
+import type { MailboxProofModule } from './sso-mailbox-proof.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 import {
   successRedirectErrorField,
@@ -93,6 +94,11 @@ export interface AppDeps {
    * grants, the provider's authorize endpoint is guarded here as well.
    */
   mcp?: McpModule | undefined
+  /**
+   * The SSO mailbox proof endpoints (docs/sso.md, Mailbox proof), mounted ahead of Better
+   * Auth's /api/auth/* so that they answer `404 sso_disabled` themselves while hard-off.
+   */
+  ssoMailboxProof?: MailboxProofModule | undefined
 }
 
 const Health = z
@@ -370,6 +376,7 @@ export function createApp({
   routes = [],
   mcp,
   waitlist,
+  ssoMailboxProof,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Generate correlation IDs locally; caller headers may contain private or forged values.
@@ -574,6 +581,7 @@ export function createApp({
       })
     }
   }
+  ssoMailboxProof?.mount({ app, resolveCaller, publicUrl })
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),
   )

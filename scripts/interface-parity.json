@@ -147,6 +147,10 @@
     "mcp": "set_attendee_no_show",
     "cli": "set-no-show"
   },
+  "setAuditLogSettings": {
+    "mcp": "set_audit_log_settings",
+    "cli": "audit-log set-retention"
+  },
   "setBranding": {
     "mcp": "set_branding",
     "cli": "branding set"

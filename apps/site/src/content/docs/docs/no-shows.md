@@ -105,8 +105,9 @@ booking-activity count covers the whole personal account or team only, reflects 
 marks (a later correction changes past days) and excludes cancelled bookings, even ones
 marked before they were cancelled. The booking lists act only on bookings already loaded
 on the page; there is no bulk marking. A marker is a host's judgment, not evidence from a meeting
-provider. Corrections overwrite current state; the audit log keeps each change but has
-no viewer, read API or export yet. Imported bookings remain managed in their original system.
+provider. Corrections overwrite current state; the [audit log](/docs/audit-log) keeps each change
+and provides authorized dashboard, REST, MCP and CLI reads subject to retention. Attendance
+export is not available. Imported bookings remain managed in their original system.
 Confirmed paid bookings remain readable, but attendance changes return
 `paid_booking_management_unavailable`; the dashboard hides their mark and unmark actions.
 Pending, expired and unpaid-cancelled payment holds are not visible through attendance reads.

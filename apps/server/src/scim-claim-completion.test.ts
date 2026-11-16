@@ -1358,6 +1358,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
           zoomConference: undefined,
           enqueueCalendarSync: unreachable,
           enqueueCalendarWritebackRecovery: unreachable,
+          mailboxProofQueue: { enqueue: unreachable },
         }),
       ).fetch,
     )

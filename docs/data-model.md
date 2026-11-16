@@ -588,6 +588,37 @@ move leaves the existing booking intact. Cancellation frees its capacity. Loweri
 limit never cancels or rewrites existing bookings: periods already at or above that
 ceiling refuse new bookings until capacity is available.
 
+## Invitee change deadline contract
+
+Migration 0089 adds nullable integer `reschedule_cutoff_minutes` and
+`cancel_cutoff_minutes` to both `event_types` and `bookings`, each constrained by a CHECK
+to 1–525600 (one year) when set. NULL contributes no limit from that setting; with
+both NULL, the invitee may change the booking until it starts. Existing rows stay NULL and are not rewritten. The editor, REST,
+MCP and CLI expose the event type columns as `rescheduleCutoffMinutes` and
+`cancelCutoffMinutes`; omitted update fields preserve saved values and explicit null
+clears a deadline.
+
+The booking columns are a snapshot. Booking creation (including a payment hold) copies
+both values from the event type row it already locks; every reschedule, by the invitee
+or a host and including a group-seat move, copies the predecessor's values to the
+successor instead of rereading the event type. Editing the event type therefore never
+changes an existing booking, and bookings created before the migration keep no deadline.
+
+`packages/scheduling/src/change-deadlines.ts` computes each deadline as
+`start_at - minutes` in elapsed time, so it is not shifted by daylight-saving changes.
+The effective invitee reschedule deadline is the earlier of the reschedule and cancel
+instants, ignoring NULL sides. Cancellation uses only the cancel instant. This prevents
+rescheduling a booking after cancellation closes and cancelling its later successor.
+An invitee change through a manage token (managed slots, reschedule, cancel; REST and MCP)
+is refused at or after that instant with 409 `booking_reschedule_deadline_passed` or
+`booking_cancel_deadline_passed`, after the token, imported/paid, cancelled and started
+checks, using a clock sampled after the booking locks. Host and team-admin paths pass no
+invitee flag and are never limited. `requestReschedule` refuses a request once the
+effective reschedule deadline has passed and caps the request's expiry at that deadline. The
+managed booking read derives `changeDeadlines.rescheduleBy` and `cancelBy` from the
+snapshot: `rescheduleBy` is the effective instant (NULL only if both settings are NULL),
+and `cancelBy` is the cancel instant. See [reschedule and cancel deadlines](https://hourmere.com/docs/change-deadlines).
+
 ## Event duration contract
 
 `event_types.duration_minutes` remains the default (`durationMinutes` in service and
@@ -993,9 +1024,13 @@ first step that writes it.
 
 Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage
 step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_cache`,
-`sso_browser_proofs` and `sso_delegation_bindings`. Nothing reads or writes them yet: there
-is no route, worker, read path or setting, and OIDC and SAML stay hard-off. The test that
-keeps production modules from naming the configuration tables covers these too. Admission
+`sso_browser_proofs` and `sso_delegation_bindings`. Only the Mailbox proof step's module
+(`apps/server/src/sso-mailbox-proof.ts`) uses them: its endpoints and delivery job write
+attempts' mailbox proofs and their tokens, and its cleanup job deletes consumed and expired
+attempts, at most 1000 a minute, with their tokens. Its endpoints answer `404 sso_disabled`
+while OIDC and SAML stay hard-off, so nothing writes attempts in production yet. The test
+that keeps production modules from naming the configuration tables covers these too, and
+lets that module name only attempts, tokens and providers. Admission
 tombstones need no new table: they are the shared `scim_membership_blocks` of the
 [SCIM identity storage](scim.md), which keep the team-local mailbox through member and
 account deletion; a subject-keyed JIT check adds its column there in the step that needs it.

@@ -128,6 +128,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List audit events of the current organization, newest first
+         * @description Personal space owner, or team owner/admin of the organization the caller acts in, with a session, a full-scope API key or MCP OAuth. Members, read/bookings-scope keys and stale or foreign expected organizations are refused before anything is read. Ordered by time and ID, descending. Requires full API key scope: the journal reveals who did what. Follow nextCursor with the same filters; events written after the first page never repeat or shift earlier entries. Reads are not recorded.
+         */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-log/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read audit log retention of the current organization
+         * @description Personal space owner, or team owner/admin of the organization the caller acts in, with a session, a full-scope API key or MCP OAuth. Members, read/bookings-scope keys and stale or foreign expected organizations are refused before anything is read. Requires full API key scope.
+         */
+        get: operations["getAuditLogSettings"];
+        /**
+         * Set audit log retention of the current organization
+         * @description Personal space owner or team owner only, with a session, a full-scope API key or MCP OAuth. Events older than the retention are deleted by a background job; nothing younger than 30 days is ever deleted. A change is recorded as audit_log.retention_updated; repeating the current value records nothing.
+         */
+        put: operations["setAuditLogSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/book/{token}": {
         parameters: {
             query?: never;
@@ -680,7 +724,7 @@ export interface paths {
         put?: never;
         /**
          * Ask the invitee to choose another time
-         * @description For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused.
+         * @description For a confirmed future booking the caller hosts. Keeps the original slot booked while the invitee chooses through their manage link or cancels. A second request replaces the first. Imported and group-seat bookings are refused. The request expires after 48 hours, at the start, or at the invitee reschedule deadline of the booking, whichever comes first; once that deadline has passed the request is refused with 409 `booking_reschedule_deadline_passed` (move the booking yourself instead).
          */
         post: operations["requestReschedule"];
         delete?: never;
@@ -1020,7 +1064,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`) */
+                /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the reschedule deadline of the booking, or its cancel deadline, has passed (`booking_reschedule_deadline_passed`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4502,6 +4546,69 @@ export interface components {
             noShowMarkedAt: string | null;
             noShowMarkedBy: string | null;
         };
+        /** @description One journal entry. Session IDs, secrets, token values, names and email addresses are never returned. */
+        AuditEvent: {
+            /** @description Stable dotted action, e.g. membership.role_changed. New actions may appear; ignore unknown ones. */
+            action: string;
+            actor: {
+                /** @description Stored user, API key, OAuth client or SCIM token ID, or a system service name; null for anonymous and external actors */
+                id: string | null;
+                /** @description Who acted: user, api_key, oauth_client, system, scim_token, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
+                type: string;
+            };
+            credential: {
+                apiKeyId: string | null;
+                /** @description Scope of the key used; null when unknown or not a key */
+                apiKeyScope: string | null;
+                oauthClientId: string | null;
+                oauthGrantId: string | null;
+                /** @description session, api_key, oauth or none. New types may appear. */
+                type: string;
+            };
+            /** @description The allow-listed details recorded with the action (https://hourmere.com/docs/audit-log); often empty */
+            details: {
+                [key: string]: unknown;
+            };
+            /** @description Journal ID (a decimal integer), unique per instance */
+            id: string;
+            /**
+             * @description UTC time the event was written, RFC 3339 with microseconds
+             * @example 2026-11-12T17:04:05.123456Z
+             */
+            occurredAt: string;
+            requestId: string | null;
+            target: {
+                /** @description Target ID; null for session targets */
+                id: string | null;
+                type: string;
+            };
+        };
+        AuditEventPage: {
+            data: components["schemas"]["AuditEvent"][];
+            /** @description Pass as cursor, with the same filters, for the next page; null on the last */
+            nextCursor: string | null;
+        };
+        AuditLogSettings: {
+            /** @description Whether the caller is an owner and may change retention */
+            canChangeRetention: boolean;
+            /** @description What applies to this organization; null keeps events forever */
+            effectiveRetentionDays: number | null;
+            /** @description The instance default in days; null keeps events forever */
+            instanceRetentionDays: number | null;
+            /**
+             * @description This organization's choice: follow the instance default, keep forever, or keep retentionDays days
+             * @enum {string}
+             */
+            retention: "instance" | "forever" | "days";
+            /** @description Set when retention is days */
+            retentionDays: number | null;
+        };
+        AuditLogSettingsInput: {
+            /** @enum {string} */
+            retention: "instance" | "forever" | "days";
+            /** @description Required with retention "days" and refused otherwise; 30–3650 */
+            retentionDays?: number;
+        };
         AvailabilityTroubleshooting: {
             /** Format: date */
             date: string;
@@ -4859,6 +4966,8 @@ export interface components {
             bufferAfterMinutes: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes: number;
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
+            cancelCutoffMinutes: number | null;
             conferenceOrganizer: {
                 /** Format: uuid */
                 userId: string;
@@ -4990,6 +5099,8 @@ export interface components {
             /** @description Order on the page, ascending */
             position: number;
             questions: components["schemas"]["Question"][];
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            rescheduleCutoffMinutes: number | null;
             /** @description Explicit round-robin activation; metadata saves never enable it */
             roundRobinActive: boolean;
             /**
@@ -5042,6 +5153,8 @@ export interface components {
              * @default 0
              */
             bufferBeforeMinutes: number;
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
+            cancelCutoffMinutes?: number | null;
             conferenceOrganizer?: {
                 userId: string;
             } | null;
@@ -5173,6 +5286,8 @@ export interface components {
             position: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
              * @description One of the host's schedules; null = the host's default schedule
@@ -5283,6 +5398,8 @@ export interface components {
             bufferAfterMinutes?: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes?: number;
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
+            cancelCutoffMinutes?: number | null;
             conferenceOrganizer?: {
                 userId: string;
             } | null;
@@ -5402,6 +5519,8 @@ export interface components {
             position?: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
              * @description One of the host's schedules; null = the host's default schedule
@@ -5549,6 +5668,13 @@ export interface components {
             };
         };
         ManagedBooking: components["schemas"]["Booking"] & {
+            /** @description The invitee's change deadlines this booking keeps (those of its event type when it was booked; later event type changes do not affect it). `rescheduleBy` is the earlier of the configured reschedule and cancel deadlines (a null setting imposes no limit from that side). From `rescheduleBy` on, rescheduling with this token fails with 409 `booking_reschedule_deadline_passed`; from `cancelBy` on, cancelling fails with 409 `booking_cancel_deadline_passed`. null = until the meeting starts. The host can still change the booking. */
+            changeDeadlines: {
+                /** Format: date-time */
+                cancelBy: string | null;
+                /** Format: date-time */
+                rescheduleBy: string | null;
+            };
             /** @description The event type as it is now; null once it is deleted. The booking start and end retain its actual length even if the default changes. */
             eventType: {
                 allowedDurationsMinutes?: number[];
@@ -6681,6 +6807,220 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                /** @description Only this exact action, e.g. api_key.created */
+                action?: string;
+                /** @description Only events by this actor ID (requires actorType) */
+                actorId?: string;
+                /** @description Only events by this actor type */
+                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
+                /** @description nextCursor from the previous page with the same filters */
+                cursor?: string;
+                /** @description Earliest time, inclusive: RFC 3339 instant with an offset */
+                from?: string;
+                /** @description Page size, 1–100; default 50 */
+                limit?: string;
+                /** @description Latest time, exclusive: RFC 3339 instant with an offset */
+                to?: string;
+            };
+            header?: {
+                /** @description Expected organization. Optional for session reads, required for session writes; stale context is rejected. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventPage"];
+                };
+            };
+            /** @description invalid_request, invalid_range, invalid_limit or invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAuditLogSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected organization. Optional for session reads, required for session writes; stale context is rejected. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retention choice and the instance default */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogSettings"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setAuditLogSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected organization. Optional for session reads, required for session writes; stale context is rejected. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditLogSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description The retention now in effect */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogSettings"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or insufficient_role. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     createOneTimeBooking: {
         parameters: {
             query?: never;
@@ -7246,7 +7586,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Booking cancelled, already started, imported read-only, group-seat unsupported, idempotency key reused or organization context changed */
+            /** @description Booking cancelled, already started, the invitee reschedule deadline passed (`booking_reschedule_deadline_passed`), imported read-only, group-seat unsupported, idempotency key reused or organization context changed */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7500,7 +7840,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the booking's cancel deadline has passed (`booking_cancel_deadline_passed`; the host can still cancel it), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7595,7 +7935,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the booking's reschedule deadline, or its cancel deadline, has passed (`booking_reschedule_deadline_passed`; the host can still move it), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;

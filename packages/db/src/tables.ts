@@ -43,6 +43,13 @@ export interface AuditEvents {
   target_type: string;
 }
 
+export interface AuditLogSettings {
+  organization_id: string;
+  retention: string;
+  retention_days: number | null;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface AuthAccount {
   accessToken: string | null;
   accessTokenExpiresAt: Timestamp | null;
@@ -425,6 +432,7 @@ export interface BookingRouting {
 
 export interface Bookings {
   api_key_id: string | null;
+  cancel_cutoff_minutes: number | null;
   cancel_reason: string | null;
   cancelled_api_key_id: string | null;
   cancelled_at: Timestamp | null;
@@ -456,6 +464,7 @@ export interface Bookings {
   payment_reference: string | null;
   payment_refund_required: Generated<boolean>;
   required_host_user_ids: Generated<string[]>;
+  reschedule_cutoff_minutes: number | null;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
   source: string;
@@ -590,6 +599,7 @@ export interface EventTypes {
   booking_window_days: number | null;
   buffer_after_minutes: Generated<number>;
   buffer_before_minutes: Generated<number>;
+  cancel_cutoff_minutes: number | null;
   conference_organizer_user_id: string | null;
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
@@ -610,6 +620,7 @@ export interface EventTypes {
   owner_user_id: string | null;
   position: Generated<number>;
   questions: Generated<Json>;
+  reschedule_cutoff_minutes: number | null;
   scheduling_type: Generated<string>;
   slot_step_minutes: number | null;
   slug: string;
@@ -1643,6 +1654,7 @@ export interface WorkflowRuns {
 
 export interface DB {
   audit_events: AuditEvents;
+  audit_log_settings: AuditLogSettings;
   "auth.account": AuthAccount;
   "auth.apikey": AuthApikey;
   "auth.invitation": AuthInvitation;

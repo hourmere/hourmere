@@ -120,6 +120,8 @@ export interface EventTypeFixture {
   maxBookingsPerDay?: number | null
   maxBookingsPerWeek?: number | null
   maxBookingsPerMonth?: number | null
+  rescheduleCutoffMinutes?: number | null
+  cancelCutoffMinutes?: number | null
   location?: Record<string, unknown> | null
   questions?: unknown[]
   isActive?: boolean
@@ -252,6 +254,12 @@ export function createFixtures(db: Db) {
         }),
         ...(o.maxBookingsPerMonth !== undefined && {
           max_bookings_per_month: o.maxBookingsPerMonth,
+        }),
+        ...(o.rescheduleCutoffMinutes !== undefined && {
+          reschedule_cutoff_minutes: o.rescheduleCutoffMinutes,
+        }),
+        ...(o.cancelCutoffMinutes !== undefined && {
+          cancel_cutoff_minutes: o.cancelCutoffMinutes,
         }),
         location: o.location ? JSON.stringify(o.location) : null,
         questions: JSON.stringify(o.questions ?? []),
