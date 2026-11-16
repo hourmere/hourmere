@@ -1,4 +1,4 @@
-/** Internal foundation; no REST, MCP, CLI or scheduler integration is enabled yet. */
+/** Internal foundation; no REST, MCP, CLI or application worker integration is enabled yet. */
 
 export {
   type CalDavConnectionDeps,
@@ -18,6 +18,15 @@ export {
   type CalDavDiscoveryResult,
   createCalDavDiscovery,
 } from './caldav-discovery.ts'
+export { calDavDispatchJob, calDavSyncJob, createCalDavSyncEnqueuer } from './caldav-jobs.ts'
+
+export { type CalDavSyncDeps, configureCalDavCalendar, syncCalDavCalendar } from './caldav-sync.ts'
+export {
+  type CalDavSyncClient,
+  type CalDavSyncCursor,
+  type CalDavSyncResult,
+  createCalDavSyncClient,
+} from './caldav-sync-client.ts'
 export {
   CalDavError,
   type CalDavPrivateTarget,

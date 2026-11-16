@@ -1048,15 +1048,15 @@ async function buildAvailabilityInputForMode(
     }),
     window,
   )
-  const googleCalendars = await db
+  const syncedCalendars = await db
     .selectFrom('calendars as c')
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
     .select(['cc.status', 'c.last_synced_at', 'c.sync_state', 'c.sync_error', 'c.time_zone'])
     .where('cc.user_id', '=', hostUserId)
-    .where('cc.provider', '=', 'google')
+    .where('cc.provider', 'in', ['google', 'caldav'])
     .where('c.check_conflicts', '=', true)
     .execute()
-  assertCachedCalendarSync(googleCalendars, now, window)
+  assertCachedCalendarSync(syncedCalendars, now, window)
   const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
     eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
   const windowDates = {
