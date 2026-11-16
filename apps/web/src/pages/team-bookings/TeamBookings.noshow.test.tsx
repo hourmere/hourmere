@@ -257,7 +257,17 @@ it('applies a late detail mark after closing details and refreshing through anot
   server({
     [LIST]: () =>
       json(200, {
-        data: [BOOKING, { ...future, status: cancelled ? 'cancelled' : 'confirmed' }],
+        data: [
+          BOOKING,
+          {
+            ...future,
+            status: cancelled ? 'cancelled' : 'confirmed',
+            eventType: {
+              ...future.eventType,
+              title: cancelled ? 'Refreshed future call' : 'Future call',
+            },
+          },
+        ],
         nextCursor: null,
       }),
     [NO_SHOW]: () => pending.response,
@@ -275,7 +285,9 @@ it('applies a late detail mark after closing details and refreshing through anot
   await userEvent.click(screen.getByRole('button', { name: 'Cancel booking…' }))
   await userEvent.click(screen.getByRole('button', { name: 'Cancel booking' }))
   await screen.findByText('The booking is cancelled.')
-  await row()
+  // The panel preserves existing rows during refresh; row() alone can still return
+  // the old snapshot. Wait for data unique to the completed refresh before the mark.
+  await screen.findByRole('button', { name: 'Refreshed future call' })
   await pending.answer(
     json(200, {
       attendeeId: GRACE,

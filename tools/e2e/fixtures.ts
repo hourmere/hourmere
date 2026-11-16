@@ -928,6 +928,7 @@ export const test = base.extend<{
             eventTypeId,
             scheduleId: schedule.id,
             bookingId,
+            teamBookingId,
             manageToken,
             bookingPath: '/fixture-host/layout-audit',
             teamBookingPath: '/team/FixtureTeam/layout-audit',

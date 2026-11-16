@@ -61,10 +61,11 @@ it.each([
   ['current source', 'latestSource.current ?? source', 'source'],
 ])('detects using stale team %s for delayed completion', (_, before, after) => {
   const source = readFileSync('apps/web/src/pages/team-bookings/TeamBookings.tsx', 'utf8')
-  const block = source.slice(
-    source.indexOf('  function applyNoShow('),
-    source.indexOf('  async function loadMore()'),
-  )
+  const start = source.indexOf('  function applyNoShow(')
+  const end = source.indexOf('  async function loadMore(', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const block = source.slice(start, end)
   negativeControl(block, before, after, (code) => {
     const old = { data: [initial], nextCursor: 'old' }
     const current = { data: [marked, next], nextCursor: 'current' }

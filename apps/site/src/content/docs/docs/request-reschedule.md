@@ -4,7 +4,7 @@ description: Request a new meeting time while keeping the original booking confi
 ---
 
 Select a future booking you host in **Bookings** to open its
-[detail panel](/docs/#review-bookings) (full-screen on phones), then choose
+[detail panel](/docs#review-bookings) (full-screen on phones), then choose
 **Request reschedule**. A direct detail link still opens a full page. Add an optional note,
 then send the request. The invitee receives an email with their private management link.
 They can choose a new time from the usual availability picker or cancel the booking.

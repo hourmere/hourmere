@@ -294,7 +294,10 @@ export async function openAuditPage(
           /^(Loading|加载|正在加载)/i.test(node.textContent?.trim() ?? ''),
         ),
     )
-    verifyAuditPath(page.url(), paths[id])
+    verifyAuditPath(
+      page.url(),
+      id === 'team-booking-detail' ? `/app/bookings/${fixture.teamBookingId}` : paths[id],
+    )
     await verifyAuditContent(page, id)
     if (id === 'event-type-editor-expanded') await page.evaluate(expandEventSettings)
     if (
