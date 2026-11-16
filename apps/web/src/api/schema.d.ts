@@ -1020,7 +1020,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the reschedule deadline of the booking has passed (`booking_reschedule_deadline_passed`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`) */
+                /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the reschedule deadline of the booking, or its cancel deadline, has passed (`booking_reschedule_deadline_passed`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4855,7 +4855,7 @@ export interface components {
             bufferAfterMinutes: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes: number;
-            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Independent of rescheduleCutoffMinutes; same snapshot and host rules. */
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
             cancelCutoffMinutes: number | null;
             conferenceOrganizer: {
                 /** Format: uuid */
@@ -4988,7 +4988,7 @@ export interface components {
             /** @description Order on the page, ascending */
             position: number;
             questions: components["schemas"]["Question"][];
-            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = until the meeting starts. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
             rescheduleCutoffMinutes: number | null;
             /** @description Explicit round-robin activation; metadata saves never enable it */
             roundRobinActive: boolean;
@@ -5042,7 +5042,7 @@ export interface components {
              * @default 0
              */
             bufferBeforeMinutes: number;
-            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Independent of rescheduleCutoffMinutes; same snapshot and host rules. */
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
             cancelCutoffMinutes?: number | null;
             conferenceOrganizer?: {
                 userId: string;
@@ -5175,7 +5175,7 @@ export interface components {
             position: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
-            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = until the meeting starts. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
             rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
@@ -5287,7 +5287,7 @@ export interface components {
             bufferAfterMinutes?: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes?: number;
-            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Independent of rescheduleCutoffMinutes; same snapshot and host rules. */
+            /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
             cancelCutoffMinutes?: number | null;
             conferenceOrganizer?: {
                 userId: string;
@@ -5408,7 +5408,7 @@ export interface components {
             position?: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
-            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = until the meeting starts. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
             rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
@@ -7610,7 +7610,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the booking's reschedule deadline has passed (`booking_reschedule_deadline_passed`; the host can still move it), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
+            /** @description Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the booking's reschedule deadline, or its cancel deadline, has passed (`booking_reschedule_deadline_passed`; the host can still move it), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
             409: {
                 headers: {
                     [name: string]: unknown;

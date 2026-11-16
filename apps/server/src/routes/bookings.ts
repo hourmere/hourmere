@@ -724,7 +724,7 @@ export function bookingRoutes({
           ),
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the reschedule deadline of the booking has passed (`booking_reschedule_deadline_passed`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
+            'Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the reschedule deadline of the booking, or its cancel deadline, has passed (`booking_reschedule_deadline_passed`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
           ),
           429: rateLimited,
         },
@@ -801,7 +801,7 @@ export function bookingRoutes({
           ),
           404: manageNotFound,
           409: error(
-            "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the booking's reschedule deadline has passed (`booking_reschedule_deadline_passed`; the host can still move it), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
+            "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), the booking's reschedule deadline, or its cancel deadline, has passed (`booking_reschedule_deadline_passed`; the host can still move it), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), the answered `rescheduleRequestId` expired, was replaced or was already resolved (`reschedule_request_changed`; load the booking again), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
