@@ -8,6 +8,8 @@ import {
   createWorkflow,
   getWorkflow,
   listWorkflows,
+  UpdateWorkflowInputSchema,
+  updateWorkflow,
   WORKFLOW_BOOKING_SOURCES,
   WORKFLOW_CONTENT_LOCALES,
   WORKFLOW_PAGE,
@@ -191,6 +193,8 @@ export const ListWorkflowsInput = z.strictObject({
   cursor: ListWorkflowsQuery.shape.cursor,
 })
 
+export const UpdateWorkflowInput = UpdateWorkflowInputSchema.openapi('UpdateWorkflowInput')
+
 export const CreateWorkflowInput = CreateWorkflowInputSchema.openapi('CreateWorkflowInput')
 
 const errors = {
@@ -280,6 +284,47 @@ export function workflowRoutes({ db, audit }: { db: Db; audit?: WorkflowAuditPor
             c.req.valid('json'),
           ),
           201,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'patch',
+        path: '/api/v1/workflows/{id}',
+        tags: ['Workflows'],
+        operationId: 'updateWorkflow',
+        summary: 'Edit, enable or disable a booking workflow',
+        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions are not available yet.`,
+        security: authenticated,
+        middleware,
+        request: {
+          params: z.object({ id: z.string() }),
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Required for session writes: the organization where the action opened. Ignored for API keys.',
+            }),
+          }),
+          body: { required: true, content: json(UpdateWorkflowInput) },
+        },
+        responses: {
+          200: { description: 'Updated workflow', content: json(Workflow) },
+          ...errorResponses({
+            400: 'invalid_request or invalid_workflow',
+            403: 'insufficient_scope or cross-origin session write',
+            404: 'workflows_disabled or workflow_not_found',
+            409: 'workflow_revision_conflict, workflow_limit_reached or organization_context_changed',
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await updateWorkflow(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
         ),
     )
 

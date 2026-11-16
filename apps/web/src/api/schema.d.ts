@@ -4509,7 +4509,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Edit, enable or disable a booking workflow
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions are not available yet.
+         */
+        patch: operations["updateWorkflow"];
         trace?: never;
     };
 }
@@ -6672,6 +6676,112 @@ export interface components {
             };
             /** Format: uuid */
             organizationId: string;
+        };
+        UpdateWorkflowInput: {
+            actions?: ({
+                content?: {
+                    de?: {
+                        body: string;
+                        subject: string;
+                    };
+                    en?: {
+                        body: string;
+                        subject: string;
+                    };
+                    es?: {
+                        body: string;
+                        subject: string;
+                    };
+                    fr?: {
+                        body: string;
+                        subject: string;
+                    };
+                    "pt-BR"?: {
+                        body: string;
+                        subject: string;
+                    };
+                    "zh-CN"?: {
+                        body: string;
+                        subject: string;
+                    };
+                };
+                recipients: ("booker" | "guests" | "hosts")[];
+                /** @enum {string} */
+                type: "email";
+            } | {
+                /** @enum {string} */
+                type: "webhook";
+                webhookId: string;
+            })[];
+            conditions?: ({
+                /** @enum {string} */
+                field: "event_type";
+                /** @enum {string} */
+                operator: "equals";
+                value: string;
+            } | {
+                /** @enum {string} */
+                field: "booking_source";
+                /** @enum {string} */
+                operator: "equals";
+                /** @enum {string} */
+                value: "web" | "embed" | "api" | "mcp";
+            } | {
+                /** @enum {string} */
+                field: "answer";
+                /** @enum {string} */
+                operator: "equals";
+                questionId: string;
+                value: string | boolean;
+            } | {
+                /** @enum {string} */
+                field: "location_kind";
+                /** @enum {string} */
+                operator: "equals";
+                /** @enum {string} */
+                value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            } | {
+                /** @enum {string} */
+                field: "guest_count";
+                /** @enum {string} */
+                operator: "equals" | "at_least" | "at_most";
+                value: number;
+            })[];
+            enabled?: boolean;
+            expectedRevision: number;
+            name?: string;
+            scope?: {
+                /** @enum {string} */
+                type: "all_event_types";
+            } | {
+                eventTypeId: string;
+                /** @enum {string} */
+                type: "event_type";
+            };
+            trigger?: {
+                /** @default 0 */
+                delayMinutes: number;
+                /** @enum {string} */
+                type: "booking.created";
+            } | {
+                /** @default 0 */
+                delayMinutes: number;
+                /** @enum {string} */
+                type: "booking.cancelled";
+            } | {
+                /** @default 0 */
+                delayMinutes: number;
+                /** @enum {string} */
+                type: "booking.rescheduled";
+            } | {
+                offsetMinutes: number;
+                /** @enum {string} */
+                type: "before_start";
+            } | {
+                offsetMinutes: number;
+                /** @enum {string} */
+                type: "after_end";
+            };
         };
         WaitlistAccepted: {
             /** @enum {boolean} */
@@ -13641,6 +13751,89 @@ export interface operations {
             };
             /** @description workflows_disabled: workflows are not available on this instance; workflow_not_found: no such workflow of the owner the caller acts as */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateWorkflow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkflowInput"];
+            };
+        };
+        responses: {
+            /** @description Updated workflow */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workflow"];
+                };
+            };
+            /** @description invalid_request or invalid_workflow */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope or cross-origin session write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled or workflow_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflow_revision_conflict, workflow_limit_reached or organization_context_changed */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

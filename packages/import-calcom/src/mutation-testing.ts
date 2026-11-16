@@ -1,6 +1,9 @@
 // Test-only source-copy negative controls. A syntax/import error is never a killed mutation.
-import { randomBytes } from 'node:crypto'
-import { readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect } from 'vitest'
 export async function checkSourceMutation<T>(
   source: URL,
@@ -27,12 +30,22 @@ export async function checkSourceMutation<T>(
   const first = offsets[start] as number
   const last = (offsets[start + needle.length - 1] as number) + 1
   const changed = original.slice(0, first) + after + original.slice(last)
-  const copy = new URL(
-    `./mutation-copy-${process.pid}-${randomBytes(6).toString('hex')}.ts`,
-    source,
+  // Resolve imports relative to the original module before moving its executable copy
+  // outside the production source inventory. This also preserves workspace package resolution.
+  const executable = stripTypeScriptTypes(changed).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) => {
+      if (specifier.startsWith('node:')) return `from '${specifier}'`
+      const resolved = specifier.startsWith('.')
+        ? new URL(specifier, source).href
+        : pathToFileURL(createRequire(source).resolve(specifier)).href
+      return `from '${resolved}'`
+    },
   )
-  await writeFile(copy, changed, { mode: 0o600 })
+  const directory = await mkdtemp(join(tmpdir(), 'hourmere-import-mutation-'))
+  const copy = pathToFileURL(join(directory, 'mutation.mjs'))
   try {
+    await writeFile(copy, executable, { mode: 0o600 })
     const module = await import(/* @vite-ignore */ copy.href)
     let assertionFailed = false
     try {
@@ -43,7 +56,7 @@ export async function checkSourceMutation<T>(
     }
     expect(assertionFailed).toBe(true)
   } finally {
-    await unlink(copy)
+    await rm(directory, { recursive: true, force: true })
   }
 }
 
