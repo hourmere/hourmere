@@ -847,8 +847,10 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     ).toMatchObject({
       code: 'poll_not_found',
     })
-    // The host's explicit invitation clears a removal tombstone.
-    expect(await counter(p, 'removed@example.com')).toMatchObject({ removed_at: null })
+    // The host's explicit invitation clears a removal tombstone and spends one resend.
+    const reinvited = await counter(p, 'removed@example.com')
+    expect(reinvited).toMatchObject({ removed_at: null, resend_count: 1 })
+    expect(reinvited?.last_resend_at).toEqual(reinvited?.updated_at)
     expect(await revisions(p)).toMatchObject({
       host_revision: host_revision + 1,
       results_revision: results_revision + 2,
@@ -1352,15 +1354,18 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
       recovery_count: 1,
       resend_count: 3,
     })
-    // Counters survive removal and re-invitation.
+    // Counters survive removal, and a re-invitation is a resend: with the budget spent, the
+    // removed mailbox cannot be invited again and nothing is written.
     await remove(p, 'invitee@example.com')
-    await succeeds(() => invite(M, p, ['invitee@example.com']))
+    const removed = await snapshot(p)
+    expect(await failure(() => invite(M, p, ['invitee@example.com']))).toMatchObject({
+      code: 'rate_limited',
+      retryAfterSeconds: undefined,
+    })
+    expect(await snapshot(p)).toBe(removed)
     expect(await counter(p, 'invitee@example.com')).toMatchObject({
       resend_count: 3,
-      removed_at: null,
-    })
-    expect(await failure(() => resend(M, p, 'invitee@example.com'))).toMatchObject({
-      code: 'rate_limited',
+      removed_at: expect.any(Date),
     })
   }
 
@@ -1959,7 +1964,7 @@ describe.skipIf(!serverUrl)('meeting poll enrollment and verification', () => {
     [
       'invitations keep a removal tombstone',
       verifyInvitationOutcomes,
-      ['{ clearRemoval: true }', '{ clearRemoval: false }'],
+      ['        clearRemoval: true,\n', '        clearRemoval: false,\n'],
     ],
     [
       'invitations leave the revisions alone',
