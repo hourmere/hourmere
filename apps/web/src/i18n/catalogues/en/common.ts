@@ -83,6 +83,18 @@ export const common = {
 
   'This booking has been rescheduled the maximum number of times. Contact the host to change it again.':
     'This booking has been rescheduled the maximum number of times. Contact the host to change it again.',
+  'You can reschedule this booking online until {date} at {time}.':
+    'You can reschedule this booking online until {date} at {time}.',
+  'You can cancel this booking online until {date} at {time}.':
+    'You can cancel this booking online until {date} at {time}.',
+  'Online rescheduling closed on {date} at {time}. Contact your host to change this booking.':
+    'Online rescheduling closed on {date} at {time}. Contact your host to change this booking.',
+  'Online cancellation closed on {date} at {time}. Contact your host to cancel this booking.':
+    'Online cancellation closed on {date} at {time}. Contact your host to cancel this booking.',
+  'The deadline for rescheduling this booking online has passed. Contact your host to change it.':
+    'The deadline for rescheduling this booking online has passed. Contact your host to change it.',
+  'The deadline for cancelling this booking online has passed. Contact your host to cancel it.':
+    'The deadline for cancelling this booking online has passed. Contact your host to cancel it.',
   'Skip to content': 'Skip to content',
   '{0}: {1}': '{0}: {1}',
   '{0} {1}': '{0} {1}',

@@ -497,6 +497,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
         ...created.booking,
         eventType: { title: 'Intro call', durationMinutes: 30 },
         hosts: [{ name: 'Ada Lovelace' }],
+        changeDeadlines: { rescheduleBy: null, cancelBy: null },
       })
 
       // Onto a time overlapping the old one.

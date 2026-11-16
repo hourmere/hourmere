@@ -33,6 +33,7 @@ import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, type TestContext } from 'vitest'
 import * as availability from '../../../packages/scheduling/src/availability.ts'
 import * as bookingPage from '../../../packages/scheduling/src/booking-page.ts'
+import * as changeDeadlines from '../../../packages/scheduling/src/change-deadlines.ts'
 import * as conferences from '../../../packages/scheduling/src/conferences.ts'
 import * as groupSeatAdmission from '../../../packages/scheduling/src/group-seat-admission.ts'
 import * as hosts from '../../../packages/scheduling/src/hosts.ts'
@@ -91,6 +92,7 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       z,
       ...availability,
       ...bookingPage,
+      ...changeDeadlines,
       ...conferences,
       ...groupSeatAdmission,
       ...hosts,

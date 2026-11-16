@@ -5,6 +5,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { selectBookableLocationOption } from './availability.ts'
 import { createOneTimeBooking, createPublicBooking, createPublicTeamBooking } from './bookings.ts'
+import { cutoffsOf } from './change-deadlines.ts'
 import { DomainError } from './errors.ts'
 import {
   isPreservedSingleton,
@@ -151,6 +152,7 @@ function copiedBooking(change?: readonly [string, string]) {
     lockOrganization: noop,
     lockHosts: noop,
     createNotificationSnapshot: () => ({}),
+    cutoffsOf,
     selectDurationMinutes: () => 30,
     requireOfferedSlot: noop,
     bookingSuccessRedirect: () => undefined,
@@ -186,7 +188,13 @@ async function verifyLockedPhoneGuard(book: ReturnType<typeof copiedBooking>) {
   const trx = {
     selectFrom: () => ({
       select: () => ({
-        where: () => ({ executeTakeFirstOrThrow: async () => ({ notifications: null }) }),
+        where: () => ({
+          executeTakeFirstOrThrow: async () => ({
+            notifications: null,
+            reschedule_cutoff_minutes: null,
+            cancel_cutoff_minutes: null,
+          }),
+        }),
       }),
     }),
   }

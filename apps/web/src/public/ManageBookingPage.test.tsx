@@ -1373,3 +1373,151 @@ describe('the invitee’s manage page', () => {
     expect(parseManageFragment('')).toEqual({ token: null, action: null })
   })
 })
+
+describe('invitee change deadlines on the manage page', () => {
+  // The booking starts Monday, November 2, 2026 at 9:00 AM New York time; now is
+  // Sunday 12:30 AM (EDT, before the clocks go back).
+  const withDeadlines = (rescheduleBy: string | null, cancelBy: string | null) => ({
+    ...managed(),
+    changeDeadlines: { rescheduleBy, cancelBy },
+  })
+  const PAST = '2026-11-01T03:00:00.000Z' // Saturday, October 31, 11:00 PM EDT
+  const SOON = '2026-11-01T14:00:00.000Z' // Sunday, November 1, 9:00 AM EST
+  const LATER = '2026-11-02T13:00:00.000Z' // Monday, November 2, 8:00 AM EST
+  const RESCHEDULE_CLOSED =
+    'Online rescheduling closed on Saturday, October 31, 2026 at 11:00 PM. Contact your host to change this booking.'
+  const CANCEL_CLOSED =
+    'Online cancellation closed on Saturday, October 31, 2026 at 11:00 PM. Contact your host to cancel this booking.'
+  const pageText = () => plain(document.body.textContent)
+  const buttons = () => ({
+    reschedule: screen.queryByRole('button', { name: 'Reschedule' }),
+    cancel: screen.queryByRole('button', { name: 'Cancel booking' }),
+  })
+
+  it('explains a closed reschedule deadline instead of offering the picker', async () => {
+    const api = manageServer(withDeadlines(PAST, null))
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(pageText()).toContain(RESCHEDULE_CLOSED)
+    expect(buttons().reschedule).toBeNull()
+    expect(buttons().cancel).not.toBeNull()
+    expect(api.to('GET /api/v1/bookings/manage/slots')).toHaveLength(0)
+    expect(pageText()).not.toContain('online until')
+  })
+
+  it('explains a closed cancel deadline and keeps rescheduling available', async () => {
+    manageServer(withDeadlines(null, PAST))
+    renderApp(`/booking#token=${TOKEN}&action=cancel`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(pageText()).toContain(CANCEL_CLOSED)
+    expect(buttons().cancel).toBeNull()
+    expect(buttons().reschedule).not.toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Cancel this booking?' })).toBeNull()
+  })
+
+  it('shows both explanations and no actions when both deadlines have passed', async () => {
+    manageServer(withDeadlines(PAST, PAST))
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(pageText()).toContain(RESCHEDULE_CLOSED)
+    expect(pageText()).toContain(CANCEL_CLOSED)
+    expect(buttons()).toEqual({ reschedule: null, cancel: null })
+  })
+
+  it('says until when changes are possible while the deadlines are ahead', async () => {
+    manageServer(withDeadlines(SOON, LATER))
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(pageText()).toContain(
+      'You can reschedule this booking online until Sunday, November 1, 2026 at 9:00 AM.',
+    )
+    expect(pageText()).toContain(
+      'You can cancel this booking online until Monday, November 2, 2026 at 8:00 AM.',
+    )
+    expect(buttons().reschedule).not.toBeNull()
+    expect(buttons().cancel).not.toBeNull()
+    expect(pageText()).not.toMatch(/closed on|deadline for/)
+  })
+
+  it('adds nothing when the booking has no deadlines', async () => {
+    manageServer(withDeadlines(null, null))
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(pageText()).not.toMatch(/online until|closed on|deadline for/)
+    expect(buttons().reschedule).not.toBeNull()
+    expect(buttons().cancel).not.toBeNull()
+  })
+
+  it('translates the deadline notes in Simplified Chinese', async () => {
+    localStorage.setItem('hourmere-language', 'zh-CN')
+    manageServer(withDeadlines(PAST, LATER))
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: '你的预约' })
+    expect(pageText()).toMatch(/在线改期已于.+截止。如需更改此预约，请联系主持人。/)
+    expect(pageText()).toMatch(/你可以在.+之前在线取消此预约。/)
+    expect(screen.queryByRole('button', { name: '改期' })).toBeNull()
+  })
+
+  it('shows the explanation when the reschedule deadline passes while choosing', async () => {
+    const user = userEvent.setup()
+    const api = manageServer(withDeadlines(SOON, null), {
+      more: {
+        'POST /api/v1/bookings/manage/reschedule': () =>
+          json(409, { error: 'booking_reschedule_deadline_passed', message: 'Server fallback' }),
+      },
+    })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+    await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+    env.now = Date.parse('2026-11-01T14:00:00Z')
+    await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+    await waitFor(() =>
+      expect(pageText()).toContain(
+        'Online rescheduling closed on Sunday, November 1, 2026 at 9:00 AM. Contact your host to change this booking.',
+      ),
+    )
+    expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(1)
+    expect(screen.queryByText('Server fallback')).toBeNull()
+    expect(buttons().reschedule).toBeNull()
+    expect(buttons().cancel).not.toBeNull()
+  })
+
+  it('trusts the server when it has closed cancellation before this clock', async () => {
+    const user = userEvent.setup()
+    manageServer(withDeadlines(null, null), {
+      more: {
+        'POST /api/v1/bookings/manage/cancel': () =>
+          json(409, { error: 'booking_cancel_deadline_passed', message: 'Server fallback' }),
+      },
+    })
+    renderApp(`/booking#token=${TOKEN}&action=cancel`)
+    await user.click(await screen.findByRole('button', { name: 'Cancel booking' }))
+    expect(
+      await screen.findByText(
+        'The deadline for cancelling this booking online has passed. Contact your host to cancel it.',
+      ),
+    ).toBeDefined()
+    expect(screen.queryByText('Server fallback')).toBeNull()
+    expect(buttons().cancel).toBeNull()
+    expect(buttons().reschedule).not.toBeNull()
+  })
+
+  it('leaves the picker when the slot lookup is refused for the deadline', async () => {
+    manageServer(withDeadlines(SOON, null), {
+      more: {
+        'GET /api/v1/bookings/manage/slots': () =>
+          json(409, { error: 'booking_reschedule_deadline_passed', message: 'Server fallback' }),
+      },
+    })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    // This clock has not reached the deadline yet, so no closing time is claimed.
+    expect(
+      await screen.findByText(
+        'The deadline for rescheduling this booking online has passed. Contact your host to change it.',
+      ),
+    ).toBeDefined()
+    expect(screen.queryByText('Server fallback')).toBeNull()
+    expect(buttons().reschedule).toBeNull()
+    expect(buttons().cancel).not.toBeNull()
+  })
+})

@@ -7,7 +7,14 @@ import {
   eventTypeNotFound,
   type PublicEventType,
   type PublicEventTypeRecord,
+  toIso,
 } from './availability.ts'
+import {
+  changeDeadline,
+  cutoffsOf,
+  effectiveRescheduleCutoff,
+  validCutoff,
+} from './change-deadlines.ts'
 import { EVENT_TYPE_LIMITS } from './event-types.ts'
 import { engineValidation } from './internal.ts'
 import {
@@ -37,6 +44,7 @@ function fieldNormalization(change?: Change) {
     compatLocation,
     validateSuccessRedirect: identity,
     validateQuestions: identity,
+    validCutoff,
   }
   return new Function(...Object.keys(bindings), `${copy}; return validFields`)(
     ...Object.values(bindings),
@@ -118,15 +126,24 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     'resolvedBookingHosts',
     'getManagedBooking',
     'managedLinkRescheduleRequest',
+    'changeDeadline',
+    'cutoffsOf',
+    'effectiveRescheduleCutoff',
+    'toIso',
     `${copy}; return getManagedBookingDetails`,
   )(
     () => ({ as: () => 'booking_hosts' }),
     async () => ({
       id: 'synthetic-booking',
       eventTypeId: 'synthetic-event',
+      start: '2030-01-01T10:00:00Z',
     }),
     // A token from no reschedule request email.
     async () => undefined,
+    changeDeadline,
+    cutoffsOf,
+    effectiveRescheduleCutoff,
+    toIso,
   ) as typeof getManagedBookingDetails
 }
 
@@ -166,6 +183,10 @@ async function verifyManaged(project: typeof getManagedBookingDetails) {
       title: 'Call',
       duration_minutes: 30,
       allowed_durations_minutes: [60, 30, 5],
+    }),
+    executeTakeFirstOrThrow: async () => ({
+      reschedule_cutoff_minutes: null,
+      cancel_cutoff_minutes: null,
     }),
     execute: async () => [{ name: 'Ada', handle: 'ada' }],
   }

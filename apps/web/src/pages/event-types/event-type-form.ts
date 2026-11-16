@@ -102,6 +102,10 @@ export interface EventTypeDraft {
   maxBookingsPerWeek: string
   maxBookingsPerMonth: string
   bookingWindowDays: string
+  /** '' = invitees can reschedule until the meeting starts. */
+  rescheduleCutoffMinutes: string
+  /** '' = invitees can cancel until the meeting starts. */
+  cancelCutoffMinutes: string
   position: string
   isActive: boolean
   isHidden: boolean
@@ -159,6 +163,8 @@ export function emptyDraft(): EventTypeDraft {
     maxBookingsPerWeek: '',
     maxBookingsPerMonth: '',
     bookingWindowDays: '',
+    rescheduleCutoffMinutes: '',
+    cancelCutoffMinutes: '',
     position: '0',
     isActive: true,
     isHidden: false,
@@ -213,6 +219,8 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     maxBookingsPerWeek: text(e.maxBookingsPerWeek),
     maxBookingsPerMonth: text(e.maxBookingsPerMonth),
     bookingWindowDays: text(e.bookingWindowDays),
+    rescheduleCutoffMinutes: text(e.rescheduleCutoffMinutes),
+    cancelCutoffMinutes: text(e.cancelCutoffMinutes),
     position: String(e.position),
     isActive: e.isActive,
     isHidden: e.isHidden,
@@ -307,6 +315,8 @@ const NUMBER_FIELDS = [
   ['maxBookingsPerWeek', false],
   ['maxBookingsPerMonth', false],
   ['bookingWindowDays', false],
+  ['rescheduleCutoffMinutes', false],
+  ['cancelCutoffMinutes', false],
 ] as const satisfies readonly (readonly [keyof typeof RULES, boolean])[]
 
 const BOOKING_LIMIT_FIELDS = [
@@ -600,6 +610,8 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     maxBookingsPerWeek: whole(draft.maxBookingsPerWeek),
     maxBookingsPerMonth: whole(draft.maxBookingsPerMonth),
     bookingWindowDays: whole(draft.bookingWindowDays),
+    rescheduleCutoffMinutes: whole(draft.rescheduleCutoffMinutes),
+    cancelCutoffMinutes: whole(draft.cancelCutoffMinutes),
     ...(draft.locationOptions === null && !(location?.kind === 'phone' && location.askInvitee)
       ? { location }
       : { locations: orderedLocations(draft).length ? orderedLocations(draft) : null }),
@@ -627,8 +639,13 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
-  // Omit untouched limits so metadata saves preserve concurrent configuration edits.
-  for (const name of BOOKING_LIMIT_FIELDS) {
+  // Omit untouched limits and change deadlines so metadata saves preserve concurrent
+  // configuration edits.
+  for (const name of [
+    ...BOOKING_LIMIT_FIELDS,
+    'rescheduleCutoffMinutes',
+    'cancelCutoffMinutes',
+  ] as const) {
     if (whole(draft[name]) === whole(baseline[name])) delete body[name]
   }
   // The compatibility field cannot represent a complete option list. Leave it out when
@@ -707,6 +724,8 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     maxBookingsPerWeek: 'Weekly limit',
     maxBookingsPerMonth: 'Monthly limit',
     bookingWindowDays: 'Booking window',
+    rescheduleCutoffMinutes: 'Invitee reschedule deadline',
+    cancelCutoffMinutes: 'Invitee cancellation deadline',
     position: 'Position',
     waitlist: 'Booking waitlist',
     successRedirect: 'After booking',

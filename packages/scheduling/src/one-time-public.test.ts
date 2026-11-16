@@ -369,7 +369,11 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
       transformResult: async ({ result }) => {
         if (
           !reached &&
-          result.rows.some((row) => Object.keys(row).length === 1 && 'notifications' in row)
+          result.rows.some(
+            (row) =>
+              Object.keys(row).sort().join() ===
+              'cancel_cutoff_minutes,notifications,reschedule_cutoff_minutes',
+          )
         ) {
           reached = true
           await paused
