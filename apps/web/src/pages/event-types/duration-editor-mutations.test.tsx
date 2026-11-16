@@ -92,6 +92,38 @@ function MutationHarness({ Component }: { Component: typeof DurationsEditor }) {
 }
 
 describe('duration editor production-source mutation controls', () => {
+  it.each([
+    'durationMinutes',
+    'minimumNoticeMinutes',
+    'bookingWindowDays',
+    'bufferBeforeMinutes',
+    'bufferAfterMinutes',
+  ] as const)('detects overwriting concurrent untouched %s settings', (field) => {
+    const patchStart = form.indexOf('export function toPatchInput(')
+    const before = form.slice(patchStart, form.indexOf('  // The compatibility field', patchStart))
+    const after = before.replace(`    '${field}',\n`, '')
+    expect(after).not.toBe(before)
+    detects(before, after, (source) => {
+      const value = buildForm(source)
+      const baseline = value.draftFromEventType(
+        eventType({
+          minimumNoticeMinutes: 1440,
+          bookingWindowDays: 30,
+          bufferBeforeMinutes: 90,
+          bufferAfterMinutes: 60,
+        }),
+      )
+      expect(value.toPatchInput({ ...baseline, title: 'Renamed' }, baseline)).not.toHaveProperty(
+        field,
+      )
+      const changed = field === 'durationMinutes' ? '45' : '2'
+      expect(value.toPatchInput({ ...baseline, [field]: changed }, baseline)).toHaveProperty(
+        field,
+        Number(changed),
+      )
+    })
+  })
+
   it('detects bypassing numeric bounds and integer validation on add', () => {
     detects('if (problem) return problem', 'if (false) return problem', (source) => {
       const value = buildForm(source)

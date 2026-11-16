@@ -116,10 +116,15 @@ describe('saved event readiness access and context', () => {
         })
         renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
         const title = await screen.findByLabelText<HTMLInputElement>(copy.title, { exact: true })
-        if (dirty) await user.type(title, ' revised')
+        await user.type(title, ' revised')
         await user.click(screen.getByRole('button', { name: copy.save }))
         const panel = screen.getByRole('region', { name: copy.heading })
         await within(panel).findByText(copy.guidance)
+        // A user can revert their edit after a refused save, then reload without losing work.
+        if (!dirty) {
+          await user.clear(title)
+          await user.type(title, 'Intro call')
+        }
         expect(within(panel).queryByText(copy.unavailable)).toBeNull()
         expect(within(panel).queryByRole('button', { name: 'Retry checks' })).toBeNull()
         expect(screen.getAllByRole('button', { name: copy.reload })).toHaveLength(1)

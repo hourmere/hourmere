@@ -1,9 +1,10 @@
 // SSO configuration and identity storage (docs/sso.md, Configuration storage and Identity
 // storage): migrations 0074 and 0075, the generated table types and the storage test support.
-// One production module owns SSO data access so far, the Mailbox proof module
+// The Mailbox proof module owns mailbox data access
 // (apps/server/src/sso-mailbox-proof.ts): it reads and writes attempts and their mailbox tokens
 // and reads providers, nothing else, and both of its endpoints answer `404 sso_disabled` while
-// OIDC and SAML stay hard-off (apps/server/src/sso-mailbox-proof.test.ts). The one other module
+// OIDC and SAML stay hard-off (apps/server/src/sso-mailbox-proof.test.ts). The fresh-proof
+// gate owns attempts and reads policies, with no production caller. The other module
 // that names the tables, apps/server/src/sso-storage-errors.ts, only recognises them in
 // database errors so that the error log omits their row details; it imports nothing and
 // performs no data access. The scan is limited to the new table names; it never compares whole
@@ -25,6 +26,7 @@ const ERROR_RECOGNISER = 'apps/server/src/sso-storage-errors.ts'
 // The production modules that own SSO data access, each with the only tables it may name.
 const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
   'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
+  'apps/server/src/sso-fresh-proof.ts': ['sso_attempts', 'sso_policies'],
 }
 // A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
 // its generated row type, or the storage test support. `sso_providers_guard` or

@@ -383,6 +383,9 @@ describe('one-time links in the saved event editor', () => {
     await user.click(create())
     const dialog = await screen.findByRole('dialog')
     expect(api.to(POST)[0]?.headers.get('X-Expected-Organization-Id')).toBe(TEAM.organization.id)
+    fireEvent.change(screen.getByLabelText('Title', { exact: true }), {
+      target: { value: 'Renamed consultation' },
+    })
     // The editor can be updated by a context refusal while this dialog is displayed.
     fireEvent.submit(document.querySelector('form.editor') as HTMLFormElement)
     await waitFor(() => expect(dialog.isConnected).toBe(false))
