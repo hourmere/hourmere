@@ -123,6 +123,7 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     change,
   )
   return new Function(
+    'getPublicBranding',
     'resolvedBookingHosts',
     'getManagedBooking',
     'managedLinkRescheduleRequest',
@@ -132,6 +133,7 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     'toIso',
     `${copy}; return getManagedBookingDetails`,
   )(
+    async () => undefined,
     () => ({ as: () => 'booking_hosts' }),
     async () => ({
       id: 'synthetic-booking',

@@ -35,6 +35,7 @@ import { authenticated, ErrorBody, json, Question, type RouteModule } from '../o
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { publicBookingAuditOrigin } from '../rest-scopes.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
+import { PublicBranding } from './public-branding.ts'
 
 // Schemas shared with the public routes (public.ts).
 
@@ -214,6 +215,7 @@ export const Booking = z
   .openapi('Booking')
 
 export const ManagedBooking = Booking.extend({
+  branding: PublicBranding.optional(),
   eventType: z
     .object({
       title: z.string(),

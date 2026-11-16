@@ -219,7 +219,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
   if (!booking) return null
   if (booking.source === 'import' || booking.managementPolicy === 'local_only_read_only') {
     return (
-      <PublicLayout>
+      <PublicLayout branding={booking.branding}>
         <PublicStatus>
           {t('This imported booking is read-only and managed in the original system.')}
         </PublicStatus>
@@ -487,7 +487,7 @@ function ManageView({
   }
 
   return (
-    <PublicLayout wide>
+    <PublicLayout wide branding={booking.branding}>
       <ConferenceNotice
         key={booking.id}
         booking={booking}

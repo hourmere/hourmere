@@ -13,6 +13,43 @@
   min-height: 100vh;
 }
 
+/* Theme roles are derived from the validated brand, independently for each theme. */
+.public.public-branded {
+  --accent: var(--brand-light-accent);
+  --accent-hover: var(--brand-light-accent-hover);
+  --accent-text: var(--brand-light-accent-text);
+  --accent-soft: var(--brand-light-accent-soft);
+  --accent-soft-text: var(--brand-light-accent-soft-text);
+  --link: var(--brand-light-link);
+  --focus: var(--brand-light-focus);
+}
+
+@media (prefers-color-scheme: dark) {
+  .public.public-branded {
+    --accent: var(--brand-dark-accent);
+    --accent-hover: var(--brand-dark-accent-hover);
+    --accent-text: var(--brand-dark-accent-text);
+    --accent-soft: var(--brand-dark-accent-soft);
+    --accent-soft-text: var(--brand-dark-accent-soft-text);
+    --link: var(--brand-dark-link);
+    --focus: var(--brand-dark-focus);
+  }
+}
+
+.public .public-brand-logo {
+  height: 64px;
+  margin-bottom: var(--space-4);
+}
+
+.public .public-brand-logo img {
+  display: block;
+  width: 192px;
+  max-width: 100%;
+  height: 64px;
+  object-fit: contain;
+  object-position: left center;
+}
+
 @supports (height: 100svh) {
   .public {
     min-height: 100svh;
@@ -686,7 +723,8 @@
 }
 
 @media print {
-  .public {
+  .public,
+  .public.public-branded {
     --bg: #ffffff;
     --surface: #ffffff;
     --surface-muted: #ffffff;

@@ -145,3 +145,14 @@ These session webhook compatibility rows mirror the canonical documentation for 
 | Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
 | Session webhook writes: the caller's own expected personal organization differs from the current space | 2xx success (header ignored; request used the current organization) | 409 `organization_context_changed` |
 | Session webhook reads: malformed expected ID or a different expected personal organization | 200 (header ignored) | 403 `team_management_access_denied` |
+
+### Public branding
+
+Public host and event-type responses, one-time link event metadata and invitee managed
+bookings add optional `branding` with `name`, nullable `primaryColor` and nullable
+`logoDataUrl`. The name labels the logo; the logo is bounded inline normalized PNG data,
+not a remote URL. Omission retains the default theme. Clients should validate colours
+and derive accessible theme roles rather than use the raw primary colour for all text.
+The resource's owning personal or team organization determines the brand, independently
+of the viewer's current workspace. No organization ID or administrative permission is
+exposed by this projection; the existing branding administration APIs remain protected.
