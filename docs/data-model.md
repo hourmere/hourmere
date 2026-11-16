@@ -970,7 +970,9 @@ counts; receipt lifetime, encryption and admission services land in later steps.
 Migration 0074 installs the configuration storage of the [SSO design](sso.md)
 (Configuration storage step): `sso_policies`, `sso_providers`, `sso_domains`,
 `sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. The mailbox proof module reads
-providers and the shared fresh-proof gate reads policies. No configuration write path or
+providers and the shared fresh-proof gate reads policies. The draft-read service
+reads an explicit safe projection of providers and policies for current team owners/admins;
+it never opens sealed configuration or reads identity links. No configuration write path or
 setting exists, and OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 

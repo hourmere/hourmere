@@ -8,6 +8,13 @@ const METHODS = ['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'del
 export type HttpMethod = (typeof METHODS)[number]
 const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(['post', 'put', 'patch', 'delete'])
 
+// These administrator reads explicitly ship on all three interfaces. Other reads remain
+// outside required parity coverage. Exact routes prevent an operation ID from moving silently.
+const REQUIRED_READS: Readonly<Record<string, string>> = {
+  listSsoProviders: 'GET /api/v1/team/sso/providers',
+  getSsoPolicy: 'GET /api/v1/team/sso/policy',
+}
+
 const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'
 // Bootstrap only: the original 20 gaps, used before this guard first reaches main.
 // Once the file exists at the base commit, that committed list is the only baseline.
@@ -187,7 +194,13 @@ export function interfaceParityErrors(
     if (prior)
       errors.push(`${operation.operationId}: duplicate operationId on ${prior} and ${route}.`)
     seen.set(operation.operationId, route)
-    if (write) writes.set(operation.operationId, { route, security: operation.security })
+    const requiredRead = Object.hasOwn(REQUIRED_READS, operation.operationId)
+      ? REQUIRED_READS[operation.operationId]
+      : undefined
+    if (requiredRead && route !== requiredRead)
+      errors.push(`${operation.operationId}: expected ${requiredRead}, received ${route}.`)
+    if (write || requiredRead)
+      writes.set(operation.operationId, { route, security: operation.security })
   }
 
   if (!isRecord(mapping)) {

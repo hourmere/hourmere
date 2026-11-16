@@ -106,6 +106,31 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
 
 describe('published API key scope tables', () => {
   it.each(documents)(
+    '$path labels the published SSO reads unavailable outside generated tables',
+    ({ document }) => {
+      const after = document.slice(document.indexOf(SCOPE_TABLE_END) + SCOPE_TABLE_END.length)
+      expect(after).toContain('SSO is being built and is not available yet')
+      expect(after).toContain('404 sso_disabled')
+      expect(after).toContain('SSO 正在开发中，尚不可用')
+      for (const name of [
+        'list_sso_providers',
+        'get_sso_policy',
+        'sso providers list',
+        'sso policy',
+      ])
+        expect(
+          document.slice(document.indexOf(SCOPE_TABLE_START), document.indexOf(SCOPE_TABLE_END)),
+        ).toContain(name)
+    },
+  )
+
+  it('keeps the public SSO limitation current', () => {
+    expect(
+      readFileSync(new URL('../apps/site/src/content/docs/docs/index.md', import.meta.url), 'utf8'),
+    ).toContain('Organization OIDC/SAML SSO is being built and is not available yet.')
+  })
+
+  it.each(documents)(
     '$path matches the live operation registry exactly',
     ({ document, section }) => {
       expect(scopeDocumentationMatches(document, section)).toBe(true)

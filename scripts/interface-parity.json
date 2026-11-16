@@ -1,4 +1,6 @@
 {
+  "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
+  "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {
     "mcp": "generate_open_time_snippet",

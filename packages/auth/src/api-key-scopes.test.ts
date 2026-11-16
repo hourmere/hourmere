@@ -19,6 +19,8 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/team/sso/providers',
+    'GET /api/v1/team/sso/policy',
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/bookings/export.csv',
@@ -415,6 +417,8 @@ describe('shared API-key scope policy', () => {
         'remove_waitlist_entry',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_sso_providers',
+        'get_sso_policy',
         'list_workflows',
         'get_workflow',
       ],
@@ -439,6 +443,8 @@ describe('shared API-key scope policy', () => {
         'list_conference_connections',
         'get_event_type_waitlist',
         'list_waitlist_entries',
+        'list_sso_providers',
+        'get_sso_policy',
         'list_workflows',
         'get_workflow',
       ],

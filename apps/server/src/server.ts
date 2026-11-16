@@ -108,6 +108,7 @@ import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
 import { slackDestinationTools } from './mcp/slack-destinations.ts'
+import { ssoReadTools } from './mcp/sso.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
@@ -136,6 +137,7 @@ import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
+import { ssoRoutes } from './routes/sso.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -280,6 +282,7 @@ export function productRoutes({
     webhookRoutes({ db, ...webhooks }),
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
+    ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({
       db,
@@ -403,6 +406,7 @@ export function productTools({
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({ db }),
+    ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
   ]
 }
 

@@ -429,6 +429,8 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+- Organization OIDC/SAML SSO is being built and is not available yet.
+
 - Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
   and restarting cannot change a compiled image. Disabling installation requires a source
   rebuild and redeployment, including removal of the image overlay and release-version
