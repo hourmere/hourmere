@@ -375,8 +375,8 @@ and `bookings` keys get `403 insufficient_scope`. The shared service also serves
 string: new codes may be added within `/api/v1`, and clients must show unknown codes neutrally.
 See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
 
-Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
-`full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
+Native creation accepts `metadata.scope` with exactly `full`, `read` or `bookings`;
+omitting it keeps `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
 Top-level `scope`/`scopes`, arrays, combinations and unknown values get
 `400 INVALID_METADATA`. Updates containing `metadata.scope`, even the same value, get
 `400 API_KEY_SCOPE_IMMUTABLE`. Create a replacement, update clients, then revoke the old key.
@@ -1013,6 +1013,15 @@ before it), alongside the existing start-time `from`/`to` filters. The web app s
 and Past at the end time, so a meeting in progress stays Upcoming. Ordering and cursors
 remain based on start time and ID; keep all filters when paginating.
 
+Both booking lists also accept the optional `status` (`confirmed` or `cancelled`) and the
+optional search `q`: at most 100 characters after trimming, matched case-insensitively
+against the invitee's name and email and the current event type title, with `%`, `_` and
+`\` taken literally. A search only narrows the caller's existing host or team list and is
+refused with `400 invalid_request` when too long or containing control characters. The web
+app adds a Cancelled tab (`status=cancelled`, newest first) and a search box to the host's
+bookings page; CSV export does not take `q`. See
+[searching the booking list](/docs/rest#search-the-booking-list).
+
 Authenticated host booking lists and details add optional `rescheduledToId`: the immediate
 successor in the same organization that the caller also hosts, or null when none is
 available. It is included even when the successor is outside the current page or filters,
@@ -1183,12 +1192,14 @@ Authenticated host moves do not consume this budget and remain available after i
 spent; cancellation remains available too.
 
 A booking can also carry invitee [change deadlines](/docs/change-deadlines). At or after
-its reschedule deadline, managed slot lookup and rescheduling return
+its effective reschedule deadline (the earlier of its reschedule and cancel deadline
+instants, ignoring null settings), managed slot lookup and rescheduling return
 `409 booking_reschedule_deadline_passed`; at or after its cancel deadline, managed
 cancellation returns `409 booking_cancel_deadline_passed`. Both mean contact the host.
 `404 booking_not_found`, `409 booking_cancelled` and `409 booking_in_past` take precedence.
 `GET /api/v1/bookings/manage` reports the deadlines as `changeDeadlines.rescheduleBy` and
-`changeDeadlines.cancelBy` (ISO instants, or `null` for none). Authenticated host moves and
+`changeDeadlines.cancelBy` (ISO instants, or `null` for none). `rescheduleBy` includes the
+cancel limit and is null only if both settings are null. Authenticated host moves and
 cancellations are not limited by them.
 
 After a cancellation, any token still shows the booking (status `cancelled`); cancelling

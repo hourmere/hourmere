@@ -18,7 +18,12 @@ import {
   type ManagedRescheduleRequestState,
   managedLinkRescheduleRequest,
 } from './bookings.ts'
-import { assertInviteeChangeOpen, changeDeadline, cutoffsOf } from './change-deadlines.ts'
+import {
+  assertInviteeChangeOpen,
+  changeDeadline,
+  cutoffsOf,
+  effectiveRescheduleCutoff,
+} from './change-deadlines.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds, resolvedBookingHosts } from './hosts.ts'
@@ -92,7 +97,7 @@ export async function getManagedBookingDetails(
     hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
     ...(rescheduleRequest && { rescheduleRequest }),
     changeDeadlines: {
-      rescheduleBy: instant(cutoffs.reschedule_cutoff_minutes),
+      rescheduleBy: instant(effectiveRescheduleCutoff(cutoffsOf(cutoffs))),
       cancelBy: instant(cutoffs.cancel_cutoff_minutes),
     },
   }

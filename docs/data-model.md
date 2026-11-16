@@ -1,5 +1,8 @@
 # Data model
 
+[Recurring bookings design](recurring-bookings.md) proposes bounded series with ordinary
+booking rows per occurrence. It is not implemented and does not change the schema below.
+
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
 profile's default calendar and provider retries, and cascades away on booking/user/calendar
@@ -122,6 +125,15 @@ unverified public enrollees. Removal deletes the voter row with its votes, crede
 deliveries and marks the mailbox counter row removed, which alone outlives it with its mail
 counts and opt-out. Removal checks only the host revision and advances the host and results
 revisions, so voter activity cannot make it fail.
+The internal cleanup service in `packages/scheduling/src/meeting-poll-cleanup.ts`, run by the
+hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending voters and
+replay tombstones past their purge instant (and terminal polls once an installation
+retention is supplied) in bounded batches that skip locked rows instead of waiting. Poll
+deletion and cleanup leave no voter data behind: only the receipts' pseudonymous replay
+tombstones remain after a poll is deleted. Migration `0088_meeting_poll_receipt_tombstones.sql`
+makes the deletion trigger also replace the request fingerprint of every receipt but `create`
+(an invitation's covers invitee names and mailboxes) with a constant, and clears existing
+tombstones the same way.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
@@ -575,8 +587,8 @@ ceiling refuse new bookings until capacity is available.
 
 Migration 0089 adds nullable integer `reschedule_cutoff_minutes` and
 `cancel_cutoff_minutes` to both `event_types` and `bookings`, each constrained by a CHECK
-to 1–525600 (one year) when set. NULL means no deadline: the invitee may change the
-booking until it starts. Existing rows stay NULL and are not rewritten. The editor, REST,
+to 1–525600 (one year) when set. NULL contributes no limit from that setting; with
+both NULL, the invitee may change the booking until it starts. Existing rows stay NULL and are not rewritten. The editor, REST,
 MCP and CLI expose the event type columns as `rescheduleCutoffMinutes` and
 `cancelCutoffMinutes`; omitted update fields preserve saved values and explicit null
 clears a deadline.
@@ -589,14 +601,18 @@ changes an existing booking, and bookings created before the migration keep no d
 
 `packages/scheduling/src/change-deadlines.ts` computes each deadline as
 `start_at - minutes` in elapsed time, so it is not shifted by daylight-saving changes.
+The effective invitee reschedule deadline is the earlier of the reschedule and cancel
+instants, ignoring NULL sides. Cancellation uses only the cancel instant. This prevents
+rescheduling a booking after cancellation closes and cancelling its later successor.
 An invitee change through a manage token (managed slots, reschedule, cancel; REST and MCP)
 is refused at or after that instant with 409 `booking_reschedule_deadline_passed` or
 `booking_cancel_deadline_passed`, after the token, imported/paid, cancelled and started
 checks, using a clock sampled after the booking locks. Host and team-admin paths pass no
 invitee flag and are never limited. `requestReschedule` refuses a request once the
-reschedule deadline has passed and caps the request's expiry at that deadline. The
+effective reschedule deadline has passed and caps the request's expiry at that deadline. The
 managed booking read derives `changeDeadlines.rescheduleBy` and `cancelBy` from the
-snapshot. See [reschedule and cancel deadlines](https://hourmere.com/docs/change-deadlines).
+snapshot: `rescheduleBy` is the effective instant (NULL only if both settings are NULL),
+and `cancelBy` is the cancel instant. See [reschedule and cancel deadlines](https://hourmere.com/docs/change-deadlines).
 
 ## Event duration contract
 

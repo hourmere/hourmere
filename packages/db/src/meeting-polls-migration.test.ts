@@ -623,7 +623,8 @@ describe.skipIf(!serverUrl)('meeting poll storage migration', { timeout: 60_000 
           retained: true,
           actor_scope_digest: receipt.actor_scope_digest,
           idempotency_key_digest: receipt.idempotency_key_digest,
-          request_fingerprint: receipt.request_fingerprint,
+          // Since 0088 only a create tombstone keeps its request fingerprint.
+          request_fingerprint: Buffer.alloc(32),
         },
       ])
     } finally {

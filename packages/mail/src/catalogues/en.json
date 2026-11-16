@@ -98,5 +98,7 @@
   "rescheduleRequest.subject": "Choose another time: {event}",
   "rescheduleRequest.introduction": "{host} asks you to choose another time. Your original booking stays reserved until you pick a new time or cancel. This request expires at {expiry}; if it expires, your original booking stays in place.",
   "rescheduleRequest.expiredSubject": "Reschedule request expired: {event}",
-  "rescheduleRequest.expiredIntroduction": "{invitee} did not choose a new time before the request expired. The original booking remains in place."
+  "rescheduleRequest.expiredIntroduction": "{invitee} did not choose a new time before the request expired. The original booking remains in place.",
+  "replyNotice.plain": "Replies to this email are not delivered to the hosts.",
+  "replyNotice.manageLinks": "Replies to this email are not delivered to the hosts. To reschedule or cancel, use the links in this email."
 }

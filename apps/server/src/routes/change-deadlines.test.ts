@@ -7,7 +7,7 @@ import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createPublicBooking, type PublicContext } from '@hourmere/scheduling'
-import { createFixtures } from '@hourmere/scheduling/testing'
+import { createFixtures, type EventTypeFixture } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
 import { bookingTools } from '../mcp/bookings.ts'
@@ -59,7 +59,7 @@ describe.skipIf(!serverUrl)('invitee change deadlines over REST and MCP', () => 
       ],
     })
 
-  async function fixture() {
+  async function fixture(rules: EventTypeFixture = {}) {
     clock.now = Temporal.Instant.from('2026-11-01T12:00:00Z')
     const f = createFixtures(db)
     const host = await f.host()
@@ -68,6 +68,7 @@ describe.skipIf(!serverUrl)('invitee change deadlines over REST and MCP', () => 
       slug: 'intro',
       rescheduleCutoffMinutes: 1440,
       cancelCutoffMinutes: 720,
+      ...rules,
     })
     const pub: PublicContext = { db, now }
     const book = async (start = START) => {
@@ -172,6 +173,39 @@ describe.skipIf(!serverUrl)('invitee change deadlines over REST and MCP', () => 
       body: '{}',
     })
     expect(hostCancel.status).toBe(200)
+  })
+
+  it('returns the same REST and MCP body when only cancellation closes rescheduling', async () => {
+    const s = await fixture({ rescheduleCutoffMinutes: null, cancelCutoffMinutes: 1440 })
+    const b = await s.book()
+    const shown = await manage('', b.token)
+    expect(shown.status).toBe(200)
+    expect(((await shown.json()) as { changeDeadlines: unknown }).changeDeadlines).toEqual({
+      rescheduleBy: '2026-11-03T09:00:00.000Z',
+      cancelBy: '2026-11-03T09:00:00.000Z',
+    })
+    clock.now = Temporal.Instant.from('2026-11-04T07:00:00Z')
+    const move = await manage('/reschedule', b.token, { start: '2026-11-06T10:00:00Z' })
+    expect(move.status).toBe(409)
+    const body = await move.json()
+    expect(body).toMatchObject({ error: 'booking_reschedule_deadline_passed' })
+    expect(
+      toolError(
+        await s.tool('reschedule_booking', {
+          manageToken: b.token,
+          start: '2026-11-06T10:00:00Z',
+        }),
+      ),
+    ).toEqual(body)
+    const slots = await manage(
+      '/slots?start=2026-11-06T08:00:00Z&end=2026-11-06T12:00:00Z',
+      b.token,
+    )
+    expect(slots.status).toBe(409)
+    expect(await slots.json()).toEqual(body)
+    const cancel = await manage('/cancel', b.token, {})
+    expect(cancel.status).toBe(409)
+    expect(await cancel.json()).toMatchObject({ error: 'booking_cancel_deadline_passed' })
   })
 
   it('answers unknown tokens with the same not-found whatever deadlines exist', async () => {

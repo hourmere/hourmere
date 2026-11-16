@@ -34,6 +34,7 @@ import {
   changeDeadline,
   cutoffColumns,
   cutoffsOf,
+  effectiveRescheduleCutoff,
 } from './change-deadlines.ts'
 import {
   automaticMeet,
@@ -2726,7 +2727,7 @@ export async function requestReschedule(
     // limits: a request they could no longer answer is refused, and an open one expires at
     // that deadline.
     const start = toInstant(row.start_at)
-    const answerBy = changeDeadline(start, row.reschedule_cutoff_minutes) ?? start
+    const answerBy = changeDeadline(start, effectiveRescheduleCutoff(cutoffsOf(row))) ?? start
     if (Temporal.Instant.compare(now, answerBy) >= 0)
       throw new DomainError(
         'conflict',

@@ -161,7 +161,9 @@ booking links plus rendered `text` and `html`, using the same formatter as the a
 Use it to draft “three times next week”; it neither sends email nor reserves times.
 Personal owners and team owners/admins can call it with `read`, `bookings` or `full` keys,
 or an authorized `mcp:tools` OAuth connection. The instance must enable
-`SLOT_SNIPPETS_ENABLED`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for the full JSON example,
+`SLOT_SNIPPETS_ENABLED`. When off (the default), `generate_open_time_snippet` is absent
+from `tools/list`; a direct call returns JSON-RPC error `-32602` with
+`Tool generate_open_time_snippet not found`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for the full JSON example,
 profile defaults, empty-result handling, DST boundaries and taken-time fallback.
 
 ## Explain why times cannot be booked
@@ -240,6 +242,12 @@ or `booking_cancel_deadline_passed` at or after the booking's deadline; calls wi
 `booking_reschedule_deadline_passed` once the invitee can no longer reschedule, and an open
 request expires at that deadline. See
 [reschedule and cancel deadlines](https://hourmere.com/docs/change-deadlines).
+
+Invitee rescheduling closes at the earlier of the reschedule and cancel deadline
+instants, using the booking's snapshot; null contributes no limit from that side.
+A refusal caused only by the cancel deadline still returns
+`booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
+deadline, and new requests are refused once it is reached.
 
 ## Export bookings without filling agent context
 

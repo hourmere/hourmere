@@ -162,7 +162,9 @@ booking links plus rendered `text` and `html`, using the same formatter as the a
 Use it to draft “three times next week”; it neither sends email nor reserves times.
 Personal owners and team owners/admins can call it with `read`, `bookings` or `full` keys,
 or an authorized `mcp:tools` OAuth connection. The instance must enable
-`SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
+`SLOT_SNIPPETS_ENABLED`. When off (the default), `generate_open_time_snippet` is absent
+from `tools/list`; a direct call returns JSON-RPC error `-32602` with
+`Tool generate_open_time_snippet not found`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
 profile defaults, empty-result handling, DST boundaries and taken-time fallback.
 
 ## Explain why times cannot be booked
@@ -256,7 +258,7 @@ for update compatibility, editor steps, invitee selection and shared-rule limits
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
 | `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
-| `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
+| `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. `status: "cancelled"` gives the cancelled view; `q` searches invitee name, invitee email and event type title. |
 
 For example, after confirming the booking page, test recipient and time zone with your agent:
 
@@ -540,7 +542,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
-| `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time | read-only |
+| `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time; optional status filter and search | read-only |
 
 Configuration discovery starts with `whoami` and `get_profile`. `list_event_types` includes
 team event types and your personal types in the key's organization, including inactive
@@ -593,6 +595,11 @@ first; keep the same order and filters when following `nextCursor`. The host's P
 uses descending order for the complete paginated history. Optional `endAfter` (strictly
 after) and `endTo` (at or before) filter by booking end time; Upcoming includes in-progress
 meetings. Keep filters unchanged while paginating.
+
+`status: "cancelled"` lists only cancelled bookings, including bookings replaced by a
+reschedule (their `rescheduledToId` is set). `q` narrows the list to bookings whose invitee
+name or email, or whose current event type title, contains the text, ignoring case. See
+[searching the booking list](/docs/rest#search-the-booking-list) for the exact rules.
 
 Host booking fields include optional `rescheduledToId`: the immediate successor in the same
 organization that the caller also hosts, or null when none is available. It is returned even
@@ -751,7 +758,8 @@ The returned booking stays `confirmed`, with optional `pendingReschedule` contai
 `id`, `expiresAt` and `note`. The original time stays booked and blocks availability
 until the invitee uses their normal manage link to pick another time or cancel.
 The request expires after 48 hours, when the original meeting starts, or at the booking's
-[reschedule deadline](/docs/change-deadlines), whichever comes first; after that deadline a
+[effective reschedule deadline](/docs/change-deadlines) (the earlier of its
+reschedule and cancel instants), whichever comes first; after that deadline a
 new request fails with `booking_reschedule_deadline_passed`. Expiry keeps that time and notifies the host. Imported and group-seat bookings
 cannot receive a request. Picking uses the normal availability rules and reschedule
 limit, calendar updates, conference handling and reminders.
@@ -789,6 +797,12 @@ ceiling does not cancel existing bookings.
 calls with `manageToken` can no longer reschedule or cancel; host calls with
 `bookingId` are not limited. Each booking keeps the values that applied when it was
 booked. See [reschedule and cancel deadlines](/docs/change-deadlines) for examples.
+
+Invitee rescheduling closes at the earlier of the reschedule and cancel deadline
+instants, using the booking's snapshot; null contributes no limit from that side.
+A refusal caused only by the cancel deadline still returns
+`booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
+deadline, and new requests are refused once it is reached.
 
 ## Attendee attendance access
 

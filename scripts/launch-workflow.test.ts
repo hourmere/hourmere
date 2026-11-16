@@ -106,6 +106,8 @@ describe('release approval visibility', () => {
       'jobs.publish-cli.permissions': { contents: 'read', 'id-token': 'write' },
     })
     expect(Object.keys(ci.jobs)).toEqual([
+      'check-static',
+      'check-tests',
       'check',
       'n8n-compatibility',
       'cli-compatibility',

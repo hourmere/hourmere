@@ -166,6 +166,24 @@ const POLL_TABLES = [
   'meeting_poll_operations',
 ] as const
 type Tables = Record<(typeof POLL_TABLES)[number], Row[]>
+/** The documented fields of a host roster entry (MeetingPollRosterEntry), sorted. */
+const ROSTER_FIELDS = [
+  'voterId',
+  'name',
+  'email',
+  'status',
+  'timeZone',
+  'locale',
+  'invitedAt',
+  'verifiedAt',
+  'withdrawnAt',
+  'pendingExpiresAt',
+  'ballotRevision',
+  'submittedAt',
+  'consentedAt',
+  'votes',
+  'responses',
+].sort()
 
 describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
   let owned: TestDatabase
@@ -788,6 +806,41 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     const cousin = await invitee(M, sibling, 'sibling-voter@example.com')
     await succeeds(() => ballot(M, sibling, cousin, ['no', 'no', 'no'], 0))
 
+    // Every stored digest of this poll's voters and credentials, removed and expired ones
+    // included: none may reach the host in any encoding.
+    const digests = [
+      ...(
+        await p.db
+          .selectFrom('meeting_poll_voters')
+          .select(['email_key', 'admission_ip_digest'])
+          .where('poll_id', '=', p.pollId)
+          .execute()
+      ).flatMap((row) => [row.email_key, row.admission_ip_digest]),
+      ...(
+        await p.db
+          .selectFrom('meeting_poll_mailbox_counters')
+          .select('email_key')
+          .where('poll_id', '=', p.pollId)
+          .execute()
+      ).map((row) => row.email_key),
+      ...(
+        await p.db
+          .selectFrom('meeting_poll_capabilities')
+          .select('token_digest')
+          .where('poll_id', '=', p.pollId)
+          .execute()
+      ).map((row) => row.token_digest),
+    ].filter((digest): digest is Buffer => digest !== null)
+    // Non-vacuous: the live and the expired reservation still hold their IP digests.
+    const ipDigests = (
+      await p.db
+        .selectFrom('meeting_poll_voters')
+        .select('admission_ip_digest')
+        .where('poll_id', '=', p.pollId)
+        .where('admission_ip_digest', 'is not', null)
+        .execute()
+    ).length
+    expect(ipDigests).toBe(2)
     const before = await tables(p)
     const read = await succeeds(() => results(M, p))
     // A read writes nothing.
@@ -869,6 +922,31 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     expect(text).not.toContain(
       Voters.meetingPollMailboxKey(SECRET, p.pollId, 'first@example.com').toString('hex'),
     )
+    // Exactly the documented fields, for every roster entry and at the top level.
+    expect(Object.keys(read).sort(), 'results fields').toEqual([
+      'candidates',
+      'countedBallots',
+      'poll',
+      'resultsRevision',
+      'roster',
+    ])
+    for (const candidate of read.candidates)
+      expect(Object.keys(candidate).sort(), 'candidate fields').toEqual([
+        'endAt',
+        'id',
+        'ifNeedBe',
+        'no',
+        'position',
+        'startAt',
+        'yes',
+      ])
+    for (const row of read.roster)
+      expect(Object.keys(row).sort(), `roster entry fields of ${row.email}`).toEqual(ROSTER_FIELDS)
+    for (const digest of digests)
+      for (const encoding of ['hex', 'base64', 'base64url'] as const)
+        expect(text, `results reveal an encoded digest (${encoding})`).not.toContain(
+          digest.toString(encoding),
+        )
 
     // A ballot changes the results revision and the counts; the host revision stays.
     await succeeds(() => ballot(M, p, first, ['no', 'no', 'no'], 1))
@@ -1227,7 +1305,24 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     })
     expect(await tables(p)).toEqual(blocked)
 
+    // A re-invitation mails the removed mailbox again, so it follows the resend budget: the
+    // resend a moment ago is still cooling down, and the whole request writes nothing.
     const placesBefore = await places(p)
+    const early = await failure(() => invite(M, p, ['again@example.com']))
+    expect(early).toMatchObject({ code: 'rate_limited' })
+    expect(early.retryAfterSeconds).toBeGreaterThan(800)
+    expect(early.retryAfterSeconds).toBeLessThanOrEqual(900)
+    expect(await tables(p)).toEqual(blocked)
+    // The same refusal holds a fresh mailbox in the same batch back: all or nothing.
+    expect(
+      await failure(() => invite(M, p, ['again@example.com', 'bystander@example.com'])),
+    ).toMatchObject({ code: 'rate_limited', retryAfterSeconds: early.retryAfterSeconds })
+    expect(await tables(p)).toEqual(blocked)
+    await sql`UPDATE meeting_poll_mailbox_counters
+      SET last_resend_at = last_resend_at - interval '16 minutes'
+      WHERE poll_id = ${p.pollId} AND email_key = ${old.email_key}`.execute(p.db)
+    const cooled = await counter(p, 'again@example.com')
+
     const again = await succeeds(() => invite(M, p, ['again@example.com']))
     expect(again.entries).toMatchObject([{ outcome: 'invited', status: 'invited' }])
     const fresh = await voter(p, 'again@example.com')
@@ -1237,34 +1332,59 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     expect((await deliveries(p, fresh.id)).map((row) => [row.kind, row.state])).toEqual([
       ['invitation', 'pending'],
     ])
-    expect(await counter(p, 'again@example.com')).toEqual({
-      ...original,
+    const spentOne = await counter(p, 'again@example.com')
+    expect(spentOne).toEqual({
+      ...cooled,
+      // The re-invitation spent a resend at its decision instant.
+      resend_count: 2,
+      last_resend_at: spentOne.updated_at,
       // A new credential was mailed, so recovery starts again for it.
       recovery_count: 0,
       last_recovery_at: null,
       removed_at: null,
       updated_at: expect.any(Date),
     })
-    // The resend cooldown carried over: the re-invited mailbox cannot be resent at once.
+    const decided = await p.db
+      .selectFrom('meeting_polls')
+      .select('updated_at')
+      .where('id', '=', p.pollId)
+      .executeTakeFirstOrThrow()
+    expect(spentOne.updated_at).toEqual(decided.updated_at)
+    // Its cooldown started again: the re-invited mailbox cannot be resent at once.
     const cooling = await failure(() => resend(M, p, 'again@example.com'))
     expect(cooling).toMatchObject({ code: 'rate_limited' })
-    expect(cooling.retryAfterSeconds).toBeGreaterThan(0)
+    expect(cooling.retryAfterSeconds).toBeGreaterThan(800)
     const renewed = (await mailed(p, 'again@example.com')).token
     await succeeds(() => ballot(M, p, renewed, ['no', 'yes'], 0))
 
-    // A spent resend budget stays spent across removal and re-invitation.
+    // A spent resend budget stays spent across removal: no re-invitation, no Retry-After,
+    // and the batch, fresh mailbox included, writes nothing.
     await succeeds(() => invite(M, p, ['spent@example.com']))
     const spent = await voter(p, 'spent@example.com')
     await sql`UPDATE meeting_poll_mailbox_counters SET resend_count = 3,
       last_resend_at = clock_timestamp() - interval '1 hour'
       WHERE poll_id = ${p.pollId} AND email_key = ${spent.email_key}`.execute(p.db)
     await succeeds(() => remove(M, p, spent.id))
-    await succeeds(() => invite(M, p, ['spent@example.com']))
-    expect(await failure(() => resend(M, p, 'spent@example.com'))).toMatchObject({
-      code: 'rate_limited',
-      retryAfterSeconds: undefined,
+    for (const batch of [
+      ['spent@example.com'],
+      ['bystander@example.com', 'spent@example.com'],
+      // A capped mailbox gives no Retry-After even beside one that is only cooling down.
+      ['spent@example.com', 'again@example.com'],
+    ]) {
+      if (batch.includes('again@example.com'))
+        await succeeds(async () => remove(M, p, (await voter(p, 'again@example.com')).id))
+      const before = await tables(p)
+      expect(await failure(() => invite(M, p, batch)), batch.join()).toMatchObject({
+        code: 'rate_limited',
+        retryAfterSeconds: undefined,
+      })
+      expect(await tables(p)).toEqual(before)
+    }
+    expect(await voterCount(p, 'bystander@example.com')).toBe(0)
+    expect(await counter(p, 'spent@example.com')).toMatchObject({
+      resend_count: 3,
+      removed_at: expect.any(Date),
     })
-    expect(await counter(p, 'spent@example.com')).toMatchObject({ resend_count: 3 })
 
     // A withdrawn voter: re-invitation leaves them unchanged, but removal and re-invitation
     // deliberately send one invitation; the reminder opt-out still applies.
@@ -1702,7 +1822,8 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     for (const verify of verifications) await verify(copies)
   }, 600_000)
 
-  type Mutant = [string, (M: Modules) => Promise<void>, Mutation]
+  /** Name, check, mutation and, optionally, the assertion message that must report it. */
+  type Mutant = [string, (M: Modules) => Promise<void>, Mutation, string?]
   const LOCKED = '    const locked = await lockManagedPoll(trx, ctx, request.id)\n'
   const POLL_LOCK = '    const poll = await lockManagedPoll(trx, ctx, request.id)\n'
   const FENCE = '    await ensureMeetingPollKey(trx, secret)\n'
@@ -1744,6 +1865,73 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     "      .where('verified_at', 'is', null)\n      .where('invited_at', 'is', null)\n      .where('withdrawn_at', 'is', null)\n      .where(sql<boolean>`pending_expires_at > ${locked.at}::timestamptz`)\n"
   const CLEAR_REMOVAL = '        ...(clearRemoval ? { removed_at: null } : {}),'
   const mutants: Mutant[] = [
+    [
+      'the roster carries the admission IP digest of pending voters',
+      verifyResults,
+      {
+        results: [
+          [
+            "        'responses',\n        sql<MeetingPollVoterState['status']>",
+            "        'responses',\n        'admission_ip_digest',\n        sql<MeetingPollVoterState['status']>",
+          ],
+          [
+            '        responses: voter.responses as Responses,\n      })),',
+            "        responses: voter.responses as Responses,\n        ...(voter.admission_ip_digest ? { ip: Buffer.from(voter.admission_ip_digest).toString('base64url') } : {}),\n      })),",
+          ],
+        ],
+      },
+    ],
+    [
+      'the roster hides a pending IP digest in a documented field',
+      verifyResults,
+      {
+        results: [
+          [
+            "        'responses',\n        sql<MeetingPollVoterState['status']>",
+            "        'responses',\n        'admission_ip_digest',\n        sql<MeetingPollVoterState['status']>",
+          ],
+          [
+            '        pendingExpiresAt: instant(voter.pendingExpires),\n',
+            "        pendingExpiresAt: voter.admission_ip_digest ? Buffer.from(voter.admission_ip_digest).toString('base64url') : instant(voter.pendingExpires),\n",
+          ],
+        ],
+      },
+      'results reveal an encoded digest (base64url)',
+    ],
+    [
+      're-invitation bypasses the resend cooldown',
+      verifyReinvitation,
+      { voters: [['  if (retryAfter > 0) throw new MeetingPollRateLimitError(retryAfter)\n', '']] },
+    ],
+    [
+      're-invitation bypasses the resend cap',
+      verifyReinvitation,
+      { voters: [['  if (capped) throw new MeetingPollRateLimitError()\n', '']] },
+    ],
+    [
+      're-invitation is not counted as a resend',
+      verifyReinvitation,
+      {
+        voters: [
+          [
+            '        resend: reinvited.some((removed) => removed.equals(key)),\n',
+            '        resend: false,\n',
+          ],
+        ],
+      },
+    ],
+    [
+      'a refused re-invitation batch admits its other entries',
+      verifyReinvitation,
+      {
+        voters: [
+          [
+            "      plan.filter((entry) => entry.outcome === 'invited').map((entry) => entry.key),\n    )\n",
+            "      plan.filter((entry) => entry.outcome === 'invited').map((entry) => entry.key),\n    ).catch(async (error) => {\n      const removed = await trx.selectFrom('meeting_poll_mailbox_counters').select('email_key').where('poll_id', '=', poll.id).where('removed_at', 'is not', null).execute()\n      for (let index = plan.length - 1; index >= 0; index--)\n        if (plan[index].outcome === 'invited' && removed.some((row) => row.email_key.equals(plan[index].key))) plan.splice(index, 1)\n      if (plan.length === 0) throw error\n      return []\n    })\n",
+          ],
+        ],
+      },
+    ],
     [
       'remove-voter checks the results revision',
       verifyChurnRemoveVoter,
@@ -1898,7 +2086,7 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     [
       're-invitation keeps the removal tombstone',
       verifyReinvitation,
-      { voters: [['{ clearRemoval: true }', '{ clearRemoval: false }']] },
+      { voters: [['        clearRemoval: true,\n', '        clearRemoval: false,\n']] },
     ],
     [
       'bulk removal takes unverified invitees',
@@ -2243,9 +2431,12 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
   // Only a failed assertion counts: a mutant that crashes or cannot load is not a detection.
   it.each(mutants)(
     'detects the mutation: %s',
-    async (_name, verify, mutation) => {
+    async (_name, verify, mutation, message) => {
       const mutated = await sourceCopy(mutation)
-      await expect(verify(mutated)).rejects.toMatchObject({ name: 'AssertionError' })
+      await expect(verify(mutated)).rejects.toMatchObject({
+        name: 'AssertionError',
+        ...(message === undefined ? {} : { message: expect.stringContaining(message) }),
+      })
     },
     180_000,
   )

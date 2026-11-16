@@ -12,7 +12,7 @@ import { resolveBookingOrganization } from './booking-organization.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import { getManagedBooking, managedLinkRescheduleRequest } from './bookings.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
-import { changeDeadline } from './change-deadlines.ts'
+import { changeDeadline, cutoffsOf, effectiveRescheduleCutoff } from './change-deadlines.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { resolvedBookingHosts } from './hosts.ts'
@@ -211,6 +211,8 @@ describe.skipIf(!serverUrl)('group seat read models', () => {
         managedLinkRescheduleRequest,
         resolvedBookingHosts,
         changeDeadline,
+        cutoffsOf,
+        effectiveRescheduleCutoff,
         toIso,
       },
       true,

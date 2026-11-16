@@ -156,7 +156,7 @@ describe.skipIf(!serverUrl)('invitee change deadlines', () => {
     })
   })
 
-  it('keeps the two deadlines independent', async () => {
+  it('keeps cancellation available after an earlier reschedule deadline', async () => {
     const s = await setup({ rescheduleCutoffMinutes: 2880, cancelCutoffMinutes: 60 })
     const b = await s.book('2026-11-02T09:00:00Z')
     s.at('2026-11-01T12:00:00Z')
@@ -166,15 +166,70 @@ describe.skipIf(!serverUrl)('invitee change deadlines', () => {
     await expect(cancelManagedBooking(s.pub, b.token)).resolves.toMatchObject({
       status: 'cancelled',
     })
-
-    const open = await setup({ rescheduleCutoffMinutes: null, cancelCutoffMinutes: 2880 })
-    const c = await open.book('2026-11-02T09:00:00Z')
-    open.at('2026-11-01T12:00:00Z')
-    await expect(cancelManagedBooking(open.pub, c.token)).rejects.toMatchObject(CANCEL_CLOSED)
-    await expect(
-      rescheduleManagedBooking(open.pub, c.token, { start: instant('2026-11-02T10:00:00Z') }),
-    ).resolves.toHaveProperty('manageToken')
   })
+
+  it('blocks moving a booking later to bypass its passed cancellation deadline', async () => {
+    const s = await setup({ rescheduleCutoffMinutes: null, cancelCutoffMinutes: 1440 })
+    const b = await s.book('2026-11-02T09:00:00Z')
+    // Removing the event-type setting cannot reopen the booking's snapshotted deadline.
+    await updateEventType(s.ctx, s.eventTypeId, { cancelCutoffMinutes: null })
+    s.at('2026-11-02T07:00:00Z')
+    await expect(cancelManagedBooking(s.pub, b.token)).rejects.toMatchObject(CANCEL_CLOSED)
+    await expect(
+      rescheduleManagedBooking(s.pub, b.token, { start: instant('2026-11-06T09:00:00Z') }),
+    ).rejects.toMatchObject(RESCHEDULE_CLOSED)
+    expect(await snapshot(b.id)).toMatchObject({ status: 'confirmed', cancel_cutoff_minutes: 1440 })
+    // No successor exists to cancel: the original booking remains the only booking.
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('id')
+        .where('event_type_id', '=', s.eventTypeId)
+        .execute(),
+    ).toEqual([{ id: b.id }])
+  })
+
+  it.each([
+    [60, 120, 120],
+    [120, 120, 120],
+    [120, 60, 120],
+    [null, 120, 120],
+    [120, null, 120],
+    [null, null, null],
+  ] as const)(
+    'uses the effective deadline for reschedule=%s cancel=%s',
+    async (reschedule, cancel, effective) => {
+      const s = await setup({ rescheduleCutoffMinutes: reschedule, cancelCutoffMinutes: cancel })
+      const b = await s.book('2026-11-02T09:00:00Z')
+      const start = instant('2026-11-02T09:00:00Z')
+      const deadline = effective === null ? null : start.subtract({ minutes: effective })
+      expect((await getManagedBookingDetails(s.pub, b.token)).changeDeadlines).toEqual({
+        rescheduleBy: deadline?.toString({ fractionalSecondDigits: 3 }) ?? null,
+        cancelBy:
+          cancel === null
+            ? null
+            : start.subtract({ minutes: cancel }).toString({ fractionalSecondDigits: 3 }),
+      })
+      if (deadline) {
+        s.clock.now = deadline
+        await expect(
+          listManagedSlots(s.pub, b.token, slotRange('2026-11-03T00:00:00Z')),
+        ).rejects.toMatchObject(RESCHEDULE_CLOSED)
+        await expect(
+          rescheduleManagedBooking(s.pub, b.token, { start: instant('2026-11-03T10:00:00Z') }),
+        ).rejects.toMatchObject(RESCHEDULE_CLOSED)
+        s.clock.now = deadline.subtract({ milliseconds: 1 })
+      } else {
+        s.clock.now = start.subtract({ milliseconds: 1 })
+      }
+      await expect(
+        listManagedSlots(s.pub, b.token, slotRange('2026-11-03T00:00:00Z')),
+      ).resolves.not.toHaveLength(0)
+      await expect(
+        rescheduleManagedBooking(s.pub, b.token, { start: instant('2026-11-03T10:00:00Z') }),
+      ).resolves.toHaveProperty('manageToken')
+    },
+  )
 
   it('counts elapsed minutes across both daylight saving changes', async () => {
     // Spring forward in Los Angeles: 2027-03-14. Monday 09:00 PDT is 16:00Z; 48 hours
@@ -319,25 +374,35 @@ describe.skipIf(!serverUrl)('invitee change deadlines', () => {
   it('caps reschedule requests at the deadline, refuses them after it, and fences answers', async () => {
     const s = await setup({ rescheduleCutoffMinutes: 60, cancelCutoffMinutes: 600 })
     const b = await s.book('2026-11-02T09:00:00Z')
-    s.at('2026-11-02T00:00:00Z')
+    s.at('2026-11-01T22:00:00Z')
     const requested = await requestReschedule(s.ctx, b.id, { idempotencyKey: randomUUID() })
     const request = required(requested.pendingReschedule)
-    // 48 hours would be later than the deadline, one hour before the start.
-    expect(request.expiresAt).toBe('2026-11-02T08:00:00.000Z')
+    // Cancellation closes rescheduling ten hours before the start.
+    expect(request.expiresAt).toBe('2026-11-01T23:00:00.000Z')
 
-    // Cancelling while the request is open but after the cancel deadline is refused.
-    await expect(
-      cancelManagedBooking(s.pub, b.token, { rescheduleRequestId: request.id }),
-    ).rejects.toMatchObject(CANCEL_CLOSED)
-
-    // At the deadline the request is closed: the answer cannot move the booking.
-    s.at('2026-11-02T08:00:00Z')
+    // At the effective deadline the request expires and cannot move the booking.
+    s.at('2026-11-01T23:00:00Z')
     await expect(
       rescheduleManagedBooking(s.pub, b.token, {
         start: instant('2026-11-02T10:00:00Z'),
         rescheduleRequestId: request.id,
       }),
     ).rejects.toMatchObject({ code: 'reschedule_request_changed' })
+    // A pre-upgrade request can have a later stored expiry; the action guard still applies.
+    await db
+      .updateTable('booking_reschedule_requests')
+      .set({ expires_at: '2026-11-02T08:00:00Z' })
+      .where('id', '=', request.id)
+      .execute()
+    await expect(
+      rescheduleManagedBooking(s.pub, b.token, {
+        start: instant('2026-11-02T10:00:00Z'),
+        rescheduleRequestId: request.id,
+      }),
+    ).rejects.toMatchObject(RESCHEDULE_CLOSED)
+    await expect(
+      cancelManagedBooking(s.pub, b.token, { rescheduleRequestId: request.id }),
+    ).rejects.toMatchObject(CANCEL_CLOSED)
     expect((await snapshot(b.id)).status).toBe('confirmed')
     // A new request would be unanswerable.
     await expect(
@@ -374,7 +439,7 @@ describe.skipIf(!serverUrl)('invitee change deadlines', () => {
   })
 
   it('decides with the clock read after the locks when a change races the deadline', async () => {
-    const s = await setup({ rescheduleCutoffMinutes: 60, cancelCutoffMinutes: 60 })
+    const s = await setup({ rescheduleCutoffMinutes: null, cancelCutoffMinutes: 60 })
     // A reschedule also waits for the event type row (a settings save can hold it).
     for (const [kind, held, at] of [
       ['reschedule', 'bookings', '2026-11-02T09:00:00Z'],
@@ -496,7 +561,7 @@ describe.skipIf(!serverUrl)('invitee change deadlines', () => {
   })
 
   it('keeps a deadline per group seat and refuses only real invitee seat moves', async () => {
-    const s = await setup({ rescheduleCutoffMinutes: 600, cancelCutoffMinutes: 600 })
+    const s = await setup({ rescheduleCutoffMinutes: null, cancelCutoffMinutes: 600 })
     await db
       .updateTable('event_types')
       .set({ booking_mode: 'group', group_capacity: 3 })
@@ -515,7 +580,7 @@ describe.skipIf(!serverUrl)('invitee change deadlines', () => {
     const a = await seat('a@example.com')
     const b = await seat('b@example.com')
     expect(await snapshot(a.id)).toMatchObject({
-      reschedule_cutoff_minutes: 600,
+      reschedule_cutoff_minutes: null,
       cancel_cutoff_minutes: 600,
     })
 
@@ -526,7 +591,7 @@ describe.skipIf(!serverUrl)('invitee change deadlines', () => {
       idempotencyKey: key,
     })
     expect(await snapshot(moved.booking.id)).toMatchObject({
-      reschedule_cutoff_minutes: 600,
+      reschedule_cutoff_minutes: null,
       cancel_cutoff_minutes: 600,
     })
 

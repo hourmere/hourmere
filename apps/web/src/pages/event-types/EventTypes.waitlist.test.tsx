@@ -101,6 +101,8 @@ describe('event type waitlist management', () => {
     })
     renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
     const user = userEvent.setup()
+    await screen.findByLabelText('Title')
+    await user.click(screen.getByText('Booking waitlist', { selector: 'summary' }))
     const checkbox = await screen.findByRole('checkbox', { name: checkboxName })
     await user.click(checkbox)
     await user.click(screen.getByRole('button', { name: 'Save changes' }))

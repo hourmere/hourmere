@@ -1,5 +1,19 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Location options': 'Location options',
+  'Default location': 'Default location',
+  'Location label': 'Location label',
+  'Add location option': 'Add location option',
+  'Remove location option': 'Remove location option',
+  'Move location up': 'Move location up',
+  'Move location down': 'Move location down',
+  'Choose each location type only once.': 'Choose each location type only once.',
+  'Invitee provides a phone number': 'Invitee provides a phone number',
+
+  'Description and visibility': 'Description and visibility',
+  'Additional durations': 'Additional durations',
+  'Location options and conferencing': 'Location options and conferencing',
+  'Duration (minutes)': 'Duration (minutes)',
   'SCIM provisioning tokens': 'SCIM provisioning tokens',
   'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
     'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',
@@ -1993,6 +2007,8 @@ export const admin = {
     'The saved booking link is invalid. Reload the saved event type and try again.',
   'The email preview could not be created. Reload the saved event type and try again.':
     'The email preview could not be created. Reload the saved event type and try again.',
+  'Rescheduling also closes when the cancellation deadline passes.':
+    'Rescheduling also closes when the cancellation deadline passes.',
   'Invitee reschedule deadline': 'Invitee reschedule deadline',
   'Invitee cancellation deadline': 'Invitee cancellation deadline',
   'until the meeting starts': 'until the meeting starts',
@@ -2000,6 +2016,18 @@ export const admin = {
     'How long before the start invitees can no longer reschedule with their booking link. Each booking keeps the deadline it was booked with, and you can still change it yourself.',
   'How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself.':
     'How long before the start invitees can no longer cancel with their booking link. Each booking keeps the deadline it was booked with, and you can still cancel it yourself.',
+  'Cancelled bookings': 'Cancelled bookings',
+  'No cancelled bookings.': 'No cancelled bookings.',
+  'Search bookings': 'Search bookings',
+  'Invitee name or email, or event type.': 'Invitee name or email, or event type.',
+  'No bookings match your search.': 'No bookings match your search.',
+  'Try another name, email address or event type.':
+    'Try another name, email address or event type.',
+  'Clear search': 'Clear search',
+  'Matching bookings: {0}.': 'Matching bookings: {0}.',
+  'Matching bookings shown: {0}. More are available.':
+    'Matching bookings shown: {0}. More are available.',
+  'Clear the search to export bookings as CSV.': 'Clear the search to export bookings as CSV.',
 
   // Availability troubleshooting
   'Troubleshoot availability': 'Troubleshoot availability',

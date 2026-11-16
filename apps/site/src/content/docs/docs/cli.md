@@ -78,7 +78,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `troubleshoot-availability` | `troubleshoot_availability` | `eventTypeId`, `date`; optional `timeZone`, `durationMinutes` |
 | `open-time-snippet` | `generate_open_time_snippet` | exactly one of `eventTypeId`, `slug`; `from`, `to`; optional `count`, `locale`, `displayTimeZone`, `durationMinutes` |
 | `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `durationMinutes`, `responses`, `guests` |
-| `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
+| `list` | `list_bookings` | optional `from`, `to`, `status` (`cancelled` for the cancelled view), `q` (search), `order`, `limit`, `cursor` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
@@ -202,7 +202,18 @@ is supplied in JSON; omitted language and display zone use the caller's profile 
 `--json` makes the normal JSON output explicit. The response includes `slots` with direct
 links, `text` and `html` for your draft. Generation sends no mail and reserves no time.
 `read`, `bookings` and `full` keys work with personal-owner or team-owner/admin permission,
-when the operator enables `SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for
+when the operator enables `SLOT_SNIPPETS_ENABLED`. When off (the default), the CLI exits 1
+with empty stdout, without `outcomeMayBeUnknown`, and writes this JSON to stderr:
+
+```json
+{
+  "error": "slot_snippets_disabled"
+}
+```
+
+A server that predates open-time snippets returns the same unknown-tool response and is
+also reported as not enabled. Ask the operator to upgrade that server before enabling
+`SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for
 response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
 
 ## Explain why times cannot be booked
@@ -306,7 +317,8 @@ Network failures or generic HTTP transport errors exit **3**. Errors are JSON on
 with a stable `error` code, an HTTP `status` when available, and `retryAfterSeconds` when
 provided. Untrusted server messages, URLs and exception causes are not printed.
 
-A failure after the call begins includes `outcomeMayBeUnknown: true`. A reserved result
+A failure after the call begins includes `outcomeMayBeUnknown: true`, except
+`slot_snippets_disabled` from `open-time-snippet`, which is a definite failure. A reserved result
 file can remain empty or incomplete after a failed call or write: do not treat it as a
 successful booking, and retain the original request. Inspect the server before retrying.
 
@@ -386,7 +398,8 @@ The returned booking stays `confirmed`, with optional `pendingReschedule` contai
 `id`, `expiresAt` and `note`. The original time stays booked and blocks availability
 until the invitee uses their normal manage link to pick another time or cancel.
 The request expires after 48 hours, when the original meeting starts, or at the booking's
-[reschedule deadline](/docs/change-deadlines), whichever comes first; after that deadline a
+[effective reschedule deadline](/docs/change-deadlines) (the earlier of its
+reschedule and cancel instants), whichever comes first; after that deadline a
 new request fails with `booking_reschedule_deadline_passed`. Expiry keeps that time and notifies the host. Imported and group-seat bookings
 cannot receive a request. Picking uses the normal availability rules and reschedule
 limit, calendar updates, conference handling and reminders.
@@ -426,6 +439,12 @@ Each is a whole number from 1 to 525600, or `null` for no deadline. From that ma
 minutes before the start, the invitee can no longer reschedule or cancel through their
 link; `reschedule` and `cancel` with `bookingId` are not limited. See
 [reschedule and cancel deadlines](/docs/change-deadlines) for the full rules.
+
+Invitee rescheduling closes at the earlier of the reschedule and cancel deadline
+instants, using the booking's snapshot; null contributes no limit from that side.
+A refusal caused only by the cancel deadline still returns
+`booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
+deadline, and new requests are refused once it is reached.
 
 ## Record attendee no-shows
 

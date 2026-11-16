@@ -51,6 +51,13 @@ export function changeDeadline(
   return minutes === null ? null : start.subtract({ minutes })
 }
 
+/** Rescheduling also cancels the old booking, so either cutoff closes that action. */
+export function effectiveRescheduleCutoff(cutoffs: ChangeCutoffs): number | null {
+  if (cutoffs.rescheduleCutoffMinutes === null) return cutoffs.cancelCutoffMinutes
+  if (cutoffs.cancelCutoffMinutes === null) return cutoffs.rescheduleCutoffMinutes
+  return Math.max(cutoffs.rescheduleCutoffMinutes, cutoffs.cancelCutoffMinutes)
+}
+
 /**
  * Refuses an invitee change at or after its deadline. Call it only once the booking is
  * locked and known to be confirmed and not yet started, with the clock sampled after the
@@ -64,7 +71,7 @@ export function assertInviteeChangeOpen(
 ): void {
   const deadline = changeDeadline(
     start,
-    kind === 'reschedule' ? cutoffs.rescheduleCutoffMinutes : cutoffs.cancelCutoffMinutes,
+    kind === 'reschedule' ? effectiveRescheduleCutoff(cutoffs) : cutoffs.cancelCutoffMinutes,
   )
   if (deadline === null || Temporal.Instant.compare(now, deadline) < 0) return
   throw kind === 'reschedule'

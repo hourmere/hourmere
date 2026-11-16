@@ -4,7 +4,8 @@ description: Stop invitees from moving or cancelling a booking through their lin
 ---
 
 Set how long before a meeting starts its invitee can no longer reschedule, and separately
-no longer cancel, through their own management link. Hosts keep full control: they can
+no longer cancel, through their own management link. Rescheduling also closes when the
+cancel deadline passes. Hosts keep full control: they can
 still move or cancel the booking themselves. Deadlines are available on self-hosted
 installations and through the event-type editor, REST, MCP and CLI.
 
@@ -15,12 +16,15 @@ Each event type has two optional settings, both in whole minutes before the star
 - **Reschedule deadline** (`rescheduleCutoffMinutes`): from this point the invitee can no
   longer choose another time.
 - **Cancel deadline** (`cancelCutoffMinutes`): from this point the invitee can no longer
-  cancel.
+  cancel or choose another time.
 
 Each accepts a whole number from **1 to 525600** (one year), or no value for no deadline.
 No deadline is the default: the invitee can change the booking until it starts. The two
-deadlines are independent; for example, rescheduling can close 48 hours before the start
-(`2880`) while cancelling stays open until 24 hours before (`1440`).
+settings are independent, but invitee rescheduling closes at the **earlier** of the two
+deadline instants. A blank setting contributes no limit from that side. For example,
+rescheduling can close 48 hours before the start (`2880`) while cancelling stays open
+until 24 hours before (`1440`). With only a 24-hour cancel deadline, both actions close
+24 hours before the start: an invitee cannot move a late booking to a later day to cancel it.
 
 A change is allowed strictly before the deadline instant. At exactly the deadline, and
 afterwards, it is refused. Minutes are elapsed time: across a daylight-saving change, a
@@ -98,7 +102,10 @@ called with `manageToken`. After the reschedule deadline, slot lookup through th
 refused as well.
 
 `GET /api/v1/bookings/manage` returns `changeDeadlines` with `rescheduleBy` and `cancelBy`:
-the ISO instants from which each change is refused, or `null` when there is no deadline.
+the ISO instants from which each change is refused. `rescheduleBy` is the earlier of
+`start − rescheduleCutoffMinutes` and `start − cancelCutoffMinutes`, ignoring null
+settings; it is null only when both settings are null. `cancelBy` uses only the cancel
+setting and is null when that setting is null.
 
 ## What hosts and team admins can do
 
@@ -110,8 +117,9 @@ keeps its original minutes, counted from the new start.
 ### Requests to choose another time
 
 The invitee answers a [request to choose another time](/docs/request-reschedule) through
-their management link, so the reschedule deadline applies. A request expires after
-48 hours, when the meeting starts, or at the booking's reschedule deadline, whichever comes
+their management link, so the effective reschedule deadline (including the cancel
+deadline) applies. A request expires after
+48 hours, when the meeting starts, or at the booking's effective reschedule deadline, whichever comes
 first. Once that deadline has passed, sending a request is refused with
 `409 booking_reschedule_deadline_passed`; move the booking yourself instead.
 
@@ -135,7 +143,7 @@ first. Once that deadline has passed, sending a request is refused with
 
 | Status and code | Meaning |
 |---|---|
-| 409 `booking_reschedule_deadline_passed` | The invitee's reschedule deadline has passed; contact the host. Also returned when a host sends a request to choose another time after that deadline. |
+| 409 `booking_reschedule_deadline_passed` | The invitee's effective reschedule deadline has passed (either configured deadline); contact the host. Also returned when a host sends a request to choose another time after that deadline. |
 | 409 `booking_cancel_deadline_passed` | The invitee's cancel deadline has passed; contact the host. |
 
 Other checks come first: an unknown token returns `404 booking_not_found`, a cancelled
@@ -153,3 +161,6 @@ deadline has passed, because the request expired at that deadline; load the book
 - Existing bookings are never updated when the event type changes. This is by design.
 - A [Cal.com import](/docs/calcom-import) does not import Cal.com's equivalent settings.
 - If a host reschedules a booking, the deadline counts from the new start time.
+- Invitees cannot keep rescheduling open after cancellation closes, even with no
+  reschedule cutoff configured. This prevents moving a booking later to bypass its
+  cancel deadline; contact the host for changes after either deadline.

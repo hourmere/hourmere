@@ -1,7 +1,41 @@
 name: UI checks
 
 on:
+  # Not required checks, but they run on every pull request that could change an audited page.
+  # The audits drive the real server with real migrations, so everything runs by default and a
+  # new directory runs too. Skipped only when every changed file is one of these:
   pull_request:
+    paths:
+      - "**"
+      # Developer docs and root prose; the site renders its own apps/site/src/content.
+      - "!docs/**"
+      - "!*.md"
+      - "!LICENSE"
+      # Repository automation; this workflow is re-included last.
+      - "!.github/**"
+      # Integrations and generators the server, web app and audits do not import. The web
+      # app reads the committed apps/web/src/api/schema.d.ts, which check-static verifies.
+      - "!tools/cli/**"
+      - "!tools/n8n-nodes-hourmere/**"
+      - "!tools/zapier-hourmere/**"
+      - "!tools/make-templates/**"
+      - "!tools/api-types/**"
+      # Repository scripts: setup, release, CI helpers and unit tests; the audits import none.
+      - "!scripts/**"
+      # Unit tests of the server and packages; no runtime module imports a *.test.ts file.
+      - "!apps/server/src/**/*.test.ts"
+      - "!packages/*/src/**/*.test.ts"
+      # Container, proxy and tooling configuration; the audits start the server with Node.
+      - "!Dockerfile"
+      - "!.dockerignore"
+      - "!docker-compose*.yml"
+      - "!Caddyfile"
+      - "!.env.example"
+      - "!server.json"
+      - "!biome.json"
+      - "!.editorconfig"
+      - "!vitest.config.ts"
+      - .github/workflows/ui-checks.yml
   push:
     branches: [main]
   workflow_dispatch:

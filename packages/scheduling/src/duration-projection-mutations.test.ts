@@ -9,7 +9,12 @@ import {
   type PublicEventTypeRecord,
   toIso,
 } from './availability.ts'
-import { changeDeadline, validCutoff } from './change-deadlines.ts'
+import {
+  changeDeadline,
+  cutoffsOf,
+  effectiveRescheduleCutoff,
+  validCutoff,
+} from './change-deadlines.ts'
 import { EVENT_TYPE_LIMITS } from './event-types.ts'
 import { engineValidation } from './internal.ts'
 import {
@@ -122,6 +127,8 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     'getManagedBooking',
     'managedLinkRescheduleRequest',
     'changeDeadline',
+    'cutoffsOf',
+    'effectiveRescheduleCutoff',
     'toIso',
     `${copy}; return getManagedBookingDetails`,
   )(
@@ -134,6 +141,8 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     // A token from no reschedule request email.
     async () => undefined,
     changeDeadline,
+    cutoffsOf,
+    effectiveRescheduleCutoff,
     toIso,
   ) as typeof getManagedBookingDetails
 }
