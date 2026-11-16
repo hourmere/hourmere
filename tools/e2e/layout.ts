@@ -70,6 +70,45 @@ export function measureLayout(viewport?: { width: number; height: number }): Aud
       /^inset\(\s*(?:50|100)%/.test(style.clipPath)
     )
   }
+  // A full-screen page replaces the visible background; it is not an oversized bar.
+  // Require the complete accessible-view contract, rather than a class-name exemption.
+  // Other overflow, target-size and keyboard checks still inspect this view and its children.
+  const fullScreenView = (element: Element, rect: DOMRect, style: CSSStyleDeclaration) => {
+    const labelledBy = element.getAttribute('aria-labelledby')?.trim().split(/\s+/) ?? []
+    const named =
+      !!element.getAttribute('aria-label')?.trim() ||
+      (labelledBy.length > 0 &&
+        labelledBy.every((id) => document.getElementById(id)?.textContent?.trim()))
+    if (
+      element.getAttribute('role') !== 'region' ||
+      !named ||
+      style.position !== 'fixed' ||
+      rect.left !== 0 ||
+      rect.top !== 0 ||
+      rect.right !== width ||
+      rect.bottom !== height ||
+      !['auto', 'scroll'].includes(style.overflowY) ||
+      !element.contains(document.activeElement) ||
+      element.closest('[inert], [aria-hidden="true"]')
+    )
+      return false
+    let branch: Element = element
+    while (branch.parentElement) {
+      const parent = branch.parentElement
+      for (const sibling of parent.children) {
+        if (sibling === branch) continue
+        if (
+          !(sibling instanceof HTMLElement) ||
+          !sibling.inert ||
+          sibling.getAttribute('aria-hidden') !== 'true'
+        )
+          return false
+      }
+      if (parent === document.body) return true
+      branch = parent
+    }
+    return false
+  }
   const documentWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)
   if (documentWidth > document.documentElement.clientWidth + 1)
     findings.push({
@@ -114,7 +153,10 @@ export function measureLayout(viewport?: { width: number; height: number }): Aud
     const oversizedSticky = style.position === 'sticky' && rect.height > height
     if (
       oversizedSticky ||
-      (['sticky', 'fixed'].includes(style.position) && fullWidthBar && rect.height > height * 0.25)
+      (['sticky', 'fixed'].includes(style.position) &&
+        fullWidthBar &&
+        rect.height > height * 0.25 &&
+        !fullScreenView(element, rect, style))
     )
       findings.push({
         code: 'oversized-fixed',
