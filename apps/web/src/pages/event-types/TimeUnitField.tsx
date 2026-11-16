@@ -55,7 +55,8 @@ export function TimeUnitField({
   const [entry, setEntry] = useState<{ canonical: string; unit: TimeUnit; text: string } | null>(
     null,
   )
-  const factor = MINUTES[storageUnit] / MINUTES[unit]
+  // Multiply before dividing: a precomputed 1/60 factor shows 111 minutes as 1.8499999999999999 hours.
+  const inUnit = (stored: number) => (stored * MINUTES[storageUnit]) / MINUTES[unit]
   const unitLabel = t(
     unit === 'minutes' ? 'Minutes' : unit === 'hours' ? 'Time unit: hours' : 'Days',
   )
@@ -64,10 +65,10 @@ export function TimeUnitField({
       ? entry.text
       : value === ''
         ? ''
-        : String(Number(value) * factor)
+        : String(inUnit(Number(value)))
   const range = msg('Enter {min}–{max} {unit}, in whole {storageUnit}.', {
-    min: String(rule.min * factor),
-    max: String(rule.max * factor),
+    min: String(inUnit(rule.min)),
+    max: String(inUnit(rule.max)),
     unit: unitLabel,
     storageUnit: t(storageUnit === 'minutes' ? 'Minutes' : 'Days'),
   })

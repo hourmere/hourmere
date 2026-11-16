@@ -143,3 +143,25 @@ it('names units and validation in Chinese with full-width punctuation', async ()
   expect(document.getElementById('notice-error')?.textContent).toContain('小时')
   expect(document.getElementById('notice-error')?.textContent).toContain('。')
 })
+
+it.each([
+  { field: 'minimumNoticeMinutes', stored: '111', unit: 'hours', shown: '1.85' },
+  { field: 'bufferBeforeMinutes', stored: '63', unit: 'days', shown: '0.04375' },
+  { field: 'minimumNoticeMinutes', stored: '90', unit: 'hours', shown: '1.5' },
+] as const)(
+  'shows $stored stored minutes as exactly $shown $unit',
+  async ({ field, stored, unit, shown }) => {
+    chooseLanguage('en')
+    render(<Harness field={field} initial={stored} />)
+    const user = userEvent.setup()
+    await user.selectOptions(screen.getByRole('combobox', { name: `${field} unit` }), unit)
+    const input = screen.getByLabelText<HTMLInputElement>(field, {
+      exact: false,
+      selector: 'input',
+    })
+    // A precomputed 1/60 or 1/1440 factor leaves float noise such as 1.8499999999999999.
+    expect(input.value).toBe(shown)
+    expect(screen.getByTestId('stored').textContent).toBe(stored)
+    expect(screen.getByTestId('changes').textContent).toBe('0')
+  },
+)
