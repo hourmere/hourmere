@@ -29,6 +29,8 @@ interface Seed {
   action?: string
   actorType?: string
   actorId?: string | null
+  targetType?: string
+  targetId?: string
   credentialType?: string
   credentialId?: string | null
   credentialScope?: string | null
@@ -59,7 +61,7 @@ describe.skipIf(!serverUrl)('audit log query, retention and purge (real Postgres
       VALUES (${seed.organizationId}, ${at}, ${actorType},
         ${seed.actorId === undefined ? (actorType === 'system' ? 'test-job' : randomUUID()) : seed.actorId},
         ${seed.credentialType ?? 'none'}, ${seed.credentialId ?? null}, ${seed.credentialScope ?? null},
-        ${seed.action ?? 'organization.updated'}, 'organization', ${randomUUID()},
+        ${seed.action ?? 'organization.updated'}, ${seed.targetType ?? 'organization'}, ${seed.targetId ?? randomUUID()},
         ${JSON.stringify(seed.details ?? {})}::jsonb)
       RETURNING id::text`.execute(db)
     return row.rows[0]?.id as string
@@ -196,6 +198,19 @@ describe.skipIf(!serverUrl)('audit log query, retention and purge (real Postgres
         byAdmin,
       ])
       expect(await ids(team.as(owner), { action: 'webhook.created' })).toEqual([])
+    })
+
+    it('paginates maximum-length Unicode actor IDs with a bounded cursor', async () => {
+      const actorId = '审'.repeat(256)
+      const older = await insert({ organizationId: team.id, actorId })
+      const newer = await insert({ organizationId: team.id, actorId })
+      const filters = { actorType: 'system' as const, actorId, limit: 1 }
+      const first = await list(team.as(owner), filters)
+      expect(first.data.map((event) => event.id)).toEqual([newer])
+      expect(first.nextCursor?.length).toBeLessThanOrEqual(1024)
+      const second = await list(team.as(owner), { ...filters, cursor: first.nextCursor ?? '' })
+      expect(second.data.map((event) => event.id)).toEqual([older])
+      expect(second.nextCursor).toBeNull()
     })
 
     it('keeps pages stable while newer events are written between them', async () => {
@@ -370,6 +385,23 @@ describe.skipIf(!serverUrl)('audit log query, retention and purge (real Postgres
           ])
         }
       }
+    })
+
+    it('redacts revoked session target IDs while preserving non-session targets', async () => {
+      const sessionId = randomUUID()
+      await insert({
+        organizationId: team.id,
+        action: 'session.revoked',
+        targetType: 'session',
+        targetId: sessionId,
+      })
+      await insert({ organizationId: team.id, targetId: team.id })
+      const page = await list(team.as(owner))
+      expect(JSON.stringify(page)).not.toContain(sessionId)
+      expect(page.data.map((event) => event.target)).toEqual([
+        { type: 'organization', id: team.id },
+        { type: 'session', id: null },
+      ])
     })
 
     it('never returns session IDs and keeps stored details, including redacted ones, as stored', async () => {

@@ -78,7 +78,14 @@ function mutate(before: string, after: string) {
 const query = (path: string | undefined) =>
   Object.fromEntries(new URL(path ?? '', 'http://x').searchParams)
 
-type Mode = 'endDay' | 'eventsScope' | 'settingsScope' | 'saveScope' | 'readOnly' | 'zone'
+type Mode =
+  | 'endDay'
+  | 'eventsScope'
+  | 'settingsScope'
+  | 'saveScope'
+  | 'readOnly'
+  | 'zone'
+  | 'redactedTarget'
 
 async function check(code: string, mode: Mode) {
   const Page = copy(code)
@@ -99,7 +106,10 @@ async function check(code: string, mode: Mode) {
               oauthClientId: null,
               oauthGrantId: null,
             },
-            target: { type: 'api_key', id: 'key-1' },
+            target:
+              mode === 'redactedTarget'
+                ? { type: 'session', id: null }
+                : { type: 'api_key', id: 'key-1' },
             details: {},
             requestId: null,
           },
@@ -154,6 +164,8 @@ async function check(code: string, mode: Mode) {
     ).toBe(true)
   } else if (mode === 'readOnly') {
     expect(screen.queryByRole('button', { name: 'Save retention' }) === null).toBe(true)
+  } else if (mode === 'redactedTarget') {
+    expect(table.querySelector('td[data-label="Target"]')?.textContent === 'session').toBe(true)
   } else {
     // 17:04 UTC is 09:04 in the profile zone.
     expect(/\b9:04\b/.test(within(table).getAllByRole('rowheader')[0]?.textContent ?? '')).toBe(
@@ -186,6 +198,7 @@ describe('audit log source-copy negative controls', () => {
     ],
     ['readOnly', '{view.canChangeRetention ? (', '{true ? ('],
     ['zone', 'zoned(timeZone, formatLocale)', "zoned('UTC', formatLocale)"],
+    ['redactedTarget', '{target.id && <Id>{target.id}</Id>}', "{<Id>{target.id ?? 'null'}</Id>}"],
   ] as const
   it.each(cases)(
     'detects removal of the %s protection through a real assertion',

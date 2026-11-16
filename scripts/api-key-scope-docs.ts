@@ -34,6 +34,7 @@ const groupNames: Record<ApiKeyOperationClass, string> = {
   other_read: 'Other account reads',
   other_write: 'Account settings and configuration writes',
   audit_read: 'Audit log reads',
+  diagnostic_read: 'Availability diagnostics',
   session_only: 'Browser session operations',
   public_metadata: 'Public instance and API metadata',
 }

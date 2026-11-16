@@ -99,3 +99,7 @@ data: choose the shortest period your obligations allow.
 - The operator cannot limit which retention an owner chooses, and there is no legal hold
   beyond **Keep forever**.
 - Deletion runs on the worker; an installation without a worker process never deletes.
+
+Purge deletion is limited to 50 batches of 1,000 rows per hourly run. Discovery still visits
+all organizations, and later organizations may wait across runs while earlier ones remain
+backlogged. Session targets are returned with a null ID to protect session identifiers.

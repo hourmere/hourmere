@@ -100,6 +100,7 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
     })
     function synchronizeTransactions() {
       let arrived = 0
+      let released = false
       let release!: () => void
       const ready = new Promise<void>((resolve) => {
         release = resolve
@@ -107,9 +108,14 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
       barrier = async () => {
         if (++arrived === POOL_SIZE) {
           barrier = undefined
+          released = true
           release()
         }
         await ready
+      }
+      return () => {
+        expect(arrived, 'transaction barrier arrivals').toBe(POOL_SIZE)
+        expect(released, 'transaction barrier released').toBe(true)
       }
     }
     const appDb = createDb(appPool)
@@ -198,7 +204,7 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
   }
   type Signed = Awaited<ReturnType<typeof signedIn>>
   /** Obtain the provider-signed query without making any external metadata requests. */
-  async function untilSelection({ request }: Instance, s: Signed) {
+  async function untilSelection({ request }: Instance, s: Signed, promptConsent = true) {
     const verifier = randomBytes(32).toString('base64url')
     const query = new URLSearchParams({
       client_id: CLIENT,
@@ -209,8 +215,8 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
       code_challenge: createHash('sha256').update(verifier).digest('base64url'),
       code_challenge_method: 'S256',
       state: randomBytes(16).toString('base64url'),
-      prompt: 'consent',
     })
+    if (promptConsent) query.set('prompt', 'consent')
     const initial = await request(`/api/auth/oauth2/authorize?${query}`, { headers: s.headers })
     expect(initial.status).toBe(302)
     const selection = new URL(initial.headers.get('location') as string, BASE)
@@ -235,6 +241,16 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
       },
     }
   }
+  /** Check the callback without exposing authorization codes in assertion output. */
+  async function expectCallbackCode(response: Response) {
+    const { redirectUrl } = (await response.json()) as { redirectUrl: string }
+    const callback = new URL(redirectUrl)
+    expect(`${callback.origin}${callback.pathname}`).toBe(CALLBACK)
+    expect(Boolean(callback.searchParams.get('code')), 'callback has an authorization code').toBe(
+      true,
+    )
+    expect(callback.searchParams.has('error'), 'callback has no OAuth error').toBe(false)
+  }
   /** Authentication still works for someone else after the batch. */
   async function sessionStillResolves(target: Instance) {
     expect(await bounded(target.health().then((r) => [r])), 'database health after batch').toEqual([
@@ -256,13 +272,14 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
       const s = await signedIn()
       pending.push({ s, body: (await untilSelection(target, s)).body })
     }
-    target.synchronizeTransactions()
+    const assertBarrier = target.synchronizeTransactions()
     expect(
       await bounded(
         Promise.all(pending.map(({ s, body }) => target.api('select', s.headers, body))),
       ),
       'select batch',
     ).toEqual(Array(POOL_SIZE).fill(200))
+    assertBarrier()
     await sessionStillResolves(target)
   }, 60_000)
 
@@ -273,13 +290,14 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
       const s = await signedIn()
       pending.push({ s, body: (await untilConsent(target, s)).body })
     }
-    target.synchronizeTransactions()
+    const assertBarrier = target.synchronizeTransactions()
     expect(
       await bounded(
         Promise.all(pending.map(({ s, body }) => target.api('consent', s.headers, body))),
       ),
       'consent batch',
     ).toEqual(Array(POOL_SIZE).fill(200))
+    assertBarrier()
     await sessionStillResolves(target)
   }, 60_000)
 
@@ -291,13 +309,37 @@ describe.skipIf(!serverUrl)('MCP OAuth app pool starvation', () => {
       const { oauthQuery, intentId } = (await untilConsent(target, s)).body
       pending.push({ s, body: { oauthQuery, intentId } })
     }
-    target.synchronizeTransactions()
+    const assertBarrier = target.synchronizeTransactions()
     expect(
       await bounded(
         Promise.all(pending.map(({ s, body }) => target.api('request', s.headers, body))),
       ),
       'intent read batch',
     ).toEqual(Array(POOL_SIZE).fill(200))
+    assertBarrier()
+    await sessionStillResolves(target)
+  }, 60_000)
+
+  it('finishes as many signed-in reconnects as the app pool has connections', async () => {
+    const target = await instance()
+    const pending = []
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const s = await signedIn()
+      const consent = await untilConsent(target, s)
+      const accepted = await target.api('consent', s.headers, consent.body)
+      expect(accepted.status).toBe(200)
+      await expectCallbackCode(accepted)
+      const { body } = await untilSelection(target, s, false)
+      expect(new URLSearchParams(body.oauthQuery).has('prompt')).toBe(false)
+      pending.push({ s, body })
+    }
+    const assertBarrier = target.synchronizeTransactions()
+    const responses = Promise.all(
+      pending.map(({ s, body }) => target.api('select', s.headers, body)),
+    )
+    expect(await bounded(responses), 'reconnect batch').toEqual(Array(POOL_SIZE).fill(200))
+    assertBarrier()
+    for (const response of await responses) await expectCallbackCode(response)
     await sessionStillResolves(target)
   }, 60_000)
 })

@@ -166,6 +166,7 @@ const classes = {
     'GET /api/v1/teams/{teamId}/member-readiness',
     'GET /api/v1/teams/{teamId}/readiness',
   ],
+  diagnostic_read: ['GET /api/v1/event-types/{id}/availability-troubleshooting'],
   public_metadata: ['GET /api/v1/instance', 'GET /api/v1/openapi.json'],
 } as const
 type Class = keyof typeof classes
@@ -175,6 +176,7 @@ const allowed: Record<Class, readonly ApiKeyScope[]> = {
   other_read: ['full', 'read'],
   other_write: ['full'],
   audit_read: ['full'],
+  diagnostic_read: ['full'],
   session_only: [],
   public_metadata: scopes,
 }
@@ -611,6 +613,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedStatus = 201
         }
         if (method === 'PATCH') payload = { title: 'Matrix updated event' }
+        if (template.endsWith('/availability-troubleshooting')) path += `?date=${date}&timeZone=UTC`
         if (operation === 'PUT /api/v1/event-types/{id}/notifications')
           payload = {
             notifications: {
@@ -768,14 +771,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 124-operation contract and all 372 scope combinations', () => {
+    it('covers the exact 125-operation contract and all 375 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(124)
-      expect(new Set(ids).size).toBe(124)
+      expect(ids).toHaveLength(125)
+      expect(new Set(ids).size).toBe(125)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(372)
+      expect(cases).toHaveLength(375)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

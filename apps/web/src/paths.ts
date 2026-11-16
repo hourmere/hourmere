@@ -11,6 +11,7 @@ export const PATHS = {
   newEventType: `${APP_BASE}/event-types/new`,
   availability: `${APP_BASE}/availability`,
   newSchedule: `${APP_BASE}/availability/new`,
+  troubleshootAvailability: `${APP_BASE}/availability/troubleshoot`,
   bookings: `${APP_BASE}/bookings`,
   teamBookings: `${APP_BASE}/team/bookings`,
   analytics: `${APP_BASE}/analytics`,

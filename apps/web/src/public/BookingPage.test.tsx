@@ -1841,6 +1841,68 @@ it.each([false, true])(
 )
 
 describe('booking a chosen location', () => {
+  it('keeps the normalized invitee phone while omitting a singleton choice', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...eventRoutes(
+        {
+          ...EVENT,
+          locations: [{ id: 'phone', kind: 'phone', askInvitee: true, isDefault: true }],
+        },
+        DST_SLOTS,
+      ),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your phone number'), '+1 (415) 555-0123')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    const body = api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body
+    expect(body).not.toHaveProperty('locationOptionId')
+    expect(body).toHaveProperty('inviteePhone', '+14155550123')
+  })
+
+  it.each([
+    [
+      'en',
+      'Automatic meeting links are unavailable. Contact the host or choose another meeting type.',
+    ],
+    ['zh-CN', '自动会议链接暂不可用，请联系主持人或选择其他活动类型。'],
+  ])(
+    'omits a singleton choice and preserves the automatic Meet message in %s',
+    async (language, message) => {
+      const user = userEvent.setup()
+      const api = fakeApi({
+        ...eventRoutes(
+          {
+            ...EVENT,
+            location: { kind: 'google_meet' },
+            locations: [{ id: 'custom-meet', kind: 'google_meet', isDefault: true }],
+          },
+          DST_SLOTS,
+        ),
+        'GET /api/v1/public/ada/intro/slots': (call) =>
+          json(409, {
+            error: new URL(call.path, 'http://x').searchParams.has('locationOptionId')
+              ? 'location_unavailable'
+              : 'automatic_meet_unavailable',
+          }),
+      })
+      renderApp('/ada/intro')
+      await screen.findByRole('heading', { level: 1, name: 'Intro call' })
+      await selectPublicLanguage(user, language)
+      await screen.findByText(message)
+      expect(api.to('GET /api/v1/public/ada/intro/slots').length).toBeGreaterThan(0)
+      for (const call of api.to('GET /api/v1/public/ada/intro/slots')) {
+        expect(new URL(call.path, 'http://x').searchParams.has('locationOptionId')).toBe(false)
+      }
+    },
+  )
+
   it.each([
     ['zh-CN', '此地点暂时无法预约。请联系主持人安排预约。'],
     [
@@ -1933,7 +1995,7 @@ describe('booking a chosen location', () => {
 })
 
 it.each([false, true])(
-  'sends the visible default location identity (single: %s) and recovers removed choices',
+  'sends a default location identity only for multiple options (single: %s) and recovers removed choices',
   async (single) => {
     const user = userEvent.setup()
     let loaded = 0
@@ -1964,8 +2026,9 @@ it.each([false, true])(
     expect((screen.getByLabelText('Your name') as HTMLInputElement).value).toBe('Grace Hopper')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
-    expect(requests[0]).toMatchObject({ locationOptionId: 'video' })
-    expect(requests[1]).toMatchObject({ locationOptionId: 'office' })
+    if (single) expect(requests[0]).not.toHaveProperty('locationOptionId')
+    else expect(requests[0]).toMatchObject({ locationOptionId: 'video' })
+    expect(requests[1]).not.toHaveProperty('locationOptionId')
   },
 )
 
@@ -2014,7 +2077,8 @@ it.each([false, true])(
     }
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
-    expect(requests[1]).toMatchObject({ locationOptionId: removed ? 'office' : 'phone' })
+    if (removed) expect(requests[1]).not.toHaveProperty('locationOptionId')
+    else expect(requests[1]).toMatchObject({ locationOptionId: 'phone' })
     if (removed) expect(requests[1]).not.toHaveProperty('inviteePhone')
     else expect(requests[1]).toHaveProperty('inviteePhone', '+14155550123')
   },
@@ -2077,5 +2141,5 @@ it('refreshes removed choices rejected by the slot endpoint', async () => {
       api.to('GET /api/v1/public/ada/intro/slots').at(-1)?.path ?? '',
       'http://x',
     ).searchParams.get('locationOptionId'),
-  ).toBe('office')
+  ).toBeNull()
 })

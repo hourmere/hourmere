@@ -694,7 +694,7 @@ function EventRow({
       <td data-label={t('Target')}>
         <div className="table-value audit-cell">
           <Id>{target.type}</Id>
-          <Id>{target.id}</Id>
+          {target.id && <Id>{target.id}</Id>}
         </div>
       </td>
       <td data-label={t('Details')}>

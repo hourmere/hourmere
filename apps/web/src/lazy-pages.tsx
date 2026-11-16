@@ -54,6 +54,10 @@ export const AvailabilityPage = page(
   () => import('./pages/availability/Availability.tsx'),
   (m) => m.AvailabilityPage,
 )
+export const TroubleshootPage = page(
+  () => import('./pages/availability/Troubleshoot.tsx'),
+  (m) => m.TroubleshootPage,
+)
 export const ScheduleEditorPage = page(
   () => import('./pages/availability/ScheduleEditor.tsx'),
   (m) => m.ScheduleEditorPage,

@@ -95,7 +95,9 @@ assigned host returns `location_unavailable`, without silently switching hosts o
 An event with exactly one location keeps its earlier behavior when the choice is omitted,
 whatever that option's ID: slot lookup and booking return the existing automatic-meeting
 readiness codes (such as `automatic_meet_unavailable`), and the booking stores that location's
-settings as configured. Choosing that option explicitly uses `location_unavailable`.
+settings as configured. Public booking pages omit the choice for a single option in both
+slot queries and booking requests, while still collecting a required invitee phone number.
+Choosing that option explicitly through an API client uses `location_unavailable`.
 Retain the same idempotency key and input for retries; changing the choice or phone with
 the same key is a different request.
 

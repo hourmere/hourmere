@@ -13,6 +13,8 @@ import {
   listAuditEvents,
   setAuditLogSettings,
 } from '@hourmere/scheduling'
+import type { MiddlewareHandler } from 'hono'
+import type { CallerEnv } from '../caller.ts'
 import {
   authenticated,
   errorResponses,
@@ -67,7 +69,10 @@ export const AuditEvent = z
       oauthClientId: z.string().nullable(),
       oauthGrantId: z.string().nullable(),
     }),
-    target: z.object({ type: z.string(), id: z.string() }),
+    target: z.object({
+      type: z.string(),
+      id: z.string().nullable().openapi({ description: 'Target ID; null for session targets' }),
+    }),
     details: z.record(z.string(), z.unknown()).openapi({
       description:
         'The allow-listed details recorded with the action (https://hourmere.com/docs/audit-log); often empty',
@@ -173,6 +178,14 @@ export function auditLogRoutes(deps: AuditLogDeps): RouteModule {
       await organizationContextAccess(principal, expected, true)(trx, principal.organization.id)
     },
   })
+  // Check membership before route validators so malformed input cannot change a member's refusal.
+  const authorize: MiddlewareHandler<CallerEnv> = async (c, next) => {
+    await getAuditLogSettings(
+      await readContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+      deps.auditLogRetentionDays,
+    )
+    await next()
+  }
   return ({ app, caller }) => {
     app.openapi(
       createRoute({
@@ -183,7 +196,7 @@ export function auditLogRoutes(deps: AuditLogDeps): RouteModule {
         summary: 'List audit events of the current organization, newest first',
         description: `${ACCESS} Ordered by time and ID, descending. Requires full API key scope: the journal reveals who did what. Follow nextCursor with the same filters; events written after the first page never repeat or shift earlier entries. Reads are not recorded.`,
         security: authenticated,
-        middleware: caller,
+        middleware: [caller, authorize] as const,
         request: { query: ListQuery, headers },
         responses: {
           200: { description: 'One page of events', content: json(AuditEventPage) },
@@ -214,7 +227,7 @@ export function auditLogRoutes(deps: AuditLogDeps): RouteModule {
         summary: 'Read audit log retention of the current organization',
         description: `${ACCESS} Requires full API key scope.`,
         security: authenticated,
-        middleware: caller,
+        middleware: [caller, authorize] as const,
         request: { headers },
         responses: {
           200: {
@@ -245,7 +258,7 @@ export function auditLogRoutes(deps: AuditLogDeps): RouteModule {
         summary: 'Set audit log retention of the current organization',
         description: `Personal space owner or team owner only, with a session, a full-scope API key or MCP OAuth. Events older than the retention are deleted by a background job; nothing younger than ${AUDIT_RETENTION_MIN_DAYS} days is ever deleted. A change is recorded as audit_log.retention_updated; repeating the current value records nothing.`,
         security: authenticated,
-        middleware: caller,
+        middleware: [caller, authorize] as const,
         request: {
           headers,
           body: { required: true, content: json(AuditLogSettingsInput) },

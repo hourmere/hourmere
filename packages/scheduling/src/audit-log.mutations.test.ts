@@ -21,6 +21,7 @@ async function sourceCopy(path: URL, before?: string, after = ''): Promise<unkno
   const source = stripTypeScriptTypes(
     before === undefined ? original : original.replace(before, after),
   ).replace(/from '([^']+)'/g, (_, specifier: string) => {
+    if (specifier.startsWith('node:')) return `from '${specifier}'`
     const resolved = specifier.startsWith('.')
       ? new URL(specifier, path).href
       : pathToFileURL(createRequire(path).resolve(specifier)).href
@@ -86,11 +87,47 @@ describe.skipIf(!serverUrl)('audit log protections under source-copy mutation', 
       const page = await m.listAuditEvents(ctx(team.as(owner)), {})
       expect(JSON.stringify(page).includes(session)).toBe(false)
     },
+    async sessionTargetHidden(m) {
+      const session = randomUUID()
+      await sql`INSERT INTO audit_events (organization_id, actor_type, actor_id,
+        credential_type, action, target_type, target_id)
+        VALUES (${team.id}, 'user', ${owner.id}, 'none', 'session.revoked', 'session', ${session})`.execute(
+        db,
+      )
+      const page = await m.listAuditEvents(ctx(team.as(owner)), {})
+      expect(page.data[0]?.target).toEqual({ type: 'session', id: null })
+      expect(JSON.stringify(page)).not.toContain(session)
+    },
+    async boundedCursor(m) {
+      const actorId = '审'.repeat(256)
+      await insert(team.id)
+      await insert(team.id)
+      await sql`UPDATE audit_events SET actor_id = ${actorId}`.execute(db)
+      const filters = { actorType: 'user' as const, actorId, limit: 1 }
+      const first = await m.listAuditEvents(ctx(team.as(owner)), filters)
+      expect(first.nextCursor?.length).toBeLessThanOrEqual(1024)
+      const second = await m.listAuditEvents(ctx(team.as(owner)), {
+        ...filters,
+        cursor: first.nextCursor ?? '',
+      })
+      expect(second.data).toHaveLength(1)
+      expect(second.data[0]?.id).not.toBe(first.data[0]?.id)
+    },
     async memberRefused(m) {
       await insert(team.id)
       expect(await code(m.listAuditEvents(ctx(team.as(member)), {}))).toBe(
         'team_management_access_denied',
       )
+    },
+    async memberBeforeValidation(m) {
+      expect(
+        await code(
+          m.setAuditLogSettings(ctx(team.as(member)), null, {
+            retention: 'days',
+            retentionDays: 1,
+          }),
+        ),
+      ).toBe('team_management_access_denied')
     },
     async organizationScoped(m) {
       await insert(other.id)
@@ -182,6 +219,17 @@ describe.skipIf(!serverUrl)('audit log protections under source-copy mutation', 
       // biome-ignore lint/suspicious/noTemplateCurlyInString: source text of the protection
       'const conditions = [sql`organization_id = ${organizationId}`]',
       'const conditions = [sql`true`]',
+    ],
+    [
+      'sessionTargetHidden',
+      "row.target_type === 'session' ? null : row.target_id",
+      'row.target_id',
+    ],
+    ['boundedCursor', "createHash('sha256').update(normalized).digest('base64url')", 'normalized'],
+    [
+      'memberBeforeValidation',
+      '  const organizationId = ctx.principal.organization.id\n  return ctx.db.transaction()',
+      '  valid(AuditLogSettingsUpdate, input)\n  const organizationId = ctx.principal.organization.id\n  return ctx.db.transaction()',
     ],
     ['cursorBound', 'if (cursor.k !== key) throw new Error()', ''],
     ['pagesDisjoint', 'sql`(occurred_at, id) < (', 'sql`(occurred_at, id) <= ('],

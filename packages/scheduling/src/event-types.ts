@@ -1418,6 +1418,12 @@ function validZoomConnection(value: unknown): string | null | undefined {
     throw new DomainError('invalid', 'invalid_zoom_connection', 'Choose your own Zoom connection.')
   return (value as string).toLowerCase()
 }
+// REST and MCP create/update share this validation; the CLI delegates to MCP.
+// Cal.com imports only static locations (or null), never automatic providers. Older
+// writes rejected multi-host automatic Meet before organizers were introduced, and
+// automatic Zoom has always required an individual host. Thus collective Meet with
+// no organizer and round-robin automatic Zoom cannot originate from supported writes;
+// booking readiness need not preserve historical error codes for those invalid rows.
 async function validateConference(
   db: Db,
   ctx: ServiceContext,

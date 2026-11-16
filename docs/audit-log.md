@@ -319,8 +319,9 @@ emit them, SSO sign-ins and bounded SSO security failures are the exception
   verified team owner or admin, by session, a `full` API key or MCP OAuth (which keeps its
   user's role). Members, removed or unverified users, and session callers whose
   `X-Expected-Organization-Id` names another team, an unknown ID or a malformed one all get
-  the same `403 team_management_access_denied` without a message, before any filter or cursor
-  is looked at, so the answer reveals nothing about other organizations.
+  the same `403 team_management_access_denied` without a message, so the answer reveals
+  nothing about other organizations. REST checks membership before validating filters;
+  MCP can reject malformed tool arguments before the service checks membership.
 - **Scope.** API keys need `full` scope (operation class `audit_read`); `read` and `bookings`
   keys get `403 insufficient_scope` and do not see the tools. The journal says who did what
   with which key, grant and role change, which is account-security information rather than
@@ -335,12 +336,12 @@ emit them, SSO sign-ins and bounded SSO security failures are the exception
   An event is visible once its transaction commits; because `occurred_at` is taken at insert,
   a long transaction can commit an event older than rows already paged past. It then appears
   on a later page if older than the cursor, or on a fresh first page.
-- **What is returned.** Stored fields only, unchanged: ID (decimal string), `occurredAt` in
+- **What is returned.** Stored fields only, with session identifiers redacted: ID (decimal string), `occurredAt` in
   UTC with microseconds, action, actor type and ID, target, details (the allow-listed values,
   so redacted SSO security-failure details stay redacted), request ID and the credential type.
   For API-key credentials the key ID and its scope, for OAuth the client and grant IDs.
   **Session IDs are never returned**: they belong to the member's account, and a team admin
-  cannot list another member's sessions. Rows without an organization (unauthenticated OAuth
+  cannot list another member's sessions. Session targets have `target.id: null`. Rows without an organization (unauthenticated OAuth
   client registration) are never returned to anyone. Reads are not recorded.
 
 The web page `/app/audit-log` uses the same endpoint, converts its date filters from the
@@ -368,10 +369,10 @@ the instance default.
 The worker's `audit-log-retention-v1` job runs hourly (`purgeAuditEvents`):
 
 - It finds the organizations that have events past their own retention through the
-  organization/time index (a skip scan), so organizations that keep everything cost nothing,
-  then deletes at most 1,000 rows per statement and 50 statements per run, one batch per
-  organization per pass so that one large backlog does not starve the others. What is left
-  is reached on the next run.
+  organization/time index (a skip scan). Discovery visits all organizations; only eligible
+  organizations consume delete batches. It then deletes at most 1,000 rows per statement and 50 statements per run, one batch per
+  organization per pass. Later organizations may wait across runs while earlier ones remain
+  backlogged; the deletion bound does not bound discovery work.
 - It never waits on locks: an organization whose retention is being changed (its writer holds
   the organization's retention advisory lock) is skipped until the next run; rows locked by
   anything else are skipped (`FOR UPDATE SKIP LOCKED`); the search and every delete give up

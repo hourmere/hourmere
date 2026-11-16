@@ -1,5 +1,6 @@
 // Reading the audit journal (docs/audit-log.md, Reading the journal) and its retention.
 // One service serves REST, MCP and the CLI, so every surface authorizes and answers alike.
+import { createHash } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
@@ -56,7 +57,7 @@ export interface AuditEventView {
     oauthClientId: string | null
     oauthGrantId: string | null
   }
-  target: { type: string; id: string }
+  target: { type: string; id: string | null }
   details: Record<string, unknown>
   requestId: string | null
 }
@@ -125,7 +126,7 @@ interface Cursor {
   i: string
 }
 function filterKey(organizationId: string, filters: AuditEventFilters) {
-  return JSON.stringify([
+  const normalized = JSON.stringify([
     organizationId.toLowerCase(),
     boundary(filters.from),
     boundary(filters.to),
@@ -133,6 +134,7 @@ function filterKey(organizationId: string, filters: AuditEventFilters) {
     filters.actorId ?? null,
     filters.action ?? null,
   ])
+  return createHash('sha256').update(normalized).digest('base64url')
 }
 function encodeCursor(key: string, position: Cursor) {
   return Buffer.from(JSON.stringify({ k: key, t: position.t, i: position.i })).toString('base64url')
@@ -193,7 +195,7 @@ function view(row: Row): AuditEventView {
       oauthClientId: oauth ? row.oauth_client_id : null,
       oauthGrantId: oauth ? row.oauth_grant_id : null,
     },
-    target: { type: row.target_type, id: row.target_id },
+    target: { type: row.target_type, id: row.target_type === 'session' ? null : row.target_id },
     details: row.details,
     requestId: row.request_id,
   }
@@ -338,7 +340,6 @@ export async function setAuditLogSettings(
   instance: AuditRetentionDays,
   input: AuditLogSettingsUpdate,
 ): Promise<AuditLogSettingsView> {
-  const update = valid(AuditLogSettingsUpdate, input)
   const organizationId = ctx.principal.organization.id
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
@@ -349,6 +350,7 @@ export async function setAuditLogSettings(
         'insufficient_role',
         'Only the personal owner or a team owner can change audit log retention',
       )
+    const update = valid(AuditLogSettingsUpdate, input)
     // Waits only for a running purge batch of this organization, which is short and bounded.
     await sql`SELECT pg_advisory_xact_lock(${auditRetentionLock(organizationId)})`.execute(trx)
     const before = await readSettings(trx, organizationId, instance, role)

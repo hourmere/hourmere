@@ -1,5 +1,8 @@
 # Data model
 
+[Recurring bookings design](recurring-bookings.md) proposes bounded series with ordinary
+booking rows per occurrence. It is not implemented and does not change the schema below.
+
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
 profile's default calendar and provider retries, and cascades away on booking/user/calendar

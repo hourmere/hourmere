@@ -30,6 +30,7 @@ const expectedScopes: Record<ApiKeyOperationClass, readonly ApiKeyScope[]> = {
   other_read: ['full', 'read'],
   other_write: ['full'],
   audit_read: ['full'],
+  diagnostic_read: ['full'],
   session_only: [],
   public_metadata: scopes,
 }

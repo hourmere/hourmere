@@ -1,4 +1,18 @@
 // Keep this module free of imports: Vitest loads it before each file's vi.mock calls.
+/**
+ * Names the run's migrated template database (see scripts/test-database-global-setup.ts) and
+ * the server it lives on. Fixtures copy it only on that server.
+ */
+export const MIGRATED_TEMPLATE_ENV = 'HOURMERE_TEST_MIGRATED_TEMPLATE'
+export const MIGRATED_TEMPLATE_SERVER_ENV = 'HOURMERE_TEST_MIGRATED_TEMPLATE_SERVER'
+
+/** The server identity of a PostgreSQL URL: protocol, user, host and port, without database. */
+export function templateServer(url: string): string {
+  const parsed = new URL(url)
+  const protocol = parsed.protocol === 'postgresql:' ? 'postgres:' : parsed.protocol
+  return `${protocol}//${decodeURIComponent(parsed.username)}@${parsed.hostname}:${parsed.port || '5432'}`
+}
+
 const activeDatabases = new Set<() => Promise<void>>()
 const SHUTDOWN_TIMEOUT_MS = 15_000
 let hooksInstalled = false

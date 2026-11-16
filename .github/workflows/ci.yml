@@ -17,8 +17,73 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  # The required `check` is split so the unit and integration suite runs in parallel shards.
+  # Lint, types, generated files, the build and the CLI tarball do not need the suite.
+  check-static:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Generated table types match the migrations
+        run: npm run db:migrate && npm run db:types -- --verify
+      - name: Generated API types match the server's OpenAPI document
+        run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
+      - name: Build with a disposable legal publication fixture
+        run: |
+          legal_source=apps/site/src/data/legal.ts
+          legal_original=$(mktemp)
+          cp "$legal_source" "$legal_original"
+          restore_legal_source() {
+            cp "$legal_original" "$legal_source"
+            rm -f "$legal_original"
+            rm -rf apps/site/dist
+          }
+          trap restore_legal_source EXIT
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const path = 'apps/site/src/data/legal.ts'
+          const source = readFileSync(path, 'utf8')
+          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
+          NODE
+          npm run build
+      - name: Inspect and smoke test the standalone npm CLI tarball
+        run: npm run cli:pack-smoke
+      - name: Validate the draft MCP Registry metadata against the official schema
+        run: npm run mcp:registry:validate
+
+  # Each shard has its own PostgreSQL service. Vitest assigns every test file to exactly one
+  # shard; the shard count in the matrix and in the command must stay equal. Vitest splits by
+  # file path hash, not duration: seven shards keep the slowest one near six minutes of tests.
+  check-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7]
     services:
       postgres:
         image: postgres:18-alpine
@@ -46,39 +111,25 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm run lint
-      - run: npm run typecheck
       - name: Install the interactive deployment-test shell
         run: sudo apt-get -o Acquire::Retries=3 update && sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y zsh
-      - run: npm test -- --maxWorkers=2
+      - run: npm test -- --maxWorkers=2 --shard=${{ matrix.shard }}/7
         env:
           HOURMERE_PROXY_INTEGRATION: "1"
-      - name: Generated table types match the migrations
-        run: npm run db:migrate && npm run db:types -- --verify
-      - name: Generated API types match the server's OpenAPI document
-        run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
-      - name: Build with a disposable legal publication fixture
-        run: |
-          legal_source=apps/site/src/data/legal.ts
-          legal_original=$(mktemp)
-          cp "$legal_source" "$legal_original"
-          restore_legal_source() {
-            cp "$legal_original" "$legal_source"
-            rm -f "$legal_original"
-            rm -rf apps/site/dist
-          }
-          trap restore_legal_source EXIT
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          const path = 'apps/site/src/data/legal.ts'
-          const source = readFileSync(path, 'utf8')
-          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
-          NODE
-          npm run build
-      - name: Inspect and smoke test the standalone npm CLI tarball
-        run: npm run cli:pack-smoke
-      - name: Validate the draft MCP Registry metadata against the official schema
-        run: npm run mcp:registry:validate
+
+  # Keep the branch-protection and merge-queue check name stable. A skipped or cancelled
+  # part must not turn this required check into a successful skip.
+  check:
+    needs: [check-static, check-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      STATIC_RESULT: ${{ needs.check-static.result }}
+      TESTS_RESULT: ${{ needs.check-tests.result }}
+    steps:
+      - name: Require the static checks and every test shard to succeed
+        run: test "$STATIC_RESULT" = success && test "$TESTS_RESULT" = success
 
   n8n-compatibility:
     runs-on: ubuntu-latest

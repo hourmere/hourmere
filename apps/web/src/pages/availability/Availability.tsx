@@ -29,6 +29,9 @@ export function AvailabilityPage() {
           'Schedules are the weekly hours people can book you in. Event types use your default schedule unless you choose another one for them.',
         )}
       >
+        <Link to={PATHS.troubleshootAvailability} className="button">
+          {t('Troubleshoot availability')}
+        </Link>
         <Link to={PATHS.newSchedule} className="button button-primary">
           {t('New schedule')}
         </Link>

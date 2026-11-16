@@ -96,6 +96,7 @@ import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
 import { auditLogTools } from './mcp/audit-log.ts'
+import { availabilityTroubleshootingTools } from './mcp/availability-troubleshooting.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { brandingTools } from './mcp/branding.ts'
 import { catalogTools } from './mcp/catalog.ts'
@@ -114,6 +115,7 @@ import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { auditLogRoutes } from './routes/audit-log.ts'
+import { availabilityTroubleshootingRoutes } from './routes/availability-troubleshooting.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { brandingRoutes } from './routes/branding.ts'
 import { calendarRoutes } from './routes/calendars.ts'
@@ -298,6 +300,7 @@ export function productRoutes({
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
     bookingRoutes({
       db,
       notify,
@@ -385,6 +388,7 @@ export function productTools({
     ...(slotSnippetsEnabled
       ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
       : []),
+    ...availabilityTroubleshootingTools({ db, automaticMeet, automaticZoom }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },

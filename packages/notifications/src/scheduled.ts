@@ -5,7 +5,6 @@ import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
 import {
   bookingEmail,
-  bookingHostName,
   bookingLocationForRecipient,
   followUpEmail,
   type MailMessage,
@@ -321,7 +320,10 @@ export async function deliverScheduledBookingEmail(
     const meeting = {
       eventName: data.booking.eventName,
       hostName: organizer.name,
-      hostNames: data.hosts.length > 1 ? data.hosts.map((host) => host.displayName) : undefined,
+      hostNames:
+        data.hosts.length > 1 || data.collective
+          ? data.hosts.map((host) => host.displayName)
+          : undefined,
       inviteeName: booker?.name ?? '',
       inviteeEmail: booker?.email ?? '',
       inviteeTimeZone: booker?.timeZone ?? 'UTC',
@@ -376,15 +378,13 @@ export async function deliverScheduledBookingEmail(
           },
           recipient.links,
           (token): MailMessage => {
+            // A collective booking's invitee and guests get no host address (see index.ts).
             const replyTo = recipient.host
               ? booker
                 ? { name: booker.name, email: booker.email }
                 : undefined
-              : data.hosts.length > 1
-                ? data.hosts.map(({ displayName, email }) => ({
-                    name: displayName || bookingHostName(recipient.locale),
-                    email,
-                  }))
+              : data.collective
+                ? undefined
                 : { name: organizer.name, email: organizer.email }
             const recipientMeeting = {
               ...meeting,
@@ -422,6 +422,7 @@ export async function deliverScheduledBookingEmail(
                           manageLinks: token
                             ? inviteeManageLinks(deps.publicUrl, token)
                             : undefined,
+                          repliesNotDelivered: data.collective,
                         }),
                     email: recipient.email,
                     timeZone: recipient.zone,
@@ -447,7 +448,7 @@ export async function deliverScheduledBookingEmail(
                         .filter((host) => host.id !== recipient.host?.id)
                         .map((host) => host.displayName),
                     }
-                  : { role: 'attendee' as const }),
+                  : { role: 'attendee' as const, repliesNotDelivered: data.collective }),
                 email: recipient.email,
                 timeZone: recipient.zone,
                 locale: recipient.locale,

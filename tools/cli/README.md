@@ -160,6 +160,18 @@ links, `text` and `html` for your draft. Generation sends no mail and reserves n
 when the operator enables `SLOT_SNIPPETS_ENABLED`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for
 response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
 
+## Explain why times cannot be booked
+
+```sh
+echo '{"eventTypeId":"…","date":"2026-11-16","timeZone":"Europe/Berlin"}' |
+  hourmere troubleshoot-availability --input -
+```
+
+The output lists every possible start time of that local day with `status` and reason codes
+(for example `outside_working_hours`, `calendar_busy`, `daily_limit`), identical to REST and MCP.
+It needs a `full` key and personal-owner or team-owner/admin permission; otherwise it fails with
+`event_type_not_found`. See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting) for the reason codes.
+
 ## Configure meeting lengths
 
 Use `create-event` or `update-event` with a `full` API key to configure event types.

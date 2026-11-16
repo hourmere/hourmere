@@ -61,6 +61,19 @@ describe.skipIf(!serverUrl)('audit log over REST, MCP and the CLI (real Postgres
     tokens.set(token, { ...base, kind: 'api_key', apiKeyScope: scope, apiKeyId: randomUUID() })
     return token
   }
+  function oauth(user: TestUser, acting?: TestTeam) {
+    const token = randomUUID()
+    const base = acting ? acting.as(user) : user.principal
+    tokens.set(token, {
+      user: base.user,
+      organization: base.organization,
+      kind: 'oauth',
+      oauthConsentId: randomUUID(),
+      clientId: randomUUID(),
+      scopes: ['mcp:tools'],
+    })
+    return token
+  }
   function session(user: TestUser, acting?: TestTeam) {
     const token = randomUUID()
     const base = acting ? acting.as(user) : user.principal
@@ -180,7 +193,20 @@ describe.skipIf(!serverUrl)('audit log over REST, MCP and the CLI (real Postgres
         auditLogRoutes({ db, auditLogRetentionDays: 400 }),
         instanceRoutes({ publicUrl: URL, socialProviders: {} }),
       ],
-      mcp: mcpEndpoint({ tools: auditLogTools({ db, auditLogRetentionDays: 400 }) }),
+      mcp: mcpEndpoint({
+        tools: auditLogTools({ db, auditLogRetentionDays: 400 }),
+        oauth: {
+          handler: async () => new Response(null, { status: 404 }),
+          resolve: async (request) => {
+            const principal = tokens.get(
+              request.headers.get('authorization')?.replace(/^Bearer /, '') ?? '',
+            )
+            return principal?.kind === 'oauth'
+              ? { ok: true, principal }
+              : { ok: false, error: 'invalid_token' }
+          },
+        },
+      }),
     })
   })
   afterAll(async () => {
@@ -350,6 +376,19 @@ describe.skipIf(!serverUrl)('audit log over REST, MCP and the CLI (real Postgres
     const memberToken = bearer(member, 'full', team)
     const refusal = { error: 'team_management_access_denied' }
     for (const path of [
+      '/api/v1/audit-events?actorType=invalid',
+      '/api/v1/audit-events?from=yesterday',
+      '/api/v1/audit-events?cursor=',
+    ])
+      expect(await rest(memberToken, path)).toEqual({ status: 403, body: refusal })
+    expect(
+      await rest(memberToken, '/api/v1/audit-log/settings', {
+        method: 'PUT',
+        body: { retention: 'invalid' },
+      }),
+    ).toEqual({ status: 403, body: refusal })
+
+    for (const path of [
       '/api/v1/audit-events',
       `/api/v1/audit-events?${query({ actorType: 'user', actorId: owner.id })}`,
       '/api/v1/audit-events?cursor=garbage',
@@ -381,6 +420,41 @@ describe.skipIf(!serverUrl)('audit log over REST, MCP and the CLI (real Postgres
     expect(otherPage.body.data.map((event: { actor: { id: string } }) => event.actor.id)).toEqual([
       outsider.id,
     ])
+  })
+
+  it('keeps OAuth native access while checking current membership and owner-only retention', async () => {
+    for (const user of [owner, admin]) {
+      const token = oauth(user, team)
+      expect((await mcp(token, 'tools/list')).tools).toHaveLength(3)
+      const page = await tool(token, 'list_audit_events', { action: 'membership.removed' })
+      expect(page.isError).toBeFalsy()
+      expect(page.structuredContent.data).toHaveLength(3)
+      expect(
+        (await tool(token, 'get_audit_log_settings')).structuredContent.canChangeRetention,
+      ).toBe(user === owner)
+      const update = await tool(token, 'set_audit_log_settings', { retention: 'instance' })
+      if (user === owner) expect(update.isError).toBeFalsy()
+      else expect(toolError(update).error).toBe('insufficient_role')
+    }
+    for (const user of [member, outsider]) {
+      const token = oauth(user, team)
+      for (const name of ['list_audit_events', 'get_audit_log_settings', 'set_audit_log_settings'])
+        expect(
+          toolError(
+            await tool(
+              token,
+              name,
+              name === 'set_audit_log_settings' ? { retention: 'forever' } : {},
+            ),
+          ),
+        ).toEqual({ error: 'team_management_access_denied' })
+    }
+    const personal = oauth(owner)
+    expect((await tool(personal, 'list_audit_events')).structuredContent.data).toEqual([])
+    expect(
+      (await tool(personal, 'set_audit_log_settings', { retention: 'forever' })).structuredContent
+        .effectiveRetentionDays,
+    ).toBeNull()
   })
 
   it('answers invalid filters with the same codes on every surface', async () => {

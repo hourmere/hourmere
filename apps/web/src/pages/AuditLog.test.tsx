@@ -87,6 +87,21 @@ async function openPage() {
 }
 
 describe('audit log page', () => {
+  it('renders a redacted session target without an identifier', async () => {
+    setup({
+      events: () =>
+        json(200, {
+          data: [event({ action: 'session.revoked', target: { type: 'session', id: null } })],
+          nextCursor: null,
+        }),
+    })
+    await openPage()
+    const table = await screen.findByRole('table', { name: 'Audit events, newest first' })
+    const target = table.querySelector('td[data-label="Target"]')
+    expect(target?.textContent).toBe('session')
+    expect(target?.querySelectorAll('code')).toHaveLength(1)
+  })
+
   it('lists events in the profile time zone and names that zone', async () => {
     const api = setup({
       events: () =>
