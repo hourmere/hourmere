@@ -1,10 +1,12 @@
-import { Suspense, useEffect } from 'react'
+import { Suspense, useEffect, useId, useRef, useState } from 'react'
 import {
   createRoutesFromElements,
+  type Location,
   matchRoutes,
   Navigate,
   Route,
   useLocation,
+  useNavigate,
   useRoutes,
 } from 'react-router'
 import { AdminLoading } from './components/AdminLoading.tsx'
@@ -43,8 +45,9 @@ import {
   TeamBookingsPage,
   TroubleshootPage,
 } from './lazy-pages.tsx'
+import { BookingPanelContext } from './pages/bookings/BookingPanel.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
-import { PATHS } from './paths.ts'
+import { bookingPath, PATHS } from './paths.ts'
 import { useAdminPwa } from './pwa.ts'
 
 export const appRoutes = createRoutesFromElements(
@@ -145,7 +148,43 @@ export function App() {
 }
 
 function AppRoutes() {
-  const routes = useRoutes(appRoutes)
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentLocation = useRef(location)
+  currentLocation.current = location
+  const token = useId()
+  const [background, setBackground] = useState<Location | null>(null)
+  const opener = useRef<HTMLElement | null>(null)
+  const active =
+    !!background &&
+    location.state?.bookingPanel === token &&
+    /^\/app\/bookings\/[^/]+$/.test(location.pathname)
+  const wasActive = useRef(false)
+  useEffect(() => {
+    if (wasActive.current && !active) opener.current?.focus({ preventScroll: true })
+    wasActive.current = active
+  }, [active])
+  const routes = useRoutes(appRoutes, active ? background : location)
+  const panel = {
+    location,
+    active,
+    open(id: string, trigger: HTMLElement) {
+      opener.current = trigger
+      if (!active) setBackground(location)
+      navigate(bookingPath(id), { replace: active, state: { bookingPanel: token } })
+    },
+    step(id: string) {
+      if (
+        currentLocation.current.key !== location.key ||
+        currentLocation.current.state?.bookingPanel !== token
+      )
+        return
+      navigate(bookingPath(id), { replace: true, state: { bookingPanel: token } })
+    },
+    close() {
+      navigate(-1)
+    },
+  }
   const { t } = useI18n()
   const { pathname } = useLocation()
   useEffect(() => {
@@ -165,7 +204,7 @@ function AppRoutes() {
           )
         }
       >
-        {routes}
+        <BookingPanelContext value={panel}>{routes}</BookingPanelContext>
       </Suspense>
     </RouteErrorBoundary>
   )

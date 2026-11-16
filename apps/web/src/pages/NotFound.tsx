@@ -53,10 +53,12 @@ export function MissingRecord({
   title,
   message,
   back,
+  onBack,
 }: {
   title: string
   message: UiText
   back: { to: string; label: string }
+  onBack?: () => void
 }) {
   const { ui } = useI18n()
 
@@ -65,7 +67,13 @@ export function MissingRecord({
     <>
       <PageHeader title={ui(title)} lede={ui(message)} />
       <p>
-        <Link to={back.to}>{ui(back.label)}</Link>
+        {onBack ? (
+          <button type="button" className="button" onClick={onBack}>
+            {ui(back.label)}
+          </button>
+        ) : (
+          <Link to={back.to}>{ui(back.label)}</Link>
+        )}
       </p>
     </>
   )

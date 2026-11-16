@@ -1,0 +1,44 @@
+.booking-detail-panel {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 40;
+  width: min(44rem, 85vw);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.5rem;
+  background: var(--surface, white);
+  border-left: 1px solid var(--border);
+  box-shadow: -0.5rem 0 2rem #0002;
+  animation: booking-panel-enter 180ms ease-out;
+}
+.booking-detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.booking-detail-toolbar [aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+.booking-detail-full-page {
+  inset: 0;
+  width: 100%;
+  padding: 1rem;
+  border: 0;
+  box-shadow: none;
+  animation: none;
+}
+@keyframes booking-panel-enter {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .booking-detail-panel {
+    animation: none;
+  }
+}

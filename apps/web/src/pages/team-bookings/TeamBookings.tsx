@@ -28,8 +28,10 @@ import { useTeamManagementAccess } from '../../team-management.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { BookingExport } from '../bookings/BookingExport.tsx'
+import { BookingPanel, useBookingPanel, useBookingPanelTitle } from '../bookings/BookingPanel.tsx'
 import { hostZone } from '../bookings/booking-format.ts'
 import { ManualRebooking } from './ManualRebooking.tsx'
+import { TeamBookingDetailPage } from './TeamBookingDetail.tsx'
 
 type Booking = Schemas['TeamAdminBooking']
 type BookingPage = Schemas['TeamAdminBookingPage']
@@ -439,6 +441,7 @@ function BookingList({
   onConflict: (error: unknown) => void
 }) {
   const { t, ui, formatLocale } = useI18n()
+  const panel = useBookingPanel()
   const loadedPages = useRef(1)
   const loadedSnapshot = useRef<BookingPage | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -556,6 +559,17 @@ function BookingList({
 
   const source = first.data
   const shown = more?.source === source ? more : source
+  const selectedId = panel?.active ? panel.location.pathname.split('/').at(-1) : undefined
+  const selectedIndex = shown.data.findIndex((booking) => booking.id === selectedId)
+  const panelBooking = shown.data[selectedIndex]
+  function updateRow(updated: Booking) {
+    const patched = {
+      ...shown,
+      data: shown.data.map((booking) => (booking.id === updated.id ? updated : booking)),
+    }
+    loadedSnapshot.current = patched
+    setMore({ ...patched, source })
+  }
   function refreshBookings() {
     moreController.current?.abort()
     setLoadingMore(false)
@@ -563,6 +577,27 @@ function BookingList({
     setRefreshError(null)
     setRefreshing(true)
     reload()
+  }
+  function cancelled(bookingId: string, background = false) {
+    const latest = loadedSnapshot.current ?? shown
+    const updated: BookingPage = {
+      data:
+        query.status === 'confirmed'
+          ? latest.data.filter((booking) => booking.id !== bookingId)
+          : latest.data.map((booking) =>
+              booking.id === bookingId ? { ...booking, status: 'cancelled' } : booking,
+            ),
+      nextCursor: latest.nextCursor,
+    }
+    loadedSnapshot.current = updated
+    setMore({ ...updated, source: latestSource.current ?? source })
+    if (!background) {
+      if (panel?.active) panel.close()
+      else setSelected(null)
+    }
+    setStatus('The booking is cancelled.')
+    refreshBookings()
+    if (!background) setTimeout(() => heading.current?.focus())
   }
   /** Keeps the list, a later refresh's fallback and the open details showing the same mark. */
   function applyNoShow(bookingId: string, change: NoShowChange, announce: boolean) {
@@ -580,7 +615,7 @@ function BookingList({
     )
     if (announce) setStatus('No-show mark updated.')
   }
-  async function loadMore() {
+  async function loadMore(forPanel = false) {
     if (!shown.nextCursor || loadingMore || refreshing || conflict) return
     const controller = new AbortController()
     moreController.current = controller
@@ -599,13 +634,15 @@ function BookingList({
       loadedSnapshot.current = { data, nextCursor: page.nextCursor }
       setMore({ data, nextCursor: page.nextCursor, source })
       setStatus(msg('Showing {0} bookings.', { '0': data.length }))
-      if (page.data[0]) setFocusId(page.data[0].id)
+      if (page.data[0] && !forPanel) setFocusId(page.data[0].id)
+      return page.data[0]?.id
     } catch (error) {
       if (controller.signal.aborted) return
       if (isAccessDenied(error)) onRevoked()
       else setMoreError(msg('Could not load more bookings. {0}', { '0': errorMessage(error) }))
+    } finally {
+      if (!controller.signal.aborted) setLoadingMore(false)
     }
-    if (!controller.signal.aborted) setLoadingMore(false)
   }
 
   return (
@@ -693,14 +730,19 @@ function BookingList({
                         type="button"
                         className="team-booking-open"
                         data-booking={booking.id}
-                        aria-expanded={selected?.id === booking.id}
+                        aria-expanded={(selectedId ?? selected?.id) === booking.id}
                         aria-controls={
-                          selected?.id === booking.id ? 'team-booking-details' : undefined
+                          (selectedId ?? selected?.id) === booking.id
+                            ? 'team-booking-details'
+                            : undefined
                         }
                         onClick={(event) => {
                           if (!confirmLeave()) return
-                          opener.current = event.currentTarget
-                          setSelected(booking)
+                          if (panel) panel.open(booking.id, event.currentTarget)
+                          else {
+                            opener.current = event.currentTarget
+                            setSelected(booking)
+                          }
                         }}
                       >
                         {booking.eventType?.title ?? t('Deleted event type')}
@@ -770,12 +812,57 @@ function BookingList({
           <button
             type="button"
             className="button"
-            onClick={loadMore}
+            onClick={() => void loadMore()}
             disabled={loadingMore || refreshing || !!conflict}
           >
             {loadingMore ? t('Loading…') : t('Show more bookings')}
           </button>
         </div>
+      )}
+      {selectedId && panel && (
+        <BookingPanel
+          name={
+            panelBooking
+              ? `${panelBooking.eventType?.title ?? t('Deleted event type')} — ${format.dateTime(panelBooking.start)}`
+              : t('Booking')
+          }
+          previous={
+            selectedIndex > 0
+              ? () => {
+                  const previous = shown.data[selectedIndex - 1]
+                  if (previous) panel.step(previous.id)
+                }
+              : undefined
+          }
+          next={
+            selectedIndex >= 0 && (selectedIndex < shown.data.length - 1 || shown.nextCursor)
+              ? async () => {
+                  const nextId = shown.data[selectedIndex + 1]?.id ?? (await loadMore(true))
+                  if (nextId) panel.step(nextId)
+                }
+              : undefined
+          }
+        >
+          {moreError && (
+            <p className="alert alert-error" role="alert">
+              {ui(moreError)}
+            </p>
+          )}
+          <TeamBookingDetailPage
+            key={selectedId}
+            id={selectedId}
+            embedded
+            onChanged={updateRow}
+            rowBooking={panelBooking}
+            onClose={panel.close}
+            listConflict={conflict}
+            onConflict={handleConflict}
+            onRevoked={onRevoked}
+            onRefresh={refreshBookings}
+            onCancelled={(background) => cancelled(selectedId, background)}
+            onNoShowChanged={(change) => applyNoShow(selectedId, change, false)}
+          />
+        </BookingPanel>
       )}
       {selected && (
         <BookingDetail
@@ -789,23 +876,7 @@ function BookingList({
           onNoShowChanged={(change) => applyNoShow(selected.id, change, false)}
           onRefresh={refreshBookings}
           onClose={closeDetails}
-          onCancelled={() => {
-            const updated: BookingPage = {
-              data:
-                query.status === 'confirmed'
-                  ? shown.data.filter((booking) => booking.id !== selected.id)
-                  : shown.data.map((booking) =>
-                      booking.id === selected.id ? { ...booking, status: 'cancelled' } : booking,
-                    ),
-              nextCursor: shown.nextCursor,
-            }
-            loadedSnapshot.current = updated
-            setMore({ ...updated, source })
-            setSelected(null)
-            setStatus('The booking is cancelled.')
-            refreshBookings()
-            setTimeout(() => heading.current?.focus())
-          }}
+          onCancelled={(background) => cancelled(selected.id, background)}
         />
       )}
     </section>
@@ -842,7 +913,9 @@ export function BookingDetail({
   onRefresh,
   onClose,
   onCancelled,
+  embedded = false,
 }: {
+  embedded?: boolean
   booking: Booking
   timeZone: string
   expectedOrganizationId: string
@@ -852,19 +925,24 @@ export function BookingDetail({
   onNoShowChanged?: (change: NoShowChange) => void
   onRefresh: () => void
   onClose: () => void
-  onCancelled: () => void
+  onCancelled: (background?: boolean) => void
 }) {
   const { t, formatLocale } = useI18n()
   const heading = useRef<HTMLHeadingElement>(null)
   const format = zoned(timeZone, formatLocale)
-  useEffect(() => heading.current?.focus(), [])
+  useEffect(() => {
+    if (!embedded) heading.current?.focus()
+  }, [embedded])
+  useBookingPanelTitle(
+    `${booking.eventType?.title ?? t('Deleted event type')} — ${format.dateTime(booking.start)}`,
+  )
   return (
     <section
       id="team-booking-details"
       className="panel team-booking-detail user-content"
       aria-labelledby="team-booking-detail-heading"
       onKeyDown={(event) => {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' && !embedded) {
           event.preventDefault()
           onClose()
         }
@@ -874,9 +952,11 @@ export function BookingDetail({
         <h2 id="team-booking-detail-heading" tabIndex={-1} ref={heading}>
           {t('Team booking details')}
         </h2>
-        <button type="button" className="button button-small" onClick={onClose}>
-          {t('Close details')}
-        </button>
+        {!embedded && (
+          <button type="button" className="button button-small" onClick={onClose}>
+            {t('Close details')}
+          </button>
+        )}
       </div>
       <dl className="details">
         <dt>{t('Event')}</dt>
@@ -990,7 +1070,7 @@ function CancelBooking({
   onConflict: (error: unknown) => void
   onRevoked: () => void
   onRefresh: () => void
-  onCancelled: () => void
+  onCancelled: (background?: boolean) => void
 }) {
   const { t, ui } = useI18n()
   const { confirmReload } = useSession()
@@ -1004,14 +1084,21 @@ function CancelBooking({
   const submitting = useRef(false)
   const [alreadyCancelled, setAlreadyCancelled] = useState(false)
   const [started, setStarted] = useState(false)
+  const [completed, setCompleted] = useState(false)
+  const reportedCompletion = useRef(false)
   const button = useRef<HTMLButtonElement>(null)
   const reasonInput = useRef<HTMLTextAreaElement>(null)
   const controller = useRef<AbortController | null>(null)
   const formId = useId()
   const reasonId = useId()
   const cancelHeadingId = useId()
-  useUnsavedChanges(open && reason.trim() !== '')
-  useEffect(() => () => controller.current?.abort(), [])
+  useUnsavedChanges(open && reason.trim() !== '' && !completed)
+  useEffect(() => {
+    if (!completed || reportedCompletion.current) return
+    reportedCompletion.current = true
+    onCancelled()
+  }, [completed, onCancelled])
+  // Let a submitted cancellation finish after navigation so its result can update the list.
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1052,9 +1139,12 @@ function CancelBooking({
           signal: controller.current.signal,
         }),
       )
-      if (!mounted.current) return
+      if (!mounted.current) {
+        onCancelled(true)
+        return
+      }
       setReason('')
-      onCancelled()
+      setCompleted(true)
       return
     } catch (failure) {
       if (!mounted.current) return

@@ -133,3 +133,8 @@
   overflow-wrap: anywhere;
   vertical-align: top;
 }
+
+.team-booking-open:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}

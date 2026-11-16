@@ -12,6 +12,7 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 
 const PAGE = '/app/team/bookings'
 beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z')))
@@ -56,21 +57,23 @@ const member = (role = 'owner') => ({
   createdAt: '2026-10-01T09:00:00.000Z',
 })
 function server(overrides: Routes = {}) {
-  return fakeApi({
-    ...signedInAs(TEAM),
-    ...profile(),
-    'GET /api/v1/me': () => json(200, { ...TEAM }),
-    'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM.organization]),
-    [MEMBER]: () => json(200, member()),
-    [LIST]: () => json(200, { data: [BOOKING], nextCursor: null }),
-    ...overrides,
-  })
+  return fakeApi(
+    teamBookingPanelApi({
+      ...signedInAs(TEAM),
+      ...profile(),
+      'GET /api/v1/me': () => json(200, { ...TEAM }),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM.organization]),
+      [MEMBER]: () => json(200, member()),
+      [LIST]: () => json(200, { data: [BOOKING], nextCursor: null }),
+      ...overrides,
+    }),
+  )
 }
 async function openDraft() {
   renderApp(PAGE)
   const user = userEvent.setup()
   await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-  await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+  await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
   await user.type(screen.getByLabelText(/Reason/), 'Draft reason')
   return {
     user,

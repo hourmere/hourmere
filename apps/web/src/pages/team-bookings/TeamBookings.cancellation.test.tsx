@@ -18,6 +18,7 @@ import {
   signedInAs,
 } from '../../test/fake-api.tsx'
 import { resolveLazy } from '../../test/resolve-lazy.ts'
+import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 import bookingStyles from './team-bookings.css?raw'
 
 const PAGE = '/app/team/bookings'
@@ -68,17 +69,19 @@ function booking(id = FIRST_ID, title = 'Team discovery call'): Schemas['TeamAdm
 }
 
 function server(overrides: Routes = {}) {
-  return fakeApi({
-    ...signedInAs(TEAM),
-    ...profile(),
-    'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM.organization]),
-    [LIST]: () => json(200, { data: [booking()], nextCursor: null }),
-    ...overrides,
-  })
+  return fakeApi(
+    teamBookingPanelApi({
+      ...signedInAs(TEAM),
+      ...profile(),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM.organization]),
+      [LIST]: () => json(200, { data: [booking()], nextCursor: null }),
+      ...overrides,
+    }),
+  )
 }
 
 async function cancelFromDetail(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+  await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
   await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
 }
 
@@ -172,7 +175,7 @@ describe('team booking cancellation refusals', () => {
       const user = userEvent.setup()
       renderApp(PAGE)
       await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-      await user.click(screen.getByRole('button', { name: copy.openCancel }))
+      await user.click(await screen.findByRole('button', { name: copy.openCancel }))
       await user.type(screen.getByLabelText(copy.reason), 'Keep this explanation')
       const roleChecksBeforeCancellation = api.to(
         'GET /api/auth/organization/get-active-member',
@@ -250,7 +253,7 @@ describe('team booking cancellation refusals', () => {
       const user = userEvent.setup()
       renderApp(PAGE)
       await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-      await user.click(screen.getByRole('button', { name: copy.openCancel }))
+      await user.click(await screen.findByRole('button', { name: copy.openCancel }))
       await user.click(screen.getByRole('button', { name: copy.submitCancel }))
       await screen.findByText(copy.started)
       expect(screen.getByRole('link', { name: copy.nav })).toBeDefined()
@@ -281,7 +284,7 @@ describe('team booking cancellation refusals', () => {
     const user = userEvent.setup()
     renderApp(PAGE)
     await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-    await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
     await user.type(screen.getByLabelText(/Reason/), 'Keep this explanation')
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
     expect((await screen.findByRole('alert')).textContent).toContain(
@@ -368,7 +371,7 @@ describe('team booking cancellation outcome', () => {
       const user = userEvent.setup()
       renderApp(PAGE)
       await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-      await user.click(screen.getByRole('button', { name: copy.openCancel }))
+      await user.click(await screen.findByRole('button', { name: copy.openCancel }))
       const summary = within(screen.getByRole('region', { name: copy.summary }))
       const when = summary.getByText(copy.when, { selector: 'dt' }).nextElementSibling
       expect(when?.querySelector('time')?.dateTime).toBe(current.start)
@@ -420,7 +423,7 @@ describe('team booking cancellation outcome', () => {
     const user = userEvent.setup()
     renderApp(PAGE)
     await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-    await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
     const summary = within(screen.getByRole('region', { name: 'Cancel this booking' }))
     const hosts = summary.getByText('Hosts', { selector: 'dt' }).nextElementSibling
     expect(hosts?.textContent).toMatch(/^None/)
@@ -475,7 +478,7 @@ describe('team booking cancellation outcome', () => {
       const opener = await screen.findByRole('button', { name: 'Team discovery call' })
       opener.focus()
       await user.keyboard('{Enter}')
-      const openCancel = screen.getByRole('button', { name: 'Cancel booking…' })
+      const openCancel = await screen.findByRole('button', { name: 'Cancel booking…' })
       openCancel.focus()
       await user.keyboard('{Enter}')
       const submit = screen.getByRole('button', { name: 'Cancel booking' })
@@ -496,7 +499,7 @@ describe('team booking cancellation outcome', () => {
         expect(getComputedStyle(active).outline).not.toContain('none')
       })
       await user.click(refreshed)
-      const panel = within(screen.getByRole('region', { name: 'Team booking details' }))
+      const panel = within(await screen.findByRole('region', { name: 'Team booking details' }))
       expect(panel.getByText('Cancelled', { selector: 'dd' })).toBeDefined()
       expect(
         panel.getByText('Cancelled', { selector: 'dt' }).nextElementSibling?.querySelector('time')
@@ -522,7 +525,7 @@ describe('team booking cancellation outcome', () => {
     const user = userEvent.setup()
     renderApp(PAGE)
     await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-    await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
     await user.type(screen.getByLabelText(/Reason/), 'Keep this explanation')
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
     expect((await screen.findByRole('alert')).textContent).toContain(
@@ -531,7 +534,7 @@ describe('team booking cancellation outcome', () => {
     const row = screen.getByRole('button', { name: 'Team discovery call' }).closest('tr')
     expect(row?.textContent).toContain('Confirmed')
     expect(row?.textContent).not.toContain('Cancelled')
-    const panel = within(screen.getByRole('region', { name: 'Team booking details' }))
+    const panel = within(await screen.findByRole('region', { name: 'Team booking details' }))
     expect(panel.getByText('Confirmed', { selector: 'dd' })).toBeDefined()
     expect(panel.queryByText('Cancelled', { selector: 'dt' })).toBeNull()
     expect(screen.getByDisplayValue('Keep this explanation')).toBeDefined()
@@ -551,7 +554,7 @@ describe('team booking cancellation outcome', () => {
     const user = userEvent.setup()
     renderApp(PAGE)
     await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-    await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
     const form = screen.getByRole('button', { name: 'Cancel booking' }).closest('form')
     expect(form).not.toBeNull()
     act(() => {
@@ -589,7 +592,7 @@ describe('team booking cancellation outcome', () => {
       const user = userEvent.setup()
       renderApp(PAGE)
       await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-      await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+      await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
       await user.type(screen.getByLabelText(/Reason/), 'Stale cancellation reason')
       await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
       expect((await screen.findByRole('alert')).textContent).toContain(
@@ -698,7 +701,9 @@ describe('cancelling a team booking loaded on a later page', () => {
           expect(screen.queryByRole('alert')).toBeNull()
         })
       }
-      expect(screen.queryByRole('region', { name: 'Team booking details' })).toBeNull()
+      await waitFor(() =>
+        expect(screen.queryByRole('region', { name: 'Team booking details' })).toBeNull(),
+      )
       expect(screen.queryByRole('button', { name: 'Show more bookings' })).toBeNull()
       expect(api.to(cancelRoute(LATER_ID))).toHaveLength(1)
     },

@@ -14,6 +14,7 @@ import {
   signedInAs,
 } from '../../test/fake-api.tsx'
 import { resolveLazy } from '../../test/resolve-lazy.ts'
+import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 
 beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, TeamBookingsPage))
 
@@ -65,21 +66,23 @@ const BOOKING: Schemas['TeamAdminBooking'] = {
   ],
 }
 function server(routes: Routes) {
-  return fakeApi({
-    ...signedInAs(TEAM),
-    ...profile(),
-    'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM.organization]),
-    'GET /api/auth/organization/get-active-member': () =>
-      json(200, {
-        id: 'membership-1',
-        organizationId: TEAM.organization.id,
-        userId: TEAM.user.id,
-        role: 'admin',
-        createdAt: '2026-10-01T09:00:00.000Z',
-      }),
-    [LIST]: () => json(200, { data: [BOOKING], nextCursor: null }),
-    ...routes,
-  })
+  return fakeApi(
+    teamBookingPanelApi({
+      ...signedInAs(TEAM),
+      ...profile(),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization, TEAM.organization]),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, {
+          id: 'membership-1',
+          organizationId: TEAM.organization.id,
+          userId: TEAM.user.id,
+          role: 'admin',
+          createdAt: '2026-10-01T09:00:00.000Z',
+        }),
+      [LIST]: () => json(200, { data: [BOOKING], nextCursor: null }),
+      ...routes,
+    }),
+  )
 }
 const echo: Routes[string] = ({ body }) =>
   json(200, {

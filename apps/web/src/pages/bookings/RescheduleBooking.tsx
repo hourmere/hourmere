@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
@@ -13,19 +13,23 @@ import { bookingPath, PATHS } from '../../paths.ts'
 import type { Slot, SlotLoader } from '../../public/api.ts'
 import { SlotPicker, type SlotPickerPosition } from '../../public/SlotPicker.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { BookingListReturnLink, useBookingPanel } from './BookingPanel.tsx'
 
 /** Hosts use their session, never the invitee's management capability. */
 export function RescheduleBooking({
   booking,
   timeZone: initialTimeZone,
   expectedOrganizationId,
+  onRescheduled,
 }: {
   booking: Schemas['Booking']
   timeZone: string
   expectedOrganizationId: string
+  onRescheduled?: (booking: Schemas['Booking']) => void
 }) {
   const { t, ui, locale, formatLocale } = useI18n()
   const navigate = useNavigate()
+  const panel = useBookingPanel()
   const mounted = useMounted()
   const [open, setOpen] = useState(false)
   const [timeZone, setTimeZone] = useState(initialTimeZone)
@@ -67,7 +71,12 @@ export function RescheduleBooking({
           body: { start: slot.start },
         }),
       )
+      onRescheduled?.(result.booking)
       if (!mounted.current) return
+      if (panel?.active) {
+        panel.step(result.booking.id)
+        return
+      }
       navigate(bookingPath(result.booking.id), {
         state: flash(msg('The booking is moved to the new time.')),
       })
@@ -137,7 +146,9 @@ export function RescheduleBooking({
           {conflict !== null && <OrganizationContextConflict error={conflict} />}
           {blocked ? (
             <p>
-              <Link to={PATHS.bookings}>{t('Back to bookings')}</Link>
+              <BookingListReturnLink to={PATHS.bookings}>
+                {t('Back to bookings')}
+              </BookingListReturnLink>
             </p>
           ) : slot ? (
             <>
