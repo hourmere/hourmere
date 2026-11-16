@@ -193,3 +193,24 @@ describe('no-show controls in the host bookings list', () => {
     expect(api.to(route(one))).toHaveLength(1)
   })
 })
+
+it('keeps a saved row mark when an already pending next page arrives', async () => {
+  const one = held()
+  const two = held({ title: 'Next call' })
+  const pending = later()
+  list([one], {
+    'GET /api/v1/bookings': ({ path }) =>
+      new URL(path, 'http://test').searchParams.has('cursor')
+        ? pending.response
+        : json(200, { data: [one], nextCursor: 'next-page' }),
+    [route(one)]: echo,
+  })
+  const cells = await row('Intro call')
+  await userEvent.click(screen.getByRole('button', { name: 'Show more bookings' }))
+  await userEvent.click(cells.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
+  await cells.findByRole('button', { name: 'Clear no-show for Grace Hopper' })
+  await pending.answer(json(200, { data: [two], nextCursor: null }))
+  await row('Next call')
+  expect(cells.getByText('No-show')).toBeTruthy()
+  expect(cells.getByRole('button', { name: 'Clear no-show for Grace Hopper' })).toBeTruthy()
+})

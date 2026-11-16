@@ -493,6 +493,8 @@ function BookingList({
     [query, onRevoked],
   )
   const [first, reload] = useLoad(load)
+  const latestSource = useRef<BookingPage | null>(null)
+  if (first.status === 'ready') latestSource.current = first.data
   const [more, setMore] = useState<(BookingPage & { source: BookingPage }) | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [moreError, setMoreError] = useState<UiText | null>(null)
@@ -564,14 +566,15 @@ function BookingList({
   }
   /** Keeps the list, a later refresh's fallback and the open details showing the same mark. */
   function applyNoShow(bookingId: string, change: NoShowChange, announce: boolean) {
+    const latest = loadedSnapshot.current ?? shown
     const patched: BookingPage = {
-      data: shown.data.map((booking) =>
+      data: latest.data.map((booking) =>
         booking.id === bookingId ? withNoShowChange(booking, change) : booking,
       ),
-      nextCursor: shown.nextCursor,
+      nextCursor: latest.nextCursor,
     }
     loadedSnapshot.current = patched
-    setMore({ ...patched, source })
+    setMore({ ...patched, source: latestSource.current ?? source })
     setSelected((current) =>
       current?.id === bookingId ? withNoShowChange(current, change) : current,
     )
@@ -591,7 +594,7 @@ function BookingList({
         }),
       )
       if (controller.signal.aborted) return
-      const data = [...shown.data, ...page.data]
+      const data = [...(loadedSnapshot.current ?? shown).data, ...page.data]
       loadedPages.current += 1
       loadedSnapshot.current = { data, nextCursor: page.nextCursor }
       setMore({ data, nextCursor: page.nextCursor, source })

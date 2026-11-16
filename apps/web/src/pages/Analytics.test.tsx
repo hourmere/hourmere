@@ -141,8 +141,9 @@ describe('booking activity page', () => {
     view.unmount()
     noShows = undefined
     renderApp('/app/analytics')
-    await screen.findByText('No booking activity was recorded in this range.')
-    expect(document.querySelectorAll('.metric-cards dd')[3]?.textContent).toBe('0')
+    await screen.findByRole('table', { name: 'Daily booking activity' })
+    expect(screen.queryByText('No booking activity was recorded in this range.')).toBeNull()
+    expect(document.querySelectorAll('.metric-cards dd')[3]?.textContent).toBe('—')
   })
   it('uses UTC before onboarding, displays zero activity and submits explicit valid filters', async () => {
     const user = userEvent.setup()

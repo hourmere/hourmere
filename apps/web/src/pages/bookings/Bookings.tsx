@@ -354,7 +354,10 @@ function BookingList({
         }),
       )
       const bookings = [...shown.bookings, ...page.data]
-      setMore({ bookings, nextCursor: page.nextCursor })
+      setMore((current) => ({
+        bookings: [...(current ?? loaded).bookings, ...page.data],
+        nextCursor: page.nextCursor,
+      }))
       setStatus(msg('Showing {0} bookings.', { '0': bookings.length }))
       // Continue from the first new booking.
       if (page.data[0]) setFocusId(page.data[0].id)

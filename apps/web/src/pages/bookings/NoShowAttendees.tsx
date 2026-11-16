@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged } from '../../api/errors.ts'
@@ -64,6 +64,20 @@ export function withNoShowChange<B extends { attendees: readonly Attendee[] }>(
   } as B
 }
 
+// A row and its open detail panel can both write the same booking. Reserve the
+// booking synchronously, then notify every mounted control before accepting another write.
+const pendingBookings = new Set<string>()
+const pendingListeners = new Set<() => void>()
+function subscribePending(listener: () => void) {
+  pendingListeners.add(listener)
+  return () => {
+    pendingListeners.delete(listener)
+  }
+}
+function notifyPending() {
+  for (const listener of pendingListeners) listener()
+}
+
 /** One booking's mark/clear request, shared by the detail panel and list rows. */
 export function useNoShowToggle({
   bookingId,
@@ -77,19 +91,19 @@ export function useNoShowToggle({
   onError?: NoShowErrorHandler
 }) {
   const mounted = useMounted()
-  const inFlight = useRef(false)
+  const pendingKey = `${expectedOrganizationId}:${bookingId}`
+  const busy = useSyncExternalStore(subscribePending, () => pendingBookings.has(pendingKey))
   // The answer may arrive after later renders; it goes to the latest handlers.
   const handlers = useRef({ onChanged, onError })
   handlers.current = { onChanged, onError }
-  const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const [saved, setSaved] = useState(false)
   const [conflict, setConflict] = useState<unknown>(null)
 
   async function toggle(person: Attendee) {
-    if (!person.id || inFlight.current || conflict) return
-    inFlight.current = true
-    setBusy(true)
+    if (!person.id || pendingBookings.has(pendingKey) || conflict) return
+    pendingBookings.add(pendingKey)
+    notifyPending()
     setFailed(false)
     setSaved(false)
     try {
@@ -109,8 +123,8 @@ export function useNoShowToggle({
       if (isOrganizationContextChanged(error)) setConflict(error)
       else setFailed(true)
     } finally {
-      inFlight.current = false
-      if (mounted.current) setBusy(false)
+      pendingBookings.delete(pendingKey)
+      notifyPending()
     }
   }
 

@@ -67,7 +67,7 @@ function count(value: string): number {
   return number
 }
 
-/** The authorization guard and both activity branches share one PostgreSQL snapshot. */
+/** The authorization guard and all activity branches share one PostgreSQL snapshot. */
 export async function getBookingActivity(
   ctx: ServiceContext,
   input: { startDate: unknown; endDate: unknown; timeZone: unknown },

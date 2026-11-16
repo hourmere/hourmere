@@ -1,12 +1,20 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
-import { createDb, type Db } from '@hourmere/db'
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
+import { createDb, type Db, isImportedBooking } from '@hourmere/db'
+import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import { setAttendeeNoShow } from '@hourmere/scheduling'
 import { createFixtures, createTestUser, testContext } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { assertBookingLocallyManaged } from '../../scheduling/src/bookings.ts'
+import { DomainError } from '../../scheduling/src/errors.ts'
+import { isUuid } from '../../scheduling/src/internal.ts'
+import { authorizeBookingNoShow } from '../../scheduling/src/no-show.ts'
+import { decryptWebhookSecret, webhookSignature } from './crypto.ts'
 import {
-  deliverWebhook,
+  type deliverWebhook,
   webhookAttendeeNoShowNotifier,
   webhookBookingNotifier,
   webhookDeliveryJob,
@@ -91,8 +99,11 @@ describe.skipIf(!serverUrl)('no-show webhook delivery through the real marking s
           NOW,
         ),
       )
-    // A mark, its replay and two concurrent identical unmarks: two actual changes.
-    await setAttendeeNoShow(ctx, bookingId, attendeeId, true)
+    // Concurrent identical marks, a replay and concurrent unmarks: two actual changes.
+    await Promise.all([
+      setAttendeeNoShow(ctx, bookingId, attendeeId, true),
+      setAttendeeNoShow(ctx, bookingId, attendeeId, true),
+    ])
     await setAttendeeNoShow(ctx, bookingId, attendeeId, true)
     await Promise.all([
       setAttendeeNoShow(ctx, bookingId, attendeeId, false),
@@ -116,9 +127,13 @@ describe.skipIf(!serverUrl)('no-show webhook delivery through the real marking s
       },
       now: () => NOW,
     }
-    for (const row of rows) await deliverWebhook(deps, row.id, signal())
-    // A replayed delivery job after success sends nothing again.
-    for (const row of rows) await deliverWebhook(deps, row.id, signal())
+    const job = webhookDeliveryJob(deps)
+    for (const row of rows) {
+      const context = { id: randomUUID(), attempt: 1, signal: signal() }
+      await job.handler({ deliveryId: row.id }, context)
+      // Re-run the real job handler after success, with the same job identity.
+      await job.handler({ deliveryId: row.id }, { ...context, attempt: 2 })
+    }
     expect(requests).toHaveLength(3)
     const [created, marked, unmarked] = requests
     if (!created || !marked || !unmarked) throw new Error('Missing requests')
@@ -143,9 +158,80 @@ describe.skipIf(!serverUrl)('no-show webhook delivery through the real marking s
           .sort(),
       ).toEqual(['attendeeId', 'noShowMarkedAt', 'noShowMarkedBy'])
       expect(body.data.attendeeId).toBe(attendeeId)
-      expect(body.data.noShowMarkedAt === null ? null : NOW.toString()).toBe(markedAt)
+      expect(body.data.noShowMarkedAt).toBe(
+        markedAt === null ? null : new Date(NOW.epochMilliseconds).toISOString(),
+      )
+      expect(body.data.noShowMarkedBy).toBe(markedAt === null ? null : ctx.principal.user.id)
       expect(request.body).not.toMatch(/invitee@example\.com|Invitee|manage/i)
       expect(request.headers['webhook-event-id']).toBe(body.id)
     }
+  })
+
+  it('source-copy mutation detects duplicate delivery capture on a replayed mark', async () => {
+    const source = readFileSync(new URL('../../scheduling/src/no-show.ts', import.meta.url), 'utf8')
+    const original = source.slice(
+      source.indexOf('export async function setAttendeeNoShow('),
+      source.indexOf('export async function authorizeBookingNoShow('),
+    )
+    const guard = 'if ((current.noShowMarkedAt !== null) === noShow) return current'
+    expect(original).toContain(guard)
+    const copy = stripTypeScriptTypes(original.replace('export ', '').replace(guard, ''))
+    const mutant = new Function(
+      'DomainError',
+      'isUuid',
+      'authorizeBookingNoShow',
+      'assertBookingLocallyManaged',
+      'auditActor',
+      'writeAuditEvent',
+      `${copy}; return setAttendeeNoShow`,
+    )(
+      DomainError,
+      isUuid,
+      authorizeBookingNoShow,
+      assertBookingLocallyManaged,
+      auditActor,
+      writeAuditEvent,
+    ) as typeof setAttendeeNoShow
+    const { ctx, webhook, bookingId, attendeeId } = await fixture()
+    await mutant(ctx, bookingId, attendeeId, true)
+    await mutant(ctx, bookingId, attendeeId, true)
+    const actual = await deliveries(webhook.id)
+    expect(actual).toHaveLength(2)
+    expect(() => expect(actual).toHaveLength(1)).toThrow()
+  })
+
+  it('source-copy mutation detects a replayed job sending an acknowledged delivery twice', async () => {
+    const source = readFileSync(new URL('./delivery.ts', import.meta.url), 'utf8')
+    const original = source.slice(
+      source.indexOf('export async function deliverWebhook('),
+      source.indexOf('export function webhookCleanupJob('),
+    )
+    const guard = "if (delivery?.status !== 'pending') return false"
+    expect(original).toContain(guard)
+    const copy = stripTypeScriptTypes(original.replace('export ', '').replace(guard, ''))
+    const mutant = new Function(
+      'isImportedBooking',
+      'decryptWebhookSecret',
+      'webhookSignature',
+      `${copy}; return deliverWebhook`,
+    )(isImportedBooking, decryptWebhookSecret, webhookSignature) as typeof deliverWebhook
+    const { ctx, webhook, bookingId, attendeeId } = await fixture()
+    await setAttendeeNoShow(ctx, bookingId, attendeeId, true)
+    const [row] = await deliveries(webhook.id)
+    if (!row) throw new Error('Missing delivery')
+    const requests: WebhookRequest[] = []
+    const deps = {
+      db,
+      ...settings,
+      now: () => NOW,
+      transport: async (request: WebhookRequest) => {
+        requests.push(request)
+        return 204
+      },
+    }
+    await mutant(deps, row.id, signal())
+    await mutant(deps, row.id, signal())
+    expect(requests).toHaveLength(2)
+    expect(() => expect(requests).toHaveLength(1)).toThrow()
   })
 })

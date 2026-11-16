@@ -21,6 +21,22 @@ const serverUrl = process.env.DATABASE_URL
 const later = () => Temporal.Instant.from('2026-12-01T00:00:00Z')
 const october = { startDate: '2026-10-01', endDate: '2026-10-03', timeZone: 'UTC' }
 
+function activityCopy(before: string, after: string): typeof getBookingActivity {
+  const source = readFileSync(new URL('./analytics.ts', import.meta.url), 'utf8')
+  const start = source.indexOf('export async function getBookingActivity(')
+  expect(source.slice(start)).toContain(before)
+  const mutant = stripTypeScriptTypes(
+    source.slice(start).replace('export async function', 'async function').replace(before, after),
+  )
+  return new Function(
+    'sql',
+    'activityRange',
+    'DomainError',
+    'count',
+    `${mutant}; return getBookingActivity`,
+  )(sql, activityRange, DomainError, (value: string) => Number(value)) as typeof getBookingActivity
+}
+
 describe.skipIf(!serverUrl)('no-show activity count with PostgreSQL', () => {
   let owned: TestDatabase
   let db: Db
@@ -93,7 +109,9 @@ describe.skipIf(!serverUrl)('no-show activity count with PostgreSQL', () => {
       cancelled: 0,
       noShows: 2,
     })
-    // Unmarking removes the attendee from the count.
+    // Unmarking removes the attendee from the count; replaying it does not subtract twice.
+    await mark(host, guests.id, guests.attendees[0] as string, false)
+    expect(await noShows(host)).toEqual([1, 0, 0])
     await mark(host, guests.id, guests.attendees[0] as string, false)
     expect(await noShows(host)).toEqual([1, 0, 0])
   })
@@ -317,6 +335,20 @@ describe.skipIf(!serverUrl)('no-show activity count with PostgreSQL', () => {
     })
   })
 
+  it('source-copy negative control detects removal of the activity role guard', async () => {
+    const member = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user: member, role: 'member' }])
+    const booking = await meeting(team.id, [member.id], '2026-10-02T09:00:00Z')
+    const ctx = testContext(db, team.as(member), later)
+    await setAttendeeNoShow(ctx, booking.id, booking.attendees[0] as string, true)
+    const checkDenied = async (read: typeof getBookingActivity) =>
+      expect(read(ctx, october)).rejects.toMatchObject({ code: 'insufficient_role' })
+    await checkDenied(getBookingActivity)
+    const mutant = activityCopy("WHERE btrim(role) IN ('owner', 'admin')", 'WHERE true')
+    // The same assertion rejects the source copy after removing the role check.
+    await expect(checkDenied(mutant)).rejects.toThrow()
+  })
+
   it('source-copy negative controls detect each exclusion in the no-show branch', async () => {
     const host = await createTestUser(db)
     const org = host.principal.organization.id
@@ -333,33 +365,13 @@ describe.skipIf(!serverUrl)('no-show activity count with PostgreSQL', () => {
     expect(unmarked.attendees).toHaveLength(2)
     const ctx = testContext(db, host.principal)
     expect((await getBookingActivity(ctx, october)).totals.noShows).toBe(1)
-    const source = readFileSync(new URL('./analytics.ts', import.meta.url), 'utf8')
-    const start = source.indexOf('export async function getBookingActivity(')
-    const copy = (before: string, after: string) => {
-      expect(source.slice(start)).toContain(before)
-      const mutant = stripTypeScriptTypes(
-        source
-          .slice(start)
-          .replace('export async function', 'async function')
-          .replace(before, after),
-      )
-      return new Function(
-        'sql',
-        'activityRange',
-        'DomainError',
-        'count',
-        `${mutant}; return getBookingActivity`,
-      )(sql, activityRange, DomainError, (value: string) =>
-        Number(value),
-      ) as typeof getBookingActivity
-    }
     const status = "AND b.status = 'confirmed'\n        AND (b.payment_hold_expires_at IS NULL"
     for (const [before, after] of [
       [status, 'AND (b.payment_hold_expires_at IS NULL'],
       ['AND a.no_show_marked_at IS NOT NULL', ''],
       ['SELECT b.start_at AS at, 0, 0, 0, 1', 'SELECT a.no_show_marked_at AS at, 0, 0, 0, 1'],
     ] as const) {
-      const mutant = copy(before, after)
+      const mutant = activityCopy(before, after)
       const totals = (await mutant(ctx, october)).totals
       expect(() => expect(totals.noShows).toBe(1)).toThrow()
     }
