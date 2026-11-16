@@ -969,9 +969,10 @@ counts; receipt lifetime, encryption and admission services land in later steps.
 
 Migration 0074 installs the configuration storage of the [SSO design](sso.md)
 (Configuration storage step): `sso_policies`, `sso_providers`, `sso_domains`,
-`sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. Nothing reads
-or writes them yet: there is no route, worker, read path or setting, and OIDC and SAML stay
-hard-off. A test keeps every production module outside the storage layer from naming them.
+`sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. The mailbox proof module reads
+providers and the shared fresh-proof gate reads policies. No configuration write path or
+setting exists, and OIDC and SAML stay hard-off. A test restricts table references to
+the storage layer and each explicitly named data owner.
 
 All six belong to a team: a personal organization's rows are refused, and deleting the
 organization deletes them. Policies, providers and domain claims are deleted only with
@@ -1024,13 +1025,16 @@ first step that writes it.
 
 Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage
 step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_cache`,
-`sso_browser_proofs` and `sso_delegation_bindings`. Only the Mailbox proof step's module
+`sso_browser_proofs` and `sso_delegation_bindings`. The Mailbox proof step's module
 (`apps/server/src/sso-mailbox-proof.ts`) uses them: its endpoints and delivery job write
 attempts' mailbox proofs and their tokens, and its cleanup job deletes consumed and expired
 attempts, at most 1000 a minute, with their tokens. Its endpoints answer `404 sso_disabled`
 while OIDC and SAML stay hard-off, so nothing writes attempts in production yet. The test
 that keeps production modules from naming the configuration tables covers these too, and
-lets that module name only attempts, tokens and providers. Admission
+lets that module name only attempts, tokens and providers. The shared fresh-proof gate
+(`apps/server/src/sso-fresh-proof.ts`) creates and consumes operation-bound attempts and
+reads the team policy; it has no production caller or route yet. Its test-only operation
+consumes proof in the same transaction as the protected write. Admission
 tombstones need no new table: they are the shared `scim_membership_blocks` of the
 [SCIM identity storage](scim.md), which keep the team-local mailbox through member and
 account deletion; a subject-keyed JIT check adds its column there in the step that needs it.
