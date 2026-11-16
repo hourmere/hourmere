@@ -1,13 +1,14 @@
-// SSO configuration and identity storage are tables only (docs/sso.md, Configuration storage
-// and Identity storage): migrations 0074 and 0075, the generated table types and the storage
-// test support exist, and no production module imports or queries the new tables, so no
-// route, worker or read path uses them. The one other module that names them,
-// apps/server/src/sso-storage-errors.ts, only recognises them in database errors so that the
-// error log omits their row details; it imports nothing and performs no data access. OIDC
-// and SAML stay hard-off (apps/server/src/sso.test.ts and sso-catalogues.test.ts). The scan
-// is limited to the new table names; it never compares whole catalogues. The first step that
-// reads or writes this storage from service code narrows it to the modules that own SSO data
-// access.
+// SSO configuration and identity storage (docs/sso.md, Configuration storage and Identity
+// storage): migrations 0074 and 0075, the generated table types and the storage test support.
+// One production module owns SSO data access so far, the Mailbox proof module
+// (apps/server/src/sso-mailbox-proof.ts): it reads and writes attempts and their mailbox tokens
+// and reads providers, nothing else, and both of its endpoints answer `404 sso_disabled` while
+// OIDC and SAML stay hard-off (apps/server/src/sso-mailbox-proof.test.ts). The one other module
+// that names the tables, apps/server/src/sso-storage-errors.ts, only recognises them in
+// database errors so that the error log omits their row details; it imports nothing and
+// performs no data access. The scan is limited to the new table names; it never compares whole
+// catalogues. Each later step that reads or writes this storage adds its module, and the tables
+// it may name, to DATA_OWNERS.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,40 +22,55 @@ const STORAGE_LAYER =
   /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/sso-(storage|identity)-[^/]+\.ts$)/
 // Recognises the tables in database errors for the error log; never reads or writes them.
 const ERROR_RECOGNISER = 'apps/server/src/sso-storage-errors.ts'
+// The production modules that own SSO data access, each with the only tables it may name.
+const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
+  'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
+}
 // A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
 // its generated row type, or the storage test support. `sso_providers_guard` or
 // `listSsoProviders` is not one, and neither is an import of the error recogniser.
+const STORAGE_TABLE_NAMES = [
+  // Configuration storage (0074).
+  'sso_policies',
+  'sso_providers',
+  'sso_domains',
+  'sso_provider_domains',
+  'sso_recovery_nominations',
+  'sso_recovery_owners',
+  'SsoPolicies',
+  'SsoProviders',
+  'SsoDomains',
+  'SsoProviderDomains',
+  'SsoRecoveryNominations',
+  'SsoRecoveryOwners',
+  // Identity storage (0075).
+  'sso_identity_links',
+  'sso_attempts',
+  'sso_mailbox_tokens',
+  'sso_replay_cache',
+  'sso_browser_proofs',
+  'sso_delegation_bindings',
+  'SsoIdentityLinks',
+  'SsoAttempts',
+  'SsoMailboxTokens',
+  'SsoReplayCache',
+  'SsoBrowserProofs',
+  'SsoDelegationBindings',
+] as const
+const whole = (names: readonly string[]) =>
+  `(?<![A-Za-z0-9_])(?:${names.join('|')})(?![A-Za-z0-9_])`
 const STORAGE_NAMES = new RegExp(
-  `sso-storage(?!-errors\\.ts)|sso-identity-|(?<![A-Za-z0-9_])(?:${[
-    // Configuration storage (0074).
-    'sso_policies',
-    'sso_providers',
-    'sso_domains',
-    'sso_provider_domains',
-    'sso_recovery_nominations',
-    'sso_recovery_owners',
-    'SsoPolicies',
-    'SsoProviders',
-    'SsoDomains',
-    'SsoProviderDomains',
-    'SsoRecoveryNominations',
-    'SsoRecoveryOwners',
-    // Identity storage (0075).
-    'sso_identity_links',
-    'sso_attempts',
-    'sso_mailbox_tokens',
-    'sso_replay_cache',
-    'sso_browser_proofs',
-    'sso_delegation_bindings',
-    'SsoIdentityLinks',
-    'SsoAttempts',
-    'SsoMailboxTokens',
-    'SsoReplayCache',
-    'SsoBrowserProofs',
-    'SsoDelegationBindings',
-  ].join('|')})(?![A-Za-z0-9_])`,
+  `sso-storage(?!-errors\\.ts)|sso-identity-|${whole(STORAGE_TABLE_NAMES)}`,
   'i',
 )
+/** Every storage name in a source, lower case. */
+function storageNamesIn(source: string): string[] {
+  const names = new RegExp(
+    `sso-storage(?!-errors\\.ts)|sso-identity-|${whole(STORAGE_TABLE_NAMES)}`,
+    'gi',
+  )
+  return [...new Set([...source.matchAll(names)].map(([name]) => name.toLowerCase()))].sort()
+}
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -141,8 +157,28 @@ describe('SSO configuration and identity storage are tables only', () => {
     expect(tables).toMatch(/^ {2}sso_delegation_bindings: SsoDelegationBindings;$/m)
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file) && file !== ERROR_RECOGNISER)
+      .filter((file) => !Object.hasOwn(DATA_OWNERS, file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
+  })
+
+  it('lets each data owner name only its own tables', () => {
+    const sources = productionSources()
+    for (const [file, tables] of Object.entries(DATA_OWNERS)) {
+      expect(sources).toContain(file)
+      const named = storageNamesIn(readFileSync(new URL(file, root), 'utf8'))
+      // It does name them, so the exception is needed, and names nothing else.
+      expect(named.length).toBeGreaterThan(0)
+      expect(
+        named.every((name) => tables.includes(name)),
+        `${file}: ${named}`,
+      ).toBe(true)
+    }
+    // The check sees a table that is not the owner's.
+    expect(storageNamesIn("selectFrom('sso_browser_proofs') FROM sso_attempts")).toEqual([
+      'sso_attempts',
+      'sso_browser_proofs',
+    ])
   })
 
   it('lets the error recogniser name the tables without any data access', () => {

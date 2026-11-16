@@ -922,6 +922,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
         zoomConference: undefined,
         enqueueCalendarSync: unavailable,
         enqueueCalendarWritebackRecovery: unavailable,
+        mailboxProofQueue: { enqueue: unavailable },
       }),
     )
     // Only SCIM-specific names: the unavailable handler is mounted and no discovery route or

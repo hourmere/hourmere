@@ -1043,6 +1043,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
         zoomConference: undefined,
         enqueueCalendarSync: unreachable,
         enqueueCalendarWritebackRecovery: unreachable,
+        mailboxProofQueue: { enqueue: unreachable },
       }),
     )
     expect(

@@ -1984,6 +1984,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         zoomConference: undefined,
         enqueueCalendarSync: unreachable,
         enqueueCalendarWritebackRecovery: unreachable,
+        mailboxProofQueue: { enqueue: unreachable },
       }),
     )
     return call(

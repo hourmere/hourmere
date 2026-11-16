@@ -68,7 +68,12 @@ export {
   reserveInvitationEmailBudget,
 } from './invitation-mail-limits.ts'
 export { deliverInvitationEmail, type InvitationEmailSenderDeps } from './invitation-sender.ts'
-export { notificationEmailCleanupJob } from './mail-limits.ts'
+export {
+  lockNotificationEmailBudget,
+  mailboxProofRecipientHash,
+  notificationEmailCleanupJob,
+  signInEmailBudget,
+} from './mail-limits.ts'
 export {
   createWaitlistEmailWorker,
   deliverWaitlistEmail,

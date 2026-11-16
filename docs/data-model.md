@@ -1024,9 +1024,13 @@ first step that writes it.
 
 Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage
 step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_cache`,
-`sso_browser_proofs` and `sso_delegation_bindings`. Nothing reads or writes them yet: there
-is no route, worker, read path or setting, and OIDC and SAML stay hard-off. The test that
-keeps production modules from naming the configuration tables covers these too. Admission
+`sso_browser_proofs` and `sso_delegation_bindings`. Only the Mailbox proof step's module
+(`apps/server/src/sso-mailbox-proof.ts`) uses them: its endpoints and delivery job write
+attempts' mailbox proofs and their tokens, and its cleanup job deletes consumed and expired
+attempts, at most 1000 a minute, with their tokens. Its endpoints answer `404 sso_disabled`
+while OIDC and SAML stay hard-off, so nothing writes attempts in production yet. The test
+that keeps production modules from naming the configuration tables covers these too, and
+lets that module name only attempts, tokens and providers. Admission
 tombstones need no new table: they are the shared `scim_membership_blocks` of the
 [SCIM identity storage](scim.md), which keep the team-local mailbox through member and
 account deletion; a subject-keyed JIT check adds its column there in the step that needs it.

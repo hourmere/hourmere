@@ -330,6 +330,51 @@ export function createLogMailer(print: (line: string) => void = console.log): Ma
   }
 }
 
+/**
+ * A mailbox proof link for an SSO attempt (docs/sso.md, Mailbox proof). One template for every
+ * recipient: it names no account, team or provider, so the message is the same whether or not
+ * the address belongs to a Hourmere account.
+ */
+export function mailboxProofEmail({
+  to,
+  url,
+  expiresInMinutes,
+  language = 'en',
+}: {
+  to: string
+  url: string
+  expiresInMinutes: number
+  language?: InterfaceLanguage | undefined
+}): MailMessage {
+  const t = (key: Parameters<typeof mailMessage>[1]) =>
+    mailMessage(language, key, { minutes: String(expiresInMinutes) })
+  const words = {
+    subject: t('mailboxProof.subject'),
+    instruction: t('mailboxProof.instruction'),
+    htmlInstruction: t('mailboxProof.htmlInstruction'),
+    button: t('mailboxProof.button'),
+    expiry: t('mailboxProof.expiry'),
+    fallback: t('mailboxProof.fallback'),
+    footer: t('mailboxProof.footer'),
+  }
+  const link = escapeHtml(url)
+  // The link opens an inert page whose button confirms, so a mail scanner opening it does not.
+  return {
+    to,
+    subject: words.subject,
+    text: `Hourmere\n\n${words.instruction}\n\n${url}\n\n${words.expiry}\n\n${words.footer}\n`,
+    html: emailLayout(
+      language,
+      words.subject,
+      `<p>${emailText(words.htmlInstruction, language)}</p>
+${emailButton(words.button, url, false, language)}
+<p style="color: #555;">${emailText(words.expiry, language)}</p>
+<p style="color: #555; font-size: 13px; ${emailWrapStyle}">${emailText(words.fallback, language)}<br><a href="${link}" style="${emailLinkStyle}">${emailText(url, language)}</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">${emailText(words.footer, language)}</p>`,
+    ),
+  }
+}
+
 export function magicLinkEmail({
   to,
   url,
