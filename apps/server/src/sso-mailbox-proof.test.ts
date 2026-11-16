@@ -446,6 +446,23 @@ const scenarios = {
     const token = await proofToken(h, link, member)
     for (const wrong of others) await expectDenied(h, link, token, wrong)
     await expectProven(h, link, token, member)
+
+    // Keep the presenter authenticated in the fake resolver: the stored session expiry
+    // must independently refuse this attempt while its token and attempt remain live.
+    const expiringSession = await session(client, f.member, at(120))
+    users.set(expiringSession, f.member)
+    const expiringBrowser = browser(expiringSession)
+    const expiring = await attempt('link', expiringBrowser, { session_id: expiringSession })
+    const expiredSessionToken = await proofToken(h, expiring, expiringBrowser)
+    h.clock.now = await text('SELECT "expiresAt"::text AS v FROM auth.session WHERE id=$1', [
+      expiringSession,
+    ])
+    await expectDenied(h, expiring, expiredSessionToken, expiringBrowser)
+    expect((await tokenOf(expiring.id))?.consumed_at).toBeNull()
+    expect((await attemptRow(expiring.id))?.mailbox_proven_at).toBeNull()
+    expect((await send(h, expiring.id, expiringBrowser)).status).toBe(202)
+    await h.deliver()
+    expect(h.sent.filter(({ to }) => to === expiring.mailbox)).toHaveLength(1)
   },
 
   /** Attempt expiry at the exact boundary instant, in delivery and in consumption. */
@@ -635,27 +652,40 @@ const scenarios = {
 
   /** A provider that is no longer what the attempt relied on ends delivery and consumption. */
   async providerCurrent(M: Module) {
-    const h = harness(M)
-    const provider = await insert(client, 'sso_providers', {
-      ...oidcProviderValues(f.team),
-      enabled: true,
-    })
-    const who = browser()
-    const a = await attempt('sign_in', who, {
-      ...signInValues(f, provider),
-      requires_mailbox: true,
-      mailbox: mailboxOf('revision'),
-      browser_binding_digest: real.sha256(who.binding),
-    })
-    const token = await proofToken(h, a, who)
-    await client.query(
-      'UPDATE sso_providers SET revision = revision + 1, configuration = $2 WHERE id=$1',
-      [provider.id, sealed()],
-    )
-    await expectDenied(h, a, token, who)
-    expect((await send(h, a.id, who)).status).toBe(202)
-    await h.deliver()
-    expect(h.sent.filter(({ to }) => to === a.mailbox)).toHaveLength(1)
+    for (const state of ['revision', 'disabled', 'retired'] as const) {
+      // No cooldown can mask an eligibility regression in the second delivery.
+      const h = harness(M, { limits: { resendCooldownSeconds: 0 } })
+      const provider = await insert(client, 'sso_providers', {
+        ...oidcProviderValues(f.team),
+        enabled: true,
+      })
+      // A retired test provider isolates retirement from the enabled check for sign-in/link.
+      const kind = state === 'retired' ? 'test' : 'sign_in'
+      const who = browser(sessionOf(kind))
+      const a = await attempt(kind, who, {
+        provider_id: provider.id,
+        provider_revision: provider.revision,
+      })
+      const token = await proofToken(h, a, who)
+      if (state === 'revision')
+        await client.query(
+          'UPDATE sso_providers SET revision = revision + 1, configuration = $2 WHERE id=$1',
+          [provider.id, sealed()],
+        )
+      else
+        await client.query(
+          state === 'disabled'
+            ? 'UPDATE sso_providers SET enabled = false WHERE id=$1'
+            : 'UPDATE sso_providers SET enabled = false, retired_at = now() WHERE id=$1',
+          [provider.id],
+        )
+      await expectDenied(h, a, token, who)
+      expect((await tokenOf(a.id))?.consumed_at).toBeNull()
+      expect((await attemptRow(a.id))?.mailbox_proven_at).toBeNull()
+      expect((await send(h, a.id, who)).status).toBe(202)
+      await h.deliver()
+      expect(h.sent.filter(({ to }) => to === a.mailbox)).toHaveLength(1)
+    }
   },
 
   /** Consume reads its instant only after the row locks it waits for. */
@@ -1040,6 +1070,12 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
       ],
       ['session', 'session binding', ['presenter.sessionId === attempt.session_id &&', 'true &&']],
       [
+        'session',
+        'session expiry',
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation anchor.
+        ['AND s."expiresAt" > ${now}::timestamptz', ''],
+      ],
+      [
         'attemptExpiry',
         'attempt expiry is exclusive',
         // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation anchor.
@@ -1087,6 +1123,12 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
         ],
       ],
       ['providerCurrent', 'provider revision', ['AND p.revision = a.provider_revision', '']],
+      ['providerCurrent', 'provider retirement', ['AND p.retired_at IS NULL', '']],
+      [
+        'providerCurrent',
+        'provider enabled for sign-in',
+        ["AND (p.enabled OR a.kind NOT IN ('sign_in', 'link'))", ''],
+      ],
       ['mailBudget', 'recipient budget', ['      if (reason)\n', '      if (false)\n']],
       [
         'sourceLimits',
