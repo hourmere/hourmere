@@ -109,6 +109,8 @@ export {
   BrandingUpdateInput,
   getBranding,
   getBrandLogo,
+  getPublicBranding,
+  type PublicBranding,
   setBranding,
   uploadBrandLogo,
 } from './branding.ts'

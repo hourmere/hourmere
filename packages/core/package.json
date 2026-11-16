@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./brand-contrast": "./src/brand-contrast.ts",
     "./reserved": "./src/reserved.ts",
     "./embed": "./src/embed.ts",
     "./embed-snippet": "./src/embed-snippet.ts",

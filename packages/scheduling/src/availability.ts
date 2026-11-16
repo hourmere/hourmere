@@ -23,6 +23,7 @@ import {
 import { publicAvatarImage } from '@hourmere/core/public-avatar'
 import type { Database, Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
+import { getPublicBranding, type PublicBranding } from './branding.ts'
 import {
   automaticMeet,
   automaticZoom,
@@ -435,10 +436,12 @@ export async function getOneTimeBookingPage(
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
   const page = publicEventType({ ...eventType, waitlistEnabled: false })
+  const branding = await getPublicBranding(ctx.db, eventType.organizationId)
   // Keep this projection explicit: additions to the reusable public page must not
   // silently expose an address or navigation capability to one-time recipients.
   return {
     eventType: {
+      ...(branding && { branding }),
       title: page.title,
       description: page.description,
       durationMinutes: page.durationMinutes,
@@ -464,6 +467,7 @@ export function eventTypeNotFound(): DomainError {
 
 /** What a public booking page shows. Location details are only revealed once booked. */
 export interface PublicEventType {
+  branding?: PublicBranding
   handle: string
   slug: string
   title: string
@@ -489,14 +493,22 @@ export async function getPublicEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicEventType(ctx.db, handle, slug), ctx.smtpConfigured)
+  const event = await findPublicEventType(ctx.db, handle, slug)
+  if (!event) throw eventTypeNotFound()
+  const page = publicEventType(event, ctx.smtpConfigured)
+  const branding = await getPublicBranding(ctx.db, event.organizationId)
+  return { ...page, ...(branding && { branding }) }
 }
 
 export async function getPublicTeamEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicTeamEventType(ctx.db, handle, slug), ctx.smtpConfigured)
+  const event = await findPublicTeamEventType(ctx.db, handle, slug)
+  if (!event) throw eventTypeNotFound()
+  const page = publicEventType(event, ctx.smtpConfigured)
+  const branding = await getPublicBranding(ctx.db, event.organizationId)
+  return { ...page, ...(branding && { branding }) }
 }
 
 function publicEventType(
@@ -545,6 +557,7 @@ export interface PublicEventTypeSummary {
 
 /** What the host's page at /{handle} shows: who they are and what can be booked. */
 export interface PublicHost {
+  branding?: PublicBranding
   handle: string
   host: { name: string; timeZone: string; image?: string }
   eventTypes: PublicEventTypeSummary[]
@@ -570,6 +583,12 @@ export async function getPublicHost(
           .where('p.handle', '=', h)
           .executeTakeFirst()
   if (!profile) throw new DomainError('not_found', 'host_not_found', 'No such booking page')
+  const personal = await ctx.db
+    .selectFrom('personal_organizations')
+    .select('organization_id')
+    .where('user_id', '=', profile.user_id)
+    .executeTakeFirst()
+  const branding = personal ? await getPublicBranding(ctx.db, personal.organization_id) : undefined
   const image = publicAvatarImage(profile.image)
   const rows = await ctx.db
     .selectFrom('event_types as et')
@@ -587,6 +606,7 @@ export async function getPublicHost(
     .orderBy('et.id')
     .execute()
   return {
+    ...(branding && { branding }),
     handle: profile.handle,
     host: {
       name: profile.name.trim() || profile.handle,

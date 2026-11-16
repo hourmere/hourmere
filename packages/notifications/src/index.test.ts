@@ -375,6 +375,46 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     },
   )
 
+  it('brands host and invitee mail only from the booking organization', async () => {
+    const own = await booked()
+    const other = await booked()
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO1sAAAAASUVORK5CYII=',
+      'base64',
+    )
+    const hash = createHash('sha256').update(png).digest('hex')
+    await db
+      .insertInto('organization_brand_logos')
+      .values({ organization_id: own.organizationId, hash, data: png })
+      .execute()
+    await db
+      .insertInto('organization_branding')
+      .values([
+        { organization_id: own.organizationId, brand_logo: hash, brand_primary_color: '#005544' },
+        { organization_id: other.organizationId, brand_logo: null, brand_primary_color: '#770033' },
+      ])
+      .execute()
+    const { mailer, sent } = testMailer()
+    await sendBookingNotification(deps(mailer), own.bookingId, 'confirmed')
+    expect(sent).toHaveLength(2)
+    for (const mail of sent) {
+      expect(mail.html).toContain('background-color: #005544;')
+      expect(mail.html).not.toContain('#770033')
+      expect(mail.html).toContain('src="cid:organization-logo@hourmere"')
+      expect(mail.attachments?.find((part) => part.cid)?.content).toBe(png.toString('base64'))
+      expect(invitation(mail)?.method).toBe('REQUEST')
+    }
+    sent.length = 0
+    await sendBookingNotification(deps(mailer), other.bookingId, 'confirmed')
+    expect(sent).toHaveLength(2)
+    for (const mail of sent) {
+      expect(mail.html).toContain('background-color: #770033;')
+      expect(mail.html).not.toContain('#005544')
+      expect(mail.html).not.toContain('cid:')
+      expect(mail.attachments?.some((part) => part.cid)).toBe(false)
+    }
+  })
+
   it('confirms to the host, the invitee and guests, each in their own time zone', async () => {
     const { bookingId, hostEmail } = await booked({ guests: true })
     const { mailer, sent } = testMailer()
