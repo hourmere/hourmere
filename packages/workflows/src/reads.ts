@@ -142,7 +142,7 @@ type DefinitionRow = {
  * The read representation of a stored definition. The revision holds the contract's canonical
  * output, which the database checks; anything else is a fault, never shown to the caller.
  */
-function view(owner: WorkflowOwner, row: DefinitionRow): WorkflowView {
+export function workflowView(owner: WorkflowOwner, row: DefinitionRow): WorkflowView {
   const stored = row.definition
   const parsed =
     typeof stored === 'object' && stored !== null && !Array.isArray(stored)
@@ -224,7 +224,7 @@ export async function listWorkflowDefinitions(
       const page = rows.slice(0, limit)
       const last = page.at(-1)
       return {
-        data: page.map((row) => view(owner, row)),
+        data: page.map((row) => workflowView(owner, row)),
         nextCursor: rows.length > limit && last ? encodeCursor(selector.data, last.id) : null,
       }
     })
@@ -249,7 +249,7 @@ export async function getWorkflowDefinition(
       if (!owner) throw notFound()
       const row = await definitionsOf(trx, owner).where('d.id', '=', workflowId).executeTakeFirst()
       if (!row) throw notFound()
-      return view(owner, row)
+      return workflowView(owner, row)
     })
 }
 

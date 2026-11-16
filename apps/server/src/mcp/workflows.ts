@@ -1,7 +1,13 @@
 import { z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
-import { getWorkflow, listWorkflows } from '@hourmere/workflows'
 import {
+  createWorkflow,
+  getWorkflow,
+  listWorkflows,
+  type WorkflowAuditPort,
+} from '@hourmere/workflows'
+import {
+  CreateWorkflowInput,
   ListWorkflowsInput,
   WORKFLOWS_NOT_AVAILABLE,
   Workflow,
@@ -11,11 +17,11 @@ import { workflowFeatureTools } from '../workflows.ts'
 import { defineTool, type Tool } from './tools.ts'
 
 /**
- * The booking workflow reads, with REST's validation and authorization. Always in the
+ * The booking workflow operations, with REST's validation and authorization. Always in the
  * catalog: while workflows are off, tools/list omits them and a direct call answers
  * `workflows_disabled` after the scope check (workflowFeatureTools).
  */
-export function workflowTools({ db }: { db: Db }): Tool[] {
+export function workflowTools({ db, audit }: { db: Db; audit?: WorkflowAuditPort }): Tool[] {
   const annotations = {
     readOnlyHint: true,
     destructiveHint: false,
@@ -23,6 +29,17 @@ export function workflowTools({ db }: { db: Db }): Tool[] {
     openWorldHint: false,
   }
   return workflowFeatureTools([
+    defineTool({
+      name: 'create_workflow',
+      title: 'Create a booking workflow',
+      description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Creates a personal workflow for yourself or a team workflow as its current owner/admin in that team context. Supply owner, idempotencyKey and the definition fields. Keep the key for retries: identical normalized input returns the stored definition; changed input conflicts. IDs are server-generated. Unknown fields and webhook actions are rejected. No email is sent by creation.`,
+      input: CreateWorkflowInput,
+      output: Workflow,
+      annotations: { ...annotations, readOnlyHint: false },
+      run(args, call) {
+        return createWorkflow({ db, audit, principal: call.caller }, args)
+      },
+    }),
     defineTool({
       name: 'list_workflows',
       title: 'List booking workflows',

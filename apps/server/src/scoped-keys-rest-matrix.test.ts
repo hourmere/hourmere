@@ -98,6 +98,7 @@ const classes = {
   ],
   audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [
+    'POST /api/v1/workflows',
     'PUT /api/v1/audit-log/settings',
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
@@ -771,14 +772,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 125-operation contract and all 375 scope combinations', () => {
+    it('covers the exact 126-operation contract and all 378 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(125)
-      expect(new Set(ids).size).toBe(125)
+      expect(ids).toHaveLength(126)
+      expect(new Set(ids).size).toBe(126)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(375)
+      expect(cases).toHaveLength(378)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -833,7 +834,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           } else if (operation === 'GET /api/v1/bookings/export.csv') {
             expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
-          } else if (operation.startsWith('GET /api/v1/workflows')) {
+          } else if (operation.includes(' /api/v1/workflows')) {
             expect(await response.json()).toEqual({ error: 'workflows_disabled' })
           } else if (response.status !== 204) {
             const data = await response.json()

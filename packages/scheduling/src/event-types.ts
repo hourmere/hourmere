@@ -60,6 +60,7 @@ import {
   validateSuccessRedirect,
 } from './success-redirect.ts'
 import { cleanText } from './text.ts'
+import { lockWorkflowOwner } from './workflow-owner-lock.ts'
 
 export type { EventTypeLocation } from './location-options.ts'
 
@@ -628,6 +629,7 @@ export async function createEventType(
       if (personalOwnerId !== null ? personalOwnerId !== ctx.principal.user.id : !canManageTeam) {
         throw insufficientRole()
       }
+      await lockWorkflowOwner(trx, ctx.principal.organization.id, personalOwnerId)
       const schedulingType = input.schedulingType ?? 'individual'
       const hostIds = validHosts(
         input.hosts ?? [{ userId: ctx.principal.user.id }],

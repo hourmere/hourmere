@@ -1,13 +1,18 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { LOCATION_KINDS } from '@hourmere/scheduling'
+import { DomainError } from '@hourmere/scheduling/errors'
 import {
+  CreateWorkflowInputSchema,
+  createWorkflow,
   getWorkflow,
   listWorkflows,
   WORKFLOW_BOOKING_SOURCES,
   WORKFLOW_CONTENT_LOCALES,
   WORKFLOW_PAGE,
   WORKFLOW_RECIPIENT_CLASSES,
+  type WorkflowAuditPort,
   WorkflowTriggerSchema,
 } from '@hourmere/workflows'
 import {
@@ -17,9 +22,14 @@ import {
   json,
   type RouteModule,
 } from '../openapi.ts'
+import {
+  EXPECTED_ORGANIZATION_HEADER,
+  organizationContextAccess,
+  organizationContextWriteLock,
+} from '../team-management.ts'
 import { workflowsGuard } from '../workflows.ts'
 
-// Booking workflow definition reads (docs/workflows.md, step 4). Workflows are not available
+// Booking workflow definitions (docs/workflows.md). Workflows are not available
 // yet: every operation answers 404 workflows_disabled until they are enabled. The read
 // representation is the stored current revision's definition (the definition contract's
 // canonical form) with its identity, owner, current revision, live enabled flag and times.
@@ -181,6 +191,8 @@ export const ListWorkflowsInput = z.strictObject({
   cursor: ListWorkflowsQuery.shape.cursor,
 })
 
+export const CreateWorkflowInput = CreateWorkflowInputSchema.openapi('CreateWorkflowInput')
+
 const errors = {
   list: errorResponses({
     400: 'invalid_request or invalid_cursor',
@@ -193,10 +205,84 @@ const errors = {
 }
 
 /** Booking workflow definitions of the personal owner or team the caller acts as. */
-export function workflowRoutes({ db }: { db: Db }): RouteModule {
+export function workflowRoutes({ db, audit }: { db: Db; audit?: WorkflowAuditPort }): RouteModule {
+  const contextAccess =
+    (
+      principal: Principal,
+      expectedOrganizationId: string | undefined,
+      lock: boolean | 'key share' = false,
+    ) =>
+    async (trx: Db, organizationId: string) => {
+      try {
+        await organizationContextAccess(
+          principal,
+          expectedOrganizationId,
+          true,
+          lock,
+        )(trx, organizationId)
+      } catch (error) {
+        // Keep workflow ownership refusals opaque across session and agent credentials.
+        // A stale browser context remains a recoverable conflict.
+        if (error instanceof DomainError && error.code === 'team_management_access_denied')
+          throw new DomainError('not_found', 'workflow_not_found', 'No such workflow')
+        throw error
+      }
+    }
+  const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
+    db,
+    principal,
+    audit,
+    prepareOrganizationWrite: async (trx: Db) => {
+      await organizationContextWriteLock(principal)(trx)
+      await contextAccess(principal, expectedOrganizationId)(trx, principal.organization.id)
+    },
+    authorizeOrganizationWrite: contextAccess(principal, expectedOrganizationId, 'key share'),
+  })
   return ({ app, caller }) => {
     // The guard answers after the caller and its scope check, before input validation.
     const middleware = [caller, workflowsGuard] as [CallerMiddleware, typeof workflowsGuard]
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/workflows',
+        tags: ['Workflows'],
+        operationId: 'createWorkflow',
+        summary: 'Create a booking workflow',
+        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions are not available yet. Creation does not send mail.`,
+        security: authenticated,
+        middleware,
+        request: {
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Required for session writes: the organization where the action opened. Ignored for API keys.',
+            }),
+          }),
+          body: { required: true, content: json(CreateWorkflowInput) },
+        },
+        responses: {
+          201: {
+            description: 'Created workflow, or its stored definition on replay',
+            content: json(Workflow),
+          },
+          ...errorResponses({
+            400: 'invalid_request or invalid_workflow',
+            403: 'insufficient_scope or cross-origin session write',
+            404: 'workflows_disabled or workflow_not_found',
+            409: 'idempotency_key_reused, workflow_limit_reached or organization_context_changed',
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await createWorkflow(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('json'),
+          ),
+          201,
+        ),
+    )
+
     app.openapi(
       createRoute({
         method: 'get',

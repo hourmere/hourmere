@@ -134,6 +134,7 @@ notifications and trigger configured integrations.
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `create_workflow` | — | `workflows create` | `full` |
 | `list_workflows` | — | `workflows list` | `full, read` |
 | `get_workflow` | — | `workflows get` | `full, read` |
 
@@ -142,7 +143,12 @@ notifications and trigger configured integrations.
 `list_workflows` and `get_workflow` are listed before booking workflows are available:
 until they are enabled, `tools/list` omits them and a direct call by a `read` or `full` key
 returns `isError: true` with `workflows_disabled` (a `bookings` key still gets
-`insufficient_scope`). `workflows list` and `workflows get` report the same codes.
+`insufficient_scope`). `workflows list`, `workflows get` and `workflows create` report the same codes.
+`create_workflow` requires full scope and accepts `owner`, a retained `idempotencyKey`,
+and the definition fields (`name`, `scope`, `trigger`, `actions`, optional `enabled` and
+`conditions`). Identical normalized retries return the stored definition; changed input
+conflicts. IDs are server-generated, unknown fields are rejected, and webhook actions
+are not available yet.
 
 Scope is immutable: use **Create replacement** on `/app/api-keys`, update the client and
 revoke the old key. Legacy keys and native API creations that omit `metadata.scope` retain

@@ -1,6 +1,5 @@
-// Booking workflows: the definition contract, timer rules and definition reads behind the
-// hard-off constant (docs/workflows.md). Only the guarded reads touch the database, and
-// nothing sends mail or posts webhooks yet; later plan steps add writes and execution.
+// Booking workflows: definition creation and reads, the definition contract and timer rules
+// behind the hard-off constant (docs/workflows.md). Nothing sends mail or posts webhooks yet.
 
 export {
   hardOffWorkflowAuditPort,
@@ -19,6 +18,12 @@ export {
   WorkflowConditionSchema,
   WorkflowConditionsSchema,
 } from './conditions.ts'
+export {
+  type CreateWorkflowInput,
+  CreateWorkflowInputSchema,
+  createWorkflow,
+  type WorkflowCreateContext,
+} from './creates.ts'
 export {
   parseWorkflowDefinition,
   validateWorkflowDefinition,
