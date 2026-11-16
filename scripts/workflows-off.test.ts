@@ -1,19 +1,11 @@
-// Booking workflows stay hard-off (docs/workflows.md, "Rollout and limitations"). Step 4 ships
-// the definition reads while off: `GET /api/v1/workflows` (listWorkflows) and
-// `GET /api/v1/workflows/{id}` (getWorkflow), the MCP tools `list_workflows` and
-// `get_workflow`, the CLI commands `workflows list` and `workflows get`, and `/instance`
-// `workflowsEnabled`, which reports false. Each operation answers 404 workflows_disabled, and
-// tools/list omits the tools. Every other workflow route, OpenAPI path or operation, MCP tool,
-// CLI command and web page is still absent. The names come from the document's REST, MCP and
-// CLI table; only workflow-specific names are asserted, and no catalogue is snapshotted. Each
-// later step that adds an operation admits its own names here. Definition storage (step 2) is
-// read only by the guarded read service (packages/workflows/src/reads.ts), which names no
-// execution table; execution storage (step 3) and the creation keys (step 5) are tables only.
-// Every other production module stays away from the tables of migrations 0076, 0079 and 0087.
+// Workflow reads and creation ship behind the pinned hard-off guard. This inventory admits
+// only those interfaces and confines data access to the definition services below.
 import { randomUUID } from 'node:crypto'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { createRequire, isBuiltin } from 'node:module'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parse } from '@babel/parser'
 import type { CallerResolver, Principal } from '@hourmere/auth'
 import { createGoogleCalendarClient, createMicrosoftCalendarClient } from '@hourmere/calendars'
 import { createZoomClient } from '@hourmere/conferences'
@@ -46,8 +38,8 @@ const operations = [
   command: command as string,
 }))
 
-/** The operations step 4 ships while workflows are off; every other one is still absent. */
-const SHIPPED = ['listWorkflows', 'getWorkflow']
+/** The operations shipped while workflows are off; every other one is still absent. */
+const SHIPPED = ['listWorkflows', 'createWorkflow', 'getWorkflow']
 const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
 const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
 
@@ -96,10 +88,10 @@ const STORAGE_NAMES = new RegExp(
   `workflow-storage|(?<![A-Za-z0-9_])(?:${[...STORAGE_TABLES, ...STORAGE_TABLES.map(rowType)].join('|')})(?![A-Za-z0-9_])`,
   'i',
 )
-// The modules that own workflow data access: only the guarded definition reads so far, which
-// read the definition tables of migration 0076 and no execution table.
-const DATA_ACCESS = ['packages/workflows/src/reads.ts']
-const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions']
+// The modules that own workflow data access: the guarded definition reads and creation;
+// no execution table is accessed.
+const DATA_ACCESS = ['packages/workflows/src/reads.ts', 'packages/workflows/src/creates.ts']
+const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -124,6 +116,116 @@ function productionSources(): string[] {
       }
     }
   return files.sort()
+}
+
+// Frozen alongside the package hard-off module: availability and tool discovery must never
+// acquire a configuration, environment or caller-controlled escape hatch.
+const FROZEN_SERVER_GUARD_STATEMENTS = [
+  `import { DomainError } from '@hourmere/scheduling'`,
+  `import { requireWorkflowsImplemented, workflowOperation } from '@hourmere/workflows'`,
+  `import type { Context, Next } from 'hono'`,
+  `import { createMiddleware } from 'hono/factory'`,
+  `import type { CallerEnv } from './caller.ts'`,
+  `import type { Tool } from './mcp/tools.ts'`,
+  `export const workflowsGuard = createMiddleware<CallerEnv>(
+  workflowOperation(async (_c: Context<CallerEnv>, next: Next) => {
+    await next()
+  }),
+)`,
+  `export function workflowFeatureTools(tools: readonly Tool[]): Tool[] {
+  return tools.map((tool) => ({ ...tool, requireAvailable: requireWorkflowsImplemented }))
+}`,
+  `export function workflowsAvailable(): boolean {
+  try {
+    requireWorkflowsImplemented()
+    return true
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'workflows_disabled') return false
+    throw error
+  }
+}`,
+]
+
+// Protect real source identities, including re-exports and the services behind the guard.
+const PROTECTED_MOCK_FILES = new Set(
+  [
+    ...productionSources().filter((file) => file.startsWith('packages/workflows/src/')),
+    'apps/server/src/workflows.ts',
+  ].map((file) => realpathSync(new URL(file, root))),
+)
+
+/** Resolve from the importing test, with TypeScript's .js-to-.ts source substitution. */
+function mockTarget(name: string, testFile: string): string | undefined {
+  if (isBuiltin(name)) return name
+  try {
+    const path = name.startsWith('file:')
+      ? fileURLToPath(name)
+      : name.startsWith('.') || isAbsolute(name)
+        ? resolve(dirname(testFile), name)
+        : // Workspace export maps resolve package names/subpaths to their source entry.
+          createRequire(testFile).resolve(name)
+    for (const candidate of [
+      path.replace(/\.js$/, '.ts'),
+      path,
+      `${path}.ts`,
+      `${path}.js`,
+      join(path, 'index.ts'),
+      join(path, 'index.js'),
+    ]) {
+      try {
+        if (statSync(candidate).isFile()) return realpathSync(candidate)
+      } catch {
+        // Try the next source extension or directory entry.
+      }
+    }
+  } catch {
+    // An unresolved target cannot be proved to leave the guards intact.
+  }
+  return undefined
+}
+
+/**
+ * Reject protected module mocks and unresolved targets conservatively. Runtime-built paths
+ * cannot prove they leave the guards intact. Inspect syntax, not adjacent source text, so
+ * computed member names, namespace aliases and dynamic-import mock syntax are covered.
+ * This is a source guard, not a JavaScript interpreter: extracted/aliased mock functions,
+ * eval and custom test-loader aliases/indirection still require review. Node export maps
+ * cover the workspace packages; unresolved literals and runtime-built paths fail closed.
+ */
+function hasWorkflowMock(source: string, testFile: string): boolean {
+  let forbidden = false
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+    if (!isRecord(value)) return
+    if (value.type === 'CallExpression' && isRecord(value.callee)) {
+      const callee = value.callee
+      const property = isRecord(callee.property) ? callee.property : undefined
+      const method = callee.computed ? property?.value : property?.name
+      if (
+        callee.type === 'MemberExpression' &&
+        (method === 'mock' || method === 'doMock' || method === 'importMock')
+      ) {
+        let target = Array.isArray(value.arguments) ? value.arguments[0] : undefined
+        if (isRecord(target) && target.type === 'ImportExpression') target = target.source
+        if (
+          isRecord(target) &&
+          target.type === 'CallExpression' &&
+          isRecord(target.callee) &&
+          target.callee.type === 'Import'
+        )
+          target = Array.isArray(target.arguments) ? target.arguments[0] : undefined
+        const name = isRecord(target) && target.type === 'StringLiteral' ? target.value : undefined
+        const resolved = typeof name === 'string' ? mockTarget(name, testFile) : undefined
+        if (resolved === undefined || PROTECTED_MOCK_FILES.has(resolved)) forbidden = true
+      }
+    }
+    Object.values(value).forEach(visit)
+  }
+  visit(parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] }).program)
+  return forbidden
 }
 
 /** API-key callers the production assembly's resolver accepts; no database is contacted. */
@@ -232,7 +334,7 @@ const toolError = (message: Awaited<ReturnType<typeof mcp>>) => {
   return JSON.parse(message.result?.content?.[0]?.text ?? '{}')
 }
 
-describe('booking workflows are off and expose only the step 4 reads', () => {
+describe('booking workflows are off and expose only definition reads and creation', () => {
   it('reads every documented workflow operation from the design', () => {
     expect(operations.map(({ operationId }) => operationId)).toEqual([
       'listWorkflows',
@@ -248,11 +350,12 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     expect(document).toContain('`workflowsEnabled`')
     expect(shipped.map(({ method, path }) => `${method} ${path}`)).toEqual([
       'GET /api/v1/workflows',
+      'POST /api/v1/workflows',
       'GET /api/v1/workflows/{id}',
     ])
   })
 
-  it('publishes only the read paths, operations and the instance field in OpenAPI', async () => {
+  it('publishes only the definition paths, operations and the instance field in OpenAPI', async () => {
     const openapi = (await openApiDocument()) as Record<string, unknown>
     expect(isRecord(openapi.paths)).toBe(true)
     const paths = openapi.paths as Record<string, Record<string, unknown>>
@@ -278,7 +381,9 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       '/api/v1/workflows/{id}',
     ])
     for (const path of ['/api/v1/workflows', '/api/v1/workflows/{id}'])
-      expect(Object.keys(paths[path] ?? {}), path).toEqual(['get'])
+      expect(Object.keys(paths[path] ?? {}).sort(), path).toEqual(
+        path === '/api/v1/workflows' ? ['get', 'post'] : ['get'],
+      )
     expect(
       operationIds.filter((id) => typeof id === 'string' && /workflow/i.test(id)).sort(),
     ).toEqual([...SHIPPED].sort())
@@ -288,7 +393,7 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     expect(instance?.properties).toHaveProperty(['workflowsEnabled', 'type'], 'boolean')
   })
 
-  it('serves only the read routes, each refusing while off, and reports workflows off', async () => {
+  it('serves only the definition routes, each refusing while off, and reports workflows off', async () => {
     const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
     const db = createDb(createPool(databaseUrl))
     try {
@@ -319,27 +424,34 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       // any input, before validation or lookup (the pool's address refuses connections). The
       // requests come from the registered routes, so a later route is checked the same way.
       const urls = workflowRoutes.flatMap((route) => {
-        const path = (route.split(' ')[1] as string).replaceAll(':id', 'not-a-uuid')
+        const [method, rawPath] = route.split(' ')
+        const path = (rawPath as string).replaceAll(':id', 'not-a-uuid')
         return [
           path,
           `${path}?ownerKind=personal&ownerId=${keys.full.user.id}`,
           `${path}?ownerKind=nobody&limit=0&cursor=x`,
           path.replace('not-a-uuid', randomUUID()),
-        ]
+        ].map((url) => ({ method, url }))
       })
-      expect(urls).toContain('/api/v1/workflows')
-      expect(urls).toContain('/api/v1/workflows/not-a-uuid')
-      for (const url of urls) {
+      expect(urls.map(({ url }) => url)).toContain('/api/v1/workflows')
+      expect(urls.map(({ url }) => url)).toContain('/api/v1/workflows/not-a-uuid')
+      for (const { method, url } of urls) {
         for (const scope of ['full', 'read'] as const) {
-          const res = await app.request(url, { headers: { authorization: bearer(scope) } })
-          expect(res.status, `${scope} ${url}`).toBe(404)
-          expect(await res.json()).toEqual({ error: 'workflows_disabled' })
+          const res = await app.request(url, { method, headers: { authorization: bearer(scope) } })
+          const refusedScope = method === 'POST' && scope === 'read'
+          expect(res.status, `${scope} ${method} ${url}`).toBe(refusedScope ? 403 : 404)
+          expect(await res.json()).toMatchObject({
+            error: refusedScope ? 'insufficient_scope' : 'workflows_disabled',
+          })
           expect(res.headers.get('cache-control')).toBe('no-store')
         }
-        const bookings = await app.request(url, { headers: { authorization: bearer('bookings') } })
+        const bookings = await app.request(url, {
+          method,
+          headers: { authorization: bearer('bookings') },
+        })
         expect(bookings.status, url).toBe(403)
         expect(await bookings.json()).toMatchObject({ error: 'insufficient_scope' })
-        expect((await app.request(url)).status, url).toBe(401)
+        expect((await app.request(url, { method })).status, url).toBe(401)
       }
       const instance = await app.request('/api/v1/instance')
       expect(instance.status).toBe(200)
@@ -349,7 +461,7 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     }
   })
 
-  it('catalogues only the read tools, lists none of them and refuses direct calls', async () => {
+  it('catalogues only the definition tools, lists none of them and refuses direct calls', async () => {
     // No handlers run and no connection opens; the pool is still closed explicitly.
     const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
     const db = createDb(createPool(databaseUrl))
@@ -359,8 +471,8 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       )
       expect(names).toContain('create_booking')
       for (const { tool } of absent) expect(names).not.toContain(tool)
-      expect(names.filter((name) => /workflow/i.test(name))).toEqual(
-        shipped.map(({ tool }) => tool),
+      expect(names.filter((name) => /workflow/i.test(name)).sort()).toEqual(
+        shipped.map(({ tool }) => tool).sort(),
       )
       const app = productionApp(db, databaseUrl)
       for (const scope of ['full', 'read'] as const) {
@@ -371,7 +483,12 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
           for (const args of [{}, { owner: { kind: 'personal', id: randomUUID() } }, { id: 'x' }])
             expect(
               toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
-            ).toEqual({ error: 'workflows_disabled' })
+            ).toMatchObject({
+              error:
+                tool === 'create_workflow' && scope === 'read'
+                  ? 'insufficient_scope'
+                  : 'workflows_disabled',
+            })
       }
       // The API-key scope check keeps its precedence over the switch.
       for (const { tool } of shipped)
@@ -383,7 +500,7 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     }
   })
 
-  it('offers only the read CLI commands and no web page', () => {
+  it('offers only the definition CLI commands and no web page', () => {
     const commands = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),
@@ -396,8 +513,10 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       expect(commands).not.toContain(tool)
     }
     expect(
-      Object.entries(COMMANDS).filter(([command, tool]) => /workflow/i.test(command + tool)),
-    ).toEqual(shipped.map(({ command, tool }) => [command, tool]))
+      Object.entries(COMMANDS)
+        .filter(([command, tool]) => /workflow/i.test(command + tool))
+        .sort(),
+    ).toEqual(shipped.map(({ command, tool }) => [command, tool]).sort())
     expect(Object.keys(REST_COMMANDS).filter((name) => /workflow/i.test(name))).toEqual([])
     expect(HELP).toContain('workflows_disabled')
     expect(
@@ -445,7 +564,7 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
 
-  it('keeps the workflow storage tables unreferenced outside storage and the guarded reads', () => {
+  it('keeps the workflow storage tables unreferenced outside storage and the guarded definitions', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     expect(sources).toContain('apps/server/src/server.ts')
@@ -464,7 +583,7 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
       .filter((file) => !isStorageLayer(file) && !DATA_ACCESS.includes(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
-    // The definition reads name the definition tables only, never an execution table.
+    // The definition services name the definition tables and creation keys only, never an execution table.
     const executionNames = new RegExp(
       `(?<![A-Za-z0-9_])(?:${STORAGE_TABLES.filter((table) => !DEFINITION_TABLES.includes(table))
         .flatMap((table) => [table, rowType(table)])
@@ -474,14 +593,17 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     expect(executionNames.test('selectFrom("workflow_runs")')).toBe(true)
     for (const file of DATA_ACCESS)
       expect(executionNames.test(readFileSync(new URL(file, root), 'utf8')), file).toBe(false)
-    // Only the package entry loads the data-access module, so every production caller gets
-    // the guarded operations and never the internal services behind them.
+    // Only the package entry and the creation service load definition modules. Production
+    // callers outside those modules receive only the guarded operations.
     const loaders = sources.filter((file) =>
-      /['"`](?:\.\/reads|[^'"`]*workflows\/src\/reads)(?:\.ts)?['"`]/.test(
+      /['"`](?:\.\/(?:reads|creates)|[^'"`]*workflows\/src\/(?:reads|creates))(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
-    expect(loaders).toEqual(['packages/workflows/src/index.ts'])
+    expect(loaders).toEqual([
+      'packages/workflows/src/creates.ts',
+      'packages/workflows/src/index.ts',
+    ])
   })
 
   it('exposes no storage module through a package entry point', () => {
@@ -513,18 +635,72 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     ).toEqual([])
   })
 
+  it('pins every statement of the server guard and discovery helpers', () => {
+    const source = readFileSync(new URL('apps/server/src/workflows.ts', root), 'utf8')
+    const program = parse(source, { sourceType: 'module', plugins: ['typescript'] }).program
+    expect(program.interpreter ?? null).toBeNull()
+    expect(program.directives).toEqual([])
+    expect(
+      program.body.map((statement) => source.slice(statement.start ?? 0, statement.end ?? 0)),
+    ).toEqual(FROZEN_SERVER_GUARD_STATEMENTS)
+  })
+
+  it.each(['mock', 'doMock', 'importMock'])(
+    'rejects resolved protected targets passed to %s',
+    (method) => {
+      const file = fileURLToPath(new URL('apps/server/src/mock-fixture.test.ts', root))
+      for (const target of [
+        '../../../packages/workflows/src/index.ts',
+        '../../../packages/workflows/src/index.js',
+        '../../../packages/workflows/src/index',
+        '../../../packages/workflows/src',
+        '@hourmere/workflows',
+        './workflows.js',
+        './workflows.ts',
+        './workflows',
+        './mcp/../workflows.js',
+        '../../../packages/workflows/src/creates.ts',
+        '../../../packages/workflows/src/creates.js',
+        '../../../packages/workflows/src/reads',
+        '../../../packages/workflows/src/hard-off.ts',
+        fileURLToPath(new URL('packages/workflows/src/index.ts', root)),
+        new URL('packages/workflows/src/creates.ts', root).href,
+      ]) {
+        const source = `vi.${method}(${JSON.stringify(target)}, () => ({}))`
+        expect(hasWorkflowMock(source, file), source).toBe(true)
+      }
+      // Ordinary package and sibling mocks still resolve from this test's directory.
+      for (const target of ['node:fs', '@hourmere/core/locales', './caller.ts', './caller.js']) {
+        const source = `vi.${method}(${JSON.stringify(target)}, () => ({}))`
+        expect(hasWorkflowMock(source, file), source).toBe(false)
+      }
+    },
+  )
+
+  it('recognises computed paths and mock syntax without executing source', () => {
+    const file = fileURLToPath(new URL('packages/workflows/src/mock-fixture.test.ts', root))
+    for (const source of [
+      "vi.mock('./hard-off.ts', () => ({}))",
+      'vi.doMock(seam, () => ({}))',
+      "vi.importMock('./' + moduleName)",
+      "vi.mock('./unknown-module.ts', () => ({}))",
+      "vitest['doMock']('./hard-off.ts', () => ({}))",
+      "vi.mock(import('@hourmere/workflows'), () => ({}))",
+    ])
+      expect(hasWorkflowMock(source, file), source).toBe(true)
+    expect(hasWorkflowMock('vi.mocked(fn).mockResolvedValue(true)', file)).toBe(false)
+    expect(hasWorkflowMock("vi.importActual('@hourmere/workflows')", file)).toBe(false)
+  })
+
   it('lets exactly one test file replace the hard-off module', () => {
-    // The sanctioned seam for the enabled read path; every other test sees the real guards.
+    // The sanctioned seam for enabled definition operations; every other test sees the real guards.
     const mocking: string[] = []
     const walk = (directory: string) => {
       for (const entry of readdirSync(directory)) {
         if (['node_modules', 'dist', '.git', 'temp'].includes(entry)) continue
         const path = join(directory, entry)
         if (statSync(path).isDirectory()) walk(path)
-        else if (
-          /\.test\.tsx?$/.test(entry) &&
-          /vi\.(?:do)?[mM]ock\([^)]*hard-off/.test(readFileSync(path, 'utf8'))
-        )
+        else if (/\.test\.tsx?$/.test(entry) && hasWorkflowMock(readFileSync(path, 'utf8'), path))
           mocking.push(relative(fileURLToPath(root), path))
       }
     }
@@ -533,20 +709,23 @@ describe('booking workflows are off and expose only the step 4 reads', () => {
     expect(mocking).toEqual(['apps/server/src/workflows-enabled.test.ts'])
   })
 
-  it('exports only the guarded reads, which refuse before touching their context', async () => {
-    const exported = Object.keys(workflows).filter((name) => /^(?:list|get)Workflow/.test(name))
-    expect(exported.sort()).toEqual(['getWorkflow', 'listWorkflows'])
+  it('exports only the guarded definition operations, which refuse before touching their context', async () => {
+    const exported = Object.keys(workflows).filter((name) =>
+      /^(?:list|get|create)Workflow/.test(name),
+    )
+    expect(exported.sort()).toEqual(['createWorkflow', 'getWorkflow', 'listWorkflows'])
     const untouchable = new Proxy(
       {},
       {
         get: () => {
-          throw new Error('a guarded read must not touch its context while off')
+          throw new Error('a guarded operation must not touch its context while off')
         },
       },
-    ) as Parameters<typeof workflows.listWorkflows>[0]
+    ) as Parameters<typeof workflows.createWorkflow>[0]
     for (const read of [
       () => workflows.listWorkflows(untouchable, { owner: { kind: 'team', id: randomUUID() } }),
       () => workflows.getWorkflow(untouchable, randomUUID()),
+      () => workflows.createWorkflow(untouchable, {} as never),
     ])
       await expect(read()).rejects.toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
   })

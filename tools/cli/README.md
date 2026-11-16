@@ -281,6 +281,11 @@ ownership and team permissions still apply. See the
 `{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)
 read booking workflows with a `read` or `full` key. Booking workflows are not available yet:
 until they are enabled on the instance both commands exit `1` with `workflows_disabled`.
+`workflows create` requires a `full` key and is also unavailable. Its JSON input carries
+`owner`, a retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`, and optional
+`enabled` and `conditions`. Identical normalized retries return the stored definition;
+changed input conflicts. IDs are server-generated; unknown fields and webhook actions
+are rejected.
 
 Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking list's
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.

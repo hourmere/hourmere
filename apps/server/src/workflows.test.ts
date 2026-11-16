@@ -140,14 +140,48 @@ describe('workflow REST operations while off', () => {
   })
 })
 
+describe('workflow creation REST while off', () => {
+  it('checks caller and write scope before the switch, and the switch before JSON validation', async () => {
+    const { app, db } = appWith()
+    try {
+      for (const [token, status, body] of [
+        ['hm_full', 404, disabled],
+        ['hm_read', 403, denial],
+        ['hm_bookings', 403, denial],
+        ['hm_unknown', 401, { error: 'unauthorized' }],
+      ] as const) {
+        for (const input of [
+          '{',
+          '{}',
+          JSON.stringify({ id: randomUUID(), actions: [{ type: 'webhook' }] }),
+        ]) {
+          const response = await app.request('/api/v1/workflows', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+            body: input,
+          })
+          expect(response.status).toBe(status)
+          expect(await response.json()).toEqual(body)
+        }
+      }
+    } finally {
+      await db.destroy()
+    }
+  })
+})
+
 describe('workflow MCP tools while off', () => {
   it('stay in the catalog, marked unavailable by the workflow guard', () => {
     const tools = workflowTools({ db: {} as never })
-    expect(tools.map(({ name }) => name)).toEqual(['list_workflows', 'get_workflow'])
+    expect(tools.map(({ name }) => name)).toEqual([
+      'create_workflow',
+      'list_workflows',
+      'get_workflow',
+    ])
     for (const tool of tools) {
       expect(tool.requireEnabled).toBeUndefined()
       expect(tool.annotations).toEqual({
-        readOnlyHint: true,
+        readOnlyHint: tool.name !== 'create_workflow',
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,
@@ -167,6 +201,7 @@ describe('workflow MCP tools while off', () => {
         const listed = await rpc(app, authorization, { method: 'tools/list', params: {} })
         expect(listed.result.tools).toEqual([])
         for (const [name, args] of [
+          ['create_workflow', {}],
           ['list_workflows', {}],
           ['list_workflows', { owner: { kind: 'personal', id: user.id } }],
           ['list_workflows', 'not an object'],
@@ -183,11 +218,13 @@ describe('workflow MCP tools while off', () => {
             continue
           }
           expect(called.result.isError, `${authorization} ${name}`).toBe(true)
-          expect(textOf(called.result)).toEqual(disabled)
+          expect(textOf(called.result)).toEqual(
+            name === 'create_workflow' && authorization === 'Bearer hm_read' ? denial : disabled,
+          )
         }
       }
       // The API-key scope check keeps its precedence.
-      for (const name of ['list_workflows', 'get_workflow']) {
+      for (const name of ['create_workflow', 'list_workflows', 'get_workflow']) {
         const called = await rpc(app, 'Bearer hm_bookings', {
           method: 'tools/call',
           params: { name, arguments: { id: 'x' } },
@@ -207,7 +244,7 @@ describe('workflow MCP tools while off', () => {
         const read = await runTool(tool, args, { caller: key('read'), rateLimit: () => {} }, () => {
           throw new Error('nothing is logged')
         })
-        expect(textOf(read as never)).toEqual(disabled)
+        expect(textOf(read as never)).toEqual(tool.name === 'create_workflow' ? denial : disabled)
         const bookings = await runTool(
           tool,
           args,
@@ -223,7 +260,9 @@ describe('workflow MCP tools while off', () => {
   it('treat an asynchronous or failing availability check as unavailable', async () => {
     const probe = (name: string, requireAvailable: () => unknown): Tool =>
       ({
-        ...(workflowTools({ db: {} as never })[0] as Tool),
+        ...(workflowTools({ db: {} as never }).find(
+          (tool) => tool.name === 'list_workflows',
+        ) as Tool),
         name,
         requireAvailable,
         run: vi.fn(async () => ({ data: [], nextCursor: null })),
@@ -281,6 +320,7 @@ describe('workflow CLI commands while off', () => {
   it.each([
     ['list', 'list_workflows', { owner: { kind: 'team', id: organization.id }, limit: 5 }],
     ['get', 'get_workflow', { id: randomUUID() }],
+    ['create', 'create_workflow', {}],
   ] as const)(
     'workflows %s calls %s and reports workflows_disabled',
     async (command, tool, input) => {
@@ -291,7 +331,7 @@ describe('workflow CLI commands while off', () => {
         const fetcher = vi.fn<typeof fetch>(async (request, init) => app.request(request, init))
         const code = await runCli({
           argv: ['workflows', command, '--input', '-'],
-          env: { HOURMERE_URL: URL, HOURMERE_API_KEY: 'hm_read' },
+          env: { HOURMERE_URL: URL, HOURMERE_API_KEY: 'hm_full' },
           stdin: (async function* () {
             yield JSON.stringify(input)
           })(),
@@ -315,14 +355,14 @@ describe('workflow CLI commands while off', () => {
     },
   )
 
-  it.each([['workflows'], ['workflows', 'create'], ['workflows', 'runs'], ['workflow', 'list']])(
+  it.each([['workflows'], ['workflows', 'runs'], ['workflow', 'list']])(
     'refuses %j as an unknown command without calling the server',
     async (...argv) => {
       const fetcher = vi.fn<typeof fetch>()
       let stderr = ''
       const code = await runCli({
         argv,
-        env: { HOURMERE_URL: URL, HOURMERE_API_KEY: 'hm_read' },
+        env: { HOURMERE_URL: URL, HOURMERE_API_KEY: 'hm_full' },
         stdin: (async function* () {})(),
         stdout: () => {},
         stderr: (text) => {

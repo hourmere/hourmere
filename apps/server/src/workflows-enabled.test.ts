@@ -1,7 +1,7 @@
-// The workflow read path through REST, MCP and the CLI, as it will behave once workflows are
+// The workflow definition paths through REST, MCP and the CLI, as it will behave once workflows are
 // enabled. The constant stays false and pinned: this file alone replaces the hard-off module
 // with WORKFLOWS_IMPLEMENTED-equivalent guards (a test-only module mock, not an option any
-// production code can pass), so the transports reach the read services. It checks scope and
+// production code can pass), so the transports reach the definition services. It checks scope and
 // role decisions, opaque refusals, the response schema and the parity of the three transports.
 import { randomUUID } from 'node:crypto'
 import '@hono/zod-openapi'
@@ -45,7 +45,7 @@ vi.mock('../../../packages/workflows/src/hard-off.ts', () => ({
 const serverUrl = process.env.DATABASE_URL
 const URL = 'http://localhost:4188'
 
-describe.skipIf(!serverUrl)('workflow reads once workflows are enabled', () => {
+describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', () => {
   let owned: TestDatabase
   let db: Db
   let owner: TestUser
@@ -172,8 +172,11 @@ describe.skipIf(!serverUrl)('workflow reads once workflows are enabled', () => {
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller,
-      routes: [workflowRoutes({ db }), instanceRoutes({ publicUrl: URL, socialProviders: {} })],
-      mcp: mcpEndpoint({ tools: workflowTools({ db }) }),
+      routes: [
+        workflowRoutes({ db, audit: { record: async () => {} } }),
+        instanceRoutes({ publicUrl: URL, socialProviders: {} }),
+      ],
+      mcp: mcpEndpoint({ tools: workflowTools({ db, audit: { record: async () => {} } }) }),
     })
   })
   afterAll(async () => {
@@ -203,7 +206,11 @@ describe.skipIf(!serverUrl)('workflow reads once workflows are enabled', () => {
       expect(await got.json()).toEqual(expected.data[0])
 
       const tools = (await mcp(token, 'tools/list')).tools.map(({ name }: { name: string }) => name)
-      expect(tools).toEqual(['list_workflows', 'get_workflow'])
+      expect(tools).toEqual(
+        scope === 'full'
+          ? ['create_workflow', 'list_workflows', 'get_workflow']
+          : ['list_workflows', 'get_workflow'],
+      )
       const called = await mcp(token, 'tools/call', {
         name: 'list_workflows',
         arguments: { owner: { kind: 'personal', id: owner.id } },
@@ -333,6 +340,191 @@ describe.skipIf(!serverUrl)('workflow reads once workflows are enabled', () => {
       arguments: { owner: { kind: 'personal', id: owner.id }, extra: true },
     })
     expect(toolError(invalid)).toMatchObject({ error: 'invalid_request' })
+  })
+
+  const createInput = () => ({
+    owner: { kind: 'personal' as const, id: owner.id },
+    idempotencyKey: randomUUID(),
+    name: 'Created workflow',
+    ...candidate({ scope: { type: 'all_event_types' }, enabled: false }),
+  })
+  const post = (token: string, input: object) =>
+    app.request('/api/v1/workflows', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+
+  it('creates and replays one definition over REST, MCP and CLI', async () => {
+    const token = bearer(owner, 'full')
+    const input = createInput()
+    const created = await post(token, input)
+    expect(created.status).toBe(201)
+    const body = await created.json()
+    expect(Workflow.parse(body)).toEqual(body)
+    expect(body).toMatchObject({
+      owner: input.owner,
+      revision: 1,
+      enabled: false,
+      name: input.name,
+    })
+    expect((await post(token, input)).status).toBe(201)
+    expect(
+      (await mcp(token, 'tools/call', { name: 'create_workflow', arguments: input }))
+        .structuredContent,
+    ).toEqual(body)
+    const command = await cli(token, ['workflows', 'create'], input)
+    expect(command.code).toBe(0)
+    expect(JSON.parse(command.stdout)).toEqual(body)
+    const changed = await post(token, { ...input, name: 'Changed replay' })
+    expect(changed.status).toBe(409)
+    expect(await changed.json()).toMatchObject({ error: 'idempotency_key_reused' })
+  })
+
+  it('rejects read keys, team members and foreign owner contexts for creation on every surface', async () => {
+    for (const [token, input, status, code] of [
+      [bearer(owner, 'read'), createInput(), 403, 'insufficient_scope'],
+      [
+        bearer(member, 'full', team),
+        { ...createInput(), owner: { kind: 'team', id: team.id } },
+        404,
+        'workflow_not_found',
+      ],
+      [
+        bearer(owner, 'full'),
+        { ...createInput(), owner: { kind: 'personal', id: outsider.id } },
+        404,
+        'workflow_not_found',
+      ],
+      [
+        bearer(owner, 'full'),
+        { ...createInput(), owner: { kind: 'team', id: team.id } },
+        404,
+        'workflow_not_found',
+      ],
+      [bearer(owner, 'full', team), createInput(), 404, 'workflow_not_found'],
+    ] as const) {
+      const response = await post(token, input)
+      expect(response.status).toBe(status)
+      expect(await response.json()).toMatchObject({ error: code })
+      expect(
+        toolError(await mcp(token, 'tools/call', { name: 'create_workflow', arguments: input })),
+      ).toMatchObject({ error: code })
+      const command = await cli(token, ['workflows', 'create'], input)
+      expect(command.code).toBe(1)
+      expect(JSON.parse(command.stderr)).toMatchObject({ error: code })
+    }
+  })
+
+  it('rejects caller IDs, unknown fields and webhook actions on every creation surface', async () => {
+    const token = bearer(owner, 'full')
+    const before = await db.selectFrom('workflow_definitions').select('id').execute()
+    for (const extra of [
+      { id: randomUUID() },
+      { unexpected: true },
+      { actions: [{ type: 'webhook', webhookId: randomUUID() }] },
+    ]) {
+      const input = { ...createInput(), ...extra }
+      const response = await post(token, input)
+      expect(response.status).toBe(400)
+      const code = 'actions' in extra ? 'invalid_workflow' : 'invalid_request'
+      expect(await response.json()).toMatchObject({ error: code })
+      expect(
+        toolError(await mcp(token, 'tools/call', { name: 'create_workflow', arguments: input })),
+      ).toMatchObject({ error: code })
+      const command = await cli(token, ['workflows', 'create'], input)
+      expect(command.code).toBe(1)
+      expect(JSON.parse(command.stderr)).toMatchObject({ error: code })
+    }
+    expect(await db.selectFrom('workflow_definitions').select('id').execute()).toEqual(before)
+  })
+
+  it('binds browser creation to its live session context while keeping owner refusals opaque', async () => {
+    async function session(user: TestUser, acting?: TestTeam) {
+      const base = acting ? acting.as(user) : user.principal
+      const token = randomUUID()
+      const row = await db
+        .insertInto('auth.session')
+        .values({
+          userId: user.id,
+          token,
+          updatedAt: new Date(),
+          expiresAt: new Date(Date.now() + 3_600_000),
+          activeOrganizationId: base.organization.id,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      tokens.set(token, { ...base, kind: 'session', sessionId: row.id })
+      return { token, id: row.id }
+    }
+    const browserPost = (token: string, input: object, expected?: string) =>
+      app.request('/api/v1/workflows', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          origin: URL,
+          'content-type': 'application/json',
+          ...(expected === undefined ? {} : { 'x-expected-organization-id': expected }),
+        },
+        body: JSON.stringify(input),
+      })
+    const personal = await session(owner)
+    expect(
+      (await browserPost(personal.token, createInput(), owner.principal.organization.id)).status,
+    ).toBe(201)
+    for (const user of [owner, admin]) {
+      const current = await session(user, team)
+      const input = { ...createInput(), owner: { kind: 'team', id: team.id } }
+      expect((await browserPost(current.token, input, team.id)).status).toBe(201)
+    }
+    const ordinary = await session(member, team)
+    const before = await db.selectFrom('workflow_definitions').select('id').execute()
+    for (const selected of [
+      { kind: 'team', id: team.id },
+      { kind: 'team', id: randomUUID() },
+      { kind: 'personal', id: outsider.id },
+    ]) {
+      const response = await browserPost(
+        ordinary.token,
+        { ...createInput(), owner: selected },
+        team.id,
+      )
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({
+        error: 'workflow_not_found',
+        message: 'No such workflow',
+      })
+    }
+    for (const selected of [
+      { kind: 'team', id: team.id },
+      { kind: 'personal', id: outsider.id },
+    ]) {
+      const response = await browserPost(
+        personal.token,
+        { ...createInput(), owner: selected },
+        owner.principal.organization.id,
+      )
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({
+        error: 'workflow_not_found',
+        message: 'No such workflow',
+      })
+    }
+    for (const expected of [undefined, 'not-an-id', team.id]) {
+      const response = await browserPost(personal.token, createInput(), expected)
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'organization_context_changed' })
+    }
+    // Resolver metadata can lag a real session switch; the live row fences the write.
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: team.id })
+      .where('id', '=', personal.id)
+      .execute()
+    const stale = await browserPost(personal.token, createInput(), owner.principal.organization.id)
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toMatchObject({ error: 'organization_context_changed' })
+    expect(await db.selectFrom('workflow_definitions').select('id').execute()).toEqual(before)
   })
 
   it('reports the guard decision on /instance', async () => {

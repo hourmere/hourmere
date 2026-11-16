@@ -12,6 +12,7 @@ import * as workflows from '@hourmere/workflows'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { hardOffWorkflowAuditPort } from './audit.ts'
+import { CreateWorkflowInputSchema, createWorkflow } from './creates.ts'
 import * as hardOff from './hard-off.ts'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
@@ -21,6 +22,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url))
  * could wrap a guard and run its operation while off) must be added here, and so reviewed.
  */
 const PACKAGE_EXPORTS = [
+  'CreateWorkflowInputSchema',
   'PERSONAL_ONLY_CONDITION_FIELDS',
   'WORKFLOWS_IMPLEMENTED',
   'WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES',
@@ -58,6 +60,8 @@ const PACKAGE_EXPORTS = [
   'WorkflowOwnerSelectorSchema',
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
+  // Definition creation is workflowOperation-wrapped, so off while hard-off.
+  'createWorkflow',
   'evaluateConditions',
   // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
   'getWorkflow',
@@ -194,6 +198,8 @@ describe('workflow hard-off', () => {
     for (const [name, value] of Object.entries(hardOff))
       expect((workflows as Record<string, unknown>)[name], name).toBe(value)
     expect(Object.keys(workflows).sort()).toEqual(PACKAGE_EXPORTS)
+    expect(workflows.createWorkflow).toBe(createWorkflow)
+    expect(workflows.CreateWorkflowInputSchema).toBe(CreateWorkflowInputSchema)
   })
 
   it('exports the constant and its guards only, with no way to change them', () => {
@@ -373,6 +379,9 @@ describe('workflow hard-off', () => {
       '@hourmere/scheduling/errors',
       '@hourmere/scheduling/text',
     ])
+    // Creation adds hashing, scope enforcement and SQL; these dependencies are confined to
+    // that service, while hard-off.ts and the other modules keep the existing import pin.
+    const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
     const own = sources.filter(
       (path) => path.startsWith('packages/workflows/src/') && !path.endsWith('/testing.ts'),
     )
@@ -386,7 +395,12 @@ describe('workflow hard-off', () => {
         (match) => match[1] as string,
       )
       expect(
-        specifiers.filter((specifier) => !specifier.startsWith('./') && !allowed.has(specifier)),
+        specifiers.filter(
+          (specifier) =>
+            !specifier.startsWith('./') &&
+            !allowed.has(specifier) &&
+            !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)),
+        ),
         file,
       ).toEqual([])
     }

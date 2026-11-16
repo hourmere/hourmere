@@ -56,6 +56,7 @@ export const COMMANDS = {
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
+  'workflows create': 'create_workflow',
   'workflows list': 'list_workflows',
   'workflows get': 'get_workflow',
 } as const
@@ -67,7 +68,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
-       hourmere workflows list|get [--input FILE|-] [--url ORIGIN]
+       hourmere workflows list|get|create [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
@@ -85,7 +86,8 @@ Commands: whoami, profile, catalog, event, create-event, update-event,
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
-           Read or full scope. Not available yet: both answer workflows_disabled until booking
+           workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
+           Read or full scope for reads; full scope for create. All answer workflows_disabled until booking
            workflows are enabled on the instance.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention

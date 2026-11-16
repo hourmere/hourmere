@@ -12,6 +12,8 @@
     "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/scheduling": "*",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@hourmere/auth": "*",
+    "kysely": "0.29.7"
   }
 }

@@ -1092,9 +1092,11 @@ upgrade test preserves a populated predecessor, including the SSO configuration 
 
 Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
 (step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Only the definition
-reads of step 4 (`packages/workflows/src/reads.ts`) query them, behind the hard-off guard, so
+reads of step 4 (`packages/workflows/src/reads.ts`) and creation of step 5
+(`packages/workflows/src/creates.ts`) access them, behind the hard-off guard, so
 they answer `workflows_disabled` while workflows stay off behind
-`WORKFLOWS_IMPLEMENTED = false`; nothing writes them yet, and no worker or setting uses them.
+`WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
+with its retained creation key; no worker or setting uses them.
 A test keeps every other production module outside the storage layer from naming them.
 
 - **Definitions** have an immutable ID, organization, owner and creation time. Definition IDs
@@ -1244,8 +1246,9 @@ ledger counts and purge unchanged on the same rows across the upgrade.
 ## Workflow creation key storage
 
 Migration 0087 installs `workflow_creation_keys`, the retained client idempotency key that
-creation in the [booking workflows design](workflows.md) requires (step 5 of its plan). Nothing
-reads or writes it yet: there is no create operation, and workflows stay hard-off behind
+creation in the [booking workflows design](workflows.md) requires (step 5a of its plan). The
+creation service added in step 5b reads and writes it transactionally with the definition and
+first revision. Its REST, MCP and CLI operations stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the workflow
 tables covers it too.
 
@@ -1301,8 +1304,8 @@ email and webhook actions, durable execution records and workflow sub-caps withi
 Only its definition, execution and creation key storage exist ([workflow definition
 storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
 [workflow creation key storage](#workflow-creation-key-storage)),
-with definition read operations that answer `workflows_disabled` while hard-off; no write API,
-worker or runtime enablement exists yet.
+with definition read and creation operations that answer `workflows_disabled` while hard-off;
+no worker or runtime enablement exists yet.
 
 | When | Change |
 |---|---|

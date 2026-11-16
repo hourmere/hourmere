@@ -61,16 +61,18 @@ const all = [
   'remove_waitlist_entry',
   'join_waitlist',
   'resend_waitlist_verification',
+  'create_workflow',
   'list_workflows',
   'get_workflow',
 ]
 // In the catalog but not available: never listed, and a direct call that passes the scope
 // check answers workflows_disabled without reaching its handler.
-const unavailable = new Set(['list_workflows', 'get_workflow'])
+const unavailable = new Set(['create_workflow', 'list_workflows', 'get_workflow'])
 const disabled = { error: 'workflows_disabled' }
 // Full scope only: audit reads reveal who did what (see api-key-operations.ts).
 const auditReads = new Set(['list_audit_events', 'get_audit_log_settings'])
 const configurationWrites = new Set([
+  'create_workflow',
   'set_audit_log_settings',
   'set_branding',
   'save_schedule_availability',
@@ -463,6 +465,7 @@ describe('CLI scope parity', () => {
     ['one-time-links create', 'create_one_time_link'],
     ['one-time-links list', 'list_one_time_links'],
     ['one-time-links revoke', 'revoke_one_time_link'],
+    ['workflows create', 'create_workflow'],
     ['workflows list', 'list_workflows'],
     ['workflows get', 'get_workflow'],
   ] as const

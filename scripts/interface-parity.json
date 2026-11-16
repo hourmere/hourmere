@@ -1,4 +1,5 @@
 {
+  "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {
     "mcp": "generate_open_time_snippet",
     "cli": "open-time-snippet"

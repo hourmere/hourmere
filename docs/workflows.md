@@ -7,7 +7,10 @@ definition and revision tables (migration 0076) and step 3 the execution tables 
 added the definition reads (`listWorkflows`/`getWorkflow`,
 `list_workflows`/`get_workflow`, `workflows list`/`workflows get`) and `/instance`
 `workflowsEnabled`; while hard-off every read answers `404 workflows_disabled`, tools/list omits
-the tools and `workflowsEnabled` is false. Nothing writes the tables or reads the execution
+the tools and `workflowsEnabled` is false. Step 5 adds creation (`createWorkflow`,
+`create_workflow`, `workflows create`) over the retained keys from step 5a; its interfaces
+also answer `404 workflows_disabled` after the full-scope check. The guarded creation
+service writes definitions, revisions and creation keys only. Nothing reads the execution
 tables yet, and no web interface exists. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
@@ -79,7 +82,10 @@ Creation defaults to disabled. A scope selects one event type or all current and
 event types of the same personal owner or team. Personal scopes never cover team event
 types merely because the person hosts them. An all-event workflow and event-specific
 workflows count together toward the enabled-per-event limit; enforce it under an owner
-lock on workflow changes and event-type creation. Disabled drafts do not execute.
+lock on workflow changes and event-type creation. Take the organization lock first, then
+an exclusive per-owner lock, before checking the combined cap or writing a definition;
+event-type creation takes the same owner lock after its organization lock. Disabled drafts
+do not execute.
 
 The following limits are source constants in `packages/workflows/src/limits.ts`, and the
 document test binds each number here to its constant. The definition contract enforces the
@@ -707,7 +713,15 @@ shared adapter. Cross-owner lookup returns the normal opaque not-found response.
 Create/list/preview carry explicit `{kind: personal|team, id}` owner scope checked against
 the current principal; other operations derive it from the authorized definition. Create
 requires a retained client idempotency key; same normalized input replays the result,
-changed input conflicts. Update requires the expected revision and a partial definition;
+changed input returns `409 idempotency_key_reused`. The key is scoped to the current
+organization, actor and Principal credential kind and ID (all sessions of one actor share
+the session scope). A matching replay returns the stored definition without re-validating
+the candidate against current event settings, consuming capacity or emitting another audit
+event. Current authorization and organization-context checks still apply. Creation accepts
+`owner`, `idempotencyKey` and the definition fields in one strict object; it rejects a
+caller-supplied `id` or any other unknown field (`invalid_request` at the transport schema;
+`invalid_workflow` for service validation). Foreign owners and
+team-context mismatches return `404 workflow_not_found`. Update requires the expected revision and a partial definition;
 `enabled: false` disables and `enabled: true` enables. Delete uses expected revision and
 is idempotent within retained identity. Preview accepts a candidate definition plus
 synthetic example values, returns rendered text and escaped HTML, matched/skipped reasons
@@ -871,7 +885,7 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 | 2. Definition storage | 1 | None. New migration for definitions and immutable revisions; select next available migration number at implementation time. | Hard-off | Populated predecessor upgrade preserves reminders and booking snapshots; fresh install equivalent; rerun no-op; generated DB types match. |
 | 3. Execution storage | 2 | None. New migration for enrollments, due runs, per-recipient claims, minimal history and workflow mail reservations, plus nullable `notification_email_sends.workflow_reservation_id` without a foreign key; indexed cleanup. | Hard-off | Unique constraints kill concurrent duplicate capture; deletion/retention cannot revive a dispatch; existing ledger rows keep NULL and core count queries are unchanged; predecessor/fresh/no-op upgrade tests. |
 | 4. Definition reads and availability signals | 2 | `GET /api/v1/workflows` (`listWorkflows`) / `list_workflows` / `workflows list`; `GET /api/v1/workflows/{id}` (`getWorkflow`) / `get_workflow` / `workflows get`. Add optional `workflowsEnabled` to existing `GET /api/v1/instance`; add the workflow feature predicate to the `registerTools()` catalog/visible split. | Hard-off | Full/read scope and current owner/admin checks; foreign IDs and team-context changes reveal no data; `tools/list` omits workflow tools while a direct call returns 404 workflows_disabled; `/instance` reports false; additive OpenAPI responses and generated client. |
-| 5. Create definitions | 4 | `POST /api/v1/workflows` (`createWorkflow`) / `create_workflow` / `workflows create`. Emit the creation audit event through the port (no-op under hard-off until 16b); reject webhook actions until 13d. | Hard-off | Creation replay returns same definition; changed replay conflicts; concurrent all-event/per-event admissions enforce combined cap; full-only writes; parity check passes; every definition ID is server-generated (uuidv7), and a create input that carries an ID is rejected. |
+| 5. Create definitions | 4 | `POST /api/v1/workflows` (`createWorkflow`) / `create_workflow` / `workflows create`. Step 5a supplies retained creation-key storage (0087); step 5b adds these interfaces without a new migration. Emit the creation audit event through the port (no-op under hard-off until 16b); reject webhook actions until 13d. | Hard-off | Creation replay returns same definition; changed replay conflicts; concurrent all-event/per-event admissions enforce combined cap; full-only writes; parity check passes; every definition ID is server-generated (uuidv7), and a create input that carries an ID is rejected. |
 | 6. Edit, enable and disable | 3, 5 | `PATCH /api/v1/workflows/{id}` (`updateWorkflow`) / `update_workflow` / `workflows update`. Emit update/enable/disable audit events through the port; reject webhook actions until 13d. | Hard-off | Expected-revision conflicts; with fixture execution rows, disable and re-enable change only the definition row and never write, retire or backfill an execution row; new revisions do not overwrite booking enrollments. (Wake-time skips are tested in 9; end-to-end sends in 12b.) |
 | 7. Delete and retirement | 3, 6 | `DELETE /api/v1/workflows/{id}` (`deleteWorkflow`) / `delete_workflow` / `workflows delete`. Emit the deletion audit event through the port; retention behavior. The deletion locks the organization, tombstones the definition and only then retires its runs. | Hard-off | Repeated authorized delete safe; storage-state invariant: the deleting transaction marks every pending fixture run of the definition retired, and no retired row can return to pending; a deletion and a reschedule that carries the workflow's timer take turns without a deadlock, and the deletion also retires the carried run; history remains minimal; no cross-tenant existence leaks. (Claim races are tested in 9.) |
 | 8a. Timer calculations | 1 | None. Pure UTC due-time, minimum-gap, capture-time and expiration rules used by capture and dispatch. | Hard-off | Before/after start/end anchors; minimum_gap and offset_not_future equality; spring/fall DST and non-hour shifts; late-bound equality. |
