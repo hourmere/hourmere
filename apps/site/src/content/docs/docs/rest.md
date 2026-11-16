@@ -126,8 +126,20 @@ required `from`/`to` instants (at most 31 elapsed days), and optional `count` (1
 `locale`, `displayTimeZone` and `durationMinutes`. It returns chosen `slots` with direct
 links plus `text` and `html`. Personal owners and team owners/admins can use `read`,
 `bookings` or `full` keys when `SLOT_SNIPPETS_ENABLED` is enabled. It reserves nothing.
+When off (the default), a valid authenticated request returns HTTP 404 with
+`{"error":"slot_snippets_disabled"}`.
 See [the agent guide](/docs/open-time-snippets) for a complete curl example, response
 fields, date boundaries and taken-time fallback.
+
+## Explain why times cannot be booked
+
+`GET /api/v1/event-types/{id}/availability-troubleshooting?date=YYYY-MM-DD` lists every
+possible start time of one local day with `status` and ordered reason codes such as
+`outside_working_hours`, `calendar_busy`, `buffer_after` or `daily_limit`. Optional
+`timeZone` (default: your profile time zone) and `durationMinutes`. Personal owners and team
+owners/admins only, with a `full` key; everyone else gets `404 event_type_not_found`. Reasons
+never include calendar event titles or booking details. See
+[Troubleshoot availability](/docs/availability-troubleshooting) for the response and limitations.
 
 ## Find a time
 
@@ -255,6 +267,39 @@ session in the current team. It returns paginated invitation lifecycle and safe 
 delivery state, attempts, fixed error classification and current resend eligibility.
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
+
+## Search the booking list
+
+`status=cancelled` lists only cancelled bookings, a page at a time like every other view.
+It includes bookings replaced by a reschedule; their `rescheduledToId` points to the new
+booking. `status=confirmed` lists the others.
+
+`q` searches the list you already have access to. A booking matches when the invitee's name
+or email, or the title of its event type, contains the text, ignoring case:
+
+```sh
+curl --fail-with-body -G "$HOURMERE_URL/api/v1/bookings" \
+  -H "Authorization: Bearer $HOURMERE_API_KEY" \
+  --data-urlencode "status=cancelled" --data-urlencode "q=ada@example.com"
+```
+
+- The text is trimmed and may have at most 100 characters; longer text or control
+  characters return `400 invalid_request`. Blank text means no search.
+- `%`, `_` and `\` match themselves; there are no wildcards.
+- Search only narrows the list you already see. It never adds bookings outside it: on the
+  host list, bookings you do not host or from another organization; on the team list
+  (`GET /api/v1/team/bookings`, which accepts the same `status` and `q`), bookings from
+  another team.
+- Keep `q`, `status`, the time filters and `order` unchanged while following `nextCursor`.
+  Ordering stays by start time and ID, so a booking that still matches is neither repeated
+  nor skipped while other bookings are added or cancelled. A booking cancelled behind the
+  cursor leaves a `status=confirmed` list and shows in `status=cancelled` from its first page.
+
+Known limitations: search matches the invitee who booked, not guests; the current title
+of an event type that still exists, not stored booking titles, answers or notes; and whole
+substrings, without typo tolerance or accent folding. Letter case is ignored according to
+the database's locale. CSV export does not take `q`, so the web app offers the export only
+when no search is applied.
 
 ## Meeting location choices
 

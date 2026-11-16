@@ -192,8 +192,8 @@ describe('legal publication date', () => {
     async (exitCode) => {
       const workflow = parse(
         await readFile(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8'),
-      ) as { jobs: { check: { steps: { name?: string; run?: string }[] } } }
-      const build = workflow.jobs.check.steps.find(
+      ) as { jobs: { 'check-static': { steps: { name?: string; run?: string }[] } } }
+      const build = workflow.jobs['check-static'].steps.find(
         (step) => step.name === 'Build with a disposable legal publication fixture',
       )
       expect(build?.run).toBeTypeOf('string')

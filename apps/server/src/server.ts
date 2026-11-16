@@ -30,8 +30,22 @@ import {
 import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
-import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
-import { createJobs, oneTimeBookingLinksRetentionJob, paymentHoldsExpiryJob } from '@hourmere/jobs'
+import {
+  createDb,
+  createPool,
+  type Db,
+  deleteUnreferencedRoutingVersions,
+  purgeExpiredRoutingReceipts,
+  ROUTING_RECEIPT_PURGE_BATCH,
+  runMigrations,
+} from '@hourmere/db'
+import {
+  createJobs,
+  oneTimeBookingLinksRetentionJob,
+  paymentHoldsExpiryJob,
+  routingRetentionJob,
+} from '@hourmere/jobs'
+import { meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -60,10 +74,10 @@ import type { ServiceContext } from '@hourmere/scheduling'
 import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
+  cleanupMeetingPolls,
   cleanupWaitlist,
   ensureWaitlistKey,
   expirePaymentHolds,
-  leaveTeamMember,
   removeWaitlist,
   scanWaitlists,
   verifyWaitlist,
@@ -80,6 +94,7 @@ import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
+import { availabilityTroubleshootingTools } from './mcp/availability-troubleshooting.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { brandingTools } from './mcp/branding.ts'
 import { catalogTools } from './mcp/catalog.ts'
@@ -94,9 +109,11 @@ import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { workflowTools } from './mcp/workflows.ts'
+import { nativeTeamLeave } from './native-team-leave.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
+import { availabilityTroubleshootingRoutes } from './routes/availability-troubleshooting.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { brandingRoutes } from './routes/branding.ts'
 import { calendarRoutes } from './routes/calendars.ts'
@@ -277,6 +294,7 @@ export function productRoutes({
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
     bookingRoutes({
       db,
       notify,
@@ -360,6 +378,7 @@ export function productTools({
     ...(slotSnippetsEnabled
       ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
       : []),
+    ...availabilityTroubleshootingTools({ db, automaticMeet, automaticZoom }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
@@ -503,7 +522,7 @@ export function productionAppOptions({
 /** What the running server's Better Auth options need beyond the configuration. */
 export interface ProductionAuthDeps {
   config: Config
-  /** createAuthPool(config.DATABASE_URL, config.signup). */
+  /** createAuthPool(config.DATABASE_URL, config.signup, its connection timeout). */
   pool: AuthConfig['pool']
   db: Db
   mailer: Mailer
@@ -531,11 +550,7 @@ export function productionAuthOptions({
   return {
     pool,
     db,
-    leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
-      leaveTeamMember(
-        { db, principal, now: () => Temporal.Now.instant() },
-        { teamId, expectedOrganizationId },
-      ),
+    leaveTeamMember: nativeTeamLeave(db),
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,
@@ -580,7 +595,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
     )
-  const pool = createPool(config.DATABASE_URL)
+  const poolOptions = { connectionTimeoutMillis: config.databaseConnectionTimeout }
+  const pool = createPool(config.DATABASE_URL, poolOptions)
   const db = createDb(pool)
 
   if (config.AUTO_MIGRATE) {
@@ -631,7 +647,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const role = config.HOURMERE_ROLE
   // A worker serves only /api/health, for the container health check: no sign-in, no API.
   const authPool =
-    role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup)
+    role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup, poolOptions)
   if (authPool) {
     try {
       await assertSignupEnforced(authPool, config.signup)
@@ -760,7 +776,23 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' }),
       }),
       waitlistEmailJob(runWaitlistEmail),
+      // No installation booking-data retention exists yet, so terminal polls stay until
+      // explicit poll, linked-booking or organization deletion (docs/meeting-polls.md).
+      meetingPollCleanupJob({
+        cleanup: () => cleanupMeetingPolls(db),
+        continueCleanup: (): Promise<string | null> =>
+          jobs.enqueue('meeting-poll-cleanup-v1', {}, { singletonKey: 'continuation' }),
+      }),
       oneTimeBookingLinksRetentionJob(db),
+      // Routing receipt and version cleanup runs whether or not routing is enabled.
+      routingRetentionJob({
+        purgeReceipts: async () => ({
+          more: (await purgeExpiredRoutingReceipts(db)) === ROUTING_RECEIPT_PURGE_BATCH,
+        }),
+        cleanupVersions: (after) => deleteUnreferencedRoutingVersions(db, { after }),
+        continueRetention: (payload): Promise<string | null> =>
+          jobs.enqueue('routing-retention-v1', payload, { singletonKey: 'continuation' }),
+      }),
       ...configuredSmsJobs(config, db),
       paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),

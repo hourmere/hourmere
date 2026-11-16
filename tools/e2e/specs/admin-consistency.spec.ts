@@ -1,4 +1,5 @@
 import { openAuditPage } from '../audit-pages.ts'
+import { revealEventSetting } from '../event-settings.ts'
 import {
   LONG_BOOKING_HANDLE,
   LONG_BOOKING_SLUG,
@@ -53,8 +54,10 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     )
     await expect(bar.locator('a')).toHaveCount(0)
     const description = page.locator('#description')
-    await page.locator('#slug').focus()
-    await page.locator('#slug').press('Tab')
+    await revealEventSetting(description)
+    const summary = description.locator('xpath=ancestor::details[1]').locator(':scope > summary')
+    await summary.focus()
+    await summary.press('Tab')
     await expect(description).toBeFocused()
     const isClear = () =>
       description.evaluate((field) => {

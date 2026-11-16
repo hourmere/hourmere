@@ -94,6 +94,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
+| `troubleshoot_availability` | — | `troubleshoot-availability` | `full` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
@@ -161,8 +162,20 @@ booking links plus rendered `text` and `html`, using the same formatter as the a
 Use it to draft “three times next week”; it neither sends email nor reserves times.
 Personal owners and team owners/admins can call it with `read`, `bookings` or `full` keys,
 or an authorized `mcp:tools` OAuth connection. The instance must enable
-`SLOT_SNIPPETS_ENABLED`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for the full JSON example,
+`SLOT_SNIPPETS_ENABLED`. When off (the default), `generate_open_time_snippet` is absent
+from `tools/list`; a direct call returns JSON-RPC error `-32602` with
+`Tool generate_open_time_snippet not found`. See [the agent guide](https://hourmere.com/docs/open-time-snippets) for the full JSON example,
 profile defaults, empty-result handling, DST boundaries and taken-time fallback.
+
+## Explain why times cannot be booked
+
+Call `troubleshoot_availability` with `eventTypeId` and a local `date` (`YYYY-MM-DD`), plus
+optional `timeZone` and `durationMinutes`. It returns every possible start time of that day
+with `status` and ordered reason codes, the same object as the REST endpoint. Only personal
+owners and team owners/admins may call it, with a `full` key or an `mcp:tools` OAuth grant;
+anything else answers `event_type_not_found`. `calendar_sync_unavailable` means connected
+calendars could not be read right now. See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting) for every reason
+code and the known limitations.
 
 ## Configure an after-booking redirect
 

@@ -75,9 +75,10 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `schedules` | `list_schedules` | optional `limit`, `after` |
 | `schedule` | `get_schedule` | `id` from `schedules` |
 | `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `durationMinutes`, `maxSlots`, `after` |
+| `troubleshoot-availability` | `troubleshoot_availability` | `eventTypeId`, `date`; optional `timeZone`, `durationMinutes` |
 | `open-time-snippet` | `generate_open_time_snippet` | exactly one of `eventTypeId`, `slug`; `from`, `to`; optional `count`, `locale`, `displayTimeZone`, `durationMinutes` |
 | `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `durationMinutes`, `responses`, `guests` |
-| `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
+| `list` | `list_bookings` | optional `from`, `to`, `status` (`cancelled` for the cancelled view), `q` (search), `order`, `limit`, `cursor` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
 | `booking-activity` | `get_booking_activity` | `startDate`, `endDate` (inclusive `YYYY-MM-DD`, at most 90 dates), `timeZone`; requires `read` or `full` and the personal owner or a team owner/admin |
@@ -202,8 +203,31 @@ is supplied in JSON; omitted language and display zone use the caller's profile 
 `--json` makes the normal JSON output explicit. The response includes `slots` with direct
 links, `text` and `html` for your draft. Generation sends no mail and reserves no time.
 `read`, `bookings` and `full` keys work with personal-owner or team-owner/admin permission,
-when the operator enables `SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for
+when the operator enables `SLOT_SNIPPETS_ENABLED`. When off (the default), the CLI exits 1
+with empty stdout, without `outcomeMayBeUnknown`, and writes this JSON to stderr:
+
+```json
+{
+  "error": "slot_snippets_disabled"
+}
+```
+
+A server that predates open-time snippets returns the same unknown-tool response and is
+also reported as not enabled. Ask the operator to upgrade that server before enabling
+`SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for
 response fields, DST boundaries, no-times errors and the booking page's taken-time fallback.
+
+## Explain why times cannot be booked
+
+```sh
+echo '{"eventTypeId":"…","date":"2026-11-16","timeZone":"Europe/Berlin"}' |
+  hourmere troubleshoot-availability --input -
+```
+
+The output lists every possible start time of that local day with `status` and reason codes
+(for example `outside_working_hours`, `calendar_busy`, `daily_limit`), identical to REST and MCP.
+It needs a `full` key and personal-owner or team-owner/admin permission; otherwise it fails with
+`event_type_not_found`. See [Troubleshoot availability](/docs/availability-troubleshooting) for the reason codes.
 
 ## Configure meeting lengths
 
@@ -294,7 +318,8 @@ Network failures or generic HTTP transport errors exit **3**. Errors are JSON on
 with a stable `error` code, an HTTP `status` when available, and `retryAfterSeconds` when
 provided. Untrusted server messages, URLs and exception causes are not printed.
 
-A failure after the call begins includes `outcomeMayBeUnknown: true`. A reserved result
+A failure after the call begins includes `outcomeMayBeUnknown: true`, except
+`slot_snippets_disabled` from `open-time-snippet`, which is a definite failure. A reserved result
 file can remain empty or incomplete after a failed call or write: do not treat it as a
 successful booking, and retain the original request. Inspect the server before retrying.
 

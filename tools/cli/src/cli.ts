@@ -33,6 +33,7 @@ export const COMMANDS = {
   'save-availability': 'save_schedule_availability',
   slots: 'find_available_slots',
   'open-time-snippet': 'generate_open_time_snippet',
+  'troubleshoot-availability': 'troubleshoot_availability',
   book: 'create_booking',
   list: 'list_bookings',
   export: 'export_bookings',
@@ -72,6 +73,7 @@ Slack events: booking.created, booking.rescheduled, booking.cancelled,
   booking.reschedule_requested, booking.reschedule_request_expired.
 Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
+          troubleshoot-availability,
           schedule-availability, save-availability,
           book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees,
           booking-activity, retry-meeting, retry-calendar-copy
@@ -112,6 +114,9 @@ one-time-links list requires read or full; revoke requires bookings or full and 
 open-time-snippet --json --input - generates text/HTML and direct links without reserving times.
 Input: eventTypeId or slug, from/to instants (at most 31 days), optional count (1–10),
 locale, displayTimeZone and durationMinutes. Requires read, bookings or full scope.
+troubleshoot-availability explains which times of one local day can be booked and why
+others cannot. Input: eventTypeId, date (YYYY-MM-DD), optional timeZone and durationMinutes.
+Requires full scope and personal ownership or team owner/admin; otherwise event_type_not_found.
 See https://hourmere.com/docs/cli for complete usage.
 `
 
@@ -298,9 +303,11 @@ export async function runCli(options: {
   let output: Awaited<ReturnType<typeof open>> | undefined
   let exportOutputPath: string | undefined
   let called = false
+  let command: string | undefined
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
     const args = parse(options.argv)
+    command = args.command
     const url = endpoint(args.url ?? options.env.HOURMERE_URL)
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
@@ -431,7 +438,10 @@ export async function runCli(options: {
             error.retryAfterSeconds !== undefined && {
               retryAfterSeconds: error.retryAfterSeconds,
             }),
-          ...(called && { outcomeMayBeUnknown: true }),
+          ...(called &&
+            !(command === 'open-time-snippet' && code === 'slot_snippets_disabled') && {
+              outcomeMayBeUnknown: true,
+            }),
         },
         secrets,
       ),

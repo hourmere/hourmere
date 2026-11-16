@@ -828,6 +828,31 @@ export async function resolveBookingLocation(
   )
 }
 
+/**
+ * Joining an existing group occurrence: admission already checked its pinned conference,
+ * before the mailbox lookup. A readiness change between that check and this preparation
+ * must keep the same public answer, so it cannot tell a seat holder from a stranger and
+ * never shows a host-facing provider hint to a visitor.
+ */
+async function prepareExistingGroupSlotConference(
+  ctx: PublicContext,
+  db: Db,
+  bookingId: string,
+): Promise<void> {
+  try {
+    await prepareBookingConference(ctx, db, bookingId)
+  } catch (error) {
+    if (
+      error instanceof DomainError &&
+      (error.code.startsWith('automatic_meet_') ||
+        error.code.startsWith('automatic_zoom_') ||
+        error.code === 'booking_hosts_unavailable')
+    )
+      throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
+    throw error
+  }
+}
+
 /** Keep a readiness race during conference intent creation inside the choice error contract. */
 async function prepareChosenBookingConference(
   ctx: PublicContext,
@@ -1434,6 +1459,7 @@ async function publicBooking(
         snapshot,
         expectedSlotId: input.expectedGroupSlotId,
         locationOptionId: input.locationOptionId,
+        conference: ctx,
       })
       const chosenOption = groupSlot
         ? null
@@ -1553,7 +1579,7 @@ async function publicBooking(
         ...origin,
         requestId: origin.requestId ?? ctx.requestId,
       })
-      if (groupSlot?.existing) await prepareBookingConference(ctx, trx, id)
+      if (groupSlot?.existing) await prepareExistingGroupSlotConference(ctx, trx, id)
       else
         await prepareChosenBookingConference(
           ctx,
@@ -2171,6 +2197,7 @@ async function rescheduleGroupLocked(
     preserveDurationBookingId: selectedDuration === undefined ? old.id : undefined,
     sourceSlotId: old.group_slot_id ?? undefined,
     expectedSlotId: expectedGroupSlotId,
+    conference: ctx,
   })
   if (!slot)
     throw new DomainError(
@@ -2210,7 +2237,8 @@ async function rescheduleGroupLocked(
     ...origin,
     requestId: origin.requestId ?? ctx.requestId,
   })
-  await prepareBookingConference(ctx, trx, result.id)
+  if (slot.existing) await prepareExistingGroupSlotConference(ctx, trx, result.id)
+  else await prepareBookingConference(ctx, trx, result.id)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: result.id, start }, now)
   return { booking: await loadBooking(trx, result.id), manageToken: result.manageToken }
 }

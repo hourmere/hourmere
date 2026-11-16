@@ -10,7 +10,13 @@ export default defineConfig({
       {
         test: {
           name: 'node',
-          setupFiles: ['scripts/test-clock-setup.ts', 'scripts/test-database-setup.ts'],
+          // One migrated template per run; database fixtures copy it (see the file).
+          globalSetup: ['scripts/test-database-global-setup.ts'],
+          setupFiles: [
+            'scripts/test-clock-setup.ts',
+            'scripts/test-database-setup.ts',
+            'scripts/test-pool-order-setup.ts',
+          ],
           include: [
             'apps/*/src/**/*.test.{ts,tsx}',
             'packages/*/src/**/*.test.ts',

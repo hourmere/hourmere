@@ -39,9 +39,9 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
     auth = createAuth({
       pool,
       db,
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
+          { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
       baseURL: origin,

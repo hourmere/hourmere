@@ -193,7 +193,7 @@ describe('team sharing production-source negative controls', () => {
       const editor = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
       const previewState = editor.slice(
         editor.indexOf('  const previewItem ='),
-        editor.indexOf('  const duration ='),
+        editor.indexOf('  const defaults ='),
       )
       const bookingPreview = editor.slice(
         editor.indexOf('function bookingLinkPreview('),
@@ -306,7 +306,7 @@ describe('team sharing production-source negative controls', () => {
     const editor = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
     const fragment = editor.slice(
       editor.indexOf('<Field\n                id="slug"'),
-      editor.indexOf('<Field\n                id="description"'),
+      editor.indexOf('<Field\n                id="durationMinutes"'),
     )
     function assertion(source: string) {
       const Preview = copy<ComponentType>(

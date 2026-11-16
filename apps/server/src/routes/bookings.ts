@@ -15,6 +15,7 @@ import {
   listHostBookings,
   listManagedSlots,
   MAX_PAGE_SIZE,
+  MAX_SEARCH_LENGTH,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
   RescheduleRequestNoteSchema,
@@ -329,7 +330,19 @@ export const ListBookingsQuery = z.object({
   endTo: Instant.optional().openapi({
     description: 'Only bookings ending at or before (inclusive)',
   }),
-  status: z.enum(['confirmed', 'cancelled']).optional(),
+  status: z.enum(['confirmed', 'cancelled']).optional().openapi({
+    description:
+      'Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart.',
+  }),
+  q: z
+    .string()
+    .trim()
+    .max(MAX_SEARCH_LENGTH)
+    .refine((value) => !/\p{Cc}/u.test(value), 'q must not contain control characters')
+    .optional()
+    .openapi({
+      description: `Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most ${MAX_SEARCH_LENGTH} characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages.`,
+    }),
   limit: z.coerce
     .number()
     .int()
@@ -893,7 +906,7 @@ export function bookingRoutes({
         path: '/api/v1/bookings',
         summary: 'Bookings the caller hosts',
         description:
-          'Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, the same).',
+          'Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Filter with status=cancelled for the cancelled view and q to search invitee name, invitee email and event type title. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, status and q, the same).',
         security: authenticated,
         middleware: caller,
         request: { query: ListBookingsQuery },
@@ -913,6 +926,7 @@ export function bookingRoutes({
           endAfter: q.endAfter === undefined ? undefined : Temporal.Instant.from(q.endAfter),
           endTo: q.endTo === undefined ? undefined : Temporal.Instant.from(q.endTo),
           status: q.status,
+          q: q.q,
           limit: q.limit,
           cursor: q.cursor,
         })
@@ -931,7 +945,7 @@ export function bookingRoutes({
         security: authenticated,
         middleware: caller,
         request: {
-          query: ListBookingsQuery.omit({ limit: true, cursor: true })
+          query: ListBookingsQuery.omit({ limit: true, cursor: true, q: true })
             .extend({
               from: Instant,
               to: Instant,

@@ -51,6 +51,7 @@ import {
   validateNotifications,
 } from './notification-settings.ts'
 import { parseQuestions, type Question, validateQuestions } from './questions.ts'
+import { refreshRoutingTargetHealth } from './routing-target-lifecycle.ts'
 import {
   type SuccessRedirect,
   type SuccessRedirectInput,
@@ -833,25 +834,37 @@ export async function updateEventType(
           .execute()
       }
       if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, row.id), waitlist)
+      // Routing targets on this event type follow its updated row, disabling included.
+      await refreshRoutingTargetHealth(
+        trx,
+        row.organization_id,
+        [row.id],
+        new Date(ctx.now().epochMilliseconds),
+      )
       await auditEventType(ctx, trx, row.id, 'event_type.updated')
       return toEventType(await loadEventType(trx, row.id))
     }),
   )
 }
 
-/** Marks the event type deleted; its slug becomes free and its bookings keep it. */
+/**
+ * Marks the event type deleted; its slug becomes free and its bookings keep it. Routing forms
+ * never block deletion: their targets on it are marked unavailable in the same transaction.
+ */
 export async function deleteEventType(ctx: ServiceContext, id: string): Promise<void> {
   await ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await assertCanWrite(trx, ctx, row, true)
+    const deletedAt = new Date(ctx.now().epochMilliseconds)
     await trx
       .updateTable('event_types')
-      .set({ deleted_at: new Date(ctx.now().epochMilliseconds) })
+      .set({ deleted_at: deletedAt })
       .where('id', '=', row.id)
       .where('deleted_at', 'is', null)
       .execute()
+    await refreshRoutingTargetHealth(trx, row.organization_id, [row.id], deletedAt)
     await auditEventType(ctx, trx, row.id, 'event_type.deleted')
   })
 }
@@ -1405,6 +1418,12 @@ function validZoomConnection(value: unknown): string | null | undefined {
     throw new DomainError('invalid', 'invalid_zoom_connection', 'Choose your own Zoom connection.')
   return (value as string).toLowerCase()
 }
+// REST and MCP create/update share this validation; the CLI delegates to MCP.
+// Cal.com imports only static locations (or null), never automatic providers. Older
+// writes rejected multi-host automatic Meet before organizers were introduced, and
+// automatic Zoom has always required an individual host. Thus collective Meet with
+// no organizer and round-robin automatic Zoom cannot originate from supported writes;
+// booking readiness need not preserve historical error codes for those invalid rows.
 async function validateConference(
   db: Db,
   ctx: ServiceContext,

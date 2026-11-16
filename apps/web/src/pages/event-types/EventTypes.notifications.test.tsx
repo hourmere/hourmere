@@ -284,6 +284,9 @@ describe('event type reminders and follow-ups editor', () => {
     const api = editorApi()
     const user = userEvent.setup()
     renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByLabelText('Title')
+    const disclosure = screen.getByText('Reminders and follow-ups', { selector: 'summary' })
+    if (!disclosure.closest('details')?.open) await user.click(disclosure)
     const reminder = await screen.findByRole('group', { name: 'Reminder 1' })
     const offset = within(reminder).getByLabelText('Minutes before the meeting')
     for (const invalid of ['4', '43201', '5.5']) {

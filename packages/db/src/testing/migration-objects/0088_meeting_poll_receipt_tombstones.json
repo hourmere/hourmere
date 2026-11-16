@@ -1,0 +1,6 @@
+{
+  "migration": "0088_meeting_poll_receipt_tombstones.sql",
+  "objects": {
+    "trigger public.meeting_polls.meeting_polls_tombstones": "CREATE TRIGGER meeting_polls_tombstones BEFORE DELETE ON public.meeting_polls FOR EACH ROW EXECUTE FUNCTION retain_meeting_poll_tombstones() -- function SET search_path=public, pg_temp md5 6b7f3ef20f02b829d1d0a4fc7429fee6"
+  }
+}

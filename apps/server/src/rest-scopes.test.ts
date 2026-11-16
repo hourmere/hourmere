@@ -29,6 +29,7 @@ const expectedScopes: Record<ApiKeyOperationClass, readonly ApiKeyScope[]> = {
   booking_write: ['full', 'bookings'],
   other_read: ['full', 'read'],
   other_write: ['full'],
+  diagnostic_read: ['full'],
   session_only: [],
   public_metadata: scopes,
 }

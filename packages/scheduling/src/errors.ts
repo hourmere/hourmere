@@ -12,6 +12,7 @@ export const RESERVED_ERROR_CODES: ReadonlySet<string> = new Set([
   'unsupported_media_type',
   'rate_limited',
   'internal_error',
+  'service_unavailable',
 ])
 
 /**

@@ -326,7 +326,7 @@ export interface paths {
         };
         /**
          * Bookings the caller hosts
-         * @description Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, the same).
+         * @description Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Filter with status=cancelled for the cancelled view and q to search invitee name, invitee email and event type title. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, status and q, the same).
          */
         get: {
             parameters: {
@@ -342,6 +342,9 @@ export interface paths {
                     limit?: number;
                     /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                     order?: "asc" | "desc";
+                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
+                    q?: string;
+                    /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                     status?: "confirmed" | "cancelled";
                     /** @description Only bookings starting before */
                     to?: string;
@@ -1906,6 +1909,26 @@ export interface paths {
         patch: operations["updateEventType"];
         trace?: never;
     };
+    "/api/v1/event-types/{id}/availability-troubleshooting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explain which times of one day can be booked, and why others cannot
+         * @description Read-only diagnostics for the personal owner or a verified team owner/admin; API keys need full scope. Every other caller, including ordinary team members, gets the same 404 event_type_not_found as a missing event type. Lists every candidate time of the local day, including past and non-working times, with status and ordered reason codes. Reasons carry only a code, the affected interval and, for team event types, the host id; never calendar event titles, attendees or booking details. Calendars that cannot be read right now answer 409 calendar_sync_unavailable rather than a reason.
+         */
+        get: operations["troubleshootAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/event-types/{id}/notifications": {
         parameters: {
             query?: never;
@@ -3397,7 +3420,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set the hours of one date */
+        /**
+         * Set the hours of one date
+         * @description Schedules accept at most 10,000 date overrides, including past dates. Adding another date at the limit returns too_many_overrides without changes. Existing dates may still be replaced or removed.
+         */
         put: operations["setScheduleOverride"];
         post?: never;
         /**
@@ -3498,7 +3524,7 @@ export interface paths {
         };
         /**
          * Bookings of the session's current team
-         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.
+         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. status=cancelled selects cancelled bookings; q searches the invitee name, invitee email and current event type title within this team only. Pass nextCursor as cursor with the same filters, search and order for the next page. Collective bookings appear once. Personal organizations are excluded. Optional X-Expected-Organization-Id binds the read to the team where the page opened. If the caller still owns or administers that expected team, switching to any other space (including personal or a member-only team) returns 409 organization_context_changed; inaccessible expected teams retain the uniform 403. Omitting the header keeps current-team reads.
          */
         get: {
             parameters: {
@@ -3514,6 +3540,9 @@ export interface paths {
                     limit?: number;
                     /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                     order?: "asc" | "desc";
+                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
+                    q?: string;
+                    /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                     status?: "confirmed" | "cancelled";
                     /** @description Only bookings starting before */
                     to?: string;
@@ -4472,6 +4501,47 @@ export interface components {
              */
             noShowMarkedAt: string | null;
             noShowMarkedBy: string | null;
+        };
+        AvailabilityTroubleshooting: {
+            /** Format: date */
+            date: string;
+            /** @description The requested length; null means the event’s default length. */
+            durationMinutes: number | null;
+            eventTypeId: string;
+            /** @description Team event types: assigned hosts. Empty for personal types. */
+            hosts: {
+                name: string;
+                userId: string;
+            }[];
+            /**
+             * Format: date-time
+             * @description Exclusive. 23 or 25 hours after rangeStart on DST change days.
+             */
+            rangeEnd: string;
+            /** Format: date-time */
+            rangeStart: string;
+            slots: {
+                /** Format: date-time */
+                end: string;
+                reasons: {
+                    /** @description Stable reason code. Known values, in this order: past, duration_not_offered, outside_working_hours, off_slot_grid, minimum_notice, booking_window, calendar_busy, buffer_before, buffer_after, daily_limit, weekly_limit, monthly_limit, host_conflict, collective_member_unavailable, no_eligible_round_robin_host. New codes may be added within /api/v1; show unknown codes neutrally. */
+                    code: string;
+                    /**
+                     * Format: date-time
+                     * @description The affected part of this time, clipped to it.
+                     */
+                    end: string;
+                    /** @description Team event types only: the host this reason concerns. */
+                    hostUserId?: string;
+                    /** Format: date-time */
+                    start: string;
+                }[];
+                /** Format: date-time */
+                start: string;
+                /** @enum {string} */
+                status: "available" | "unavailable";
+            }[];
+            timeZone: string;
         };
         Booking: {
             /** @description The actual round-robin winner; no private host identity or availability mapping */
@@ -7294,6 +7364,7 @@ export interface operations {
                 hostUserId?: string;
                 /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                 order?: "asc" | "desc";
+                /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                 status?: "confirmed" | "cancelled";
                 timeZone?: string;
                 /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
@@ -9208,6 +9279,88 @@ export interface operations {
                 };
             };
             /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    troubleshootAvailability: {
+        parameters: {
+            query: {
+                /** @description Local calendar date (YYYY-MM-DD) to explain, read in timeZone. */
+                date: string;
+                durationMinutes?: number;
+                /** @description IANA time zone for the day’s bounds. Defaults to the caller’s profile time zone, else UTC. */
+                timeZone?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The day’s candidate times with status and reasons, ordered by start */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvailabilityTroubleshooting"];
+                };
+            };
+            /** @description invalid_request, invalid_date, invalid_time_zone, invalid_duration, invalid_range, range_too_long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope: API keys need full scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found (also for event types the caller may not manage) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_sync_unavailable, location_unavailable */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11456,7 +11609,7 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleOverride"];
                 };
             };
-            /** @description invalid_request, invalid_date or invalid_intervals */
+            /** @description invalid_request, invalid_date, invalid_intervals or too_many_overrides */
             400: {
                 headers: {
                     [name: string]: unknown;

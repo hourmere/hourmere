@@ -1,4 +1,4 @@
-import type { Db } from '@hourmere/db'
+import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
 import {
   automaticConference,
@@ -11,6 +11,128 @@ import {
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { cleanText } from './text.ts'
+
+type ConferenceFlags = Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>
+const slotUnavailable = () =>
+  new DomainError('conflict', 'slot_unavailable', 'This time is not available')
+
+/**
+ * The pinned conference of an existing occurrence must still be usable. Every failure is the
+ * same public `slot_unavailable`: the reason (a disconnected Zoom account, an instance that
+ * turned automatic meetings off, a removed organizer) is host configuration, and a different
+ * code here would let a visitor learn whether a mailbox already holds a seat (that check
+ * comes later and answers `slot_unavailable` too).
+ */
+async function requirePinnedGroupConference(
+  ctx: ConferenceFlags,
+  trx: Db,
+  existing: {
+    organizer_user_id: string
+    organization_id: string
+    invitation_organizer_email: string
+    provider: string
+    zoom_connection_id: string | null
+    calendar_id: string | null
+    connection_id: string | null
+  },
+) {
+  if (!(await conferenceOrganizerAvailable(trx, existing))) throw slotUnavailable()
+  if (existing.provider === 'zoom') {
+    try {
+      await requireZoomConnection(
+        trx,
+        existing.organizer_user_id,
+        existing.zoom_connection_id,
+        ctx.automaticZoom,
+        true,
+      )
+    } catch (error) {
+      if (error instanceof DomainError) throw slotUnavailable()
+      throw error
+    }
+    return
+  }
+  const pinned = await trx
+    .selectFrom('calendars as c')
+    .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
+    .select([
+      'c.id as calendar_id',
+      'cc.id as connection_id',
+      'cc.provider',
+      'cc.status',
+      'c.access_role',
+      'c.supports_google_meet',
+      'cc.scopes',
+    ])
+    .where('c.id', '=', existing.calendar_id ?? '')
+    .where('cc.id', '=', existing.connection_id ?? '')
+    .where('cc.user_id', '=', existing.organizer_user_id)
+    .executeTakeFirst()
+  if (
+    !ctx.automaticMeet ||
+    !evaluateGoogleWriteDestination(
+      pinned ? { ...pinned, destination: existing.calendar_id } : undefined,
+      true,
+    ).eligible
+  )
+    throw slotUnavailable()
+}
+
+/**
+ * Admission preflight for an existing occurrence, run before any mailbox lookup. It reads
+ * only the slot and its pinned resources, so a seat holder and a stranger take the same
+ * path and get the same answer. An occurrence without a pinned resource row yet is checked
+ * against the host's current account, the way the first seat's preparation would.
+ */
+export async function requireGroupSlotConferenceUsable(
+  ctx: ConferenceFlags,
+  trx: Db,
+  slot: {
+    id: string
+    location: Json | null
+    host_user_id: string
+    event_type_id: string | null
+    zoom_connection_id: string | null
+  },
+) {
+  if (!automaticConference(slot.location)) return
+  const existing = await trx
+    .selectFrom('group_slot_conferences')
+    .selectAll()
+    .where('group_slot_id', '=', slot.id)
+    .executeTakeFirst()
+  if (existing) return requirePinnedGroupConference(ctx, trx, existing)
+  // Preparation would also need the host's verified address as the invitation organizer.
+  if (
+    !(await trx
+      .selectFrom('auth.user')
+      .select('id')
+      .where('id', '=', slot.host_user_id)
+      .where('emailVerified', '=', true)
+      .executeTakeFirst())
+  )
+    throw slotUnavailable()
+  try {
+    if (automaticZoom(slot.location))
+      await requireZoomConnection(
+        trx,
+        slot.host_user_id,
+        slot.zoom_connection_id,
+        ctx.automaticZoom,
+        true,
+      )
+    else
+      await requireMeetDestination(
+        trx,
+        slot.host_user_id,
+        slot.event_type_id ?? undefined,
+        ctx.automaticMeet,
+      )
+  } catch (error) {
+    if (error instanceof DomainError) throw slotUnavailable()
+    throw error
+  }
+}
 
 /** Caller owns the slot lock. Resource ownership never follows an attendee chain. */
 export async function prepareGroupSlotConference(ctx: PublicContext, trx: Db, slotId: string) {
@@ -26,43 +148,7 @@ export async function prepareGroupSlotConference(ctx: PublicContext, trx: Db, sl
     .where('group_slot_id', '=', slotId)
     .executeTakeFirst()
   if (existing) {
-    if (!(await conferenceOrganizerAvailable(trx, existing)))
-      throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
-    if (existing.provider === 'zoom') {
-      await requireZoomConnection(
-        trx,
-        existing.organizer_user_id,
-        existing.zoom_connection_id,
-        ctx.automaticZoom,
-        true,
-      )
-    } else {
-      const pinned = await trx
-        .selectFrom('calendars as c')
-        .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-        .select([
-          'c.id as calendar_id',
-          'cc.id as connection_id',
-          'cc.provider',
-          'cc.status',
-          'c.access_role',
-          'c.supports_google_meet',
-          'cc.scopes',
-        ])
-        .where('c.id', '=', existing.calendar_id ?? '')
-        .where('cc.id', '=', existing.connection_id ?? '')
-        .where('cc.user_id', '=', existing.organizer_user_id)
-        .executeTakeFirst()
-      if (
-        !ctx.automaticMeet ||
-        !evaluateGoogleWriteDestination(
-          pinned ? { ...pinned, destination: existing.calendar_id } : undefined,
-          true,
-        ).eligible
-      )
-        throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
-    }
-
+    await requirePinnedGroupConference(ctx, trx, existing)
     if (existing.state === 'ready' || existing.state === 'failed')
       await releaseGroupSeatInvitations(trx, slotId, existing.state === 'failed')
     return

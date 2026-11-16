@@ -229,7 +229,8 @@ is optional and may change. The HTTP status carries the category and the code na
 specific case, e.g. 404 `event_type_not_found`, 409 `slot_taken`. These codes are reserved
 for the generic cases in the table below: `invalid_request`,
 `unauthorized`, `forbidden`, `not_found` (unknown endpoint), `method_not_allowed`,
-`payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
+`payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`,
+`service_unavailable`. Codes are never
 renamed within `/api/v1`. Services cannot use these codes except `invalid_request` with
 an invalid-input error when enforcing the same schema validation as the transports.
 
@@ -273,6 +274,7 @@ See [Zoom connections](/docs/zoom-connections) for callback replay and recovery 
 | 405 `method_not_allowed`, 413 `payload_too_large`, 415 `unsupported_media_type` | Raised by the HTTP layer for the obvious cases; any other 4xx from it is `invalid_request` |
 | 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
 | 500 `internal_error` | An unexpected server error; details go to the server log only |
+| 503 `service_unavailable` | The server could not get a database connection in time (`DATABASE_CONNECTION_TIMEOUT`). Temporary: retry after `Retry-After` seconds. Like a 500, it does not say whether an earlier step of the request took effect |
 
 `message` is written for people and is safe to show: it never contains internal error text.
 
@@ -367,8 +369,16 @@ MCP `generate_open_time_snippet` and CLI `open-time-snippet --json`. See the
 [request/response contract](https://hourmere.com/docs/open-time-snippets#request-and-response-reference)
 for the 31-elapsed-day bound, language and time-zone defaults, and empty-result behavior.
 
-Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
-`full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
+`GET /api/v1/event-types/{id}/availability-troubleshooting` is a read-only diagnostic that
+only `full` keys may call (operation group "Availability diagnostics"), with personal-owner or
+team-owner/admin permission. Repeated explanations can reveal when a host is busy, so `read`
+and `bookings` keys get `403 insufficient_scope`. The shared service also serves MCP
+`troubleshoot_availability` and CLI `troubleshoot-availability`. Its reason `code` is an open
+string: new codes may be added within `/api/v1`, and clients must show unknown codes neutrally.
+See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
+
+Native creation accepts `metadata.scope` with exactly `full`, `read` or `bookings`;
+omitting it keeps `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
 Top-level `scope`/`scopes`, arrays, combinations and unknown values get
 `400 INVALID_METADATA`. Updates containing `metadata.scope`, even the same value, get
 `400 API_KEY_SCOPE_IMMUTABLE`. Create a replacement, update clients, then revoke the old key.
@@ -1004,6 +1014,15 @@ Booking lists accept `endAfter` (end strictly after this instant) and `endTo` (e
 before it), alongside the existing start-time `from`/`to` filters. The web app splits Upcoming
 and Past at the end time, so a meeting in progress stays Upcoming. Ordering and cursors
 remain based on start time and ID; keep all filters when paginating.
+
+Both booking lists also accept the optional `status` (`confirmed` or `cancelled`) and the
+optional search `q`: at most 100 characters after trimming, matched case-insensitively
+against the invitee's name and email and the current event type title, with `%`, `_` and
+`\` taken literally. A search only narrows the caller's existing host or team list and is
+refused with `400 invalid_request` when too long or containing control characters. The web
+app adds a Cancelled tab (`status=cancelled`, newest first) and a search box to the host's
+bookings page; CSV export does not take `q`. See
+[searching the booking list](/docs/rest#search-the-booking-list).
 
 Authenticated host booking lists and details add optional `rescheduledToId`: the immediate
 successor in the same organization that the caller also hosts, or null when none is

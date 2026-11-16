@@ -1,5 +1,8 @@
 # Data model
 
+[Recurring bookings design](recurring-bookings.md) proposes bounded series with ordinary
+booking rows per occurrence. It is not implemented and does not change the schema below.
+
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
 profile's default calendar and provider retries, and cascades away on booking/user/calendar
@@ -122,6 +125,15 @@ unverified public enrollees. Removal deletes the voter row with its votes, crede
 deliveries and marks the mailbox counter row removed, which alone outlives it with its mail
 counts and opt-out. Removal checks only the host revision and advances the host and results
 revisions, so voter activity cannot make it fail.
+The internal cleanup service in `packages/scheduling/src/meeting-poll-cleanup.ts`, run by the
+hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending voters and
+replay tombstones past their purge instant (and terminal polls once an installation
+retention is supplied) in bounded batches that skip locked rows instead of waiting. Poll
+deletion and cleanup leave no voter data behind: only the receipts' pseudonymous replay
+tombstones remain after a poll is deleted. Migration `0088_meeting_poll_receipt_tombstones.sql`
+makes the deletion trigger also replace the request fingerprint of every receipt but `create`
+(an invitation's covers invitee names and mailboxes) with a constant, and clears existing
+tombstones the same way.
 See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
 capacity bounds and the remaining implementation steps. Numeric admission and cleanup
 constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
@@ -390,6 +402,11 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
   belonging to the host are checked by the application.
 - **Triggers pin `search_path`**, because they also run on Better Auth's auth-only
   connection (e.g. when it deletes a user).
+- **No relation name exists in both `auth` and `public`.** Native auth transactions set
+  `search_path TO auth, public` and run application code on that connection (invitation
+  acceptance, team leave with its departure-impact check, the sign-up policy), so an
+  unqualified public table name must never resolve to an `auth` relation instead.
+  `packages/db/src/schema-names.test.ts` checks this after every migration.
 - **Dates** (`DATE` columns) are returned as `YYYY-MM-DD` strings, never as `Date`
   objects shifted by the server's time zone.
 
@@ -1189,12 +1206,66 @@ populated predecessor with reminders, follow-ups, workflow definitions and the m
 to row versions, and compares fresh and upgraded schemas. A notifications test shows the core
 ledger counts and purge unchanged on the same rows across the upgrade.
 
+## Workflow creation key storage
+
+Migration 0087 installs `workflow_creation_keys`, the retained client idempotency key that
+creation in the [booking workflows design](workflows.md) requires (step 5 of its plan). Nothing
+reads or writes it yet: there is no create operation, and workflows stay hard-off behind
+`WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the workflow
+tables covers it too.
+
+- **One key per created definition.** A row names the definition a create request made
+  (`organization_id`, `workflow_id`) through a composite foreign key, so the key's organization
+  is its definition's, and a definition holds at most one key. The row keeps the client's
+  `idempotency_key` (1 to 255 printable ASCII characters, as for booking and one-time link
+  retries) and `request_fingerprint`, a 32-byte SHA-256 digest of the request's canonical input,
+  so a replay with the same input can return that definition and a changed input under the same
+  key can be refused as a conflict.
+- **Scope.** A key is unique per organization, acting user (`actor_user_id`) and credential, by
+  kind (`credential_kind`): a session principal (`session`, which names no credential record,
+  so it covers every session of that user), an API key (`api_key`) or an OAuth consent
+  (`oauth`), each named by its record ID (`credential_id`). As in booking retries, the kinds
+  never share a scope, and the unique key is `NULLS NOT DISTINCT`, so a session principal's
+  keys are unique too. Of two concurrent creates with one key, the second waits for the first
+  and, once it commits, fails with a unique violation (23505): one definition is written. A key
+  of another actor, credential, kind or organization never matches.
+- **Retained identity.** A key lives as long as its definition row, tombstone included:
+  tombstoning keeps it unchanged. It goes with the definition row (`ON DELETE CASCADE`), when
+  the tombstone is purged or with the organization or personal owner. A guard trigger refuses
+  every update of a key (`workflow_creation_keys_immutable`) and its deletion while the
+  definition row exists, tombstoned or not (`workflow_creation_keys_retained`), so only those
+  cascades remove a key and a retried create always finds it.
+- **Credential deletion.** `actor_user_id` and `credential_id` are historical identifiers
+  without foreign keys, as bookings keep `api_key_id` and `oauth_consent_id`. Revoking an API
+  key or OAuth consent, signing out or deleting the user changes no key. A later credential or
+  user gets a new random ID, so it never matches a retained key: the same client key under it
+  is a new scope. A personal owner's definitions still go with the owner, and their keys with
+  them.
+
+A key is inserted in the creating transaction after its definition and first revision. Its
+foreign key share-locks the definition row, after the organization lock that the definition
+insert takes.
+
+`workflow-storage-creation-keys-coverage.test.ts` drops every constraint, the guard trigger and
+every NOT NULL column through `checkConstraintCoverage` (expectation file
+`packages/db/src/testing/migration-objects/0087_workflow_creation_keys.json`), and the scope
+columns, its `NULLS NOT DISTINCT`, every check, the default, the organization in the foreign
+key, the cascade on purge, each guard rule and the retention through a tombstone and credential
+deletion also have source-copy mutations (`packages/db/src/workflow-storage-creation-keys-protections.ts`),
+run against the predecessor schema. Two creates race one key, for a session principal and for
+an API key, and exactly one wins. The upgrade test preserves a populated predecessor with
+workflow definitions, revisions and execution rows down to row versions, and compares fresh and
+upgraded schemas. `packages/workflows/src/creation-key-storage.test.ts` binds the credential
+kinds to `Principal['kind']` of `@hourmere/auth`: typecheck fails when a principal kind is added
+or renamed, and the test fails until the check accepts exactly those kinds.
+
 ## Planned additions (each a new migration)
 
 The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
 email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition and execution storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage)),
+Only its definition, execution and creation key storage exist ([workflow definition
+storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
+[workflow creation key storage](#workflow-creation-key-storage)),
 with definition read operations that answer `workflows_disabled` while hard-off; no write API,
 worker or runtime enablement exists yet.
 
@@ -1540,6 +1611,13 @@ The phases within that organization boundary are:
   that record finishes first. Only routing takes that lock, always after the
   organization and before event types, so it adds no cycle; concurrent retries of one key
   queue on it, and each finds the record the first one committed.
+- Routing target invalidation runs inside event-type deletion and updates and administrative
+  member removal, after their organization and event-type locks. It updates the dependency
+  rows of current published versions only and takes no form or receipt lock. Routing cleanup
+  locks receipt, version, dependency and `routing_form_operations` rows with `SKIP LOCKED` in
+  bounded batches and takes no organization, event-type, host or form lock, so it never
+  waits: a version whose dependency row or publication record another transaction holds (a
+  replay reading that record, say) is left for a later sweep.
 - SCIM User creation takes the organization update lock first, like membership management,
   then a key share lock on its provisioning token row (revocation and rotation take the
   organization lock before their token update lock), then the shared invitation service's
@@ -2166,9 +2244,15 @@ unknown mailboxes before checking mailbox duplication. An exact authorized idemp
 still returns its original seat without consuming capacity or sending another notification.
 For occurrences with spare capacity, duplicate-mailbox rejection is not a non-enumeration
 guarantee: a different mailbox can create a real booking and trigger its notifications.
-A later failure of the pinned Zoom resource can also return a different error to a new
-mailbox while rolling back its tentative seat. Snapshot location-option mismatches are
-checked before mailbox duplication and return the same error to both callers.
+Snapshot location-option mismatches are checked before mailbox duplication and return the
+same error to both callers. Every other check of an existing occurrence (pinned host,
+allowed duration, notice and booking window, a shared phone location, and the usability of
+its pinned Zoom or Google Meet resource and organizer) also runs before the mailbox lookup,
+which is the last admission step. These refusals are all `slot_unavailable`, read only the
+occurrence, and write nothing, so a seat holder and a new mailbox take the same statements
+to the same answer. A pinned-resource readiness change between admission and conference
+preparation is mapped to the same `slot_unavailable`; joining an existing occurrence never
+returns a host-facing `automatic_zoom_*` or `automatic_meet_*` code.
 
 Moving one seat cancels its predecessor and creates a successor in the same transaction,
 so capacity is released/taken atomically and surviving source seats retain their resources.
@@ -2215,7 +2299,8 @@ revision and records terminal suppression under the existing instance mail budge
 minute dispatcher recovers pending and expired claims directly from durable due rows.
 It rechecks slot lifecycle, host membership and conference readiness after budget waits;
 SMTP never holds slot or booking row locks. Host calendar organizer name/mailbox are
-pinned on the slot before the first host ICS. A host reminder contains title, time and
+pinned on the slot before the first host ICS; as for seat invitations, a later `MAIL_FROM`
+signs that item as `SENT-BY` instead of replacing its organizer. A host reminder contains title, time and
 current seat count only; follow-ups contain no capabilities, join links or calendar files.
 
 Migration 0061 adds the shared location-option snapshot, slot-owned calendar/conference

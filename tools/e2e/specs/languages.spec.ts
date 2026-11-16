@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 import { selectPublicLanguage } from '../public-language.ts'
 
@@ -22,7 +23,7 @@ const text = {
     title: 'Title',
     duration: 'Duration to add (minutes)',
     addDuration: 'Add duration',
-    defaultDuration: 'Default duration',
+    defaultDuration: 'Duration (minutes)',
     create: 'Create event type',
     numberError: 'Enter a number.',
     navBookings: 'Bookings',
@@ -45,7 +46,7 @@ const text = {
     title: '标题',
     duration: '要添加的时长（分钟）',
     addDuration: '添加时长',
-    defaultDuration: '默认时长',
+    defaultDuration: '时长（分钟）',
     create: '创建活动类型',
     numberError: '请输入数字。',
     navBookings: '预约',
@@ -417,6 +418,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await page.goto(`${app.url}/app/event-types/new`)
     const title = page.getByLabel(text[selected].title, { exact: true })
     await title.fill('Settings')
+    await revealEventSetting(page.getByLabel(text[selected].duration, { exact: true }))
     await page.getByLabel(text[selected].duration, { exact: true }).fill('')
     await page.getByRole('button', { name: text[selected].addDuration, exact: true }).click()
     await expect(page.locator('#duration-to-add-error')).toContainText(text[selected].numberError)
@@ -560,6 +562,7 @@ test('zh-CN collective host drafts, validation and public booking preserve every
   await page.goto(`${app.url}/app/event-types/new`)
   const title = page.getByLabel('标题', { exact: true })
   await title.fill('Chinese panel interview')
+  await revealEventSetting(page.getByLabel('排期方式', { exact: true }))
   await page.getByLabel('排期方式', { exact: true }).selectOption('collective')
   await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
   await expect(page.getByText('请选择两至八位必选主持人。').first()).toBeVisible()

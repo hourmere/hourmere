@@ -35,7 +35,7 @@ function buildForm(source: string): typeof formFunctions {
   }
   return new Function(
     ...Object.keys(dependencies),
-    `${compiled}; return {emptyDraft, draftFromEventType, validateDraft, toInput, toPatchInput, serverErrors}`,
+    `${compiled}; return {changeLocationKind, emptyDraft, draftFromEventType, validateDraft, toInput, toPatchInput, serverErrors}`,
   )(...Object.values(dependencies)) as typeof formFunctions
 }
 
@@ -49,6 +49,82 @@ function detects(before: string, after: string, assertion: (values: typeof formF
 }
 
 describe('location editor production-source mutation controls', () => {
+  it('detects adding a derived durations error for an invalid first-screen duration', () => {
+    detects(
+      '!wholeNumberProblem(defaultDuration, RULES.durationMinutes, true) &&',
+      'true &&',
+      (values) => {
+        const draft = {
+          ...values.emptyDraft(),
+          title: 'Intro',
+          slug: 'intro',
+          durationMinutes: '2000',
+        }
+        expect(Object.keys(values.validateDraft(draft))).toEqual(['durationMinutes'])
+      },
+    )
+  })
+  it('detects sending primary invitee collection through the rejected legacy path', () => {
+    detects(
+      "draft.locationOptions === null && !(location?.kind === 'phone' && location.askInvitee)",
+      'draft.locationOptions === null',
+      (values) => {
+        const draft = {
+          ...values.emptyDraft(),
+          locationKind: 'phone' as const,
+          phoneAskInvitee: true,
+        }
+        expect(values.toInput(draft).locations).toEqual([
+          { id: draft.primaryLocationId, kind: 'phone', askInvitee: true },
+        ])
+        expect(values.toInput(draft)).not.toHaveProperty('location')
+      },
+    )
+  })
+  it('detects dropping a named primary while changing another location', () => {
+    detects('            ...(option.label && { label: option.label }),', '', (values) => {
+      const baseline = values.draftFromEventType(
+        eventType({
+          location: { kind: 'phone', askInvitee: true },
+          locations: [
+            { id: 'call', kind: 'phone', askInvitee: true, label: 'Call me', isDefault: true },
+            { id: 'office', kind: 'in_person', address: '1 Main Street' },
+          ],
+        }),
+      )
+      const draft = {
+        ...baseline,
+        locationOptions: (baseline.locationOptions ?? []).map((option) =>
+          option.id === 'office' ? { ...option, address: '2 Main Street' } : option,
+        ),
+      }
+      expect(values.toPatchInput(draft, baseline).locations?.[0]).toEqual({
+        id: 'call',
+        kind: 'phone',
+        askInvitee: true,
+        label: 'Call me',
+        isDefault: true,
+      })
+    })
+  })
+
+  it('detects clearing collective host schedules on a metadata save', () => {
+    detects(
+      "if (draft.schedulingType !== 'individual' && sameHosts) delete body.scheduleId",
+      "if (draft.schedulingType === 'round_robin' && sameHosts) delete body.scheduleId",
+      (values) => {
+        const baseline = {
+          ...values.emptyDraft(),
+          schedulingType: 'collective' as const,
+          hostUserIds: ['host-one', 'host-two'],
+        }
+        expect(
+          values.toPatchInput({ ...baseline, title: 'Renamed panel' }, baseline),
+        ).not.toHaveProperty('scheduleId')
+      },
+    )
+  })
+
   it('detects displaying a location conflict as untranslated server prose', () => {
     detects("case 'location_options_conflict':", "case 'unused_location_conflict':", (values) => {
       const result = values.serverErrors(
@@ -70,7 +146,9 @@ describe('location editor production-source mutation controls', () => {
         const baseline = values.draftFromEventType(
           eventType({ location: { kind: 'phone', askInvitee: true } }),
         )
-        expect(values.toInput(baseline).location).toEqual({ kind: 'phone', askInvitee: true })
+        expect(values.toInput(baseline).locations).toEqual([
+          { id: baseline.primaryLocationId, kind: 'phone', askInvitee: true },
+        ])
       },
     )
   })
@@ -111,7 +189,9 @@ describe('location editor production-source mutation controls', () => {
         const baseline = values.draftFromEventType(
           eventType({ location: { kind: 'phone', askInvitee: true } }),
         )
-        expect(values.toInput(baseline).location).toEqual({ kind: 'phone', askInvitee: true })
+        expect(values.toInput(baseline).locations).toEqual([
+          { id: baseline.primaryLocationId, kind: 'phone', askInvitee: true },
+        ])
       },
     )
   })
@@ -142,6 +222,93 @@ describe('location editor production-source mutation controls', () => {
         expect(
           values.toPatchInput({ ...baseline, phone: '+14155550123' }, baseline).location,
         ).toEqual({ kind: 'phone', number: '+14155550123' })
+      },
+    )
+  })
+})
+
+describe('ordered locations editor preservation controls', () => {
+  const options = [
+    { id: 'office', kind: 'in_person' as const, address: '42 Main Street', label: 'Office' },
+    { id: 'call', kind: 'phone' as const, askInvitee: true as const, isDefault: true as const },
+  ]
+  it('loads and preserves every option and its metadata', () => {
+    detects(
+      'locationOptions: e.locations?.map((option) => ({ ...option })) ?? null,',
+      'locationOptions: null,',
+      (values) => {
+        const baseline = values.draftFromEventType(
+          eventType({ locations: options, location: { kind: 'phone', askInvitee: true } }),
+        )
+        expect(values.toInput(baseline).locations).toEqual(options)
+        expect(values.toPatchInput({ ...baseline, title: 'Renamed' }, baseline)).not.toHaveProperty(
+          'locations',
+        )
+        expect(values.toPatchInput({ ...baseline, title: 'Renamed' }, baseline)).not.toHaveProperty(
+          'location',
+        )
+      },
+    )
+  })
+  it('updates the selected primary option without replacing other options', () => {
+    detects(
+      'if (option.id !== draft.primaryLocationId) return [option]',
+      'if (false) return [option]',
+      (values) => {
+        const baseline = values.draftFromEventType(
+          eventType({ locations: options, location: { kind: 'phone', askInvitee: true } }),
+        )
+        const changed = { ...baseline, phone: '+14155550123' }
+        expect(values.toPatchInput(changed, baseline).locations).toEqual([
+          options[0],
+          { id: 'call', kind: 'phone', number: '+14155550123', isDefault: true },
+        ])
+      },
+    )
+  })
+  it('sends reordered options and preserves their stable identities', () => {
+    detects('    delete body.locations', '    body.locations = null', (values) => {
+      const baseline = values.draftFromEventType(
+        eventType({ locations: options, location: { kind: 'phone', askInvitee: true } }),
+      )
+      expect(values.toPatchInput({ ...baseline, title: 'Changed' }, baseline)).not.toHaveProperty(
+        'locations',
+      )
+      expect(
+        values.toPatchInput({ ...baseline, locationOptions: [...options].reverse() }, baseline)
+          .locations,
+      ).toEqual([...options].reverse())
+    })
+  })
+  it('rejects invalid fields on additional location options', () => {
+    detects("if (option.kind === 'link') add", 'if (false) add', (values) => {
+      const draft = {
+        ...values.emptyDraft(),
+        title: 'Intro',
+        slug: 'intro',
+        locationKind: 'google_meet' as const,
+        locationOptions: [{ id: 'bad-link', kind: 'link' as const, url: 'not-a-url' }],
+      }
+      expect(values.validateDraft(draft)).toHaveProperty('location-option-bad-link-value')
+    })
+  })
+  it('allocates fresh identity on replacing or removing and readding a primary choice', () => {
+    detects(
+      'primaryLocationId: id, locationOptions: options',
+      'primaryLocationId: draft.primaryLocationId, locationOptions: options',
+      (values) => {
+        const baseline = values.draftFromEventType(
+          eventType({ locations: options, location: { kind: 'phone', askInvitee: true } }),
+        )
+        const replaced = values.changeLocationKind(baseline, 'zoom')
+        expect(replaced.primaryLocationId).not.toBe(baseline.primaryLocationId)
+        expect(values.toInput(replaced).locations).toEqual([
+          options[0],
+          { id: replaced.primaryLocationId, kind: 'zoom', isDefault: true },
+        ])
+        const removed = values.changeLocationKind(baseline, '')
+        const readded = values.changeLocationKind(removed, 'phone')
+        expect(readded.primaryLocationId).not.toBe(baseline.primaryLocationId)
       },
     )
   })

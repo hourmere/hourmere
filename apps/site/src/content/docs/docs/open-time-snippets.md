@@ -29,6 +29,30 @@ Deploy the public direct-slot booking pages on the same instance before enabling
 Hidden/unlisted active events remain usable through their direct links, just as in the
 picker; forwarding a snippet also forwards access to that unlisted address.
 
+## When the feature is off
+
+With `SLOT_SNIPPETS_ENABLED=false` (the default), a valid authenticated request sees:
+
+| Channel | Response |
+|---|---|
+| REST | `POST /api/v1/open-time-snippets` returns HTTP 404 with `{"error":"slot_snippets_disabled"}`. |
+| MCP | `generate_open_time_snippet` is absent from `tools/list`. A direct `tools/call` returns JSON-RPC error `{"code":-32602,"message":"Tool generate_open_time_snippet not found"}`. |
+| CLI | `hourmere open-time-snippet --json` exits 1, writes the JSON below to stderr, and leaves stdout empty. |
+
+```json
+{
+  "error": "slot_snippets_disabled"
+}
+```
+
+The CLI maps the hidden-tool response to a client error, without `outcomeMayBeUnknown`:
+this read-only call did not generate a snippet or change anything. Ask the instance
+operator to enable the setting, then refresh MCP tool discovery and retry. A server that
+predates open-time snippets returns the same unknown-tool response and is also reported
+as not enabled; ask the operator to upgrade that server before enabling the setting. Enabling it
+makes the tool discoverable and allows all three channels to return the snippet described below,
+subject to the same permissions and availability checks.
+
 ## Draft three times next week
 
 Resolve “next week” using the sender's intended time zone and current date before calling
@@ -112,9 +136,9 @@ booking-page preferences.
   the host has missing configuration.
 - A temporarily unavailable host calendar returns `409 calendar_sync_unavailable`.
   Retry shortly; this error does not mean there are no available times.
-- A disabled instance flag returns `404 slot_snippets_disabled`. Inactive/deleted events
-  return `404 event_type_not_found`; unavailable public configuration cannot generate a
-  usable snippet. Hidden active events are allowed.
+- Disabled-feature responses differ by channel; see [When the feature is off](#when-the-feature-is-off).
+  Inactive/deleted events return `404 event_type_not_found`; unavailable public
+  configuration cannot generate a usable snippet. Hidden active events are allowed.
 - The response is a live availability snapshot. Repeating a request is safe and creates
   no record, but may return different times. There is no idempotency key or saved result.
 - A direct link never confirms a booking by itself. If its time is already taken when

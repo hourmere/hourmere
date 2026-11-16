@@ -826,7 +826,7 @@ const invitationOutcomes = [
   ],
   [
     'Removed mailbox',
-    "Re-invited: the host's explicit invitation clears the removal tombstone and reserves a new place; mailbox counters persist",
+    "Re-invited: the host's explicit invitation clears the removal tombstone and reserves a new place; mailbox counters persist, and the invitation spends one resend under the resend cooldown and cap",
   ],
 ] as const
 

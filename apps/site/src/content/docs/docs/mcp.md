@@ -116,6 +116,7 @@ notifications and trigger configured integrations.
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
+| `troubleshoot_availability` | — | `troubleshoot-availability` | `full` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
@@ -162,8 +163,20 @@ booking links plus rendered `text` and `html`, using the same formatter as the a
 Use it to draft “three times next week”; it neither sends email nor reserves times.
 Personal owners and team owners/admins can call it with `read`, `bookings` or `full` keys,
 or an authorized `mcp:tools` OAuth connection. The instance must enable
-`SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
+`SLOT_SNIPPETS_ENABLED`. When off (the default), `generate_open_time_snippet` is absent
+from `tools/list`; a direct call returns JSON-RPC error `-32602` with
+`Tool generate_open_time_snippet not found`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
 profile defaults, empty-result handling, DST boundaries and taken-time fallback.
+
+## Explain why times cannot be booked
+
+Call `troubleshoot_availability` with `eventTypeId` and a local `date` (`YYYY-MM-DD`), plus
+optional `timeZone` and `durationMinutes`. It returns every possible start time of that day
+with `status` and ordered reason codes, the same object as the REST endpoint. Only personal
+owners and team owners/admins may call it, with a `full` key or an `mcp:tools` OAuth grant;
+anything else answers `event_type_not_found`. `calendar_sync_unavailable` means connected
+calendars could not be read right now. See [Troubleshoot availability](/docs/availability-troubleshooting) for every reason
+code and the known limitations.
 
 ## Configure an after-booking redirect
 
@@ -246,7 +259,7 @@ for update compatibility, editor steps, invitee selection and shared-rule limits
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
 | `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
-| `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
+| `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. `status: "cancelled"` gives the cancelled view; `q` searches invitee name, invitee email and event type title. |
 
 For example, after confirming the booking page, test recipient and time zone with your agent:
 
@@ -525,11 +538,12 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
 | `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
+| `troubleshoot_availability` | Every possible start time of one local day with bookable status and plain reason codes; owner/admin and `full` keys only, no calendar or booking details | read-only |
 | `generate_open_time_snippet` | Earliest open alternatives with direct booking links and localized text/HTML for an email draft; owner/admin only, no reservation | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
-| `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time | read-only |
+| `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time; optional status filter and search | read-only |
 
 Configuration discovery starts with `whoami` and `get_profile`. `list_event_types` includes
 team event types and your personal types in the key's organization, including inactive
@@ -582,6 +596,11 @@ first; keep the same order and filters when following `nextCursor`. The host's P
 uses descending order for the complete paginated history. Optional `endAfter` (strictly
 after) and `endTo` (at or before) filter by booking end time; Upcoming includes in-progress
 meetings. Keep filters unchanged while paginating.
+
+`status: "cancelled"` lists only cancelled bookings, including bookings replaced by a
+reschedule (their `rescheduledToId` is set). `q` narrows the list to bookings whose invitee
+name or email, or whose current event type title, contains the text, ignoring case. See
+[searching the booking list](/docs/rest#search-the-booking-list) for the exact rules.
 
 Host booking fields include optional `rescheduledToId`: the immediate successor in the same
 organization that the caller also hosts, or null when none is available. It is returned even
