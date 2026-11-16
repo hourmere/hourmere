@@ -4,7 +4,7 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createTestDatabase, outsideAuthTransaction, type TestDatabase } from '@hourmere/db/testing'
 import { type MailMessage, MailRejectedError } from '@hourmere/mail'
 import { deliverInvitationEmail, type InvitationEmailSenderDeps } from '@hourmere/notifications'
 import { sql } from 'kysely'
@@ -115,7 +115,8 @@ describe.skipIf(!serverUrl)('invitation sign-up and delivery boundary audit', ()
         const increment = trx.incrementOne.bind(trx)
         trx.incrementOne = async (request) => {
           if (request.model === 'invitation' && request.set?.status === 'accepted') {
-            await change()
+            // The independent connection's change, deliberately mid-transaction.
+            await outsideAuthTransaction(change)
             injections++
           }
           return increment(request)

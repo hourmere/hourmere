@@ -14,6 +14,7 @@ import {
   ScimTokenError,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
+import { isConnectionTimeout } from '@hourmere/db'
 import { withAuditRequest } from '@hourmere/db/audit'
 import {
   DomainError,
@@ -127,7 +128,8 @@ const domainStatus = {
 
 // Codes for errors raised by the framework itself (e.g. malformed JSON), so every error
 // response has the documented `{ "error": code }` shape.
-// Other 4xx statuses fall back to invalid_request; 5xx are always internal_error.
+// Other 4xx statuses fall back to invalid_request; 5xx are internal_error, except a database
+// connection timeout, which is 503 service_unavailable.
 const httpErrorCodes: Record<number, string> = {
   400: 'invalid_request',
   401: 'unauthorized',
@@ -218,6 +220,9 @@ function isDisconnect(err: unknown): boolean {
   }
   return false
 }
+
+/** Sent with 503 service_unavailable when no database connection was free in time. */
+const DATABASE_RETRY_AFTER_SECONDS = '5'
 
 /** An error's name, message and code, cut to 200 characters: enough to recognize it. */
 function summary(err: unknown): string {
@@ -466,6 +471,13 @@ export function createApp({
       if (isWaitlistAdmissionPath(c.req.path) || isSlackDestinationPath(c.req.path))
         delete body.message
       return c.json(body, domainStatus[err.kind])
+    }
+    // Every database connection stayed busy (or the database did not answer) for the whole
+    // DATABASE_CONNECTION_TIMEOUT. Temporary: the client may retry. One line, no stack.
+    if (isConnectionTimeout(err)) {
+      logLine(c, 'ERROR', `database connection unavailable (${summary(err)})`)
+      c.header('Retry-After', DATABASE_RETRY_AFTER_SECONDS)
+      return c.json({ error: 'service_unavailable' }, 503)
     }
     logError(c, '', err)
     return c.json({ error: 'internal_error' }, 500)

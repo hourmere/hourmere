@@ -6,7 +6,9 @@ import {
   TeamManagementError,
   teamRoles,
 } from '@hourmere/auth'
+import type { Database } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import type { Transaction } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { getTeamMemberDepartureImpact } from './member-departure-impact.ts'
@@ -23,9 +25,17 @@ export async function leaveTeamMember(
   // Repair legacy accounts before taking team locks; this helper may create its own
   // transaction. Only this user's personal space is touched here.
   const personalId = await ensurePersonalOrganization(ctx.db, principal.user.id)
-  return ctx.db
-    .transaction()
-    .setIsolationLevel('read committed')
+  // Better Auth's native leave calls this inside its own read-committed transaction on the
+  // auth pool and passes that transaction as ctx.db. Run on it: waiting for an application
+  // connection while holding an auth connection can deadlock against requests that hold an
+  // application transaction while they wait for an auth connection (the MCP OAuth broker).
+  const departure = ctx.db.isTransaction
+    ? {
+        execute: <T>(work: (trx: Transaction<Database>) => Promise<T>) =>
+          work(ctx.db as Transaction<Database>),
+      }
+    : ctx.db.transaction().setIsolationLevel('read committed')
+  return departure
     .execute(async (trx) => {
       // Web callers join the native switch ordering before taking any row locks.
       // Native HTTP departure already owns that context lock on its dedicated pool.

@@ -122,9 +122,9 @@ describe.skipIf(!bootstrap)('OAuth team revocation over real HTTP and Postgres',
       secret,
       signup,
       mcpOAuth: true,
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
+          { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
       mailer: { send: async (message) => void outbox.push(message) },

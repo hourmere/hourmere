@@ -46,9 +46,9 @@ describe.skipIf(!bootstrap)('membership revocation across REST, MCP and the CLI'
       baseURL: origin,
       secret,
       signup,
-      leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+      leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         leaveTeamMember(
-          { db, principal, now: () => Temporal.Now.instant() },
+          { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
           { teamId, expectedOrganizationId },
         ),
       mailer: { send: async (message) => void outbox.push(message) },

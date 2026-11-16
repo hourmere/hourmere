@@ -5,7 +5,7 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { type Auth, type AuthConfig, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createTestDatabase, outsideAuthTransaction, type TestDatabase } from '@hourmere/db/testing'
 import type { leaveTeamMember } from '@hourmere/scheduling'
 import {
   createFixtures,
@@ -164,9 +164,9 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
       signup,
       mailer: { send: async () => {} },
       ...(configured && {
-        leaveTeamMember: (principal, teamId, expectedOrganizationId) =>
+        leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
           copy.leaveTeamMember(
-            { db, principal, now: () => Temporal.Now.instant() },
+            { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
             { teamId, expectedOrganizationId },
           ),
       }),
@@ -329,13 +329,16 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
       .set({ role: 'member, owner' })
       .where('id', '=', f.memberId)
       .execute()
+    // A concurrent writer on its own connection, also when called inside the native leave.
     const demoteOtherOwner = () =>
-      db
-        .updateTable('auth.member')
-        .set({ role: 'member' })
-        .where('organizationId', '=', f.teamId)
-        .where('userId', '=', f.owner.id)
-        .execute()
+      outsideAuthTransaction(() =>
+        db
+          .updateTable('auth.member')
+          .set({ role: 'member' })
+          .where('organizationId', '=', f.teamId)
+          .where('userId', '=', f.owner.id)
+          .execute(),
+      )
     let reachedPersistence = false
     if (!demoteAfterNativeCheck) await demoteOtherOwner()
     const server = app(
