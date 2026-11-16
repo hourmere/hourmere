@@ -4,7 +4,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { createJobs, defineJob, JobPayloadError } from './index.ts'
-import { meetingPollCleanupJob } from './meeting-polls.ts'
+import { meetingPollCapabilityExpiryJob, meetingPollCleanupJob } from './meeting-polls.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
@@ -20,7 +20,9 @@ function sourceCopy(before?: string, after?: string): typeof meetingPollCleanupJ
 
 const run = (signal = new AbortController().signal) => ({ id: 'test', attempt: 1, signal })
 
-async function verifyCleanupJob(factory: typeof meetingPollCleanupJob) {
+async function verifyCleanupJob(
+  factory: typeof meetingPollCleanupJob | typeof meetingPollCapabilityExpiryJob,
+) {
   let pages = 0
   const cleanup = vi.fn(async () => {
     pages++
@@ -110,4 +112,11 @@ describe.skipIf(!serverUrl)('meeting poll cleanup registration', () => {
       await jobs.stop()
     }
   }, 20_000)
+})
+
+it('bounds hourly capability expiry and continues its backlog', async () => {
+  await verifyCleanupJob(meetingPollCapabilityExpiryJob)
+  expect(meetingPollCapabilityExpiryJob({ cleanup: async () => ({ more: false }) }).name).toBe(
+    'meeting-poll-capability-expiry-v1',
+  )
 })

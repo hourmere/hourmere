@@ -185,6 +185,7 @@ export {
   listManagedSlots,
   type ManagedBooking,
 } from './manage.ts'
+export { expireMeetingPollCapabilities } from './meeting-poll-capability-expiry.ts'
 export {
   cleanupMeetingPolls,
   type MeetingPollCleanupOptions,
@@ -351,5 +352,4 @@ export {
 } from './text.ts'
 export * from './waitlist.ts'
 export { scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
-
 export { lockWorkflowOwner } from './workflow-owner-lock.ts'
