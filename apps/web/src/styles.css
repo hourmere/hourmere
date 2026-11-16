@@ -1758,6 +1758,27 @@ input[type="radio"] {
   color: var(--success-text);
 }
 
+/* Per-attendee no-show marks inside a narrow bookings-list status cell. */
+.no-show-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.no-show-row-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.no-show-row-list .button {
+  /* Short labels stay on one line in the fitted status column instead of wrapping per word. */
+  white-space: nowrap;
+}
+
 .heading-badge {
   vertical-align: middle;
   font-size: var(--text-xs);

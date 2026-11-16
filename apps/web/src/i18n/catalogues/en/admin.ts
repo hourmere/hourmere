@@ -1772,6 +1772,8 @@ export const admin = {
   Cancellations: 'Cancellations',
   'Creations count the initial booking once. Reschedules count each move. Cancellations exclude the old booking withdrawn during a move. These are activity counts, without visitor or conversion tracking.':
     'Creations count the initial booking once. Reschedules count each move. Cancellations exclude the old booking withdrawn during a move. These are activity counts, without visitor or conversion tracking.',
+  'No-shows count each attendee currently marked as a no-show, by the meeting date, on bookings that are still confirmed.':
+    'No-shows count each attendee currently marked as a no-show, by the meeting date, on bookings that are still confirmed.',
   'No booking activity was recorded in this range.':
     'No booking activity was recorded in this range.',
   'Daily booking activity': 'Daily booking activity',

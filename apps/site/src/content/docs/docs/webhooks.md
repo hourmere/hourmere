@@ -156,7 +156,8 @@ The JSON is an immutable snapshot captured inside the booking's transaction:
 
 For `booking.attendee_no_show_changed`, `data` additionally contains `attendeeId`,
 `noShowMarkedAt` and `noShowMarkedBy`. Unmarking sets both marker fields to null. Each
-actual transition has a new event ID; repeating the same state emits no event. Existing
+actual transition has a new event ID; repeating the same state emits no event. The event uses the same
+envelope, `v1` signature and headers as every other event, so one verifier handles all of them. Existing
 subscriptions are not expanded automatically. This extends the subscription and delivery
 response event enums: consumers must ignore unknown event types and update closed
 validators when upgrading. See [no-shows](/docs/no-shows).

@@ -1,4 +1,9 @@
-import { NoShowAttendees } from '../bookings/NoShowAttendees.tsx'
+import {
+  NoShowAttendees,
+  type NoShowChange,
+  NoShowRowControls,
+  withNoShowChange,
+} from '../bookings/NoShowAttendees.tsx'
 import './team-bookings.css'
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
@@ -488,6 +493,8 @@ function BookingList({
     [query, onRevoked],
   )
   const [first, reload] = useLoad(load)
+  const latestSource = useRef<BookingPage | null>(null)
+  if (first.status === 'ready') latestSource.current = first.data
   const [more, setMore] = useState<(BookingPage & { source: BookingPage }) | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [moreError, setMoreError] = useState<UiText | null>(null)
@@ -513,6 +520,19 @@ function BookingList({
     list.current?.querySelector<HTMLButtonElement>(`[data-booking="${focusId}"]`)?.focus()
     setFocusId(null)
   }, [focusId])
+
+  /** Team writes that fail on context or access take the page's recovery paths. */
+  function handleConflict(error: unknown) {
+    moreController.current?.abort()
+    setLoadingMore(false)
+    onConflict(error)
+  }
+  function handleNoShowError(error: unknown): boolean {
+    if (isOrganizationContextChanged(error)) handleConflict(error)
+    else if (isAccessDenied(error)) onRevoked()
+    else return false
+    return true
+  }
 
   function closeDetails() {
     if (!confirmLeave()) return
@@ -544,6 +564,22 @@ function BookingList({
     setRefreshing(true)
     reload()
   }
+  /** Keeps the list, a later refresh's fallback and the open details showing the same mark. */
+  function applyNoShow(bookingId: string, change: NoShowChange, announce: boolean) {
+    const latest = loadedSnapshot.current ?? shown
+    const patched: BookingPage = {
+      data: latest.data.map((booking) =>
+        booking.id === bookingId ? withNoShowChange(booking, change) : booking,
+      ),
+      nextCursor: latest.nextCursor,
+    }
+    loadedSnapshot.current = patched
+    setMore({ ...patched, source: latestSource.current ?? source })
+    setSelected((current) =>
+      current?.id === bookingId ? withNoShowChange(current, change) : current,
+    )
+    if (announce) setStatus('No-show mark updated.')
+  }
   async function loadMore() {
     if (!shown.nextCursor || loadingMore || refreshing || conflict) return
     const controller = new AbortController()
@@ -558,7 +594,7 @@ function BookingList({
         }),
       )
       if (controller.signal.aborted) return
-      const data = [...shown.data, ...page.data]
+      const data = [...(loadedSnapshot.current ?? shown).data, ...page.data]
       loadedPages.current += 1
       loadedSnapshot.current = { data, nextCursor: page.nextCursor }
       setMore({ data, nextCursor: page.nextCursor, source })
@@ -708,6 +744,13 @@ function BookingList({
                         >
                           {t(bookingStatus(booking))}
                         </span>
+                        <NoShowRowControls
+                          booking={booking}
+                          expectedOrganizationId={expectedOrganizationId}
+                          disabled={!!conflict}
+                          onChanged={(change) => applyNoShow(booking.id, change, true)}
+                          onError={handleNoShowError}
+                        />
                       </div>
                     </td>
                   </tr>
@@ -741,12 +784,9 @@ function BookingList({
           timeZone={timeZone}
           expectedOrganizationId={expectedOrganizationId}
           conflict={conflict}
-          onConflict={(error) => {
-            moreController.current?.abort()
-            setLoadingMore(false)
-            onConflict(error)
-          }}
+          onConflict={handleConflict}
           onRevoked={onRevoked}
+          onNoShowChanged={(change) => applyNoShow(selected.id, change, false)}
           onRefresh={refreshBookings}
           onClose={closeDetails}
           onCancelled={() => {
@@ -798,6 +838,7 @@ export function BookingDetail({
   conflict,
   onConflict,
   onRevoked,
+  onNoShowChanged,
   onRefresh,
   onClose,
   onCancelled,
@@ -808,6 +849,7 @@ export function BookingDetail({
   conflict: unknown
   onConflict: (error: unknown) => void
   onRevoked: () => void
+  onNoShowChanged?: (change: NoShowChange) => void
   onRefresh: () => void
   onClose: () => void
   onCancelled: () => void
@@ -918,6 +960,13 @@ export function BookingDetail({
         booking={booking}
         expectedOrganizationId={expectedOrganizationId}
         disabled={!!conflict}
+        onChanged={onNoShowChanged}
+        onError={(error) => {
+          if (isOrganizationContextChanged(error)) onConflict(error)
+          else if (isAccessDenied(error)) onRevoked()
+          else return false
+          return true
+        }}
       />
       <ManualRebooking booking={booking} expectedOrganizationId={expectedOrganizationId} />
     </section>

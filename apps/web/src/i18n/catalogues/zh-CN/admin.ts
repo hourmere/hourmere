@@ -1691,6 +1691,8 @@ export const admin = {
   Cancellations: '取消',
   'Creations count the initial booking once. Reschedules count each move. Cancellations exclude the old booking withdrawn during a move. These are activity counts, without visitor or conversion tracking.':
     '新建预约仅计入首次预约；每次改期均计入改期次数；取消次数不包含改期时撤销的旧预约。这里只统计预约操作，不追踪访客或转化。',
+  'No-shows count each attendee currently marked as a no-show, by the meeting date, on bookings that are still confirmed.':
+    '未出席人数按会议日期统计当前被标记为未出席的每位参与者，仅包含仍为已确认状态的预约。',
   'No booking activity was recorded in this range.': '此范围内没有预约操作记录。',
   'Daily booking activity': '每日预约统计',
   Hosts: '主持人',

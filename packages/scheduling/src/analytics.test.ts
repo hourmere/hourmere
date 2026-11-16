@@ -116,11 +116,11 @@ describe.skipIf(!serverUrl)('booking activity with retained PostgreSQL records',
     })
     expect(await getBookingActivity(ctx, filters)).toEqual({
       ...filters,
-      totals: { created: 2, rescheduled: 2, cancelled: 1 },
+      totals: { created: 2, rescheduled: 2, cancelled: 1, noShows: 0 },
       data: [
-        { date: '2026-10-01', created: 1, rescheduled: 1, cancelled: 0 },
-        { date: '2026-10-02', created: 0, rescheduled: 1, cancelled: 0 },
-        { date: '2026-10-03', created: 1, rescheduled: 0, cancelled: 1 },
+        { date: '2026-10-01', created: 1, rescheduled: 1, cancelled: 0, noShows: 0 },
+        { date: '2026-10-02', created: 0, rescheduled: 1, cancelled: 0, noShows: 0 },
+        { date: '2026-10-03', created: 1, rescheduled: 0, cancelled: 1, noShows: 0 },
       ],
     })
     // A successor outside this narrow report still excludes a withdrawal from cancellations.
@@ -147,12 +147,12 @@ describe.skipIf(!serverUrl)('booking activity with retained PostgreSQL records',
       timeZone: 'Europe/Berlin',
     })
     expect(report.data).toEqual([
-      { date: '2026-03-29', created: 2, rescheduled: 0, cancelled: 0 },
-      { date: '2026-03-30', created: 1, rescheduled: 0, cancelled: 0 },
+      { date: '2026-03-29', created: 2, rescheduled: 0, cancelled: 0, noShows: 0 },
+      { date: '2026-03-30', created: 1, rescheduled: 0, cancelled: 0, noShows: 0 },
     ])
     const empty = await getBookingActivity(ctx, filters)
     expect(empty.data).toHaveLength(3)
-    expect(empty.totals).toEqual({ created: 0, rescheduled: 0, cancelled: 0 })
+    expect(empty.totals).toEqual({ created: 0, rescheduled: 0, cancelled: 0, noShows: 0 })
     await record(org, '2026-10-24T21:59:59.999999Z')
     await record(org, '2026-10-24T22:00:00Z')
     await record(org, '2026-10-25T22:59:59.999999Z')
@@ -242,12 +242,14 @@ describe.skipIf(!serverUrl)('booking activity with retained PostgreSQL records',
         created: 1,
         rescheduled: 0,
         cancelled: 0,
+        noShows: 0,
       })
     })
     expect((await getBookingActivity(ctx, filters)).totals).toEqual({
       created: 1,
       rescheduled: 1,
       cancelled: 0,
+      noShows: 0,
     })
   })
 })

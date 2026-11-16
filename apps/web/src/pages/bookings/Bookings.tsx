@@ -2,10 +2,11 @@ import { type RefObject, useCallback, useEffect, useId, useRef, useState } from 
 import { Link, useSearchParams } from 'react-router'
 import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, unwrap } from '../../api/client.ts'
-import { errorMessage } from '../../api/errors.ts'
+import { errorMessage, isOrganizationContextChanged } from '../../api/errors.ts'
 import { type Booking, loadProfile } from '../../api/resources.ts'
 import { BreakableText } from '../../components/BreakableText.tsx'
 import { EmptyState } from '../../components/EmptyState.tsx'
+import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { zoned } from '../../format.ts'
@@ -17,6 +18,7 @@ import { bookingPath, PATHS } from '../../paths.ts'
 import { useMe } from '../../session.tsx'
 import { BookingExport } from './BookingExport.tsx'
 import { bookingTitle, hostZone } from './booking-format.ts'
+import { type NoShowChange, NoShowRowControls, withNoShowChange } from './NoShowAttendees.tsx'
 
 type Tab = 'upcoming' | 'past' | 'cancelled'
 
@@ -263,6 +265,8 @@ function BookingList({
 }) {
   const { t, ui, formatLocale: displayLocale } = useI18n()
   const me = useMe()
+  // Writes stay bound to the organization this list opened in.
+  const [expectedOrganizationId] = useState(me.organization.id)
 
   // Every page of a list uses the same moment, as the API's cursors require the same filters.
   const [now] = useState(() => new Date().toISOString())
@@ -295,6 +299,7 @@ function BookingList({
   const [moreError, setMoreError] = useState<UiText | null>(null)
   const [status, setStatus] = useState<UiText>('')
   const [focusId, setFocusId] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<unknown>(null)
   const list = useRef<HTMLTableSectionElement>(null)
   const format = zoned(timeZone, displayLocale)
 
@@ -319,6 +324,19 @@ function BookingList({
   }
 
   const shown = more ?? first.data
+  const loaded = first.data
+  function applyNoShow(bookingId: string, change: NoShowChange) {
+    setMore((current) => {
+      const state = current ?? loaded
+      return {
+        ...state,
+        bookings: state.bookings.map((booking) =>
+          booking.id === bookingId ? withNoShowChange(booking, change) : booking,
+        ),
+      }
+    })
+    setStatus('No-show mark updated.')
+  }
   async function loadMore() {
     if (!shown.nextCursor) return
     setLoadingMore(true)
@@ -336,7 +354,10 @@ function BookingList({
         }),
       )
       const bookings = [...shown.bookings, ...page.data]
-      setMore({ bookings, nextCursor: page.nextCursor })
+      setMore((current) => ({
+        bookings: [...(current ?? loaded).bookings, ...page.data],
+        nextCursor: page.nextCursor,
+      }))
       setStatus(msg('Showing {0} bookings.', { '0': bookings.length }))
       // Continue from the first new booking.
       if (page.data[0]) setFocusId(page.data[0].id)
@@ -385,6 +406,7 @@ function BookingList({
             expectedOrganizationId={me.organization.id}
           />
         ))}
+      <OrganizationContextConflict error={conflict} />
       {shown.bookings.length === 0 ? (
         search ? (
           <EmptyState
@@ -488,6 +510,17 @@ function BookingList({
                         ) : (
                           <span className="badge badge-success">{t('Confirmed')}</span>
                         )}
+                        <NoShowRowControls
+                          booking={b}
+                          expectedOrganizationId={expectedOrganizationId}
+                          disabled={conflict !== null}
+                          onChanged={(change) => applyNoShow(b.id, change)}
+                          onError={(error) => {
+                            if (!isOrganizationContextChanged(error)) return false
+                            setConflict(error)
+                            return true
+                          }}
+                        />
                       </div>
                     </td>
                   </tr>

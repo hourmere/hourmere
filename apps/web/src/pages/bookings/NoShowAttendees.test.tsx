@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, renderHook, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -15,7 +15,11 @@ import { chooseLanguage } from '../../i18n/store.ts'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { BOOKING_ID, booking as hostBooking } from '../../test/fixtures.ts'
-import { NoShowAttendees } from './NoShowAttendees.tsx'
+import {
+  NoShowAttendees,
+  type NoShowRowControls,
+  type useNoShowToggle,
+} from './NoShowAttendees.tsx'
 
 const attendee = {
   id: 'attendee',
@@ -190,7 +194,7 @@ describe('admin no-show controls', () => {
 })
 
 const source = readFileSync('apps/web/src/pages/bookings/NoShowAttendees.tsx', 'utf8')
-function copy(text: string): typeof NoShowAttendees {
+function copy(text: string) {
   const code = compileSourceCopy('apps/web/src/pages/bookings/NoShowAttendees.tsx', text, {
     loader: 'tsx',
     format: 'cjs',
@@ -216,7 +220,11 @@ function copy(text: string): typeof NoShowAttendees {
     module.exports,
     react,
   )
-  return (module.exports as { NoShowAttendees: typeof NoShowAttendees }).NoShowAttendees
+  return module.exports as {
+    NoShowAttendees: typeof NoShowAttendees
+    NoShowRowControls: typeof NoShowRowControls
+    useNoShowToggle: typeof useNoShowToggle
+  }
 }
 
 describe('no-show source-copy mutation controls', () => {
@@ -231,7 +239,7 @@ describe('no-show source-copy mutation controls', () => {
     ],
   ] as const)('detects removal of %s guard', (_, before, props) => {
     function assertion(text: string) {
-      const view = display(props, copy(text))
+      const view = display(props, copy(text).NoShowAttendees)
       try {
         expect(screen.queryByRole('button')).toBeNull()
       } finally {
@@ -257,7 +265,7 @@ it('detects removal of the expected-organization write protection', async () => 
           noShowMarkedBy: 'host',
         }),
     })
-    const view = display({}, copy(text))
+    const view = display({}, copy(text).NoShowAttendees)
     try {
       await userEvent.click(screen.getByRole('button', { name: 'Mark Visitor as a no-show' }))
       expect(api.to(route)[0]?.headers.get('x-expected-organization-id')).toBe('team')
@@ -269,6 +277,87 @@ it('detects removal of the expected-organization write protection', async () => 
   expect(source.split(before)).toHaveLength(2)
   await assertion(source)
   await expect(assertion(source.replace(before, 'headers: {},'))).rejects.toMatchObject({
+    name: 'AssertionError',
+  })
+  await assertion(source)
+})
+
+// Exercise the actual row presentation too: a shared predicate alone would not catch
+// a future row accidentally bypassing that predicate.
+describe('row no-show source-copy mutation controls', () => {
+  it.each([
+    ['permission', 'booking.canManageNoShow === true', { canManageNoShow: false }],
+    ['unknown permission', 'booking.canManageNoShow === true', { canManageNoShow: undefined }],
+    ['import policy', '!isReadOnlyBooking(booking)', { source: 'import' }],
+    ['cancellation', "booking.status === 'confirmed'", { status: 'cancelled' }],
+    [
+      'start boundary',
+      'new Date(booking.start).getTime() < Date.now()',
+      { start: '2999-01-01T00:00:00Z' },
+    ],
+  ] as const)('detects removal of the row %s guard', (_, before, props) => {
+    function assertion(text: string) {
+      const Row = copy(text).NoShowRowControls
+      const view = render(
+        <Row
+          booking={{ ...booking, ...props }}
+          expectedOrganizationId="team"
+          onChanged={() => {}}
+        />,
+      )
+      try {
+        expect(screen.queryByRole('button')).toBeNull()
+      } finally {
+        view.unmount()
+      }
+    }
+    expect(source.split(before)).toHaveLength(2)
+    assertion(source)
+    expect(() => assertion(source.replace(before, 'true'))).toThrowError(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+    assertion(source)
+  })
+})
+
+it('detects removing the synchronous shared row/detail write reservation', async () => {
+  async function assertion(text: string) {
+    const useToggle = copy(text).useNoShowToggle
+    let respond!: (response: Response) => void
+    const response = new Promise<Response>((resolve) => {
+      respond = resolve
+    })
+    const api = fakeApi({ [route]: () => response })
+    const props = { bookingId: 'booking', expectedOrganizationId: 'team', onChanged: () => {} }
+    const first = renderHook(() => useToggle(props))
+    const second = renderHook(() => useToggle(props))
+    let firstWrite!: Promise<void>
+    let secondWrite!: Promise<void>
+    await act(async () => {
+      firstWrite = first.result.current.toggle(attendee)
+      secondWrite = second.result.current.toggle(attendee)
+    })
+    try {
+      expect(api.to(route)).toHaveLength(1)
+    } finally {
+      await act(async () => {
+        respond(
+          json(200, {
+            attendeeId: attendee.id,
+            noShowMarkedAt: '2020-01-01T10:01:00Z',
+            noShowMarkedBy: 'host',
+          }),
+        )
+        await Promise.all([firstWrite, secondWrite])
+      })
+      first.unmount()
+      second.unmount()
+    }
+  }
+  const before = 'pendingBookings.has(pendingKey) || conflict'
+  expect(source.split(before)).toHaveLength(2)
+  await assertion(source)
+  await expect(assertion(source.replace(before, 'conflict'))).rejects.toMatchObject({
     name: 'AssertionError',
   })
   await assertion(source)

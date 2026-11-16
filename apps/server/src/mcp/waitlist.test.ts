@@ -15,6 +15,7 @@ import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp, hasUnsafeJsonText } from '../app.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import * as rateLimits from '../rate-limit.ts'
+import * as analyticsSchemas from '../routes/analytics.ts'
 import * as bookingSchemas from '../routes/bookings.ts'
 import * as schemas from '../routes/event-types.ts'
 import * as publicSchemas from '../routes/public.ts'
@@ -646,6 +647,7 @@ describe('MCP waitlist adapter protections', () => {
       ...calendars,
       ...scheduling,
       ...rateLimits,
+      ...analyticsSchemas,
       ...bookingSchemas,
       ...publicSchemas,
       defineTool,

@@ -648,13 +648,15 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       } else {
         const activity = await body(activityResponse)
         keys(activity, ['startDate', 'endDate', 'timeZone', 'totals', 'data'])
-        keys(activity.totals, ['created', 'rescheduled', 'cancelled'])
+        keys(activity.totals, ['created', 'rescheduled', 'cancelled', 'noShows'])
         expect(activity.totals).toEqual({
           created: index === 3 ? 0 : 1,
           rescheduled: 0,
           cancelled: 0,
+          noShows: 0,
         })
-        for (const day of activity.data) keys(day, ['date', 'created', 'rescheduled', 'cancelled'])
+        for (const day of activity.data)
+          keys(day, ['date', 'created', 'rescheduled', 'cancelled', 'noShows'])
         expect(JSON.stringify(activity)).not.toContain(privateMarker)
       }
       const webhooksResponse = await get('/api/v1/webhooks', actor)

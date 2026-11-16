@@ -16,6 +16,19 @@ document and update closed validators. Consumers must ignore unknown event types
 than reject otherwise valid responses. Existing subscriptions are unchanged; attendance
 notifications require explicit subscription to the new event.
 
+### Booking activity no-show counts
+
+`GET /api/v1/analytics/bookings` adds `noShows` to daily and total counts. MCP
+`get_booking_activity` and CLI `booking-activity` return the same report and enforce
+the same personal-owner or current team-owner/admin access, with `read` or `full`
+API-key scope. Each currently marked attendee counts once on the scheduled start's
+local date in the requested IANA time zone. Unmarking removes the count; cancelled
+bookings and rescheduled predecessors are excluded. Guests and independent group
+seats count individually. This is current state, so corrections change past days.
+Clients must ignore unknown fields and treat an absent `noShows` on older servers
+as unknown, not zero. See [booking activity](https://hourmere.com/docs/analytics)
+for daylight-saving boundaries and retained-data limitations.
+
 ### Attendance access and team booking fields
 
 Actual booking hosts may read attendees and mark or unmark no-shows. Team owners/admins

@@ -209,15 +209,29 @@ function ActivityReport({ filters }: { filters: Filters }) {
           <dt>{t('Cancellations')}</dt>
           <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.cancelled)}</dd>
         </div>
+        <div>
+          <dt>{t('No-shows')}</dt>
+          <dd>
+            {data.totals.noShows == null
+              ? '—'
+              : new Intl.NumberFormat(displayLocale).format(data.totals.noShows)}
+          </dd>
+        </div>
       </dl>
       <p className="hint">
         {t(
           'Creations count the initial booking once. Reschedules count each move. Cancellations exclude the old booking withdrawn during a move. These are activity counts, without visitor or conversion tracking.',
+        )}{' '}
+        {t(
+          'No-shows count each attendee currently marked as a no-show, by the meeting date, on bookings that are still confirmed.',
         )}
       </p>
-      {data.totals.created + data.totals.rescheduled + data.totals.cancelled === 0 && (
-        <p>{t('No booking activity was recorded in this range.')}</p>
-      )}
+      {data.totals.noShows != null &&
+        data.totals.created +
+          data.totals.rescheduled +
+          data.totals.cancelled +
+          (data.totals.noShows ?? 0) ===
+          0 && <p>{t('No booking activity was recorded in this range.')}</p>}
       <div className="table-container">
         <table className="table table-analytics">
           <caption className="analytics-caption">{t('Daily booking activity')}</caption>
@@ -227,6 +241,7 @@ function ActivityReport({ filters }: { filters: Filters }) {
               <th scope="col">{t('Bookings created')}</th>
               <th scope="col">{t('Reschedules')}</th>
               <th scope="col">{t('Cancellations')}</th>
+              <th scope="col">{t('No-shows')}</th>
             </tr>
           </thead>
           <tbody>
@@ -248,6 +263,13 @@ function ActivityReport({ filters }: { filters: Filters }) {
                 <td data-label={t('Cancellations')} className="nowrap">
                   <div className="table-value">
                     {new Intl.NumberFormat(displayLocale).format(day.cancelled)}
+                  </div>
+                </td>
+                <td data-label={t('No-shows')} className="nowrap">
+                  <div className="table-value">
+                    {day.noShows == null
+                      ? '—'
+                      : new Intl.NumberFormat(displayLocale).format(day.noShows)}
                   </div>
                 </td>
               </tr>

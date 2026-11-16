@@ -296,6 +296,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
+| `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |

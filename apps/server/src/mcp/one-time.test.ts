@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { hasUnsafeJsonText } from '../app.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import * as limits from '../rate-limit.ts'
+import * as analyticsSchemas from '../routes/analytics.ts'
 import * as bookingSchemas from '../routes/bookings.ts'
 import * as publicSchemas from '../routes/public.ts'
 import {
@@ -93,6 +94,7 @@ function factory(change?: Change, service = vi.fn(async () => booked)) {
       ...calendars,
       ...scheduling,
       ...limits,
+      ...analyticsSchemas,
       ...bookingSchemas,
       ...publicSchemas,
       defineTool,

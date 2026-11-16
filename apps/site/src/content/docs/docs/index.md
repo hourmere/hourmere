@@ -172,8 +172,9 @@ configuration remain unavailable in the editor, as described below.
 - [Follow-ups](/docs/reminders-and-follow-ups) use the scheduled end regardless of
   attendance. Invitees cannot stop them after the meeting starts; cancel in Hourmere
   before the start. Mail limits can permanently suppress a message.
-- [No-show marks](/docs/no-shows) are manual and private. They do not suppress follow-ups;
-  attendance reporting and exports are not yet available.
+- [No-show marks](/docs/no-shows) are manual and private. They do not suppress follow-ups.
+  [Booking activity](/docs/analytics) counts current marks per day; per-host breakdowns,
+  rates and attendance exports are not yet available.
 - PostgreSQL 18+ is required for `uuidv7()`; [PgBouncer is unsupported](/docs/configuration#server-and-database).
   The [upgrade notes](https://github.com/hourmere/hourmere/blob/main/CHANGELOG.md#upgrade-notes)
   cover the database version requirement.

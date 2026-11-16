@@ -1,9 +1,9 @@
 ---
 title: Booking activity
-description: View bounded daily booking activity for your organization.
+description: View bounded daily booking activity and no-show counts for your organization.
 ---
 
-`/app/analytics` shows first-party booking activity in the current organization: three
+`/app/analytics` shows first-party booking activity in the current organization: four
 totals and a daily table. Choose inclusive start/end dates (at most 90 calendar dates) and
 an IANA reporting time zone. The initial view covers 30 dates ending today in the profile's
 time zone, or UTC before onboarding. A day can have 23 or 25 hours across daylight saving;
@@ -18,6 +18,9 @@ database in the same statement that aggregates the counts.
 The authenticated REST endpoint accepts session cookies or an API key with `read` or
 `full` scope. `read` is recommended for analytics and reporting; a `bookings` key receives
 `403 insufficient_scope`. See [API key scopes](/docs/api-keys) for the generated operation table.
+The same report is available as MCP tool `get_booking_activity` (API key with `read` or
+`full`, or MCP OAuth) and CLI command `booking-activity`, with the same input, output,
+permissions and error codes.
 
 For example:
 
@@ -28,7 +31,8 @@ Authorization: Bearer <API key from your secret manager>
 
 It returns `startDate`, `endDate`, the normalized `timeZone`, `totals` and `data` (daily
 counts, ordered by date, including zero days). Each totals/day object has `created`,
-`rescheduled` and `cancelled`; daily objects also have `date`. No booking IDs, names,
+`rescheduled`, `cancelled` and `noShows`; daily objects also have `date`. Clients should
+treat a missing `noShows` from an older server as unknown. No booking IDs, names,
 email addresses, answers, cancellation reasons, source credentials or management tokens
 are included. There is no organization-ID override or unlimited pagination.
 
@@ -41,11 +45,32 @@ These are **operation-date counts**, independently of when the meeting was sched
   the same organization. A move's withdrawal is not an actual cancellation. Successors
   outside the chosen report dates still exclude those withdrawals.
 
+### No-shows
+
+`noShows` is different: it is a **meeting-date count of current marks**, not an operation
+count.
+
+- **Per attendee:** each attendee currently marked as a [no-show](/docs/no-shows) counts
+  once. A booking with an invitee and a guest who both missed it contributes two; group
+  seats are separate bookings and count separately. Marking the same attendee again counts
+  nothing extra, and unmarking removes them.
+- **Meeting date:** the attendee counts on the local date of the booking's scheduled start
+  in the report time zone, with the same daylight-saving-aware day boundaries as the other
+  counts, regardless of when the mark was made. A future date always shows zero, because
+  attendance can only be marked after the start.
+- **Still confirmed only:** cancelled bookings are excluded even if a mark is still stored
+  on them. A rescheduled booking's withdrawn predecessor is cancelled, so its marks do not
+  count; the new booking has fresh, unmarked attendees and counts only when one of them is
+  marked, on its own start date. Unpaid payment holds never count.
+- **Current state:** the count reflects marks as they are now. Corrections and unmarks change
+  past days; the [audit log](/docs/audit-log) keeps the history of each change.
+
 A creation committed once and replayed with the same idempotency key still counts once.
 The SQL branches use one database snapshot, so an in-flight transactional reschedule
 cannot expose only its cancellation half. Temporal computes local-date UTC boundaries;
-parameterized indexed range scans aggregate the stored records without reading attendee or
-answer rows. Migration 0018 adds organization/creation and organization/cancellation-time
+parameterized indexed range scans aggregate the stored records. The no-show branch reads only
+the marker timestamp of attendee rows through the existing organization/start and booking
+indexes; it never selects names, email addresses or answers. Migration 0018 adds organization/creation and organization/cancellation-time
 indexes; the existing predecessor index supports withdrawal exclusion.
 
 The report reconstructs history from **currently retained booking rows**, rather than an
@@ -54,5 +79,5 @@ hard deletion can change chain-derived history. `created_at` uses PostgreSQL's s
 transaction-start timestamp; `cancelled_at` is the service's stored cancellation time.
 This is not a millisecond-precise execution log. Soft-deleting an event type preserves its
 existing booking activity. The report does not measure page views, unique visitors,
-conversion, attendance, no-shows or meeting completion. It adds no tracking pixel, external
+conversion, automatic attendance or meeting completion; no-shows are only the hosts' marks. It adds no tracking pixel, external
 telemetry or analytics dependency.

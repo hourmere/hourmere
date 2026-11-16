@@ -176,8 +176,8 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
           startDate: '2026-03-29',
           endDate: '2026-03-29',
           timeZone: 'UTC',
-          totals: { created: 1, rescheduled: 0, cancelled: 0 },
-          data: [{ date: '2026-03-29', created: 1, rescheduled: 0, cancelled: 0 }],
+          totals: { created: 1, rescheduled: 0, cancelled: 0, noShows: 2 },
+          data: [{ date: '2026-03-29', created: 1, rescheduled: 0, cancelled: 0, noShows: 2 }],
         }),
     })
     renderApp('/app/analytics')
@@ -185,9 +185,11 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
     expectCardMarkup(
       table,
       'analytics',
-      zh ? ['新建预约', '改期', '取消'] : ['Bookings created', 'Reschedules', 'Cancellations'],
+      zh
+        ? ['新建预约', '改期', '取消', '未出席记录']
+        : ['Bookings created', 'Reschedules', 'Cancellations', 'No-shows'],
     )
-    // Four short columns: every value stays on one line and auto layout spaces them.
-    expectCellKinds(table, { userContent: [], nowrap: [0, 1, 2, 3], fit: [] })
+    // Five short columns: every value stays on one line and auto layout spaces them.
+    expectCellKinds(table, { userContent: [], nowrap: [0, 1, 2, 3, 4], fit: [] })
   })
 })
