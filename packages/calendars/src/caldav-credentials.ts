@@ -63,9 +63,11 @@ export function createCalDavCredentialRecord(
   key: Buffer,
   userId: string,
   input: CalDavCredentials,
+  connectionId?: string,
 ): Insertable<CalendarConnections> & CalDavCredentialRecord {
   try {
     if (!userId) throw new Error()
+    if (connectionId !== undefined && !z.uuid().safeParse(connectionId).success) throw new Error()
     const parsed = payload.safeParse({
       serverUrl: input.serverUrl,
       username: input.username,
@@ -75,7 +77,7 @@ export function createCalDavCredentialRecord(
     if (!parsed.success) throw new Error()
     const value = { ...parsed.data, serverUrl: canonicalServerUrl(parsed.data.serverUrl) }
     const record = {
-      id: randomUUID(),
+      id: connectionId ?? randomUUID(),
       user_id: userId,
       provider: 'caldav',
       external_account_id: identity(value.serverUrl, value.username),
