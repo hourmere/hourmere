@@ -400,6 +400,7 @@ describe('creating an event type', () => {
     expect(location()).toBe(`/app/event-types/${CREATED_ID}`)
     expect(api.to('POST /api/v1/event-types').map((c) => c.body)).toEqual([
       {
+        smsRemindersEnabled: false,
         title: 'Intro call',
         slug: 'intro-call',
         description: 'Let us talk.\nBring questions.',
@@ -773,6 +774,7 @@ describe('editing an event type', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Edit “First call”')
     expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`).map((c) => c.body)).toEqual([
       {
+        smsRemindersEnabled: false,
         title: 'First call',
         slug: 'intro-call',
         description: 'A first call.',

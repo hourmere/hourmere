@@ -7,6 +7,7 @@ import { createDb, type Db } from '@hourmere/db'
 import * as Audit from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
+import * as PhoneNumbers from 'libphonenumber-js/max'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as Zod from 'zod'
 import * as Availability from './availability.ts'
@@ -37,6 +38,7 @@ type Change = readonly [string, string]
 const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
+  'libphonenumber-js/max': PhoneNumbers,
   zod: Zod,
   '@hourmere/db': HourmereDb,
   '@hourmere/auth': HourmereAuth,

@@ -381,9 +381,9 @@ export function productTools({
     whoamiTool,
     ...bookingTools({
       db,
-      smsRemindersAvailable,
       waitlistSecret,
       smtpConfigured,
+      smsRemindersAvailable,
       notify,
       notifyAttendeeNoShow,
       automaticMeet,

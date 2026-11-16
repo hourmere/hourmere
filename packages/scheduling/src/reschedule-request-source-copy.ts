@@ -5,6 +5,7 @@ import * as HourmereAuth from '@hourmere/auth'
 import * as HourmereDb from '@hourmere/db'
 import * as HourmereAudit from '@hourmere/db/audit'
 import * as Kysely from 'kysely'
+import * as PhoneNumbers from 'libphonenumber-js/max'
 import { expect } from 'vitest'
 import * as Zod from 'zod'
 import * as Availability from './availability.ts'
@@ -37,6 +38,7 @@ export type Change = readonly [string, string]
 const dependencies: Record<string, object> = {
   'node:crypto': Crypto,
   kysely: Kysely,
+  'libphonenumber-js/max': PhoneNumbers,
   zod: Zod,
   '@hourmere/auth': HourmereAuth,
   '@hourmere/db': HourmereDb,

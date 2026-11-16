@@ -601,6 +601,7 @@ it.each(['', 'google_meet', 'zoom', 'phone', 'in_person', 'link'] as const)(
         isActive: true,
         isHidden: false,
         allowGuests: false,
+        smsRemindersEnabled: false,
       }),
     )
   },

@@ -14,6 +14,7 @@ import {
   createTestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import type pg from 'pg'
 import { expect, it } from 'vitest'
 import { assertAuditEventListProtections } from '../../db/src/audit-event-details-protections.ts'
@@ -142,7 +143,17 @@ async function writeJournal(db: Db) {
   await revokeScimToken(db, { ...actor, tokenId: token.id })
 
   // An event type, then the remaining detail shapes through the application's writer.
-  await createEventType(ctx, { slug: 'upgrade', title: 'Private title', durationMinutes: 30 })
+  // The current event writer includes the SMS setting added after this historical schema.
+  // Bridge only that writer call, then restore the exact predecessor before testing 0080.
+  // The audit row still comes from the real service; no later migration/check is installed.
+  await sql`ALTER TABLE event_types ADD COLUMN sms_reminders_enabled boolean NOT NULL DEFAULT false`.execute(
+    db,
+  )
+  try {
+    await createEventType(ctx, { slug: 'upgrade', title: 'Private title', durationMinutes: 30 })
+  } finally {
+    await sql`ALTER TABLE event_types DROP COLUMN sms_reminders_enabled`.execute(db)
+  }
   const sessionActor = auditActor({ kind: 'session', sessionId: randomUUID(), user: owner })
   const keyActor = auditActor({
     kind: 'api_key',
