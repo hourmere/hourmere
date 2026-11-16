@@ -28,8 +28,8 @@ async function sourceCopy(...replacements: [string, string][]): Promise<typeof D
     expect(source.includes(from), `mutation must match source: ${from}`).toBe(true)
     source = source.replaceAll(from, to)
   }
-  source = source.replaceAll(
-    "import('@hourmere/scheduling/meeting-poll-delivery')",
+  source = source.replace(
+    /import\(\s*'@hourmere\/scheduling\/meeting-poll-delivery'\s*\)/g,
     `import('${pathToFileURL(createRequire(location).resolve('@hourmere/scheduling/meeting-poll-delivery')).href}')`,
   )
   const module = stripTypeScriptTypes(source).replace(
