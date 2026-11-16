@@ -165,11 +165,18 @@ export function groupHostMessage(row: Message, deps: NotificationDeps): MailMess
           end: instant(row.end_at),
           summary: row.title,
           description: count,
-          organizer: {
-            name: row.ical_organizer_name ?? row.host_name ?? '',
-            email:
-              row.ical_organizer_email ?? deps.mailer.senderEmail ?? (row.host_email as string),
-          },
+          organizer: (() => {
+            // The same rule as seat invitations: the pinned organizer never changes for this
+            // UID, and a later sender mailbox signs as SENT-BY instead of replacing it.
+            const email =
+              row.ical_organizer_email ?? deps.mailer.senderEmail ?? (row.host_email as string)
+            const sender = deps.mailer.senderEmail
+            return {
+              name: row.ical_organizer_name ?? row.host_name ?? '',
+              email,
+              sentBy: sender && sender.toLowerCase() !== email.toLowerCase() ? sender : undefined,
+            }
+          })(),
           attendees: [
             {
               name: row.host_name ?? '',
