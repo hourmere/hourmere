@@ -604,8 +604,9 @@ describe('team booking cancellation', () => {
         }),
     })
     renderApp(PAGE)
+    await screen.findByRole('button', { name: 'Team discovery call' })
+    await userEvent.click(screen.getByText('Filter bookings', { selector: 'summary' }))
     const user = await openDetail()
-    await user.click(screen.getByText('Filter bookings', { selector: 'summary' }))
     await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
     await user.type(screen.getByLabelText(/Reason/), 'Original team reason')
     active = OTHER_TEAM
@@ -619,6 +620,7 @@ describe('team booking cancellation', () => {
     expect(api.to(CANCEL)[0]?.headers.get('X-Expected-Organization-Id')).toBe(TEAM.organization.id)
     expect(api.to(CANCEL)).toHaveLength(1)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
     const readsBeforeReload = api.to(LIST).length
     for (const name of ['Show more bookings', 'Apply filters', 'Clear filters']) {
       const control = screen.getByRole('button', { name })
@@ -628,7 +630,7 @@ describe('team booking cancellation', () => {
     const past = screen.getByRole('link', { name: 'Past' })
     expect(past.getAttribute('aria-disabled')).toBe('true')
     await user.click(past)
-    expect(screen.getByTestId('location').textContent).toBe(`/app/bookings/${BOOKING_ID}`)
+    expect(screen.getByTestId('location').textContent).toBe(PAGE)
     expect(api.to(LIST)).toHaveLength(readsBeforeReload)
     expect(api.to(CANCEL)).toHaveLength(1)
     await user.click(screen.getAllByRole('button', { name: 'Reload' })[0] as HTMLElement)
@@ -668,6 +670,7 @@ describe('team booking cancellation', () => {
     await confirmCancellation(user)
     await screen.findAllByRole('button', { name: 'Reload' })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
     await user.click(screen.getByRole('link', { name: 'Bookings' }))
     await screen.findByRole('heading', { name: 'Bookings', level: 1 })
     await user.click(screen.getAllByRole('link', { name: 'Team bookings' })[0] as HTMLAnchorElement)
@@ -741,6 +744,7 @@ describe('team booking cancellation', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
     await screen.findByText(/This booking has already started, so it can no longer be cancelled/)
     expect(api.to(CANCEL)).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
     expect(
       screen.getAllByRole('link', { name: 'Team bookings' })[0] as HTMLAnchorElement,
     ).toBeDefined()

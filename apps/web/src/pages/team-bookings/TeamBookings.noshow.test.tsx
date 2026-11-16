@@ -97,31 +97,46 @@ async function row() {
   return within(tr)
 }
 const detail = () => within(screen.getByRole('region', { name: 'Team booking details' }))
-const flash = () =>
-  screen.getAllByRole('status').find((element) => element.classList.contains('flash'))
 
 describe('team bookings list no-show controls', () => {
   it('keeps a row change and the open details in step both ways', async () => {
-    const api = server({ [NO_SHOW]: echo })
+    const pending = later()
+    const api = server({
+      [NO_SHOW]: (call) =>
+        (call.body as { noShow: boolean }).noShow ? pending.response : echo(call),
+    })
     renderApp(PAGE)
     const user = userEvent.setup()
     const cells = await row()
-    await user.click(cells.getByRole('button', { name: 'Team discovery call' }))
-
     await user.click(cells.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
+    await user.click(cells.getByRole('button', { name: 'Team discovery call' }))
+    await pending.answer(
+      json(200, {
+        attendeeId: GRACE,
+        noShowMarkedAt: '2020-01-01T09:05:00.000Z',
+        noShowMarkedBy: TEAM.user.id,
+      }),
+    )
     expect(
       await detail().findByRole('button', { name: 'Clear no-show for Grace Hopper' }),
     ).toBeTruthy()
     expect(detail().getByText('No-show')).toBeTruthy()
     expect(cells.getByText('No-show')).toBeTruthy()
-    expect(flash()?.textContent).toBe('No-show mark updated.')
+    expect(
+      cells.getByRole('button', { name: 'Clear no-show for Grace Hopper', hidden: true }),
+    ).toBeTruthy()
 
     await user.click(detail().getByRole('button', { name: 'Clear no-show for Grace Hopper' }))
     expect(
-      await cells.findByRole('button', { name: 'Mark Grace Hopper as a no-show' }),
+      await cells.findByRole('button', { name: 'Mark Grace Hopper as a no-show', hidden: true }),
     ).toBeTruthy()
     expect(cells.queryByText('No-show')).toBeNull()
     expect(detail().queryByText('No-show')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
+    expect(
+      screen.getAllByRole('status').find((element) => element.classList.contains('flash'))
+        ?.textContent,
+    ).toBe('No-show mark updated.')
 
     expect(api.to(NO_SHOW).map((call) => call.body)).toEqual([{ noShow: true }, { noShow: false }])
     expect(api.to(NO_SHOW).map((call) => call.headers.get('x-expected-organization-id'))).toEqual([
@@ -169,13 +184,15 @@ it('keeps row and details synchronized when a pending next page arrives after ma
   })
   renderApp(PAGE)
   const cells = await row()
-  await userEvent.click(cells.getByRole('button', { name: 'Team discovery call' }))
   await userEvent.click(screen.getByRole('button', { name: 'Show more bookings' }))
-  await userEvent.click(cells.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
+  await userEvent.click(cells.getByRole('button', { name: 'Team discovery call' }))
+  await userEvent.click(detail().getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
   await detail().findByRole('button', { name: 'Clear no-show for Grace Hopper' })
   await pending.answer(json(200, { data: [], nextCursor: null }))
   expect(cells.getByText('No-show')).toBeTruthy()
-  expect(cells.getByRole('button', { name: 'Clear no-show for Grace Hopper' })).toBeTruthy()
+  expect(
+    cells.getByRole('button', { name: 'Clear no-show for Grace Hopper', hidden: true }),
+  ).toBeTruthy()
   expect(detail().getByText('No-show')).toBeTruthy()
 })
 
@@ -224,8 +241,8 @@ it('shares one pending write lock between a row and its details', async () => {
   const api = server({ [NO_SHOW]: () => pending.response })
   renderApp(PAGE)
   const cells = await row()
-  await userEvent.click(cells.getByRole('button', { name: 'Team discovery call' }))
   await userEvent.click(cells.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
+  await userEvent.click(cells.getByRole('button', { name: 'Team discovery call' }))
   const detailButton = detail().getByRole('button', { name: 'Mark Grace Hopper as a no-show' })
   expect((detailButton as HTMLButtonElement).disabled).toBe(true)
   await userEvent.click(detailButton)

@@ -508,6 +508,7 @@ function BookingList({
   const list = useRef<HTMLTableSectionElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
+  const [focusAfterCancellation, setFocusAfterCancellation] = useState(false)
   const confirmLeave = useConfirmLeave()
   const format = zoned(timeZone, formatLocale)
 
@@ -523,6 +524,14 @@ function BookingList({
     list.current?.querySelector<HTMLButtonElement>(`[data-booking="${focusId}"]`)?.focus()
     setFocusId(null)
   }, [focusId])
+
+  useEffect(() => {
+    // Wait for Back to close the modal and restore its inert background first.
+    // The cancelled row may no longer exist under a confirmed-only filter.
+    if (!focusAfterCancellation || panel?.active) return
+    heading.current?.focus()
+    setFocusAfterCancellation(false)
+  }, [focusAfterCancellation, panel?.active])
 
   /** Team writes that fail on context or access take the page's recovery paths. */
   function handleConflict(error: unknown) {
@@ -597,7 +606,7 @@ function BookingList({
     }
     setStatus('The booking is cancelled.')
     refreshBookings()
-    if (!background) setTimeout(() => heading.current?.focus())
+    if (!background) setFocusAfterCancellation(true)
   }
   /** Keeps the list, a later refresh's fallback and the open details showing the same mark. */
   function applyNoShow(bookingId: string, change: NoShowChange, announce: boolean) {
