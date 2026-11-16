@@ -1,4 +1,4 @@
-// Workflow reads and creation ship behind the pinned hard-off guard. This inventory admits
+// Workflow reads, creation and updates ship behind the pinned hard-off guard. This inventory admits
 // only those interfaces and confines data access to the definition services below.
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
@@ -39,7 +39,7 @@ const operations = [
 }))
 
 /** The operations shipped while workflows are off; every other one is still absent. */
-const SHIPPED = ['listWorkflows', 'createWorkflow', 'getWorkflow']
+const SHIPPED = ['listWorkflows', 'createWorkflow', 'getWorkflow', 'updateWorkflow']
 const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
 const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
 
@@ -88,9 +88,13 @@ const STORAGE_NAMES = new RegExp(
   `workflow-storage|(?<![A-Za-z0-9_])(?:${[...STORAGE_TABLES, ...STORAGE_TABLES.map(rowType)].join('|')})(?![A-Za-z0-9_])`,
   'i',
 )
-// The modules that own workflow data access: the guarded definition reads and creation;
+// The modules that own workflow data access: the guarded definition reads, creation and updates;
 // no execution table is accessed.
-const DATA_ACCESS = ['packages/workflows/src/reads.ts', 'packages/workflows/src/creates.ts']
+const DATA_ACCESS = [
+  'packages/workflows/src/reads.ts',
+  'packages/workflows/src/creates.ts',
+  'packages/workflows/src/updates.ts',
+]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
@@ -334,7 +338,7 @@ const toolError = (message: Awaited<ReturnType<typeof mcp>>) => {
   return JSON.parse(message.result?.content?.[0]?.text ?? '{}')
 }
 
-describe('booking workflows are off and expose only definition reads and creation', () => {
+describe('booking workflows are off and expose only definition reads, creation and updates', () => {
   it('reads every documented workflow operation from the design', () => {
     expect(operations.map(({ operationId }) => operationId)).toEqual([
       'listWorkflows',
@@ -352,6 +356,7 @@ describe('booking workflows are off and expose only definition reads and creatio
       'GET /api/v1/workflows',
       'POST /api/v1/workflows',
       'GET /api/v1/workflows/{id}',
+      'PATCH /api/v1/workflows/{id}',
     ])
   })
 
@@ -382,7 +387,7 @@ describe('booking workflows are off and expose only definition reads and creatio
     ])
     for (const path of ['/api/v1/workflows', '/api/v1/workflows/{id}'])
       expect(Object.keys(paths[path] ?? {}).sort(), path).toEqual(
-        path === '/api/v1/workflows' ? ['get', 'post'] : ['get'],
+        path === '/api/v1/workflows' ? ['get', 'post'] : ['get', 'patch'],
       )
     expect(
       operationIds.filter((id) => typeof id === 'string' && /workflow/i.test(id)).sort(),
@@ -438,7 +443,7 @@ describe('booking workflows are off and expose only definition reads and creatio
       for (const { method, url } of urls) {
         for (const scope of ['full', 'read'] as const) {
           const res = await app.request(url, { method, headers: { authorization: bearer(scope) } })
-          const refusedScope = method === 'POST' && scope === 'read'
+          const refusedScope = (method === 'POST' || method === 'PATCH') && scope === 'read'
           expect(res.status, `${scope} ${method} ${url}`).toBe(refusedScope ? 403 : 404)
           expect(await res.json()).toMatchObject({
             error: refusedScope ? 'insufficient_scope' : 'workflows_disabled',
@@ -485,7 +490,7 @@ describe('booking workflows are off and expose only definition reads and creatio
               toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
             ).toMatchObject({
               error:
-                tool === 'create_workflow' && scope === 'read'
+                ['create_workflow', 'update_workflow'].includes(tool) && scope === 'read'
                   ? 'insufficient_scope'
                   : 'workflows_disabled',
             })
@@ -593,16 +598,17 @@ describe('booking workflows are off and expose only definition reads and creatio
     expect(executionNames.test('selectFrom("workflow_runs")')).toBe(true)
     for (const file of DATA_ACCESS)
       expect(executionNames.test(readFileSync(new URL(file, root), 'utf8')), file).toBe(false)
-    // Only the package entry and the creation service load definition modules. Production
+    // Only the package entry and definition services load definition modules. Production
     // callers outside those modules receive only the guarded operations.
     const loaders = sources.filter((file) =>
-      /['"`](?:\.\/(?:reads|creates)|[^'"`]*workflows\/src\/(?:reads|creates))(?:\.ts)?['"`]/.test(
+      /['"`](?:\.\/(?:reads|creates|updates)|[^'"`]*workflows\/src\/(?:reads|creates|updates))(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
     expect(loaders).toEqual([
       'packages/workflows/src/creates.ts',
       'packages/workflows/src/index.ts',
+      'packages/workflows/src/updates.ts',
     ])
   })
 
@@ -711,9 +717,14 @@ describe('booking workflows are off and expose only definition reads and creatio
 
   it('exports only the guarded definition operations, which refuse before touching their context', async () => {
     const exported = Object.keys(workflows).filter((name) =>
-      /^(?:list|get|create)Workflow/.test(name),
+      /^(?:list|get|create|update)Workflow/.test(name),
     )
-    expect(exported.sort()).toEqual(['createWorkflow', 'getWorkflow', 'listWorkflows'])
+    expect(exported.sort()).toEqual([
+      'createWorkflow',
+      'getWorkflow',
+      'listWorkflows',
+      'updateWorkflow',
+    ])
     const untouchable = new Proxy(
       {},
       {
@@ -726,6 +737,7 @@ describe('booking workflows are off and expose only definition reads and creatio
       () => workflows.listWorkflows(untouchable, { owner: { kind: 'team', id: randomUUID() } }),
       () => workflows.getWorkflow(untouchable, randomUUID()),
       () => workflows.createWorkflow(untouchable, {} as never),
+      () => workflows.updateWorkflow(untouchable, randomUUID(), {} as never),
     ])
       await expect(read()).rejects.toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
   })

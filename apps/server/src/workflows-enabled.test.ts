@@ -208,7 +208,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       const tools = (await mcp(token, 'tools/list')).tools.map(({ name }: { name: string }) => name)
       expect(tools).toEqual(
         scope === 'full'
-          ? ['create_workflow', 'list_workflows', 'get_workflow']
+          ? ['create_workflow', 'update_workflow', 'list_workflows', 'get_workflow']
           : ['list_workflows', 'get_workflow'],
       )
       const called = await mcp(token, 'tools/call', {
@@ -381,6 +381,110 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     expect(await changed.json()).toMatchObject({ error: 'idempotency_key_reused' })
   })
 
+  const patch = (token: string, id: string, input: object) =>
+    app.request(`/api/v1/workflows/${id}`, {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+
+  it('edits, enables and disables through all three surfaces with stale-revision conflicts', async () => {
+    const token = bearer(owner, 'full')
+    const created = Workflow.parse(await (await post(token, createInput())).json())
+    const edited = await patch(token, created.id, { expectedRevision: 1, name: 'Edited workflow' })
+    expect(edited.status).toBe(200)
+    expect(await edited.json()).toMatchObject({
+      revision: 2,
+      name: 'Edited workflow',
+      enabled: false,
+    })
+    const enabled = await mcp(token, 'tools/call', {
+      name: 'update_workflow',
+      arguments: { id: created.id, expectedRevision: 2, enabled: true },
+    })
+    expect(enabled.structuredContent).toMatchObject({ revision: 2, enabled: true })
+    const disabled = await cli(token, ['workflows', 'update'], {
+      id: created.id,
+      expectedRevision: 2,
+      enabled: false,
+    })
+    expect(disabled.code).toBe(0)
+    expect(JSON.parse(disabled.stdout)).toMatchObject({ revision: 2, enabled: false })
+    const stale = { expectedRevision: 1, name: 'Stale edit' }
+    const response = await patch(token, created.id, stale)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'workflow_revision_conflict' })
+    expect(
+      toolError(
+        await mcp(token, 'tools/call', {
+          name: 'update_workflow',
+          arguments: { id: created.id, ...stale },
+        }),
+      ),
+    ).toMatchObject({ error: 'workflow_revision_conflict' })
+    const command = await cli(token, ['workflows', 'update'], { id: created.id, ...stale })
+    expect(command.code).toBe(1)
+    expect(JSON.parse(command.stderr)).toMatchObject({ error: 'workflow_revision_conflict' })
+  })
+
+  it('keeps update scope and foreign-owner refusals identical on all surfaces', async () => {
+    const before = await db.selectFrom('workflow_definitions').selectAll().orderBy('id').execute()
+    for (const [token, id, status, error] of [
+      [bearer(owner, 'read'), workflow.personal, 403, 'insufficient_scope'],
+      [bearer(owner, 'bookings'), workflow.personal, 403, 'insufficient_scope'],
+      [bearer(member, 'full', team), workflow.team, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), workflow.foreign, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), workflow.team, 404, 'workflow_not_found'],
+      [bearer(owner, 'full', team), workflow.personal, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), 'not-an-id', 404, 'workflow_not_found'],
+    ] as const) {
+      const input = { expectedRevision: 1, enabled: true }
+      if (!id) throw new Error('Missing workflow fixture')
+      const response = await patch(token, id, input)
+      expect(response.status).toBe(status)
+      expect(await response.json()).toMatchObject({ error })
+      expect(
+        toolError(
+          await mcp(token, 'tools/call', { name: 'update_workflow', arguments: { id, ...input } }),
+        ),
+      ).toMatchObject({ error })
+      const command = await cli(token, ['workflows', 'update'], { id, ...input })
+      expect(command.code).toBe(1)
+      expect(JSON.parse(command.stderr)).toMatchObject({ error })
+    }
+    expect(await db.selectFrom('workflow_definitions').selectAll().orderBy('id').execute()).toEqual(
+      before,
+    )
+  })
+
+  it('rejects unknown update fields and webhook actions across all surfaces', async () => {
+    const token = bearer(owner, 'full')
+    const created = Workflow.parse(await (await post(token, createInput())).json())
+    for (const fields of [
+      { owner: { kind: 'personal', id: owner.id } },
+      { unexpected: true },
+      { actions: [{ type: 'webhook', webhookId: randomUUID() }] },
+    ]) {
+      const input = { expectedRevision: 1, ...fields }
+      const error = 'actions' in fields ? 'invalid_workflow' : 'invalid_request'
+      const response = await patch(token, created.id, input)
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error })
+      expect(
+        toolError(
+          await mcp(token, 'tools/call', {
+            name: 'update_workflow',
+            arguments: { id: created.id, ...input },
+          }),
+        ),
+      ).toMatchObject({ error })
+      const command = await cli(token, ['workflows', 'update'], { id: created.id, ...input })
+      expect(command.code).toBe(1)
+      expect(JSON.parse(command.stderr)).toMatchObject({ error })
+    }
+    expect(await (await rest(token, `/api/v1/workflows/${created.id}`)).json()).toEqual(created)
+  })
+
   it('rejects read keys, team members and foreign owner contexts for creation on every surface', async () => {
     for (const [token, input, status, code] of [
       [bearer(owner, 'read'), createInput(), 403, 'insufficient_scope'],
@@ -524,6 +628,19 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     const stale = await browserPost(personal.token, createInput(), owner.principal.organization.id)
     expect(stale.status).toBe(409)
     expect(await stale.json()).toMatchObject({ error: 'organization_context_changed' })
+    const staleUpdate = await app.request(`/api/v1/workflows/${workflow.personal}`, {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${personal.token}`,
+        origin: URL,
+        'content-type': 'application/json',
+        'x-expected-organization-id': owner.principal.organization.id,
+      },
+      body: JSON.stringify({ expectedRevision: 1, enabled: false }),
+    })
+    expect(staleUpdate.status).toBe(409)
+    expect(await staleUpdate.json()).toMatchObject({ error: 'organization_context_changed' })
+
     expect(await db.selectFrom('workflow_definitions').select('id').execute()).toEqual(before)
   })
 
