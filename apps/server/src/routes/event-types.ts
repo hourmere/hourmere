@@ -345,24 +345,35 @@ const fields = {
   }),
   title: z.string().openapi({ minLength: 1, maxLength: L.titleMaxLength, example: 'Intro call' }),
   description: z.string().nullable().openapi({ maxLength: L.descriptionMaxLength }),
-  durationMinutes: rule('durationMinutes', 'Default length of a meeting'),
-  allowedDurationsMinutes: z.array(rule('durationMinutes', 'Permitted meeting length')).openapi({
-    description:
-      'Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes]',
-    minItems: 1,
-    maxItems: MAX_ALLOWED_DURATIONS,
-    uniqueItems: true,
-  }),
+  durationMinutes: rule('durationMinutes', 'Default length of a meeting, in whole minutes'),
+  allowedDurationsMinutes: z
+    .array(rule('durationMinutes', 'Permitted meeting length, in whole minutes'))
+    .openapi({
+      description:
+        'Distinct permitted whole-minute lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes]',
+      minItems: 1,
+      maxItems: MAX_ALLOWED_DURATIONS,
+      uniqueItems: true,
+    }),
   slotStepMinutes: rule(
     'slotStepMinutes',
-    'Distance between start times; null = the selected duration',
+    'Distance between start times, in whole minutes; null = the selected duration',
   ).nullable(),
-  bufferBeforeMinutes: rule('bufferBeforeMinutes', 'Free time kept before a meeting'),
-  bufferAfterMinutes: rule('bufferAfterMinutes', 'Free time kept after a meeting'),
-  minimumNoticeMinutes: rule('minimumNoticeMinutes', 'How far ahead a meeting must be booked'),
+  bufferBeforeMinutes: rule(
+    'bufferBeforeMinutes',
+    'Free time kept before a meeting, in whole minutes',
+  ),
+  bufferAfterMinutes: rule(
+    'bufferAfterMinutes',
+    'Free time kept after a meeting, in whole minutes',
+  ),
+  minimumNoticeMinutes: rule(
+    'minimumNoticeMinutes',
+    'How far ahead a meeting must be booked, in whole minutes',
+  ),
   bookingWindowDays: rule(
     'bookingWindowDays',
-    'How many days ahead can be booked; null = no limit',
+    'How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit',
   ).nullable(),
   maxBookingsPerDay: rule(
     'maxBookingsPerDay',

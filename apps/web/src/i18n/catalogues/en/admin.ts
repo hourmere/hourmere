@@ -6,6 +6,17 @@ export const admin = {
   'SMS reminders are not configured on this instance.':
     'SMS reminders are not configured on this instance.',
   'SMS availability is unknown.': 'SMS availability is unknown.',
+  'Stored value: {value} {unit}.': 'Stored value: {value} {unit}.',
+  'Default duration presets': 'Default duration presets',
+  'Custom duration': 'Custom duration',
+  '{minutes} minutes': '{minutes} minutes',
+  Minutes: 'Minutes',
+  'Time unit: hours': 'Hours',
+  Days: 'Days',
+  '{label} unit': '{label} unit',
+  'Enter {min}–{max} {unit}, in whole {storageUnit}.':
+    'Enter {min}–{max} {unit}, in whole {storageUnit}.',
+  'Empty: no limit.': 'Empty: no limit.',
 
   'Location options': 'Location options',
   'Default location': 'Default location',

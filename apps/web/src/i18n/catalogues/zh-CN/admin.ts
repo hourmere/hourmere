@@ -5,6 +5,17 @@ export const admin = {
     '已同意的受邀者可接收短信提醒。发件人和运营商费用由实例运营者管理。',
   'SMS reminders are not configured on this instance.': '此实例尚未配置短信提醒。',
   'SMS availability is unknown.': '短信可用状态未知。',
+  'Stored value: {value} {unit}.': '存储值：{value} {unit}。',
+  'Default duration presets': '默认时长快捷选项',
+  'Custom duration': '自定义时长',
+  '{minutes} minutes': '{minutes}分钟',
+  Minutes: '分钟',
+  'Time unit: hours': '小时',
+  Days: '天',
+  '{label} unit': '{label}单位',
+  'Enter {min}–{max} {unit}, in whole {storageUnit}.':
+    '请输入{min}–{max} {unit}，且必须为整数{storageUnit}。',
+  'Empty: no limit.': '留空表示不限制。',
 
   'Location options': '地点选项',
   'Default location': '默认地点',

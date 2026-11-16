@@ -304,6 +304,7 @@ describe('team host setup navigation', () => {
       })
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
       await screen.findByLabelText('Scheduling')
+      await user.type(screen.getByLabelText('Title', { exact: true }), ' renamed')
       await user.click(screen.getByRole('button', { name: 'Save changes' }))
       if (count === 1) {
         await screen.findByText('Saved.')

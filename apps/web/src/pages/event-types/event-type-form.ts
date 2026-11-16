@@ -643,10 +643,15 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
-  // Omit untouched limits and change deadlines so metadata saves preserve concurrent
-  // configuration edits.
+  // Omit untouched timing settings, limits and deadlines so metadata saves preserve
+  // concurrent configuration edits. Display-unit changes never modify these values.
   for (const name of [
     ...BOOKING_LIMIT_FIELDS,
+    'durationMinutes',
+    'minimumNoticeMinutes',
+    'bookingWindowDays',
+    'bufferBeforeMinutes',
+    'bufferAfterMinutes',
     'rescheduleCutoffMinutes',
     'cancelCutoffMinutes',
   ] as const) {
