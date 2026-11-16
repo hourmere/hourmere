@@ -110,6 +110,7 @@ export interface EventType {
   locations: LocationOption[] | null
   successRedirect: SuccessRedirect | null
   questions: Question[]
+  smsRemindersAvailable?: boolean
   notifications: NotificationSettings
   waitlist: WaitlistSettings
   isActive: boolean
@@ -117,6 +118,7 @@ export interface EventType {
   isHidden: boolean
   /** Whether new bookings may add guest recipients; existing attendees are preserved. */
   allowGuests: boolean
+  smsRemindersEnabled: boolean
   position: number
   /** The host's schedule; null = the host's default schedule. */
   scheduleId: string | null
@@ -155,6 +157,7 @@ export interface EventTypeInput {
   isActive?: boolean | undefined
   isHidden?: boolean | undefined
   allowGuests?: boolean | undefined
+  smsRemindersEnabled?: boolean | undefined
   position?: number | undefined
   /** One of the host's schedules; null or omitted = the host's default schedule. */
   scheduleId?: string | null | undefined
@@ -209,6 +212,7 @@ interface Fields {
   isHidden: boolean
   /** Whether new bookings may add guest recipients; existing attendees are preserved. */
   allowGuests: boolean
+  smsRemindersEnabled: boolean
   position: number
 }
 
@@ -235,6 +239,7 @@ const FIELD_NAMES = [
   'isActive',
   'isHidden',
   'allowGuests',
+  'smsRemindersEnabled',
   'position',
 ] as const satisfies readonly (keyof Fields)[]
 
@@ -257,6 +262,7 @@ const DEFAULTS = {
   isActive: true,
   isHidden: false,
   allowGuests: false,
+  smsRemindersEnabled: false,
   position: 0,
 } as const satisfies Partial<Fields>
 
@@ -280,12 +286,12 @@ export async function listEventTypes(ctx: ServiceContext): Promise<EventType[]> 
     .orderBy('e.position')
     .orderBy('e.id')
     .execute()
-  return rows.map(toEventType)
+  return rows.map((row) => toEventType(row, ctx.smsRemindersAvailable))
 }
 
 export async function getEventType(ctx: ServiceContext, id: string): Promise<EventType> {
   const row = await visibleRow(ctx.db, ctx, id)
-  return toEventType(await loadEventType(ctx.db, row.id))
+  return toEventType(await loadEventType(ctx.db, row.id), ctx.smsRemindersAvailable)
 }
 
 /** The complete saved notification settings visible to the caller. */
@@ -555,6 +561,7 @@ export type EventTypeSummary = Pick<
   | 'isActive'
   | 'isHidden'
   | 'allowGuests'
+  | 'smsRemindersEnabled'
   | 'position'
 >
 
@@ -577,6 +584,7 @@ export async function listEventTypeCatalog(
       'is_active',
       'is_hidden',
       'allow_guests',
+      'sms_reminders_enabled',
       'position',
     ])
     .where('organization_id', '=', ctx.principal.organization.id)
@@ -601,6 +609,7 @@ export async function listEventTypeCatalog(
       isActive: r.is_active,
       isHidden: r.is_hidden,
       allowGuests: r.allow_guests,
+      smsRemindersEnabled: r.sms_reminders_enabled,
       position: r.position,
     })),
     limit,
@@ -679,7 +688,7 @@ export async function createEventType(
         .execute()
       if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, id), waitlist)
       await auditEventType(ctx, trx, id, 'event_type.created')
-      return toEventType(await loadEventType(trx, id))
+      return toEventType(await loadEventType(trx, id), ctx.smsRemindersAvailable)
     }),
   )
 }
@@ -857,7 +866,7 @@ export async function updateEventType(
         new Date(ctx.now().epochMilliseconds),
       )
       await auditEventType(ctx, trx, row.id, 'event_type.updated')
-      return toEventType(await loadEventType(trx, row.id))
+      return toEventType(await loadEventType(trx, row.id), ctx.smsRemindersAvailable)
     }),
   )
 }
@@ -1083,6 +1092,8 @@ function validFields(
   )
   if (typeof c.isActive !== 'boolean') throw invalid('isActive must be true or false')
   if (typeof c.isHidden !== 'boolean') throw invalid('isHidden must be true or false')
+  if (typeof c.smsRemindersEnabled !== 'boolean')
+    throw invalid('smsRemindersEnabled must be true or false')
   if (typeof c.allowGuests !== 'boolean') throw invalid('allowGuests must be true or false')
   const { positionMin, positionMax } = EVENT_TYPE_LIMITS
   if (
@@ -1122,6 +1133,7 @@ function validFields(
     isActive: c.isActive,
     isHidden: c.isHidden,
     allowGuests: c.allowGuests,
+    smsRemindersEnabled: c.smsRemindersEnabled,
     position: c.position as number,
   }
 }
@@ -1270,6 +1282,7 @@ function fieldsOf(row: {
   is_active: boolean
   is_hidden: boolean
   allow_guests: boolean
+  sms_reminders_enabled: boolean
   position: number
 }): Fields {
   const locations =
@@ -1298,6 +1311,7 @@ function fieldsOf(row: {
     isActive: row.is_active,
     isHidden: row.is_hidden,
     allowGuests: row.allow_guests,
+    smsRemindersEnabled: row.sms_reminders_enabled,
     position: row.position,
   }
 }
@@ -1340,16 +1354,18 @@ function columns(fields: Fields) {
     is_active: fields.isActive,
     is_hidden: fields.isHidden,
     allow_guests: fields.allowGuests,
+    sms_reminders_enabled: fields.smsRemindersEnabled,
     position: fields.position,
   }
 }
 
-function toEventType(row: EventTypeRow): EventType {
+function toEventType(row: EventTypeRow, smsRemindersAvailable = false): EventType {
   return {
     id: row.id,
     organizationId: row.organization_id,
     ownerUserId: row.owner_user_id,
     ...fieldsOf(row),
+    smsRemindersAvailable,
     notifications: parseNotifications(row.notifications),
     waitlist: { enabled: row.waitlist_enabled },
     schedulingType: row.scheduling_type as SchedulingType,
@@ -1442,7 +1458,7 @@ export async function activateRoundRobin(ctx: ServiceContext, id: string): Promi
       .onConflict((conflict) => conflict.column('event_type_id').doUpdateSet({ enabled: true }))
       .execute()
     await auditEventType(ctx, trx, row.id, 'event_type.round_robin_activated')
-    return toEventType(await loadEventType(trx, row.id))
+    return toEventType(await loadEventType(trx, row.id), ctx.smsRemindersAvailable)
   })
 }
 

@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.':
+    'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.',
   'Meeting location': 'Meeting location',
   'Your phone number': 'Your phone number',
   'Choose one of the available locations.': 'Choose one of the available locations.',

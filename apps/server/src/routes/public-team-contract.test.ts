@@ -36,6 +36,7 @@ function verifyPublicKeys(
 ) {
   expect(Object.keys(page).sort()).toEqual(
     [
+      'smsRemindersEnabled',
       'allowGuests',
       'description',
       'durationMinutes',

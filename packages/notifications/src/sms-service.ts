@@ -29,9 +29,11 @@ export interface SmsRequest {
   /** Stable across every retry of a logical job; never reuse for another message. */
   idempotencyKey: string
   organizationId: string
+  /** Internal booking eligibility check under the reservation fence; never provider data. */
+  beforeReserve?: ((transaction: Db) => Promise<boolean>) | undefined
 }
 
-function digest(secret: string, purpose: string, value: string): Buffer {
+export function digest(secret: string, purpose: string, value: string): Buffer {
   return createHmac('sha256', secret).update(`hourmere/sms/${purpose}/v1\0`).update(value).digest()
 }
 
@@ -83,6 +85,14 @@ export function createSmsService(deps: {
       const reservation = await deps.db.transaction().execute(async (tx) => {
         // Database-local fence shared by all workers, held only for reservation, never HTTP.
         await sql`SELECT pg_advisory_xact_lock(1852798057, 1936552802)`.execute(tx)
+        const suppressed = await tx
+          .selectFrom('sms_suppressions')
+          .select('recipient_hash')
+          .where('recipient_hash', '=', recipient)
+          .executeTakeFirst()
+        if (suppressed) throw new SmsError('sms_opted_out')
+        if (input.beforeReserve && !(await input.beforeReserve(tx)))
+          throw new SmsError('sms_suppressed')
         await purgeSmsDeliveryDetails(tx)
         const existing = await tx
           .selectFrom('sms_deliveries')

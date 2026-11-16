@@ -50,6 +50,7 @@ const EventTypeSummary = z.object({
   isActive: z.boolean(),
   isHidden: z.boolean(),
   allowGuests: z.boolean(),
+  smsRemindersEnabled: z.boolean(),
   position: z.number().int(),
 })
 const ScheduleSummary = z.object({
@@ -72,15 +73,18 @@ const annotations = {
 
 export function catalogTools({
   db,
+  smsRemindersAvailable,
   followUpHostNotesEnabled,
 }: {
   db: Db
+  smsRemindersAvailable?: boolean | undefined
   followUpHostNotesEnabled?: boolean | undefined
 }): Tool[] {
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
     now: () => Temporal.Now.instant(),
+    smsRemindersAvailable,
     followUpHostNotesEnabled,
   })
   return [

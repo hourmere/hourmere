@@ -47,6 +47,7 @@ export function oneTimeBookingRoutes({
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
+  smsRemindersAvailable,
   automaticZoom,
   successRedirectPolicy,
   rateLimits = {},
@@ -56,6 +57,7 @@ export function oneTimeBookingRoutes({
     now,
     notify,
     automaticMeet,
+    smsRemindersAvailable,
     automaticZoom,
     successRedirectPolicy,
   }
@@ -157,6 +159,7 @@ export function oneTimeBookingRoutes({
             durationMinutes: body.durationMinutes,
             locationOptionId: body.locationOptionId,
             inviteePhone: body.inviteePhone,
+            smsConsent: body.smsConsent,
             invitee: body.invitee,
             guests: body.guests,
             responses: body.responses,

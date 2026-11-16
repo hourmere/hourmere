@@ -134,6 +134,7 @@ export interface PublicEventTypeRecord {
   bookingMode?: 'individual' | 'group'
   questions: Question[]
   allowGuests: boolean
+  smsRemindersEnabled: boolean
   hostName: string
   hostImage?: string
   hostTimeZone: string
@@ -196,6 +197,7 @@ async function findPersonalEventType(
       'et.zoom_connection_id',
       'et.questions',
       'et.allow_guests',
+      'et.sms_reminders_enabled',
       'et.success_redirect',
       'et.waitlist_enabled',
       'p.user_id',
@@ -247,6 +249,7 @@ async function findPersonalEventType(
     bookingMode: row.booking_mode === 'group' ? 'group' : 'individual',
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
+    smsRemindersEnabled: row.sms_reminders_enabled,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     waitlistEnabled: row.waitlist_enabled,
     hostName: row.name.trim() || row.handle,
@@ -385,6 +388,7 @@ async function findTeamEventType(
     bookingMode: row.booking_mode === 'group' ? 'group' : 'individual',
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
+    smsRemindersEnabled: row.sms_reminders_enabled,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     waitlistEnabled: row.waitlist_enabled,
     hostName:
@@ -429,7 +433,11 @@ export async function getOneTimeBookingPage(
   const link = await resolveOneTimeBookingLink(ctx, token)
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
-  const page = publicEventType({ ...eventType, waitlistEnabled: false })
+  const page = publicEventType(
+    { ...eventType, waitlistEnabled: false },
+    false,
+    ctx.smsRemindersAvailable,
+  )
   // Keep this projection explicit: additions to the reusable public page must not
   // silently expose an address or navigation capability to one-time recipients.
   return {
@@ -444,6 +452,7 @@ export async function getOneTimeBookingPage(
       locations: page.locations,
       questions: page.questions,
       allowGuests: page.allowGuests,
+      smsRemindersEnabled: page.smsRemindersEnabled,
       host: page.host,
       ...(page.hosts && { hosts: page.hosts }),
       ...(page.schedulingType && { schedulingType: page.schedulingType }),
@@ -470,6 +479,7 @@ export interface PublicEventType {
   locations: PublicLocationOption[] | null
   questions: Question[]
   allowGuests: boolean
+  smsRemindersEnabled: boolean
   waitlist?: { enabled: true }
   /** Only the saved parent-navigation opt-in; never the redirect target or parameters. */
   allowEmbedParentRedirect?: boolean
@@ -484,19 +494,28 @@ export async function getPublicEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicEventType(ctx.db, handle, slug), ctx.smtpConfigured)
+  return publicEventType(
+    await findPublicEventType(ctx.db, handle, slug),
+    ctx.smtpConfigured,
+    ctx.smsRemindersAvailable,
+  )
 }
 
 export async function getPublicTeamEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicTeamEventType(ctx.db, handle, slug), ctx.smtpConfigured)
+  return publicEventType(
+    await findPublicTeamEventType(ctx.db, handle, slug),
+    ctx.smtpConfigured,
+    ctx.smsRemindersAvailable,
+  )
 }
 
 function publicEventType(
   et: PublicEventTypeRecord | undefined,
   smtpConfigured = false,
+  smsRemindersAvailable = false,
 ): PublicEventType {
   if (!et) throw eventTypeNotFound()
   return {
@@ -512,6 +531,7 @@ function publicEventType(
     locations: publicLocationOptions(et.locations),
     questions: et.questions,
     allowGuests: et.allowGuests,
+    smsRemindersEnabled: smsRemindersAvailable && et.smsRemindersEnabled,
     ...(smtpConfigured &&
       et.waitlistEnabled &&
       et.schedulingType === 'individual' &&

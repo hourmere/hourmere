@@ -31,6 +31,7 @@ export function selectedLocation(locations: readonly BookingLocationOption[], id
 
 export interface BookingFormValues {
   locationOptionId?: string
+  smsConsent?: boolean
   inviteePhone?: string
   name: string
   email: string
@@ -40,6 +41,7 @@ export interface BookingFormValues {
 
 interface BookingFormProps {
   locations?: readonly BookingLocationOption[] | null
+  smsRemindersEnabled?: boolean
   allowGuests: boolean
   questions: readonly Question[]
   values: BookingFormValues
@@ -62,7 +64,7 @@ export function validateBookingForm(
   if (locations.length && !chosen)
     errors.locationOptionId = 'Choose one of the available locations.'
   if (
-    chosen?.askInvitee &&
+    (chosen?.askInvitee || values.smsConsent) &&
     !/^\+[1-9][0-9]{6,14}$/.test((values.inviteePhone ?? '').replace(/[ ().-]/g, ''))
   )
     errors.inviteePhone =
@@ -92,6 +94,7 @@ export function validateBookingForm(
  * guests. Problems show next to their fields and in a focused summary linking to each one.
  */
 export function BookingForm({
+  smsRemindersEnabled,
   allowGuests,
   locations: locationOptions,
   questions,
@@ -241,7 +244,19 @@ export function BookingForm({
           {errorText('locationOptionId')}
         </fieldset>
       )}
-      {chosen?.askInvitee &&
+      {smsRemindersEnabled && (
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={values.smsConsent ?? false}
+            onChange={(e) => update({ smsConsent: e.target.checked })}
+          />
+          {t(
+            'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.',
+          )}
+        </label>
+      )}
+      {(chosen?.askInvitee || (smsRemindersEnabled && values.smsConsent)) &&
         textInput(
           'inviteePhone',
           'Your phone number',

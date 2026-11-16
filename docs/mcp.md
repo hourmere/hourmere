@@ -297,3 +297,13 @@ owner/admin status does not grant access to bookings hosted by other members thr
 MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
 Non-host team administrators must use a browser session. See the
 [no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.
+
+## SMS reminders
+
+`create_event_type` and `update_event_type` accept `smsRemindersEnabled`; event reads
+report the saved setting and `smsRemindersAvailable` operator capability. Full API-key
+scope and the usual owner/admin permissions are required for configuration.
+`create_booking` accepts `inviteePhone` and explicit `smsConsent` for the invitee. CLI
+`create-event`, `update-event` and `book` expose the same JSON inputs. See
+[SMS reminders and opt-out](https://hourmere.com/docs/sms-provider) for consent, provider
+configuration, signed STOP handling and limitations.

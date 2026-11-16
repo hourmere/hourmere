@@ -20,6 +20,7 @@
     "@hourmere/db": "*",
     "kysely": "0.29.7",
     "zod": "4.6.7",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "libphonenumber-js": "1.13.15"
   }
 }

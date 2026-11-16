@@ -596,6 +596,7 @@ function BookingFlow({
       ...(requestedLocationOptionId && { locationOptionId: requestedLocationOptionId }),
       ...(chosenLocation?.askInvitee && {
         inviteePhone: values.inviteePhone?.replace(/[ ().-]/g, ''),
+        smsConsent: values.smsConsent ?? false,
       }),
       ...(waitlist && { waitlistToken: waitlist.token }),
       ...((hasDurationChoices || directFlow) && { durationMinutes }),
@@ -869,6 +870,7 @@ function BookingFlow({
               )}
               <BookingForm
                 locations={event.locations}
+                smsRemindersEnabled={event.smsRemindersEnabled}
                 allowGuests={event.allowGuests}
                 questions={event.questions}
                 values={values}

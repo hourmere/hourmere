@@ -542,6 +542,7 @@ describe.skipIf(!serverUrl)('availability', () => {
         slug: 'chat',
         title: 'Chat',
         allowGuests: false,
+        smsRemindersEnabled: false,
         description: 'A quick chat',
         durationMinutes: 20,
         location: { kind: 'phone' },

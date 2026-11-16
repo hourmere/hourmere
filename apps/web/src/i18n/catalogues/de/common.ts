@@ -1,4 +1,6 @@
 export const common = {
+  'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.':
+    'Ich stimme SMS-Buchungserinnerungen zu. Zum Abmelden STOP antworten. Nachrichten- und Datengebühren können anfallen.',
   'Meeting location': 'Besprechungsort',
   'Your phone number': 'Ihre Telefonnummer',
   'Choose one of the available locations.': 'Wählen Sie einen der verfügbaren Orte.',

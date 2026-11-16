@@ -27,6 +27,7 @@ const ONE_TIME_EVENT: OneTimeBookingPage['eventType'] = {
   durationMinutes: EVENT.durationMinutes,
   locations: EVENT.locations,
   location: EVENT.location,
+  smsRemindersEnabled: false,
   allowGuests: EVENT.allowGuests,
   host: EVENT.host,
   allowedDurationsMinutes: [30, 60],

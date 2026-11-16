@@ -63,6 +63,7 @@ export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
   checkDb: () => Promise<void>
   scim?: ScimOptions | undefined
+  smsInbound?: ((request: Request) => Promise<Response>) | undefined
   /** Minimal confirmation transports for emailed waitlist capabilities. */
   waitlist?:
     | {
@@ -366,6 +367,7 @@ const requestLogger = createMiddleware(async (c, next) => {
 export function createApp({
   checkDb,
   scim,
+  smsInbound,
   authHandler,
   resolveCaller,
   publicUrl,
@@ -537,6 +539,8 @@ export function createApp({
   // /api/v1, 413s included; it applies its own checks.
   app.use('/mcp/*', noStoreByDefault, requestLogger, clientIp(trustedProxies), apiBodyLimit())
   app.use('/.well-known/*', clientIp(trustedProxies))
+
+  app.post('/api/sms/twilio', (c) => (smsInbound ? smsInbound(c.req.raw) : c.notFound()))
 
   app.openapi(healthRoute, async (c) => {
     try {

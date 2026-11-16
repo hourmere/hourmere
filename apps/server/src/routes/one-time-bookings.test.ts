@@ -139,6 +139,7 @@ describe.skipIf(!serverUrl)('one-time booking HTTP contract', () => {
       expect(Object.keys(page.prefill).sort()).toEqual(['email', 'name'])
       expect(Object.keys(page.eventType).sort()).toEqual(
         [
+          'smsRemindersEnabled',
           'allowGuests',
           'allowedDurationsMinutes',
           'description',

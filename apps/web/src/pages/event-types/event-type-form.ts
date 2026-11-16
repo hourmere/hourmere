@@ -110,6 +110,7 @@ export interface EventTypeDraft {
   isActive: boolean
   isHidden: boolean
   allowGuests: boolean
+  smsRemindersEnabled: boolean
   waitlistEnabled: boolean
   successRedirectUrl: string
   successRedirectParameters: SuccessRedirectParameter[]
@@ -169,6 +170,7 @@ export function emptyDraft(): EventTypeDraft {
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    smsRemindersEnabled: false,
     waitlistEnabled: false,
     successRedirectUrl: '',
     successRedirectParameters: [],
@@ -225,6 +227,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     isActive: e.isActive,
     isHidden: e.isHidden,
     allowGuests: e.allowGuests,
+    smsRemindersEnabled: e.smsRemindersEnabled,
     waitlistEnabled: e.waitlist?.enabled ?? false,
     successRedirectUrl: e.successRedirect?.url ?? '',
     successRedirectParameters: [...(e.successRedirect?.parameters ?? [])],
@@ -627,6 +630,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     isActive: draft.isActive,
     isHidden: draft.isHidden,
     allowGuests: draft.allowGuests,
+    smsRemindersEnabled: draft.smsRemindersEnabled,
     ...(draft.waitlistEnabled && { waitlist: { enabled: true } }),
     ...(draft.successRedirectUrl !== '' && { successRedirect: redirectInput(draft) }),
     ...(comparableNotifications(draft.notifications) !==

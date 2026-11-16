@@ -95,6 +95,18 @@ function Harness({
 }
 
 describe('event type reminders and follow-ups editor', () => {
+  it('saves the SMS switch and explains unknown instance availability neutrally', async () => {
+    const api = editorApi()
+    const user = userEvent.setup()
+    renderApp('/app/event-types/new')
+    await user.type(await screen.findByLabelText('Title', { exact: true }), 'SMS reminders')
+    expect(screen.getByText('SMS availability is unknown.')).toBeTruthy()
+    const checkbox = screen.getByRole('checkbox', { name: 'SMS reminders' })
+    expect((checkbox as HTMLInputElement).checked).toBe(false)
+    await user.click(checkbox)
+    await user.click(screen.getByRole('button', { name: 'Create event type' }))
+    await waitFor(() => expect(api.saved().smsRemindersEnabled).toBe(true))
+  })
   it('shows the legacy default and preserves omitted notification settings on create', async () => {
     const api = editorApi()
     const user = userEvent.setup()

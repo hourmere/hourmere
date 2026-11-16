@@ -395,6 +395,7 @@ export interface BookingRoutesDeps {
   bookingExportMaxConcurrent?: number | undefined
   bookingMaxInviteeReschedules?: number | undefined
   automaticMeet?: boolean | undefined
+  smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
@@ -419,6 +420,7 @@ export function bookingRoutes({
   notify,
   notifyAttendeeNoShow,
   automaticMeet,
+  smsRemindersAvailable,
   automaticZoom,
   rateLimits = {},
   hostRateLimits = {},
@@ -428,6 +430,7 @@ export function bookingRoutes({
     now,
     notify,
     automaticMeet,
+    smsRemindersAvailable,
     automaticZoom,
     bookingMaxInviteeReschedules,
   }
@@ -466,6 +469,7 @@ export function bookingRoutes({
       now,
       notify,
       automaticMeet,
+      smsRemindersAvailable,
       automaticZoom,
       bookingExportMaxConcurrent,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),

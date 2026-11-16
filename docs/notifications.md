@@ -11,3 +11,11 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
+
+## SMS reminders
+
+Operator-configured Twilio supports per-event-type booking reminders for explicitly
+consenting invitees. The signed inbound webhook applies instance-wide STOP suppression
+under the same transaction fence as send reservations. SMS jobs and failures are separate
+from email delivery. See [SMS reminders and opt-out](https://hourmere.com/docs/sms-provider)
+for setup, consent, replay protection, limits and delivery limitations.

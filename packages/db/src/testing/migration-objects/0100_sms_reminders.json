@@ -1,0 +1,12 @@
+{
+  "migration": "0100_sms_reminders.sql",
+  "objects": {
+    "constraint public.sms_inbound_receipts.sms_inbound_receipts_key_hash_check": "CHECK ((octet_length(key_hash) = 32))",
+    "constraint public.sms_inbound_receipts.sms_inbound_receipts_pkey": "PRIMARY KEY (key_hash)",
+    "constraint public.sms_suppressions.sms_suppressions_pkey": "PRIMARY KEY (recipient_hash)",
+    "constraint public.sms_suppressions.sms_suppressions_recipient_hash_check": "CHECK ((octet_length(recipient_hash) = 32))",
+    "not_null public.booking_attendees.sms_consent": "NOT NULL DEFAULT false",
+    "not_null public.bookings.sms_reminders_enabled": "NOT NULL DEFAULT false",
+    "not_null public.event_types.sms_reminders_enabled": "NOT NULL DEFAULT false"
+  }
+}

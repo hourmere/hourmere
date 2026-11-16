@@ -201,8 +201,9 @@ See [REST](/docs/rest), [MCP](/docs/mcp), [CLI](/docs/cli) and the
 
 ## Known limitations
 
-- Delivery is email only. SMS, marketing campaigns and a general workflow engine are not
-  available.
+- Optional [SMS reminders](/docs/sms-provider) require operator Twilio configuration,
+  the event-type switch and invitee consent. SMS follow-ups, marketing campaigns and a
+  general workflow engine are not available.
 - Settings apply to future new bookings. There is no bulk rewrite of existing booking
   snapshots, and rescheduling retains the original settings.
 - Follow-ups use scheduled time, with no attendance or no-show detection. Calendar declines

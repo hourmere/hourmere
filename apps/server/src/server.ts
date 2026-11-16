@@ -142,7 +142,7 @@ import { webhookRoutes } from './routes/webhooks.ts'
 import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
-import { configuredSmsJobs } from './sms.ts'
+import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
 import {
   type MailboxProofQueue,
   mailboxProofJobs,
@@ -184,6 +184,7 @@ export function productRoutes({
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
+  smsRemindersAvailable = false,
   embedAllowedOrigins,
   scimProvisioningEnabled = false,
   slotSnippetsEnabled = false,
@@ -208,6 +209,7 @@ export function productRoutes({
   automaticMeet?: boolean
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
+  smsRemindersAvailable?: boolean
   embedAllowedOrigins?: readonly string[]
   scimProvisioningEnabled?: boolean
   slotSnippetsEnabled?: boolean
@@ -250,6 +252,7 @@ export function productRoutes({
       socialProviders,
       scimProvisioningEnabled,
       automaticMeet,
+      smsRemindersAvailable,
       automaticZoom,
       followUpHostNotesEnabled,
       slotSnippetsEnabled,
@@ -284,12 +287,14 @@ export function productRoutes({
     eventTypeRoutes({
       db,
       followUpHostNotesEnabled,
+      smsRemindersAvailable,
       automaticMeet,
       automaticZoom,
       successRedirectPolicy,
     }),
     publicRoutes({
       db,
+      smsRemindersAvailable,
       waitlistSecret,
       smtpConfigured,
       publicUrl,
@@ -300,6 +305,7 @@ export function productRoutes({
     }),
     oneTimeBookingRoutes({
       db,
+      smsRemindersAvailable,
       notify,
       automaticMeet,
       automaticZoom,
@@ -310,6 +316,7 @@ export function productRoutes({
     availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
     bookingRoutes({
       db,
+      smsRemindersAvailable,
       notify,
       notifyAttendeeNoShow,
       automaticMeet,
@@ -339,6 +346,7 @@ export function productTools({
   publicUrl,
   slotSnippetsEnabled = false,
   followUpHostNotesEnabled,
+  smsRemindersAvailable = false,
   successRedirectPolicy,
   notify,
   notifyAttendeeNoShow,
@@ -358,6 +366,7 @@ export function productTools({
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
   publicUrl?: string | undefined
+  smsRemindersAvailable?: boolean | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
@@ -372,6 +381,7 @@ export function productTools({
     whoamiTool,
     ...bookingTools({
       db,
+      smsRemindersAvailable,
       waitlistSecret,
       smtpConfigured,
       notify,
@@ -380,13 +390,14 @@ export function productTools({
       automaticZoom,
       bookingMaxInviteeReschedules,
     }),
-    ...catalogTools({ db, followUpHostNotesEnabled }),
+    ...catalogTools({ db, followUpHostNotesEnabled, smsRemindersAvailable }),
     ...brandingTools({ db }),
     ...auditLogTools({ db, auditLogRetentionDays }),
     ...eventTypeTools({
       db,
       automaticMeet,
       automaticZoom,
+      smsRemindersAvailable,
       followUpHostNotesEnabled,
       successRedirectPolicy,
     }),
@@ -467,6 +478,7 @@ export function productionAppOptions({
   return {
     checkDb,
     scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
+    smsInbound: createConfiguredSmsInbound(config, db),
     authHandler: auth.handler,
     resolveCaller,
     publicUrl: config.PUBLIC_URL,
@@ -494,6 +506,7 @@ export function productionAppOptions({
       automaticMeet: config.GOOGLE_MEET_ENABLED,
       automaticZoom: config.ZOOM_MEETINGS_ENABLED,
       followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+      smsRemindersAvailable: config.SMS_PROVIDER === 'twilio',
       embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
       slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
       successRedirectPolicy,
@@ -530,6 +543,7 @@ export function productionAppOptions({
         waitlistSecret: config.BETTER_AUTH_SECRET,
         publicUrl: config.PUBLIC_URL,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
+        smsRemindersAvailable: config.SMS_PROVIDER === 'twilio',
         successRedirectPolicy,
         smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
         notify,

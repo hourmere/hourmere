@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.':
+    '我同意接收预约短信提醒。回复 STOP 退订。可能产生短信和数据费用。',
   'Meeting location': '会议地点',
   'Your phone number': '你的电话号码',
   'Choose one of the available locations.': '请选择一个可用的会议地点。',

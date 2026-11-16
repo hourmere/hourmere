@@ -1,4 +1,5 @@
 import { sendRescheduleRequestNotification } from './reschedule-request.ts'
+import { enqueueBookingSmsReminders, type SmsReminderQueue } from './sms-reminders.ts'
 
 export { rescheduleRequestExpiryJob } from './reschedule-request.ts'
 
@@ -213,6 +214,12 @@ export async function enqueueBookingNotifications(
     return
   }
   await send(event.type === 'created' ? 'confirmed' : 'rescheduled')
+  await enqueueBookingSmsReminders(
+    queue as unknown as SmsReminderQueue,
+    transaction,
+    event.bookingId,
+    now,
+  )
   if (
     await enqueueScheduledBookingEmails(
       queue as unknown as Partial<ScheduledEmailQueue>,

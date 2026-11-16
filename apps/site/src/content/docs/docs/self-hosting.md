@@ -1123,9 +1123,11 @@ the hosted sign-up page URL when available. The links send no booking details or
 parameters, and suppress the referrer. Removing attribution may become an
 enterprise-license entitlement later; it is outside the current configuration.
 
-## SMS foundation
+## SMS reminders
 
-An optional [operator-configured Twilio provider](/docs/sms-provider) supplies internal
-SMS sending with durable per-number, instance and organization limits. Costs are billed
-to your Twilio account. There are no user-facing SMS reminders or workflow actions yet;
-no SMS sending jobs or status callback endpoint are enabled by configuration.
+An optional [operator-configured Twilio provider](/docs/sms-provider) sends booking
+reminders to invitees who supply a mobile number and explicitly consent. Hosts enable
+SMS per event type. Existing per-number, instance and organization limits apply; charges
+belong to the operator's Twilio account. Signed inbound STOP messages suppress that
+number across the instance, and START/UNSTOP re-enables it. SMS failures are isolated from
+booking and email delivery. See the SMS guide for inbound webhook setup and limitations.

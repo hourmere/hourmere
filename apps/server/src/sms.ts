@@ -1,5 +1,10 @@
 import type { Db } from '@hourmere/db'
-import { createSmsService, smsRetentionJob } from '@hourmere/notifications/sms'
+import {
+  bookingSmsReminderJob,
+  createSmsInboundHandler,
+  createSmsService,
+  smsRetentionJob,
+} from '@hourmere/notifications/sms'
 import { createTwilioSmsProvider } from '@hourmere/notifications/sms-provider'
 import type { Config } from './config.ts'
 
@@ -28,7 +33,23 @@ export function createConfiguredSmsService(config: Config, db: Db) {
   })
 }
 
-/** Metadata cleanup remains active when sending is disabled. Never schedules sending. */
-export function configuredSmsJobs(_config: Config, db: Db) {
-  return [smsRetentionJob({ db })]
+/** Keep both job definitions registered when disabled so existing queued jobs drain safely. */
+export function configuredSmsJobs(config: Config, db: Db) {
+  return [
+    smsRetentionJob({ db }),
+    bookingSmsReminderJob({ db, sms: createConfiguredSmsService(config, db) }),
+  ]
+}
+
+export function createConfiguredSmsInbound(config: Config, db: Db) {
+  if (config.SMS_PROVIDER !== 'twilio') return undefined
+  return createSmsInboundHandler({
+    db,
+    publicUrl: config.PUBLIC_URL,
+    accountSid: config.TWILIO_ACCOUNT_SID ?? '',
+    authToken: config.TWILIO_WEBHOOK_AUTH_TOKEN ?? config.TWILIO_AUTH_TOKEN ?? '',
+    hashSecret: config.SMS_HASH_KEY ?? '',
+    from: config.TWILIO_FROM,
+    messagingServiceSid: config.TWILIO_MESSAGING_SERVICE_SID,
+  })
 }

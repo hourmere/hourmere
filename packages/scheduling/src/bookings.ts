@@ -12,6 +12,7 @@ import {
 } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql, type Transaction } from 'kysely'
+import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
 import {
   eventTypeNotFound,
@@ -97,6 +98,8 @@ export interface Attendee {
   locale: string | null
   /** The invitee who made the booking; the others are guests they added. */
   isBooker: boolean
+  smsPhone?: string | null
+  smsConsent?: boolean
 }
 
 export interface Booking {
@@ -387,6 +390,7 @@ const RESCHEDULE_COLUMNS = [
   'hosts_use_default_schedule',
   'manage_token_hash',
   'notification_snapshot',
+  'sms_reminders_enabled',
   'group_slot_id',
   'reschedule_cutoff_minutes',
   'cancel_cutoff_minutes',
@@ -974,6 +978,7 @@ interface NewBooking {
   hostsUseDefaultSchedule: boolean
   attendees: readonly Attendee[]
   notificationSnapshot: NotificationSnapshot
+  smsRemindersEnabled?: boolean
   /**
    * The invitee change deadlines this booking keeps: the event type's at booking time, or
    * the replaced booking's on a reschedule (see change-deadlines.ts).
@@ -1020,6 +1025,7 @@ export async function insertBooking(
       required_host_user_ids: [...b.hostUserIds].sort(),
       hosts_use_default_schedule: b.hostsUseDefaultSchedule,
       notification_snapshot: JSON.stringify(b.notificationSnapshot),
+      sms_reminders_enabled: b.smsRemindersEnabled ?? false,
       ...cutoffColumns(b.changeCutoffs),
     })
     .returning('id')
@@ -1050,6 +1056,8 @@ export async function insertBooking(
           time_zone: a.timeZone,
           locale: a.locale,
           is_booker: a.isBooker,
+          sms_phone: a.smsPhone ?? null,
+          sms_consent: a.smsConsent ?? false,
         })),
       )
       .execute()
@@ -1183,6 +1191,7 @@ async function skipScheduledMessages(
 export interface CreateBookingInput {
   locationOptionId?: string | undefined
   inviteePhone?: string | undefined
+  smsConsent?: boolean | undefined
   handle: string
   slug: string
   /** Internal service generation fence; transports introduce it separately. */
@@ -1392,6 +1401,7 @@ function bookingIdempotency(
         durationMinutes: input.durationMinutes,
         locationOptionId: input.locationOptionId,
         inviteePhone: input.inviteePhone,
+        smsConsent: input.smsConsent,
         ...(input.expectedGroupSlotId !== undefined
           ? { expectedGroupSlotId: input.expectedGroupSlotId }
           : {}),
@@ -1424,6 +1434,34 @@ async function publicBooking(
   // Fails fast before taking the lock; checked again below against the current questions.
   validateResponses(et.questions, input.responses ?? {})
   const invitee = validateInvitee(input.invitee)
+  if (input.smsConsent !== undefined && typeof input.smsConsent !== 'boolean')
+    throw new DomainError('invalid', 'invalid_sms_consent', 'SMS consent must be true or false.')
+  if (
+    input.smsConsent === true ||
+    (input.inviteePhone !== undefined && input.inviteePhone !== '')
+  ) {
+    const phone = (input.inviteePhone ?? '').replace(/[ ().-]/g, '')
+    if (!/^\+[1-9][0-9]{6,14}$/.test(phone))
+      throw new DomainError(
+        'invalid',
+        'invalid_invitee_phone',
+        'Provide a phone number in E.164 format.',
+      )
+    if (input.smsConsent === true) {
+      const parsed = parsePhoneNumberFromString(phone)
+      if (
+        !parsed?.isValid() ||
+        !['MOBILE', 'FIXED_LINE_OR_MOBILE'].includes(parsed.getType() ?? '')
+      )
+        throw new DomainError(
+          'invalid',
+          'invalid_invitee_phone',
+          'Provide a valid mobile phone number in E.164 format.',
+        )
+      invitee.smsPhone = parsed.number
+      invitee.smsConsent = true
+    }
+  }
   const guests = validateGuests(input.guests ?? [], invitee)
 
   try {
@@ -1579,6 +1617,7 @@ async function publicBooking(
         hostsUseDefaultSchedule: current.schedulingType !== 'individual',
         attendees: [invitee, ...guests],
         notificationSnapshot: snapshot,
+        smsRemindersEnabled: current.smsRemindersEnabled && ctx.smsRemindersAvailable === true,
         // The deadlines that apply when it is booked, from the same locked row.
         changeCutoffs: cutoffsOf(policy),
       })
@@ -1867,7 +1906,7 @@ async function rescheduleLocked(
     trx.selectFrom('booking_hosts').select('user_id').where('booking_id', '=', old.id).execute(),
     trx
       .selectFrom('booking_attendees')
-      .select(['name', 'email', 'time_zone', 'locale', 'is_booker'])
+      .select(['name', 'email', 'time_zone', 'locale', 'is_booker', 'sms_phone', 'sms_consent'])
       .where('booking_id', '=', old.id)
       .orderBy('is_booker', 'desc')
       .orderBy('id')
@@ -1959,6 +1998,7 @@ async function rescheduleLocked(
     hostUserIds,
     hostsUseDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
     notificationSnapshot: notificationSnapshot(old.notification_snapshot),
+    smsRemindersEnabled: old.sms_reminders_enabled,
     // The meeting keeps the deadlines it was booked with, whoever moves it.
     changeCutoffs: cutoffsOf(old),
     attendees: attendees.map((a) => ({
@@ -1967,6 +2007,8 @@ async function rescheduleLocked(
       timeZone: a.time_zone,
       locale: a.locale,
       isBooker: a.is_booker,
+      smsPhone: a.sms_phone,
+      smsConsent: a.sms_consent,
     })),
   })
   await resolveRescheduleRequest(trx, old.id, 'picked', now)
@@ -2254,6 +2296,7 @@ async function rescheduleGroupLocked(
     hostUserIds: event.hostUserIds,
     hostsUseDefaultSchedule: false,
     notificationSnapshot: snapshot,
+    smsRemindersEnabled: old.sms_reminders_enabled,
     changeCutoffs: cutoffsOf(old),
     attendees: attendees.map((a) => ({
       name: a.name,
@@ -2261,6 +2304,8 @@ async function rescheduleGroupLocked(
       timeZone: a.time_zone,
       locale: a.locale,
       isBooker: a.is_booker,
+      smsPhone: a.sms_phone,
+      smsConsent: a.sms_consent,
     })),
   })
   await skipScheduledMessages(trx, old.id, 'booking_replaced')
