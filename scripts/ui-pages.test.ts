@@ -21,6 +21,7 @@ import {
 import {
   auditLocales,
   auditPages,
+  expandEventSettings,
   prepareAuditLocale,
   verifyAuditPath,
 } from '../tools/e2e/audit-pages.ts'
@@ -43,6 +44,7 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'oauth-consent',
     'event-types',
     'event-type-editor',
+    'event-type-editor-expanded',
     'availability-editor',
     'bookings',
     'booking-detail',
@@ -60,6 +62,15 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     expect(auditLocales(page.id)).toEqual(
       page.id === 'booking' ? ['en-US', 'zh-CN', 'en-GB'] : ['en-US', 'zh-CN'],
     )
+})
+
+it('expands every settings group and refuses an empty audit state', () => {
+  document.body.innerHTML =
+    '<details class="event-settings-group"><summary>Booking rules</summary><input></details><details class="event-settings-group" open><summary>Notifications</summary><input></details><details class="event-settings-group"><summary>Booking form</summary><input></details>'
+  expandEventSettings()
+  expect([...document.querySelectorAll('details')].every((group) => group.open)).toBe(true)
+  document.body.innerHTML = ''
+  expect(expandEventSettings).toThrow('Event settings disclosures are missing')
 })
 
 it('uses a long Chinese title, unbroken synthetic URL, and long synthetic attendee email', () => {
@@ -343,6 +354,7 @@ const expected={
   'team-booking':{path:'/team/FixtureTeam/layout-audit',public:true,wait:'heading'},
   'oauth-consent':{path:'/oauth/consent',public:false,wait:'Synthetic audit connector'},
   'manage-reschedule':{path:'/booking',public:true,wait:'.reschedule-summary .event-title'},
+  'event-type-editor-expanded':{path:'/app/event-types/synthetic-event',public:false,wait:'h1'},
   'team-bookings':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-bookings-list'},
   'team-booking-detail':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-booking-detail'},
 }
@@ -350,6 +362,8 @@ for(const [id,state] of Object.entries(expected)) {
   assert.ok(auditPages.some(page=>page.id===id),'Missing coverage state: '+id)
   let path='',signedIn,query='',space
   const calls=[]
+  const groups=[{open:false},{open:true},{open:false}]
+  globalThis.document={querySelectorAll:()=>groups}
   const locator=(selector)=>({
     waitFor:async()=>calls.push(['wait',selector]),
     first:()=>locator(selector),
@@ -366,13 +380,14 @@ for(const [id,state] of Object.entries(expected)) {
     addInitScript:async()=>{},goto:async(url)=>{path=new URL(url).pathname;query=new URL(url).search;calls.push(['goto',path])},
     locator,getByRole:(role,options)=>locator(role+':'+(options?.name ?? '')),
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
-    waitForFunction:async()=>{},evaluate:async(callback)=>calls.push(['evaluate',callback.name]),url:()=> 'http://127.0.0.1:42421'+path,
+    waitForFunction:async()=>{},evaluate:async(callback)=>{calls.push(['evaluate',callback.name]);if(callback.name==='expandEventSettings')callback()},url:()=> 'http://127.0.0.1:42421'+path,
   }
-  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
+  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',eventTypeId:'synthetic-event',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
   await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
   assert.deepEqual(calls[0],['clock',data.AUDIT_NOW],'Audit browser clock must be fixed before navigation: '+id)
   assert.deepEqual(calls.at(-1),['evaluate','settleAuditLayout'],'Audit layout must settle after content verification: '+id)
   assert.equal(path,state.path,'Wrong coverage route: '+id)
+  if(id==='event-type-editor-expanded')assert.ok(groups.every(group=>group.open),'Every event settings group must be expanded')
   if(id==='manage-reschedule')assert.ok(calls.some(call=>call[0]==='wait'&&call[1]==='.reschedule-summary'),'Missing current booking summary readiness')
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
   assert.equal(space,state.space,'Wrong organization space: '+id)
@@ -408,6 +423,17 @@ describe('source-copy coverage mutations', () => {
     const result = run(pagesSource)
     expect(result.stderr).toBe('')
     expect(result.status).toBe(0)
+  })
+
+  it('detects skipped expansion before the layout and axe audit', () => {
+    const mutant = pagesSource.replace(
+      "if (id === 'event-type-editor-expanded') await page.evaluate(expandEventSettings)",
+      '',
+    )
+    expect(mutant).not.toBe(pagesSource)
+    const result = run(mutant)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Every event settings group must be expanded')
   })
 
   for (const id of [

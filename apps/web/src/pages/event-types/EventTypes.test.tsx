@@ -356,9 +356,16 @@ describe('creating an event type', () => {
     expect(screen.queryByRole('button', { name: 'Copy link' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Copy booking link' })).toBeNull()
     expect(screen.getByText('Save your changes before sharing this address.')).toBeDefined()
+    for (const label of [
+      'Description and visibility',
+      'Additional durations',
+      'Booking form',
+      'When people can book',
+    ])
+      await user.click(screen.getByText(label, { selector: 'summary' }))
     await user.type(field(/Description/), 'Let us talk.{Enter}Bring questions.')
     await user.click(screen.getByRole('button', { name: 'Add 45 min' }))
-    await user.selectOptions(screen.getByLabelText('Default duration'), '45')
+    await user.selectOptions(screen.getByLabelText('Duration (minutes)'), '45')
     await user.clear(field('Position'))
     await user.type(field('Position'), '2')
     await user.click(screen.getByRole('checkbox', { name: 'Active: invitees can book it' }))
@@ -439,6 +446,7 @@ describe('creating an event type', () => {
     const user = userEvent.setup()
     const api = eventTypeServer([])
     await openNew()
+    await user.click(screen.getByText('When people can book', { selector: 'summary' }))
     await user.type(field('Booking link'), 'Not A Slug')
     await user.type(field(/Daily limit/), '1.5')
     await user.type(field(/Booking window/), '4000')
@@ -490,7 +498,7 @@ describe('creating an event type', () => {
         error: 'invalid_event_type',
         message: 'durationMinutes must be a whole number from 1 to 1440, got 30',
       }),
-      'Default duration',
+      'Duration (minutes)',
       'Enter a number from 1 to 1,440.',
     ],
     [
@@ -832,7 +840,7 @@ describe('editing an event type', () => {
     const user = userEvent.setup()
     const api = eventTypeServer([eventType({ location: { kind: 'phone', askInvitee: true } })])
     await openExisting()
-    expect(field('Your phone number').value).toBe('')
+    expect(screen.queryByLabelText('Your phone number')).toBeNull()
     await user.clear(field('Title'))
     await user.type(field('Title'), 'Renamed')
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
@@ -840,13 +848,16 @@ describe('editing an event type', () => {
     const patch = api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
     expect(patch).toHaveProperty('title', 'Renamed')
     expect(patch).not.toHaveProperty('location')
-    expect(field('Your phone number').value).toBe('')
+    expect(screen.queryByLabelText('Your phone number')).toBeNull()
   })
 
   it('validates and saves an intentional host-number replacement for an invitee-phone default', async () => {
     const user = userEvent.setup()
     const api = eventTypeServer([eventType({ location: { kind: 'phone', askInvitee: true } })])
     await openExisting()
+    const summary = screen.getByText('Location options and conferencing', { selector: 'summary' })
+    if (!summary.closest('details')?.open) await user.click(summary)
+    await user.click(screen.getByRole('checkbox', { name: 'Invitee provides a phone number' }))
     await user.type(field('Your phone number'), '0301234567')
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     expect((await screen.findByRole('alert')).textContent).toContain(
@@ -1812,7 +1823,7 @@ it('keeps the event type editor inside the app shell while its skeleton loads', 
   expect(screen.getByRole('heading', { name: 'Edit “Intro call”', level: 1 })).toBeDefined()
 })
 
-it('shows configured location options and preserves them when saving the legacy editor', async () => {
+it('shows configured location options and preserves them when changing only the title', async () => {
   const locations = [
     { id: 'office', kind: 'in_person' as const, address: '1 Main Street' },
     { id: 'call', kind: 'phone' as const, askInvitee: true as const },
@@ -1822,9 +1833,12 @@ it('shows configured location options and preserves them when saving the legacy 
   ])
   const user = userEvent.setup()
   renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
-  await screen.findByText(
-    '2 location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
-  )
+  await screen.findByLabelText('Title')
+  const group = screen
+    .getByText('Location options and conferencing', { selector: 'summary' })
+    .closest('details')
+  expect(group?.open).toBe(true)
+  expect(screen.getByLabelText<HTMLInputElement>('Address').value).toBe('1 Main Street')
   await user.type(screen.getByLabelText('Title'), ' updated')
   await user.click(screen.getByRole('button', { name: 'Save changes' }))
   await screen.findByText('Saved.')

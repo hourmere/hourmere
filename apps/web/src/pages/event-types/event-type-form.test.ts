@@ -119,7 +119,9 @@ describe('validateDraft', () => {
     expect(draft.locationKind).toBe('phone')
     expect(draft.phone).toBe('')
     expect(draft.phoneAskInvitee).toBe(true)
-    expect(toInput(draft).location).toEqual({ kind: 'phone', askInvitee: true })
+    expect(toInput(draft).locations).toEqual([
+      { id: draft.primaryLocationId, kind: 'phone', askInvitee: true },
+    ])
     const renamed = { ...draft, title: 'Renamed' }
     expect(renderedDraftErrors(renamed, draft)).toEqual({})
     expect(toPatchInput(renamed, draft)).not.toHaveProperty('location')
@@ -550,3 +552,54 @@ describe('booking limit drafts', () => {
     expect(translateMessage('zh-CN', mapped.fields[longer])).not.toBe(message)
   })
 })
+
+it.each(['', 'google_meet', 'zoom', 'phone', 'in_person', 'link'] as const)(
+  'keeps the legacy essentials request byte-identical for %s',
+  (locationKind) => {
+    const location =
+      locationKind === ''
+        ? null
+        : locationKind === 'phone'
+          ? { kind: locationKind, number: '+14155550123' }
+          : locationKind === 'in_person'
+            ? { kind: locationKind, address: '42 Main Street' }
+            : locationKind === 'link'
+              ? { kind: locationKind, url: 'https://example.com/meeting' }
+              : { kind: locationKind }
+    expect(
+      JSON.stringify(
+        toInput({
+          ...emptyDraft(),
+          title: 'Intro',
+          slug: 'intro',
+          locationKind,
+          phone: '+14155550123',
+          address: '42 Main Street',
+          url: 'https://example.com/meeting',
+        }),
+      ),
+    ).toBe(
+      JSON.stringify({
+        title: 'Intro',
+        slug: 'intro',
+        description: null,
+        durationMinutes: 30,
+        slotStepMinutes: null,
+        bufferBeforeMinutes: 0,
+        bufferAfterMinutes: 0,
+        minimumNoticeMinutes: 0,
+        maxBookingsPerDay: null,
+        maxBookingsPerWeek: null,
+        maxBookingsPerMonth: null,
+        bookingWindowDays: null,
+        location,
+        questions: [],
+        scheduleId: null,
+        position: 0,
+        isActive: true,
+        isHidden: false,
+        allowGuests: false,
+      }),
+    )
+  },
+)

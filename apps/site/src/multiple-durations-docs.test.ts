@@ -16,6 +16,13 @@ const siteDocs = 'apps/site/src/content/docs/docs'
 const guide = () => read(`${siteDocs}/multiple-durations.md`)
 const prose = (source: string) => source.replace(/[*`]/g, '').replace(/\s+/g, ' ')
 
+function assertEditorLabels(source: string) {
+  const text = prose(source)
+  expect(text).toContain('Open Additional durations')
+  expect(text).toContain('Duration (minutes) on the first screen')
+  expect(text).not.toContain('Default duration')
+}
+
 function assertAscendingOrder(source: string) {
   const text = prose(source)
   expect(text).toContain('kept in ascending order')
@@ -105,13 +112,31 @@ describe('multiple meeting length documentation', () => {
       '15, 30, 45, 60 or 90-minute presets',
       'Duration to add (minutes)',
       'Add duration',
-      'Default duration',
+      'Duration (minutes)',
+      'Additional durations',
       'at least one must remain',
       'Removing the current default selects the first remaining length',
       'View and share',
       'first-run setup guide',
     ]) {
       expect(text).toContain(action)
+    }
+  })
+
+  it('uses current editor labels in both guides and rejects stale source copies', () => {
+    for (const path of ['docs/multiple-durations.md', `${siteDocs}/multiple-durations.md`]) {
+      const source = read(path)
+      assertEditorLabels(source)
+      for (const [before, after] of [
+        ['Additional durations', 'More settings'],
+        ['Duration (minutes)', 'Default duration'],
+      ] as const) {
+        expect(source).toContain(before)
+        expect(() => assertEditorLabels(source.replace(before, after))).toThrow(
+          expect.objectContaining({ name: 'AssertionError' }),
+        )
+      }
+      assertEditorLabels(source)
     }
   })
 

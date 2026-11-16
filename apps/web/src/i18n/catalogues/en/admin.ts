@@ -1,5 +1,19 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Location options': 'Location options',
+  'Default location': 'Default location',
+  'Location label': 'Location label',
+  'Add location option': 'Add location option',
+  'Remove location option': 'Remove location option',
+  'Move location up': 'Move location up',
+  'Move location down': 'Move location down',
+  'Choose each location type only once.': 'Choose each location type only once.',
+  'Invitee provides a phone number': 'Invitee provides a phone number',
+
+  'Description and visibility': 'Description and visibility',
+  'Additional durations': 'Additional durations',
+  'Location options and conferencing': 'Location options and conferencing',
+  'Duration (minutes)': 'Duration (minutes)',
   'SCIM provisioning tokens': 'SCIM provisioning tokens',
   'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
     'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',

@@ -1,5 +1,19 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Location options': '地点选项',
+  'Default location': '默认地点',
+  'Location label': '地点名称',
+  'Add location option': '添加地点选项',
+  'Remove location option': '移除地点选项',
+  'Move location up': '上移地点',
+  'Move location down': '下移地点',
+  'Choose each location type only once.': '每种地点类型只能选择一次。',
+  'Invitee provides a phone number': '由受邀人提供电话号码',
+
+  'Description and visibility': '说明与显示设置',
+  'Additional durations': '更多时长',
+  'Location options and conferencing': '地点选项与视频会议',
+  'Duration (minutes)': '时长（分钟）',
   'SCIM provisioning tokens': 'SCIM 预配令牌',
   'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
     '预配功能尚未开放。这些令牌用于为组织未来的 SCIM 连接做准备。',

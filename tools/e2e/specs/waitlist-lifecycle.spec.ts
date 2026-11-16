@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { revealEventSetting } from '../event-settings.ts'
 import { expect, type FixtureApp, test } from '../fixtures.ts'
 
 test.use({ waitlistSmtp: true })
@@ -59,6 +60,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
       const day = await app.configureWaitlist('personal', false)
       await app.auditSignIn(true, locale)
       await hostEditor(page, app)
+      await revealEventSetting(page.locator('#waitlist'))
       await page.locator('#waitlist').check()
       await saveSettings(page)
       await expect(page.locator('#waitlist')).toBeChecked()
