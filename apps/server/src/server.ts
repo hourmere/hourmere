@@ -107,6 +107,7 @@ import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
+import { routingFormConfigurationTools } from './mcp/routing-forms.ts'
 import { slackDestinationTools } from './mcp/slack-destinations.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
@@ -134,6 +135,7 @@ import { profileRoutes } from './routes/profile.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
+import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
@@ -307,6 +309,7 @@ export function productRoutes({
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    routingFormRoutes({ db, routingFormsEnabled: routingEnabled }),
     availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
     bookingRoutes({
       db,
@@ -338,6 +341,7 @@ export function productTools({
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
+  routingFormsEnabled: routingEnabled = routingFormsEnabled,
   followUpHostNotesEnabled,
   successRedirectPolicy,
   notify,
@@ -357,6 +361,7 @@ export function productTools({
   waitlistSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
+  routingFormsEnabled?: boolean | undefined
   publicUrl?: string | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -403,6 +408,7 @@ export function productTools({
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({ db }),
+    ...routingFormConfigurationTools({ db, routingFormsEnabled: routingEnabled }),
   ]
 }
 

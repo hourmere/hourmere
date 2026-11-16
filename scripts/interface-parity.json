@@ -1,4 +1,7 @@
 {
+  "createRoutingForm": { "mcp": "create_routing_form", "cli": "routing-forms create" },
+  "updateRoutingForm": { "mcp": "update_routing_form", "cli": "routing-forms update" },
+  "archiveRoutingForm": { "mcp": "archive_routing_form", "cli": "routing-forms archive" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {
     "mcp": "generate_open_time_snippet",

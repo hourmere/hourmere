@@ -1,31 +1,8 @@
-// Routing forms are storage only (docs/routing-forms.md, step a1a): migration 0072 and the
-// packages/db storage files exist, and no product surface does. Step a1b adds the hard-off
-// guard (apps/server/src/routing-forms.ts, tested in routing-forms.test.ts) and one surface,
-// the `/instance` capability `routingFormsEnabled`, which reports false; the OpenAPI check
-// below exempts exactly that field. This test asserts that the routing feature's own surface
-// is otherwise absent, keyed on the names docs/routing-forms.md assigns to each surface. It
-// never snapshots or compares whole catalogues and never consults a git base. Later plan
-// steps delete or narrow one assertion each when they add their surface:
-// - REST paths, operations and schemas: b1, b2 and b3 add `/routing-forms…`, c2a and c2b
-//   add `/public/-/routing/…`, c4 and c5b add `/routing-continuations/…`.
-// - MCP tools: b1 (`list_routing_forms`, `get_routing_form`, `create_routing_form`,
-//   `update_routing_form`, `archive_routing_form`), b2 (`publish_routing_form`),
-//   b3 (`preview_routing_form`), c2a (`get_public_routing_form`), c2b (`route_lead`),
-//   c4 (`resolve_routing_continuation`, `find_routed_slots`). Those steps list the tools only
-//   while `routingFormsEnabled` is true, so this assertion then moves into their off checks.
-// - CLI commands: b1 onward add `routing-forms …` commands to the static command table.
-// - Storage imports: a3's configuration services and a4's lifecycle storage
-//   (STORAGE_SERVICES) are the service code that names the storage; nothing else outside the
-//   storage layer may.
-// - Shared services: a3's configuration services (SHARED_SERVICES) stay unloaded until a
-//   transport step (b1 onward) first calls them. Step a4 is not a surface: its target
-//   invalidation runs inside the existing event-type and member-removal mutations and its
-//   cleanup in a background job, so production loads its lifecycle modules (LIFECYCLE) and,
-//   through them, step a2's target checks; with no routing form they find nothing to do.
-// The web route table is asserted by apps/web/src/routing-forms-off.test.tsx (jsdom
-// project), which c3, c6 and d1 narrow when they mount routing pages.
-// The Hono routes are read from the app as startServer assembles it (productionAppOptions),
-// with every optional route group turned on, so a route only production registers is seen too.
+// Routing configuration interfaces are present by name, but production remains hard-off.
+// Allow only their five operations, schemas and CLI commands; publication, public routing,
+// continuation and UI surfaces belong to later steps. Runtime refusal is tested by the
+// routing adapter tests. This inventory still examines production assembly and all source
+// paths, without snapshots or a git baseline. The web keeps its separate Off inventory.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,10 +13,11 @@ import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../apps/server/src/app.ts'
 import { loadConfig } from '../apps/server/src/config.ts'
-import { prepareTools } from '../apps/server/src/mcp/tools.ts'
+import { mcpEndpoint } from '../apps/server/src/mcp/endpoint.ts'
 import { openApiDocument } from '../apps/server/src/openapi-document.ts'
 import { productionAppOptions, productTools } from '../apps/server/src/server.ts'
 import { COMMANDS, REST_COMMANDS } from '../tools/cli/src/cli.ts'
+import { restOperations } from './interface-parity.ts'
 import { isRoutingName } from './routing-forms-names.ts'
 
 const root = new URL('..', import.meta.url)
@@ -88,6 +66,31 @@ const CLI_COMMANDS = [
   'slots',
 ].map((verb) => `routing-forms ${verb}`)
 
+const CONFIGURATION_OPERATIONS = [
+  { method: 'get', path: '/api/v1/routing-forms', operationId: 'listRoutingForms' },
+  { method: 'get', path: '/api/v1/routing-forms/{id}', operationId: 'getRoutingForm' },
+  { method: 'post', path: '/api/v1/routing-forms', operationId: 'createRoutingForm' },
+  { method: 'patch', path: '/api/v1/routing-forms/{id}', operationId: 'updateRoutingForm' },
+  { method: 'delete', path: '/api/v1/routing-forms/{id}', operationId: 'archiveRoutingForm' },
+]
+const CONFIGURATION_PATHS = [...new Set(CONFIGURATION_OPERATIONS.map(({ path }) => path))]
+const CONFIGURATION_COMMANDS = {
+  'routing-forms list': 'list_routing_forms',
+  'routing-forms get': 'get_routing_form',
+  'routing-forms create': 'create_routing_form',
+  'routing-forms update': 'update_routing_form',
+  'routing-forms archive': 'archive_routing_form',
+}
+// Explicit component names keep a future publication or public schema visible to this test.
+const CONFIGURATION_SCHEMAS = [
+  'CreateRoutingForm',
+  'ArchiveRoutingForm',
+  'UpdateRoutingForm',
+  'RoutingForm',
+  'RoutingFormList',
+]
+const CONFIGURATION_TAGS = ['Routing forms']
+
 // The storage layer: the migration, the generated table types and the storage test support.
 const STORAGE_LAYER =
   /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/routing-storage-[^/]+\.ts$)/
@@ -95,7 +98,7 @@ const STORAGE_LAYER =
 // `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
   /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_form_operations|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
-// Step a3's configuration and publication services, which no production entry point loads yet.
+// Configuration adapters now load the existing service module; publication has no adapter.
 const CONFIGURATION_SERVICES = ['packages/scheduling/src/routing-form-service.ts']
 // Step a4's target invalidation and retention, loaded by event-type updates and deletion,
 // member removal and the worker.
@@ -519,7 +522,7 @@ function expectExcludedUnreachable(patterns: readonly RegExp[], reached: Set<str
   expect(excluded.filter((file) => reached.has(file))).toEqual([])
 }
 
-describe('routing forms are storage only', () => {
+describe('routing forms remain hard-off with configuration interfaces', () => {
   it('names each documented routing surface so an added one is recognised', () => {
     for (const name of [
       ...REST_PATHS,
@@ -588,21 +591,43 @@ describe('routing forms are storage only', () => {
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
 
-  it('exposes no routing path, operation, tag or schema in the OpenAPI document', async () => {
+  it('documents exactly the configuration paths, operations, tags and schemas', async () => {
     const document = await openApiDocument()
     const names = openApiNames(document)
     expect(names.length).toBeGreaterThan(100)
     expect(names).toContain('/api/v1/bookings/{id}')
-    for (const path of REST_PATHS) expect(names).not.toContain(path)
-    expect(names.filter(isRoutingName)).toEqual([])
-    // Schema properties too: narrowed by a1b to its one `/instance` capability.
+    const allowed = new Set([
+      ...CONFIGURATION_PATHS,
+      ...CONFIGURATION_OPERATIONS.map(({ operationId }) => operationId),
+      ...CONFIGURATION_SCHEMAS,
+      ...CONFIGURATION_TAGS,
+    ])
+    expect([...new Set(names.filter(isRoutingName))].sort()).toEqual([...allowed].sort())
+    expect(
+      restOperations(document)
+        .filter(({ path }) => isRoutingName(path))
+        .map(({ method, path, operationId }) => ({ method, path, operationId }))
+        .sort((a, b) => String(a.operationId).localeCompare(String(b.operationId))),
+    ).toEqual(
+      [...CONFIGURATION_OPERATIONS].sort((a, b) => a.operationId.localeCompare(b.operationId)),
+    )
+    for (const path of REST_PATHS.filter((path) => !CONFIGURATION_PATHS.includes(path)))
+      expect(names).not.toContain(path)
+    // Permit configuration schema owners, but still reject new routing-named properties.
     const properties = schemaPropertyNames(document)
     expect(properties.length).toBeGreaterThan(500)
     expect(properties).toContain('Slot.start')
-    expect(properties.filter(isRoutingName)).toEqual([INSTANCE_CAPABILITY])
+    expect(
+      properties.filter((name) => {
+        const [owner, property] = name.split('.')
+        return CONFIGURATION_SCHEMAS.includes(owner ?? '')
+          ? isRoutingName(property ?? '')
+          : isRoutingName(name)
+      }),
+    ).toEqual([INSTANCE_CAPABILITY])
   })
 
-  it('registers no routing route on the app startServer serves, with every optional group on', async () => {
+  it('registers exactly the configuration routes in production with every optional group on', async () => {
     // The production assembly (createApp of productionAppOptions, as startServer calls it),
     // from a configuration that enables each optional route group: SCIM, MCP OAuth, slot snippets,
     // webhooks, the Zoom event webhook, the waitlist pages and the built web app, with the
@@ -632,7 +657,22 @@ describe('routing forms are storage only', () => {
           config,
           db,
           auth: { handler: async () => new Response(null, { status: 404 }) },
-          resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+          resolveCaller: async () => ({
+            ok: true,
+            principal: {
+              kind: 'api_key',
+              apiKeyId: '00000000-0000-4000-8000-000000000001',
+              apiKeyScope: 'full',
+              user: { id: 'routing-off-user', name: 'Routing off', email: 'off@example.test' },
+              organization: {
+                id: 'routing-off-org',
+                name: 'Routing off',
+                slug: 'off',
+                personal: true,
+              },
+            },
+            setCookie: [],
+          }),
           resolveMcpOAuth: async () => ({ ok: false, error: 'invalid_token' }),
           checkDb: async () => {},
           waitlist: { verify: async () => null, remove: async () => null },
@@ -686,17 +726,40 @@ describe('routing forms are storage only', () => {
         '/api/conference/zoom/callback',
       ])
         expect(paths, control).toContain(control)
-      expect(paths.filter(isRoutingName)).toEqual([])
+      expect(
+        [
+          ...new Set(
+            app.routes
+              .filter(({ path }) => isRoutingName(path))
+              .map(({ method, path }) => `${method} ${path}`),
+          ),
+        ].sort(),
+      ).toEqual(
+        CONFIGURATION_OPERATIONS.map(
+          ({ method, path }) => `${method.toUpperCase()} ${path.replace('{id}', ':id')}`,
+        ).sort(),
+      )
       // a1b: the effective state the production assembly reports.
       const instance = await app.request('/api/v1/instance')
       expect(instance.status).toBe(200)
       expect(await instance.json()).toHaveProperty('routingFormsEnabled', false)
+      // This pool cannot connect. A guard wired after a lookup therefore fails, as does a
+      // handler reached before input validation: every operation refuses even malformed input.
+      for (const { method, path } of CONFIGURATION_OPERATIONS) {
+        const response = await app.request(path.replace('{id}', 'not-a-uuid'), {
+          method: method.toUpperCase(),
+          headers: { authorization: 'Bearer hm_inventory', 'content-type': 'application/json' },
+          ...(['post', 'patch', 'delete'].includes(method) ? { body: '{' } : {}),
+        })
+        expect(response.status, `${method} ${path}`).toBe(404)
+        expect(await response.json()).toEqual({ error: 'routing_forms_disabled' })
+      }
     } finally {
       await db.destroy()
     }
   })
 
-  it('names no routing path in a production source string literal, template or concatenation', () => {
+  it('names only configuration paths in production literals, templates or concatenations', () => {
     // Backstop for a route the inventory cannot see: one registered outside the shared
     // assembly (a `.get` on the app in startServer, say), one gated on something the test
     // does not configure, or a Better Auth endpoint behind /api/auth/*. Its path must be
@@ -715,7 +778,9 @@ describe('routing forms are storage only', () => {
     expect(literals).toContain('/api/v1/bookings/{id}')
     expect(literals).toContain('/sign-in/confirm')
     expect(literals).toContain('/booking')
-    expect(literals.filter(isRoutingName)).toEqual([])
+    expect([...new Set(literals.filter(isRoutingName))].sort()).toEqual(
+      [...CONFIGURATION_PATHS].sort(),
+    )
     const built = sources.flatMap(([file, source]) => builtPaths(file, source))
     expect(built.length).toBeGreaterThan(50)
     // The `${prefix}/…` idiom of the MCP OAuth consent routes.
@@ -851,9 +916,44 @@ describe('routing forms are storage only', () => {
     // No handlers run and no connection opens; the pool is still closed explicitly.
     const pool = createPool('postgres://routing-off@127.0.0.1:9/routing-off')
     try {
-      const names = prepareTools(
-        productTools({ db: createDb(pool), slotSnippetsEnabled: true }),
-      ).map(({ tool }) => tool.name)
+      const app = createApp({
+        publicUrl: 'http://localhost',
+        checkDb: async () => {},
+        authHandler: async () => new Response(null, { status: 404 }),
+        resolveCaller: async () => ({
+          ok: true,
+          principal: {
+            kind: 'api_key',
+            apiKeyId: 'routing-off-key',
+            apiKeyScope: 'full',
+            user: { id: 'routing-off-user', name: 'Routing off', email: 'off@example.test' },
+            organization: {
+              id: 'routing-off-org',
+              name: 'Routing off',
+              slug: 'off',
+              personal: true,
+            },
+          },
+          setCookie: [],
+        }),
+        mcp: mcpEndpoint({
+          tools: productTools({ db: createDb(pool), slotSnippetsEnabled: true }),
+        }),
+      })
+      const response = await app.request('/mcp', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer hm_inventory',
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      })
+      expect(response.status).toBe(200)
+      const body = await response.text()
+      const event = body.split('\n').find((line) => line.startsWith('data: '))
+      const message = JSON.parse(event ? event.slice(6) : body)
+      const names: string[] = message.result.tools.map(({ name }: { name: string }) => name)
       expect(names.length).toBeGreaterThan(20)
       expect(names).toContain('create_booking')
       for (const tool of MCP_TOOLS) expect(names).not.toContain(tool)
@@ -863,7 +963,7 @@ describe('routing forms are storage only', () => {
     }
   })
 
-  it('offers no routing CLI command', () => {
+  it('offers exactly the five configuration CLI commands', () => {
     const names = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),
@@ -871,16 +971,22 @@ describe('routing forms are storage only', () => {
       ...Object.values(REST_COMMANDS),
     ]
     expect(names).toContain('book')
-    for (const command of CLI_COMMANDS) expect(names).not.toContain(command)
-    expect(names.filter(isRoutingName)).toEqual([])
+    expect(
+      Object.fromEntries(Object.entries(COMMANDS).filter(([name]) => isRoutingName(name))),
+    ).toEqual(CONFIGURATION_COMMANDS)
+    expect([...new Set(names.filter(isRoutingName))].sort()).toEqual(
+      [...Object.keys(CONFIGURATION_COMMANDS), ...Object.values(CONFIGURATION_COMMANDS)].sort(),
+    )
+    for (const command of CLI_COMMANDS.filter((name) => !(name in CONFIGURATION_COMMANDS)))
+      expect(names).not.toContain(command)
   })
 
-  it('loads no shared routing service from a production entry point', () => {
+  it('loads the configuration service and existing lifecycle through production entry points', () => {
     for (const file of SHARED_SERVICES) expect(existsSync(new URL(file, root)), file).toBe(true)
     const reached = runtimeGraph(ENTRY_POINTS)
     // Their own dependencies are loaded, so the graph does reach the package.
     expect(reached).toContain('packages/scheduling/src/text.ts')
-    for (const file of SHARED_SERVICES) expect(reached).not.toContain(file)
+    for (const file of SHARED_SERVICES) expect(reached, file).toContain(file)
     // Step a4's lifecycle is loaded, through the mutations and the worker that run it.
     for (const file of LIFECYCLE) expect(reached, file).toContain(file)
   }, 30_000)
