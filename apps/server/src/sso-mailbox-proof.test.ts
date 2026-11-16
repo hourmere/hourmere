@@ -790,7 +790,8 @@ const scenarios = {
         token_digest: digest(),
         organization_id: expired.organization_id,
         attempt_id: expired.id,
-        issued_at: at(-400),
+        // Two clock reads: stay a second inside the 300-second lifetime the table allows.
+        issued_at: at(-399),
         expires_at: at(-100),
       })
       const consumed = await seed('sso_attempts', {
