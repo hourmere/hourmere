@@ -6,6 +6,8 @@ import { isUuid } from './internal.ts'
 
 export const DEFAULT_PAGE_SIZE = 50
 export const MAX_PAGE_SIZE = 100
+/** The longest booking search, in UTF-16 code units after trimming. */
+export const MAX_SEARCH_LENGTH = 100
 
 export interface ListBookingsInput {
   /** Chronological direction for start and id; default asc. Keep it unchanged between pages. */
@@ -19,6 +21,11 @@ export interface ListBookingsInput {
   /** Only bookings that end at or before this instant. */
   endTo?: Temporal.Instant | undefined
   status?: BookingStatus | undefined
+  /**
+   * Case-insensitive text in the invitee's name or email or the event type's current title.
+   * Trimmed; blank means no search; at most MAX_SEARCH_LENGTH, without control characters.
+   */
+  q?: string | undefined
   /** 1–MAX_PAGE_SIZE, default DEFAULT_PAGE_SIZE. */
   limit?: number | undefined
   /** `nextCursor` of the previous page. */
@@ -45,6 +52,25 @@ function timestamptz<DB, TB extends keyof DB>(
         ? LATEST_SQL
         : instant
   return eb.cast<Date>(eb.val(clamped.toString()), 'timestamptz')
+}
+
+/** A literal substring pattern for ILIKE, whose default escape character is the backslash. */
+export function containsPattern(text: string): string {
+  return `%${text.replace(/[\\%_]/g, '\\$&')}%`
+}
+
+/** The trimmed search text, or undefined for none; refuses long or control-character input. */
+function searchText(q: string | undefined): string | undefined {
+  if (q === undefined) return undefined
+  const text = q.trim()
+  // Postgres refuses NUL in text, and no name, email or title holds a control character.
+  if (text.length > MAX_SEARCH_LENGTH || /\p{Cc}/u.test(text))
+    throw new DomainError(
+      'invalid',
+      'invalid_search',
+      `q must be at most ${MAX_SEARCH_LENGTH} characters without control characters`,
+    )
+  return text || undefined
 }
 
 /** `start` keeps the microseconds of start_at (see bookingPageQuery), so pages never overlap. */
@@ -97,6 +123,7 @@ export function bookingPageQuery(db: Db, input: ListBookingsInput) {
     throw new DomainError('invalid', 'invalid_range', 'endTo must be after endAfter')
   }
   const after = input.cursor === undefined ? undefined : decodeCursor(input.cursor)
+  const search = searchText(input.q)
 
   const query = db
     .selectFrom('bookings as b')
@@ -129,6 +156,43 @@ export function bookingPageQuery(db: Db, input: ListBookingsInput) {
       q.where((eb) => eb('b.end_at', '<=', timestamptz(eb, endTo as Temporal.Instant))),
     )
     .$if(status !== undefined, (q) => q.where('b.status', '=', status as string))
+    // Each list keeps its own caller scope; this only narrows it, through the invitee's row and
+    // the live event type the list itself shows (a deleted event's title stays hidden). LIMIT
+    // keeps each lookup a per-row index probe of a booking already in scope, so the planner
+    // never turns it into a scan of every organization's attendees.
+    .$if(search !== undefined, (q) =>
+      q
+        .leftJoinLateral(
+          (eb) =>
+            eb
+              .selectFrom('booking_attendees as invitee')
+              .select(['invitee.name', 'invitee.email'])
+              .whereRef('invitee.booking_id', '=', 'b.id')
+              .where('invitee.is_booker', '=', true)
+              .limit(1)
+              .as('search_invitee'),
+          (join) => join.onTrue(),
+        )
+        .leftJoinLateral(
+          (eb) =>
+            eb
+              .selectFrom('event_types as event_type')
+              .select('event_type.title')
+              .whereRef('event_type.id', '=', 'b.event_type_id')
+              .where('event_type.deleted_at', 'is', null)
+              .limit(1)
+              .as('search_event'),
+          (join) => join.onTrue(),
+        )
+        .where((eb) => {
+          const pattern = containsPattern(search as string)
+          return eb.or([
+            eb('search_invitee.name', 'ilike', pattern),
+            eb('search_invitee.email', 'ilike', pattern),
+            eb('search_event.title', 'ilike', pattern),
+          ])
+        }),
+    )
     .$if(after !== undefined, (q) =>
       q.where((eb) => {
         const start = timestamptz(eb, (after as { start: Temporal.Instant }).start)

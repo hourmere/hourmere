@@ -2305,6 +2305,26 @@ input[type="radio"] {
   color: var(--text);
 }
 
+/* Three bookings tabs share a 320px row; wider screens keep the usual tab padding. */
+.bookings-tabs ul {
+  flex-wrap: wrap;
+}
+
+.bookings-tabs .tab {
+  padding-inline: var(--space-3);
+}
+
+@media (min-width: 480px) {
+  .bookings-tabs .tab {
+    padding-inline: var(--space-4);
+  }
+}
+
+.bookings-search {
+  max-width: 32rem;
+  margin: 0 0 var(--space-4);
+}
+
 .zone-note {
   font-size: var(--text-sm);
 }
