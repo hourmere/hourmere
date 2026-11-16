@@ -91,6 +91,8 @@ function productSourceCopy(change?: Change): Factory {
     openTimeSnippetTools: () => [],
     availabilityTroubleshootingTools: () => [],
     workflowTools: () => [],
+    routingFormsEnabled: false,
+    routingFormConfigurationTools: () => [],
     waitlistTools: () => [],
     brandingTools: () => [],
     auditLogTools: () => [],

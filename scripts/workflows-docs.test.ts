@@ -588,7 +588,7 @@ describe('workflow design numeric contracts', () => {
       'apps/server/src/mcp/scopes.test.ts',
       'apps/server/src/mcp/schema-contracts.test.ts',
     ]) {
-      expect(read(consumer)).toMatch(/productTools\(\{ db[^)]*slotSnippetsEnabled: true \}\)/)
+      expect(read(consumer)).toMatch(/productTools\(\{ db[^)]*slotSnippetsEnabled: true\b[^)]*\}\)/)
       expect(rollout).toContain(`\`${consumer}\``)
     }
   })
