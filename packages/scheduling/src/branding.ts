@@ -265,7 +265,17 @@ export async function getPublicBranding(
         .onRef('l.organization_id', '=', 'b.organization_id')
         .onRef('l.hash', '=', 'b.brand_logo'),
     )
-    .select(['o.name', 'b.brand_primary_color', 'l.data'])
+    .leftJoin('personal_organizations as po', 'po.organization_id', 'o.id')
+    .leftJoin('auth.user as u', 'u.id', 'po.user_id')
+    .leftJoin('profiles as p', 'p.user_id', 'po.user_id')
+    .select([
+      'o.name',
+      'b.brand_primary_color',
+      'l.data',
+      'po.user_id as personal_user_id',
+      'u.name as user_name',
+      'p.handle',
+    ])
     .where('b.organization_id', '=', organizationId)
     .executeTakeFirst()
   if (!row) return undefined
@@ -281,5 +291,8 @@ export async function getPublicBranding(
     row.data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
       ? `data:image/png;base64,${row.data.toString('base64')}`
       : null
-  return primaryColor || logoDataUrl ? { name: row.name, primaryColor, logoDataUrl } : undefined
+  // A personal space's internal name can be an old name or the mailbox prefix it was created with.
+  // Publicly it carries what the person's booking pages already show: their name, else their handle.
+  const name = row.personal_user_id ? row.user_name?.trim() || row.handle || '' : row.name
+  return primaryColor || logoDataUrl ? { name, primaryColor, logoDataUrl } : undefined
 }

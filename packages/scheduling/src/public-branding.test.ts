@@ -31,3 +31,43 @@ describe('public branding stored-value validation', () => {
     },
   )
 })
+
+describe('public brand name', () => {
+  function row(extra: Record<string, unknown>): Db {
+    const query = {
+      innerJoin: () => query,
+      leftJoin: () => query,
+      select: () => query,
+      where: () => query,
+      executeTakeFirst: async () => ({
+        name: 'jane.doe',
+        brand_primary_color: '#000000',
+        data: null,
+        ...extra,
+      }),
+    }
+    return { selectFrom: () => query } as unknown as Db
+  }
+  it('uses the team name for a team', async () => {
+    const brand = await getPublicBranding(
+      row({ name: 'Acme', personal_user_id: null }),
+      'organization',
+    )
+    expect(brand?.name).toBe('Acme')
+  })
+  // A personal space is created with the mailbox prefix as its name when the person gave none.
+  it.each([
+    { user_name: 'Jane Doe', handle: 'jane', shown: 'Jane Doe' },
+    { user_name: '  ', handle: 'jane', shown: 'jane' },
+    { user_name: null, handle: null, shown: '' },
+  ])(
+    'never publishes a personal space’s internal name: $shown',
+    async ({ user_name, handle, shown }) => {
+      const brand = await getPublicBranding(
+        row({ personal_user_id: 'user', user_name, handle }),
+        'organization',
+      )
+      expect(brand?.name).toBe(shown)
+    },
+  )
+})
