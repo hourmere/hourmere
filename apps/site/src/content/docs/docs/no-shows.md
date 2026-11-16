@@ -6,7 +6,8 @@ description: Record attendance privately for individual invitees and guests thro
 Hosts can mark an attendee as a no-show after the booking's scheduled start, or remove
 that mark if it was a mistake. In **Bookings**, past confirmed bookings show **Mark no-show**
 or **Clear no-show** directly in the list row, next to the status, with a **No-show** badge
-for marked attendees; bookings with guests or several seats list each attendee by name.
+for marked attendees; bookings with guests list each attendee by name, and every seat of a group
+event is its own row.
 The same action is also on the booking's detail. Team owners and admins can do this from
 the team's booking list or booking detail; a change in one updates the other. The feature is included in self-hosted installations without a plan gate.
 
