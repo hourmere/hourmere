@@ -201,7 +201,7 @@ it('detects removing the narrow viewport switch in a rendered panel source copy'
     )
     try {
       render(<Copy />)
-      expect(screen.queryByRole('complementary', { name: 'Mobile booking' })).toBeNull()
+      expect(screen.queryByRole('dialog', { name: 'Mobile booking' })).toBeNull()
       expect(screen.getByRole('region', { name: 'Mobile booking' }).className).toContain(
         'booking-detail-full-page',
       )

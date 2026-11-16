@@ -138,3 +138,11 @@
   outline: 3px solid var(--focus);
   outline-offset: 4px;
 }
+
+/* Contact links remain comfortable targets when detail is rendered in a side panel. */
+.team-booking-detail a[href^="mailto:"] {
+  display: inline-block;
+  min-height: 24px;
+  min-width: 24px;
+  padding-block: 0.125rem;
+}

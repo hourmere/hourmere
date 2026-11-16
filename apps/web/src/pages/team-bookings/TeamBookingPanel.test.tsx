@@ -103,7 +103,7 @@ describe('team booking panel', () => {
     const trigger = await screen.findByRole('button', { name: 'First team meeting' })
     const table = trigger.closest('table') as HTMLTableElement
     await user.click(trigger)
-    expect(await screen.findByRole('complementary', { name: /First team meeting/ })).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: /First team meeting/ })).toBeTruthy()
     expect(table.isConnected).toBe(true)
     expect(
       screen
@@ -226,7 +226,8 @@ it('keeps a later team detail open when an earlier cancellation finishes', async
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   open('/app/team/bookings?tab=all')
   const user = userEvent.setup()
-  await user.click(await screen.findByRole('button', { name: 'First team meeting' }))
+  const trigger = await screen.findByRole('button', { name: 'First team meeting' })
+  await user.click(trigger)
   await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
   await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
   await user.click(screen.getByRole('button', { name: 'Next booking' }))
@@ -234,7 +235,6 @@ it('keeps a later team detail open when an earlier cancellation finishes', async
   cancelled = true
   await pending.answer(json(200, { cancelled: true }))
   await waitFor(() => {
-    const trigger = screen.getByRole('button', { name: 'First team meeting' })
     expect(within(trigger.closest('tr') as HTMLElement).getByText('Cancelled')).toBeTruthy()
   })
   expect(detail().getByText('Second team meeting')).toBeTruthy()

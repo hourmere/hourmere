@@ -89,9 +89,10 @@ browser history entry, and stepping replaces that entry, so browser Back returns
 list. Copy the detail URL to open it later: a direct visit or reload shows the ordinary
 full detail page without a background list or previous/next controls.
 
-The desktop detail is a non-modal complementary region: focus moves inside when opened,
-but you can still reach the list with the keyboard. Closing returns focus to the original
-row. Escape closes the detail when a nested form or text field is not using that key;
+The desktop detail is a modal dialog: focus moves inside when opened, and Tab and
+Shift+Tab stay within its controls. The list stays visible behind it, but cannot receive
+keyboard or pointer input until the detail closes; this keeps covered controls out of
+the keyboard path. Closing returns focus to the original row. Escape closes the detail when a nested form or text field is not using that key;
 there are no arrow-key shortcuts. The slide respects reduced-motion preferences.
 
 List position is kept only during the current in-app visit, not after a reload. Results

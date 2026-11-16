@@ -51,7 +51,7 @@ export function BookingListReturnLink({ to, children }: { to: string; children: 
   )
 }
 
-/** A non-modal region: people can still inspect the list, so focus is never trapped. */
+/** The overlay is modal on desktop; the retained list stays inaccessible until close. */
 export function BookingPanel({
   name,
   previous,
@@ -87,7 +87,7 @@ export function BookingPanel({
   useEffect(() => close.current?.focus({ preventScroll: true }), [])
   // biome-ignore lint/correctness/useExhaustiveDependencies: reapply hiding when list/detail rendering adds siblings
   useEffect(() => {
-    if (!narrow || !region.current) return
+    if (!region.current) return
     if (!region.current.contains(document.activeElement))
       close.current?.focus({ preventScroll: true })
     const hidden: { element: HTMLElement; inert: boolean; aria: string | null }[] = []
@@ -129,10 +129,37 @@ export function BookingPanel({
   return (
     <section
       ref={region}
-      role={narrow ? 'region' : 'complementary'}
+      {...(narrow ? { role: 'region' } : { role: 'dialog', 'aria-modal': true })}
       aria-label={accessibleName}
       className={`booking-detail-panel${narrow ? ' booking-detail-full-page' : ''}`}
       onKeyDown={(event) => {
+        if (event.key === 'Tab' && !narrow && !event.defaultPrevented) {
+          const controls = Array.from(
+            event.currentTarget.querySelectorAll<HTMLElement>(
+              'a[href], button, input, select, textarea, summary, [tabindex]',
+            ),
+          ).filter(
+            (element) =>
+              element.tabIndex >= 0 &&
+              !element.matches(':disabled') &&
+              !element.closest('[hidden], [inert], [aria-hidden="true"]') &&
+              getComputedStyle(element).display !== 'none' &&
+              getComputedStyle(element).visibility !== 'hidden',
+          )
+          const first = controls[0]
+          const last = controls.at(-1)
+          if (
+            event.shiftKey &&
+            (document.activeElement === first ||
+              !controls.includes(document.activeElement as HTMLElement))
+          ) {
+            event.preventDefault()
+            last?.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first?.focus()
+          }
+        }
         if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing)
           return
         event.preventDefault()
