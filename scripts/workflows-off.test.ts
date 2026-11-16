@@ -1,8 +1,9 @@
 // Workflow reads and creation ship behind the pinned hard-off guard. This inventory admits
 // only those interfaces and confines data access to the definition services below.
 import { randomUUID } from 'node:crypto'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { createRequire, isBuiltin } from 'node:module'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
 import type { CallerResolver, Principal } from '@hourmere/auth'
@@ -145,14 +146,53 @@ const FROZEN_SERVER_GUARD_STATEMENTS = [
 }`,
 ]
 
+// Protect real source identities, including re-exports and the services behind the guard.
+const PROTECTED_MOCK_FILES = new Set(
+  [
+    ...productionSources().filter((file) => file.startsWith('packages/workflows/src/')),
+    'apps/server/src/workflows.ts',
+  ].map((file) => realpathSync(new URL(file, root))),
+)
+
+/** Resolve from the importing test, with TypeScript's .js-to-.ts source substitution. */
+function mockTarget(name: string, testFile: string): string | undefined {
+  if (isBuiltin(name)) return name
+  try {
+    const path = name.startsWith('file:')
+      ? fileURLToPath(name)
+      : name.startsWith('.') || isAbsolute(name)
+        ? resolve(dirname(testFile), name)
+        : // Workspace export maps resolve package names/subpaths to their source entry.
+          createRequire(testFile).resolve(name)
+    for (const candidate of [
+      path.replace(/\.js$/, '.ts'),
+      path,
+      `${path}.ts`,
+      `${path}.js`,
+      join(path, 'index.ts'),
+      join(path, 'index.js'),
+    ]) {
+      try {
+        if (statSync(candidate).isFile()) return realpathSync(candidate)
+      } catch {
+        // Try the next source extension or directory entry.
+      }
+    }
+  } catch {
+    // An unresolved target cannot be proved to leave the guards intact.
+  }
+  return undefined
+}
+
 /**
  * Reject protected module mocks and unresolved targets conservatively. Runtime-built paths
  * cannot prove they leave the guards intact. Inspect syntax, not adjacent source text, so
  * computed member names, namespace aliases and dynamic-import mock syntax are covered.
  * This is a source guard, not a JavaScript interpreter: extracted/aliased mock functions,
- * eval and custom test-loader indirection still require review.
+ * eval and custom test-loader aliases/indirection still require review. Node export maps
+ * cover the workspace packages; unresolved literals and runtime-built paths fail closed.
  */
-function hasWorkflowMock(source: string): boolean {
+function hasWorkflowMock(source: string, testFile: string): boolean {
   let forbidden = false
   const visit = (value: unknown) => {
     if (Array.isArray(value)) {
@@ -164,7 +204,10 @@ function hasWorkflowMock(source: string): boolean {
       const callee = value.callee
       const property = isRecord(callee.property) ? callee.property : undefined
       const method = callee.computed ? property?.value : property?.name
-      if (callee.type === 'MemberExpression' && (method === 'mock' || method === 'doMock')) {
+      if (
+        callee.type === 'MemberExpression' &&
+        (method === 'mock' || method === 'doMock' || method === 'importMock')
+      ) {
         let target = Array.isArray(value.arguments) ? value.arguments[0] : undefined
         if (isRecord(target) && target.type === 'ImportExpression') target = target.source
         if (
@@ -175,11 +218,8 @@ function hasWorkflowMock(source: string): boolean {
         )
           target = Array.isArray(target.arguments) ? target.arguments[0] : undefined
         const name = isRecord(target) && target.type === 'StringLiteral' ? target.value : undefined
-        if (
-          typeof name !== 'string' ||
-          /hard-off|@hourmere\/workflows|(?:^|\/)workflows(?:\.ts)?$/.test(name)
-        )
-          forbidden = true
+        const resolved = typeof name === 'string' ? mockTarget(name, testFile) : undefined
+        if (resolved === undefined || PROTECTED_MOCK_FILES.has(resolved)) forbidden = true
       }
     }
     Object.values(value).forEach(visit)
@@ -605,18 +645,51 @@ describe('booking workflows are off and expose only definition reads and creatio
     ).toEqual(FROZEN_SERVER_GUARD_STATEMENTS)
   })
 
-  it('recognises protected mocks, computed paths and direct package or helper replacements', () => {
+  it.each(['mock', 'doMock', 'importMock'])(
+    'rejects resolved protected targets passed to %s',
+    (method) => {
+      const file = fileURLToPath(new URL('apps/server/src/mock-fixture.test.ts', root))
+      for (const target of [
+        '../../../packages/workflows/src/index.ts',
+        '../../../packages/workflows/src/index.js',
+        '../../../packages/workflows/src/index',
+        '../../../packages/workflows/src',
+        '@hourmere/workflows',
+        './workflows.js',
+        './workflows.ts',
+        './workflows',
+        './mcp/../workflows.js',
+        '../../../packages/workflows/src/creates.ts',
+        '../../../packages/workflows/src/creates.js',
+        '../../../packages/workflows/src/reads',
+        '../../../packages/workflows/src/hard-off.ts',
+        fileURLToPath(new URL('packages/workflows/src/index.ts', root)),
+        new URL('packages/workflows/src/creates.ts', root).href,
+      ]) {
+        const source = `vi.${method}(${JSON.stringify(target)}, () => ({}))`
+        expect(hasWorkflowMock(source, file), source).toBe(true)
+      }
+      // Ordinary package and sibling mocks still resolve from this test's directory.
+      for (const target of ['node:fs', '@hourmere/core/locales', './caller.ts', './caller.js']) {
+        const source = `vi.${method}(${JSON.stringify(target)}, () => ({}))`
+        expect(hasWorkflowMock(source, file), source).toBe(false)
+      }
+    },
+  )
+
+  it('recognises computed paths and mock syntax without executing source', () => {
+    const file = fileURLToPath(new URL('packages/workflows/src/mock-fixture.test.ts', root))
     for (const source of [
       "vi.mock('./hard-off.ts', () => ({}))",
       'vi.doMock(seam, () => ({}))',
-      "vi.mock('@hourmere/workflows', () => ({}))",
-      "vi.mock('../apps/server/src/workflows.ts', () => ({}))",
+      "vi.importMock('./' + moduleName)",
+      "vi.mock('./unknown-module.ts', () => ({}))",
       "vitest['doMock']('./hard-off.ts', () => ({}))",
       "vi.mock(import('@hourmere/workflows'), () => ({}))",
     ])
-      expect(hasWorkflowMock(source), source).toBe(true)
-    expect(hasWorkflowMock("vi.mock('node:fs', () => ({}))")).toBe(false)
-    expect(hasWorkflowMock('vi.mocked(fn).mockResolvedValue(true)')).toBe(false)
+      expect(hasWorkflowMock(source, file), source).toBe(true)
+    expect(hasWorkflowMock('vi.mocked(fn).mockResolvedValue(true)', file)).toBe(false)
+    expect(hasWorkflowMock("vi.importActual('@hourmere/workflows')", file)).toBe(false)
   })
 
   it('lets exactly one test file replace the hard-off module', () => {
@@ -627,7 +700,7 @@ describe('booking workflows are off and expose only definition reads and creatio
         if (['node_modules', 'dist', '.git', 'temp'].includes(entry)) continue
         const path = join(directory, entry)
         if (statSync(path).isDirectory()) walk(path)
-        else if (/\.test\.tsx?$/.test(entry) && hasWorkflowMock(readFileSync(path, 'utf8')))
+        else if (/\.test\.tsx?$/.test(entry) && hasWorkflowMock(readFileSync(path, 'utf8'), path))
           mocking.push(relative(fileURLToPath(root), path))
       }
     }

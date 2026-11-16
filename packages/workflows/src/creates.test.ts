@@ -194,6 +194,45 @@ describe.skipIf(!serverUrl)('workflow creation', () => {
     ).rejects.toMatchObject({ code: 'workflow_not_found' })
   })
 
+  it('rejects replay by a demoted admin without writes or an audit event', async () => {
+    const owner = await createTestUser(db),
+      admin = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: admin, role: 'admin' },
+    ])
+    const audit = { record: vi.fn(async () => {}) }
+    const ctx = { db, principal: team.as(admin), audit }
+    const request = input(admin, { owner: { kind: 'team', id: team.id } })
+    const created = await createWorkflowDefinition(ctx, request)
+    expect(audit.record).toHaveBeenCalledTimes(1)
+    const stored = () =>
+      Promise.all(
+        (['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys'] as const).map(
+          (table) =>
+            db.selectFrom(table).selectAll().where('organization_id', '=', team.id).execute(),
+        ),
+      )
+    const before = await stored()
+    expect(before.map((rows) => rows.length)).toEqual([1, 1, 1])
+    expect(before[0]?.[0]).toMatchObject({ id: created.id })
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', admin.id)
+      .execute()
+    audit.record.mockClear()
+
+    // Reuse the exact principal, credential and key that created the retained definition.
+    await expect(createWorkflowDefinition(ctx, request)).rejects.toMatchObject({
+      kind: 'not_found',
+      code: 'workflow_not_found',
+    })
+    expect(await stored()).toEqual(before)
+    expect(audit.record).not.toHaveBeenCalled()
+  })
+
   it('scopes keys by actor, principal kind and credential, with sessions shared across sessions', async () => {
     const user = await createTestUser(db),
       request = input(user)
