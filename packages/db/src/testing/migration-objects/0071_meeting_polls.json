@@ -196,6 +196,6 @@
     "trigger public.meeting_polls.meeting_polls_booking_match": "CREATE CONSTRAINT TRIGGER meeting_polls_booking_match AFTER INSERT OR UPDATE ON public.meeting_polls DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_meeting_poll_booking() -- function SET search_path=public, pg_temp md5 50edf7f70d860fae18464f848c7e118e",
     "trigger public.meeting_polls.meeting_polls_history": "CREATE TRIGGER meeting_polls_history BEFORE UPDATE ON public.meeting_polls FOR EACH ROW EXECUTE FUNCTION protect_meeting_poll_history() -- function SET search_path=public, pg_temp md5 1c3e0805ef06fdd9adb7e24f1aa18948",
     "trigger public.meeting_polls.meeting_polls_slot_count": "CREATE CONSTRAINT TRIGGER meeting_polls_slot_count AFTER INSERT ON public.meeting_polls DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_meeting_poll_slot_count() -- function SET search_path=public, pg_temp md5 1f49947b8a1f3df73c63dcaa075fcbe9",
-    "trigger public.meeting_polls.meeting_polls_tombstones": "CREATE TRIGGER meeting_polls_tombstones BEFORE DELETE ON public.meeting_polls FOR EACH ROW EXECUTE FUNCTION retain_meeting_poll_tombstones() -- function SET search_path=public, pg_temp md5 440c0518b7b012723807f96bef7962e0"
+    "trigger public.meeting_polls.meeting_polls_tombstones": "CREATE TRIGGER meeting_polls_tombstones BEFORE DELETE ON public.meeting_polls FOR EACH ROW EXECUTE FUNCTION retain_meeting_poll_tombstones() -- function SET search_path=public, pg_temp md5 6b7f3ef20f02b829d1d0a4fc7429fee6"
   }
 }
