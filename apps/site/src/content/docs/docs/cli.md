@@ -80,6 +80,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
+| `booking-activity` | `get_booking_activity` | `startDate`, `endDate` (inclusive `YYYY-MM-DD`, at most 90 dates), `timeZone`; requires `read` or `full` and the personal owner or a team owner/admin |
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
 | `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
 | `one-time-links revoke` | `revoke_one_time_link` | `eventTypeId`, `id`; requires `bookings` or `full` |
@@ -413,6 +414,8 @@ of every scope and MCP OAuth can read or mark attendees only on bookings the cal
 hosts in the current organization. Non-host team owners/admins need a browser session;
 agent credentials receive `booking_not_found`, just as for a missing booking.
 Invitee pages and messages are unchanged, including scheduled follow-ups.
+Counts of marked attendees appear in [booking activity](/docs/analytics) (`noShows`), also
+through MCP `get_booking_activity` and CLI `booking-activity`.
 
 ## Booking waitlists
 

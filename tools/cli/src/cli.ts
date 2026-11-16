@@ -41,6 +41,7 @@ export const COMMANDS = {
   cancel: 'cancel_booking',
   'set-no-show': 'set_attendee_no_show',
   'booking-attendees': 'get_booking_attendees',
+  'booking-activity': 'get_booking_activity',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
   'slack list': 'list_slack_destinations',
@@ -73,7 +74,7 @@ Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           schedule-availability, save-availability,
           book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees,
-          retry-meeting, retry-calendar-copy
+          booking-activity, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).

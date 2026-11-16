@@ -4,9 +4,11 @@ description: Record attendance privately for individual invitees and guests thro
 ---
 
 Hosts can mark an attendee as a no-show after the booking's scheduled start, or remove
-that mark if it was a mistake. Open the booking's detail in **Bookings** and use the
-action next to the attendee. Team owners and admins can also do this from the team's
-booking detail. The feature is included in self-hosted installations without a plan gate.
+that mark if it was a mistake. In **Bookings**, past confirmed bookings show **Mark no-show**
+or **Clear no-show** directly in the list row, next to the status, with a **No-show** badge
+for marked attendees; bookings with guests or several seats list each attendee by name.
+The same action is also on the booking's detail. Team owners and admins can do this from
+the team's booking list or booking detail; a change in one updates the other. The feature is included in self-hosted installations without a plan gate.
 
 ## Who and what the mark describes
 
@@ -64,6 +66,17 @@ attendee markers but cannot change them. Existing host,
 organization and verified-membership checks still apply. MCP OAuth retains its existing
 `mcp:tools` grant. No new API-key scope is introduced.
 
+## Counts in booking activity
+
+[Booking activity](/docs/analytics) reports `noShows` per day and in total, through the
+dashboard, REST `GET /api/v1/analytics/bookings`, MCP `get_booking_activity` and CLI
+`booking-activity`. It counts each attendee currently marked as a no-show once, on the
+local date of the meeting's scheduled start in the report time zone, only for bookings
+that are still confirmed. Cancelled bookings and rescheduled predecessors are excluded;
+see the analytics page for the full definition. Only personal account owners and team
+owners/admins can read the report; hosting team bookings as an ordinary member does not
+grant it.
+
 ## Privacy and other booking behavior
 
 The marker is private administrative metadata. Invitee booking and management pages,
@@ -78,15 +91,20 @@ meeting's attendance judgment. Cancelled predecessors cannot be edited.
 
 When enabled and explicitly subscribed, [webhooks](/docs/webhooks) emit
 `booking.attendee_no_show_changed` for each actual mark or unmark, in the same transaction.
-Exact replays emit nothing. The payload includes the attendee ID and marker fields but
-no attendee name, email, management link or other contact details. Existing subscriptions
+Exact replays emit nothing. Deliveries are signed with the same `v1` HMAC scheme and the
+same `Webhook-*` headers as every other booking event. The payload has the same envelope
+and booking fields as booking events, plus the attendee ID and marker fields, and no
+attendee name, email, management link or other contact details. Existing subscriptions
 are unchanged; opt in to the new event. Normal delivery retry and ordering limitations apply.
 
 ## Known limitations
 
-There is no automatic attendance detection, attendance export, aggregate no-show report,
-penalty, refund, or attendance-based follow-up rule. The stored fields are available for
-future reporting/export work. A marker is a host's judgment, not evidence from a meeting
+There is no automatic attendance detection, attendance export, per-host or per-event-type
+no-show breakdown, no-show rate, penalty, refund, or attendance-based follow-up rule. The
+booking-activity count covers the whole personal account or team only, reflects current
+marks (a later correction changes past days) and excludes cancelled bookings, even ones
+marked before they were cancelled. The booking lists act only on bookings already loaded
+on the page; there is no bulk marking. A marker is a host's judgment, not evidence from a meeting
 provider. Corrections overwrite current state; the audit log keeps each change but has
 no viewer, read API or export yet. Imported bookings remain managed in their original system.
 Confirmed paid bookings remain readable, but attendance changes return

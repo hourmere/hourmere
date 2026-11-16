@@ -298,6 +298,15 @@ other members: these return `booking_not_found`, just as missing bookings do. No
 team administration requires a browser session. Reads are available before the start
 and after cancellation.
 
+### Booking activity
+
+`booking-activity` takes `{ "startDate": "2026-10-01", "endDate": "2026-10-31",
+"timeZone": "Europe/Berlin" }` (inclusive local dates, at most 90) and prints the same
+report as `GET /api/v1/analytics/bookings`: daily and total `created`, `rescheduled`,
+`cancelled` and `noShows`. It requires a `read` or `full` key held by the personal owner
+or a team owner/admin; other callers get `insufficient_role`. See
+[booking activity](https://hourmere.com/docs/analytics) for each count's definition.
+
 ## Organization branding
 
 ```sh

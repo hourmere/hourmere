@@ -15,6 +15,10 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Private per-attendee no-show marking after the scheduled start, with dashboard, REST,
   MCP and CLI access for hosts and browser-session access for team owners/admins. Optional
   `booking.attendee_no_show_changed` webhooks report actual changes without attendee contacts.
+  Hosts and team owners/admins can mark and clear no-shows directly from the booking lists.
+  Booking activity adds a `noShows` count (each currently marked attendee on a still-confirmed
+  booking, by the meeting's local date) in the dashboard, REST, the new MCP tool
+  `get_booking_activity` and the new CLI command `booking-activity`.
 - `security.txt` on hourmere.com and www.hourmere.com lists Hourmere's private vulnerability
   reporting channels.
 - Self-hosted operators can allow exact private webhook hosts or IP/CIDR and port ranges

@@ -80,6 +80,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
+| `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
 | `retry_calendar_copy` | — | `retry-calendar-copy` | `full, bookings` |
 | `get_profile` | — | `profile` | `full, read, bookings` |
@@ -235,6 +236,16 @@ organization to prevent a browser workspace switch from downloading another work
 Use `hourmere export --input export.json --output bookings.csv` for a streamed private
 file. Keeping rows out of MCP responses prevents large personal-data dumps in model
 context. See [CSV exports](https://hourmere.com/docs/booking-export).
+
+## Booking activity
+
+`get_booking_activity` returns the same report as `GET /api/v1/analytics/bookings` for the
+acting organization: daily and total `created`, `rescheduled`, `cancelled` and `noShows`
+for inclusive `startDate`/`endDate` (at most 90 local dates) in an IANA `timeZone`. It
+requires the personal owner or a current team owner/admin (`insufficient_role` otherwise)
+and an API key with `read` or `full` scope. `noShows` counts each attendee currently marked
+as a no-show on still-confirmed bookings, by the local date of the scheduled start; see
+[booking activity](https://hourmere.com/docs/analytics) for the full definition.
 
 ## Attendee attendance access
 

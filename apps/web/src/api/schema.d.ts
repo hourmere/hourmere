@@ -58,7 +58,7 @@ export interface paths {
         };
         /**
          * Daily booking activity of the acting organization
-         * @description Counts initial creations, reschedule operations and actual cancellations by their stored operation dates in an IANA time zone. Both dates inclusive, at most 90 local dates. Reschedule withdrawals are excluded from cancellations. Based on currently retained rows; deletion can alter history. No traffic or conversion metrics.
+         * @description Counts initial creations, reschedule operations and actual cancellations by their stored operation dates in an IANA time zone. Both dates inclusive, at most 90 local dates. Reschedule withdrawals are excluded from cancellations. noShows counts currently marked attendees on still-confirmed bookings by the scheduled start date instead. Based on currently retained rows; deletion can alter history. No traffic or conversion metrics. Also available as MCP get_booking_activity and CLI booking-activity.
          */
         get: {
             parameters: {
@@ -4586,6 +4586,8 @@ export interface components {
                 created: number;
                 /** Format: date */
                 date: string;
+                /** @description Attendees (invitees, guests and group seats, each counted once) currently marked as no-shows on bookings that are still confirmed, by the local date of the scheduled start. Cancelled and rescheduled-away bookings are excluded. Clients must tolerate its absence on older servers. */
+                noShows: number;
                 rescheduled: number;
             }[];
             /** Format: date */
@@ -4596,6 +4598,8 @@ export interface components {
             totals: {
                 cancelled: number;
                 created: number;
+                /** @description Attendees (invitees, guests and group seats, each counted once) currently marked as no-shows on bookings that are still confirmed, by the local date of the scheduled start. Cancelled and rescheduled-away bookings are excluded. Clients must tolerate its absence on older servers. */
+                noShows: number;
                 rescheduled: number;
             };
         };

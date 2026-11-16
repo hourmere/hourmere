@@ -10,10 +10,10 @@ const result = {
   startDate: '2026-03-29',
   endDate: '2026-03-30',
   timeZone: 'Europe/Berlin',
-  totals: { created: 4, rescheduled: 2, cancelled: 1 },
+  totals: { created: 4, rescheduled: 2, cancelled: 1, noShows: 3 },
   data: [
-    { date: '2026-03-29', created: 4, rescheduled: 2, cancelled: 0 },
-    { date: '2026-03-30', created: 0, rescheduled: 0, cancelled: 1 },
+    { date: '2026-03-29', created: 4, rescheduled: 2, cancelled: 0, noShows: 1 },
+    { date: '2026-03-30', created: 0, rescheduled: 0, cancelled: 1, noShows: 2 },
   ],
 }
 const query = (path: string) => Object.fromEntries(new URL(path, 'http://x').searchParams)
@@ -51,7 +51,17 @@ describe('booking activity page', () => {
       ['Bookings created', '4'],
       ['Reschedules', '2'],
       ['Cancellations', '1'],
+      ['No-shows', '3'],
     ])
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((cell) => cell.textContent),
+    ).toEqual(['Date', 'Bookings created', 'Reschedules', 'Cancellations', 'No-shows'])
+    expect(
+      [...table.querySelectorAll('td[data-label="No-shows"]')].map((cell) => cell.textContent),
+    ).toEqual(['1', '2'])
+    expect(screen.getByText(/No-shows count each attendee currently marked/)).toBeDefined()
     expect(table.querySelector('caption')?.classList.contains('analytics-caption')).toBe(true)
     expect(
       within(table)
@@ -111,6 +121,29 @@ describe('booking activity page', () => {
     ])
     expect(styles).toMatch(/\.nowrap\s*\{\s*white-space: nowrap;/)
   })
+  it('treats a range with only no-shows as activity and tolerates older servers without the count', async () => {
+    const zero = { created: 0, rescheduled: 0, cancelled: 0 }
+    let noShows: number | undefined = 2
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/analytics/bookings': () =>
+        json(200, {
+          ...result,
+          totals: { ...zero, ...(noShows === undefined ? {} : { noShows }) },
+          data: [],
+        }),
+    })
+    const view = renderApp('/app/analytics')
+    await screen.findByRole('table', { name: 'Daily booking activity' })
+    expect(screen.queryByText('No booking activity was recorded in this range.')).toBeNull()
+    expect(document.querySelectorAll('.metric-cards dd')[3]?.textContent).toBe('2')
+    view.unmount()
+    noShows = undefined
+    renderApp('/app/analytics')
+    await screen.findByText('No booking activity was recorded in this range.')
+    expect(document.querySelectorAll('.metric-cards dd')[3]?.textContent).toBe('0')
+  })
   it('uses UTC before onboarding, displays zero activity and submits explicit valid filters', async () => {
     const user = userEvent.setup()
     const api = fakeApi({
@@ -120,7 +153,7 @@ describe('booking activity page', () => {
         json(200, {
           ...result,
           ...query(path),
-          totals: { created: 0, rescheduled: 0, cancelled: 0 },
+          totals: { created: 0, rescheduled: 0, cancelled: 0, noShows: 0 },
           data: [],
         }),
     })

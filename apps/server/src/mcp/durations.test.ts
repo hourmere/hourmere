@@ -11,6 +11,7 @@ import * as scheduling from '@hourmere/scheduling'
 import { createFixtures, type Fixtures, weekdays } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as rateLimits from '../rate-limit.ts'
+import * as analyticsSchemas from '../routes/analytics.ts'
 import * as bookingSchemas from '../routes/bookings.ts'
 import * as publicSchemas from '../routes/public.ts'
 import { bookingTools } from './bookings.ts'
@@ -40,6 +41,7 @@ function sourceCopy(change?: Change): Factory {
     ...calendars,
     ...scheduling,
     ...rateLimits,
+    ...analyticsSchemas,
     ...bookingSchemas,
     ...publicSchemas,
     defineTool,

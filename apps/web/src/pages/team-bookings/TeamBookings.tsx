@@ -1,4 +1,9 @@
-import { NoShowAttendees } from '../bookings/NoShowAttendees.tsx'
+import {
+  NoShowAttendees,
+  type NoShowChange,
+  NoShowRowControls,
+  withNoShowChange,
+} from '../bookings/NoShowAttendees.tsx'
 import './team-bookings.css'
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
@@ -514,6 +519,19 @@ function BookingList({
     setFocusId(null)
   }, [focusId])
 
+  /** Team writes that fail on context or access take the page's recovery paths. */
+  function handleConflict(error: unknown) {
+    moreController.current?.abort()
+    setLoadingMore(false)
+    onConflict(error)
+  }
+  function handleNoShowError(error: unknown): boolean {
+    if (isOrganizationContextChanged(error)) handleConflict(error)
+    else if (isAccessDenied(error)) onRevoked()
+    else return false
+    return true
+  }
+
   function closeDetails() {
     if (!confirmLeave()) return
     setSelected(null)
@@ -543,6 +561,21 @@ function BookingList({
     setRefreshError(null)
     setRefreshing(true)
     reload()
+  }
+  /** Keeps the list, a later refresh's fallback and the open details showing the same mark. */
+  function applyNoShow(bookingId: string, change: NoShowChange, announce: boolean) {
+    const patched: BookingPage = {
+      data: shown.data.map((booking) =>
+        booking.id === bookingId ? withNoShowChange(booking, change) : booking,
+      ),
+      nextCursor: shown.nextCursor,
+    }
+    loadedSnapshot.current = patched
+    setMore({ ...patched, source })
+    setSelected((current) =>
+      current?.id === bookingId ? withNoShowChange(current, change) : current,
+    )
+    if (announce) setStatus('No-show mark updated.')
   }
   async function loadMore() {
     if (!shown.nextCursor || loadingMore || refreshing || conflict) return
@@ -708,6 +741,13 @@ function BookingList({
                         >
                           {t(bookingStatus(booking))}
                         </span>
+                        <NoShowRowControls
+                          booking={booking}
+                          expectedOrganizationId={expectedOrganizationId}
+                          disabled={!!conflict}
+                          onChanged={(change) => applyNoShow(booking.id, change, true)}
+                          onError={handleNoShowError}
+                        />
                       </div>
                     </td>
                   </tr>
@@ -741,12 +781,9 @@ function BookingList({
           timeZone={timeZone}
           expectedOrganizationId={expectedOrganizationId}
           conflict={conflict}
-          onConflict={(error) => {
-            moreController.current?.abort()
-            setLoadingMore(false)
-            onConflict(error)
-          }}
+          onConflict={handleConflict}
           onRevoked={onRevoked}
+          onNoShowChanged={(change) => applyNoShow(selected.id, change, false)}
           onRefresh={refreshBookings}
           onClose={closeDetails}
           onCancelled={() => {
@@ -798,6 +835,7 @@ export function BookingDetail({
   conflict,
   onConflict,
   onRevoked,
+  onNoShowChanged,
   onRefresh,
   onClose,
   onCancelled,
@@ -808,6 +846,7 @@ export function BookingDetail({
   conflict: unknown
   onConflict: (error: unknown) => void
   onRevoked: () => void
+  onNoShowChanged?: (change: NoShowChange) => void
   onRefresh: () => void
   onClose: () => void
   onCancelled: () => void
@@ -918,6 +957,13 @@ export function BookingDetail({
         booking={booking}
         expectedOrganizationId={expectedOrganizationId}
         disabled={!!conflict}
+        onChanged={onNoShowChanged}
+        onError={(error) => {
+          if (isOrganizationContextChanged(error)) onConflict(error)
+          else if (isAccessDenied(error)) onRevoked()
+          else return false
+          return true
+        }}
       />
       <ManualRebooking booking={booking} expectedOrganizationId={expectedOrganizationId} />
     </section>

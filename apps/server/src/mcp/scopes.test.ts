@@ -27,6 +27,7 @@ const all = [
   'retry_calendar_copy',
   'set_attendee_no_show',
   'get_booking_attendees',
+  'get_booking_activity',
   'get_profile',
   'list_event_types',
   'get_event_type',
@@ -94,6 +95,7 @@ const writes = new Set([
 const otherReads = new Set([
   'get_branding',
   'export_bookings',
+  'get_booking_activity',
   'list_slack_destinations',
   'list_schedules',
   'get_schedule',
@@ -437,6 +439,7 @@ describe('CLI scope parity', () => {
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],
     ['set-no-show', 'set_attendee_no_show'],
+    ['booking-activity', 'get_booking_activity'],
     ['event-waitlist', 'get_event_type_waitlist'],
     ['set-event-waitlist', 'set_event_type_waitlist'],
     ['waitlist-entries', 'list_waitlist_entries'],

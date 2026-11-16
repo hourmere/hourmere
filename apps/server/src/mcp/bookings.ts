@@ -14,6 +14,7 @@ import {
   createPublicBooking,
   createPublicTeamBooking,
   DomainError,
+  getBookingActivity,
   getPublicEventType,
   getPublicTeamEventType,
   listBookingAttendeeNoShows,
@@ -31,6 +32,7 @@ import {
   validTimeZone,
 } from '@hourmere/scheduling'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit } from '../rate-limit.ts'
+import { BookingActivity } from '../routes/analytics.ts'
 import {
   AttendeeNoShow,
   Booking,
@@ -659,6 +661,28 @@ export function bookingTools({
       return { accepted: true as const }
     },
   })
+  const getActivity = defineTool({
+    name: 'get_booking_activity',
+    title: 'Read daily booking activity',
+    description:
+      'Same report as GET /api/v1/analytics/bookings: daily created, rescheduled, cancelled and noShows counts for the acting organization, inclusive startDate/endDate (YYYY-MM-DD, at most 90 local dates) in an IANA timeZone. Creations, reschedules and cancellations count by operation date; noShows counts attendees currently marked as no-shows on still-confirmed bookings by the local date of the scheduled start. Personal owner or team owner/admin only (insufficient_role otherwise). Requires read/full API key scope. No names, emails or booking IDs.',
+    input: z.strictObject({
+      startDate: z.iso.date(),
+      endDate: z.iso.date(),
+      timeZone: z.string().min(1).max(64),
+    }),
+    output: BookingActivity,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return getBookingActivity(context(call.caller), args)
+    },
+  })
+
   return [
     findAvailableSlots,
     createBooking,
@@ -671,5 +695,6 @@ export function bookingTools({
     retryCalendarCopy,
     setNoShow,
     getAttendees,
+    getActivity,
   ]
 }

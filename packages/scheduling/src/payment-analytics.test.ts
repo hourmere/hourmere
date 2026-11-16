@@ -48,7 +48,7 @@ describe.skipIf(!process.env.DATABASE_URL)('unconfirmed payment activity', () =>
       endDate: '2026-10-01',
       timeZone: 'UTC',
     })
-    expect(activity.totals).toEqual({ created: 0, rescheduled: 0, cancelled: 0 })
+    expect(activity.totals).toEqual({ created: 0, rescheduled: 0, cancelled: 0, noShows: 0 })
   }
   it('does not count unconfirmed holds as booking creation or cancellation', async () => {
     await verify()
@@ -73,7 +73,7 @@ describe.skipIf(!process.env.DATABASE_URL)('unconfirmed payment activity', () =>
       endDate: '2026-10-01',
       timeZone: 'UTC',
     })
-    expect(activity.totals).toEqual({ created: 1, rescheduled: 0, cancelled: 1 })
+    expect(activity.totals).toEqual({ created: 1, rescheduled: 0, cancelled: 1, noShows: 0 })
   }
   it('counts creation and cancellation of a previously confirmed paid booking', async () => {
     await paidCancellation()
