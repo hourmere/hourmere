@@ -98,5 +98,7 @@
   "rescheduleRequest.subject": "请选择其他时间：{event}",
   "rescheduleRequest.introduction": "{host} 请你选择其他时间。在你选择新时间或取消之前，原预约时段会继续保留。此请求将于 {expiry} 到期；到期后，原预约仍然有效。",
   "rescheduleRequest.expiredSubject": "改期请求已到期：{event}",
-  "rescheduleRequest.expiredIntroduction": "{invitee} 未在请求到期前选择新时间。原预约仍然有效。"
+  "rescheduleRequest.expiredIntroduction": "{invitee} 未在请求到期前选择新时间。原预约仍然有效。",
+  "replyNotice.plain": "回复此邮件不会送达主持人。",
+  "replyNotice.manageLinks": "回复此邮件不会送达主持人。如需改期或取消，请使用此邮件中的链接。"
 }

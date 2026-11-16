@@ -129,6 +129,16 @@ links plus `text` and `html`. Personal owners and team owners/admins can use `re
 See [the agent guide](/docs/open-time-snippets) for a complete curl example, response
 fields, date boundaries and taken-time fallback.
 
+## Explain why times cannot be booked
+
+`GET /api/v1/event-types/{id}/availability-troubleshooting?date=YYYY-MM-DD` lists every
+possible start time of one local day with `status` and ordered reason codes such as
+`outside_working_hours`, `calendar_busy`, `buffer_after` or `daily_limit`. Optional
+`timeZone` (default: your profile time zone) and `durationMinutes`. Personal owners and team
+owners/admins only, with a `full` key; everyone else gets `404 event_type_not_found`. Reasons
+never include calendar event titles or booking details. See
+[Troubleshoot availability](/docs/availability-troubleshooting) for the response and limitations.
+
 ## Find a time
 
 Choose a future UTC range within the event type's booking window, at most 62 days.

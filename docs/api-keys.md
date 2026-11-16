@@ -126,6 +126,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Account settings and configuration writes | Allowed | — | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
 | Booking actions and repairs | Allowed | — | Allowed |
+| Availability diagnostics | Allowed | — | — |
 | Public instance and API metadata | Allowed | Allowed | Allowed |
 
 ### REST operations
@@ -187,6 +188,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `GET /api/v1/event-types/{id}/waitlist/entries` | Session or API key | `full, read` |
 | `DELETE /api/v1/event-types/{id}/waitlist/entries/{entryId}` | Session or API key | `full` |
 | `POST /api/v1/open-time-snippets` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/event-types/{id}/availability-troubleshooting` | Session or API key | `full` |
 | `GET /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, read` |
 | `POST /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, bookings` |
 | `GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, read` |
@@ -297,6 +299,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
+| `troubleshoot_availability` | — | `troubleshoot-availability` | `full` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |

@@ -115,6 +115,7 @@ notifications and trigger configured integrations.
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
+| `troubleshoot_availability` | — | `troubleshoot-availability` | `full` |
 | `create_one_time_link` | — | `one-time-links create` | `full, bookings` |
 | `list_one_time_links` | — | `one-time-links list` | `full, read` |
 | `revoke_one_time_link` | — | `one-time-links revoke` | `full, bookings` |
@@ -163,6 +164,16 @@ Personal owners and team owners/admins can call it with `read`, `bookings` or `f
 or an authorized `mcp:tools` OAuth connection. The instance must enable
 `SLOT_SNIPPETS_ENABLED`. See [the agent guide](/docs/open-time-snippets) for the full JSON example,
 profile defaults, empty-result handling, DST boundaries and taken-time fallback.
+
+## Explain why times cannot be booked
+
+Call `troubleshoot_availability` with `eventTypeId` and a local `date` (`YYYY-MM-DD`), plus
+optional `timeZone` and `durationMinutes`. It returns every possible start time of that day
+with `status` and ordered reason codes, the same object as the REST endpoint. Only personal
+owners and team owners/admins may call it, with a `full` key or an `mcp:tools` OAuth grant;
+anything else answers `event_type_not_found`. `calendar_sync_unavailable` means connected
+calendars could not be read right now. See [Troubleshoot availability](/docs/availability-troubleshooting) for every reason
+code and the known limitations.
 
 ## Configure an after-booking redirect
 
@@ -524,6 +535,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
 | `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
+| `troubleshoot_availability` | Every possible start time of one local day with bookable status and plain reason codes; owner/admin and `full` keys only, no calendar or booking details | read-only |
 | `generate_open_time_snippet` | Earliest open alternatives with direct booking links and localized text/HTML for an email draft; owner/admin only, no reservation | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |

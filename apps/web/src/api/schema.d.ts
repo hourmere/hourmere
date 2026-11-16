@@ -1906,6 +1906,26 @@ export interface paths {
         patch: operations["updateEventType"];
         trace?: never;
     };
+    "/api/v1/event-types/{id}/availability-troubleshooting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Explain which times of one day can be booked, and why others cannot
+         * @description Read-only diagnostics for the personal owner or a verified team owner/admin; API keys need full scope. Every other caller, including ordinary team members, gets the same 404 event_type_not_found as a missing event type. Lists every candidate time of the local day, including past and non-working times, with status and ordered reason codes. Reasons carry only a code, the affected interval and, for team event types, the host id; never calendar event titles, attendees or booking details. Calendars that cannot be read right now answer 409 calendar_sync_unavailable rather than a reason.
+         */
+        get: operations["troubleshootAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/event-types/{id}/notifications": {
         parameters: {
             query?: never;
@@ -4475,6 +4495,47 @@ export interface components {
              */
             noShowMarkedAt: string | null;
             noShowMarkedBy: string | null;
+        };
+        AvailabilityTroubleshooting: {
+            /** Format: date */
+            date: string;
+            /** @description The requested length; null means the event’s default length. */
+            durationMinutes: number | null;
+            eventTypeId: string;
+            /** @description Team event types: assigned hosts. Empty for personal types. */
+            hosts: {
+                name: string;
+                userId: string;
+            }[];
+            /**
+             * Format: date-time
+             * @description Exclusive. 23 or 25 hours after rangeStart on DST change days.
+             */
+            rangeEnd: string;
+            /** Format: date-time */
+            rangeStart: string;
+            slots: {
+                /** Format: date-time */
+                end: string;
+                reasons: {
+                    /** @description Stable reason code. Known values, in this order: past, duration_not_offered, outside_working_hours, off_slot_grid, minimum_notice, booking_window, calendar_busy, buffer_before, buffer_after, daily_limit, weekly_limit, monthly_limit, host_conflict, collective_member_unavailable, no_eligible_round_robin_host. New codes may be added within /api/v1; show unknown codes neutrally. */
+                    code: string;
+                    /**
+                     * Format: date-time
+                     * @description The affected part of this time, clipped to it.
+                     */
+                    end: string;
+                    /** @description Team event types only: the host this reason concerns. */
+                    hostUserId?: string;
+                    /** Format: date-time */
+                    start: string;
+                }[];
+                /** Format: date-time */
+                start: string;
+                /** @enum {string} */
+                status: "available" | "unavailable";
+            }[];
+            timeZone: string;
         };
         Booking: {
             /** @description The actual round-robin winner; no private host identity or availability mapping */
@@ -9207,6 +9268,88 @@ export interface operations {
                 };
             };
             /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    troubleshootAvailability: {
+        parameters: {
+            query: {
+                /** @description Local calendar date (YYYY-MM-DD) to explain, read in timeZone. */
+                date: string;
+                durationMinutes?: number;
+                /** @description IANA time zone for the day’s bounds. Defaults to the caller’s profile time zone, else UTC. */
+                timeZone?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The day’s candidate times with status and reasons, ordered by start */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvailabilityTroubleshooting"];
+                };
+            };
+            /** @description invalid_request, invalid_date, invalid_time_zone, invalid_duration, invalid_range, range_too_long */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope: API keys need full scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found (also for event types the caller may not manage) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_sync_unavailable, location_unavailable */
             409: {
                 headers: {
                     [name: string]: unknown;

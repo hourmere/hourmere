@@ -134,6 +134,8 @@ describe('UI measurement CI contract', () => {
   it('runs UI measurements only for pull requests, main pushes and manual baseline review', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     expect(workflow.on.push).toEqual({ branches: ['main'] })
+    // Pull requests run the UI checks by default; only listed paths can skip them.
+    expect(workflow.on.pull_request).toEqual({ paths: uiPullRequestPaths })
     expect(workflow.on.workflow_dispatch).toEqual({
       inputs: {
         visual_baselines: {
@@ -167,6 +169,8 @@ describe('UI measurement CI contract', () => {
   it('isolates UI jobs from reusable CI and releases', () => {
     expect(Object.keys(requiredWorkflow.jobs).sort()).toEqual([
       'check',
+      'check-static',
+      'check-tests',
       'cli-compatibility',
       'docker',
       'e2e',
@@ -185,8 +189,14 @@ describe('UI measurement CI contract', () => {
 
   // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
-    // Also run the isolated Caddy upgrade integration; PostgreSQL limits stay unchanged.
-    ['check', '108d0bfde8853d30249ccbb817b61152784571bb04f1c623a465b5371b7896f4'],
+    // The stable required job only aggregates check-static and check-tests and fails unless
+    // both succeeded (a failed, cancelled or skipped part fails it).
+    ['check', 'd18968eb8cf24725d3c282e48bf92a300db6dd99208ef74bd8bcdde56f063b1e'],
+    // Lint, types, generated types, the build, the CLI tarball and MCP metadata.
+    ['check-static', '3bce9a980ab6c404fbf4ccc83607a7da40b8feb11e75b4918e8fe9c2057d5a0c'],
+    // The suite in seven shards. Also runs the isolated Caddy upgrade integration; PostgreSQL
+    // limits stay unchanged.
+    ['check-tests', '65308b7f42b4185b4361e703050c88357bdb4375e61756ebcbcdc26a61c08a1a'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],
@@ -533,6 +543,130 @@ describe('required browser shards', () => {
       expect(selectedSpecs(functionalConfig, project), project.name).toEqual(
         project.name?.startsWith('site-') ? ['site-layout.spec.ts'] : applicationSpecs,
       )
+    }
+  })
+})
+
+/** The reviewed pull-request filter: run by default, skip only these, re-include the workflow. */
+const uiPullRequestPaths = [
+  '**',
+  '!docs/**',
+  '!*.md',
+  '!LICENSE',
+  '!.github/**',
+  '!tools/cli/**',
+  '!tools/n8n-nodes-hourmere/**',
+  '!tools/zapier-hourmere/**',
+  '!tools/make-templates/**',
+  '!tools/api-types/**',
+  '!scripts/**',
+  '!apps/server/src/**/*.test.ts',
+  '!packages/*/src/**/*.test.ts',
+  '!Dockerfile',
+  '!.dockerignore',
+  '!docker-compose*.yml',
+  '!Caddyfile',
+  '!.env.example',
+  '!server.json',
+  '!biome.json',
+  '!.editorconfig',
+  '!vitest.config.ts',
+  '.github/workflows/ui-checks.yml',
+]
+
+/** GitHub's path filter glob: `**` crosses `/` (and dot directories); `*` and `?` do not. */
+function filterGlob(pattern: string): RegExp {
+  let source = ''
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index] as string
+    if (character === '*' && pattern[index + 1] === '*' && pattern[index + 2] === '/') {
+      // `**/` also matches no directory at all: `src/**/*.test.ts` covers `src/a.test.ts`.
+      source += '(?:.*/)?'
+      index += 2
+    } else if (character === '*' && pattern[index + 1] === '*') {
+      source += '.*'
+      index += 1
+    } else if (character === '*') source += '[^/]*'
+    else if (character === '?') source += '[^/]'
+    else source += character.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp(`^${source}$`)
+}
+
+/** Whether a pull request changing `files` triggers the workflow: the last matching pattern wins. */
+function triggers(paths: string[], files: string[]): boolean {
+  return files.some((file) => {
+    let included = false
+    for (const pattern of paths) {
+      const negated = pattern.startsWith('!')
+      if (filterGlob(negated ? pattern.slice(1) : pattern).test(file)) included = !negated
+    }
+    return included
+  })
+}
+
+describe('UI checks pull-request filter', () => {
+  const paths = (workflow.on.pull_request as { paths: string[] }).paths
+
+  // Everything that can change an audited page, its data, its strings or the audit itself.
+  it.each([
+    'apps/server/src/app.ts',
+    'apps/server/src/routes/bookings.ts',
+    'packages/auth/src/auth.ts',
+    'packages/scheduling/src/slots.ts',
+    'packages/db/migrations/0099_example.sql',
+    'packages/db/src/testing.ts',
+    'packages/core/src/locales.ts',
+    'packages/mail/src/templates.ts',
+    'apps/web/src/App.tsx',
+    'apps/web/src/App.test.tsx',
+    'apps/web/src/api/schema.d.ts',
+    'apps/site/src/content/docs/docs/self-hosting.md',
+    'apps/site/src/site.test.ts',
+    'tools/e2e/specs/layout.spec.ts',
+    'tools/e2e/fixtures.ts',
+    '.github/workflows/ui-checks.yml',
+    'package.json',
+    'package-lock.json',
+    '.node-version',
+    'tsconfig.base.json',
+    'packages/new-package/src/index.ts',
+    'new-directory/file.ts',
+  ])('runs for a pull request that changes %s', (file) => {
+    expect(triggers(paths, [file])).toBe(true)
+    expect(triggers(paths, ['docs/sso.md', file])).toBe(true)
+  })
+
+  it.each([
+    'docs/routing-forms.md',
+    'README.md',
+    'CHANGELOG.md',
+    'LICENSE',
+    '.github/workflows/ci.yml',
+    '.github/dependabot.yml',
+    'tools/cli/src/cli.ts',
+    'tools/n8n-nodes-hourmere/nodes/Hourmere/Hourmere.node.ts',
+    'tools/zapier-hourmere/index.js',
+    'tools/make-templates/booking.json',
+    'tools/api-types/generate.ts',
+    'scripts/release.ts',
+    'apps/server/src/routes/bookings.test.ts',
+    'packages/db/src/testing.test.ts',
+    'packages/scheduling/src/slots/limits.test.ts',
+    'Dockerfile',
+    'docker-compose.worker.yml',
+    'Caddyfile',
+    'server.json',
+    'vitest.config.ts',
+  ])('skips a pull request that changes only %s', (file) => {
+    expect(triggers(paths, [file])).toBe(false)
+  })
+
+  it('skips nothing that the audited server, web app or fixtures import', () => {
+    const imported = readFileSync(join(root, 'tools/e2e/fixture-server.ts'), 'utf8')
+    expect(imported).toContain('apps/server')
+    for (const file of ['apps/server/src/server.ts', 'apps/server/src/app.ts']) {
+      expect(triggers(paths, [file]), file).toBe(true)
     }
   })
 })
