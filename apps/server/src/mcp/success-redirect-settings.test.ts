@@ -92,6 +92,7 @@ function productSourceCopy(change?: Change): Factory {
     workflowTools: () => [],
     waitlistTools: () => [],
     brandingTools: () => [],
+    auditLogTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),
