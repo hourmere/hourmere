@@ -313,6 +313,8 @@ describe.skipIf(!process.env.DATABASE_URL)('group session mail and calendar priv
     expect(hostEvent.getFirstPropertyValue('sequence')).toBe(Number(slot.revision))
     expect(hostIcs.text).toContain('booked seats: 3.')
     expect(mailto(String(hostEvent.getFirstPropertyValue('organizer')))).toBe(SENDER)
+    // The sender is the pinned organizer here, so nobody sends on its behalf.
+    expect(hostEvent.getFirstProperty('organizer')?.getParameter('sent-by')).toBeUndefined()
     expect(
       hostEvent.getAllProperties('attendee').map((a) => mailto(String(a.getFirstValue()))),
     ).toEqual([s.host.email])
