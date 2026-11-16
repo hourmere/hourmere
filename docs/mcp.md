@@ -186,6 +186,20 @@ accept the same object or `null` as REST, with `full` API key scope. Omission on
 preserves the setting. See [after-booking redirects](https://hourmere.com/docs/after-booking)
 for configuration examples, validation fields, privacy warnings and embed permissions.
 
+## Configure notice, booking window and buffers
+
+The same event-type create/update JSON accepts `minimumNoticeMinutes` (0–525600 whole
+minutes), `bufferBeforeMinutes` and `bufferAfterMinutes` (0–1440 whole minutes each).
+`bookingWindowDays` uses **whole calendar days**, 1–3650, or `null` for no limit.
+For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
+"bufferAfterMinutes": 30, "bookingWindowDays": 14}` means two hours' notice, a
+15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
+Omitted update fields keep their current values. The web editor's minute/hour/day
+selector is a display convenience; API input and output units do not change.
+Booking windows retain calendar-day semantics in the host's schedule time zone across
+daylight saving time. See [event-type timing settings](https://hourmere.com/docs/#notice-booking-window-and-buffers)
+for ranges, conversions and limitations.
+
 ## Configure meeting lengths
 
 MCP `create_event_type` and `update_event_type` configure event types with the same

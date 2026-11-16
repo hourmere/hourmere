@@ -92,7 +92,9 @@ Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 
            Full scope; owner/admin reads, owner changes retention.
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
-                1–12 distinct lengths including the default. Requires full API key scope.
+                1–12 distinct whole-minute lengths (1–1440) including the default. Requires full API key scope.
+                minimumNoticeMinutes: 0–525600; bufferBeforeMinutes/bufferAfterMinutes: 0–1440,
+                all whole minutes. bookingWindowDays: 1–3650 whole calendar days or null (unlimited).
 Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
            book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;

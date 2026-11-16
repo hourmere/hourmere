@@ -1,5 +1,17 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Stored value: {value} {unit}.': 'Stored value: {value} {unit}.',
+  'Default duration presets': 'Default duration presets',
+  'Custom duration': 'Custom duration',
+  '{minutes} minutes': '{minutes} minutes',
+  Minutes: 'Minutes',
+  'Time unit: hours': 'Hours',
+  Days: 'Days',
+  '{label} unit': '{label} unit',
+  'Enter {min}–{max} {unit}, in whole {storageUnit}.':
+    'Enter {min}–{max} {unit}, in whole {storageUnit}.',
+  'Empty: no limit.': 'Empty: no limit.',
+
   'Location options': 'Location options',
   'Default location': 'Default location',
   'Location label': 'Location label',

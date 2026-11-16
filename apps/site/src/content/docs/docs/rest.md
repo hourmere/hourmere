@@ -78,6 +78,20 @@ of a single-length type also replaces its sole allowed length. Invalid values re
 The [multiple meeting lengths guide](/docs/multiple-durations) covers the editor,
 invitee choices, rescheduling and shared-rule limits.
 
+## Configure notice, booking window and buffers
+
+The same event-type create/update JSON accepts `minimumNoticeMinutes` (0–525600 whole
+minutes), `bufferBeforeMinutes` and `bufferAfterMinutes` (0–1440 whole minutes each).
+`bookingWindowDays` uses **whole calendar days**, 1–3650, or `null` for no limit.
+For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
+"bufferAfterMinutes": 30, "bookingWindowDays": 14}` means two hours' notice, a
+15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
+Omitted update fields keep their current values. The web editor's minute/hour/day
+selector is a display convenience; API input and output units do not change.
+Booking windows retain calendar-day semantics in the host's schedule time zone across
+daylight saving time. See [event-type timing settings](/docs/#notice-booking-window-and-buffers)
+for ranges, conversions and limitations.
+
 ## Configure an after-booking redirect
 
 Event-type create/PATCH accepts `successRedirect`, and protected reads return the saved

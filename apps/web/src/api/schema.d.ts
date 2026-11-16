@@ -4952,15 +4952,15 @@ export interface components {
          */
         ErrorAlias: "zoom_operation_busy";
         EventType: {
-            /** @description Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
+            /** @description Distinct permitted whole-minute lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
             allowedDurationsMinutes: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;
-            /** @description How many days ahead can be booked; null = no limit */
+            /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays: number | null;
-            /** @description Free time kept after a meeting */
+            /** @description Free time kept after a meeting, in whole minutes */
             bufferAfterMinutes: number;
-            /** @description Free time kept before a meeting */
+            /** @description Free time kept before a meeting, in whole minutes */
             bufferBeforeMinutes: number;
             /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
             cancelCutoffMinutes: number | null;
@@ -4971,7 +4971,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             description: string | null;
-            /** @description Default length of a meeting */
+            /** @description Default length of a meeting, in whole minutes */
             durationMinutes: number;
             hosts: {
                 /** Format: uuid */
@@ -5082,7 +5082,7 @@ export interface components {
             maxBookingsPerMonth: number | null;
             /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
             maxBookingsPerWeek: number | null;
-            /** @description How far ahead a meeting must be booked */
+            /** @description How far ahead a meeting must be booked, in whole minutes */
             minimumNoticeMinutes: number;
             notifications: components["schemas"]["EventTypeNotifications"];
             /** Format: uuid */
@@ -5106,7 +5106,7 @@ export interface components {
             scheduleId: string | null;
             /** @enum {string} */
             schedulingType: "individual" | "round_robin" | "collective";
-            /** @description Distance between start times; null = the selected duration */
+            /** @description Distance between start times, in whole minutes; null = the selected duration */
             slotStepMinutes: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
@@ -5130,22 +5130,22 @@ export interface components {
             zoomConnectionId?: string | null;
         };
         EventTypeInput: {
-            /** @description Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
+            /** @description Distinct permitted whole-minute lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
             allowedDurationsMinutes?: number[];
             /**
              * @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved
              * @default false
              */
             allowGuests: boolean;
-            /** @description How many days ahead can be booked; null = no limit */
+            /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays?: number | null;
             /**
-             * @description Free time kept after a meeting
+             * @description Free time kept after a meeting, in whole minutes
              * @default 0
              */
             bufferAfterMinutes: number;
             /**
-             * @description Free time kept before a meeting
+             * @description Free time kept before a meeting, in whole minutes
              * @default 0
              */
             bufferBeforeMinutes: number;
@@ -5155,7 +5155,7 @@ export interface components {
                 userId: string;
             } | null;
             description?: string | null;
-            /** @description Default length of a meeting */
+            /** @description Default length of a meeting, in whole minutes */
             durationMinutes: number;
             hosts?: {
                 userId: string;
@@ -5270,7 +5270,7 @@ export interface components {
             /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
             maxBookingsPerWeek?: number | null;
             /**
-             * @description How far ahead a meeting must be booked
+             * @description How far ahead a meeting must be booked, in whole minutes
              * @default 0
              */
             minimumNoticeMinutes: number;
@@ -5291,7 +5291,7 @@ export interface components {
             scheduleId?: string | null;
             /** @enum {string} */
             schedulingType?: "individual" | "collective" | "round_robin";
-            /** @description Distance between start times; null = the selected duration */
+            /** @description Distance between start times, in whole minutes; null = the selected duration */
             slotStepMinutes?: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
@@ -5384,15 +5384,15 @@ export interface components {
         };
         /** @description Omitted fields stay as they are; null clears a nullable field */
         EventTypeUpdate: {
-            /** @description Distinct permitted lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
+            /** @description Distinct permitted whole-minute lengths kept in ascending order, including durationMinutes; omitted on creation = [durationMinutes] */
             allowedDurationsMinutes?: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests?: boolean;
-            /** @description How many days ahead can be booked; null = no limit */
+            /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays?: number | null;
-            /** @description Free time kept after a meeting */
+            /** @description Free time kept after a meeting, in whole minutes */
             bufferAfterMinutes?: number;
-            /** @description Free time kept before a meeting */
+            /** @description Free time kept before a meeting, in whole minutes */
             bufferBeforeMinutes?: number;
             /** @description Invitee cancel deadline: from this many minutes before the start, the invitee can no longer cancel through their manage link (409 `booking_cancel_deadline_passed`); null = until the meeting starts. Once it has passed the invitee can no longer reschedule either, whatever rescheduleCutoffMinutes says. Same snapshot and host rules. */
             cancelCutoffMinutes?: number | null;
@@ -5400,7 +5400,7 @@ export interface components {
                 userId: string;
             } | null;
             description?: string | null;
-            /** @description Default length of a meeting */
+            /** @description Default length of a meeting, in whole minutes */
             durationMinutes?: number;
             hosts?: {
                 userId: string;
@@ -5508,7 +5508,7 @@ export interface components {
             maxBookingsPerMonth?: number | null;
             /** @description Bookings per host schedule's ISO week (Monday–Sunday); null = no limit. Set limits must satisfy day ≤ week ≤ month, including day ≤ month when week is unset. Lowering a limit never cancels bookings. */
             maxBookingsPerWeek?: number | null;
-            /** @description How far ahead a meeting must be booked */
+            /** @description How far ahead a meeting must be booked, in whole minutes */
             minimumNoticeMinutes?: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
             /** @description Order on the page, ascending */
@@ -5524,7 +5524,7 @@ export interface components {
             scheduleId?: string | null;
             /** @enum {string} */
             schedulingType?: "individual" | "collective" | "round_robin";
-            /** @description Distance between start times; null = the selected duration */
+            /** @description Distance between start times, in whole minutes; null = the selected duration */
             slotStepMinutes?: number | null;
             /**
              * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
