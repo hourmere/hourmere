@@ -1583,7 +1583,7 @@ describe('the booking page', () => {
     expect(await screen.findByText(/Try again in 30 seconds/)).toBeDefined()
   })
 
-  it.each(['slot_taken', 'booking_changed'])(
+  it.each(['slot_taken', 'slot_unavailable', 'booking_changed'])(
     'refreshes availability and keeps entered details after %s',
     async (error) => {
       const user = userEvent.setup()

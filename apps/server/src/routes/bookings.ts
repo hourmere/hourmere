@@ -60,7 +60,20 @@ export const Instant = z.iso
 export const LocationKind = z.enum(LOCATION_KINDS)
 
 /** A bookable time: public slots and the times a booking can move to. */
-export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
+export const Slot = z
+  .object({
+    start: Instant,
+    end: Instant,
+    seatsRemaining: z.number().int().positive().optional().openapi({
+      description:
+        'Group sessions only: seats currently available. Full sessions are omitted; availability is not a reservation.',
+    }),
+    capacity: z.number().int().positive().optional().openapi({
+      description:
+        'Group sessions only: total capacity of this occurrence. No attendee identities are exposed.',
+    }),
+  })
+  .openapi('Slot')
 
 /** A selected length is checked against the event type's current allowed list by the service. */
 export const SelectedDurationMinutes = z.number().int().min(1).max(1440).openapi({
@@ -785,10 +798,15 @@ export function bookingRoutes({
         operationId: 'rescheduleManagedBooking',
         summary: 'Reschedule with the manage token',
         description:
-          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).',
+          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.',
         middleware: manageLimit,
         request: {
-          headers: ManageToken,
+          headers: ManageToken.extend({
+            'idempotency-key': z.string().optional().openapi({
+              description:
+                'Required for group-seat moves. Reuse the same key and request after a lost response; replay returns the same seat without recovering its manage token.',
+            }),
+          }),
           body: {
             content: json(ManagedRescheduleBody),
             required: true,
@@ -814,6 +832,7 @@ export function bookingRoutes({
             start: Temporal.Instant.from(c.req.valid('json').start),
             durationMinutes: c.req.valid('json').durationMinutes,
             rescheduleRequestId: c.req.valid('json').rescheduleRequestId,
+            idempotencyKey: c.req.valid('header')['idempotency-key'],
           },
           publicBookingAuditOrigin(c),
         )

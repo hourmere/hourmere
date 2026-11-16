@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  '{count} seat left': '{count} seat left',
+  '{count} seats left': '{count} seats left',
   'Meeting location': 'Meeting location',
   'Your phone number': 'Your phone number',
   'Choose one of the available locations.': 'Choose one of the available locations.',

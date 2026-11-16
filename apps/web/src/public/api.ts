@@ -335,10 +335,11 @@ export async function rescheduleManagedBooking(
   token: string,
   start: string,
   rescheduleRequestId?: string,
+  idempotencyKey = randomKey(),
 ): Promise<BookingWithToken> {
   const { data } = await call(() =>
     api.POST('/api/v1/bookings/manage/reschedule', {
-      params: { header: { 'x-manage-token': token } },
+      params: { header: { 'x-manage-token': token, 'idempotency-key': idempotencyKey } },
       body: { start, ...(rescheduleRequestId ? { rescheduleRequestId } : {}) },
     }),
   )
