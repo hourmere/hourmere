@@ -126,6 +126,8 @@ required `from`/`to` instants (at most 31 elapsed days), and optional `count` (1
 `locale`, `displayTimeZone` and `durationMinutes`. It returns chosen `slots` with direct
 links plus `text` and `html`. Personal owners and team owners/admins can use `read`,
 `bookings` or `full` keys when `SLOT_SNIPPETS_ENABLED` is enabled. It reserves nothing.
+When off (the default), a valid authenticated request returns HTTP 404 with
+`{"error":"slot_snippets_disabled"}`.
 See [the agent guide](/docs/open-time-snippets) for a complete curl example, response
 fields, date boundaries and taken-time fallback.
 

@@ -67,8 +67,8 @@ and `bookings` keys get `403 insufficient_scope`. The shared service also serves
 string: new codes may be added within `/api/v1`, and clients must show unknown codes neutrally.
 See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting).
 
-Native creation accepts `metadata.scope` with one of those exact values; omitting it keeps
-`full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
+Native creation accepts `metadata.scope` with exactly `full`, `read` or `bookings`;
+omitting it keeps `full` compatibility, including absent/null metadata. Legacy keys were migrated to `full`.
 Top-level `scope`/`scopes`, arrays, combinations and unknown values get
 `400 INVALID_METADATA`. Updates containing `metadata.scope`, even the same value, get
 `400 API_KEY_SCOPE_IMMUTABLE`. Create a replacement, update clients, then revoke the old key.
