@@ -40,6 +40,7 @@ import {
   runMigrations,
 } from '@hourmere/db'
 import {
+  auditLogRetentionJob,
   createJobs,
   oneTimeBookingLinksRetentionJob,
   paymentHoldsExpiryJob,
@@ -78,6 +79,7 @@ import {
   cleanupWaitlist,
   ensureWaitlistKey,
   expirePaymentHolds,
+  purgeAuditEvents,
   removeWaitlist,
   scanWaitlists,
   verifyWaitlist,
@@ -94,6 +96,7 @@ import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
+import { auditLogTools } from './mcp/audit-log.ts'
 import { availabilityTroubleshootingTools } from './mcp/availability-troubleshooting.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { brandingTools } from './mcp/branding.ts'
@@ -113,6 +116,7 @@ import { nativeTeamLeave } from './native-team-leave.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
+import { auditLogRoutes } from './routes/audit-log.ts'
 import { availabilityTroubleshootingRoutes } from './routes/availability-troubleshooting.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { brandingRoutes } from './routes/branding.ts'
@@ -191,8 +195,11 @@ export function productRoutes({
   invitationMailLimits,
   waitlistSecret,
   smtpConfigured,
+  auditLogRetentionDays = null,
 }: {
   db: Db
+  /** AUDIT_LOG_RETENTION_DAYS: days, or null (the default) to keep events forever. */
+  auditLogRetentionDays?: number | null
   automaticMeet?: boolean
   automaticZoom?: boolean
   followUpHostNotesEnabled?: boolean
@@ -267,6 +274,7 @@ export function productRoutes({
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
     brandingRoutes({ db }),
+    auditLogRoutes({ db, auditLogRetentionDays }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({
       db,
@@ -334,8 +342,11 @@ export function productTools({
   bookingMaxInviteeReschedules,
   googleCalendar,
   zoomConference,
+  auditLogRetentionDays = null,
 }: {
   db: Db
+  /** AUDIT_LOG_RETENTION_DAYS: days, or null (the default) to keep events forever. */
+  auditLogRetentionDays?: number | null
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
   waitlistSecret?: string | undefined
@@ -366,6 +377,7 @@ export function productTools({
     }),
     ...catalogTools({ db, followUpHostNotesEnabled }),
     ...brandingTools({ db }),
+    ...auditLogTools({ db, auditLogRetentionDays }),
     ...eventTypeTools({
       db,
       automaticMeet,
@@ -473,6 +485,7 @@ export function productionAppOptions({
       successRedirectPolicy,
       bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
       bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
+      auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
       hostedSignupUrl: config.HOSTED_SIGNUP_URL,
       privacyPolicyUrl: config.PRIVACY_POLICY_URL,
       termsUrl: config.TERMS_URL,
@@ -510,6 +523,7 @@ export function productionAppOptions({
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
+        auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
         googleCalendar,
         zoomConference,
         webhooks: webhookSettings,
@@ -784,6 +798,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           jobs.enqueue('meeting-poll-cleanup-v1', {}, { singletonKey: 'continuation' }),
       }),
       oneTimeBookingLinksRetentionJob(db),
+      auditLogRetentionJob((signal) =>
+        purgeAuditEvents(db, { instance: config.AUDIT_LOG_RETENTION_DAYS, signal }),
+      ),
       // Routing receipt and version cleanup runs whether or not routing is enabled.
       routingRetentionJob({
         purgeReceipts: async () => ({

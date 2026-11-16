@@ -43,6 +43,13 @@ export interface AuditEvents {
   target_type: string;
 }
 
+export interface AuditLogSettings {
+  organization_id: string;
+  retention: string;
+  retention_days: number | null;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface AuthAccount {
   accessToken: string | null;
   accessTokenExpiresAt: Timestamp | null;
@@ -1643,6 +1650,7 @@ export interface WorkflowRuns {
 
 export interface DB {
   audit_events: AuditEvents;
+  audit_log_settings: AuditLogSettings;
   "auth.account": AuthAccount;
   "auth.apikey": AuthApikey;
   "auth.invitation": AuthInvitation;

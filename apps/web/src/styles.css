@@ -2489,6 +2489,20 @@ input[aria-invalid="true"] {
   justify-self: start;
 }
 
+/* Audit log cells stack short lines; IDs and detail values may break anywhere. */
+.audit-cell,
+.audit-details {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+  min-width: 0;
+  margin: 0;
+}
+
+.audit-details dd {
+  margin: 0;
+}
+
 .metric-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));

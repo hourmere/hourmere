@@ -76,7 +76,7 @@ configuration remain unavailable in the editor, as described below.
 ## Known limitations
 
 - [Audit events](/docs/audit-log) are recorded only for the management changes listed
-  there. The audit viewer, read APIs, export and retention controls are not available yet.
+  there. Owners and admins can read and filter them; export is not available yet.
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).

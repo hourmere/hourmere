@@ -12,6 +12,11 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Audit log reading and retention: owners and admins filter their team's or personal
+  space's audit log by time, actor and action on a new admin page and through REST, MCP and
+  the CLI (full-scope API keys only). Owners choose to keep it forever or 30–3650 days over
+  the operator's `AUDIT_LOG_RETENTION_DAYS` default (`forever`); the worker deletes older
+  events hourly and never anything younger than 30 days.
 - Private per-attendee no-show marking after the scheduled start, with dashboard, REST,
   MCP and CLI access for hosts and browser-session access for team owners/admins. Optional
   `booking.attendee_no_show_changed` webhooks report actual changes without attendee contacts.

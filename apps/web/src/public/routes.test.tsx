@@ -30,6 +30,15 @@ describe('routing between the app and the public pages', () => {
         json(200, { data: [], zoomEnabled: false, maximumConnections: 5, pendingAttempts: 0 }),
       'GET /api/v1/calendar-connections': () => json(200, { googleEnabled: false, data: [] }),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'GET /api/v1/audit-events': () => json(200, { data: [], nextCursor: null }),
+      'GET /api/v1/audit-log/settings': () =>
+        json(200, {
+          retention: 'instance',
+          retentionDays: null,
+          instanceRetentionDays: null,
+          effectiveRetentionDays: null,
+          canChangeRetention: true,
+        }),
     })
     renderApp(path)
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeDefined()

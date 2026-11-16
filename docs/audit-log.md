@@ -1,9 +1,11 @@
 # Audit event journal
 
 Every self-hosted and Cloud instance records the audit events listed below without plan
-gating; actions that are not listed are not recorded (see [Not recorded](#not-recorded)). The
-journal is recorded but not yet viewable: a query UI, REST/MCP/CLI read APIs, export
-and retention controls are future work. It is separate from booking activity analytics.
+gating; actions that are not listed are not recorded (see [Not recorded](#not-recorded)).
+Owners and admins read it on the admin page and through REST, MCP and the CLI
+([Reading the journal](#reading-the-journal)); owners choose how long it is kept
+([Retention](#retention)). Export is future work. It is separate from booking activity
+analytics.
 Existing changes are not backfilled. Recording starts with the upgraded application;
 stop old application/worker processes during rollout because old binaries do not
 write this journal.
@@ -83,6 +85,7 @@ recorded. New detail keys require deliberate schema and documentation review. Th
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
+| Audit log | `audit_log.retention_updated` |
 
 `organization.ownership_transferred` and `api_key.rotated` are reserved action
 names, not currently emitted. Ownership transfer is blocked by the existing
@@ -265,11 +268,9 @@ email addresses, invitee answers, booking notes, or configuration text. Public
 invitee self-service uses anonymous identity and entity IDs only. Request IDs are
 locally generated correlation identifiers, never copied from untrusted headers.
 
-No application journal update/delete path exists. Entity identifiers deliberately
-have no cascading foreign keys, preserving history when a subject is removed.
-A later retention worker will delete bounded batches by organization and age
-using the organization/time index, outside request transactions, with an explicit
-operator policy. There is currently no automatic retention cleanup.
+No application journal update path exists, and the only delete path is the retention
+purge ([Retention](#retention)). Entity identifiers deliberately have no cascading
+foreign keys, preserving history when a subject is removed.
 
 ## Not recorded
 
@@ -307,3 +308,101 @@ provider internals, email contents, and database changes made directly by an ope
 are not recorded. Existing booking provenance columns remain intact. Once later SSO steps
 emit them, SSO sign-ins and bounded SSO security failures are the exception
 ([SSO actions](#sso-actions)); today nothing records them.
+
+## Reading the journal
+
+`GET /api/v1/audit-events` (`listAuditEvents`), MCP `list_audit_events` and CLI
+`audit-log list` share one service (`listAuditEvents` in
+`packages/scheduling/src/audit-log.ts`), so they authorize, validate and answer identically.
+
+- **Who.** The organization the caller acts in, never another: its personal owner, or a
+  verified team owner or admin, by session, a `full` API key or MCP OAuth (which keeps its
+  user's role). Members, removed or unverified users, and session callers whose
+  `X-Expected-Organization-Id` names another team, an unknown ID or a malformed one all get
+  the same `403 team_management_access_denied` without a message, so the answer reveals
+  nothing about other organizations. REST checks membership before validating filters;
+  MCP can reject malformed tool arguments before the service checks membership.
+- **Scope.** API keys need `full` scope (operation class `audit_read`); `read` and `bookings`
+  keys get `403 insufficient_scope` and do not see the tools. The journal says who did what
+  with which key, grant and role change, which is account-security information rather than
+  reporting data: a `read` key handed to an analytics agent should not learn it.
+- **Filters.** `from` (inclusive) and `to` (exclusive) are RFC 3339 instants with an offset;
+  values finer than a microsecond round up, because stored times have microseconds.
+  `actorType` (with optional `actorId`) and an exact `action`. Unknown actions match nothing.
+- **Order and pages.** Newest first by `(occurred_at, id)`. `limit` 1–100 (default 50).
+  `nextCursor` is opaque and bound to the organization and the filters: reusing it with other
+  filters or in another organization is `400 invalid_cursor`. Pages continue below the last
+  row's position, so events written after the first page never repeat or shift earlier rows.
+  An event is visible once its transaction commits; because `occurred_at` is taken at insert,
+  a long transaction can commit an event older than rows already paged past. It then appears
+  on a later page if older than the cursor, or on a fresh first page.
+- **What is returned.** Stored fields only, with session identifiers redacted: ID (decimal string), `occurredAt` in
+  UTC with microseconds, action, actor type and ID, target, details (the allow-listed values,
+  so redacted SSO security-failure details stay redacted), request ID and the credential type.
+  For API-key credentials the key ID and its scope, for OAuth the client and grant IDs.
+  **Session IDs are never returned**: they belong to the member's account, and a team admin
+  cannot list another member's sessions. Session targets have `target.id: null`. Rows without an organization (unauthenticated OAuth
+  client registration) are never returned to anyone. Reads are not recorded.
+
+The web page `/app/audit-log` uses the same endpoint, converts its date filters from the
+viewer's profile time zone (local midnight of the first day to local midnight after the last,
+so a 23- or 25-hour day is covered exactly) and shows times in that zone, naming it.
+
+## Retention
+
+Each organization keeps its journal according to one rule:
+
+| Choice | Set by | Effect |
+| --- | --- | --- |
+| Instance default (no row) | operator, `AUDIT_LOG_RETENTION_DAYS` | `forever` (the default) or 30–3650 days |
+| `forever` | owner | never deleted |
+| `days` | owner | deleted once older than 30–3650 days |
+
+Owners (a personal space's owner or a team owner) change it with `PUT
+/api/v1/audit-log/settings`, MCP `set_audit_log_settings` or CLI `audit-log set-retention`;
+owners and admins read it. Admins are refused with `insufficient_role`. A change is stored in
+`audit_log_settings` (migration 0090) and recorded as `audit_log.retention_updated` on the
+organization, with empty details; repeating the current value records nothing. Deleting an
+organization removes its choice; any events it left behind, and instance-wide rows, follow
+the instance default.
+
+The worker's `audit-log-retention-v1` job runs hourly (`purgeAuditEvents`):
+
+- It finds the organizations that have events past their own retention through the
+  organization/time index (a skip scan). Discovery visits all organizations; only eligible
+  organizations consume delete batches. It then deletes at most 1,000 rows per statement and 50 statements per run, one batch per
+  organization per pass. Later organizations may wait across runs while earlier ones remain
+  backlogged; the deletion bound does not bound discovery work.
+- It never waits on locks: an organization whose retention is being changed (its writer holds
+  the organization's retention advisory lock) is skipped until the next run; rows locked by
+  anything else are skipped (`FOR UPDATE SKIP LOCKED`); the search and every delete give up
+  after 100 ms behind a table lock (for example a migration) and leave the rest to the next run. A retention change waits at most for one running batch of
+  its organization, so a purge sees either the old or the new choice, never a mix.
+- It is idempotent and safe to run twice at once: a repeated or concurrent run deletes nothing
+  already deleted, and new events are never eligible.
+- It never deletes an event younger than 30 days, whatever is stored: the 30-day minimum is
+  enforced by the setting's check, in the service and in the purge itself. This keeps every
+  reader of recent events whole, such as the SSO security-failure bound, which counts the last
+  3,600 seconds.
+- Purges are system housekeeping and are not recorded in the journal.
+
+**What retention means for compliance.** Retention is a deletion schedule, not an archive:
+deleted events are gone from the database (backups follow the operator's backup policy). No
+foreign key references journal rows, so nothing is kept because another row points to it; the
+only rows the purge always keeps are those younger than 30 days. There is no legal hold:
+an organization that must keep records for a dispute or an audit chooses `forever` (or the
+operator keeps the instance default at `forever`) before the period runs out. Changing from a
+longer to a shorter period deletes older events at the next run, and the change itself is in
+the journal for at least 30 days. Choose a period that satisfies both your record-keeping
+obligations and data minimisation: the journal holds user, key and grant IDs, not names or
+email addresses.
+
+## Known limitations
+
+- No export (CSV or JSON download) yet; page through the API instead.
+- No filter by target, credential or free text, and no "any of these actions" filter.
+- Actors are shown by stored ID. An API key actor is its key ID: the key's owner is not
+  resolved (look for the matching `api_key.created` event). Users who left keep their ID.
+- The operator cannot cap what an owner chooses (for example forbid `forever`), and there is
+  no legal hold beyond choosing `forever`.
+- The purge only runs on worker processes; an instance without a worker never deletes.

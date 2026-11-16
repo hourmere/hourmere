@@ -257,6 +257,7 @@ but no email.
 | `HTTP_HEADERS_TIMEOUT` | `20` | Whole seconds, 1–3600, to receive request headers. Must not exceed request timeout. |
 | `HTTP_REQUEST_TIMEOUT` | `60` | Whole seconds, 1–3600, to receive the request. |
 | `BOOKING_EXPORT_MAX_CONCURRENT` | `2` | Process-wide CSV export cap, 1–8; empty means unset; invalid values prevent startup. The export service refuses excess requests with `409 export_busy` before acquiring a connection. Keep pool headroom for other requests. Streams close after 30 seconds without reader progress and after five minutes overall. See [CSV exports](/docs/booking-export). |
+| `AUDIT_LOG_RETENTION_DAYS` | `forever` | How long teams and personal spaces that keep the default retain their [audit log](/docs/audit-log#retention): `forever` or a whole number of days from 30 to 3650; invalid values prevent startup. Owners may choose their own. The worker deletes older events hourly and never anything younger than 30 days. |
 | `HTTP_KEEP_ALIVE_TIMEOUT` | `125` | Whole seconds, 1–3600, for an idle HTTP connection. Keep above the proxy's upstream idle timeout. |
 
 ## Social sign-in

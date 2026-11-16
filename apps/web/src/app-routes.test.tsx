@@ -1,5 +1,5 @@
 // The signed-in app lives under /app; the root is for public pages.
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
   emptyAccount,
@@ -52,7 +52,8 @@ describe('the app under /app', () => {
     renderApp('/app/nothing-here')
     expect(await screen.findByRole('heading', { name: 'Page not found', level: 1 })).toBeDefined()
     const nav = screen.getByRole('navigation', { name: 'Main' })
-    expect(within(nav).getAllByRole('link')).toHaveLength(9)
+    // The audit log link joins once the personal owner's role is confirmed.
+    await waitFor(() => expect(within(nav).getAllByRole('link')).toHaveLength(10))
     expect(
       within(nav).getByRole('link', { name: 'Conference accounts' }).getAttribute('href'),
     ).toBe('/app/conferences')

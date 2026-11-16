@@ -124,6 +124,7 @@ describe('admin shell layout', () => {
     ['/app/calendars', 'main-content-wide'],
     ['/app/api-keys', 'main-content-wide'],
     ['/app/connected-apps', 'main-content-wide'],
+    ['/app/audit-log', 'main-content-wide'],
     ['/app/settings', 'main-content'],
     ['/app/event-types/new', 'main-content'],
     ['/app/event-types/example', 'main-content'],

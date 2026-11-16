@@ -67,6 +67,7 @@ describe('the session gate', () => {
       'Calendars',
       'API keys',
       'Connected apps',
+      'Audit log',
       'Settings',
     ])
     expect(
@@ -82,6 +83,7 @@ describe('the session gate', () => {
       '/app/calendars',
       '/app/api-keys',
       '/app/connected-apps',
+      '/app/audit-log',
       '/app/settings',
     ])
     expect(screen.getByRole('link', { name: 'Event types' }).getAttribute('aria-current')).toBe(

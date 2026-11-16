@@ -62,6 +62,9 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 
 | Command | Tool | Arguments |
 |---|---|---|
+| `audit-log list` | `list_audit_events` | optional `from`, `to`, `actorType`, `actorId`, `action`, `limit`, `cursor`; requires `full`; [audit log](/docs/audit-log) |
+| `audit-log settings` | `get_audit_log_settings` | `{}`; requires `full` |
+| `audit-log set-retention` | `set_audit_log_settings` | `retention` and, for `days`, `retentionDays`; requires `full` and owner |
 | `branding get` | `get_branding` | `{}`; requires `read` or `full` |
 | `branding set` | `set_branding` | optional `brandPrimaryColor` (`#RRGGBB`), `brandLogo` (uploaded hash); `null` clears; requires `full` |
 | `branding upload` | REST `POST /api/v1/branding/logo` | `--file FILE --content-type image/png` (also `image/jpeg`, `image/webp`); requires `full` |
