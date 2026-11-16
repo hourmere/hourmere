@@ -89,7 +89,7 @@ For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
 Omitted update fields keep their current values. The web editor's minute/hour/day
 selector is a display convenience; API input and output units do not change.
 Booking windows retain calendar-day semantics in the host's schedule time zone across
-daylight saving time. See [event-type timing settings](/docs/#notice-booking-window-and-buffers)
+daylight saving time. See [event-type timing settings](/docs#notice-booking-window-and-buffers)
 for ranges, conversions and limitations.
 
 ## Configure an after-booking redirect
