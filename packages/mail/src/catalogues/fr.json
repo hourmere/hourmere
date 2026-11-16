@@ -109,7 +109,7 @@
   "replyNotice.plain": "Les réponses à cet e-mail ne sont pas transmises aux hôtes.",
   "replyNotice.manageLinks": "Les réponses à cet e-mail ne sont pas transmises aux hôtes. Pour replanifier ou annuler, utilisez les liens de cet e-mail.",
   "poll.verify.subject": "Vérifiez votre adresse e-mail pour {poll}",
-  "poll.vote.subject": "Voir le sondage de réunion : {poll}",
+  "poll.vote.subject": "Voir le sondage de réunion : {poll}",
   "poll.verify.body": "Confirmez votre adresse e-mail pour participer à {poll}.",
   "poll.vote.body": "Utilisez votre lien privé pour participer à {poll}.",
   "poll.expiry": "Ce lien est valable jusqu’au {expiry}.",
