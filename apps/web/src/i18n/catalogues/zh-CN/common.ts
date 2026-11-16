@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  '{count} seat left': '剩余 {count} 个名额',
+  '{count} seats left': '剩余 {count} 个名额',
   'Meeting location': '会议地点',
   'Your phone number': '你的电话号码',
   'Choose one of the available locations.': '请选择一个可用的会议地点。',

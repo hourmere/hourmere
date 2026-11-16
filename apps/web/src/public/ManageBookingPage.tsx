@@ -15,6 +15,7 @@ import {
   getManagedBooking,
   type ManagedBooking,
   PublicRequestError,
+  randomKey,
   rescheduleManagedBooking,
   rescheduleSlots,
   type Slot,
@@ -339,6 +340,7 @@ function ManageView({
       ? { kind: 'view' }
       : chosenMode
   // The deadline can pass while the picker is open: its slot lookup is then refused too.
+  const moveAttempt = useRef<{ request: string; key: string } | null>(null)
   const onSlotsRefused = useRef<(err: unknown) => void>(() => {})
   const loadSlots = useMemo((): SlotLoader => {
     const load = rescheduleSlots(token)
@@ -685,11 +687,20 @@ function ManageView({
               }}
               onConfirm={async () => {
                 const { slot } = mode
+                const request = JSON.stringify([
+                  token,
+                  booking.id,
+                  slot.start,
+                  booking.pendingReschedule?.id,
+                ])
+                if (moveAttempt.current?.request !== request)
+                  moveAttempt.current = { request, key: randomKey() }
                 try {
                   const result = await rescheduleManagedBooking(
                     token,
                     slot.start,
                     booking.pendingReschedule?.id,
+                    moveAttempt.current.key,
                   )
                   // The new booking answers no request; the old link's request state is history.
                   const {

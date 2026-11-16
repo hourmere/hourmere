@@ -133,9 +133,21 @@ configuration remain unavailable in the editor, as described below.
   user and two exports total by default (`export_user_in_progress` / `export_busy`);
   these concurrency limits are per process, not cluster-wide. Files contain personal data; there is no
   scheduled export or automatic delivery. Answers use a JSON column.
-- Group seats currently have internal storage and service support only. Public booking
-  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
-  this limitation applies equally to self-hosted installations. Existing occurrences retain
+- Group mode cannot yet be enabled in event editors or REST/MCP/CLI configuration;
+  this limitation applies equally to self-hosted installations. For internally seeded group
+  types, public booking pages and inline, popup and manual iframe embeds show exact seats
+  remaining beside each offered time. Full occurrences are omitted. The public slots API
+  adds `seatsRemaining` and `capacity` only for group times; these are aggregate totals,
+  with no attendee names, addresses or seat identities. Counts are a snapshot, not a
+  reservation. If another visitor takes the last seat, the page asks you to choose another
+  time and keeps your form entries. Cancellation or moving a seat releases its place; a
+  refreshed availability request shows it again if admission is still allowed.
+  When the existing waitlist is enabled, an empty selected window uses that same waitlist;
+  a window with free seats does not offer enrollment. No seat is reserved by joining it.
+  The invitee reschedule picker still lists new available occurrences only; it does not
+  display remaining seats or offer other already occupied group occurrences. Moving or
+  canceling a seat nevertheless updates the counts on the public booking page.
+  Existing occurrences retain
   their shared location, schedule and conference settings when event settings change, and
   continue accepting seats until full, subject to current booking cutoffs and usable pinned
   conference resources. Later time off, external-calendar conflicts and stale calendar sync
