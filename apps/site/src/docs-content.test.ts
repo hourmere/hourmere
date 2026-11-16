@@ -542,6 +542,10 @@ describe('complete public documentation', () => {
       const webhookEventPolicy = source
         .match(/^### Webhook event compatibility\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
         ?.trimEnd()
+      const activityPolicy = source
+        .match(/^### Booking activity no-show counts\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
+        ?.trimEnd()
+      expect(activityPolicy).toBeDefined()
       const attendancePolicy = source
         .match(/^### Attendance access and team booking fields\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
         ?.trimEnd()
@@ -579,6 +583,8 @@ describe('complete public documentation', () => {
           bookingSourcePolicy,
           '',
           webhookEventPolicy,
+          '',
+          activityPolicy,
           '',
           attendancePolicy,
           '',
