@@ -272,13 +272,34 @@ function EventTypeForm({
           slug: suggestedBookingSlug(d.title, String(value)),
         }),
     }))
+    if (
+      [
+        'minimumNoticeMinutes',
+        'bookingWindowDays',
+        'bufferBeforeMinutes',
+        'bufferAfterMinutes',
+      ].includes(name)
+    ) {
+      setErrors((current) => {
+        if (!current[name]) return current
+        const next = { ...current }
+        const problem = validateDraft({ ...draft, [name]: value }, baseline)[name]
+        if (problem) next[name] = problem
+        else delete next[name]
+        return next
+      })
+    }
     setStatus('')
   }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     // Display-unit choices are local presentation, not a reason to write stale settings.
-    if (saved && !dirty) return
+    if (saved && !dirty) {
+      setStatus('No changes to save.')
+      statusRef.current?.focus()
+      return
+    }
     setAttempt((n) => n + 1)
     setFormError(null)
     setStatus('')
@@ -680,6 +701,13 @@ function EventTypeForm({
                   {t('Custom duration')}
                 </button>
               </fieldset>
+              {draft.allowedDurationsMinutes.length >= EVENT_TYPE.maxAllowedDurations && (
+                <p className="hint">
+                  {t(
+                    'All 12 lengths are in use. Remove a length in Additional durations before adding another.',
+                  )}
+                </p>
+              )}
               <Field
                 id="durationMinutes"
                 label={t('Duration (minutes)')}
@@ -1175,6 +1203,7 @@ function EventTypeForm({
                     onChange={(value) => set('bookingWindowDays', value)}
                     error={errors.bookingWindowDays}
                     rule={RULES.bookingWindowDays}
+                    extra={t('How far into the future invitees can book, in calendar days.')}
                   />
                   <Field
                     id="maxBookingsPerDay"

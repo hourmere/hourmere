@@ -201,6 +201,26 @@ for ranges, conversions and limitations.
 Use the existing `create-event` or `update-event --input FILE` JSON input; updates
 include `id` beside the changed fields. There are no hour/day configuration flags.
 
+## Create and manage event types
+
+Creation requires `slug`, `title` and `durationMinutes`. The web form's suggested booking
+link, duration preset buttons and connected-service location default are conveniences;
+REST, MCP and CLI do not apply those suggestions. Omitted location configuration stays
+unset. Timing units remain whole minutes for notice/buffers and whole calendar days for
+`bookingWindowDays`, regardless of the web editor's selected display unit.
+
+Enable or disable with `isActive: true` or `false` through REST
+`PATCH /api/v1/event-types/{id}`, MCP `update_event_type`, or CLI `update-event`.
+MCP and CLI take `id` beside the changed fields; omitted fields keep their saved values.
+These writes require a `full` API key and the existing ownership/organization permissions.
+Disabling does not cancel existing bookings. Delete uses the web confirmation or REST
+`DELETE /api/v1/event-types/{id}` (204 on success); REST has no confirmation step.
+There is currently no event-type deletion MCP tool or CLI command. See
+[creating and managing event types](https://hourmere.com/docs/event-types) for the editor, copying rules and limitations.
+
+中文：三个接口均需明确传入创建字段，不套用网页的链接建议或已连接会议服务默认值。
+用 `isActive` 启停不会取消已有预约；删除仅支持网页确认或 REST，目前没有 MCP／CLI 删除命令。
+
 ## Configure meeting lengths
 
 Use `create-event` or `update-event` with a `full` API key to configure event types.
