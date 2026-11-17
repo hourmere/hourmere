@@ -92,6 +92,9 @@ const restContract = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   session_only: [
+    'POST /api/v1/team/sso/providers',
+    'PATCH /api/v1/team/sso/providers/{providerId}',
+    'DELETE /api/v1/team/sso/providers/{providerId}',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',

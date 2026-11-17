@@ -155,6 +155,11 @@ function isSlackDestinationPath(path: string): boolean {
   return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
 }
 
+/** Provider writes carry replacement credentials, including arbitrary invalid input keys. */
+function isSsoProviderPath(path: string): boolean {
+  return /^\/api\/v1\/team\/sso\/providers(?:\/|$)/i.test(path)
+}
+
 /** Admission bodies carry private contacts and arbitrary keys can themselves contain PII. */
 function isWaitlistAdmissionPath(path: string): boolean {
   let decoded = path
@@ -174,6 +179,7 @@ function isWaitlistEntryPath(path: string): boolean {
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
+  if (isSsoProviderPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
@@ -362,7 +368,11 @@ const requestLogger = createMiddleware(async (c, next) => {
     console.log(escapeControlCharacters(`--> ${c.req.method} ${managementRoute} ${c.res.status}`))
     return
   }
-  if (!isOneTimeLinkPath(c.req.path) && !isSlackDestinationPath(c.req.path))
+  if (
+    !isOneTimeLinkPath(c.req.path) &&
+    !isSlackDestinationPath(c.req.path) &&
+    !isSsoProviderPath(c.req.path)
+  )
     return ordinaryRequestLogger(c, next)
   await next()
   console.log(escapeControlCharacters(`--> ${c.req.method} ${routePath(c)} ${c.res.status}`))
@@ -402,16 +412,20 @@ export function createApp({
     // Driver messages and disconnect causes can echo contact values and malformed keys.
     const text = c.req.path.toLowerCase().includes('/meeting-polls')
       ? 'private meeting poll request failed'
-      : isSlackDestinationPath(c.req.path)
-        ? '[private Slack diagnostic omitted]'
-        : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
-          ? 'private waitlist request failed'
-          : detail
+      : isSsoProviderPath(c.req.path)
+        ? '[private SSO diagnostic omitted]'
+        : isSlackDestinationPath(c.req.path)
+          ? '[private Slack diagnostic omitted]'
+          : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
+            ? 'private waitlist request failed'
+            : detail
     const path = c.req.path.toLowerCase().includes('/meeting-polls')
       ? '/api/v1/public/meeting-polls/[redacted]'
       : isOneTimeCapabilityPath(c.req.path)
         ? '/book/[redacted]'
-        : isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path)
+        : isOneTimeLinkPath(c.req.path) ||
+            isSlackDestinationPath(c.req.path) ||
+            isSsoProviderPath(c.req.path)
           ? routePath(c)
           : c.req.path
     const message = c.req.path.includes('/provisioning-tokens')
@@ -460,7 +474,8 @@ export function createApp({
           !isOneTimeLinkPath(c.req.path) &&
           !isWaitlistAdmissionPath(c.req.path) &&
           !c.req.path.toLowerCase().includes('/meeting-polls') &&
-          !isSlackDestinationPath(c.req.path)
+          !isSlackDestinationPath(c.req.path) &&
+          !isSsoProviderPath(c.req.path)
           ? { error, message: err.message }
           : { error },
         err.status,
@@ -493,7 +508,9 @@ export function createApp({
         error: err.code,
         ...(field && !isOneTimeLinkPath(c.req.path) && { field }),
         ...(errorAlias !== undefined && { errorAlias }),
-        ...(err.detail && !isOneTimeLinkPath(c.req.path) && { message: err.detail }),
+        ...(err.detail &&
+          !isOneTimeLinkPath(c.req.path) &&
+          !isSsoProviderPath(c.req.path) && { message: err.detail }),
         ...(err.code === 'one_time_link_already_created' &&
           /\/one-time-links(?:\/|$)/i.test(c.req.path) && {
             message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,

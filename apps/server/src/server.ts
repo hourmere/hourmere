@@ -146,6 +146,7 @@ import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -198,6 +199,7 @@ export function productRoutes({
   embedAllowedOrigins,
   scimProvisioningEnabled = false,
   slotSnippetsEnabled = false,
+  ssoConfigurationKey,
   ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
   ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
@@ -224,6 +226,8 @@ export function productRoutes({
   embedAllowedOrigins?: readonly string[]
   scimProvisioningEnabled?: boolean
   slotSnippetsEnabled?: boolean
+  /** Operator-managed key for encrypted provider configuration; does not enable SSO. */
+  ssoConfigurationKey?: Buffer | undefined
   /** In-process test injection only; no operator setting exists during hard-off. */
   ssoOidcEnabled?: boolean
   /** In-process test injection only; no operator setting exists during hard-off. */
@@ -296,6 +300,12 @@ export function productRoutes({
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
+    ssoDraftRoutes({
+      db,
+      publicUrl,
+      configurationKey: ssoConfigurationKey,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({
       db,
@@ -517,6 +527,9 @@ export function productionAppOptions({
     }),
     // db is closed by the caller.
     routes: productRoutes({
+      ssoConfigurationKey: config.SSO_ENCRYPTION_KEY
+        ? Buffer.from(config.SSO_ENCRYPTION_KEY, 'base64')
+        : undefined,
       scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
       mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
       publicUrl: config.PUBLIC_URL,

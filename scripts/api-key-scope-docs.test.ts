@@ -124,6 +124,20 @@ describe('published API key scope tables', () => {
     },
   )
 
+  it('documents provider draft writes as session-only without machine write commands', () => {
+    for (const { document, section } of documents) {
+      if (section !== 'all') continue
+      for (const operation of [
+        'POST /api/v1/team/sso/providers',
+        'PATCH /api/v1/team/sso/providers/{providerId}',
+        'DELETE /api/v1/team/sso/providers/{providerId}',
+      ])
+        expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
+    }
+    for (const tool of ['create_sso_provider', 'update_sso_provider', 'delete_sso_provider'])
+      expect(API_KEY_MCP_OPERATIONS.some((operation) => operation.tool === tool)).toBe(false)
+  })
+
   it('keeps the public SSO limitation current', () => {
     expect(
       readFileSync(new URL('../apps/site/src/content/docs/docs/index.md', import.meta.url), 'utf8'),
