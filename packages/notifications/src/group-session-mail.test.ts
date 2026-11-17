@@ -39,19 +39,25 @@ interface Person {
   email: string
   timeZone: string
 }
+// Each name word is searched as a substring of whole raw messages, which carry random boundaries,
+// message IDs and base64. Three-letter first names (dan, ivy, pia) matched such noise by chance.
 const ALPHA: Person = {
-  name: 'Ivy Alphaname',
+  name: 'Ivyfirstname Alphaname',
   email: 'ivy.alphaaddr@people.example.test',
   timeZone: 'America/New_York',
 }
 const OTHERS: Person[] = [
-  { name: 'Oscar Bravoname', email: 'oscar.bravoaddr@people.example.test', timeZone: 'Asia/Tokyo' },
   {
-    name: 'Pia Charliename',
+    name: 'Oscarfirstname Bravoname',
+    email: 'oscar.bravoaddr@people.example.test',
+    timeZone: 'Asia/Tokyo',
+  },
+  {
+    name: 'Piafirstname Charliename',
     email: 'pia.charlieaddr@people.example.test',
     timeZone: 'Europe/Berlin',
   },
-  { name: 'Dan Deltaname', email: 'dan.deltaaddr@people.example.test', timeZone: 'UTC' },
+  { name: 'Danfirstname Deltaname', email: 'dan.deltaaddr@people.example.test', timeZone: 'UTC' },
 ]
 
 interface Seat {
