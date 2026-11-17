@@ -429,7 +429,9 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
-- Organization OIDC/SAML SSO is being built and is not available yet.
+- Organization OIDC/SAML SSO is being built and is not available yet. The optional
+  `SSO_ENCRYPTION_KEY` reserves an independent 32-byte base64 key for sealed provider
+  drafts; keep it stable and backed up privately. Setting it does not enable SSO.
 
 - Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
   and restarting cannot change a compiled image. Disabling installation requires a source

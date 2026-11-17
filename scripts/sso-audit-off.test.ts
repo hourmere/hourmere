@@ -1,9 +1,6 @@
-// The SSO audit actions exist with no emitter (docs/sso.md, Audit actions): their names, detail
-// allow-lists and writers live in the audit journal module and its SSO catalogue, migration 0085
-// checks their details, and no route, worker or service records one, because no SSO write path
-// exists yet. OIDC and SAML stay hard-off (apps/server/src/sso.test.ts). The scan is limited to
-// SSO action names and the SSO writers; it never freezes the rest of the audit catalogue. The
-// first step that records an SSO action narrows it to the modules that write it.
+// SSO audit storage owns the action catalogue. The browser provider-draft service may emit
+// only its four transactional provider actions, behind the hard-off gate. Every later writer
+// must gain an explicit owner entry without allowing other routes or workers to emit events.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +18,14 @@ const AUDIT_LAYER = new Set([
   'packages/db/src/sso-audit-protections.ts',
   'packages/db/src/sso-audit-check-source.ts',
 ])
+const EMITTERS: Readonly<Record<string, readonly string[]>> = {
+  'apps/server/src/sso-drafts.ts': [
+    'sso_provider.created',
+    'sso_provider.updated',
+    'sso_provider.deleted',
+    'sso_provider.secret_rotated',
+  ],
+}
 // An SSO action name as a string literal, whether or not the catalogue lists it.
 const SSO_ACTION = /['"`]sso_[a-z_]+\.[a-z_]+['"`]/
 // The SSO writers and the catalogue module, by name or import.
@@ -51,7 +56,7 @@ function productionSources(): string[] {
   return files.sort()
 }
 
-describe('SSO audit actions are defined but never recorded', () => {
+describe('SSO audit actions have explicit guarded emitters', () => {
   it('recognises SSO action names and writers, and nothing else', () => {
     for (const source of [
       "action: 'sso_provider.created'",
@@ -81,7 +86,7 @@ describe('SSO audit actions are defined but never recorded', () => {
       expect(SSO_WRITER.test(source), source).toBe(false)
   })
 
-  it('keeps every SSO action and writer inside the audit layer', () => {
+  it('keeps every SSO action and writer inside the audit layer or its explicit emitter', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     const layer = sources.filter((file) => AUDIT_LAYER.has(file))
@@ -94,7 +99,7 @@ describe('SSO audit actions are defined but never recorded', () => {
     const journal = readFileSync(new URL('packages/db/src/audit.ts', root), 'utf8')
     expect(SSO_WRITER.test(journal)).toBe(true)
     const referencing = sources
-      .filter((file) => !AUDIT_LAYER.has(file))
+      .filter((file) => !AUDIT_LAYER.has(file) && !Object.hasOwn(EMITTERS, file))
       .filter((file) => {
         const text = readFileSync(new URL(file, root), 'utf8')
         return (
@@ -104,6 +109,16 @@ describe('SSO audit actions are defined but never recorded', () => {
         )
       })
     expect(referencing).toEqual([])
+    for (const [file, actions] of Object.entries(EMITTERS)) {
+      expect(sources).toContain(file)
+      const source = readFileSync(new URL(file, root), 'utf8')
+      const named = [...source.matchAll(/['"`]sso_[a-z_]+\.[a-z_]+['"`]/g)].map(([name]) =>
+        name.slice(1, -1),
+      )
+      expect([...new Set(named)].sort()).toEqual([...actions].sort())
+      expect(source).toContain('writeSsoAuditEvent')
+      expect(source).not.toMatch(/writeSsoSecurityFailure|redactSsoSecurityFailure/)
+    }
   })
 
   it('keeps the existing actions and the SSO actions apart', () => {

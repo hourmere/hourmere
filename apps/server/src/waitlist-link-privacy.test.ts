@@ -201,6 +201,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
         'isSlackDestinationPath',
+        'isSsoProviderPath',
         'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
@@ -213,6 +214,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
+        (path: string) => /^\/api\/v1\/team\/sso\/providers(?:\/|$)/i.test(path),
         routePath,
         /x^/,
       )
@@ -249,6 +251,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
         'isSlackDestinationPath',
+        'isSsoProviderPath',
         'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
@@ -261,6 +264,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
+        (path: string) => /^\/api\/v1\/team\/sso\/providers(?:\/|$)/i.test(path),
         routePath,
         /x^/,
       )

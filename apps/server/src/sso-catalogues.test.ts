@@ -100,12 +100,37 @@ const GUARDED_SSO_READS = [
   },
 ] as const
 
+// Session-only draft mutations are mounted but proved disabled below; no machine write exemption.
+const GUARDED_SSO_DRAFT_WRITES = [
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/providers',
+    runtimePath: '/api/v1/team/sso/providers',
+    operationId: 'createSsoProvider',
+  },
+  {
+    method: 'patch',
+    path: '/api/v1/team/sso/providers/{providerId}',
+    runtimePath: '/api/v1/team/sso/providers/:providerId',
+    operationId: 'updateSsoProvider',
+  },
+  {
+    method: 'delete',
+    path: '/api/v1/team/sso/providers/{providerId}',
+    runtimePath: '/api/v1/team/sso/providers/:providerId',
+    operationId: 'deleteSsoProvider',
+  },
+] as const
+
 function expectNoUnguardedSsoRoutes(paths: string[]) {
   expectNoSsoRoutes(
     paths.filter(
       (path) =>
         !(GUARDED_SSO_AUTH_PATHS as readonly string[]).includes(path) &&
-        !GUARDED_SSO_READS.some((read) => read.path === path),
+        !GUARDED_SSO_READS.some((read) => read.path === path) &&
+        !GUARDED_SSO_DRAFT_WRITES.some(
+          (write) => write.path === path || write.runtimePath === path,
+        ),
     ),
   )
 }
@@ -402,6 +427,12 @@ function expectNoSsoOperations(document: Document) {
         GUARDED_SSO_READS.some(
           (read) =>
             read.path === path && method === 'get' && read.operationId === operation.operationId,
+        ) ||
+        GUARDED_SSO_DRAFT_WRITES.some(
+          (write) =>
+            write.path === path &&
+            write.method === method &&
+            write.operationId === operation.operationId,
         )
       )
         continue
@@ -450,10 +481,12 @@ function webRouteNames(app: string, paths: string) {
 }
 
 describe('SSO hard-off excludes only SSO from the published catalogues', () => {
-  it('publishes exactly the guarded SSO draft reads in OpenAPI', async () => {
+  it('publishes exactly the guarded SSO draft reads and session writes in OpenAPI', async () => {
     const document = (await openApiDocument()) as Document
     for (const read of GUARDED_SSO_READS)
       expect(document.paths[read.path]?.get?.operationId).toBe(read.operationId)
+    for (const write of GUARDED_SSO_DRAFT_WRITES)
+      expect(document.paths[write.path]?.[write.method]?.operationId).toBe(write.operationId)
     expectNoSsoOperations(document)
   })
 
@@ -550,6 +583,48 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
         if (value === undefined) delete process.env[name]
         else process.env[name] = value
       await db.destroy()
+    }
+  })
+
+  it('answers disabled for each exact draft write before caller, input or database access', async () => {
+    const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
+    try {
+      const app = createApp(productionOptions(db))
+      for (const write of GUARDED_SSO_DRAFT_WRITES)
+        for (const providerId of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id'])
+          for (const headers of [
+            {},
+            { origin: 'https://attacker.example', authorization: 'Bearer hm_x', cookie: 'a=b' },
+          ]) {
+            const response = await app.request(write.path.replace('{providerId}', providerId), {
+              method: write.method.toUpperCase(),
+              headers,
+              body: '{invalid-json',
+            })
+            expect(response.status).toBe(404)
+            expect(await response.json()).toEqual({ error: 'sso_disabled' })
+          }
+    } finally {
+      await db.destroy()
+    }
+  })
+
+  it('exempts draft writes only at their exact method, path and operation id', () => {
+    for (const write of GUARDED_SSO_DRAFT_WRITES) {
+      const check = (path: string, method: string, operationId: string) =>
+        expectNoSsoOperations({ paths: { [path]: { [method]: { operationId } } } })
+      check(write.path, write.method, write.operationId)
+      for (const [path, method, operationId] of [
+        [write.path, 'put', write.operationId],
+        [`${write.path}/`, write.method, write.operationId],
+        [write.path, write.method, 'activateSsoProvider'],
+      ])
+        expect(() => check(path as string, method as string, operationId as string)).toThrow(
+          expect.objectContaining({ name: 'AssertionError' }),
+        )
+      expect(() => expectNoSso([write.operationId])).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
     }
   })
 

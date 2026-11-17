@@ -271,6 +271,9 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/workflows` | Session or API key | `full` |
 | `GET /api/v1/workflows` | Session or API key | `full, read` |
 | `GET /api/v1/workflows/{id}` | Session or API key | `full, read` |
+| `POST /api/v1/team/sso/providers` | Browser session only | — |
+| `PATCH /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
+| `DELETE /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `GET /api/v1/team/sso/providers` | Session or API key | `full, read` |
 | `GET /api/v1/team/sso/policy` | Session or API key | `full, read` |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
