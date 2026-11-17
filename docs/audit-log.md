@@ -200,8 +200,11 @@ disappears.
 ## SSO actions
 
 The [organization SSO](sso.md) actions are defined, with their detail allow-lists in the
-application (`packages/db/src/sso-audit.ts`) and in the database check (migration 0085), but
-nothing records them yet: no SSO write path exists, and both protocols are off. Each later
+application (`packages/db/src/sso-audit.ts`) and in the database check (migration 0085).
+The browser provider-draft service records creation, update, retirement and secret rotation
+in the same transaction as its change, using only protocol, provider ID and revision details.
+An idempotent repeat retirement records nothing. Both protocols remain hard-off, so these
+writes are unavailable in production. Each later
 SSO step records the events of the changes it builds with `writeSsoAuditEvent`, inside the
 transaction of that change, so the event and the change commit or roll back together, and its
 security failures with `writeSsoSecurityFailure`. The existing actions above are unchanged.
