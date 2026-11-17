@@ -60,6 +60,7 @@ export function OrderedLocationsEditor({
           : kind === 'link'
             ? { id, kind, url: '' }
             : { id, kind }
+    pendingFocus.current = `location-option-${id}-label`
     set('locationOptions', [...options, option])
   }
   return (
@@ -191,24 +192,23 @@ export function OrderedLocationsEditor({
               >
                 {t('Move location down')}
               </button>
-              {!primary && (
-                <button
-                  className="button button-small"
-                  type="button"
-                  onClick={() => {
-                    const neighbor = options[index - 1] ?? options[index + 1]
-                    pendingFocus.current = neighbor
-                      ? `location-option-${neighbor.id}-label`
-                      : 'location-option-add-kind'
-                    set(
-                      'locationOptions',
-                      options.filter((item) => item.id !== option.id),
-                    )
-                  }}
-                >
-                  {t('Remove location option')}
-                </button>
-              )}
+              <button
+                className="button button-small"
+                type="button"
+                onClick={() => {
+                  if (primary) set('locationKind', '')
+                  const neighbor = options[index - 1] ?? options[index + 1]
+                  pendingFocus.current = neighbor
+                    ? `location-option-${neighbor.id}-label`
+                    : 'location-option-add-kind'
+                  set(
+                    'locationOptions',
+                    options.filter((item) => item.id !== option.id),
+                  )
+                }}
+              >
+                {t('Remove location option')}
+              </button>
             </div>
           </fieldset>
         )

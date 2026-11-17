@@ -147,8 +147,8 @@ it('detects losing focus or changing the implicit default while moving source-co
 
 it('detects losing focus when removing a source-copy option', () => {
   const source = readFileSync('apps/web/src/pages/event-types/OrderedLocationsEditor.tsx', 'utf8')
-  const start = source.indexOf('                    const neighbor =')
-  const handler = source.slice(start, source.indexOf('\n                  }}', start))
+  const start = source.indexOf('const neighbor =')
+  const handler = source.slice(start, source.indexOf('}}', start))
   const check = (code: string, sole = false) => {
     const input = document.createElement('input')
     input.id = sole ? 'location-option-add-kind' : 'location-option-first-label'
