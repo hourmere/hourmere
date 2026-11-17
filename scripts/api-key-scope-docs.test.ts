@@ -106,6 +106,15 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
 
 describe('published API key scope tables', () => {
   it.each(documents)(
+    '$path explains the routing hard-off beside the generated table',
+    ({ document }) => {
+      expect(document.slice(0, document.indexOf(SCOPE_TABLE_START))).toContain(
+        'Routing operations return `routing_forms_disabled` until an operator enables routing.',
+      )
+    },
+  )
+
+  it.each(documents)(
     '$path matches the live operation registry exactly',
     ({ document, section }) => {
       expect(scopeDocumentationMatches(document, section)).toBe(true)

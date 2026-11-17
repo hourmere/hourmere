@@ -19,6 +19,8 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/routing-forms',
+    'GET /api/v1/routing-forms/{id}',
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/bookings/export.csv',
@@ -117,6 +119,9 @@ const restContract = {
   ],
   audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [
+    'POST /api/v1/routing-forms',
+    'PATCH /api/v1/routing-forms/{id}',
+    'DELETE /api/v1/routing-forms/{id}',
     'PATCH /api/v1/workflows/{id}',
     'POST /api/v1/workflows',
     'PUT /api/v1/audit-log/settings',
@@ -369,6 +374,11 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'list_routing_forms',
+        'get_routing_form',
+        'create_routing_form',
+        'update_routing_form',
+        'archive_routing_form',
         'update_workflow',
         'create_workflow',
         'list_audit_events',
@@ -421,6 +431,8 @@ describe('shared API-key scope policy', () => {
         'get_workflow',
       ],
       read: [
+        'list_routing_forms',
+        'get_routing_form',
         'get_branding',
         'list_slack_destinations',
         'whoami',

@@ -65,6 +65,11 @@ const all = [
   'update_workflow',
   'list_workflows',
   'get_workflow',
+  'list_routing_forms',
+  'get_routing_form',
+  'create_routing_form',
+  'update_routing_form',
+  'archive_routing_form',
 ]
 // In the catalog but not available: never listed, and a direct call that passes the scope
 // check answers workflows_disabled without reaching its handler.
@@ -78,6 +83,9 @@ const disabled = { error: 'workflows_disabled' }
 // Full scope only: audit reads reveal who did what (see api-key-operations.ts).
 const auditReads = new Set(['list_audit_events', 'get_audit_log_settings'])
 const configurationWrites = new Set([
+  'create_routing_form',
+  'update_routing_form',
+  'archive_routing_form',
   'create_workflow',
   'update_workflow',
   'set_audit_log_settings',
@@ -109,6 +117,8 @@ const writes = new Set([
   'resend_waitlist_verification',
 ])
 const otherReads = new Set([
+  'list_routing_forms',
+  'get_routing_form',
   'get_branding',
   'export_bookings',
   'get_booking_activity',
@@ -140,7 +150,7 @@ const denial = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
 }
-const catalog = productTools({ db: {} as Db, slotSnippetsEnabled: true })
+const catalog = productTools({ db: {} as Db, slotSnippetsEnabled: true, routingFormsEnabled: true })
 function principal(scope: ApiKeyScope): McpCaller {
   return {
     kind: 'api_key',
@@ -476,6 +486,11 @@ describe('CLI scope parity', () => {
     ['workflows create', 'create_workflow'],
     ['workflows list', 'list_workflows'],
     ['workflows get', 'get_workflow'],
+    ['routing-forms list', 'list_routing_forms'],
+    ['routing-forms get', 'get_routing_form'],
+    ['routing-forms create', 'create_routing_form'],
+    ['routing-forms update', 'update_routing_form'],
+    ['routing-forms archive', 'archive_routing_form'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',

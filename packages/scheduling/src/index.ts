@@ -297,6 +297,13 @@ export {
   TeamReadinessPageSchema,
 } from './readiness.ts'
 export {
+  archiveRoutingForm,
+  createRoutingForm,
+  getRoutingForm,
+  listRoutingForms,
+  updateRoutingForm,
+} from './routing-form-service.ts'
+export {
   confirmDefaultSchedule,
   createSchedule,
   deleteSchedule,
@@ -353,5 +360,4 @@ export {
 } from './text.ts'
 export * from './waitlist.ts'
 export { scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
-
 export { lockWorkflowOwner } from './workflow-owner-lock.ts'
