@@ -4,10 +4,12 @@ import { embedSnippet } from '@hourmere/core/embed-snippet'
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api, unwrap } from '../../api/client.ts'
+import { errorMessage } from '../../api/errors.ts'
 import type { EventType } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
+import type { UiText } from '../../i18n/translate.ts'
 
 const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance/embed', { signal }))
 
@@ -18,14 +20,24 @@ export interface EventEmbedProps {
   disabled?: boolean
 }
 
-/** The row menu deliberately starts with one action, ready for future row actions. */
+/** Saved-event actions share a keyboard-operable menu. */
 export function EventEmbedAction({
   event,
   bookingPath,
   disabled = false,
   inMenu = false,
-}: EventEmbedProps & { inMenu?: boolean }) {
-  const { t } = useI18n()
+  onDuplicate,
+  onDelete,
+}: EventEmbedProps & {
+  inMenu?: boolean
+  onDuplicate?: () => Promise<void>
+  onDelete?: () => Promise<void>
+}) {
+  const { t, uiText } = useI18n()
+  const [failure, setFailure] = useState<UiText | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const initialItem = useRef<'first' | 'last'>('first')
   const [menu, setMenu] = useState(false)
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -35,7 +47,9 @@ export function EventEmbedAction({
 
   useEffect(() => {
     if (!menu) return
-    item.current?.focus()
+    const items = container.current?.querySelectorAll<HTMLButtonElement>('[role=menuitem]')
+    if (initialItem.current === 'last') items?.[items.length - 1]?.focus()
+    else items?.[0]?.focus()
     const outside = (event: Event) => {
       if (event.target instanceof Node && !container.current?.contains(event.target)) setMenu(false)
     }
@@ -46,6 +60,21 @@ export function EventEmbedAction({
       document.removeEventListener('focusin', outside)
     }
   }, [menu])
+
+  async function duplicate() {
+    if (!onDuplicate) return
+    setMenu(false)
+    setBusy(true)
+    setFailure(null)
+    try {
+      await onDuplicate()
+    } catch (error) {
+      setFailure(errorMessage(error))
+    } finally {
+      setBusy(false)
+      trigger.current?.focus()
+    }
+  }
 
   function close() {
     setOpen(false)
@@ -58,15 +87,19 @@ export function EventEmbedAction({
         ref={trigger}
         type="button"
         className={`button button-small${inMenu ? ' event-more-trigger' : ''}`}
-        disabled={disabled}
+        disabled={disabled || busy}
         aria-label={inMenu ? t('More actions for {0}', { '0': event.title }) : undefined}
         aria-haspopup={inMenu ? 'menu' : 'dialog'}
         aria-expanded={inMenu ? menu : undefined}
         aria-controls={menu ? menuId : undefined}
-        onClick={() => (inMenu ? setMenu(!menu) : setOpen(true))}
+        onClick={() => {
+          initialItem.current = 'first'
+          inMenu ? setMenu(!menu) : setOpen(true)
+        }}
         onKeyDown={(event) => {
           if (inMenu && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
             event.preventDefault()
+            initialItem.current = event.key === 'ArrowUp' ? 'last' : 'first'
             setMenu(true)
           }
         }}
@@ -87,13 +120,28 @@ export function EventEmbedAction({
               trigger.current?.focus()
             } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
               event.preventDefault()
-              item.current?.focus()
+              const items = Array.from(
+                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role=menuitem]'),
+              )
+              const index = items.indexOf(document.activeElement as HTMLButtonElement)
+              const next =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? items.length - 1
+                    : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+              items[next]?.focus()
             } else if (event.key === 'Tab') {
               setMenu(false)
               trigger.current?.focus()
             }
           }}
         >
+          {onDuplicate && (
+            <button type="button" role="menuitem" tabIndex={-1} onClick={() => void duplicate()}>
+              {t('Duplicate')}
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -106,12 +154,100 @@ export function EventEmbedAction({
           >
             {t('Embed')}
           </button>
+          {onDelete && (
+            <button
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              onClick={() => {
+                setMenu(false)
+                setDeleting(true)
+              }}
+            >
+              {t('Delete')}
+            </button>
+          )}
         </span>
+      )}
+      {failure && <span role="alert">{uiText(failure)}</span>}
+      {deleting && onDelete && (
+        <DeleteEventDialog
+          event={event}
+          onConfirm={onDelete}
+          onClose={() => {
+            setDeleting(false)
+            trigger.current?.focus()
+          }}
+        />
       )}
       {open && !disabled && (
         <EventEmbedDialog event={event} bookingPath={bookingPath} onClose={close} />
       )}
     </span>
+  )
+}
+
+function DeleteEventDialog({
+  event,
+  onConfirm,
+  onClose,
+}: {
+  event: EventType
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  const { t, uiText } = useI18n()
+  const dialog = useRef<HTMLDialogElement>(null)
+  const cancel = useRef<HTMLButtonElement>(null)
+  const id = useId()
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<UiText | null>(null)
+  useEffect(() => {
+    const element = dialog.current
+    element?.showModal()
+    cancel.current?.focus()
+    return () => element?.close()
+  }, [])
+  async function confirm() {
+    setBusy(true)
+    setFailure(null)
+    try {
+      await onConfirm()
+      onClose()
+    } catch (error) {
+      setFailure(errorMessage(error))
+      setBusy(false)
+    }
+  }
+  return createPortal(
+    <dialog
+      ref={dialog}
+      className="embed-dialog"
+      aria-labelledby={id}
+      onCancel={(event) => {
+        event.preventDefault()
+        if (!busy) onClose()
+      }}
+    >
+      <h2 id={id}>{t('Delete “{0}”? This cannot be undone.', { '0': event.title })}</h2>
+      <button
+        type="button"
+        className="button button-danger"
+        disabled={busy}
+        onClick={() => void confirm()}
+      >
+        {t(busy ? 'Deleting…' : 'Delete event type')}
+      </button>
+      <button ref={cancel} type="button" className="button" disabled={busy} onClick={onClose}>
+        {t('Cancel')}
+      </button>
+      {failure && (
+        <p role="alert">
+          {t('Could not delete the event type.')} {uiText(failure)}
+        </p>
+      )}
+    </dialog>,
+    document.body,
   )
 }
 

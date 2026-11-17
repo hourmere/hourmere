@@ -68,6 +68,7 @@ import { WaitlistEditor } from './WaitlistEditor.tsx'
 import { ZoomMeetingFields } from './ZoomMeetingFields.tsx'
 
 interface Loaded {
+  defaultLocation: LocationKind | ''
   eventType: EventType | null
   schedules: Schedule[]
   profile: Profile | null
@@ -89,21 +90,44 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
-      const [eventType, schedules, profile, instance] = await Promise.all([
-        id === undefined
-          ? null
-          : unwrap(api.GET('/api/v1/event-types/{id}', { params: { path: { id } }, signal })).catch(
-              (err: unknown) => {
+      const [eventType, schedules, profile, instance, connections, conferences] = await Promise.all(
+        [
+          id === undefined
+            ? null
+            : unwrap(
+                api.GET('/api/v1/event-types/{id}', { params: { path: { id } }, signal }),
+              ).catch((err: unknown) => {
                 if (isNotFound(err, 'event_type_not_found')) return 'missing' as const
                 throw err
-              },
-            ),
-        loadSchedules(signal),
-        loadProfile(signal),
-        unwrap(api.GET('/api/v1/instance', { signal })),
-      ])
+              }),
+          loadSchedules(signal),
+          loadProfile(signal),
+          unwrap(api.GET('/api/v1/instance', { signal })),
+          id === undefined
+            ? unwrap(api.GET('/api/v1/calendar-connections', { signal })).catch(() => null)
+            : null,
+          id === undefined
+            ? unwrap(api.GET('/api/v1/conference-connections', { signal })).catch(() => null)
+            : null,
+        ],
+      )
       if (eventType === 'missing') return 'missing'
       return {
+        defaultLocation: connections?.data.some(
+          (connection) =>
+            connection.provider === 'google' &&
+            connection.status === 'active' &&
+            connection.syncAuthorized,
+        )
+          ? 'google_meet'
+          : conferences?.data.some(
+                (connection) =>
+                  connection.provider === 'zoom' &&
+                  connection.status === 'active' &&
+                  connection.mode === 'meetings',
+              )
+            ? 'zoom'
+            : '',
         eventType,
         schedules,
         profile,
@@ -147,6 +171,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
 }
 
 function EventTypeForm({
+  defaultLocation,
   eventType,
   schedules,
   profile,
@@ -177,7 +202,11 @@ function EventTypeForm({
   const [baseline, setBaseline] = useState(() =>
     eventType
       ? draftFromEventType(eventType)
-      : { ...emptyDraft(), ...(!me.organization.personal && { hostUserIds: [me.user.id] }) },
+      : {
+          ...emptyDraft(),
+          locationKind: defaultLocation,
+          ...(!me.organization.personal && { hostUserIds: [me.user.id] }),
+        },
   )
   const [draft, setDraft] = useState(baseline)
   const ownSchedule =

@@ -143,6 +143,7 @@ export {
   activateRoundRobin,
   createEventType,
   deleteEventType,
+  duplicateEventType,
   EVENT_TYPE_LIMITS,
   type EventType,
   type EventTypeInput,

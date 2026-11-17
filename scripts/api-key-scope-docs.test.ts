@@ -170,6 +170,8 @@ describe('published API key scope tables', () => {
     expect(rendered).toContain('`reschedule_booking` | `host`')
     expect(rendered).toContain('`reschedule_booking` | `manageToken`')
     expect(rendered).toContain('`GET /api/health` | Public health check; no key needed')
+    expect(rendered).toContain('`POST /api/v1/event-types/{id}/duplicate`')
+    expect(rendered).toContain('| `duplicate_event_type` | — | `duplicate-event` | `full` |')
     expect(rendered).toContain('`POST /api/conference/zoom/events` | Provider signature')
   })
 

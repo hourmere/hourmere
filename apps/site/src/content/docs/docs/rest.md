@@ -409,3 +409,11 @@ See [booking waitlists](/docs/booking-waitlist) for host settings, entry managem
 invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
 Nothing is reserved: every eligible invitee can be notified and the first successful
 ordinary booking wins.
+
+## Duplicate an event type
+
+Send `POST /api/v1/event-types/{id}/duplicate` with an empty JSON object and a `full`
+API key. The HTTP 201 response is the newly created event, with its own unique booking
+slug. The same owner/admin and configuration checks as creation apply. The copy stays
+in the current organization. See [event types](/docs/event-types) for copied settings,
+excluded history and links, and retry behavior. Existing create defaults are unchanged.

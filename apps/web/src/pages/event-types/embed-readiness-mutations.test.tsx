@@ -72,6 +72,8 @@ function copy<T>(source: string, exported: string): T {
     useEffect,
     useRef,
     useState,
+    useNavigate: () => () => {},
+    useMounted: () => ({ current: true }),
     useLoad: () => [{ status: 'loading' }],
     loadInstance: () => {},
     HostSlotPicker: EmptySlotPicker,

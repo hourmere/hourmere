@@ -339,6 +339,61 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI event type configuration
     }
   })
 
+  it('duplicates through REST, MCP and CLI with new links and rejects cross-organization access', async () => {
+    const s = await setup()
+    const source = ok(await s.call('create_event_type', createInput()))
+    const rest = await s.app.request(`/api/v1/event-types/${source.id}/duplicate`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer hm_synthetic', 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(rest.status).toBe(201)
+    const first = (await rest.json()) as Saved & { slug: string }
+    const second = ok(await s.call('duplicate_event_type', { id: source.id })) as Saved & {
+      slug: string
+    }
+    let stdout = ''
+    const code = await runCli({
+      argv: ['duplicate-event', '--input', '-'],
+      env: { HOURMERE_URL: 'http://localhost:4189', HOURMERE_API_KEY: 'hm_synthetic' },
+      stdin: (async function* () {
+        yield JSON.stringify({ id: source.id })
+      })(),
+      stdout: (text) => {
+        stdout += text
+      },
+      stderr: () => {},
+      fetch: async (input, init) => s.app.request(input, init),
+    })
+    expect(code).toBe(0)
+    const third = JSON.parse(stdout) as Saved & { slug: string }
+    expect(new Set([source.id, first.id, second.id, third.id]).size).toBe(4)
+    expect([
+      first.slug.endsWith('-copy'),
+      second.slug.endsWith('-copy-2'),
+      third.slug.endsWith('-copy-3'),
+    ]).toEqual([true, true, true])
+    for (const copy of [first, second, third])
+      expect(copy).toMatchObject({
+        durationMinutes: source.durationMinutes,
+        allowedDurationsMinutes: source.allowedDurationsMinutes,
+      })
+    const outsider = await setup()
+    expect(error(await outsider.call('duplicate_event_type', { id: source.id })).error).toBe(
+      'event_type_not_found',
+    )
+    const denied = await outsider.app.request(`/api/v1/event-types/${source.id}/duplicate`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer hm_synthetic', 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(denied.status).toBe(404)
+    const member = await setup(eventTypeTools, 'member')
+    expect(error(await member.call('duplicate_event_type', { id: source.id })).error).toBe(
+      'insufficient_role',
+    )
+  })
+
   it('retains team role, organization and ownership boundaries', async () => {
     const member = await setup(eventTypeTools, 'member')
     expect(error(await member.call('create_event_type', createInput())).error).toBe(
