@@ -92,7 +92,23 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
     }
     google = fakeGoogle()
     zoom = fakeZoom(PUBLIC_URL)
-    calendar = { db, google: { client: google.client, encryptionKey: TEST_CALENDAR_KEY } }
+    calendar = {
+      db,
+      google: { client: google.client, encryptionKey: TEST_CALENDAR_KEY },
+      caldav: {
+        encryptionKey: TEST_CALENDAR_KEY,
+        discoveryClient: {
+          discover: async () => {
+            throw new Error('Listing must not discover')
+          },
+        },
+        syncClient: {
+          sync: async () => {
+            throw new Error('Listing must not sync')
+          },
+        },
+      },
+    }
     conference = { db, zoom: { client: zoom.client, encryptionKey: TEST_CONFERENCE_KEY } }
     for (const [index, principal] of [owner, other].entries()) {
       google.controls.identity.sub = `discovery-google-${index}`
@@ -171,6 +187,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
         tools: productTools({
           db,
           googleCalendar: calendar.google,
+          caldavCalendar: calendar.caldav,
           zoomConference: conference.zoom,
         }),
       }),
@@ -237,6 +254,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
     '%s matches REST for personal and team keys and excludes another admin',
     async (name) => {
       const personal = await rest(name)
+      if (name === 'list_calendar_connections') expect(personal.caldavEnabled).toBe(true)
       expect(personal.data.map((row) => row.id)).toEqual([
         ownIds.get(name),
         ...(name === 'list_calendar_connections' ? [caldavIds.get(owner.user.id)] : []),

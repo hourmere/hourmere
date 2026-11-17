@@ -391,6 +391,7 @@ export function productTools({
   automaticZoom,
   bookingMaxInviteeReschedules,
   googleCalendar,
+  caldavCalendar,
   zoomConference,
   auditLogRetentionDays = null,
 }: {
@@ -413,6 +414,7 @@ export function productTools({
   automaticZoom?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   googleCalendar?: CalendarDeps['google']
+  caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
 }): Tool[] {
   return [
@@ -446,7 +448,7 @@ export function productTools({
       : []),
     ...availabilityTroubleshootingTools({ db, automaticMeet, automaticZoom }),
     ...integrationTools({
-      calendar: { db, google: googleCalendar },
+      calendar: { db, google: googleCalendar, caldav: caldavCalendar },
       conference: { db, zoom: zoomConference },
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
@@ -599,6 +601,7 @@ export function productionAppOptions({
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
         googleCalendar,
+        caldavCalendar,
         zoomConference,
         webhooks: webhookSettings,
         webhookQueue,
