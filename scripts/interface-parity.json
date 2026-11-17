@@ -1,5 +1,17 @@
 {
   "duplicateEventType": { "mcp": "duplicate_event_type", "cli": "duplicate-event" },
+  "createSsoProvider": {
+    "exemption": "browser-session-only",
+    "reason": "Installing an authentication authority requires interactive administrator proof."
+  },
+  "updateSsoProvider": {
+    "exemption": "browser-session-only",
+    "reason": "Changing credentials/trust requires interactive administrator proof."
+  },
+  "deleteSsoProvider": {
+    "exemption": "browser-session-only",
+    "reason": "Retiring authentication authority requires interactive administrator proof."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
   "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },

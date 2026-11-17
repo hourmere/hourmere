@@ -302,7 +302,7 @@ describe('one-time capability privacy source-copy controls', () => {
   })
   it('detects skipping administration request logs', async () => {
     const module = await copy([
-      'if (!isOneTimeLinkPath(c.req.path) && !isSlackDestinationPath(c.req.path))\n    return ordinaryRequestLogger(c, next)',
+      'if (\n    !isOneTimeLinkPath(c.req.path) &&\n    !isSlackDestinationPath(c.req.path) &&\n    !isSsoProviderPath(c.req.path)\n  )\n    return ordinaryRequestLogger(c, next)',
       'if (isOneTimeLinkPath(c.req.path)) return next()',
     ])
     await expect(verifyAdminRequestLogs(module)).rejects.toMatchObject({ name: 'AssertionError' })
@@ -352,7 +352,10 @@ describe('one-time capability privacy source-copy controls', () => {
     await expect(verifyLogs(module, 'error')).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects reflected domain-error details', async () => {
-    const module = await copy(['err.detail && !isOneTimeLinkPath(c.req.path)', 'err.detail'])
+    const module = await copy([
+      'err.detail &&\n          !isOneTimeLinkPath(c.req.path)',
+      'err.detail',
+    ])
     await expect(verifyResponse(module, 'domain')).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects reflected HTTP error messages', async () => {

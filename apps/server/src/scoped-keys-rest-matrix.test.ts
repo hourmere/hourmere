@@ -142,6 +142,9 @@ const classes = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   session_only: [
+    'POST /api/v1/team/sso/providers',
+    'PATCH /api/v1/team/sso/providers/{providerId}',
+    'DELETE /api/v1/team/sso/providers/{providerId}',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -364,6 +367,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       if (kind === 'session_only') {
         path = path
           .replaceAll('{id}', randomUUID())
+          .replaceAll('{providerId}', randomUUID())
           .replaceAll('{invitationId}', randomUUID())
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
@@ -811,14 +815,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 136-operation contract and all 408 scope combinations', () => {
+    it('covers the exact 139-operation contract and all 417 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(136)
-      expect(new Set(ids).size).toBe(136)
+      expect(ids).toHaveLength(139)
+      expect(new Set(ids).size).toBe(139)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(408)
+      expect(cases).toHaveLength(417)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

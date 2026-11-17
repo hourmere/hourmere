@@ -258,6 +258,29 @@ describe('loadConfig', () => {
       loadConfig({ ...base, SSO_PRIVATE_TARGETS: 'untrusted-private-value' }),
     ).not.toThrow(/untrusted-private-value/)
   })
+  it('validates the optional independent SSO encryption key without exposing its value', () => {
+    const key = Buffer.alloc(32, 's').toString('base64')
+    expect(loadConfig({ ...base }).SSO_ENCRYPTION_KEY).toBeUndefined()
+    expect(loadConfig({ ...base, SSO_ENCRYPTION_KEY: '' }).SSO_ENCRYPTION_KEY).toBeUndefined()
+    expect(loadConfig({ ...base, SSO_ENCRYPTION_KEY: key }).SSO_ENCRYPTION_KEY).toBe(key)
+    for (const reused of [
+      { BETTER_AUTH_SECRET: key },
+      { BETTER_AUTH_SECRET: Buffer.alloc(32, 's').toString() },
+      { CALENDAR_ENCRYPTION_KEY: key },
+      { CONFERENCE_ENCRYPTION_KEY: key },
+      { WEBHOOK_ENCRYPTION_KEY: key },
+      { SMS_HASH_KEY: key },
+    ])
+      expect(() => loadConfig({ ...base, SSO_ENCRYPTION_KEY: key, ...reused })).toThrow(
+        /independent/,
+      )
+    expect(() => loadConfig({ ...base, SSO_ENCRYPTION_KEY: 'synthetic-invalid-key' })).toThrow(
+      /SSO_ENCRYPTION_KEY/,
+    )
+    expect(() => loadConfig({ ...base, SSO_ENCRYPTION_KEY: 'synthetic-invalid-key' })).not.toThrow(
+      /synthetic-invalid-key/,
+    )
+  })
   it('requires calendar encryption to be independent of authentication and webhook keys', () => {
     const key = Buffer.alloc(32, 'k').toString('base64')
     for (const reused of [
