@@ -180,19 +180,20 @@ const accepted = () => ({ accepted: true as const })
 
 // --- Digests and retained credentials ------------------------------------------------------
 
-const derivedKey = (secret: string, purpose: string) =>
+/** Dedicated HKDF subkey of the installation secret, one per purpose label. */
+export const meetingPollDerivedKey = (secret: string, purpose: string) =>
   Buffer.from(hkdfSync('sha256', secret, 'hourmere/meeting-poll', purpose, 32))
 
 /** Keyed digest of a normalized mailbox, separate per poll. */
 export function meetingPollMailboxKey(secret: string, pollId: string, email: string): Buffer {
-  return createHmac('sha256', derivedKey(secret, 'mailbox/v1'))
+  return createHmac('sha256', meetingPollDerivedKey(secret, 'mailbox/v1'))
     .update(`${pollId.toLowerCase()}\0${email}`)
     .digest()
 }
 
 /** Keyed digest of the trusted client IP (IPv6 by /64), separate per poll. */
 function admissionIpDigest(secret: string, pollId: string, ip: string | undefined): Buffer {
-  return createHmac('sha256', derivedKey(secret, 'admission-ip/v1'))
+  return createHmac('sha256', meetingPollDerivedKey(secret, 'admission-ip/v1'))
     .update(`${pollId.toLowerCase()}\0${waitlistIpBucket(ip)}`)
     .digest()
 }
@@ -227,7 +228,7 @@ function sealCredential(
   token: string,
 ): Buffer {
   const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', derivedKey(secret, 'capability/v1'), iv)
+  const cipher = createCipheriv('aes-256-gcm', meetingPollDerivedKey(secret, 'capability/v1'), iv)
   cipher.setAAD(credentialAad(binding))
   const body = Buffer.concat([
     cipher.update(JSON.stringify({ purpose, token }), 'utf8'),
@@ -250,7 +251,7 @@ export function openMeetingPollCredential(
       return undefined
     const decipher = createDecipheriv(
       'aes-256-gcm',
-      derivedKey(secret, 'capability/v1'),
+      meetingPollDerivedKey(secret, 'capability/v1'),
       ciphertext.subarray(1, 13),
     )
     decipher.setAAD(credentialAad(binding))

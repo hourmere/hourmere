@@ -1,12 +1,18 @@
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { MEETING_POLL_LIMITS, meetingPollDerivedKey, waitlistIpBucket } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { enforceMeetingPollRateLimit } from './meeting-poll-rate-limit.ts'
 
 const serverUrl = process.env.DATABASE_URL
+const {
+  admissionRequestsPerWindow: admission,
+  ballotRequestsPerWindow: ballot,
+  readRequestsPerWindow: read,
+} = MEETING_POLL_LIMITS
 
 describe.skipIf(!serverUrl)('shared meeting poll transport budgets', () => {
   let database: TestDatabase
@@ -21,11 +27,11 @@ describe.skipIf(!serverUrl)('shared meeting poll transport budgets', () => {
     const deps = { db: createDb(database.pool), meetingPollSecret: 'test-poll-request-secret' }
     const other = { ...deps, db: createDb(database.pool) }
     const outcomes = await Promise.allSettled(
-      Array.from({ length: 15 }, (_, i) =>
+      Array.from({ length: admission + 5 }, (_, i) =>
         enforceMeetingPollRateLimit(i % 2 ? deps : other, 'admission', '192.0.2.5'),
       ),
     )
-    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(10)
+    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(admission)
     const refused = outcomes.filter((result) => result.status === 'rejected')
     expect(refused).toHaveLength(5)
     for (const result of refused)
@@ -43,7 +49,15 @@ describe.skipIf(!serverUrl)('shared meeting poll transport budgets', () => {
       hits: number
     }>`SELECT * FROM meeting_poll_request_limits`.execute(deps.db)
     expect(rows.rows.every((row) => row.key_digest.length === 32)).toBe(true)
-    expect(rows.rows.some((row) => row.hits === 11)).toBe(true)
+    expect(rows.rows.some((row) => row.hits === admission + 1)).toBe(true)
+    // Keyed with a dedicated HKDF subkey, never the raw installation secret.
+    const expected = createHmac(
+      'sha256',
+      meetingPollDerivedKey(deps.meetingPollSecret, 'request/v1'),
+    )
+      .update(`admission\0${waitlistIpBucket('192.0.2.5')}`)
+      .digest()
+    expect(rows.rows.some((row) => row.key_digest.equals(expected))).toBe(true)
     await sql`UPDATE meeting_poll_request_limits SET reset_at = now() - interval '1 second'`.execute(
       deps.db,
     )
@@ -61,7 +75,7 @@ describe.skipIf(!serverUrl)('shared meeting poll transport budgets', () => {
       await writeFile(path, mutant)
       const mutated = await import(path.href)
       const deps = { db: createDb(database.pool), meetingPollSecret: 'test-poll-request-secret' }
-      for (let i = 0; i < 10; i++)
+      for (let i = 0; i < admission; i++)
         await mutated.enforceMeetingPollRateLimit(deps, 'admission', '192.0.2.99')
       await expect(
         (async () => {
@@ -80,12 +94,12 @@ describe.skipIf(!serverUrl)('shared meeting poll transport budgets', () => {
 
   it('groups IPv6 aliases and applies read and ballot limits', async () => {
     const deps = { db: createDb(database.pool), meetingPollSecret: 'test-poll-request-secret' }
-    for (let i = 0; i < 30; i++)
+    for (let i = 0; i < ballot; i++)
       await enforceMeetingPollRateLimit(deps, 'ballot', `2001:db8:1:2::${i.toString(16)}`)
     await expect(
       enforceMeetingPollRateLimit(deps, 'ballot', '2001:0db8:0001:0002::ffff'),
     ).rejects.toMatchObject({ code: 'rate_limited' })
-    for (let i = 0; i < 120; i++) await enforceMeetingPollRateLimit(deps, 'read', '192.0.2.10')
+    for (let i = 0; i < read; i++) await enforceMeetingPollRateLimit(deps, 'read', '192.0.2.10')
     await expect(enforceMeetingPollRateLimit(deps, 'read', '192.0.2.10')).rejects.toMatchObject({
       code: 'rate_limited',
     })

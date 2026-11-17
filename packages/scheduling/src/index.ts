@@ -204,6 +204,7 @@ export {
   type MeetingPollCleanupResult,
 } from './meeting-poll-cleanup.ts'
 export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
+export { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
 export {
   type EnrollMeetingPollVoterInput,
@@ -211,6 +212,7 @@ export {
   type MeetingPollPublicContext,
   MeetingPollRateLimitError,
   type MeetingPollVoterState,
+  meetingPollDerivedKey,
   recoverMeetingPollVoter,
   type VerifyMeetingPollVoterResult,
   verifyMeetingPollVoter,
