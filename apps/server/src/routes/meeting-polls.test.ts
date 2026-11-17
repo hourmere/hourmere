@@ -380,6 +380,24 @@ describe.skipIf(!serverUrl)('public meeting poll REST on Postgres', () => {
     expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0)
   })
 
+  it('redacts unknown property names and nested validation details on every public operation', async () => {
+    const sentinel = 'private-capability-and-mailbox@example.test'
+    for (const operation of [
+      'read',
+      'enroll',
+      'recover',
+      'verify',
+      'vote',
+      'withdraw',
+      'reminder-opt-out',
+    ]) {
+      const response = await send(operation, { [sentinel]: sentinel })
+      expect(response.status).toBe(400)
+      expect(response.body).toEqual({ error: 'invalid_request' })
+      expect(JSON.stringify(response.body)).not.toContain(sentinel)
+    }
+  })
+
   it('redacts database diagnostics on capability routes', async () => {
     const diagnostic = 'private-capability-and-mailbox@example.test'
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})

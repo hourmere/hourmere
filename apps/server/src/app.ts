@@ -179,6 +179,8 @@ function isWaitlistEntryPath(path: string): boolean {
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
+  if (c.req.path.toLowerCase().includes('/meeting-polls'))
+    return c.json({ error: 'invalid_request' }, 400)
   if (isSsoProviderPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
