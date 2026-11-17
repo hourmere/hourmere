@@ -1,4 +1,4 @@
-// Booking workflows: definition services, creation capture, the contract and timer rules
+// Booking workflows: definition services, lifecycle capture, the contract and timer rules
 // behind the hard-off constant (docs/workflows.md). Nothing sends mail or posts webhooks yet.
 
 export {
@@ -11,7 +11,11 @@ export {
   type WorkflowAuditRecord,
   type WorkflowSkipReason,
 } from './audit.ts'
-export { captureWorkflowCreation, workflowRecipientHash } from './capture.ts'
+export {
+  captureWorkflowBooking,
+  captureWorkflowCreation,
+  workflowRecipientHash,
+} from './capture.ts'
 export {
   evaluateConditions,
   PERSONAL_ONLY_CONDITION_FIELDS,
