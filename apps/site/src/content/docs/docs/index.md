@@ -110,7 +110,8 @@ configuration remain unavailable in the editor, as described below.
 ## Review bookings
 
 In **Bookings**, select an event title to open its detail. On wide screens the detail
-slides in from the right over the list; on phones it fills the screen. **Team bookings**
+slides in from the right over the list; on phones it replaces the list as an ordinary page,
+with the app navigation still available. **Team bookings**
 uses the same view for owners and admins, with its existing limited team information
 and actions. Close the detail to return to your view, search, loaded pages and scroll
 position. Attendance and booking changes made there update the retained list.
