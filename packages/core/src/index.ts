@@ -5,6 +5,7 @@ export {
   brandContrast,
   brandPalette,
 } from './brand-contrast.ts'
+export { PHONE_NUMBER_PATTERN } from './phone.ts'
 export {
   CLAIM_RESERVED_HANDLES,
   isClaimReservedHandle,
@@ -12,4 +13,3 @@ export {
   isReservedName,
   RESERVED_NAMES,
 } from './reserved.ts'
-export { PHONE_NUMBER_PATTERN } from './phone.ts'

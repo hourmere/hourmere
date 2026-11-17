@@ -5,7 +5,6 @@
 // pointing at the event type they were made with.
 import { requireActiveApiKey } from '@hourmere/auth'
 import { PHONE_NUMBER_PATTERN, validateEventTypeRules } from '@hourmere/core'
-export { PHONE_NUMBER_PATTERN } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
@@ -166,6 +165,9 @@ export interface EventTypeInput {
 
 /** Omitted fields stay as they are; null clears a nullable field. */
 export type EventTypeUpdate = Partial<EventTypeInput>
+
+/** E.164 phone pattern; defined in core so notifications need not load scheduling schemas. */
+export { PHONE_NUMBER_PATTERN }
 
 /** Lowercase letters, digits and inner hyphens, 1–64 characters (the `event_types` CHECK). */
 export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/

@@ -832,6 +832,7 @@ describe.skipIf(!serverUrl)('public one-time booking flow', () => {
             'location',
             'locations',
             'questions',
+            'smsRemindersEnabled',
             ...(mode === 'team address' ? ['team'] : []),
             'title',
           ].sort(),
