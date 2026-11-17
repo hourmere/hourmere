@@ -1,4 +1,4 @@
-// Creation capture shares the booking transaction. Due rows are the durable outbox; the
+// Lifecycle capture shares the booking transaction. Due rows are the durable outbox; the
 // dispatcher adds wakes later. Existing booking snapshots and immutable revisions supply
 // content, so execution identity/history never duplicate answers or recipient addresses.
 import { createHmac } from 'node:crypto'
@@ -41,14 +41,14 @@ interface Recipient {
 }
 
 /** Internal service, directly exercised by fixtures; production uses the guarded export. */
-export async function captureCreatedWorkflows(
+export async function captureBookingWorkflows(
   trx: Db,
   event: BookingEvent,
   now: Temporal.Instant,
   secret: string,
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Workflow capture needs the booking transaction')
-  if (event.type !== 'created') return
+  if (event.type !== 'created' && event.type !== 'rescheduled' && event.type !== 'cancelled') return
   const identity = await trx
     .selectFrom('bookings')
     .select('organization_id')
@@ -65,14 +65,80 @@ export async function captureCreatedWorkflows(
     .where('id', '=', event.bookingId)
     .executeTakeFirst()
   if (
-    booking?.status !== 'confirmed' ||
-    booking.rescheduled_from_id !== null ||
+    !booking ||
+    booking.status !== (event.type === 'cancelled' ? 'cancelled' : 'confirmed') ||
+    (event.type === 'created' && booking.rescheduled_from_id !== null) ||
+    (event.type === 'rescheduled' && booking.rescheduled_from_id === null) ||
     booking.group_slot_id !== null ||
     !booking.event_type_id ||
     !['web', 'embed', 'api', 'mcp'].includes(booking.source) ||
     (await isImportedBooking(trx, booking.id))
   )
     return
+  // Acquire all definition share locks in ID order, then use creation order for intent winners.
+  const definitions = await trx
+    .selectFrom('workflow_definitions')
+    .selectAll()
+    .select(
+      sql<string>`(extract(epoch from created_at) * 1000000)::bigint::text`.as('creation_order'),
+    )
+    .where('organization_id', '=', booking.organization_id)
+    .where('enabled', '=', true)
+    .where('deleted_at', 'is', null)
+    .orderBy('id')
+    .forShare()
+    .execute()
+  // A reschedule's cancellation is internal, never an actual cancellation occurrence.
+  const successor = await trx
+    .selectFrom('bookings')
+    .select('id')
+    .where('rescheduled_from_id', '=', booking.id)
+    .executeTakeFirst()
+  if (successor) return
+  const predecessor =
+    event.type === 'rescheduled'
+      ? await trx
+          .selectFrom('bookings')
+          .selectAll()
+          .where('id', '=', booking.rescheduled_from_id as string)
+          .where('organization_id', '=', booking.organization_id)
+          .where('status', '=', 'cancelled')
+          .executeTakeFirst()
+      : undefined
+  if (event.type === 'rescheduled' && !predecessor) return
+  // Read immutable timer revisions before retiring their runs. Never carry lifecycle work.
+  const carried = predecessor
+    ? await trx
+        .selectFrom('workflow_enrollments')
+        .select(['workflow_id', 'revision'])
+        .where('organization_id', '=', booking.organization_id)
+        .where('booking_id', '=', predecessor.id)
+        .where('trigger', 'in', ['before_start', 'after_end'])
+        .execute()
+    : []
+  if (event.type !== 'created') {
+    // Definition locks above precede run locks, including when deletion is waiting.
+    // Excluding cancellation preserves its delayed run on replay.
+    await trx
+      .updateTable('workflow_runs')
+      .set({ state: 'retired', finished_at: date(now), claim_token: null, lease_until: null })
+      .where('organization_id', '=', booking.organization_id)
+      .where('booking_id', '=', predecessor?.id ?? booking.id)
+      .where('state', 'in', ['pending', 'claimed'])
+      .where('enrollment_id', 'in', (eb) =>
+        eb
+          .selectFrom('workflow_enrollments')
+          .select('id')
+          .where('organization_id', '=', booking.organization_id)
+          .where('trigger', 'in', [
+            'before_start',
+            'after_end',
+            'booking.created',
+            'booking.rescheduled',
+          ]),
+      )
+      .execute()
+  }
   const eventType = await trx
     .selectFrom('event_types')
     .selectAll()
@@ -93,19 +159,6 @@ export async function captureCreatedWorkflows(
     deleted: false,
     questions: parseQuestions(eventType.questions),
   }
-  // Acquire all definition share locks in ID order, then use creation order for intent winners.
-  const definitions = await trx
-    .selectFrom('workflow_definitions')
-    .selectAll()
-    .select(
-      sql<string>`(extract(epoch from created_at) * 1000000)::bigint::text`.as('creation_order'),
-    )
-    .where('organization_id', '=', booking.organization_id)
-    .where('enabled', '=', true)
-    .where('deleted_at', 'is', null)
-    .orderBy('id')
-    .forShare()
-    .execute()
   definitions.sort((a, b) => {
     const order = BigInt(a.creation_order) - BigInt(b.creation_order)
     return order < 0n ? -1 : order > 0n ? 1 : a.id.localeCompare(b.id)
@@ -163,16 +216,33 @@ export async function captureCreatedWorkflows(
           )
       }
   }
-  for (const row of definitions) {
+  const captures = definitions.flatMap((row) => {
+    const retained = carried.find((enrollment) => enrollment.workflow_id === row.id)
+    return [
+      ...(retained ? [{ row, capturedRevision: retained.revision, retained: true }] : []),
+      { row, capturedRevision: row.revision, retained: false },
+    ]
+  })
+  for (const { row, capturedRevision, retained } of captures) {
     const revision = await trx
       .selectFrom('workflow_revisions')
       .select('definition')
       .where('organization_id', '=', booking.organization_id)
       .where('workflow_id', '=', row.id)
-      .where('revision', '=', row.revision)
+      .where('revision', '=', capturedRevision)
       .executeTakeFirstOrThrow()
     const definition = WorkflowDefinitionSchema.parse(revision.definition)
-    if (!['booking.created', 'before_start', 'after_end'].includes(definition.trigger.type))
+    const trigger = definition.trigger.type
+    const timer = trigger === 'before_start' || trigger === 'after_end'
+    if (
+      event.type === 'created'
+        ? !timer && trigger !== 'booking.created'
+        : event.type === 'cancelled'
+          ? trigger !== 'booking.cancelled'
+          : retained
+            ? !timer
+            : trigger !== 'booking.rescheduled'
+    )
       continue
     const owner: WorkflowOwner = row.owner_user_id
       ? {
@@ -188,8 +258,8 @@ export async function captureCreatedWorkflows(
         organization_id: booking.organization_id,
         booking_id: booking.id,
         workflow_id: row.id,
-        revision: row.revision,
-        occurrence: 'created',
+        revision: capturedRevision,
+        occurrence: timer ? 'created' : event.type,
         trigger: definition.trigger.type,
       })
       .onConflict((oc) => oc.columns(['booking_id', 'occurrence', 'workflow_id']).doNothing())
@@ -238,7 +308,7 @@ export async function captureCreatedWorkflows(
           run_id: run.id,
           organization_id: booking.organization_id,
           workflow_id: row.id,
-          revision: row.revision,
+          revision: capturedRevision,
           trigger: definition.trigger.type,
           due_at: date(timing.dueAt),
           finished_at: date(now),
@@ -289,4 +359,16 @@ export async function captureCreatedWorkflows(
   }
 }
 
+/** Creation-only compatibility entry; lifecycle callers use captureBookingWorkflows. */
+export async function captureCreatedWorkflows(
+  trx: Db,
+  event: BookingEvent,
+  now: Temporal.Instant,
+  secret: string,
+): Promise<void> {
+  if (event.type !== 'created') return
+  await captureBookingWorkflows(trx, event, now, secret)
+}
+
 export const captureWorkflowCreation = workflowCapture(captureCreatedWorkflows)
+export const captureWorkflowBooking = workflowCapture(captureBookingWorkflows)
