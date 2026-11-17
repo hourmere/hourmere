@@ -9,13 +9,24 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
 ## Public branding
 
 Public host and event-type responses, one-time link event metadata and invitee managed
-bookings add optional `branding` with `name`, nullable `primaryColor` and nullable
-`logoDataUrl`. The name labels the logo; the logo is bounded inline normalized PNG data,
-not a remote URL. Omission retains the default theme. Clients should validate colours
-and derive accessible theme roles rather than use the raw primary colour for all text.
+bookings include optional `branding` with `name`, nullable `primaryColor` and nullable
+`logoUrl`. The legacy nullable `logoDataUrl` field remains present as null. Clients should
+use `logoUrl`, a same-origin path containing the organization ID and SHA-256 hash of the
+normalized PNG bytes, instead of expecting inline bytes. Omission retains the default
+theme. Validate colours and derive accessible theme roles rather than use the raw primary
+colour for all text.
+
+`GET /api/v1/public/branding/{organizationId}/logo/{hash}` is public and serves bounded
+PNG bytes with immutable cache headers. Lookup requires the organization's current logo
+and the content hash to match. Unknown hashes and hashes belonging only to another
+organization receive the same unavailable response. The protected administrative image
+endpoint remains unchanged in authorization; knowing a hash grants no administrative access.
+
 The resource's owning personal or team organization determines the brand, independently
-of the viewer's current workspace. No organization ID or administrative permission is
-exposed by this projection; the existing branding administration APIs remain protected.
+of the viewer's current workspace. Host event summaries add optional `branding` and
+`organizationName` (team only), so each card can match its booking page. An unbranded team
+card uses the default palette rather than inheriting the personal home page's palette.
+See [branding](/docs/branding) for size limits, caching and email compatibility.
 
 ## Attendance API compatibility
 

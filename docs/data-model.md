@@ -211,7 +211,11 @@ Contrast calculations select black or white text with the greater WCAG 2.x ratio
 report the primary colour's ratio against white separately. Public pages, embeds and booking
 email HTML read the owning organization's current brand; personal bookings use the personal
 organization and team bookings use the team. Rendering validates colours again and derives
-accessible theme roles. Logos travel as inline PNG data on pages and CID attachments in mail. See [branding](https://hourmere.com/docs/branding)
+accessible theme roles. Uploads and legacy reads normalize logos to PNG, at most 512 pixels
+on the longest side and 64 KiB. Public pages use organization-scoped, content-hash image
+URLs with immutable cache headers; emails retain bounded CID attachments. No migration
+is needed: legacy stored rows remain readable. Personal home event cards carry their
+owning space's brand and identify team-owned events, matching their booking pages. See [branding](https://hourmere.com/docs/branding)
 for limits and client instructions.
 
 ### `auth` (Better Auth: core + organization + api-key plugins)

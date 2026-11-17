@@ -783,9 +783,9 @@ export async function sendOnce(
         .select('organization_id')
         .where('id', '=', key.bookingId)
         .executeTakeFirstOrThrow()
-      const { getPublicBranding } = await import('@hourmere/scheduling')
+      const { getEmailBranding } = await import('@hourmere/scheduling')
       await deps.mailer.send(
-        brandEmail(message(token), await getPublicBranding(trx, bookingBrand.organization_id)),
+        brandEmail(message(token), await getEmailBranding(trx, bookingBrand.organization_id)),
         { signal },
       )
       await trx

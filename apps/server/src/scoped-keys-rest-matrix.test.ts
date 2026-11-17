@@ -180,7 +180,11 @@ const classes = {
     'GET /api/v1/teams/{teamId}/readiness',
   ],
   diagnostic_read: ['GET /api/v1/event-types/{id}/availability-troubleshooting'],
-  public_metadata: ['GET /api/v1/instance', 'GET /api/v1/openapi.json'],
+  public_metadata: [
+    'GET /api/v1/instance',
+    'GET /api/v1/openapi.json',
+    'GET /api/v1/public/branding/{organizationId}/logo/{hash}',
+  ],
 } as const
 type Class = keyof typeof classes
 const allowed: Record<Class, readonly ApiKeyScope[]> = {
@@ -775,7 +779,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       if (operation === 'PUT /api/v1/audit-log/settings') payload = { retention: 'forever' }
       if (
         operation === 'POST /api/v1/branding/logo' ||
-        operation === 'GET /api/v1/branding/logo/{hash}'
+        operation === 'GET /api/v1/branding/logo/{hash}' ||
+        operation === 'GET /api/v1/public/branding/{organizationId}/logo/{hash}'
       ) {
         const { default: sharp } = await import('sharp')
         const image = await sharp({
@@ -793,7 +798,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
             image,
             'image/png',
           )
-          path = path.replace('{hash}', branding.brandLogo as string)
+          path = path
+            .replace('{hash}', branding.brandLogo as string)
+            .replace('{organizationId}', fullPrincipal.organization.id)
         }
       }
       path = path.replace('{id}', id).replace('{date}', date)
@@ -811,14 +818,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 138-operation contract and all 414 scope combinations', () => {
+    it('covers the exact 139-operation contract and all 417 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(138)
-      expect(new Set(ids).size).toBe(138)
+      expect(ids).toHaveLength(139)
+      expect(new Set(ids).size).toBe(139)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(414)
+      expect(cases).toHaveLength(417)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -868,7 +875,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(google.calls.length).toBe(beforeProvider)
         } else {
           expect(response.status).toBe(fixture.expectedStatus)
-          if (operation === 'GET /api/v1/branding/logo/{hash}') {
+          if (
+            operation === 'GET /api/v1/branding/logo/{hash}' ||
+            operation === 'GET /api/v1/public/branding/{organizationId}/logo/{hash}'
+          ) {
             expect(response.headers.get('content-type')).toBe('image/png')
           } else if (operation === 'GET /api/v1/bookings/export.csv') {
             expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
@@ -948,11 +958,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(link.booking_id !== null).toBe(consumed)
         }
         expect(response.headers.get('cache-control')).toBe(
-          operation === 'GET /api/v1/instance/embed' ||
-            operation.includes('/provisioning-tokens') ||
-            (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
-            ? 'private, no-store'
-            : 'no-store',
+          operation === 'GET /api/v1/public/branding/{organizationId}/logo/{hash}'
+            ? 'public, max-age=31536000, immutable'
+            : operation === 'GET /api/v1/instance/embed' ||
+                operation.includes('/provisioning-tokens') ||
+                (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
+              ? 'private, no-store'
+              : 'no-store',
         )
       } finally {
         // Remove the exact fixture capability before its consuming booking: used-link

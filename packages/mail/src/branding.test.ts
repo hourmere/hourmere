@@ -68,6 +68,17 @@ describe('transactional email branding', () => {
     ).toEqual(message)
   })
 
+  it('refuses oversized CID attachments at the mail boundary', () => {
+    const oversized = Buffer.concat([Buffer.from(logo, 'base64'), Buffer.alloc(64 * 1024)])
+    const result = brandEmail(message, {
+      name: 'Example',
+      primaryColor: null,
+      logoDataUrl: `data:image/png;base64,${oversized.toString('base64')}`,
+    })
+    expect(result.attachments).toEqual(message.attachments)
+    expect(result.html).not.toContain('cid:')
+  })
+
   it('does not interpret invitee text as template styles', () => {
     const malicious = {
       ...message,

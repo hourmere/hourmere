@@ -12,8 +12,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import {
   BRAND_LOGO_MAX_BYTES,
+  BRAND_LOGO_OUTPUT_MAX_BYTES,
   getBranding,
   getBrandLogo,
+  getEmailBranding,
+  getPublicBranding,
+  getPublicBrandLogo,
   normalizeBrandLogo,
   setBranding,
   uploadBrandLogo,
@@ -114,7 +118,7 @@ describe('logo normalization', () => {
     ).rejects.toMatchObject({ name: 'AssertionError' })
     await verify(serviceCopy())
   })
-  it('rejects animated WebP and images whose normalized PNG exceeds storage limits', async () => {
+  it('rejects animated WebP and reduces noisy input to the output byte budget', async () => {
     const animated = await sharp(Buffer.from([255, 0, 0, 0, 0, 255]), {
       raw: { width: 1, height: 2, channels: 3, pageHeight: 1 },
     })
@@ -127,24 +131,47 @@ describe('logo normalization', () => {
       .jpeg({ quality: 80 })
       .toBuffer()
     expect(compressed.length).toBeLessThan(BRAND_LOGO_MAX_BYTES)
-    for (const [before, after, bytes, type, code] of [
-      ['(metadata.pages ?? 1) !== 1', 'false', animated, 'image/webp', 'invalid_brand_logo'],
-      [
-        'if (normalized.length > BRAND_LOGO_MAX_BYTES) throw tooLarge()',
-        'if (false) throw tooLarge()',
-        compressed,
-        'image/jpeg',
-        'brand_logo_too_large',
-      ],
-    ] as const) {
-      const verify = async (m: ReturnType<typeof serviceCopy>) => {
-        await expect(m.normalizeBrandLogo(bytes, type)).rejects.toMatchObject({ code })
-      }
-      await verify(serviceCopy())
-      await expect(verify(serviceCopy([before, after]))).rejects.toMatchObject({
-        name: 'AssertionError',
+    await expect(normalizeBrandLogo(animated, 'image/webp')).rejects.toMatchObject({
+      code: 'invalid_brand_logo',
+    })
+    const verify = async (m: ReturnType<typeof serviceCopy>) => {
+      const normalized = await m.normalizeBrandLogo(compressed, 'image/jpeg')
+      expect(normalized.length).toBeLessThanOrEqual(BRAND_LOGO_OUTPUT_MAX_BYTES)
+    }
+    await verify(serviceCopy())
+    await expect(
+      verify(
+        serviceCopy([
+          'if (normalized.length <= BRAND_LOGO_OUTPUT_MAX_BYTES) return normalized',
+          'return normalized',
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(serviceCopy())
+  })
+  it('bounds the longest side without enlarging small uploads', async () => {
+    for (const [width, height, expectedWidth, expectedHeight] of [
+      [1800, 900, 512, 256],
+      [4, 2, 4, 2],
+    ]) {
+      const bytes = await sharp({
+        create: {
+          width: width as number,
+          height: height as number,
+          channels: 4,
+          background: '#aabbcc80',
+        },
       })
-      await verify(serviceCopy())
+        .png()
+        .toBuffer()
+      const result = await normalizeBrandLogo(bytes, 'image/png')
+      expect(result.length).toBeLessThanOrEqual(BRAND_LOGO_OUTPUT_MAX_BYTES)
+      expect(await sharp(result).metadata()).toMatchObject({
+        format: 'png',
+        width: expectedWidth,
+        height: expectedHeight,
+        hasAlpha: true,
+      })
     }
   })
   it('strips appended polyglot content and metadata from decoded pixels', async () => {
@@ -404,6 +431,59 @@ describe.skipIf(!process.env.DATABASE_URL)('organization branding', () => {
         code: 'invalid_brand_color',
       })
   })
+  it('normalizes legacy stored logos for public delivery and bounded CID email without rewriting references', async () => {
+    const user = await createTestUser(db)
+    const org = user.principal.organization.id
+    const legacy = await sharp({
+      create: { width: 1600, height: 800, channels: 4, background: '#abc' },
+    })
+      .png()
+      .toBuffer()
+    const hash = createHash('sha256').update(legacy).digest('hex')
+    await db
+      .insertInto('organization_brand_logos')
+      .values({ organization_id: org, hash, data: legacy })
+      .execute()
+    await db
+      .insertInto('organization_branding')
+      .values({ organization_id: org, brand_logo: hash })
+      .execute()
+    const brand = await getPublicBranding(db, org)
+    expect(brand?.logoDataUrl).toBeNull()
+    const publicHash = brand?.logoUrl?.split('/').at(-1) as string
+    const publicBytes = await getPublicBrandLogo(db, org, publicHash)
+    expect(publicHash).toBe(createHash('sha256').update(publicBytes).digest('hex'))
+    expect(await sharp(publicBytes).metadata()).toMatchObject({ width: 512, height: 256 })
+    expect(publicBytes.length).toBeLessThanOrEqual(BRAND_LOGO_OUTPUT_MAX_BYTES)
+    const email = await getEmailBranding(db, org)
+    expect(email?.logoDataUrl).toBe(`data:image/png;base64,${publicBytes.toString('base64')}`)
+    expect((await getBranding(testContext(db, user.principal))).brandLogo).toBe(hash)
+    expect(await getBrandLogo(testContext(db, user.principal), hash)).toEqual(publicBytes)
+    const other = await createTestUser(db)
+    const verifyIsolation = async (module: ReturnType<typeof serviceCopy>) => {
+      await expect(
+        module.getPublicBrandLogo(db, other.principal.organization.id, publicHash),
+      ).rejects.toMatchObject({ code: 'brand_logo_not_found' })
+    }
+    await verifyIsolation(serviceCopy())
+    await expect(
+      verifyIsolation(
+        serviceCopy([
+          ".where('b.organization_id', '=', organizationId)",
+          `.where('b.organization_id', '=', '${org}')`,
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+    await verifyIsolation(serviceCopy())
+    for (const [organization, requestedHash] of [
+      [org, 'f'.repeat(64)],
+      [other.principal.organization.id, publicHash],
+    ]) {
+      await expect(
+        getPublicBrandLogo(db, organization as string, requestedHash as string),
+      ).rejects.toMatchObject({ code: 'brand_logo_not_found' })
+    }
+  })
   it('records each branding change with what changed, never the image, hash or colour', async () => {
     const user = await createTestUser(db),
       ctx = testContext(db, user.principal),
@@ -492,7 +572,7 @@ function serviceCopy(replacement?: readonly [string, string]) {
     'DomainError',
     'auditActor',
     'writeAuditEvent',
-    `${script}; return {normalizeBrandLogo,getBranding,setBranding,uploadBrandLogo,getBrandLogo}`,
+    `${script}; return {normalizeBrandLogo,getBranding,setBranding,uploadBrandLogo,getBrandLogo,getPublicBranding,getPublicBrandLogo,getEmailBranding}`,
   )(
     createHash,
     brandContrast,
@@ -557,8 +637,8 @@ describe('logo source-copy mutations', () => {
         },
       ],
       [
-        'const normalized = await image.rotate().png().toBuffer()',
-        'const normalized = data',
+        'return normalized',
+        'return data',
         async (m) => {
           const result = await m.normalizeBrandLogo(
             Buffer.concat([image, Buffer.from('<script>bad()</script>')]),

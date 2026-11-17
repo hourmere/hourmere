@@ -39,14 +39,14 @@ export function brandEmail(message: MailMessage, brand?: EmailBranding): MailMes
   if (
     !png ||
     png.length < 24 ||
-    png.length > 512 * 1024 ||
+    png.length > 64 * 1024 ||
     png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a'
   ) {
     return { ...message, html }
   }
   const width = png.readUInt32BE(16)
   const height = png.readUInt32BE(20)
-  if (!width || !height || width > 2048 || height > 2048) return { ...message, html }
+  if (!width || !height || width > 512 || height > 512) return { ...message, html }
   const scale = Math.min(1, 160 / width, 64 / height)
   const image = `<img src="cid:organization-logo@hourmere" alt="${escapeHtml(brand.name)}" width="${Math.max(1, Math.round(width * scale))}" height="${Math.max(1, Math.round(height * scale))}" style="display: block; max-width: 160px; max-height: 64px; margin: 0 0 24px;">`
   // Every ordinary booking template has this header. Minimal group notices have no wrapper.
