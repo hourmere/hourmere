@@ -11,7 +11,9 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import { PATHS } from '../../paths.ts'
 import { useMe } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
+import { useCloseBookingPanel } from '../bookings/BookingPanel.tsx'
 import { hostZone } from '../bookings/booking-format.ts'
+import { type NoShowChange, withNoShowChange } from '../bookings/NoShowAttendees.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { BookingDetail } from './TeamBookings.tsx'
 
@@ -46,10 +48,35 @@ async function loadTeamBookingDetail(
 }
 
 /** Email deep links use only the current team's deliberately limited admin projection. */
-export function TeamBookingDetailPage({ id }: { id: string }) {
+export function TeamBookingDetailPage({
+  id,
+  embedded = false,
+  onChanged,
+  onClose,
+  rowBooking,
+  listConflict,
+  onConflict,
+  onRevoked,
+  onRefresh,
+  onCancelled,
+  onNoShowChanged,
+}: {
+  id: string
+  embedded?: boolean
+  rowBooking?: Schemas['TeamAdminBooking']
+  onChanged?: (booking: Schemas['TeamAdminBooking']) => void
+  onClose?: () => void
+  listConflict?: unknown
+  onConflict?: (error: unknown) => void
+  onRevoked?: () => void
+  onRefresh?: () => void
+  onCancelled?: (background?: boolean) => void
+  onNoShowChanged?: (change: NoShowChange) => void
+}) {
   const { t, ui } = useI18n()
   const me = useMe()
   const navigate = useNavigate()
+  const closePanel = useCloseBookingPanel()
   const access = useTeamManagementAccess()
   const [expectedOrganizationId] = useState(me.organization.id)
   const [conflict, setConflict] = useState<unknown>(access.contextError)
@@ -66,14 +93,19 @@ export function TeamBookingDetailPage({ id }: { id: string }) {
         title={t('Booking not found')}
         message="This booking does not exist, or it is not one of yours."
         back={{ to: PATHS.bookings, label: 'Back to bookings' }}
+        onBack={embedded ? closePanel : undefined}
       />
     )
   return (
     <div className="team-bookings-page">
-      <PageHeader title={t('Booking')} />
-      <p>
-        <Link to={PATHS.teamBookings}>{t('Team bookings')}</Link>
-      </p>
+      {!embedded && (
+        <>
+          <PageHeader title={t('Booking')} />
+          <p>
+            <Link to={PATHS.teamBookings}>{t('Team bookings')}</Link>
+          </p>
+        </>
+      )}
       {state.status === 'loading' ? (
         <PageSkeleton label="Loading the booking…" />
       ) : state.status === 'error' ? (
@@ -91,21 +123,40 @@ export function TeamBookingDetailPage({ id }: { id: string }) {
         <>
           <OrganizationContextConflict error={conflict} />
           <BookingDetail
-            booking={state.data.booking}
+            embedded={embedded}
+            booking={rowBooking ?? state.data.booking}
             timeZone={state.data.timeZone}
             expectedOrganizationId={expectedOrganizationId}
-            conflict={conflict}
+            conflict={listConflict ?? conflict}
             onConflict={(error) => {
               setConflict(error)
-              access.reportContextChanged(error)
+              if (onConflict) onConflict(error)
+              else access.reportContextChanged(error)
             }}
             onRevoked={() => {
               setRevoked(true)
-              access.revoke()
+              if (onRevoked) onRevoked()
+              else access.revoke()
             }}
-            onRefresh={reload}
-            onCancelled={reload}
-            onClose={() => navigate(PATHS.teamBookings)}
+            onRefresh={onRefresh ?? reload}
+            onNoShowChanged={(change) => {
+              if (onNoShowChanged) {
+                onNoShowChanged(change)
+                return
+              }
+              if (state.data.kind === 'booking')
+                onChanged?.(withNoShowChange(rowBooking ?? state.data.booking, change))
+            }}
+            onCancelled={(background) => {
+              if (onCancelled) {
+                onCancelled(background)
+                return
+              }
+              if (state.data.kind === 'booking')
+                onChanged?.({ ...(rowBooking ?? state.data.booking), status: 'cancelled' })
+              reload()
+            }}
+            onClose={onClose ?? (() => navigate(PATHS.teamBookings))}
           />
         </>
       ) : null}

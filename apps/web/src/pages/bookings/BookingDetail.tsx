@@ -25,6 +25,12 @@ import { MissingRecord } from '../NotFound.tsx'
 import { TeamBookingDetailPage } from '../team-bookings/TeamBookingDetail.tsx'
 import { BookingOrganization } from './BookingOrganization.tsx'
 import {
+  BookingListReturnLink,
+  useBookingPanel,
+  useBookingPanelTitle,
+  useCloseBookingPanel,
+} from './BookingPanel.tsx'
+import {
   answerText,
   bookingTitle,
   bookingUpdate,
@@ -33,7 +39,7 @@ import {
   SOURCE_LABELS,
 } from './booking-format.ts'
 import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
-import { NoShowAttendees } from './NoShowAttendees.tsx'
+import { NoShowAttendees, withNoShowChange } from './NoShowAttendees.tsx'
 import { RequestReschedule } from './RequestReschedule.tsx'
 import { RescheduleBooking } from './RescheduleBooking.tsx'
 
@@ -47,14 +53,39 @@ interface Loaded {
   fromProfile: boolean
 }
 
-export function BookingDetailPage() {
+export function BookingDetailPage({
+  id: suppliedId,
+  onChanged,
+  rowBooking,
+}: {
+  id?: string
+  onChanged?: (booking: Booking) => void
+  rowBooking?: Booking
+} = {}) {
   const { id = '' } = useParams()
-  return <BookingSpace key={id} id={id} />
+  return (
+    <BookingSpace
+      key={suppliedId ?? id}
+      id={suppliedId ?? id}
+      onChanged={onChanged}
+      rowBooking={rowBooking}
+    />
+  )
 }
 
-function BookingSpace({ id }: { id: string }) {
+function BookingSpace({
+  id,
+  onChanged,
+  rowBooking,
+}: {
+  id: string
+  onChanged?: (booking: Booking) => void
+  rowBooking?: Booking
+}) {
   const me = useMe()
-  const location = useLocation()
+  const routeLocation = useLocation()
+  const panel = useBookingPanel()
+  const location = panel?.active ? panel.location : routeLocation
   const navigate = useNavigate()
   const currentLocation = useRef(location)
   currentLocation.current = location
@@ -92,21 +123,36 @@ function BookingSpace({ id }: { id: string }) {
   )
     return <TeamBookingDetailPage key={id} id={id} />
   // Starts over for another booking (e.g. the one it was rescheduled from).
-  return <BookingDetail key={id} id={id} resolveSpace={!opening} rememberSpace={rememberSpace} />
+  return (
+    <BookingDetail
+      key={id}
+      id={id}
+      resolveSpace={!opening && !panel?.active}
+      rememberSpace={rememberSpace}
+      onChanged={onChanged}
+      rowBooking={rowBooking}
+    />
+  )
 }
 
 function BookingDetail({
   id,
   resolveSpace,
   rememberSpace,
+  onChanged,
+  rowBooking,
 }: {
+  rowBooking?: Booking
   id: string
   resolveSpace: boolean
+  onChanged?: (booking: Booking) => void
   rememberSpace: (organizationId: string, access: 'host' | 'team_admin') => void
 }) {
   const { t, ui } = useI18n()
   const me = useMe()
   const [expectedOrganizationId] = useState(me.organization.id)
+  const panel = useBookingPanel()
+  const closePanel = useCloseBookingPanel()
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing' | 'resolve'> => {
@@ -174,10 +220,18 @@ function BookingDetail({
         title={t('Booking not found')}
         message="This booking does not exist, or it is not one of yours."
         back={{ to: PATHS.bookings, label: 'Back to bookings' }}
+        onBack={panel?.active ? closePanel : undefined}
       />
     )
   }
-  return <BookingView {...state.data} expectedOrganizationId={expectedOrganizationId} />
+  return (
+    <BookingView
+      {...state.data}
+      expectedOrganizationId={expectedOrganizationId}
+      onChanged={onChanged}
+      rowBooking={rowBooking}
+    />
+  )
 }
 
 function BookingView({
@@ -186,13 +240,31 @@ function BookingView({
   timeZone,
   fromProfile,
   expectedOrganizationId,
-}: Loaded & { expectedOrganizationId: string }) {
+  onChanged,
+  rowBooking,
+}: Loaded & {
+  expectedOrganizationId: string
+  onChanged?: (booking: Booking) => void
+  rowBooking?: Booking
+}) {
   const { t, ui, locale, formatLocale: displayLocale } = useI18n()
   const flash = useFlash()
 
+  const viewMounted = useMounted()
   const [booking, setBooking] = useState(initial)
+  const previousRow = useRef(rowBooking)
+  useEffect(() => {
+    if (rowBooking && previousRow.current !== rowBooking)
+      setBooking((current) => bookingUpdate(current, rowBooking))
+    previousRow.current = rowBooking
+  }, [rowBooking])
+  useBookingPanelTitle(
+    `${ui(bookingTitle(booking))} — ${zoned(timeZone, displayLocale).dateTime(booking.start)}`,
+  )
   function updateBooking(updated: Booking) {
-    setBooking((current) => bookingUpdate(current, updated))
+    const next = bookingUpdate(booking, updated)
+    if (viewMounted.current) setBooking(next)
+    onChanged?.(next)
   }
   const [status, setStatus] = useState<UiText>(flash ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
@@ -218,7 +290,7 @@ function BookingView({
   return (
     <>
       <p className="breadcrumb">
-        <Link to={PATHS.bookings}>{t('Bookings')}</Link>
+        <BookingListReturnLink to={PATHS.bookings}>{t('Bookings')}</BookingListReturnLink>
       </p>
       <PageHeader
         title={
@@ -327,6 +399,9 @@ function BookingView({
         <RescheduleBooking
           booking={booking}
           timeZone={timeZone}
+          onRescheduled={(replacement) =>
+            updateBooking({ ...booking, status: 'cancelled', rescheduledToId: replacement.id })
+          }
           expectedOrganizationId={expectedOrganizationId}
         />
       )}
@@ -350,6 +425,7 @@ function BookingView({
           expectedOrganizationId={expectedOrganizationId}
           onCancelled={(updated) => {
             updateBooking(updated)
+            if (!viewMounted.current) return
             setStatus('The booking is cancelled.')
             statusRef.current?.focus()
           }}
@@ -360,7 +436,11 @@ function BookingView({
         />
       )}
 
-      <NoShowAttendees booking={booking} expectedOrganizationId={expectedOrganizationId} />
+      <NoShowAttendees
+        booking={booking}
+        expectedOrganizationId={expectedOrganizationId}
+        onChanged={(change) => updateBooking(withNoShowChange(booking, change))}
+      />
 
       <ConferenceNotice
         key={booking.id}
@@ -523,9 +603,10 @@ function CancelBooking({
           body: text ? { reason: text } : {},
         }),
       )
+      // The underlying list remains mounted when this detail has been closed or stepped.
+      onCancelled(updated)
       if (!mounted.current) return
       setReason('')
-      onCancelled(updated)
       return
     } catch (err) {
       if (!mounted.current) return

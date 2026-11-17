@@ -8,7 +8,10 @@ that mark if it was a mistake. In **Bookings**, past confirmed bookings show **M
 or **Clear no-show** directly in the list row, next to the status, with a **No-show** badge
 for marked attendees; bookings with guests list each attendee by name, and every seat of a group
 event is its own row.
-The same action is also on the booking's detail. Team owners and admins can do this from
+The same action is also on the booking's detail. Select the event title to open the
+[detail panel](/docs#review-bookings), or the full-screen detail on a phone. Previous
+and next follow your current list; closing preserves its filters and loaded pages.
+Team owners and admins can do this from
 the team's booking list or booking detail; a change in one updates the other. The feature is included in self-hosted installations without a plan gate.
 
 ## Who and what the mark describes

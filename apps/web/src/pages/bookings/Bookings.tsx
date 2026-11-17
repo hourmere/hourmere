@@ -16,7 +16,9 @@ import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
 import { useMe } from '../../session.tsx'
+import { BookingDetailPage } from './BookingDetail.tsx'
 import { BookingExport } from './BookingExport.tsx'
+import { BookingPanel, useBookingPanel } from './BookingPanel.tsx'
 import { bookingTitle, hostZone } from './booking-format.ts'
 import { type NoShowChange, NoShowRowControls, withNoShowChange } from './NoShowAttendees.tsx'
 
@@ -265,6 +267,7 @@ function BookingList({
 }) {
   const { t, ui, formatLocale: displayLocale } = useI18n()
   const me = useMe()
+  const panel = useBookingPanel()
   // Writes stay bound to the organization this list opened in.
   const [expectedOrganizationId] = useState(me.organization.id)
 
@@ -337,8 +340,8 @@ function BookingList({
     })
     setStatus('No-show mark updated.')
   }
-  async function loadMore() {
-    if (!shown.nextCursor) return
+  async function loadMore(forPanel = false) {
+    if (!shown.nextCursor || loadingMore) return
     setLoadingMore(true)
     setMoreError(null)
     try {
@@ -360,11 +363,25 @@ function BookingList({
       }))
       setStatus(msg('Showing {0} bookings.', { '0': bookings.length }))
       // Continue from the first new booking.
-      if (page.data[0]) setFocusId(page.data[0].id)
+      if (page.data[0] && !forPanel) setFocusId(page.data[0].id)
+      return page.data[0]?.id
     } catch (err) {
       setMoreError(msg('Could not load more bookings. {0}', { '0': errorMessage(err) }))
+    } finally {
+      setLoadingMore(false)
     }
-    setLoadingMore(false)
+  }
+
+  const selectedId = panel?.active ? panel.location.pathname.split('/').at(-1) : undefined
+  const selectedIndex = shown.bookings.findIndex((booking) => booking.id === selectedId)
+  const selected = shown.bookings[selectedIndex]
+  function updateRow(updated: Booking) {
+    setMore((current) => ({
+      ...(current ?? loaded),
+      bookings: (current ?? loaded).bookings.map((booking) =>
+        booking.id === updated.id ? updated : booking,
+      ),
+    }))
   }
 
   // One sentence per language around the link, so Chinese keeps its punctuation unspaced.
@@ -469,7 +486,23 @@ function BookingList({
                       </div>
                     </td>
                     <th scope="row" data-label={t('Event')} className="user-content">
-                      <Link to={bookingPath(b.id)} data-booking={b.id}>
+                      <Link
+                        to={bookingPath(b.id)}
+                        data-booking={b.id}
+                        onClick={(event) => {
+                          if (
+                            !panel ||
+                            event.button !== 0 ||
+                            event.metaKey ||
+                            event.ctrlKey ||
+                            event.shiftKey ||
+                            event.altKey
+                          )
+                            return
+                          event.preventDefault()
+                          panel.open(b.id, event.currentTarget)
+                        }}
+                      >
                         {ui(bookingTitle(b))}
                       </Link>
                     </th>
@@ -540,10 +573,47 @@ function BookingList({
       )}
       {shown.nextCursor && (
         <div className="load-more">
-          <button type="button" className="button" onClick={loadMore} disabled={loadingMore}>
+          <button
+            type="button"
+            className="button"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+          >
             {loadingMore ? t('Loading…') : t('Show more bookings')}
           </button>
         </div>
+      )}
+      {selectedId && panel && (
+        <BookingPanel
+          name={
+            selected
+              ? `${ui(bookingTitle(selected))} — ${format.dateTime(selected.start)}`
+              : t('Booking')
+          }
+          previous={
+            selectedIndex > 0
+              ? () => {
+                  const previous = shown.bookings[selectedIndex - 1]
+                  if (previous) panel.step(previous.id)
+                }
+              : undefined
+          }
+          next={
+            selectedIndex >= 0 && (selectedIndex < shown.bookings.length - 1 || shown.nextCursor)
+              ? async () => {
+                  const nextId = shown.bookings[selectedIndex + 1]?.id ?? (await loadMore(true))
+                  if (nextId) panel.step(nextId)
+                }
+              : undefined
+          }
+        >
+          {moreError && (
+            <p className="alert alert-error" role="alert">
+              {ui(moreError)}
+            </p>
+          )}
+          <BookingDetailPage id={selectedId} onChanged={updateRow} rowBooking={selected} />
+        </BookingPanel>
       )}
     </section>
   )

@@ -21,6 +21,7 @@ import * as formatting from '../i18n/formatting.ts'
 import * as runtime from '../i18n/runtime.tsx'
 import * as translate from '../i18n/translate.ts'
 import * as limits from '../limits.ts'
+import * as bookingPanel from '../pages/bookings/BookingPanel.tsx'
 import * as bookingFormat from '../pages/bookings/booking-format.ts'
 import * as calendarCopy from '../pages/bookings/CalendarCopyNotice.tsx'
 import * as noShow from '../pages/bookings/NoShowAttendees.tsx'
@@ -70,6 +71,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../../components/PageHeader.tsx': pageHeader,
     '../../components/forms.tsx': forms,
     '../../components/ConferenceNotice.tsx': conference,
+    './BookingPanel.tsx': bookingPanel,
     './CalendarCopyNotice.tsx': calendarCopy,
     './booking-format.ts': bookingFormat,
     './RescheduleBooking.tsx': reschedule,

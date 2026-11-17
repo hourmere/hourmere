@@ -356,7 +356,7 @@ const expected={
   'manage-reschedule':{path:'/booking',public:true,wait:'.reschedule-summary .event-title'},
   'event-type-editor-expanded':{path:'/app/event-types/synthetic-event',public:false,wait:'h1'},
   'team-bookings':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-bookings-list'},
-  'team-booking-detail':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-booking-detail'},
+  'team-booking-detail':{path:'/app/bookings/synthetic-team-booking',public:false,space:'team',wait:'.team-booking-detail'},
 }
 for(const [id,state] of Object.entries(expected)) {
   assert.ok(auditPages.some(page=>page.id===id),'Missing coverage state: '+id)
@@ -370,8 +370,8 @@ for(const [id,state] of Object.entries(expected)) {
     filter:()=>locator(selector),
     getByText:(text)=>locator(selector+' '+text),
     getByRole:(role)=>locator(selector+' '+role),
-    click:async()=>{if(['button.day-available','.slots button'].includes(selector))throw new Error('Synthetic clipped pointer target');calls.push(['click',selector]);if(selector.includes('Continue'))path='/oauth/consent'},
-    press:async(key)=>{calls.push(['press',selector,key]);if(selector.includes('Continue'))path='/oauth/consent'},
+    click:async()=>{if(['button.day-available','.slots button'].includes(selector))throw new Error('Synthetic clipped pointer target');calls.push(['click',selector]);if(selector.includes('Continue'))path='/oauth/consent';if(selector==='.team-bookings-list button')path='/app/bookings/synthetic-team-booking'},
+    press:async(key)=>{calls.push(['press',selector,key]);if(selector.includes('Continue'))path='/oauth/consent';if(selector==='.team-bookings-list button')path='/app/bookings/synthetic-team-booking'},
     fill:async()=>calls.push(['fill',selector]),
     selectOption:async(value)=>calls.push(['select',selector,value]),
   })
@@ -382,7 +382,7 @@ for(const [id,state] of Object.entries(expected)) {
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
     waitForFunction:async()=>{},evaluate:async(callback)=>{calls.push(['evaluate',callback.name]);if(callback.name==='expandEventSettings')callback()},url:()=> 'http://127.0.0.1:42421'+path,
   }
-  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',eventTypeId:'synthetic-event',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
+  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',eventTypeId:'synthetic-event',teamBookingId:'synthetic-team-booking',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
   await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
   assert.deepEqual(calls[0],['clock',data.AUDIT_NOW],'Audit browser clock must be fixed before navigation: '+id)
   assert.deepEqual(calls.at(-1),['evaluate','settleAuditLayout'],'Audit layout must settle after content verification: '+id)
@@ -550,7 +550,7 @@ describe('source-copy coverage mutations', () => {
     ],
     [
       "await page.locator('.team-bookings-list').getByRole('button').first().press('Enter')",
-      '',
+      "await page.locator('.team-bookings-list').getByRole('button').first().click()",
       'Team booking detail must open with the keyboard',
     ],
     [
