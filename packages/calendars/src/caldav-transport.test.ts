@@ -103,6 +103,28 @@ describe('CalDAV pinned transport', () => {
     expect(callback).toHaveBeenCalledWith(null, '8.8.8.8', 4)
     expect(network.lookup).toHaveBeenCalledTimes(1)
   })
+  it('sends calendar content and conditional write headers over the pinned transport', async () => {
+    network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
+    reply('', 201)
+    await sendCalDav({
+      ...input(),
+      method: 'PUT',
+      body: 'BEGIN:VCALENDAR',
+      contentType: 'text/calendar; charset=utf-8',
+      ifNoneMatch: '*',
+    })
+    expect(network.request.mock.calls[0]?.[1].headers).toMatchObject({
+      'content-type': 'text/calendar; charset=utf-8',
+      'if-none-match': '*',
+      'content-length': '15',
+    })
+    reply('', 204)
+    await sendCalDav({ ...input(), method: 'DELETE', body: '', ifMatch: '"version"' })
+    expect(network.request.mock.calls[1]?.[1]).toMatchObject({
+      method: 'DELETE',
+      headers: { 'if-match': '"version"' },
+    })
+  })
   it('permits exact operator private destination and refuses metadata even with host allowlist', async () => {
     const privateTargets = parseWebhookPrivateTargets('dav.internal:443')
     network.lookup.mockResolvedValue([{ address: '10.0.0.2', family: 4 }])

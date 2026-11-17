@@ -43,6 +43,21 @@ function verifiedZone(value: string | null): string | null {
   }
 }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+/** Caller holds the connection lock; retire any pre-write hashed copy before mirroring. */
+export async function removeCalDavSyncedResource(
+  db: Db,
+  calendar: { id: string; sync_state: unknown },
+  href: string,
+) {
+  const parsed = state.safeParse(calendar.sync_state)
+  const ids = parsed.success ? parsed.data.resources[hash(href)] : undefined
+  if (ids?.length)
+    await db
+      .deleteFrom('calendar_busy')
+      .where('calendar_id', '=', calendar.id)
+      .where('external_event_id', 'in', ids)
+      .execute()
+}
 const sanitized = (error: unknown) =>
   new CalDavError(error instanceof CalDavError ? error.code : 'unavailable')
 
@@ -148,7 +163,7 @@ export async function syncCalDavCalendar(
       let prepared: {
         page: Awaited<ReturnType<CalDavSyncClient['sync']>>
         timeZone: string | null
-        events: { key: string; periods: ReturnType<typeof parseCalDavBusy> }[]
+        events: { key: string; href: string; periods: ReturnType<typeof parseCalDavBusy> }[]
       }
       try {
         if (!metadata.success || !metadata.data.caldavDiscovery.available)
@@ -186,6 +201,7 @@ export async function syncCalDavCalendar(
           timeZone: page.calendarTimezone === null ? timeZone : verifiedZone(page.calendarTimezone),
           events: page.resources.map((resource) => ({
             key: hash(resource.href),
+            href: resource.href,
             periods: parseCalDavBusy(resource.calendarData, {
               start,
               end,
@@ -218,9 +234,50 @@ export async function syncCalDavCalendar(
         return failure
       }
       const { page, timeZone, events } = prepared
+      // Only a persisted mapping plus its expected UID identifies our own copy. A
+      // matching time/title, UID on another href, or recurrence is still foreign busy time.
+      const written = await trx
+        .selectFrom('booking_calendar_events as e')
+        .innerJoin('booking_calendar_targets as t', (join) =>
+          join
+            .onRef('t.calendar_id', '=', 'e.calendar_id')
+            .on(
+              sql<boolean>`e.external_event_id = ${calendar.external_id.replace(/\/?$/, '/')} || t.root_booking_id::text || '.ics'`,
+            ),
+        )
+        .select(['e.external_event_id', 't.root_booking_id'])
+        .where('e.calendar_id', '=', calendarId)
+        .execute()
+      const groups = await trx
+        .selectFrom('group_slot_calendar_events')
+        .select(['external_event_id', 'group_slot_id'])
+        .where('calendar_id', '=', calendarId)
+        .execute()
+      const own = new Map<string, Set<string>>()
+      for (const mapping of written) {
+        const ids = own.get(mapping.external_event_id) ?? new Set<string>()
+        ids.add(JSON.stringify([mapping.root_booking_id, null]))
+        own.set(mapping.external_event_id, ids)
+      }
+      for (const mapping of groups)
+        own.set(
+          mapping.external_event_id,
+          new Set([JSON.stringify([`group-${mapping.group_slot_id}@hourmere`, null])]),
+        )
       const resources = page.full ? ({} as Record<string, string[]>) : { ...previous?.resources }
       if (page.full)
         await trx.deleteFrom('calendar_busy').where('calendar_id', '=', calendarId).execute()
+      // A write may have installed its immediate mirror after the previous snapshot.
+      // Such a row is not yet in resources; retire it on both updates and deletions.
+      const mirrored = [...page.deleted, ...events.map((event) => event.href)].filter((href) =>
+        own.has(href),
+      )
+      if (mirrored.length)
+        await trx
+          .deleteFrom('calendar_busy')
+          .where('calendar_id', '=', calendarId)
+          .where('external_event_id', 'in', mirrored)
+          .execute()
       for (const key of [...page.deleted.map(hash), ...events.map((event) => event.key)]) {
         const old = resources[key]
         if (old?.length)
@@ -234,7 +291,10 @@ export async function syncCalDavCalendar(
       for (const event of events) {
         resources[event.key] = []
         for (const period of event.periods) {
-          const id = hash(JSON.stringify([event.key, period.instanceId]))
+          const id =
+            event.periods.length === 1 && own.get(event.href)?.has(period.instanceId)
+              ? event.href
+              : hash(JSON.stringify([event.key, period.instanceId]))
           resources[event.key]?.push(id)
           await trx
             .insertInto('calendar_busy')
@@ -263,6 +323,8 @@ export async function syncCalDavCalendar(
             etags: page.etags,
             resources,
             caldavDiscovery: metadata.success ? metadata.data.caldavDiscovery : undefined,
+            caldavWriteback: (calendar.sync_state as { caldavWriteback?: unknown } | null)
+              ?.caldavWriteback,
           }),
           time_zone: timeZone,
           last_synced_at: new Date(now.epochMilliseconds),
@@ -272,7 +334,12 @@ export async function syncCalDavCalendar(
         .execute()
       await trx
         .updateTable('calendar_connections')
-        .set({ last_error: null })
+        .set({
+          last_error: sql<string | null>`CASE WHEN EXISTS (
+          SELECT 1 FROM calendars WHERE connection_id=${owner.id}::uuid
+            AND sync_state->'caldavWriteback'->>'result' <> 'success'
+          ) THEN 'provider_unavailable' ELSE NULL END`,
+        })
         .where('id', '=', owner.id)
         .execute()
     })

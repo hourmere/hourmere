@@ -1,11 +1,10 @@
 # CalDAV connections
 
 This document defines Hourmere's internal CalDAV connection, discovery and busy-time
-synchronization services, and the intended booking-write adapter. Encrypted credentials,
-guarded discovery, bounded busy reads, incremental sync and job factories are implemented.
+synchronization services, and booking-write services. Encrypted credentials, guarded discovery, bounded busy reads,
+incremental sync, conditional booking writes and internal job factories are implemented.
 **CalDAV remains unavailable in the application:** no UI, REST, MCP or CLI connection
-surface and no production worker registration is added. Real-account compatibility and
-booking writes remain pending. Tests use synthetic Nextcloud-style and iCloud-style responses.
+surface and no production worker registration is added. Real-account compatibility remains pending. Tests use synthetic Nextcloud-style and iCloud-style responses.
 
 ## Credentials and ownership
 
@@ -83,13 +82,12 @@ The caller explicitly supplies collection URLs to include in the saved inventory
 unknown, duplicate or explicitly non-VEVENT selections are refused. This is inventory
 selection only. Discovery does not establish that event bodies can be read. The internal
 `configureCalDavCalendar` service separately authorizes conflict selection; booking
-destinations remain unavailable. No production jobs are registered.
+destinations are selected only through the internal write service. No production jobs are registered.
 
 此阶段仅提供内部连接服务：先验证本人有效会话，再发现并以事务保存加密凭据及
 支持 VEVENT 的日历。连接属于用户，切换组织不会转移所有权，团队管理员也不能
 读取其他用户的连接。颜色缺失或无效时为 null；未确认权限不代表可写。
-应用界面、REST、MCP、CLI 入口仍未开放，不注册生产同步任务，也不提供预约写入。
-内部忙闲读取和增量同步服务可供受控测试调用。
+应用界面、REST、MCP、CLI 入口仍未开放，不注册生产任务。内部忙闲读取、增量同步及预约写回服务可供受控测试调用。
 
 ## Discovery
 
@@ -249,9 +247,9 @@ conservatively remains busy. Provider usernames are never assumed to be email id
 保存，不保存标题、参会者或原始事件。失败保留旧快照并标记暂时不可用；同一连接
 串行同步。未经验证的浮动时区、未展开的重复规则及无法解释的 VTIMEZONE 会使同步
 失败，不会被当作空闲。尚未验证本人日历地址时，已拒绝邀请仍保守地占用时间。
-界面及 REST/MCP/CLI、生产任务注册、真实账号验收和预约写入均未开放。
+界面及 REST/MCP/CLI、生产任务注册和真实账号验收均未开放；预约写回仅供内部调用。
 
-## Synchronization design and planned writes
+## Synchronization and internal writes
 
 ### Calendar selection and freshness
 
@@ -333,14 +331,51 @@ edits and surface a conflict requiring host action. A missing resource on delete
 success only for the known owned mapping. Permissions, quota and transient failures
 remain distinct from concurrency conflicts.
 
-Hourmere rescheduling creates a successor booking ID. To keep `UID = booking id`
-consistent, the planned adapter will conditionally retire the predecessor event and
-create the successor resource, tracking both mappings. This is an explicit CalDAV
-lifecycle choice, not a claim that two provider requests are atomic. A durable job must
-reconcile partial completion, serialize by booking chain/destination, and re-check
-current desired state after network I/O so cancel/reschedule races cannot resurrect an
-obsolete event. Replaying any phase must be safe. Confirm this behavior and its temporary
-external-calendar gap before implementing writes.
+Hourmere rescheduling creates a successor booking ID, but CalDAV keeps the **root booking
+UUID** as UID and resource name for the whole chain. This supersedes the earlier planned
+retire-and-create lifecycle: updates replace the same resource conditionally, with a
+monotonically increasing SEQUENCE. Each written successor maps to that same href through
+`booking_calendar_events`; destinations remain pinned in `booking_calendar_targets`.
+Group slots own one resource independently of their seats, with a slot identity and count
+revision. Collective hosts each receive a copy in their own pinned destination.
+
+`configureCalDavWriteCalendar` authorizes the owner's live browser session and selects a
+verified writable calendar as the profile default (or clears it). It does not move
+existing pinned targets. A trusted embedding caller wires `calDavBookingNotifier` into
+the booking transaction and registers `calDavBookingJob`; neither is wired in production.
+`writeCalDavBooking` reconciles a booking-chain or group-slot payload. No REST/MCP/CLI
+contract or UI string is added.
+
+Writes and busy sync share the connection row lock, so only one request sequence runs
+per connection. Internal jobs reconcile current database state rather than the queued
+version. Bounded retry/backoff uses the existing job system. A successful replay verifies
+the desired resource and performs no further PUT; a completed DELETE retains its mapping
+with a null etag and cannot delete a later replacement. Missing resources during an update
+are treated as a conflict, rather than silently recreating an externally deleted event.
+Conflicts preserve server changes and require host reconciliation. The calendar stores
+its latest write result and root identity in `sync_state.caldavWriteback`; successful busy
+reads preserve this result and the neutral `provider_unavailable` connection status. Raw credentials, ICS bodies
+and provider exceptions are never logged or included in errors.
+
+An HMAC-SHA256 signature binds each generated VEVENT to the local calendar and its
+semantic properties. This lets recovery recognize an unchanged earlier Hourmere revision
+after a lost response, even when cancellation or a newer reschedule arrived before the
+mapping committed. It uses a bounded fresh-ETag conditional retry, never an unconditional
+write. Folding, property order and timestamp normalization are tolerated; changed content
+or extra event properties remain conflicts. Encryption-key rotation cannot authenticate
+an ambiguous old signed write: reconcile pending writes before rotating the key, or
+resolve those conflicts explicitly afterwards.
+
+Busy sync recognizes a calendar copy only from its persisted href mapping and expected
+non-recurring UID. It uses the same external identity as the write mapping, allowing the
+existing reschedule/group-slot exclusions to ignore that copy. An unrelated href with the
+same UID remains foreign busy time.
+
+中文：内部写回以预约链根 UUID 固定 UID 和资源路径，改期更新同一资源并递增
+SEQUENCE；集体预约分别写入每位主持人的固定目标日历，团体时段只写一份共享副本。
+创建使用 If-None-Match，更新和删除使用已确认的强 ETag。重放不会重复创建；
+412 后重新读取并只认可已完成的目标版本，不覆盖外部修改。更新时发现资源已消失
+会报告冲突；已知资源删除后的 404 可视为成功。失败仅报告中性不可用状态。
 
 CalDAV calendar copies do not change Hourmere's email invitation identity or process
 calendar RSVPs. Do not add attendees or scheduling inbox/outbox delivery until duplicate
@@ -405,7 +440,7 @@ remain blocked; an allowlist never disables TLS or permits password forwarding t
 unapproved origin.
 
 Out of scope here: connection UI/API/MCP/CLI, live-account
-acceptance, client-side recurring expansion, booking writes, production job registration,
+acceptance, client-side recurring expansion, production job registration,
 OAuth, Digest/NTLM/client-certificate login, DNS SRV/TXT discovery, calendar creation,
 sharing management, CardDAV, VTODO, attachments, RSVP processing, scheduling delivery,
 provider-specific push, and arbitrary self-signed-certificate acceptance. Mock tests

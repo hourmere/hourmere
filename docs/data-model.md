@@ -10,6 +10,13 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
+CalDAV's internal write service reuses these targets and mappings: the root booking UUID
+is the stable UID, `external_event_id` is the resource href, and `etag` is the last
+acknowledged strong ETag (null after deletion). Group copies use
+`group_slot_calendar_events`. `calendars.sync_state.caldavWriteback` stores the last
+bounded result and root identity separately from busy sync; successful busy reads retain
+write failures. No new schema is required. See [CalDAV](caldav.md).
+
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
 `period` (`tstzrange`) for a timed event, or `all_day_start` and `all_day_end` (`date`)
 with an exclusive end for an all-day event. The dates are finite, within years 0001–9999,
