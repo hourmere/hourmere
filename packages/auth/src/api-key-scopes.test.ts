@@ -118,6 +118,7 @@ const restContract = {
   audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [
     'PATCH /api/v1/workflows/{id}',
+    'DELETE /api/v1/workflows/{id}',
     'POST /api/v1/workflows',
     'PUT /api/v1/audit-log/settings',
     'PATCH /api/v1/branding',
@@ -369,6 +370,7 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'delete_workflow',
         'update_workflow',
         'create_workflow',
         'list_audit_events',

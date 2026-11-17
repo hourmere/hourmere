@@ -208,7 +208,13 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       const tools = (await mcp(token, 'tools/list')).tools.map(({ name }: { name: string }) => name)
       expect(tools).toEqual(
         scope === 'full'
-          ? ['create_workflow', 'update_workflow', 'list_workflows', 'get_workflow']
+          ? [
+              'create_workflow',
+              'update_workflow',
+              'delete_workflow',
+              'list_workflows',
+              'get_workflow',
+            ]
           : ['list_workflows', 'get_workflow'],
       )
       const called = await mcp(token, 'tools/call', {
@@ -457,6 +463,101 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     )
   })
 
+  const remove = (token: string, id: string, input: object = { expectedRevision: 1 }) =>
+    app.request(`/api/v1/workflows/${id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+
+  it('deletes and safely repeats across REST, MCP and CLI', async () => {
+    for (const token of [bearer(owner, 'full'), bearer(admin, 'full', team)]) {
+      const input = {
+        ...createInput(),
+        ...(tokens.get(token)?.organization.id === team.id
+          ? { owner: { kind: 'team' as const, id: team.id } }
+          : {}),
+      }
+      const created = Workflow.parse(await (await post(token, input)).json())
+      const response = await remove(token, created.id)
+      expect(response.status).toBe(204)
+      expect(await response.text()).toBe('')
+      const called = await mcp(token, 'tools/call', {
+        name: 'delete_workflow',
+        arguments: { id: created.id, expectedRevision: 1 },
+      })
+      expect(called.structuredContent).toEqual({ deleted: true })
+      const command = await cli(token, ['workflows', 'delete'], {
+        id: created.id,
+        expectedRevision: 1,
+      })
+      expect(command.code).toBe(0)
+      expect(JSON.parse(command.stdout)).toEqual({ deleted: true })
+      expect((await rest(token, `/api/v1/workflows/${created.id}`)).status).toBe(404)
+      expect(
+        await db
+          .selectFrom('workflow_definitions')
+          .select(['enabled', 'deleted_at'])
+          .where('id', '=', created.id)
+          .executeTakeFirstOrThrow(),
+      ).toMatchObject({ enabled: false, deleted_at: expect.any(Date) })
+    }
+  })
+
+  it('keeps deletion scope, revision and opaque ownership refusals identical across transports', async () => {
+    const before = await db.selectFrom('workflow_definitions').selectAll().orderBy('id').execute()
+    for (const [token, id, revision, status, error] of [
+      [bearer(owner, 'read'), workflow.personal, 1, 403, 'insufficient_scope'],
+      [bearer(owner, 'bookings'), workflow.personal, 1, 403, 'insufficient_scope'],
+      [bearer(member, 'full', team), workflow.team, 1, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), workflow.foreign, 1, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), workflow.team, 1, 404, 'workflow_not_found'],
+      [bearer(owner, 'full', team), workflow.personal, 1, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), 'not-an-id', 1, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), randomUUID(), 1, 404, 'workflow_not_found'],
+      [bearer(owner, 'full'), workflow.personal, 99, 409, 'workflow_revision_conflict'],
+    ] as const) {
+      if (!id) throw new Error('Missing workflow fixture')
+      const input = { expectedRevision: revision }
+      const response = await remove(token, id, input)
+      expect(response.status).toBe(status)
+      expect(await response.json()).toMatchObject({ error })
+      expect(
+        toolError(
+          await mcp(token, 'tools/call', { name: 'delete_workflow', arguments: { id, ...input } }),
+        ),
+      ).toMatchObject({ error })
+      const command = await cli(token, ['workflows', 'delete'], { id, ...input })
+      expect(command.code).toBe(1)
+      expect(JSON.parse(command.stderr)).toMatchObject({ error })
+    }
+    expect(await db.selectFrom('workflow_definitions').selectAll().orderBy('id').execute()).toEqual(
+      before,
+    )
+  })
+
+  it('requires a strict deletion revision on every transport without modifying storage', async () => {
+    const token = bearer(owner, 'full')
+    const before = await db.selectFrom('workflow_definitions').selectAll().orderBy('id').execute()
+    for (const input of [{}, { expectedRevision: 0 }, { expectedRevision: 1, unexpected: true }]) {
+      const id = workflow.personal as string
+      const response = await remove(token, id, input)
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error: 'invalid_request' })
+      expect(
+        toolError(
+          await mcp(token, 'tools/call', { name: 'delete_workflow', arguments: { id, ...input } }),
+        ),
+      ).toMatchObject({ error: 'invalid_request' })
+      const command = await cli(token, ['workflows', 'delete'], { id, ...input })
+      expect(command.code).toBe(1)
+      expect(JSON.parse(command.stderr)).toMatchObject({ error: 'invalid_request' })
+    }
+    expect(await db.selectFrom('workflow_definitions').selectAll().orderBy('id').execute()).toEqual(
+      before,
+    )
+  })
+
   it('rejects unknown update fields and webhook actions across all surfaces', async () => {
     const token = bearer(owner, 'full')
     const created = Workflow.parse(await (await post(token, createInput())).json())
@@ -640,6 +741,19 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     })
     expect(staleUpdate.status).toBe(409)
     expect(await staleUpdate.json()).toMatchObject({ error: 'organization_context_changed' })
+
+    const staleDelete = await app.request(`/api/v1/workflows/${workflow.personal}`, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${personal.token}`,
+        origin: URL,
+        'content-type': 'application/json',
+        'x-expected-organization-id': owner.principal.organization.id,
+      },
+      body: JSON.stringify({ expectedRevision: 1 }),
+    })
+    expect(staleDelete.status).toBe(409)
+    expect(await staleDelete.json()).toMatchObject({ error: 'organization_context_changed' })
 
     expect(await db.selectFrom('workflow_definitions').select('id').execute()).toEqual(before)
   })

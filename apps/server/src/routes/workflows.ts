@@ -6,6 +6,8 @@ import { DomainError } from '@hourmere/scheduling/errors'
 import {
   CreateWorkflowInputSchema,
   createWorkflow,
+  DeleteWorkflowInputSchema,
+  deleteWorkflow,
   getWorkflow,
   listWorkflows,
   UpdateWorkflowInputSchema,
@@ -193,6 +195,8 @@ export const ListWorkflowsInput = z.strictObject({
   cursor: ListWorkflowsQuery.shape.cursor,
 })
 
+export const DeleteWorkflowInput = DeleteWorkflowInputSchema.openapi('DeleteWorkflowInput')
+
 export const UpdateWorkflowInput = UpdateWorkflowInputSchema.openapi('UpdateWorkflowInput')
 
 export const CreateWorkflowInput = CreateWorkflowInputSchema.openapi('CreateWorkflowInput')
@@ -326,6 +330,46 @@ export function workflowRoutes({ db, audit }: { db: Db; audit?: WorkflowAuditPor
           ),
           200,
         ),
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'delete',
+        path: '/api/v1/workflows/{id}',
+        tags: ['Workflows'],
+        operationId: 'deleteWorkflow',
+        summary: 'Delete a booking workflow',
+        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.`,
+        security: authenticated,
+        middleware,
+        request: {
+          params: z.object({ id: z.string() }),
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Required for session writes: the organization where the action opened. Ignored for API keys.',
+            }),
+          }),
+          body: { required: true, content: json(DeleteWorkflowInput) },
+        },
+        responses: {
+          204: { description: 'Deleted workflow, including an authorized repeat' },
+          ...errorResponses({
+            400: 'invalid_request',
+            403: 'insufficient_scope or cross-origin session write',
+            404: 'workflows_disabled or workflow_not_found',
+            409: 'workflow_revision_conflict or organization_context_changed',
+          }),
+        },
+      }),
+      async (c) => {
+        await deleteWorkflow(
+          writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+          c.req.valid('param').id,
+          c.req.valid('json'),
+        )
+        return c.body(null, 204)
+      },
     )
 
     app.openapi(

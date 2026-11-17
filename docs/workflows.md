@@ -13,8 +13,11 @@ also answer `404 workflows_disabled` after the full-scope check. The guarded cre
 service writes definitions, revisions and creation keys only. Step 6 adds editing, enabling
 and disabling (`updateWorkflow`, `update_workflow`, `workflows update`) behind the same
 hard-off guard. Content edits append immutable revisions; enable/disable changes only the
-definition row. Neither operation rewrites enrollments or execution rows. Nothing reads the
-execution tables yet, and no web interface exists. Decisions below are Hourmere decisions unless explicitly
+definition row. Neither operation rewrites enrollments or execution rows. Step 7 adds deletion
+(`deleteWorkflow`, `delete_workflow`, `workflows delete`) behind the same hard-off guard.
+It checks the expected revision, tombstones the definition and retires every pending run
+in one transaction, retaining creation keys and execution identities. No dispatcher,
+retention worker or web interface exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 ## Evidence and existing foundations
@@ -736,7 +739,19 @@ the combined all-event/per-event cap under the same owner lock as creation. Upda
 webhook actions until subscription support is implemented, and record actual update, enable
 and disable transitions through the injected audit port (no-op in production while hard-off).
 No separate enable or disable interface exists. Delete uses expected revision and
-is idempotent within retained identity. Preview accepts a candidate definition plus
+is idempotent within retained identity. Its strict REST body is `{ "expectedRevision": 1 }`;
+MCP and CLI include `id` in the same input. REST returns `204` and MCP/CLI return
+`{ "deleted": true }`. Current owner/admin authorization is checked even on replay; a
+stale revision returns `409 workflow_revision_conflict`, including for a retained tombstone.
+Missing, malformed, foreign and unauthorized IDs all return `404 workflow_not_found`.
+Deletion takes the organization and owner locks, then locks and tombstones the definition,
+and only then retires pending runs. Already-claimed runs remain for the dispatcher's live
+eligibility check; deletion does not authorize a send. Retired runs cannot become pending.
+Replays do not rewrite the tombstone or emit another `workflow.deleted` audit event.
+Existing minimal history, enrollments, recipient claims and mail charges keep their own
+retention rules. The creation key stays with the tombstone: a matching create retry returns
+the retained disabled definition without restoring it; changed input still conflicts.
+No retention worker or execution-history writer is registered by this operation. Preview accepts a candidate definition plus
 synthetic example values, returns rendered text and escaped HTML, matched/skipped reasons
 and static budget estimates derived only from the candidate and published limits; never
 instance-wide or other-owner usage. It performs no email or webhook call. No write sends immediately.

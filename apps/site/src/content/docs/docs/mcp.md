@@ -135,6 +135,7 @@ notifications and trigger configured integrations.
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `delete_workflow` | — | `workflows delete` | `full` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
 | `list_workflows` | — | `workflows list` | `full, read` |
@@ -869,3 +870,21 @@ rejected. These operations remain unavailable (`workflows_disabled`).
 `id`。省略的字段保持不变，数组整体替换。内容修改会新增修订，仅切换 `enabled` 不改变
 修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
 登记或执行记录。暂不支持 webhook 动作；功能仍关闭，返回 `workflows_disabled`。
+
+
+`delete_workflow` / `workflows delete` requires `full` scope and accepts `id` and
+`expectedRevision`. REST uses `DELETE /api/v1/workflows/{id}` with only
+`expectedRevision` in its JSON body and returns `204`; MCP/CLI return `{ "deleted": true }`.
+A stale revision conflicts. A repeated delete succeeds while the tombstone is retained,
+but always rechecks current owner/admin permission. Missing or unauthorized IDs return the
+same `workflow_not_found`. Deletion retires pending runs and preserves creation-key replay
+protection, minimal history and mail charges. All three interfaces remain unavailable
+(`workflows_disabled`) while workflows are hard-off, and MCP discovery omits the tool.
+
+中文：`delete_workflow` / `workflows delete` 需要 `full` 权限，输入 `id` 和
+`expectedRevision`。REST 使用 `DELETE /api/v1/workflows/{id}`，JSON 正文只含
+`expectedRevision`，成功返回 `204`；MCP/CLI 返回 `{ "deleted": true }`。
+版本过期会冲突；保留删除标记期间可以安全重试，但每次都会重新检查当前所有者或管理员权限。
+不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
+最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
+MCP 工具列表不显示此工具。

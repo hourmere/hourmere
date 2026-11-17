@@ -63,6 +63,7 @@ const all = [
   'resend_waitlist_verification',
   'create_workflow',
   'update_workflow',
+  'delete_workflow',
   'list_workflows',
   'get_workflow',
 ]
@@ -71,6 +72,7 @@ const all = [
 const unavailable = new Set([
   'create_workflow',
   'update_workflow',
+  'delete_workflow',
   'list_workflows',
   'get_workflow',
 ])
@@ -80,6 +82,7 @@ const auditReads = new Set(['list_audit_events', 'get_audit_log_settings'])
 const configurationWrites = new Set([
   'create_workflow',
   'update_workflow',
+  'delete_workflow',
   'set_audit_log_settings',
   'set_branding',
   'save_schedule_availability',
@@ -473,6 +476,7 @@ describe('CLI scope parity', () => {
     ['one-time-links list', 'list_one_time_links'],
     ['one-time-links revoke', 'revoke_one_time_link'],
     ['workflows update', 'update_workflow'],
+    ['workflows delete', 'delete_workflow'],
     ['workflows create', 'create_workflow'],
     ['workflows list', 'list_workflows'],
     ['workflows get', 'get_workflow'],

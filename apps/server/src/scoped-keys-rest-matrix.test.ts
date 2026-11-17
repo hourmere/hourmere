@@ -100,6 +100,7 @@ const classes = {
   other_write: [
     'POST /api/v1/workflows',
     'PATCH /api/v1/workflows/{id}',
+    'DELETE /api/v1/workflows/{id}',
     'PUT /api/v1/audit-log/settings',
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
@@ -773,14 +774,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 127-operation contract and all 381 scope combinations', () => {
+    it('covers the exact 128-operation contract and all 384 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(127)
-      expect(new Set(ids).size).toBe(127)
+      expect(ids).toHaveLength(128)
+      expect(new Set(ids).size).toBe(128)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(381)
+      expect(cases).toHaveLength(384)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

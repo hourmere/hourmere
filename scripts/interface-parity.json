@@ -1,4 +1,5 @@
 {
+  "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {
