@@ -523,10 +523,12 @@ export const test = base.extend<{
         parentUrl,
         personalPath: '/fixture-host/call',
         auditPollState: async (state) => {
-          const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+          // Poll backing events must not change the existing host/list audit states.
+          const pollHost = await f.host()
+          const eventTypeId = await f.eventType(pollHost.organizationId, pollHost.userId, {
             title: AUDIT_TITLE,
           })
-          return seedPollAuditData(db, host, eventTypeId, authSecret, state)
+          return seedPollAuditData(db, pollHost, eventTypeId, authSecret, state)
         },
         setEmbedSnippet: (snippet) => {
           embedSnippet = snippet
