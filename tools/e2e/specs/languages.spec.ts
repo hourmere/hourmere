@@ -411,10 +411,13 @@ for (const selected of ['en', 'zh-CN'] as const) {
   test(`${selected} admin draft, localized validation and real saves survive language switches`, async ({
     page,
     app,
-  }) => {
+  }, testInfo) => {
     await app.authorizeHost()
     await initialLanguage(page, selected)
-    await page.setViewportSize({ width: 320, height: 760 })
+    await page.setViewportSize({
+      width: testInfo.project.name === 'mobile' ? 320 : 1280,
+      height: 900,
+    })
     await page.goto(`${app.url}/app/event-types/new`)
     const title = page.getByLabel(text[selected].title, { exact: true })
     await title.fill('Settings')
@@ -485,6 +488,153 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await expect.poll(() => new URL(page.url()).pathname).toBe('/app/event-types')
     await language(page, selected)
     await expect(page.getByText('Settings', { exact: true })).toBeVisible()
+    await page
+      .getByRole('link', {
+        name: selected === 'en' ? 'Edit Settings' : '编辑 Settings',
+        exact: true,
+      })
+      .click()
+    await revealEventSetting(page.locator('#minimumNoticeMinutes'))
+    for (const [unit, minutes, days, canonicalMinutes, canonicalDays] of [
+      ['minutes', '90', '2880', 90, 2],
+      ['hours', '2', '72', 120, 3],
+      ['days', '1', '4', 1440, 4],
+    ] as const) {
+      for (const id of [
+        'minimumNoticeMinutes',
+        'bufferBeforeMinutes',
+        'bufferAfterMinutes',
+        'bookingWindowDays',
+      ]) {
+        const input = page.locator(`#${id}`)
+        await input.locator('..').getByRole('combobox').selectOption(unit)
+        await input.fill(id === 'bookingWindowDays' ? days : minutes)
+      }
+      const saving = page.waitForResponse(
+        (result) =>
+          new URL(result.url()).pathname === `/api/v1/event-types/${event.id}` &&
+          result.request().method() === 'PATCH',
+      )
+      await page
+        .getByRole('button', { name: selected === 'en' ? 'Save changes' : '保存更改', exact: true })
+        .click()
+      const result = await saving
+      expect(result.status()).toBe(200)
+      expect(await result.json()).toMatchObject({
+        minimumNoticeMinutes: canonicalMinutes,
+        bufferBeforeMinutes: canonicalMinutes,
+        bufferAfterMinutes: canonicalMinutes,
+        bookingWindowDays: canonicalDays,
+      })
+      await expect(
+        page.getByText(selected === 'en' ? 'Saved.' : '已保存。', { exact: true }),
+      ).toBeVisible()
+    }
+    await page
+      .getByRole('link', {
+        name: selected === 'en' ? 'Back to event types' : '返回活动类型',
+        exact: true,
+      })
+      .click()
+    await page
+      .getByRole('button', {
+        name: selected === 'en' ? 'More actions for Settings' : 'Settings 的更多操作',
+        exact: true,
+      })
+      .click()
+    const duplicating = page.waitForResponse(
+      (result) =>
+        new URL(result.url()).pathname === `/api/v1/event-types/${event.id}/duplicate` &&
+        result.request().method() === 'POST',
+    )
+    await page
+      .getByRole('menuitem', { name: selected === 'en' ? 'Duplicate' : '复制', exact: true })
+      .click()
+    const duplicated = await duplicating
+    expect(duplicated.status()).toBe(201)
+    const copy = (await duplicated.json()) as { id: string; title: string; slug: string }
+    expect(copy.id).not.toBe(event.id)
+    expect(copy.slug).toBe('settings-copy')
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/app/event-types/${copy.id}`)
+    await page
+      .getByRole('link', {
+        name: selected === 'en' ? 'Back to event types' : '返回活动类型',
+        exact: true,
+      })
+      .click()
+    const row = page.locator('.table-event-types tbody tr').filter({
+      has: page.locator(`a[href="/app/event-types/${copy.id}"]`),
+    })
+    const toggle = row.getByRole('switch')
+    await toggle.click()
+    await expect(toggle).toBeEnabled()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    // authorizeHost injects its synthetic credential through browser request routing;
+    // APIRequestContext bypasses that routing and has no signed-in session cookie.
+    const readSavedEvent = (id: string) =>
+      page.evaluate(async (eventId) => {
+        const response = await fetch(`/api/v1/event-types/${eventId}`)
+        if (!response.ok) return { status: response.status, settings: null }
+        const {
+          isActive,
+          minimumNoticeMinutes,
+          bufferBeforeMinutes,
+          bufferAfterMinutes,
+          bookingWindowDays,
+        } = await response.json()
+        return {
+          status: response.status,
+          settings: {
+            isActive,
+            minimumNoticeMinutes,
+            bufferBeforeMinutes,
+            bufferAfterMinutes,
+            bookingWindowDays,
+          },
+        }
+      }, id)
+    const persisted = await readSavedEvent(copy.id)
+    expect(persisted.status).toBe(200)
+    expect(persisted.settings).toMatchObject({
+      isActive: false,
+      minimumNoticeMinutes: 1440,
+      bufferBeforeMinutes: 1440,
+      bufferAfterMinutes: 1440,
+      bookingWindowDays: 4,
+    })
+    const more = row.getByRole('button', {
+      name: selected === 'en' ? `More actions for ${copy.title}` : `${copy.title} 的更多操作`,
+      exact: true,
+    })
+    await more.click()
+    await page
+      .getByRole('menuitem', { name: selected === 'en' ? 'Delete' : '删除', exact: true })
+      .click()
+    const confirmation = page.getByRole('dialog')
+    await expect(confirmation).toContainText(copy.title)
+    await confirmation
+      .getByRole('button', { name: selected === 'en' ? 'Cancel' : '取消', exact: true })
+      .click()
+    await expect(confirmation).not.toBeVisible()
+    expect((await readSavedEvent(copy.id)).status).toBe(200)
+    await more.click()
+    await page
+      .getByRole('menuitem', { name: selected === 'en' ? 'Delete' : '删除', exact: true })
+      .click()
+    await confirmation
+      .getByRole('button', {
+        name: selected === 'en' ? 'Delete event type' : '删除活动类型',
+        exact: true,
+      })
+      .click()
+    await expect(row).toHaveCount(0)
+    expect((await readSavedEvent(copy.id)).status).toBe(404)
+    expect((await readSavedEvent(event.id)).status).toBe(200)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true)
   })
 }
 

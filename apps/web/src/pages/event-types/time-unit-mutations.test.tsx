@@ -122,7 +122,11 @@ it('detects removing the pristine submit guard before a real PATCH call', async 
     editor.indexOf('  async function submit('),
     editor.indexOf('  async function roundRobinAction('),
   )
-  const anchor = 'if (saved && !dirty) return'
+  const anchor = `if (saved && !dirty) {
+      setStatus('No changes to save.')
+      statusRef.current?.focus()
+      return
+    }`
   expect(source.split(anchor)).toHaveLength(2)
   async function assertSubmit(code: string) {
     const calls: unknown[] = []

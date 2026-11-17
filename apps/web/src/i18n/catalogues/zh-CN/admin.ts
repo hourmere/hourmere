@@ -1,5 +1,16 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Current value: {value} {unit}.': '当前值：{value} {unit}。',
+  minutes: '分钟',
+  hours: '小时',
+  days: '天',
+  'No changes to save.': '没有需要保存的更改。',
+  'How far into the future invitees can book, in calendar days.':
+    '受邀人可以提前多少个日历日预约。',
+  'All 12 lengths are in use. Remove a length in Additional durations before adding another.':
+    '已使用全部 12 个时长。请先在「更多时长」中移除一个时长，再添加新时长。',
+  'All 12 lengths are in use. Remove a length before adding another.':
+    '已使用全部 12 个时长。请先移除一个时长，再添加新时长。',
   'Group events': '群组活动',
   'Booking mode': '预约模式',
   'Seats per session': '每场席位数',
@@ -36,7 +47,6 @@ export const admin = {
     '已同意的受邀者可接收短信提醒。发件人和运营商费用由实例运营者管理。',
   'SMS reminders are not configured on this instance.': '此实例尚未配置短信提醒。',
   'SMS availability is unknown.': '短信可用状态未知。',
-  'Stored value: {value} {unit}.': '存储值：{value} {unit}。',
   'Default duration presets': '默认时长快捷选项',
   'Custom duration': '自定义时长',
   '{minutes} minutes': '{minutes}分钟',

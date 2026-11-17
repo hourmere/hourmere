@@ -229,3 +229,68 @@ it.each(['create', 'editor'] as const)(
     })
   },
 )
+
+describe.each(['en', 'zh-CN'] as const)('editor feedback in %s', (language) => {
+  it('confirms an untouched save without writing and clears stale timing errors after correction', async () => {
+    chooseLanguage(language)
+    const { api } = setup()
+    const user = userEvent.setup()
+    const view = renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByLabelText(copy[language].title, { exact: true })
+    const save = screen.getByRole('button', { name: copy[language].save })
+    await user.click(save)
+    expect(
+      await screen.findByText(language === 'en' ? 'No changes to save.' : '没有需要保存的更改。'),
+    ).toBeTruthy()
+    expect(api.to(patchRoute)).toHaveLength(0)
+    for (const details of view.container.querySelectorAll('details')) details.open = true
+    const input = document.getElementById('minimumNoticeMinutes') as HTMLInputElement
+    const selector = input.closest('.field')?.querySelector('select') as HTMLSelectElement
+    fireEvent.change(input, { target: { value: 'invalid text' } })
+    await user.click(save)
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    await user.selectOptions(selector, 'days')
+    expect(input.value).toBe('invalid text')
+    expect(api.to(patchRoute)).toHaveLength(0)
+    fireEvent.change(input, { target: { value: '2' } })
+    await user.selectOptions(selector, 'hours')
+    expect(input.value).toBe('48')
+    expect(input.getAttribute('aria-invalid')).toBeNull()
+    expect(document.getElementById('minimumNoticeMinutes-error')).toBeNull()
+    const hint = document.getElementById('bookingWindowDays-hint')?.textContent
+    expect(hint).toContain(
+      language === 'en'
+        ? 'How far into the future invitees can book, in calendar days.'
+        : '受邀人可以提前多少个日历日预约。',
+    )
+    expect(hint).not.toContain('。 ')
+    await user.click(save)
+    await waitFor(() => expect(api.to(patchRoute)).toHaveLength(1))
+    expect(api.to(patchRoute)[0]?.body).toHaveProperty('minimumNoticeMinutes', 2880)
+  })
+
+  it('explains why new preset lengths are disabled at capacity', async () => {
+    chooseLanguage(language)
+    setup(eventType({ allowedDurationsMinutes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 30, 60] }))
+    const view = renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByLabelText(copy[language].title, { exact: true })
+    for (const details of view.container.querySelectorAll('details')) details.open = true
+    expect(
+      screen.getByRole<HTMLButtonElement>('button', { name: copy[language].preset(15) }).disabled,
+    ).toBe(true)
+    expect(
+      screen.getByText(
+        language === 'en'
+          ? 'All 12 lengths are in use. Remove a length in Additional durations before adding another.'
+          : '已使用全部 12 个时长。请先在「更多时长」中移除一个时长，再添加新时长。',
+      ),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        language === 'en'
+          ? 'All 12 lengths are in use. Remove a length before adding another.'
+          : '已使用全部 12 个时长。请先移除一个时长，再添加新时长。',
+      ),
+    ).toBeTruthy()
+  })
+})

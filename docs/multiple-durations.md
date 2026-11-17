@@ -7,16 +7,18 @@ Personal, individual team, collective and activated round-robin event types supp
 ## Configure meeting lengths
 
 1. Open **Event types** in your personal or team space and create or edit an event type.
-   Choose a 15, 30, 45 or 60-minute preset for the default duration, or choose **Custom**
+   Choose a 15, 30, 45 or 60-minute preset for the default duration, or choose **Custom duration**
    to enter a whole-minute value. These controls are available when creating and editing.
    A preset replaces the sole length on a single-length event. For a multi-length event,
    it selects that default and adds it if needed, preserving the other offered lengths.
-   A new preset is unavailable when all 12 lengths are already used.
+   A new preset is unavailable when all 12 lengths are already used; the form explains
+   that you must remove a length first. Presets for existing lengths remain selectable
+   as the default.
 2. Open **Additional durations**. Under **Allowed durations**, use the 15, 30, 45, 60 or 90-minute presets, or enter a
    custom whole-minute length in **Duration to add (minutes)** and choose **Add duration**.
    Remove lengths you no longer offer; at least one must remain.
 3. Choose the default in **Duration (minutes)** on the first screen from the offered lengths.
-   **Custom** opens the additional-duration controls when several lengths are offered;
+   **Custom duration** opens the additional-duration controls when several lengths are offered;
    add your custom length there before selecting it as the default.
    Removing the current default selects the first remaining length as the new default.
 4. Save the event type. Use the saved **View and share** panel to open the booking page
