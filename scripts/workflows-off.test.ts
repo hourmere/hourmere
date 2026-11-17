@@ -700,19 +700,22 @@ describe('booking workflows are off and expose only definition reads, creation, 
     ).toEqual(FROZEN_SERVER_GUARD_STATEMENTS)
   })
 
-  it('wires only guarded creation capture after core intents in the production notifier', () => {
+  it('wires only guarded lifecycle capture after core intents in the production notifier', () => {
     const server = readFileSync(new URL('apps/server/src/server.ts', root), 'utf8')
-    expect(server).toContain("import { captureWorkflowCreation } from '@hourmere/workflows'")
+    expect(server).toContain("import { captureWorkflowBooking } from '@hourmere/workflows'")
+    expect(server).toContain(
+      'const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)',
+    )
     const notifier = server.slice(server.indexOf('const notify: BookingNotifier = async'))
     const core = notifier.indexOf('await emailNotifier(trx, event, now)')
     const capture = notifier.indexOf(
-      'await captureWorkflowCreation(trx, event, now, config.BETTER_AUTH_SECRET)',
+      'await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET)',
     )
     expect(core).toBeGreaterThanOrEqual(0)
     expect(capture).toBeGreaterThan(core)
     const service = readFileSync(new URL('packages/workflows/src/capture.ts', root), 'utf8')
     expect(service).toContain(
-      'export const captureWorkflowCreation = workflowCapture(captureCreatedWorkflows)',
+      'export const captureWorkflowBooking = workflowCapture(captureBookingWorkflows)',
     )
   })
 

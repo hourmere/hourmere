@@ -1,3 +1,4 @@
+import { Resolver } from 'node:dns/promises'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import type { Socket } from 'node:net'
@@ -193,6 +194,69 @@ function acquire(origin: string): () => void {
     const remaining = (activeByOrigin.get(origin) ?? 1) - 1
     if (remaining > 0) activeByOrigin.set(origin, remaining)
     else activeByOrigin.delete(origin)
+  }
+}
+
+/**
+ * TXT ownership proofs use the system's trusted recursive resolver, never a caller's
+ * DNS server or uploaded answer. No HTTP connection or address lookup is involved:
+ * a mail domain need not have an A/AAAA record. Absolute names prevent search expansion.
+ * Keep the same deadline/concurrency budget as the SSO outbound transport and cancel
+ * outstanding resolver work before releasing its slot.
+ */
+export async function resolveSsoDomainTxt(name: string): Promise<string[][]> {
+  const prefix = '_hourmere-sso.'
+  const domain = name.slice(prefix.length)
+  if (
+    !name.startsWith(prefix) ||
+    name.length > 253 ||
+    domain !== domain.toLowerCase() ||
+    !/\.[a-z][a-z0-9-]*$/.test(domain) ||
+    !domain.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
+    !ssoPublicName(new URL(`https://${domain}/`))
+  )
+    throw new SsoTransportError('destination_refused')
+  const release = acquire(`dns:${domain}`)
+  let resolver: Resolver | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    resolver = new Resolver({ timeout: LIMITS.ssoConnectTimeout, tries: 1 })
+    const lookup = resolver.resolveTxt(`${name}.`).catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        (error.code === 'ENOTFOUND' || error.code === 'ENODATA')
+      )
+        return []
+      throw new SsoTransportError('dns_failed')
+    })
+    const answers = await Promise.race([
+      lookup,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new SsoTransportError('timeout')), LIMITS.ssoConnectTimeout)
+      }),
+    ])
+    if (
+      !Array.isArray(answers) ||
+      answers.length > LIMITS.ssoMaximumDnsAnswers ||
+      answers.some(
+        (record) =>
+          !Array.isArray(record) ||
+          record.length > 32 ||
+          record.some((chunk) => typeof chunk !== 'string' || Buffer.byteLength(chunk) > 255) ||
+          Buffer.byteLength(record.join('')) > 4096,
+      ) ||
+      answers.reduce((size, record) => size + Buffer.byteLength(record.join('')), 0) > 16384
+    )
+      throw new SsoTransportError('response_too_large')
+    return answers
+  } catch (error) {
+    throw error instanceof SsoTransportError ? error : new SsoTransportError('dns_failed')
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    resolver?.cancel()
+    release()
   }
 }
 

@@ -96,7 +96,7 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
-import { captureWorkflowCreation } from '@hourmere/workflows'
+import { captureWorkflowBooking } from '@hourmere/workflows'
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -147,6 +147,7 @@ import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
@@ -301,6 +302,11 @@ export function productRoutes({
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
+    ssoDomainRoutes({
+      db,
+      publicUrl,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
     ssoDraftRoutes({
       db,
       publicUrl,
@@ -1022,7 +1028,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
       await webhookNotifier(trx, event, now)
       // Core notification intents precede workflow capture in the booking's transaction.
-      await captureWorkflowCreation(trx, event, now, config.BETTER_AUTH_SECRET)
+      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET)
     }
     const auth = createAuth(
       productionAuthOptions({

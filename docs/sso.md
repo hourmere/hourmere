@@ -915,6 +915,36 @@ status}, txtName, txtValue, expiresAt}` once; repeated creation rotates rather t
 recovering the value. Verify/delete take `{expectedGeneration, proofAttemptId?}`.
 Domains are organization-owned and providers
 reference their IDs; the provider inventory includes safe domain status/generation.
+The three domain writes are browser-session-only and remain `404 sso_disabled` while
+both protocols are hard-off; they have no MCP tools or CLI commands. With the internal
+test capability enabled, each requires a verified current team owner/admin, the exact
+Origin, expected organization header and operation-bound mailbox fresh proof. A new
+challenge lasts 24 hours and rotates the generation; the TXT value is returned only once.
+Names are normalized to lowercase IDNA ASCII and one trailing DNS root dot is removed.
+Wildcards, IPs, special-use names, public suffixes (including private suffixes) and known
+public mailbox namespaces are refused; the mailbox restriction also covers subdomains.
+The normalized name must fit the 253-byte TXT owner limit including `_hourmere-sso.`.
+The mailbox list covers
+Gmail/Googlemail, Outlook/Hotmail/Live/MSN, Yahoo/Ymail/Rocketmail, AOL, iCloud/Me/Mac,
+Proton/Protonmail/PM, Fastmail, Hey, Mail.com, GMX, QQ, 163/126 and Yandex.
+Parent and child domains remain separate exact claims.
+Verification returns the safe domain summary and verification/recheck deadlines. A DNS
+outage returns `unknown`, never a successful ownership proof. Pending claims do not reserve
+names, and another team's verified or suspended claim remains exclusive until retirement.
+Deleting a claim retires its ID. These operations never create accounts or memberships,
+move personal spaces or enable a provider. Scheduled rechecks and operator retirement
+remain the separate Domain lifecycle step.
+
+域名挑战、验证与退役只允许浏览器会话调用，没有 MCP 工具或 CLI 命令。
+OIDC 和 SAML 仍在代码中关闭，三个接口均返回 `404 sso_disabled`。内部测试开启后，
+当前团队中已验证的所有者或管理员须提供同源请求、预期团队和操作绑定的邮箱新鲜证明。
+域名转换为小写 IDNA ASCII，并移除一个末尾根点；拒绝通配符、IP、特殊用途名称、
+公共后缀（含私有后缀）以及已知公共邮箱域名及其子域名。父域名与子域名须分别证明。
+挑战有效期为 24 小时；重新创建会轮换代次，TXT 值只返回一次。DNS 故障显示 `unknown`，
+不能视为所有权已验证。未验证挑战不占用域名；其他团队已验证或过期暂停的声明不会被抢占。
+退役保留声明 ID，域名验证不会创建账号、加入团队、移动个人空间或启用提供者。
+定期复查与运营者退役命令仍属于后续的域名生命周期工作。
+
 Test takes `{expectedRevision, proofAttemptId?}` and link takes `{proofAttemptId?}`.
 Test/link returns a bounded authorization URL and its own ceremony attempt ID;
 completion is via protocol

@@ -990,6 +990,9 @@ providers and the shared fresh-proof gate reads policies. The draft-read service
 reads an explicit safe projection of providers and policies for current team owners/admins;
 it never opens sealed configuration or reads identity links. Browser-only provider draft writes
 use the fresh-proof gate, seal each new revision, and audit changes transactionally.
+Browser-only domain challenge, verification and retirement also use that gate, store only
+bound TXT digests and serialize exact-domain authority changes with the domain lock;
+pending challenges never reserve the name.
 OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 
@@ -1118,7 +1121,7 @@ Migration 0076 installs the definition storage of the [booking workflows design]
 reads of step 4 (`packages/workflows/src/reads.ts`), creation of step 5
 (`packages/workflows/src/creates.ts`), updates of step 6
 (`packages/workflows/src/updates.ts`) and deletion of step 7
-(`packages/workflows/src/deletes.ts`) and creation capture
+(`packages/workflows/src/deletes.ts`) and booking lifecycle capture
 (`packages/workflows/src/capture.ts`) access them behind the hard-off guard. Definition
 operations answer `workflows_disabled`, and capture does nothing, while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
@@ -1178,9 +1181,12 @@ Migration 0079 installs the execution storage of the [booking workflows design](
 `workflow_run_history` and `workflow_mail_reservations`, plus a nullable
 `workflow_reservation_id` on the shared mail ledger. Deletion reads enrollments to retire
 pending runs after tombstoning their definition; it preserves the other execution rows.
-Creation capture writes immutable enrollments, due runs and recipient intents in the booking
+Booking lifecycle capture writes immutable enrollments, due runs and recipient intents in the booking
 transaction after core notifications, sharing live definitions in ID order after the organization
-lock. Timer skips also write minimal history. Internal mail admission writes reservations and
+lock. Reschedule retires predecessor work before carrying captured timer revisions to the
+successor; cancellation retires pending timer and delayed-created/rescheduled runs before
+capturing its own occurrence. Request, request-expiry and no-show events write no workflow
+rows. Timer skips also write minimal history. Internal mail admission writes reservations and
 shared ledger charges atomically, and retry admission restamps both under the same organization
 and mail-budget locks. Instance and owner sub-cap settings do not enable delivery. There is no
 dispatcher or retention worker, and workflows stay hard-off behind
