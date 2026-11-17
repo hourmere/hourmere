@@ -278,11 +278,11 @@ describe('creating an event type', () => {
     await openNew()
     const hint = document.getElementById('minimumNoticeMinutes-hint')
     expect(hint?.textContent).toContain(
-      'How far ahead a meeting must be booked. Enter 0–525600 Minutes, in whole Minutes.',
+      'How far ahead a meeting must be booked. Enter 0–525600 minutes, in whole minutes.',
     )
     await user.clear(field('Minimum notice'))
     await user.type(field('Minimum notice'), '1440')
-    expect(hint?.textContent).toContain('Stored value: 1440 Minutes.')
+    expect(hint?.textContent).toContain('Current value: 1440 minutes.')
   })
 
   it('translates the minimum notice and buffer hints in Simplified Chinese', async () => {

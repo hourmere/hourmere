@@ -65,6 +65,7 @@ const PACKAGE_EXPORTS = [
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
   // Definition creation is workflowOperation-wrapped, so off while hard-off.
+  'captureWorkflowBooking',
   'captureWorkflowCreation',
   'createWorkflow',
   'deleteWorkflow',
@@ -198,6 +199,27 @@ describe('workflow hard-off', () => {
         'synthetic-capture-secret',
       ),
     ).resolves.toBeUndefined()
+    for (const type of [
+      'created',
+      'rescheduled',
+      'cancelled',
+      'reschedule_requested',
+      'reschedule_request_expired',
+    ] as const) {
+      await expect(
+        workflows.captureWorkflowBooking(
+          trx,
+          {
+            type,
+            requestId: '10000000-0000-4000-8000-000000000002',
+            bookingId: '10000000-0000-4000-8000-000000000001',
+            start: Temporal.Instant.from('2026-11-16T12:00Z'),
+          },
+          Temporal.Instant.from('2026-11-16T00:00Z'),
+          'synthetic-capture-secret',
+        ),
+      ).resolves.toBeUndefined()
+    }
   })
 
   it('refuses at every guarded entry point', async () => {
