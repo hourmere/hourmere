@@ -20,12 +20,18 @@ in one transaction, retaining creation keys and execution identities. Creation c
 uses the pure timer rules to enroll original confirmed native bookings and record due runs
 and recipient intents in the booking transaction, after core notifications. Existing reminders
 win overlapping intents; workflows then win by creation time and ID. The production capture
-entry remains a no-op under the pinned hard-off constant. No dispatcher,
+entry remains a no-op under the pinned hard-off constant. Cancellation and reschedule capture
+now retire predecessor work and use separate lifecycle identities. Successors retain captured
+timer revisions with recalculated anchors; delayed-created work never transfers. Request and
+request-expiry events leave workflow state untouched, and attendee no-show notifications have
+no workflow listener. No dispatcher,
 retention worker or web interface exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 中文：原生预约确认时的工作流登记、到期记录和收件人意图已在预约事务内实现，先记录核心
 通知；已有提醒优先，其次按工作流创建时间和 ID 排序。付款保留、导入及团体预约不登记。
+取消和改期使用各自的生命周期标识；改期保留原有定时工作流版本并重新计算到期时间，
+延迟的创建通知会终止，不会转移至后继预约。改期请求、请求到期及缺席标记不改变工作流状态。
 生产入口仍受硬关闭常量保护，不会捕获或发送工作流。
 
 ## Evidence and existing foundations
