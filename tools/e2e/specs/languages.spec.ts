@@ -569,9 +569,33 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await toggle.click()
     await expect(toggle).toBeEnabled()
     await expect(toggle).toHaveAttribute('aria-checked', 'false')
-    const persisted = await page.request.get(`${app.url}/api/v1/event-types/${copy.id}`)
-    expect(persisted.status()).toBe(200)
-    expect(await persisted.json()).toMatchObject({
+    // authorizeHost injects its synthetic credential through browser request routing;
+    // APIRequestContext bypasses that routing and has no signed-in session cookie.
+    const readSavedEvent = (id: string) =>
+      page.evaluate(async (eventId) => {
+        const response = await fetch(`/api/v1/event-types/${eventId}`)
+        if (!response.ok) return { status: response.status, settings: null }
+        const {
+          isActive,
+          minimumNoticeMinutes,
+          bufferBeforeMinutes,
+          bufferAfterMinutes,
+          bookingWindowDays,
+        } = await response.json()
+        return {
+          status: response.status,
+          settings: {
+            isActive,
+            minimumNoticeMinutes,
+            bufferBeforeMinutes,
+            bufferAfterMinutes,
+            bookingWindowDays,
+          },
+        }
+      }, id)
+    const persisted = await readSavedEvent(copy.id)
+    expect(persisted.status).toBe(200)
+    expect(persisted.settings).toMatchObject({
       isActive: false,
       minimumNoticeMinutes: 1440,
       bufferBeforeMinutes: 1440,
@@ -592,7 +616,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
       .getByRole('button', { name: selected === 'en' ? 'Cancel' : '取消', exact: true })
       .click()
     await expect(confirmation).not.toBeVisible()
-    expect((await page.request.get(`${app.url}/api/v1/event-types/${copy.id}`)).status()).toBe(200)
+    expect((await readSavedEvent(copy.id)).status).toBe(200)
     await more.click()
     await page
       .getByRole('menuitem', { name: selected === 'en' ? 'Delete' : '删除', exact: true })
@@ -604,8 +628,8 @@ for (const selected of ['en', 'zh-CN'] as const) {
       })
       .click()
     await expect(row).toHaveCount(0)
-    expect((await page.request.get(`${app.url}/api/v1/event-types/${copy.id}`)).status()).toBe(404)
-    expect((await page.request.get(`${app.url}/api/v1/event-types/${event.id}`)).status()).toBe(200)
+    expect((await readSavedEvent(copy.id)).status).toBe(404)
+    expect((await readSavedEvent(event.id)).status).toBe(200)
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
