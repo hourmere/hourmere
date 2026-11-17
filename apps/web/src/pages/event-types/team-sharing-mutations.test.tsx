@@ -306,7 +306,7 @@ describe('team sharing production-source negative controls', () => {
     const editor = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
     const fragment = editor.slice(
       editor.indexOf('<Field\n                id="slug"'),
-      editor.indexOf('<Field\n                id="durationMinutes"'),
+      editor.indexOf('<fieldset className="duration-presets">'),
     )
     function assertion(source: string) {
       const Preview = copy<ComponentType>(

@@ -11,6 +11,7 @@ import {
 
 const DAV = 'DAV:'
 const CAL = 'urn:ietf:params:xml:ns:caldav'
+const APPLE = 'http://apple.com/ns/ical/'
 interface Element {
   uri: string
   name: string
@@ -76,6 +77,7 @@ function properties(response: Element): Element[] {
 export interface CalDavCalendar {
   url: string
   displayName: string | null
+  color: string | null
   supportsEvents: boolean
   canWrite: boolean
 }
@@ -158,7 +160,7 @@ export function createCalDavDiscovery(
                       authorization,
                       privateTargets,
                       signal,
-                      body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:current-user-principal/><c:calendar-home-set/><d:resourcetype/><d:displayname/><d:current-user-privilege-set/><c:supported-calendar-component-set/></d:prop></d:propfind>',
+                      body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/"><d:prop><d:current-user-principal/><c:calendar-home-set/><d:resourcetype/><d:displayname/><a:calendar-color/><d:current-user-privilege-set/><c:supported-calendar-component-set/></d:prop></d:propfind>',
                     }),
                   ),
                 )
@@ -236,9 +238,11 @@ export function createCalDavDiscovery(
         if (!target) throw new CalDavError('invalid_response')
         const privileges = prop(DAV, 'current-user-privilege-set')
         const components = prop(CAL, 'supported-calendar-component-set')
+        const color = prop(APPLE, 'calendar-color')?.text.trim() ?? ''
         calendars.push({
           url: resolve(target, home.url),
           displayName: prop(DAV, 'displayname')?.text.trim() || null,
+          color: /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(color) ? color.toUpperCase() : null,
           // RFC 4791 section 5.2.3: an absent component set accepts every component.
           supportsEvents:
             !components ||

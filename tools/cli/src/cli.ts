@@ -56,6 +56,7 @@ export const COMMANDS = {
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
+  'workflows update': 'update_workflow',
   'workflows create': 'create_workflow',
   'workflows list': 'list_workflows',
   'workflows get': 'get_workflow',
@@ -68,7 +69,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
-       hourmere workflows list|get|create [--input FILE|-] [--url ORIGIN]
+       hourmere workflows list|get|create|update [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
@@ -87,7 +88,8 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
-           Read or full scope for reads; full scope for create. All answer workflows_disabled until booking
+           workflows update (id, expectedRevision, and changed definition fields).
+           Read or full scope for reads; full scope for create/update. All answer workflows_disabled until booking
            workflows are enabled on the instance.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention
@@ -95,7 +97,9 @@ Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 
            Full scope; owner/admin reads, owner changes retention.
 Meeting length: --duration-minutes on slots, book or reschedule; 1–1440 whole minutes.
 Event settings: create-event/update-event use JSON durationMinutes and allowedDurationsMinutes;
-                1–12 distinct lengths including the default. Requires full API key scope.
+                1–12 distinct whole-minute lengths (1–1440) including the default. Requires full API key scope.
+                minimumNoticeMinutes: 0–525600; bufferBeforeMinutes/bufferAfterMinutes: 0–1440,
+                all whole minutes. bookingWindowDays: 1–3650 whole calendar days or null (unlimited).
 Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
            book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;

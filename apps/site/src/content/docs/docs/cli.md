@@ -89,6 +89,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
 | `one-time-links revoke` | `revoke_one_time_link` | `eventTypeId`, `id`; requires `bookings` or `full` |
 | `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; not available yet (`workflows_disabled`) |
+| `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
 | `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
 
@@ -249,6 +250,23 @@ For example, save `{ "slug": "intro", "title": "Introduction", "durationMinutes"
 and `hourmere update-event --input event-update.json`. Omitting the list on creation
 makes a single-length type. See [multiple meeting lengths](/docs/multiple-durations) for
 update compatibility, rescheduling and shared-rule limits.
+
+## Configure notice, booking window and buffers
+
+The same event-type create/update JSON accepts `minimumNoticeMinutes` (0–525600 whole
+minutes), `bufferBeforeMinutes` and `bufferAfterMinutes` (0–1440 whole minutes each).
+`bookingWindowDays` uses **whole calendar days**, 1–3650, or `null` for no limit.
+For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
+"bufferAfterMinutes": 30, "bookingWindowDays": 14}` means two hours' notice, a
+15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
+Omitted update fields keep their current values. The web editor's minute/hour/day
+selector is a display convenience; API input and output units do not change.
+Booking windows retain calendar-day semantics in the host's schedule time zone across
+daylight saving time. See [event-type timing settings](/docs#notice-booking-window-and-buffers)
+for ranges, conversions and limitations.
+
+Use the existing `create-event` or `update-event --input FILE` JSON input; updates
+include `id` beside the changed fields. There are no hour/day configuration flags.
 
 ## Configure an after-booking redirect
 

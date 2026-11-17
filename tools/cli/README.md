@@ -183,6 +183,23 @@ The output lists every possible start time of that local day with `status` and r
 It needs a `full` key and personal-owner or team-owner/admin permission; otherwise it fails with
 `event_type_not_found`. See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting) for the reason codes.
 
+## Configure notice, booking window and buffers
+
+The same event-type create/update JSON accepts `minimumNoticeMinutes` (0–525600 whole
+minutes), `bufferBeforeMinutes` and `bufferAfterMinutes` (0–1440 whole minutes each).
+`bookingWindowDays` uses **whole calendar days**, 1–3650, or `null` for no limit.
+For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
+"bufferAfterMinutes": 30, "bookingWindowDays": 14}` means two hours' notice, a
+15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
+Omitted update fields keep their current values. The web editor's minute/hour/day
+selector is a display convenience; API input and output units do not change.
+Booking windows retain calendar-day semantics in the host's schedule time zone across
+daylight saving time. See [event-type timing settings](https://hourmere.com/docs#notice-booking-window-and-buffers)
+for ranges, conversions and limitations.
+
+Use the existing `create-event` or `update-event --input FILE` JSON input; updates
+include `id` beside the changed fields. There are no hour/day configuration flags.
+
 ## Configure meeting lengths
 
 Use `create-event` or `update-event` with a `full` API key to configure event types.
@@ -401,3 +418,18 @@ team owner/admin permissions. The MCP call returns a small pointer; the CLI stre
 its same-instance authenticated REST download without buffering the CSV in memory.
 Files contain attendee personal data; store and share them privately. See
 [CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
+
+
+`update_workflow` / `workflows update` requires `full` scope and accepts `id`,
+`expectedRevision` and changed definition fields. REST uses `PATCH /api/v1/workflows/{id}`
+with the same body except `id`. Omitted fields are preserved; supplied arrays replace their
+previous values. Content edits append a revision, while an `enabled`-only change preserves
+it. A stale expectation returns `workflow_revision_conflict`. Disabling and re-enabling
+leave existing booking enrollments and execution rows unchanged. Webhook actions are
+rejected. These operations remain unavailable (`workflows_disabled`).
+
+中文：`update_workflow` / `workflows update` 需要 `full` 权限，输入 `id`、
+`expectedRevision` 和要修改的字段。REST 使用 `PATCH /api/v1/workflows/{id}`，正文不含
+`id`。省略的字段保持不变，数组整体替换。内容修改会新增修订，仅切换 `enabled` 不改变
+修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
+登记或执行记录。暂不支持 webhook 动作；功能仍关闭，返回 `workflows_disabled`。

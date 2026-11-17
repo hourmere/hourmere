@@ -20,9 +20,7 @@ export function BrandSettings({
     <section className="panel" aria-labelledby="branding-heading">
       <h2 id="branding-heading">{t('Booking page branding')}</h2>
       <p>
-        {t(
-          'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.',
-        )}
+        {t('Use this space’s logo and primary colour on booking pages, embeds and booking emails.')}
       </p>
       {canManage === null ? (
         <p role="status">{t('Branding access has not been confirmed.')}</p>
@@ -260,13 +258,7 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
           })}
         </p>
       )}
-      <p role="status">
-        {success
-          ? t('Branding saved. Booking pages and emails are unchanged.')
-          : dirty
-            ? t('Unsaved changes')
-            : ''}
-      </p>
+      <p role="status">{success ? t('Branding saved.') : dirty ? t('Unsaved changes') : ''}</p>
     </form>
   )
 }

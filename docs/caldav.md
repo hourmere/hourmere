@@ -1,9 +1,9 @@
 # CalDAV connections
 
 This document defines Hourmere's generic CalDAV connection boundary and the intended
-busy-time and booking-write adapters. The current foundation provides an encrypted
-credential record and a standalone, mockable discovery client. **It does not enable
-CalDAV connections in the application:** no UI, REST, MCP, CLI, scheduling worker,
+busy-time and booking-write adapters. The current foundation provides encrypted
+credentials, a standalone mockable discovery client and an internal connection service.
+**It does not enable CalDAV connections in the application:** no UI, REST, MCP, CLI, scheduling worker,
 busy-time reads or event writes are added. Provider compatibility has not been tested
 with real accounts. Everything under “Planned synchronization and writes” is follow-up
 work, not supported product behavior.
@@ -55,11 +55,41 @@ a reliable guarantee of memory zeroization. Back up the encryption key separatel
 the database. Losing it requires reconnecting; rotation must explicitly decrypt and
 re-encrypt records with both keys available, not simply replace the environment value.
 
-A future service will authorize the owner, discover before saving, transactionally
-persist connection/calendar metadata, handle duplicate attempts, and replace encrypted
-credentials on reconnect. Disconnect must remove local secrets and stop jobs; revoking
-an app password at its provider remains the host's action. No persistence service or
-reconnection lifecycle is enabled in this foundation.
+The internal connection service authorizes the owner's live browser session before
+network access and rechecks it before saving. Successful discovery precedes transactional
+persistence of encrypted credentials and VEVENT calendar metadata. Connections belong to
+the user across organizations; a team administrator gains no access to another user's
+connection. Agent credentials cannot create or replace provider credentials in this step.
+No application route or tool calls this service yet; REST, MCP, CLI and UI connection
+contracts remain deferred, as does operator configuration wiring.
+
+`connectCalDav` discovers and saves the chosen inventory; `listCalDavConnections`
+returns only owner-scoped connection IDs/status and calendar IDs, names, colours,
+read-only and availability flags. `disconnectCalDav` deletes the owner's connection
+and its dependent calendars, including local encrypted credentials; provider-side app
+password revocation remains the host's action. Reconnect keeps connection and calendar
+IDs stable and replaces credentials using the existing row's authenticated encryption
+identity. A failed discovery leaves the prior inventory untouched.
+
+No migration is needed: `calendars.sync_state.caldavDiscovery` stores version 1
+metadata (`available`, `color`), not an event sync cursor. Deselected or removed
+collections retain their identity with `available: false`; reconnect never deletes
+pinned references. Calendar conflict selection defaults to false, and discovery never
+sets `last_synced_at` or changes a booking destination.
+
+Calendar collection hrefs are provider identities. Discovery returns nullable display
+names, normalized `color` (`#RRGGBB` or `#RRGGBBAA`), and advisory `canWrite` flags;
+missing or invalid colours are null, and missing privileges never imply write access.
+The caller explicitly supplies collection URLs to include in the saved inventory;
+unknown, duplicate or explicitly non-VEVENT selections are refused. This is inventory
+selection only. Selection for busy checking and booking destinations remains unavailable:
+discovery does not establish that event bodies can be read, and no synchronization or
+write jobs are scheduled.
+
+此阶段仅提供内部连接服务：先验证本人有效会话，再发现并以事务保存加密凭据及
+支持 VEVENT 的日历。连接属于用户，切换组织不会转移所有权，团队管理员也不能
+读取其他用户的连接。颜色缺失或无效时为 null；未确认权限不代表可写。
+应用界面、REST、MCP、CLI 入口仍未开放，也不启用忙闲同步或预约写入。
 
 ## Discovery
 
@@ -323,7 +353,7 @@ apply it consistently to web and worker processes. Link-local/metadata destinati
 remain blocked; an allowlist never disables TLS or permits password forwarding to an
 unapproved origin.
 
-Out of scope here: connection UI/API/MCP/CLI, persistence orchestration, live-account
+Out of scope here: connection UI/API/MCP/CLI, live-account
 acceptance, busy synchronization, recurring expansion, booking writes, provider jobs,
 OAuth, Digest/NTLM/client-certificate login, DNS SRV/TXT discovery, calendar creation,
 sharing management, CardDAV, VTODO, attachments, RSVP processing, scheduling delivery,
