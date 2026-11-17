@@ -1483,3 +1483,20 @@ endpoint returns private names, email addresses, answers, status and no-show met
 only after host/current-membership authorization; non-host team owners/admins require
 a browser session. Public and invitee-management reads never return the roster.
 See [group events](https://hourmere.com/docs/group-events) for operations and constraints.
+
+## Public meeting polls
+
+Meeting-poll public transports use POST bodies at `/api/v1/public/meeting-polls/`
+(`read`, `enroll`, `recover`, `verify`, `vote`, `withdraw`, `reminder-opt-out`). They are
+available without a feature switch or login; any supplied API key must still be valid and
+have the operation's scope. Capabilities never belong in query strings or paths. Responses
+are private/no-store, no-referrer and noindex. Recovery accepts `pollId` and `email` without
+requiring a valid capability and answers uniform 202, including unknown IDs/mailboxes.
+Enrollment answers uniform 202 except poll-level closure/capacity and request limits.
+Public reads reveal only the holder's ballot; aggregate visibility additionally exposes
+counts to verified voters, never a roster. Public capability reads do not verify a mailbox.
+
+中文：公共投票接口均使用 POST 正文，无开关且无需登录；提供 API 密钥时仍验证其有效性与
+权限。能力凭据不可放入路径或查询参数。找回仅需 `pollId` 和 `email`，未知投票或邮箱也
+统一返回 202。读取不会验证邮箱，只返回持有者自己的选票；汇总可见模式仅向已验证投票人
+提供计数，不提供名单。主办方接口及网页由后续步骤提供。

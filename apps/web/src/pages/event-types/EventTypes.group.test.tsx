@@ -74,15 +74,23 @@ describe('group event editor', () => {
     expect(
       validateDraft({ ...draft, locationKind: 'phone', phoneAskInvitee: true }),
     ).toHaveProperty('bookingMode')
+    const choices = {
+      ...draft,
+      locationOptions: [
+        { id: 'room', kind: 'in_person' as const, address: 'Room', isDefault: true as const },
+        { id: 'phone', kind: 'phone' as const, askInvitee: true as const },
+      ],
+    }
+    expect(validateDraft(choices)).not.toHaveProperty('bookingMode')
+    // Seats always use the shared default, so new extra choices are refused up front.
+    expect(validateDraft(choices)).toHaveProperty('location-kind')
+    expect(validateDraft(choices, { ...choices, bookingMode: 'individual' })).toHaveProperty(
+      'location-kind',
+    )
+    expect(validateDraft({ ...choices, title: 'Renamed' }, choices)).toEqual({})
     expect(
-      validateDraft({
-        ...draft,
-        locationOptions: [
-          { id: 'room', kind: 'in_person', address: 'Room', isDefault: true },
-          { id: 'phone', kind: 'phone', askInvitee: true },
-        ],
-      }),
-    ).not.toHaveProperty('bookingMode')
+      validateDraft({ ...choices, locationOptions: choices.locationOptions.slice(0, 1) }),
+    ).toEqual({})
     expect(
       serverErrors(new RequestError(409, 'group_mode_has_bookings', ''), draft).fields,
     ).toHaveProperty('bookingMode')

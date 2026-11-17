@@ -78,6 +78,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
+| `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
+| `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
+| `verify_meeting_poll_voter` | — | `polls verify` | `full, bookings` |
+| `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
+| `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
+| `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |
@@ -820,9 +827,10 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged. An answer to a request that expired, was
-replaced or was already resolved by a move fails with `reschedule_request_changed`, as
-does a pick after cancellation. With the request email's token, REST
+reschedule retry semantics remain unchanged. Except for that saved pick replay, an
+answer to a request that expired, was replaced or was resolved by a move fails with
+`reschedule_request_changed`, as does a pick after cancellation. Replaying a cancellation keeps its original reason even
+if a different reason is supplied. With the request email's token, REST
 `GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
 have no invitee read of a manage token.
 

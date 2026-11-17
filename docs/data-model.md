@@ -1118,8 +1118,9 @@ Migration 0076 installs the definition storage of the [booking workflows design]
 reads of step 4 (`packages/workflows/src/reads.ts`), creation of step 5
 (`packages/workflows/src/creates.ts`), updates of step 6
 (`packages/workflows/src/updates.ts`) and deletion of step 7
-(`packages/workflows/src/deletes.ts`) access them, behind the hard-off guard, so
-they answer `workflows_disabled` while workflows stay off behind
+(`packages/workflows/src/deletes.ts`) and creation capture
+(`packages/workflows/src/capture.ts`) access them behind the hard-off guard. Definition
+operations answer `workflows_disabled`, and capture does nothing, while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
 with its retained creation key. Updates check the expected revision, append immutable content
 revisions and change the live enabled flag without touching execution snapshots; no worker
@@ -1177,7 +1178,10 @@ Migration 0079 installs the execution storage of the [booking workflows design](
 `workflow_run_history` and `workflow_mail_reservations`, plus a nullable
 `workflow_reservation_id` on the shared mail ledger. Deletion reads enrollments to retire
 pending runs after tombstoning their definition; it preserves the other execution rows.
-There is no capture, dispatcher, retention worker or setting, and workflows stay hard-off behind
+Creation capture writes immutable enrollments, due runs and recipient intents in the booking
+transaction after core notifications, sharing live definitions in ID order after the organization
+lock. Timer skips also write minimal history. There is no dispatcher, retention worker or
+setting, and workflows stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 
@@ -2166,7 +2170,9 @@ remove an agreed meeting before the invitee accepts a replacement. A request the
 never promises that any alternative slot is reserved.
 
 `RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48` bounds a request's life to the earlier of 48 elapsed
-hours after creation and the original booking's start. Elapsed time makes the timeout
+hours after creation, the original booking's start and its effective invitee reschedule
+deadline (the earlier of the snapshotted reschedule and cancel deadline instants). New
+requests at or after that deadline fail with `booking_reschedule_deadline_passed`. Elapsed time makes the timeout
 unambiguous across DST changes. Expiry leaves the original booking intact and queues a host
 notice; it never cancels or moves the booking. Workers may deliver the notice later. A
 second request replaces the first; superseded jobs cannot send a new obsolete invitation.
@@ -2185,8 +2191,9 @@ the current booking without another email; changed input fails with
 `idempotency_key_reused`. Replaying an old key never replaces a newer request.
 The optional `rescheduleRequestId` on managed pick/cancel identifies the displayed request.
 The web interface submits it. A matching pick replay returns its saved successor without a
-new token; a matching cancellation replay returns the cancelled booking. A replaced,
-expired or differently answered request fails with `reschedule_request_changed`. Keep the
+new token; a cancellation replay returns the cancelled booking and preserves the original
+reason even when the retry supplies a different reason. A replaced or expired request,
+a different picked time or the opposite action fails with `reschedule_request_changed`. Keep the
 existing private email link when replay returns `manageToken: null`.
 
 Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
@@ -2438,3 +2445,8 @@ booking/rule identity and scheduling instants, never phone numbers or message bo
 `audit_events` is the append-only management journal available to every instance.
 See [Audit event journal](audit-log.md) for fields, actions, privacy, transaction
 boundaries, indexes and future retention. Events are recorded but not yet viewable.
+
+Public poll transport request budgets use `meeting_poll_request_limits` (migration `0108`):
+a purpose-bound keyed IP digest, bounded positive request count and reset timestamp. REST
+and MCP share the same 60-second windows; expired rows are deleted in bounded batches
+during requests. No mailbox, raw IP or capability is stored in this table.

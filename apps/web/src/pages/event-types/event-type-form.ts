@@ -354,6 +354,16 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
     const defaultLocation = locations.find((location) => location.isDefault) ?? locations[0]
     if (defaultLocation?.kind === 'phone' && defaultLocation.askInvitee)
       errors.bookingMode = 'Group events cannot ask invitees for a meeting phone number.'
+    // Every seat uses the occurrence's shared default, so the booking service refuses any
+    // other option. Stop new configurations from offering choices nobody can book; an
+    // untouched saved list is preserved on unrelated edits.
+    if (
+      locations.length > 1 &&
+      (baseline?.bookingMode !== 'group' ||
+        JSON.stringify(orderedLocations(baseline)) !== JSON.stringify(locations))
+    )
+      errors['location-kind'] =
+        'Group events use one shared location for every seat. Remove the other location options.'
   }
   if (
     draft.waitlistEnabled &&
@@ -368,7 +378,7 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
     comparableNotifications(baseline?.notifications ?? defaultNotificationsDraft())
   )
     Object.assign(errors, validateNotificationsDraft(draft.notifications))
-  if (draft.locationKind === 'zoom' && draft.autoCreateZoom) {
+  if (hasAutomaticLocation(draft, 'zoom')) {
     if (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
       errors['location-kind'] = msg(
         'Automatic Zoom supports individual meetings with exactly one host.',
@@ -377,8 +387,7 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
       errors.zoomConnectionId = msg('Choose your own authorized Zoom meetings account.')
   }
   if (
-    draft.locationKind === 'google_meet' &&
-    draft.autoCreateMeet &&
+    hasAutomaticLocation(draft, 'google_meet') &&
     draft.schedulingType === 'collective' &&
     !draft.hostUserIds.includes(draft.conferenceOrganizerUserId)
   )
@@ -603,6 +612,13 @@ export function orderedLocations(draft: EventTypeDraft): LocationOption[] {
   return result
 }
 
+/** Conference controls apply to every offered provider, including a non-default choice. */
+export function hasAutomaticLocation(draft: EventTypeDraft, kind: 'google_meet' | 'zoom'): boolean {
+  return orderedLocations(draft).some(
+    (option) => option.kind === kind && option.autoCreate === true,
+  )
+}
+
 /** The API body for a draft that passed validateDraft. */
 export function toInput(draft: EventTypeDraft): EventTypeBody {
   const location = primaryLocation(draft)
@@ -615,8 +631,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
           : null,
       hosts: draft.hostUserIds.map((userId) => ({ userId })),
     }),
-    ...(draft.locationKind === 'zoom' &&
-      draft.autoCreateZoom && { zoomConnectionId: draft.zoomConnectionId || null }),
+    ...(hasAutomaticLocation(draft, 'zoom') && {
+      zoomConnectionId: draft.zoomConnectionId || null,
+    }),
     ...(draft.bookingMode === 'group' && {
       bookingMode: draft.bookingMode,
       groupCapacity: whole(draft.groupCapacity),
@@ -731,8 +748,8 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
   )
     delete body.location
   if (
-    (baseline.autoCreateMeet && draft.autoCreateMeet && draft.locationKind === 'google_meet') ||
-    (baseline.autoCreateZoom && draft.autoCreateZoom && draft.locationKind === 'zoom')
+    (hasAutomaticLocation(baseline, 'google_meet') && hasAutomaticLocation(draft, 'google_meet')) ||
+    (hasAutomaticLocation(baseline, 'zoom') && hasAutomaticLocation(draft, 'zoom'))
   ) {
     if (draft.locationKind === 'google_meet') delete body.location
     if (draft.scheduleId === baseline.scheduleId) delete body.scheduleId

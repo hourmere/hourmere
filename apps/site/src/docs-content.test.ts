@@ -579,6 +579,7 @@ describe('complete public documentation', () => {
       expect(webhookRows.length).toBeGreaterThan(0)
       const groupPolicy = source
         .match(/^### Group booking fields and privacy\n[\s\S]*$/m)?.[0]
+        ?.split('\n## ')[0]
         ?.trimEnd()
       expect(groupPolicy).toBeDefined()
       expect(read(original)).toBe(

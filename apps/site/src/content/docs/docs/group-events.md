@@ -12,8 +12,9 @@ answers private. Group events are included in self-hosted installations without 
 Open **Event types**, create or edit an individual event type, select group booking mode,
 and enter a capacity of **2–100**. Disable guests and save. Personal owners and team
 owners/admins use the same editor. A group event has one host; collective and round-robin
-events cannot use group mode. Invitee-supplied phone locations are unsupported because
-an occurrence has one shared location.
+events cannot use group mode. An occurrence has one shared location: invitee-supplied
+phone locations are unsupported, and the editor does not let a group event offer
+additional location choices, because seats always use the default location.
 
 Existing future confirmed bookings or pending payment holds prevent changing booking
 mode. Cancel or complete that booked work first, or create a separate event type.

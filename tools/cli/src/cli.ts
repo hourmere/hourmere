@@ -12,6 +12,14 @@ import {
 } from './client.ts'
 
 export const COMMANDS = {
+  'polls view': 'read_meeting_poll',
+  'polls join': 'enroll_meeting_poll_voter',
+  'polls recover': 'recover_meeting_poll_voter',
+  'polls verify': 'verify_meeting_poll_voter',
+  'polls vote': 'submit_meeting_poll_vote',
+  'polls withdraw': 'withdraw_meeting_poll_vote',
+  'polls reminder-opt-out': 'opt_out_meeting_poll_reminder',
+
   'sso providers list': 'list_sso_providers',
   'sso policy': 'get_sso_policy',
   'routing-forms list': 'list_routing_forms',
@@ -78,6 +86,7 @@ export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' }
 
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
+       hourmere polls view|join|recover|verify|vote|withdraw|reminder-opt-out --input -
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
@@ -99,6 +108,13 @@ Commands: whoami, profile, catalog, event, create-event, duplicate-event, update
           book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
           booking-activity, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
+Polls: JSON input must come from stdin (--input -); files, capability flags and --output are refused.
+       Relay only the voter’s explicit choices using their token; a host key cannot impersonate them.
+       view accepts token; join uses publicToken, name, email, timeZone; recover uses pollId, email.
+       verify accepts token; vote uses token, votes, consent, responses, expectedBallotRevision;
+       withdraw uses token, expectedBallotRevision; reminder-opt-out accepts its own mail token.
+       All require an API key: read/full/bookings for view, bookings/full for writes.
+       REST also supports access without a login or key. verify prints a newly minted votingToken once; keep it private.
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
@@ -173,7 +189,8 @@ function parse(argv: readonly string[]): Options {
       ? parts[0] === 'providers'
         ? `${first} ${parts.shift()} ${parts.shift() ?? ''}`
         : `${first} ${parts.shift() ?? ''}`
-      : first === 'one-time-links' ||
+      : first === 'polls' ||
+          first === 'one-time-links' ||
           first === 'branding' ||
           first === 'slack' ||
           first === 'workflows' ||
@@ -258,6 +275,8 @@ function parse(argv: readonly string[]): Options {
       }
     }
   }
+  if (command.startsWith('polls ') && (options.input !== '-' || options.output))
+    throw new CliError('poll_stdin_required')
   if (options.clearSuccessRedirect && options.successRedirect)
     throw new CliError('invalid_success_redirect_options')
   if (command === 'one-time-links create' && options.output)
@@ -354,6 +373,12 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    if (args.command.startsWith('polls ')) {
+      for (const field of ['token', 'publicToken']) {
+        const value = input[field]
+        if (typeof value === 'string') secrets.push(value)
+      }
+    }
     const slackUrl =
       args.command.startsWith('slack ') && typeof input.url === 'string' ? input.url : ''
     if (slackUrl) secrets.push(slackUrl)

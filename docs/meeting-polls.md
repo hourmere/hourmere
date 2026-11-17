@@ -10,7 +10,7 @@ and replace ballots, withdraw, reactivate and reminder opt-out) by
 services (host results, voter removal and bulk removal of unverified enrollees) by
 `packages/scheduling/src/meeting-poll-results.ts`. Cleanup and deletion with receipt
 tombstones are implemented through migration `0088`; credential mail delivery and hourly
-capability ciphertext expiry are now implemented. Public and host transports, reminder and
+capability ciphertext expiry are now implemented. Public REST/MCP/CLI transports are implemented. Host transports, reminder and
 outcome mail, and UI remain proposed. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
@@ -404,9 +404,9 @@ under its own HKDF subkey, never the secret. `ensureMeetingPollKey` in
   invitation, verification, recovery mail or resend happens under another secret, and
   recovery for a well-formed poll ID fails instead of answering 202 with nothing queued.
 
-No transport supplies the secret yet. Internal credential-delivery and expiry workers use
+Public transports and internal credential-delivery and expiry workers use
 `BETTER_AUTH_SECRET` as the meeting-poll secret and call the fence in every transaction.
-The step that supplies it (B2) calls `ensureMeetingPollKey` at server start, before any
+Server startup calls `ensureMeetingPollKey` at server start, before any
 meeting-poll route serves. Every worker that opens, mints or stores a credential ciphertext
 (B1 delivery, B4 reminders and opt-out credentials) calls it first in each transaction,
 before any row lock or claim: a worker that waited for the fence while holding a poll or
@@ -427,8 +427,7 @@ fail closed with `MeetingPollKeyMismatchError` until the operator either:
    queued credential mail are gone; polls without voters stay.
 
 Internal workers use the existing `BETTER_AUTH_SECRET`; the transport startup check and
-operator documentation land with B2 and must state both procedures. Whether B2 also
-ships an operator command that performs the invalidation in one step is decided there.
+operator documentation include both procedures. There is no dedicated invalidation command.
 
 ## Proposed tables and invariants
 
