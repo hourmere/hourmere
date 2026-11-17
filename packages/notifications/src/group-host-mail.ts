@@ -3,7 +3,13 @@ import { randomUUID } from 'node:crypto'
 import { interfaceLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
-import { escapeHtml, icsAttachment, type MailMessage } from '@hourmere/mail'
+import {
+  brandEmail,
+  emailLayout,
+  escapeHtml,
+  icsAttachment,
+  type MailMessage,
+} from '@hourmere/mail'
 import type { NotificationSnapshot } from '@hourmere/scheduling/notification-settings'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -18,6 +24,7 @@ const asDate = (value: Temporal.Instant) => new Date(value.epochMilliseconds)
 const instant = (date: Date) => Temporal.Instant.fromEpochMilliseconds(date.getTime())
 const clock = (deps: NotificationDeps) => deps.now?.() ?? Temporal.Now.instant()
 interface Slot {
+  organization_id: string
   id: string
   state: string
   revision: string
@@ -153,7 +160,11 @@ export function groupHostMessage(row: Message, deps: NotificationDeps): MailMess
     to: row.host_email as string,
     subject: `${heading}${zh ? '：' : ': '}${row.title}`,
     text,
-    html: `<p>${escapeHtml(text).replaceAll('\n', '<br>')}</p>`,
+    html: emailLayout(
+      zh ? 'zh-CN' : 'en',
+      heading,
+      `<p>${escapeHtml(text).replaceAll('\n', '<br>')}</p>`,
+    ),
     ...(row.kind === 'calendar' && {
       attachments: [
         icsAttachment({
@@ -282,9 +293,13 @@ export async function deliverGroupHostMail(
       const remaining = row.lease_until.getTime() - row.wall_now.getTime() - 1_000
       if (remaining <= 0) throw new Error('Slot host mail claim deadline reached')
       const timeout = AbortSignal.timeout(Math.min(60_000, remaining))
-      await deps.mailer.send(groupHostMessage(row, deps), {
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      })
+      const { getPublicBranding } = await import('@hourmere/scheduling')
+      await deps.mailer.send(
+        brandEmail(groupHostMessage(row, deps), await getPublicBranding(trx, row.organization_id)),
+        {
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        },
+      )
       await trx
         .insertInto('notification_email_sends')
         .values({ recipient_hash: null, sent_at: asDate(clock(deps)) })

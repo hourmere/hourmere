@@ -1,4 +1,6 @@
 export const common = {
+  '{count} seat left': 'Noch {count} Platz',
+  '{count} seats left': 'Noch {count} Plätze',
   'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.':
     'Ich stimme SMS-Buchungserinnerungen zu. Zum Abmelden STOP antworten. Nachrichten- und Datengebühren können anfallen.',
   'Meeting location': 'Besprechungsort',

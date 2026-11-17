@@ -19,6 +19,7 @@ import {
   bookingHostName,
   bookingHostNames,
   bookingLocationForRecipient,
+  brandEmail,
   calendarBookingDescription,
   calendarResponseDescription,
   calendarSummary,
@@ -777,7 +778,16 @@ export async function sendOnce(
         return 'suppressed' as const
       }
       // An abort (worker shutdown) rejects here and rolls the row back for another worker.
-      await deps.mailer.send(message(token), { signal })
+      const bookingBrand = await trx
+        .selectFrom('bookings')
+        .select('organization_id')
+        .where('id', '=', key.bookingId)
+        .executeTakeFirstOrThrow()
+      const { getPublicBranding } = await import('@hourmere/scheduling')
+      await deps.mailer.send(
+        brandEmail(message(token), await getPublicBranding(trx, bookingBrand.organization_id)),
+        { signal },
+      )
       await trx
         .insertInto('notification_email_sends')
         .values({

@@ -77,8 +77,8 @@ export const admin = {
   'Saved brand logo': '已保存的品牌标志',
 
   'Booking page branding': '预约页面品牌设置',
-  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
-    '为当前空间保存标志和主色。目前尚未应用到预约页面和邮件。',
+  'Use this space’s logo and primary colour on booking pages, embeds and booking emails.':
+    '在预约页面、嵌入式预约页面和预约邮件中使用此空间的标志和主色。',
   'Branding access has not been confirmed.': '尚未确认品牌设置权限。',
   'Only the personal owner or team owners and admins can manage branding.':
     '只有个人空间所有者、团队所有者和管理员可以管理品牌设置。',
@@ -103,8 +103,7 @@ export const admin = {
     '已保存颜色：{colour}。按钮文字：{text}。与白色的对比度：{ratio}:1。',
   Black: '黑色',
   White: '白色',
-  'Branding saved. Booking pages and emails are unchanged.':
-    '品牌设置已保存。预约页面和邮件暂不受影响。',
+  'Branding saved.': '品牌设置已保存。',
   'Event type filter': '按活动类型筛选',
   'All event types': '所有活动类型',
   'Saved event type — details unavailable': '已保存的活动类型（详情暂不可用）',

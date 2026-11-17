@@ -410,3 +410,11 @@
     display: none;
   }
 }
+
+.picker .slot-seats {
+  display: block;
+  padding: var(--space-1);
+  font-size: 0.8rem;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}

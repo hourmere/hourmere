@@ -13,6 +13,21 @@ helper (`@hourmere/notifications`), the `booking_notifications` table, and the b
 services ([`packages/scheduling/src/bookings.ts`](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/bookings.ts)), which queue the jobs in the transaction of
 every booking change, whether it came over REST or MCP (last section).
 
+## Booking email branding
+
+Booking, reminder, follow-up, reschedule-request, waitlist and group-host HTML emails use
+[branding](/docs/branding) from the organization that owns the booking or event. Personal events use their
+personal workspace brand; team events use their team brand, even when a host also belongs
+to other teams. Branding is read at delivery time. Plain text and calendar invitations
+remain unchanged, and sign-in and account emails keep the Hourmere theme.
+
+Uploaded logos travel as inline PNG attachments referenced by Content-ID. Rendering never
+fetches a remote image and adds no tracking pixels. Logos have explicit dimensions and fit
+within 160 × 64 pixels; an email client may hide inline images or show them as attachments.
+Colors are validated again and adjusted for readable text on the email's light background.
+Missing or invalid colors retain the default Hourmere theme. Emails request light mode;
+clients that force dark mode may recolor them, so an exact brand-color match is not guaranteed.
+
 ## Phone location privacy
 
 For phone locations, booking emails and calendar invitations state who calls whom. A phone

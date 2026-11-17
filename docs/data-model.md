@@ -201,8 +201,10 @@ stored settings; concurrent writes are ordered, with the last committed value wi
 for a field changed by both callers.
 
 Contrast calculations select black or white text with the greater WCAG 2.x ratio and
-report the primary colour's ratio against white separately. These settings do not yet
-change public pages, bookings or mail. See [branding](https://hourmere.com/docs/branding)
+report the primary colour's ratio against white separately. Public pages, embeds and booking
+email HTML read the owning organization's current brand; personal bookings use the personal
+organization and team bookings use the team. Rendering validates colours again and derives
+accessible theme roles. Logos travel as inline PNG data on pages and CID attachments in mail. See [branding](https://hourmere.com/docs/branding)
 for limits and client instructions.
 
 ### `auth` (Better Auth: core + organization + api-key plugins)
@@ -969,9 +971,10 @@ counts; receipt lifetime, encryption and admission services land in later steps.
 
 Migration 0074 installs the configuration storage of the [SSO design](sso.md)
 (Configuration storage step): `sso_policies`, `sso_providers`, `sso_domains`,
-`sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. Nothing reads
-or writes them yet: there is no route, worker, read path or setting, and OIDC and SAML stay
-hard-off. A test keeps every production module outside the storage layer from naming them.
+`sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. The mailbox proof module reads
+providers and the shared fresh-proof gate reads policies. No configuration write path or
+setting exists, and OIDC and SAML stay hard-off. A test restricts table references to
+the storage layer and each explicitly named data owner.
 
 All six belong to a team: a personal organization's rows are refused, and deleting the
 organization deletes them. Policies, providers and domain claims are deleted only with
@@ -1024,13 +1027,16 @@ first step that writes it.
 
 Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage
 step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_cache`,
-`sso_browser_proofs` and `sso_delegation_bindings`. Only the Mailbox proof step's module
+`sso_browser_proofs` and `sso_delegation_bindings`. The Mailbox proof step's module
 (`apps/server/src/sso-mailbox-proof.ts`) uses them: its endpoints and delivery job write
 attempts' mailbox proofs and their tokens, and its cleanup job deletes consumed and expired
 attempts, at most 1000 a minute, with their tokens. Its endpoints answer `404 sso_disabled`
 while OIDC and SAML stay hard-off, so nothing writes attempts in production yet. The test
 that keeps production modules from naming the configuration tables covers these too, and
-lets that module name only attempts, tokens and providers. Admission
+lets that module name only attempts, tokens and providers. The shared fresh-proof gate
+(`apps/server/src/sso-fresh-proof.ts`) creates and consumes operation-bound attempts and
+reads the team policy; it has no production caller or route yet. Its test-only operation
+consumes proof in the same transaction as the protected write. Admission
 tombstones need no new table: they are the shared `scim_membership_blocks` of the
 [SCIM identity storage](scim.md), which keep the team-local mailbox through member and
 account deletion; a subject-keyed JIT check adds its column there in the step that needs it.
@@ -1092,11 +1098,14 @@ upgrade test preserves a populated predecessor, including the SSO configuration 
 
 Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
 (step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Only the definition
-reads of step 4 (`packages/workflows/src/reads.ts`) and creation of step 5
-(`packages/workflows/src/creates.ts`) access them, behind the hard-off guard, so
+reads of step 4 (`packages/workflows/src/reads.ts`), creation of step 5
+(`packages/workflows/src/creates.ts`) and updates of step 6
+(`packages/workflows/src/updates.ts`) access them, behind the hard-off guard, so
 they answer `workflows_disabled` while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
-with its retained creation key; no worker or setting uses them.
+with its retained creation key. Updates check the expected revision, append immutable content
+revisions and change the live enabled flag without touching execution snapshots; no worker
+or setting uses them.
 A test keeps every other production module outside the storage layer from naming them.
 
 - **Definitions** have an immutable ID, organization, owner and creation time. Definition IDs
@@ -1304,7 +1313,7 @@ email and webhook actions, durable execution records and workflow sub-caps withi
 Only its definition, execution and creation key storage exist ([workflow definition
 storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
 [workflow creation key storage](#workflow-creation-key-storage)),
-with definition read and creation operations that answer `workflows_disabled` while hard-off;
+with definition read, creation and update operations that answer `workflows_disabled` while hard-off;
 no worker or runtime enablement exists yet.
 
 | When | Change |

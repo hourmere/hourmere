@@ -695,7 +695,7 @@ function BookingFlow({
     event.schedulingType !== 'round_robin' && !event.hosts ? event.host.timeZone : undefined
 
   return (
-    <PublicLayout wide>
+    <PublicLayout wide branding={event.branding}>
       <div className="booking-layout">
         <aside className="event-info" aria-label={t('About this event')}>
           <h1 className="event-title">{event.title}</h1>
@@ -1059,7 +1059,7 @@ function Confirmation({
   const title = t('{event} with {host}', { event: event.title, host: hostName })
   if (booking.source === 'import' || booking.managementPolicy === 'local_only_read_only') {
     return (
-      <PublicLayout>
+      <PublicLayout branding={event.branding}>
         <PublicStatus>
           {t('This imported booking is read-only and managed in the original system.')}
         </PublicStatus>
@@ -1067,7 +1067,7 @@ function Confirmation({
     )
   }
   return (
-    <PublicLayout>
+    <PublicLayout branding={event.branding}>
       <div className="card public-card confirmation">
         {booking.status === 'confirmed' && !ended && booking.conference?.status !== 'failed' && (
           <span className="confirmation-indicator" aria-hidden="true">

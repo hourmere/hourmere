@@ -150,18 +150,23 @@ describe('workflow creation REST while off', () => {
         ['hm_bookings', 403, denial],
         ['hm_unknown', 401, { error: 'unauthorized' }],
       ] as const) {
-        for (const input of [
-          '{',
-          '{}',
-          JSON.stringify({ id: randomUUID(), actions: [{ type: 'webhook' }] }),
-        ]) {
-          const response = await app.request('/api/v1/workflows', {
-            method: 'POST',
-            headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-            body: input,
-          })
-          expect(response.status).toBe(status)
-          expect(await response.json()).toEqual(body)
+        for (const [method, path] of [
+          ['POST', '/api/v1/workflows'],
+          ['PATCH', '/api/v1/workflows/not-a-uuid'],
+        ] as const) {
+          for (const input of [
+            '{',
+            '{}',
+            JSON.stringify({ id: randomUUID(), actions: [{ type: 'webhook' }] }),
+          ]) {
+            const response = await app.request(path, {
+              method,
+              headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+              body: input,
+            })
+            expect(response.status).toBe(status)
+            expect(await response.json()).toEqual(body)
+          }
         }
       }
     } finally {
@@ -175,15 +180,16 @@ describe('workflow MCP tools while off', () => {
     const tools = workflowTools({ db: {} as never })
     expect(tools.map(({ name }) => name)).toEqual([
       'create_workflow',
+      'update_workflow',
       'list_workflows',
       'get_workflow',
     ])
     for (const tool of tools) {
       expect(tool.requireEnabled).toBeUndefined()
       expect(tool.annotations).toEqual({
-        readOnlyHint: tool.name !== 'create_workflow',
+        readOnlyHint: !['create_workflow', 'update_workflow'].includes(tool.name),
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: tool.name !== 'update_workflow',
         openWorldHint: false,
       })
       expect(() => tool.requireAvailable?.()).toThrow(
@@ -202,6 +208,7 @@ describe('workflow MCP tools while off', () => {
         expect(listed.result.tools).toEqual([])
         for (const [name, args] of [
           ['create_workflow', {}],
+          ['update_workflow', {}],
           ['list_workflows', {}],
           ['list_workflows', { owner: { kind: 'personal', id: user.id } }],
           ['list_workflows', 'not an object'],
@@ -219,12 +226,15 @@ describe('workflow MCP tools while off', () => {
           }
           expect(called.result.isError, `${authorization} ${name}`).toBe(true)
           expect(textOf(called.result)).toEqual(
-            name === 'create_workflow' && authorization === 'Bearer hm_read' ? denial : disabled,
+            ['create_workflow', 'update_workflow'].includes(name) &&
+              authorization === 'Bearer hm_read'
+              ? denial
+              : disabled,
           )
         }
       }
       // The API-key scope check keeps its precedence.
-      for (const name of ['create_workflow', 'list_workflows', 'get_workflow']) {
+      for (const name of ['create_workflow', 'update_workflow', 'list_workflows', 'get_workflow']) {
         const called = await rpc(app, 'Bearer hm_bookings', {
           method: 'tools/call',
           params: { name, arguments: { id: 'x' } },
@@ -244,7 +254,9 @@ describe('workflow MCP tools while off', () => {
         const read = await runTool(tool, args, { caller: key('read'), rateLimit: () => {} }, () => {
           throw new Error('nothing is logged')
         })
-        expect(textOf(read as never)).toEqual(tool.name === 'create_workflow' ? denial : disabled)
+        expect(textOf(read as never)).toEqual(
+          ['create_workflow', 'update_workflow'].includes(tool.name) ? denial : disabled,
+        )
         const bookings = await runTool(
           tool,
           args,
@@ -321,6 +333,7 @@ describe('workflow CLI commands while off', () => {
     ['list', 'list_workflows', { owner: { kind: 'team', id: organization.id }, limit: 5 }],
     ['get', 'get_workflow', { id: randomUUID() }],
     ['create', 'create_workflow', {}],
+    ['update', 'update_workflow', {}],
   ] as const)(
     'workflows %s calls %s and reports workflows_disabled',
     async (command, tool, input) => {

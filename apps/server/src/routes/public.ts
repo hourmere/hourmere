@@ -29,6 +29,7 @@ import {
   SelectedDurationMinutes,
   Slot,
 } from './bookings.ts'
+import { PublicBranding } from './public-branding.ts'
 
 /** Only creation can offer a continuation; manage, cancel and reschedule never do. */
 export const PublicBookingResult = BookingWithToken.extend({
@@ -52,6 +53,7 @@ export const PublicBookingResult = BookingWithToken.extend({
 
 export const PublicEventType = z
   .object({
+    branding: PublicBranding.optional(),
     handle: z.string(),
     slug: z.string(),
     title: z.string(),
@@ -122,6 +124,7 @@ export const PublicEventType = z
 
 export const PublicHost = z
   .object({
+    branding: PublicBranding.optional(),
     handle: z.string(),
     host: z.object({
       name: z.string(),
