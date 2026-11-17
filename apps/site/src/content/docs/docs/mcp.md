@@ -78,6 +78,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
+| `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
+| `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
+| `verify_meeting_poll_voter` | — | `polls verify` | `full, bookings` |
+| `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
+| `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
+| `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |

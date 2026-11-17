@@ -79,6 +79,7 @@ import {
   type BookingNotifier,
   cleanupMeetingPolls,
   cleanupWaitlist,
+  ensureMeetingPollKey,
   ensureWaitlistKey,
   expireMeetingPollCapabilities,
   expirePaymentHolds,
@@ -107,6 +108,7 @@ import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
 import { integrationTools } from './mcp/integrations.ts'
+import { meetingPollTools } from './mcp/meeting-polls.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
@@ -129,6 +131,7 @@ import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
+import { meetingPollRoutes } from './routes/meeting-polls.ts'
 import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts'
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
@@ -207,6 +210,7 @@ export function productRoutes({
   termsUrl,
   invitationMailLimits,
   waitlistSecret,
+  meetingPollSecret,
   smtpConfigured,
   auditLogRetentionDays = null,
 }: {
@@ -235,6 +239,7 @@ export function productRoutes({
   termsUrl?: string
   invitationMailLimits: InvitationSummaryMailLimits
   waitlistSecret?: string | undefined
+  meetingPollSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
@@ -300,6 +305,7 @@ export function productRoutes({
       automaticZoom,
       successRedirectPolicy,
     }),
+    meetingPollRoutes({ db, meetingPollSecret }),
     publicRoutes({
       db,
       smsRemindersAvailable,
@@ -351,6 +357,7 @@ export function productTools({
   webhooks = { enabled: false },
   webhookQueue,
   waitlistSecret,
+  meetingPollSecret,
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
@@ -373,6 +380,7 @@ export function productTools({
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
   waitlistSecret?: string | undefined
+  meetingPollSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
   routingFormsEnabled?: boolean | undefined
@@ -422,6 +430,7 @@ export function productTools({
       calendar: { db, google: googleCalendar },
       conference: { db, zoom: zoomConference },
     }),
+    ...meetingPollTools({ db, meetingPollSecret }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({ db }),
@@ -514,6 +523,7 @@ export function productionAppOptions({
       db,
       invitationMailLimits,
       waitlistSecret: config.BETTER_AUTH_SECRET,
+      meetingPollSecret: config.BETTER_AUTH_SECRET,
       smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
       socialProviders: config.socialProviders,
       automaticMeet: config.GOOGLE_MEET_ENABLED,
@@ -554,6 +564,7 @@ export function productionAppOptions({
         db,
         slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
         waitlistSecret: config.BETTER_AUTH_SECRET,
+        meetingPollSecret: config.BETTER_AUTH_SECRET,
         publicUrl: config.PUBLIC_URL,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
         successRedirectPolicy,
@@ -661,6 +672,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
 
   try {
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
+    await db.transaction().execute((trx) => ensureMeetingPollKey(trx, config.BETTER_AUTH_SECRET))
   } catch (error) {
     await db.destroy()
     throw error

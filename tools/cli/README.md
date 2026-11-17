@@ -451,3 +451,30 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+## Public meeting polls
+
+Use `hourmere polls view|join|recover|verify|vote|withdraw|reminder-opt-out --input -`.
+All poll JSON input must come from stdin; input files, capability flags and `--output`
+are refused. Never paste capabilities into shell arguments or command history. `view`
+needs a `read`, `bookings` or `full` API key; writes need `bookings` or `full`.
+The CLI uses authenticated MCP. The public REST endpoints also permit no-login access.
+
+`view` and `verify` use `{ "token": "…" }`; `join` uses `publicToken`, `name`, `email`,
+`timeZone` and optional `locale`. `recover` needs only `pollId` and `email`, without a
+valid token, and returns the same accepted response for unknown mailboxes. `vote` takes
+the voting token, complete `votes` with `slotId`/`value`, `consent: true`, optional
+`responses` and `expectedBallotRevision`; `withdraw` takes the token and revision.
+`reminder-opt-out` uses the separate token from the email. `verify` prints a newly minted
+`votingToken` once to stdout; keep it private (it is also emailed). Input tokens and error
+diagnostics are redacted. Calls never retry automatically; read and reconcile after
+`poll_changed`. These public operations are available without a feature flag; host
+creation/lifecycle commands and the browser ballot page are not available yet.
+
+中文：公开会议投票命令为 `hourmere polls view|join|recover|verify|vote|withdraw|reminder-opt-out --input -`。
+所有 JSON 参数只能从标准输入读取，拒绝文件输入、令牌命令行参数和 `--output`。
+不要把令牌放入 shell 参数或历史。读取需要 `read`、`bookings` 或 `full` 密钥，
+写入需要 `bookings` 或 `full`。CLI 使用已认证的 MCP；公开 REST 也支持免登录。
+找回只需投票 ID 与邮箱，无需有效令牌；验证首次返回的新投票令牌须保密，邮件也会发送。
+只提交投票者明确同意的完整选择和当前选票版本，遇到 `poll_changed` 应重新读取核对，
+不要自动重试。目前无功能开关，管理端命令和浏览器投票页面尚未提供。

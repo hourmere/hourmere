@@ -56,6 +56,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
+| `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
+| `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
+| `verify_meeting_poll_voter` | — | `polls verify` | `full, bookings` |
+| `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
+| `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
+| `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |
@@ -375,3 +382,41 @@ scope and the usual owner/admin permissions are required for configuration.
 `create-event`, `update-event` and `book` expose the same JSON inputs. See
 [SMS reminders and opt-out](https://hourmere.com/docs/sms-provider) for consent, provider
 configuration, signed STOP handling and limitations.
+
+## Public meeting polls
+
+Public poll capability tools are available without a feature flag. `read_meeting_poll`
+accepts `token` and a `read`, `bookings` or `full` key. The following writes require
+`bookings` or `full`: `enroll_meeting_poll_voter`, `recover_meeting_poll_voter`,
+`verify_meeting_poll_voter`, `submit_meeting_poll_vote`, `withdraw_meeting_poll_vote` and
+`opt_out_meeting_poll_reminder`. MCP still authenticates its connection; REST public poll
+operations also work without login or a key. A host key alone cannot identify or impersonate
+a voter: relay only the voter's explicit choices with their own capability.
+
+Read returns the safe snapshot and own ballot. Only a verified voter in an `aggregate`
+poll sees separate yes/if-need-be/no counts; no public operation lists other voters or
+mailboxes. Enrollment uses `publicToken`, `name`, `email`, `timeZone` and optional `locale`.
+It answers uniformly with `accepted: true`, except that a full poll answers `poll_full`
+for every mailbox. Recovery needs only `pollId` and `email`, always answers accepted,
+and sends the unchanged credential only to an eligible existing voter under cooldowns/caps.
+Verification explicitly consumes a verification token; a replacement `votingToken` is
+returned once and sent by email. Reads never verify or vote.
+
+Voting takes `token`, all candidate `votes` (`slotId`, `value`: `yes`, `if_need_be`, `no`),
+`consent: true`, optional question `responses` and `expectedBallotRevision` (initially 0).
+Withdraw takes the token and revision. On `poll_changed`, read and reconcile before a new
+submission; never automatically retry a lost response. Reminder opt-out takes the separate
+mail opt-out token and cannot access ballots. Admission requests share 10 per minute per
+trusted IP across REST/MCP/processes; reads use 120 and vote/withdraw/opt-out share 30.
+Host creation and lifecycle transports and the browser voting page are not available yet.
+
+中文：公开投票工具已提供，无功能开关。读取需要 `read`、`bookings` 或 `full` 密钥，
+写入需要 `bookings` 或 `full`；MCP 连接仍需认证，公开 REST 不要求登录或密钥。
+密钥不代替投票者的专用令牌，也不能用于冒充投票者。只转达投票者明确授权的选择。
+读取仅返回安全快照和自己的选票；只有已验证且采用 `aggregate` 可见性的投票者能查看
+汇总数量，不会公开其他人的姓名、邮箱或选票。报名对已知和未知邮箱统一应答，满员时
+对全部邮箱返回 `poll_full`。找回仅需 `pollId` 和邮箱，统一返回接受；符合条件时重发
+原令牌，不轮换或延长有效期。验证需明确提交，首次返回的新 `votingToken` 须保密。
+投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
+`poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
+管理端创建/生命周期接口和浏览器投票页面尚未提供。

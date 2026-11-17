@@ -131,6 +131,8 @@ function framework<T>(name: string, change?: Change): T {
       ...auth,
       DomainError: scheduling.DomainError,
       WaitlistRateLimitError: scheduling.WaitlistRateLimitError,
+      MeetingPollRateLimitError: scheduling.MeetingPollRateLimitError,
+      MeetingPollKeyMismatchError: scheduling.MeetingPollKeyMismatchError,
       inspect,
       hasUnsafeJsonText,
       redactOneTimeLogDetails,

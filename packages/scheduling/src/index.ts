@@ -188,12 +188,33 @@ export {
   listManagedSlots,
   type ManagedBooking,
 } from './manage.ts'
+export {
+  type MeetingPollOwnBallot,
+  type MeetingPollReminderOptOut,
+  optOutOfMeetingPollReminders,
+  type SubmitMeetingPollBallotInput,
+  submitMeetingPollBallot,
+  type WithdrawMeetingPollVoterInput,
+  withdrawMeetingPollVoter,
+} from './meeting-poll-ballots.ts'
 export { expireMeetingPollCapabilities } from './meeting-poll-capability-expiry.ts'
 export {
   cleanupMeetingPolls,
   type MeetingPollCleanupOptions,
   type MeetingPollCleanupResult,
 } from './meeting-poll-cleanup.ts'
+export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
+export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
+export {
+  type EnrollMeetingPollVoterInput,
+  enrollMeetingPollVoter,
+  type MeetingPollPublicContext,
+  MeetingPollRateLimitError,
+  type MeetingPollVoterState,
+  recoverMeetingPollVoter,
+  type VerifyMeetingPollVoterResult,
+  verifyMeetingPollVoter,
+} from './meeting-poll-voters.ts'
 export {
   getTeamMemberDepartureImpact,
   MemberDepartureBookingSchema,

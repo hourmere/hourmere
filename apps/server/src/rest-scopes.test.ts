@@ -119,7 +119,9 @@ describe('REST scoped-key operation matrix', () => {
         })
         expect(response.status, operation.id).toBe(403)
         expect(await response.json()).toEqual(denied)
-        expect(response.headers.get('cache-control')).toBe('no-store')
+        expect(response.headers.get('cache-control')).toBe(
+          operation.path.includes('/public/meeting-polls/') ? 'private, no-store' : 'no-store',
+        )
       }
       expect(f.resource).not.toHaveBeenCalled()
       expect(f.notify).not.toHaveBeenCalled()
