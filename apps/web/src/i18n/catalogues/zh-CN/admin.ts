@@ -22,7 +22,7 @@ export const admin = {
   'All seats': '全部席位',
   'No seats match this filter on this page.': '本页没有符合筛选条件的席位。',
   'Attendee list pages': '参会名单分页',
-  'Page {page}': '第 {page} 页',
+  'Page {page}': '第{page}页',
   'Session attendee list': '本场参会名单',
   'Only the host and authorized team administrators can see this list. Invitees cannot see each other.':
     '仅主持人和有权限的团队管理员可查看此名单。受邀人无法看到彼此。',
