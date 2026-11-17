@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'No location has been specified. Contact the host for meeting details.':
+    '尚未指定会议地点。请联系主持人了解会议详情。',
   '{count} seat left': '剩余{count}个名额',
   '{count} seats left': '剩余{count}个名额',
   'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.':

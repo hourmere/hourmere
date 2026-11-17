@@ -283,7 +283,7 @@ for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and 
 
 ## Commands
 
-`whoami`, `profile`, `catalog`, `event`, `create-event`, `update-event`,
+`whoami`, `profile`, `catalog`, `event`, `create-event`, `duplicate-event`, `update-event`,
 `set-event-notifications`, `schedules`, `schedule`, `slots`, `open-time-snippet`, `book`, `list`, `reschedule`,
 `cancel`, `retry-meeting`, `retry-calendar-copy`.
 
@@ -458,3 +458,13 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+## Duplicate an event type
+
+Save `{ "id": "EVENT_TYPE_UUID" }` in `duplicate.json`, then run
+`hourmere duplicate-event --input duplicate.json` with a `full` API key.
+The response contains the new event and its unique booking slug. It copies editable
+settings within the current space, with the same owner/admin permission as creation.
+Bookings, history, statistics and one-time links are excluded; round-robin activation
+starts off. Each successful call makes another copy. After a lost response, use `catalog`
+to check before retrying. See [event types](https://hourmere.com/docs/event-types).

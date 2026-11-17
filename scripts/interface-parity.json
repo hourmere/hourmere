@@ -11,6 +11,7 @@
     "exemption": "browser-session-only",
     "reason": "Releasing domain authority requires interactive administrator proof."
   },
+  "duplicateEventType": { "mcp": "duplicate_event_type", "cli": "duplicate-event" },
   "createSsoProvider": {
     "exemption": "browser-session-only",
     "reason": "Installing an authentication authority requires interactive administrator proof."

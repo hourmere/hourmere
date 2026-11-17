@@ -76,6 +76,10 @@ function table(source: string, item: TeamEventReadiness | undefined = CHECK) {
     'EventTypeTable',
     {
       ...common,
+      useState,
+      useNavigate: () => () => {},
+      useMounted: () => ({ current: true }),
+      useTeamManagementAccess: () => ({ status: 'ready', role: 'owner' }),
       useEventReadiness: () => [
         { status: 'ready', data: new Map(item ? [[EVENT.id, item]] : []) },
         () => {},

@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'No location has been specified. Contact the host for meeting details.':
+    'No location has been specified. Contact the host for meeting details.',
   '{count} seat left': '{count} seat left',
   '{count} seats left': '{count} seats left',
   'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.':
