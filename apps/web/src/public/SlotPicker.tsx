@@ -151,7 +151,7 @@ export function SlotPicker({
   renderWaitlist,
   noticeRole = 'alert',
 }: SlotPickerProps) {
-  const { t, uiText } = useI18n()
+  const { t, uiText, locale: language } = useI18n()
 
   const headingId = useId()
   const heading = useRef<HTMLHeadingElement>(null)
@@ -451,6 +451,16 @@ export function SlotPicker({
                           onClick={() => onSelect(slot)}
                         >
                           {label}
+                          {slot.seatsRemaining !== undefined && (
+                            <span className="slot-seats">
+                              {t(
+                                new Intl.PluralRules(language).select(slot.seatsRemaining) === 'one'
+                                  ? '{count} seat left'
+                                  : '{count} seats left',
+                                { count: slot.seatsRemaining },
+                              )}
+                            </span>
+                          )}
                         </button>
                       </li>
                     )

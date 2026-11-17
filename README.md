@@ -46,7 +46,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
 | `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
-CalDAV is currently a [design and credential/discovery foundation](docs/caldav.md) only.
+CalDAV is currently a [design and internal connection foundation](docs/caldav.md) only.
 iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
 available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
 
@@ -436,8 +436,8 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 Organization owners and team admins can store a logo and primary colour through settings,
 REST, MCP and CLI. [Branding settings](https://hourmere.com/docs/branding) include safe image
-uploads and automatic readable button-text selection; public pages and emails do not apply
-the stored theme yet.
+uploads and accessible light/dark colours on public pages and embeds, plus inline logos
+and brand colours in booking email HTML. Email clients may override colours or hide images.
 
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:

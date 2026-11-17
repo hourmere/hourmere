@@ -7,7 +7,9 @@ import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layo
 import { emailText, escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
+export * from './branding.ts'
 export * from './ics.ts'
+export { emailLayout } from './layout.ts'
 export * from './team-invitation.ts'
 export { escapeHtml, formatChineseTemplate, multiLine, singleLine, subjectLine } from './text.ts'
 export * from './waitlist.ts'
@@ -18,6 +20,9 @@ export interface MailAttachment {
   /** Media type with its parameters, e.g. `text/calendar; method=REQUEST; charset=UTF-8`. */
   contentType: string
   content: string
+  /** Inline uploaded logo bytes, never a remote URL or local file path. */
+  encoding?: 'base64'
+  cid?: string
 }
 
 export interface MailMessage {
@@ -269,10 +274,12 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
           },
         }),
         ...(files?.length && {
-          attachments: files.map(({ filename, contentType, content }) => ({
+          attachments: files.map(({ filename, contentType, content, encoding, cid }) => ({
             filename,
             contentType,
             content,
+            ...(encoding && { encoding }),
+            ...(cid && { cid }),
           })),
         }),
       })

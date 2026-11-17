@@ -1,5 +1,10 @@
 export * from './availability/index.ts'
-export { brandContrast } from './brand-contrast.ts'
+export {
+  type BrandTheme,
+  brandColorContrast,
+  brandContrast,
+  brandPalette,
+} from './brand-contrast.ts'
 export {
   CLAIM_RESERVED_HANDLES,
   isClaimReservedHandle,

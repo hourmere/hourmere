@@ -11,6 +11,7 @@ import { toIso } from './availability.ts'
 import { resolveBookingOrganization } from './booking-organization.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import { getManagedBooking, managedLinkRescheduleRequest } from './bookings.ts'
+import { getPublicBranding } from './branding.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import { changeDeadline, cutoffsOf, effectiveRescheduleCutoff } from './change-deadlines.ts'
 import type { ServiceContext } from './context.ts'
@@ -207,6 +208,7 @@ describe.skipIf(!serverUrl)('group seat read models', () => {
       'manage',
       'getManagedBookingDetails',
       {
+        getPublicBranding,
         getManagedBooking,
         managedLinkRescheduleRequest,
         resolvedBookingHosts,

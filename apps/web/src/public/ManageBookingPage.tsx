@@ -15,6 +15,7 @@ import {
   getManagedBooking,
   type ManagedBooking,
   PublicRequestError,
+  randomKey,
   rescheduleManagedBooking,
   rescheduleSlots,
   type Slot,
@@ -219,7 +220,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
   if (!booking) return null
   if (booking.source === 'import' || booking.managementPolicy === 'local_only_read_only') {
     return (
-      <PublicLayout>
+      <PublicLayout branding={booking.branding}>
         <PublicStatus>
           {t('This imported booking is read-only and managed in the original system.')}
         </PublicStatus>
@@ -339,6 +340,7 @@ function ManageView({
       ? { kind: 'view' }
       : chosenMode
   // The deadline can pass while the picker is open: its slot lookup is then refused too.
+  const moveAttempt = useRef<{ request: string; key: string } | null>(null)
   const onSlotsRefused = useRef<(err: unknown) => void>(() => {})
   const loadSlots = useMemo((): SlotLoader => {
     const load = rescheduleSlots(token)
@@ -487,7 +489,7 @@ function ManageView({
   }
 
   return (
-    <PublicLayout wide>
+    <PublicLayout wide branding={booking.branding}>
       <ConferenceNotice
         key={booking.id}
         booking={booking}
@@ -685,11 +687,20 @@ function ManageView({
               }}
               onConfirm={async () => {
                 const { slot } = mode
+                const request = JSON.stringify([
+                  token,
+                  booking.id,
+                  slot.start,
+                  booking.pendingReschedule?.id,
+                ])
+                if (moveAttempt.current?.request !== request)
+                  moveAttempt.current = { request, key: randomKey() }
                 try {
                   const result = await rescheduleManagedBooking(
                     token,
                     slot.start,
                     booking.pendingReschedule?.id,
+                    moveAttempt.current.key,
                   )
                   // The new booking answers no request; the old link's request state is history.
                   const {

@@ -4,11 +4,13 @@ import {
   createWorkflow,
   getWorkflow,
   listWorkflows,
+  updateWorkflow,
   type WorkflowAuditPort,
 } from '@hourmere/workflows'
 import {
   CreateWorkflowInput,
   ListWorkflowsInput,
+  UpdateWorkflowInput,
   WORKFLOWS_NOT_AVAILABLE,
   Workflow,
   WorkflowPage,
@@ -38,6 +40,17 @@ export function workflowTools({ db, audit }: { db: Db; audit?: WorkflowAuditPort
       annotations: { ...annotations, readOnlyHint: false },
       run(args, call) {
         return createWorkflow({ db, audit, principal: call.caller }, args)
+      },
+    }),
+    defineTool({
+      name: 'update_workflow',
+      title: 'Edit, enable or disable a booking workflow',
+      description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Supply id, expectedRevision and changed definition fields. Content edits append an immutable revision; enabled-only changes preserve the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Existing booking enrollments and execution rows stay unchanged. Webhook actions are rejected.`,
+      input: UpdateWorkflowInput.extend({ id: z.string() }),
+      output: Workflow,
+      annotations: { ...annotations, readOnlyHint: false, idempotentHint: false },
+      run({ id, ...args }, call) {
+        return updateWorkflow({ db, audit, principal: call.caller }, id, args)
       },
     }),
     defineTool({

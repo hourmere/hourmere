@@ -10,8 +10,11 @@ added the definition reads (`listWorkflows`/`getWorkflow`,
 the tools and `workflowsEnabled` is false. Step 5 adds creation (`createWorkflow`,
 `create_workflow`, `workflows create`) over the retained keys from step 5a; its interfaces
 also answer `404 workflows_disabled` after the full-scope check. The guarded creation
-service writes definitions, revisions and creation keys only. Nothing reads the execution
-tables yet, and no web interface exists. Decisions below are Hourmere decisions unless explicitly
+service writes definitions, revisions and creation keys only. Step 6 adds editing, enabling
+and disabling (`updateWorkflow`, `update_workflow`, `workflows update`) behind the same
+hard-off guard. Content edits append immutable revisions; enable/disable changes only the
+definition row. Neither operation rewrites enrollments or execution rows. Nothing reads the
+execution tables yet, and no web interface exists. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 ## Evidence and existing foundations
@@ -722,7 +725,17 @@ event. Current authorization and organization-context checks still apply. Creati
 caller-supplied `id` or any other unknown field (`invalid_request` at the transport schema;
 `invalid_workflow` for service validation). Foreign owners and
 team-context mismatches return `404 workflow_not_found`. Update requires the expected revision and a partial definition;
-`enabled: false` disables and `enabled: true` enables. Delete uses expected revision and
+`enabled: false` disables and `enabled: true` enables. The update body is a strict partial
+of the definition fields plus required positive integer `expectedRevision`; identity and owner
+cannot change. Fields supplied in a patch replace that whole field, so `conditions` and
+`actions` replace their arrays. A stale expectation returns `409 workflow_revision_conflict`
+without a write. Content changes append a revision; an enable/disable-only patch retains the
+current content revision and changes only the live definition row. Existing captured revisions,
+enrollments and execution rows remain untouched, including on re-enable. Enablement checks
+the combined all-event/per-event cap under the same owner lock as creation. Updates reject
+webhook actions until subscription support is implemented, and record actual update, enable
+and disable transitions through the injected audit port (no-op in production while hard-off).
+No separate enable or disable interface exists. Delete uses expected revision and
 is idempotent within retained identity. Preview accepts a candidate definition plus
 synthetic example values, returns rendered text and escaped HTML, matched/skipped reasons
 and static budget estimates derived only from the candidate and published limits; never

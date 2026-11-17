@@ -113,6 +113,7 @@ registry, including each tool's modes and CLI equivalents. Regenerate it with
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
 | `list_workflows` | — | `workflows list` | `full, read` |
 | `get_workflow` | — | `workflows get` | `full, read` |
@@ -232,8 +233,9 @@ Upload a PNG, JPEG or WebP through REST `POST /api/v1/branding/logo` or
 `hourmere branding upload --file logo.png --content-type image/png`; MCP accepts the
 returned reference, not binary image data or remote URLs. Uploads are limited to
 512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG, and attached to
-the current organization. SVG and animated images are rejected. This stores branding;
-public page and email theme application is not included yet.
+the current organization. SVG and animated images are rejected. Saved branding applies to
+that space’s public pages, embeds and booking email HTML; see [branding](https://hourmere.com/docs/branding)
+for personal/team ownership, accessible colour adjustments and email client limitations.
 
 ## Meeting location choices
 
@@ -311,3 +313,18 @@ owner/admin status does not grant access to bookings hosted by other members thr
 MCP or the CLI; those bookings return `booking_not_found`, just as missing bookings do.
 Non-host team administrators must use a browser session. See the
 [no-show guide](https://hourmere.com/docs/no-shows) for marker behavior and key scopes.
+
+
+`update_workflow` / `workflows update` requires `full` scope and accepts `id`,
+`expectedRevision` and changed definition fields. REST uses `PATCH /api/v1/workflows/{id}`
+with the same body except `id`. Omitted fields are preserved; supplied arrays replace their
+previous values. Content edits append a revision, while an `enabled`-only change preserves
+it. A stale expectation returns `workflow_revision_conflict`. Disabling and re-enabling
+leave existing booking enrollments and execution rows unchanged. Webhook actions are
+rejected. These operations remain unavailable (`workflows_disabled`).
+
+中文：`update_workflow` / `workflows update` 需要 `full` 权限，输入 `id`、
+`expectedRevision` 和要修改的字段。REST 使用 `PATCH /api/v1/workflows/{id}`，正文不含
+`id`。省略的字段保持不变，数组整体替换。内容修改会新增修订，仅切换 `enabled` 不改变
+修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
+登记或执行记录。暂不支持 webhook 动作；功能仍关闭，返回 `workflows_disabled`。
