@@ -175,6 +175,18 @@ describe.skipIf(!serverUrl)('public organization branding isolation', () => {
     expect(missing.status).toBe(404)
     expect(await foreign.json()).toEqual(await missing.json())
     expect(foreign.headers.get('cache-control')).toBe('no-store')
+    // The right organization with a wrong hash must miss too: a hit would be cached as immutable
+    // under a URL that does not match the bytes.
+    const wrongHash = await app.request(
+      `/api/v1/public/branding/${owner.organizationId}/logo/${'f'.repeat(64)}`,
+    )
+    expect(wrongHash.status).toBe(404)
+    expect(await wrongHash.json()).toEqual(
+      await (
+        await app.request(`/api/v1/public/branding/${other.organizationId}/logo/${'f'.repeat(64)}`)
+      ).json(),
+    )
+    expect(wrongHash.headers.get('cache-control')).toBe('no-store')
     const malformed = await app.request(`/api/v1/public/branding/not-a-uuid/logo/${hash}`)
     expect(malformed.status).toBe(400)
   })
