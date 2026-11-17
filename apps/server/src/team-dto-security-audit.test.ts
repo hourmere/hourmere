@@ -77,6 +77,8 @@ const eventKeys = [
   'description',
   'durationMinutes',
   'allowedDurationsMinutes',
+  'bookingMode',
+  'groupCapacity',
   'slotStepMinutes',
   'bufferBeforeMinutes',
   'bufferAfterMinutes',
