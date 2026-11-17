@@ -299,6 +299,26 @@ export async function openAuditPage(
       id === 'team-booking-detail' ? `/app/bookings/${fixture.teamBookingId}` : paths[id],
     )
     await verifyAuditContent(page, id)
+    if (
+      [
+        'host',
+        'booking',
+        'booking-form',
+        'booking-confirmation',
+        'booking-time-zone',
+        'embedded-booking',
+        'team-booking',
+        'manage',
+        'manage-reschedule',
+      ].includes(id)
+    ) {
+      await page.locator('.public.public-branded').waitFor()
+      await page.locator('main > .public-brand-logo img').waitFor()
+      await page.waitForFunction(() => {
+        const logo = document.querySelector<HTMLImageElement>('main > .public-brand-logo img')
+        return Boolean(logo?.complete && logo.naturalWidth > 0)
+      })
+    }
     if (id === 'event-type-editor-expanded') await page.evaluate(expandEventSettings)
     if (
       ['booking', 'booking-form', 'booking-time-zone', 'embedded-booking', 'team-booking'].includes(

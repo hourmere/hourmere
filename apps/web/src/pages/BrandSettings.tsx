@@ -1,3 +1,4 @@
+import { brandColorContrast, brandPalette } from '@hourmere/core/brand-contrast'
 import { type FormEvent, useCallback, useRef, useState } from 'react'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
@@ -115,7 +116,7 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
         file.size > 512 * 1024 ||
         !['image/png', 'image/jpeg', 'image/webp'].includes(file.type))
     ) {
-      setMessage('Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.')
+      setMessage('Choose a PNG, JPEG or WebP image up to 512 KiB. SVG is not supported.')
       return
     }
     setBusy(true)
@@ -163,7 +164,7 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
           ['invalid_brand_logo', 'brand_logo_too_large', 'payload_too_large'].includes(
             error.code ?? '',
           )
-          ? 'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.'
+          ? 'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.'
           : error instanceof RequestError && error.code === 'invalid_brand_color'
             ? 'Enter a colour in #RRGGBB format, or leave it empty to clear it.'
             : errorMessage(error),
@@ -209,7 +210,7 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
           id="brand-logo"
           label={t('Brand logo')}
           hint={t(
-            'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.',
+            'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.',
           )}
         >
           {(props) => (
@@ -225,12 +226,12 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
             />
           )}
         </Field>
-        {logo && (
-          <>
-            <p>{t('A logo is saved for this space.')}</p>
-            <BrandLogoPreview key={logo} organizationId={organizationId} hash={logo} />
-          </>
-        )}
+        <p className="hint">
+          {t(
+            'Logos are converted to PNG, at most 512 pixels on the longest side and 64 KiB. Smaller images are not enlarged.',
+          )}
+        </p>
+        {logo && <p>{t('A logo is saved for this space.')}</p>}
         {(logo || file) && (
           <button
             type="button"
@@ -245,10 +246,26 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
             {t('Remove logo')}
           </button>
         )}
+        <button
+          type="button"
+          className="button"
+          disabled={!colour && !logo && !file}
+          onClick={() => {
+            setColour('')
+            setLogo(null)
+            setFile(null)
+            if (fileInput.current) fileInput.current.value = ''
+            setSuccess(false)
+          }}
+        >
+          {t('Reset to default')}
+        </button>
+        <p className="hint">{t('Reset clears the logo and colour when you save branding.')}</p>
         <button type="submit" className="button button-primary" disabled={!dirty}>
           {busy ? t('Saving…') : t('Save branding')}
         </button>
       </fieldset>
+      <BrandPreviews organizationId={organizationId} hash={logo} file={file} colour={colour} />
       {saved.brandPrimaryColor && (
         <p>
           {t('Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.', {
@@ -263,10 +280,35 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
   )
 }
 
-function BrandLogoPreview({ organizationId, hash }: { organizationId: string; hash: string }) {
+function BrandPreviews({
+  organizationId,
+  hash,
+  file,
+  colour,
+}: {
+  organizationId: string
+  hash: string | null
+  file: File | null
+  colour: string
+}) {
   const { t } = useI18n()
   const load = useCallback(
     async (signal: AbortSignal) => {
+      if (file) {
+        if (
+          !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) ||
+          file.size === 0 ||
+          file.size > 512 * 1024
+        )
+          return null
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result))
+          reader.onerror = () => reject(new Error('Logo preview unavailable'))
+          reader.readAsDataURL(file)
+        })
+      }
+      if (!hash) return null
       const bytes = await unwrap(
         api.GET('/api/v1/branding/logo/{hash}', {
           params: { path: { hash } },
@@ -277,18 +319,106 @@ function BrandLogoPreview({ organizationId, hash }: { organizationId: string; ha
       )
       return `data:image/png;base64,${btoa(Array.from(new Uint8Array(bytes), (byte) => String.fromCharCode(byte)).join(''))}`
     },
-    [organizationId, hash],
+    [organizationId, hash, file],
   )
   const [preview] = useLoad(load)
-  if (preview.status === 'loading') return <p role="status">{t('Loading logo preview…')}</p>
-  if (preview.status === 'error') return <p role="status">{t('Logo preview is unavailable.')}</p>
+  const palette = brandPalette(colour)
+  // Match the public theme's default accent when branding is cleared or invalid.
+  const defaults = {
+    light: { accent: '#1F4FD8', accentText: '#FFFFFF', link: '#1F4FD8' },
+    dark: { accent: '#3D68E6', accentText: '#FFFFFF', link: '#8FAEFF' },
+  }
+  const src = preview.status === 'ready' ? preview.data : null
   return (
-    <img
-      src={preview.data}
-      alt={t('Saved brand logo')}
-      width={160}
-      height={160}
-      style={{ objectFit: 'contain' }}
-    />
+    <section className="stack" aria-label={t('Booking page preview')}>
+      <h3>{t('Booking page preview')}</h3>
+      <p className="hint">
+        {t(
+          'Sample only. Changes apply after saving. Colours adjust in each theme for readable text and controls.',
+        )}
+      </p>
+      {preview.status === 'loading' && (hash || file) && (
+        <p role="status">{t('Loading logo preview…')}</p>
+      )}
+      {preview.status === 'error' && <p role="status">{t('Logo preview is unavailable.')}</p>}
+      {src && !file && (
+        <img
+          src={src}
+          alt={t('Saved brand logo')}
+          width={160}
+          height={80}
+          style={{ objectFit: 'contain' }}
+        />
+      )}
+      {colour && !palette && (
+        <p role="status">{t('Enter a colour in #RRGGBB format, or leave it empty to clear it.')}</p>
+      )}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))',
+          gap: '1rem',
+        }}
+      >
+        {(['light', 'dark'] as const).map((mode) => {
+          const theme = (palette ?? defaults)[mode]
+          const background = mode === 'light' ? '#FFFFFF' : '#0E1015'
+          return (
+            <section
+              key={mode}
+              aria-label={t(mode === 'light' ? 'Light preview' : 'Dark preview')}
+              data-brand-preview={mode}
+              style={{
+                background,
+                color: mode === 'light' ? '#172033' : '#F1F4FC',
+                border: '1px solid #738099',
+                borderRadius: '12px',
+                padding: '1rem',
+                minWidth: 0,
+              }}
+            >
+              <h4>{t(mode === 'light' ? 'Light preview' : 'Dark preview')}</h4>
+              {src && (
+                <img
+                  src={src}
+                  alt=""
+                  width={160}
+                  height={64}
+                  style={{ maxWidth: '100%', objectFit: 'contain' }}
+                />
+              )}
+              <p>
+                <strong>{t('Sample introduction call')}</strong>
+              </p>
+              <p>{t('30 minutes · Online meeting')}</p>
+              <p style={{ color: theme.link }}>{t('Choose a time that works for you.')}</p>
+              <span
+                style={{
+                  display: 'inline-block',
+                  padding: '0.65rem 1rem',
+                  borderRadius: '8px',
+                  background: theme.accent,
+                  color: theme.accentText,
+                }}
+              >
+                {t('Confirm booking')}
+              </span>
+              <p>
+                {t('Button text contrast: {ratio}:1 (minimum 4.5:1).', {
+                  ratio: brandColorContrast(theme.accent, theme.accentText).toFixed(2),
+                })}
+              </p>
+              <p>
+                {t('Link contrast: {ratio}:1 (minimum 4.5:1).', {
+                  ratio: brandColorContrast(theme.link, background).toFixed(2),
+                })}
+              </p>
+              <p>{t('Displayed accent: {colour}', { colour: theme.accent })}</p>
+              <small>{t('Powered by {0}', { '0': 'Hourmere' })}</small>
+            </section>
+          )
+        })}
+      </div>
+    </section>
   )
 }

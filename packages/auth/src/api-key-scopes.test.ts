@@ -171,7 +171,11 @@ const restContract = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   diagnostic_read: ['GET /api/v1/event-types/{id}/availability-troubleshooting'],
-  public_metadata: ['GET /api/v1/instance', 'GET /api/v1/openapi.json'],
+  public_metadata: [
+    'GET /api/v1/instance',
+    'GET /api/v1/openapi.json',
+    'GET /api/v1/public/branding/{organizationId}/logo/{hash}',
+  ],
 } as const
 
 const allowedClasses: Record<ApiKeyScope, readonly string[]> = {

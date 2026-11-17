@@ -1,0 +1,20 @@
+/* Each card follows its event's space, including the default palette for unbranded teams. */
+.public .event-card-own-brand {
+  --link: var(--event-brand-light-link, var(--cobalt));
+  --accent: var(--event-brand-light-accent, var(--cobalt));
+  --focus: var(--event-brand-light-focus, var(--cobalt));
+}
+
+@media (prefers-color-scheme: dark) {
+  .public .event-card-own-brand {
+    --link: var(--event-brand-dark-link, #8faeff);
+    --accent: var(--event-brand-dark-accent, #3d68e6);
+    --focus: var(--event-brand-dark-focus, #8faeff);
+  }
+}
+
+@media print {
+  .public .event-card-own-brand {
+    --link: #0e1015;
+  }
+}

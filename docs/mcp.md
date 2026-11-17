@@ -231,6 +231,7 @@ For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
 15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
 Omitted update fields keep their current values. The web editor's minute/hour/day
 selector is a display convenience; API input and output units do not change.
+Notice and buffers use elapsed minutes; a 1440-minute notice is exactly 24 hours.
 Booking windows retain calendar-day semantics in the host's schedule time zone across
 daylight saving time. See [event-type timing settings](https://hourmere.com/docs#notice-booking-window-and-buffers)
 for ranges, conversions and limitations.
@@ -259,7 +260,8 @@ is selected automatically. The background contrast is reported against white.
 Upload a PNG, JPEG or WebP through REST `POST /api/v1/branding/logo` or
 `hourmere branding upload --file logo.png --content-type image/png`; MCP accepts the
 returned reference, not binary image data or remote URLs. Uploads are limited to
-512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG, and attached to
+512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG at most 512 pixels
+on the longest side and 64 KiB, and attached to
 the current organization. SVG and animated images are rejected. Saved branding applies to
 that space’s public pages, embeds and booking email HTML; see [branding](https://hourmere.com/docs/branding)
 for personal/team ownership, accessible colour adjustments and email client limitations.
@@ -301,6 +303,12 @@ instants, using the booking's snapshot; null contributes no limit from that side
 A refusal caused only by the cancel deadline still returns
 `booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
 deadline, and new requests are refused once it is reached.
+These are elapsed minutes, independent of the invitee's display time zone and daylight
+saving changes: `1440` means exactly 24 hours. With `cancelCutoffMinutes: 1440` and
+`rescheduleCutoffMinutes: 120`, both invitee actions close 24 hours before the start.
+The exact deadline instant is closed; 1 millisecond before it remains eligible, subject
+to the other booking rules. Host actions still require the caller to host the booking;
+team-admin status alone grants no extra MCP/CLI or API-key access.
 
 ## Export bookings without filling agent context
 

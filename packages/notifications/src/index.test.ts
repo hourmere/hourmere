@@ -379,7 +379,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     const own = await booked()
     const other = await booked()
     const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO1sAAAAASUVORK5CYII=',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==',
       'base64',
     )
     const hash = createHash('sha256').update(png).digest('hex')
@@ -401,7 +401,12 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       expect(mail.html).toContain('background-color: #005544;')
       expect(mail.html).not.toContain('#770033')
       expect(mail.html).toContain('src="cid:organization-logo@hourmere"')
-      expect(mail.attachments?.find((part) => part.cid)?.content).toBe(png.toString('base64'))
+      const attached = Buffer.from(
+        mail.attachments?.find((part) => part.cid)?.content as string,
+        'base64',
+      )
+      expect(attached.length).toBeLessThanOrEqual(64 * 1024)
+      expect(attached.subarray(0, 8)).toEqual(png.subarray(0, 8))
       expect(invitation(mail)?.method).toBe('REQUEST')
     }
     sent.length = 0
