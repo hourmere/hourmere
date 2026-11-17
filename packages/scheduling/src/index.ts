@@ -2,6 +2,8 @@
 // MCP server. Each takes a ServiceContext (or PublicContext) and plain inputs, reads and
 // writes through Kysely, and throws DomainError for failures the caller can act on.
 
+// Defined in core so notifications can use it without loading scheduling schemas.
+export { PHONE_NUMBER_PATTERN } from '@hourmere/core'
 export {
   type ActivityCounts,
   activityRange,
@@ -154,7 +156,6 @@ export {
   listEventTypes,
   listEventTypeWaitlistEntries,
   type ManagedWaitlistEntry,
-  PHONE_NUMBER_PATTERN,
   type QuestionInput,
   removeEventTypeWaitlistEntry,
   type SchedulingType,
@@ -353,5 +354,4 @@ export {
 } from './text.ts'
 export * from './waitlist.ts'
 export { scanWaitlistEvent, scanWaitlists } from './waitlist-discovery.ts'
-
 export { lockWorkflowOwner } from './workflow-owner-lock.ts'

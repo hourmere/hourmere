@@ -25,9 +25,9 @@ export function eventTypeTools({
     principal,
     automaticMeet,
     automaticZoom,
+    smsRemindersAvailable,
     successRedirectPolicy,
     followUpHostNotesEnabled,
-    smsRemindersAvailable,
     now: () => Temporal.Now.instant(),
   })
   return [
