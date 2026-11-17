@@ -1,6 +1,7 @@
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
+import { createFixtures } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { connectCalDav } from './caldav-connection.ts'
@@ -8,6 +9,7 @@ import { calDavDispatchJob, calDavSyncJob, createCalDavSyncEnqueuer } from './ca
 import { type CalDavSyncDeps, configureCalDavCalendar, syncCalDavCalendar } from './caldav-sync.ts'
 import type { CalDavSyncClient } from './caldav-sync-client.ts'
 import { CalDavError } from './caldav-transport.ts'
+import { configureCalDavWriteCalendar } from './caldav-write-selection.ts'
 import { calendarTestSession, TEST_CALENDAR_KEY } from './testing.ts'
 
 const calendarUrl = 'https://dav.example.com/calendars/events/'
@@ -86,6 +88,53 @@ describe.skipIf(!process.env.DATABASE_URL)('internal CalDAV sync persistence and
   async function stored(id: string) {
     return db.selectFrom('calendars').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
   }
+  it('selects a write destination only for its live owner session and verified writable inventory', async () => {
+    const s = await setup(),
+      other = await calendarTestSession(db)
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: s.owner.user.id,
+        handle: `caldav-${s.owner.user.id.slice(0, 20)}`,
+        time_zone: 'UTC',
+      })
+      .execute()
+    await expect(configureCalDavWriteCalendar(s.deps, other, s.calendar.id)).rejects.toMatchObject({
+      code: 'calendar_not_found',
+    })
+    await expect(
+      configureCalDavWriteCalendar(
+        s.deps,
+        { ...s.owner, kind: 'api_key', apiKeyId: s.owner.user.id, apiKeyScope: 'full' },
+        s.calendar.id,
+      ),
+    ).rejects.toMatchObject({ code: 'session_required' })
+    await configureCalDavWriteCalendar(s.deps, s.owner, s.calendar.id)
+    expect(
+      await db
+        .selectFrom('profiles')
+        .select('destination_calendar_id')
+        .where('user_id', '=', s.owner.user.id)
+        .executeTakeFirst(),
+    ).toEqual({ destination_calendar_id: s.calendar.id })
+    await db
+      .updateTable('calendars')
+      .set({ access_role: 'reader' })
+      .where('id', '=', s.calendar.id)
+      .execute()
+    await expect(
+      configureCalDavWriteCalendar(s.deps, s.owner, s.calendar.id),
+    ).rejects.toMatchObject({ code: 'caldav_calendar_unavailable' })
+    await configureCalDavWriteCalendar(s.deps, s.owner, null)
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: new Date(0) })
+      .where('id', '=', s.owner.sessionId)
+      .execute()
+    await expect(configureCalDavWriteCalendar(s.deps, s.owner, null)).rejects.toMatchObject({
+      code: 'session_required',
+    })
+  })
   it('requires a current owner session and explicit selection before network reads', async () => {
     const s = await setup(),
       other = await calendarTestSession(db)
@@ -196,6 +245,68 @@ describe.skipIf(!process.env.DATABASE_URL)('internal CalDAV sync persistence and
       log.mockRestore()
     }
   })
+  it('deduplicates only the mapped booking resource and UID, retaining foreign copies', async () => {
+    const s = await setup()
+    const root = await createFixtures(db).booking(
+      s.owner.organization.id,
+      [s.owner.user.id],
+      '2026-11-17T10:00Z',
+      '2026-11-17T11:00Z',
+    )
+    const href = `${calendarUrl}${root}.ics`
+    await db
+      .insertInto('booking_calendar_targets')
+      .values({ root_booking_id: root, user_id: s.owner.user.id, calendar_id: s.calendar.id })
+      .execute()
+    await db
+      .insertInto('booking_calendar_events')
+      .values({
+        booking_id: root,
+        calendar_id: s.calendar.id,
+        external_event_id: href,
+        etag: '"1"',
+      })
+      .execute()
+    const own = ical().replace('UID:private-uid', `UID:${root}`)
+    await configureCalDavCalendar(s.deps, s.owner, s.calendar.id, true)
+    s.sync.mockResolvedValue({ ...page(), resources: [], etags: {} })
+    await syncCalDavCalendar(s.deps, s.calendar.id)
+    const mirror = () =>
+      db
+        .insertInto('calendar_busy')
+        .values({
+          calendar_id: s.calendar.id,
+          external_event_id: href,
+          period: sql<string>`tstzrange('2026-11-17T10:00Z','2026-11-17T11:00Z','[)')`,
+        })
+        .execute()
+    await mirror()
+    s.sync.mockResolvedValue({
+      ...page(false),
+      resources: [
+        { href, etag: '"1"', calendarData: own },
+        { href: `${calendarUrl}foreign.ics`, etag: '"2"', calendarData: own },
+      ],
+    })
+    await syncCalDavCalendar(s.deps, s.calendar.id)
+    expect(await rows(s.calendar.id)).toHaveLength(2)
+    expect(
+      (await rows(s.calendar.id)).filter((row) => row.external_event_id === href),
+    ).toHaveLength(1)
+    s.sync.mockResolvedValue({
+      ...page(false),
+      resources: [{ href, etag: '"3"', calendarData: ical() }],
+    })
+    await syncCalDavCalendar(s.deps, s.calendar.id)
+    expect(await rows(s.calendar.id)).toHaveLength(2)
+    expect((await rows(s.calendar.id)).some((row) => row.external_event_id === href)).toBe(false)
+    s.sync.mockResolvedValue({ ...page(), resources: [], etags: {} })
+    await syncCalDavCalendar(s.deps, s.calendar.id)
+    await mirror()
+    s.sync.mockResolvedValue({ ...page(false), resources: [], etags: {}, deleted: [href] })
+    await syncCalDavCalendar(s.deps, s.calendar.id)
+    expect(await rows(s.calendar.id)).toEqual([])
+  })
   it('invalidates freshness and preserves data when the atomic database write fails', async () => {
     const s = await setup()
     await configureCalDavCalendar(s.deps, s.owner, s.calendar.id, true)
@@ -209,6 +320,28 @@ describe.skipIf(!process.env.DATABASE_URL)('internal CalDAV sync persistence and
     })
     expect(await rows(s.calendar.id)).toEqual(before)
     expect((await stored(s.calendar.id)).sync_error).toBe('provider_unavailable')
+  })
+  it('preserves a write conflict through a successful busy refresh', async () => {
+    const s = await setup()
+    await configureCalDavCalendar(s.deps, s.owner, s.calendar.id, true)
+    await db
+      .updateTable('calendars')
+      .set({
+        sync_state: sql`sync_state || '{"caldavWriteback":{"result":"conflict","root":"synthetic-root"}}'::jsonb`,
+      })
+      .where('id', '=', s.calendar.id)
+      .execute()
+    await syncCalDavCalendar(s.deps, s.calendar.id)
+    expect((await stored(s.calendar.id)).sync_state).toMatchObject({
+      caldavWriteback: { result: 'conflict', root: 'synthetic-root' },
+    })
+    expect(
+      await db
+        .selectFrom('calendar_connections')
+        .select('last_error')
+        .where('id', '=', s.connection.id)
+        .executeTakeFirst(),
+    ).toEqual({ last_error: 'provider_unavailable' })
   })
   it('stops rejected credential jobs and dispatches only active selected calendars', async () => {
     const s = await setup()
