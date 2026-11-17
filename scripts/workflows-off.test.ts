@@ -1,5 +1,5 @@
-// Workflow reads, creation, updates and deletion ship behind the pinned hard-off guard. This inventory admits
-// only those interfaces and confines data access to the definition services below.
+// Workflow definition operations and creation capture stay behind the pinned hard-off guard.
+// This inventory admits only those interfaces and the exact data-access modules below.
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createRequire, isBuiltin } from 'node:module'
@@ -94,13 +94,14 @@ const STORAGE_NAMES = new RegExp(
   `workflow-storage|(?<![A-Za-z0-9_])(?:${[...STORAGE_TABLES, ...STORAGE_TABLES.map(rowType)].join('|')})(?![A-Za-z0-9_])`,
   'i',
 )
-// The modules that own workflow data access: the guarded definition reads, creation, updates and deletion;
-// Deletion alone may access runs and enrollments to retire pending work.
+// The modules that own workflow data access: guarded definitions and creation capture.
+// Deletion retires pending runs; capture writes enrollments, runs, claims and skip history.
 const DATA_ACCESS = [
   'packages/workflows/src/reads.ts',
   'packages/workflows/src/creates.ts',
   'packages/workflows/src/updates.ts',
   'packages/workflows/src/deletes.ts',
+  'packages/workflows/src/capture.ts',
 ]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
 
@@ -598,7 +599,7 @@ describe('booking workflows are off and expose only definition reads, creation, 
       .filter((file) => !isStorageLayer(file) && !DATA_ACCESS.includes(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
-    // Only deletion can name the execution tables needed for retirement.
+    // Deletion and capture name only the execution tables needed by each operation.
     const executionNames = new RegExp(
       `(?<![A-Za-z0-9_])(?:${STORAGE_TABLES.filter((table) => !DEFINITION_TABLES.includes(table))
         .flatMap((table) => [table, rowType(table)])
@@ -616,12 +617,22 @@ describe('booking workflows are off and expose only definition reads, creation, 
             ![...DEFINITION_TABLES, 'workflow_runs', 'workflow_enrollments'].includes(table),
         )
         for (const table of forbidden) expect(source).not.toContain(table)
+      } else if (file === 'packages/workflows/src/capture.ts') {
+        for (const table of [
+          'workflow_enrollments',
+          'workflow_runs',
+          'workflow_recipient_claims',
+          'workflow_run_history',
+        ])
+          expect(source).toContain(table)
+        for (const table of ['workflow_mail_reservations', 'workflow_creation_keys'])
+          expect(source).not.toContain(table)
       } else expect(executionNames.test(source), file).toBe(false)
     }
     // Only the package entry and definition services load definition modules. Production
     // callers outside those modules receive only the guarded operations.
     const loaders = sources.filter((file) =>
-      /['"`](?:\.\/(?:reads|creates|updates|deletes)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes))(?:\.ts)?['"`]/.test(
+      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture))(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
@@ -670,6 +681,22 @@ describe('booking workflows are off and expose only definition reads, creation, 
     expect(
       program.body.map((statement) => source.slice(statement.start ?? 0, statement.end ?? 0)),
     ).toEqual(FROZEN_SERVER_GUARD_STATEMENTS)
+  })
+
+  it('wires only guarded creation capture after core intents in the production notifier', () => {
+    const server = readFileSync(new URL('apps/server/src/server.ts', root), 'utf8')
+    expect(server).toContain("import { captureWorkflowCreation } from '@hourmere/workflows'")
+    const notifier = server.slice(server.indexOf('const notify: BookingNotifier = async'))
+    const core = notifier.indexOf('await emailNotifier(trx, event, now)')
+    const capture = notifier.indexOf(
+      'await captureWorkflowCreation(trx, event, now, config.BETTER_AUTH_SECRET)',
+    )
+    expect(core).toBeGreaterThanOrEqual(0)
+    expect(capture).toBeGreaterThan(core)
+    const service = readFileSync(new URL('packages/workflows/src/capture.ts', root), 'utf8')
+    expect(service).toContain(
+      'export const captureWorkflowCreation = workflowCapture(captureCreatedWorkflows)',
+    )
   })
 
   it.each(['mock', 'doMock', 'importMock'])(
