@@ -342,7 +342,10 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
   The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
-  discovery foundation; CalDAV is not yet enabled in the product.
+  discovery and busy-sync foundation; CalDAV is not yet enabled in the product.
+  Its internal sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
+  intervals, hashed instance IDs, resource href/etag mappings and an opaque sync token,
+  never event bodies, titles or attendee lists.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
   `event_type_id`. A rescheduled booking is a new row linked by `rescheduled_from_id`.
 - **Deleting an account** cascades to the user's own data (profile, schedules,

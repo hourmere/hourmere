@@ -648,7 +648,7 @@ function calendarChecks(facts: Facts, userId: string, now: Temporal.Instant): Ch
   const selected = facts.calendars.value.filter((c) => c.user_id === userId && c.check_conflicts)
   if (!selected.length)
     return [na('conflict_calendar_selection', now), na('selected_calendar_sync', now)]
-  const unsupported = selected.some((c) => c.provider !== 'google')
+  const unsupported = selected.some((c) => c.provider !== 'google' && c.provider !== 'caldav')
   const selection = check(
     'conflict_calendar_selection',
     unsupported ? 'not_checked' : 'satisfied',
@@ -658,7 +658,9 @@ function calendarChecks(facts: Facts, userId: string, now: Temporal.Instant): Ch
     'member_self',
   )
   const syncIssues: Check[] = []
-  for (const calendar of selected.filter((c) => c.provider === 'google')) {
+  for (const calendar of selected.filter(
+    (c) => c.provider === 'google' || c.provider === 'caldav',
+  )) {
     try {
       assertCachedCalendarSync([calendar], now)
     } catch (error) {

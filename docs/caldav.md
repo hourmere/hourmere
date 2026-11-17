@@ -1,12 +1,11 @@
 # CalDAV connections
 
-This document defines Hourmere's generic CalDAV connection boundary and the intended
-busy-time and booking-write adapters. The current foundation provides encrypted
-credentials, a standalone mockable discovery client and an internal connection service.
-**It does not enable CalDAV connections in the application:** no UI, REST, MCP, CLI, scheduling worker,
-busy-time reads or event writes are added. Provider compatibility has not been tested
-with real accounts. Everything under “Planned synchronization and writes” is follow-up
-work, not supported product behavior.
+This document defines Hourmere's internal CalDAV connection, discovery and busy-time
+synchronization services, and the intended booking-write adapter. Encrypted credentials,
+guarded discovery, bounded busy reads, incremental sync and job factories are implemented.
+**CalDAV remains unavailable in the application:** no UI, REST, MCP or CLI connection
+surface and no production worker registration is added. Real-account compatibility and
+booking writes remain pending. Tests use synthetic Nextcloud-style and iCloud-style responses.
 
 ## Credentials and ownership
 
@@ -82,14 +81,15 @@ names, normalized `color` (`#RRGGBB` or `#RRGGBBAA`), and advisory `canWrite` fl
 missing or invalid colours are null, and missing privileges never imply write access.
 The caller explicitly supplies collection URLs to include in the saved inventory;
 unknown, duplicate or explicitly non-VEVENT selections are refused. This is inventory
-selection only. Selection for busy checking and booking destinations remains unavailable:
-discovery does not establish that event bodies can be read, and no synchronization or
-write jobs are scheduled.
+selection only. Discovery does not establish that event bodies can be read. The internal
+`configureCalDavCalendar` service separately authorizes conflict selection; booking
+destinations remain unavailable. No production jobs are registered.
 
 此阶段仅提供内部连接服务：先验证本人有效会话，再发现并以事务保存加密凭据及
 支持 VEVENT 的日历。连接属于用户，切换组织不会转移所有权，团队管理员也不能
 读取其他用户的连接。颜色缺失或无效时为 null；未确认权限不代表可写。
-应用界面、REST、MCP、CLI 入口仍未开放，也不启用忙闲同步或预约写入。
+应用界面、REST、MCP、CLI 入口仍未开放，不注册生产同步任务，也不提供预约写入。
+内部忙闲读取和增量同步服务可供受控测试调用。
 
 ## Discovery
 
@@ -200,7 +200,58 @@ global concurrency, use exponential backoff with jitter for transient errors, ca
 `Retry-After`, and stop retrying rejected credentials until reconnect. Never convert a
 partial/failed busy sync into an empty, apparently free calendar.
 
-## Planned synchronization and writes
+## Internal busy synchronization
+
+`createCalDavSyncClient` reads the selected collection through the discovery transport's
+HTTPS, DNS pinning, exact-origin credential and redirect guards. It discovers advertised
+sync support, captures a token before the initial bounded `calendar-query`, and requests
+server-side `calendar-data/expand`. Later `sync-collection` reports identify changed and
+deleted resources; bounded expanded `calendar-multiget` checks each returned etag against
+the listing before applying changes. Invalid tokens or unsupported sync reports trigger
+a complete bounded reconciliation. Without sync support, each refresh reconciles the
+range and resource etags; ctag alone never proves a snapshot current. Incomplete, oversized,
+malformed, permission-denied or inconsistent responses never establish an empty calendar.
+
+`syncCalDavCalendar` serializes all calendars on one connection with a database row lock.
+It parses every resource before publishing intervals and the opaque token together in
+one transaction. `calendar_busy` retains only hashed instance identities and timed or
+all-day intervals. `calendars.sync_state` retains version-2 coverage, discovery metadata,
+resource href/etag mappings and hashed instance mappings; no event bodies, titles or
+attendees are stored. The daily refreshed coverage is UTC midnight minus three days
+through plus 403 days. The client accepts at most 410 days, 2,048 resources, 1 MiB per
+response and 30 seconds per call. Sync network work has a 60-second deadline;
+jobs expire after 120 seconds. Database lock waits and persistence are not interrupted
+by the network abort signal.
+
+Selection requires the owner's live browser session and respects the existing twenty
+conflict-calendar limit. Calendar jobs use the existing Postgres job system, bounded
+concurrency and exponential retry backoff with jitter. Wire selection and dispatch through
+`createCalDavSyncEnqueuer(jobs)`: its per-calendar singleton key preserves delayed retries
+and its optional transaction keeps initial enqueue atomic with selection. Rejected credentials stop retrying until
+reconnect. These factories remain internal and unregistered in the application.
+Failures retain the last snapshot and mark freshness unavailable. Availability and
+readiness apply the same ten-minute freshness and range-coverage contract as Google;
+failed or stale data cannot advertise free slots.
+
+The parser consumes expanded instances, including server-resolved RRULE/RDATE/EXDATE
+and RECURRENCE-ID exceptions. Unexpanded recurrence is unsupported and fails the refresh.
+UTC, unambiguous IANA TZID times, and exclusive all-day dates are supported. Floating
+values require an independently verified IANA calendar zone; raw `calendar-timezone`
+VTIMEZONE metadata is not treated as verified. Embedded/custom VTIMEZONE definitions,
+ambiguous or nonexistent local DST times and local calendar-day durations remain
+unsupported unless the server expands them to usable UTC values. Transparent and
+cancelled instances are excluded. Declines are excluded only with independently verified
+calendar-user addresses; this sync service currently supplies none, so a declined event
+conservatively remains busy. Provider usernames are never assumed to be email identities.
+
+内部同步先读取有界且由服务器展开的事件，再使用已声明支持的 sync-collection
+增量报告；令牌失效或服务器不支持时进行有界全量核对。忙碌区间与游标以事务一并
+保存，不保存标题、参会者或原始事件。失败保留旧快照并标记暂时不可用；同一连接
+串行同步。未经验证的浮动时区、未展开的重复规则及无法解释的 VTIMEZONE 会使同步
+失败，不会被当作空闲。尚未验证本人日历地址时，已拒绝邀请仍保守地占用时间。
+界面及 REST/MCP/CLI、生产任务注册、真实账号验收和预约写入均未开放。
+
+## Synchronization design and planned writes
 
 ### Calendar selection and freshness
 
@@ -354,7 +405,7 @@ remain blocked; an allowlist never disables TLS or permits password forwarding t
 unapproved origin.
 
 Out of scope here: connection UI/API/MCP/CLI, live-account
-acceptance, busy synchronization, recurring expansion, booking writes, provider jobs,
+acceptance, client-side recurring expansion, booking writes, production job registration,
 OAuth, Digest/NTLM/client-certificate login, DNS SRV/TXT discovery, calendar creation,
 sharing management, CardDAV, VTODO, attachments, RSVP processing, scheduling delivery,
 provider-specific push, and arbitrary self-signed-certificate acceptance. Mock tests
