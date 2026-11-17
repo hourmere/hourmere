@@ -264,7 +264,7 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
 
   it('a provider without cached sync checks stays unchecked while the existing engine can book', async () => {
     const setup = await fixture()
-    await calendar(setup.host, { provider: 'caldav' })
+    await calendar(setup.host, { provider: 'microsoft' })
     await compare(setup, { summary: 'not_checked', slots: 16, status: 201 })
   })
 
