@@ -12,9 +12,12 @@ Troubleshooting reads availability only: it books, reserves or changes nothing.
 ## Who can use it
 
 - Personal event types: their owner, acting in their personal space.
+
 - Team event types: a current, verified team owner or admin acting in that team.
+
 - API keys need **Full account access** (`full`). `read` and `bookings` keys are refused
   with `insufficient_scope`, because repeated explanations can reveal when someone is busy.
+
 - MCP OAuth connections use the existing `mcp:tools` grant, with the same owner/admin rule.
 
 Everyone else, including ordinary team members, assigned hosts who are not admins and
