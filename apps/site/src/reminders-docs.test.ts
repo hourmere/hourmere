@@ -1,5 +1,3 @@
-// Match server bootstrap before notifications loads shared scheduling schemas.
-import '@hono/zod-openapi'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'

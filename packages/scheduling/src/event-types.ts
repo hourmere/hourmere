@@ -4,7 +4,8 @@
 // managed by owners and admins. Deleting one only marks it deleted, so past bookings keep
 // pointing at the event type they were made with.
 import { requireActiveApiKey } from '@hourmere/auth'
-import { validateEventTypeRules } from '@hourmere/core'
+import { PHONE_NUMBER_PATTERN, validateEventTypeRules } from '@hourmere/core'
+export { PHONE_NUMBER_PATTERN } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
@@ -168,8 +169,6 @@ export type EventTypeUpdate = Partial<EventTypeInput>
 
 /** Lowercase letters, digits and inner hyphens, 1–64 characters (the `event_types` CHECK). */
 export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
-/** E.164: a plus sign, then 7–15 digits. */
-export const PHONE_NUMBER_PATTERN = /^\+[1-9][0-9]{6,14}$/
 
 /**
  * Limits of the fields the availability engine does not read (its rules have their own;

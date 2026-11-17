@@ -7,3 +7,4 @@ export {
   isReservedName,
   RESERVED_NAMES,
 } from './reserved.ts'
+export { PHONE_NUMBER_PATTERN } from './phone.ts'

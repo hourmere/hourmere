@@ -1059,5 +1059,6 @@ An optional [operator-configured Twilio provider](/docs/sms-provider) sends book
 reminders to invitees who supply a mobile number and explicitly consent. Hosts enable
 SMS per event type. Existing per-number, instance and organization limits apply; charges
 belong to the operator's Twilio account. Signed inbound STOP messages suppress that
-number across the instance, and START/UNSTOP re-enables it. SMS failures are isolated from
-booking and email delivery. See the SMS guide for inbound webhook setup and limitations.
+number across the instance under the same transaction fence as send reservations, and
+START/UNSTOP re-enables it. SMS jobs and failures are separate from booking and email
+delivery. See the SMS guide for inbound webhook setup, replay protection and limitations.
