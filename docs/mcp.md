@@ -96,6 +96,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `list_bookings` | — | `list` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
+| `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |
+| `cancel_group_occurrence` | — | `cancel-group` | `full, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
@@ -426,6 +428,27 @@ scope and the usual owner/admin permissions are required for configuration.
 `create-event`, `update-event` and `book` expose the same JSON inputs. See
 [SMS reminders and opt-out](https://hourmere.com/docs/sms-provider) for consent, provider
 configuration, signed STOP handling and limitations.
+
+## Group events
+
+Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
+`allowGuests: false` and individual single-host scheduling. Configuration requires `full`
+API-key scope. Omitted update fields preserve saved values; existing future booked work
+prevents switching mode. Capacity edits affect new occurrences only.
+
+Authorized booking reads/lists represent each seat separately and include `groupSlotId`.
+`GET /api/v1/group-occurrences/{id}/attendees`, MCP `get_group_occurrence_attendees` and
+CLI `group-attendees` return the private occurrence roster, including answers, booking
+status and no-show state. MCP/CLI take `occurrenceId`. Reads allow `full`, `read` and
+`bookings` keys, with actual host authority in the current organization. Non-host team
+owners/admins need a browser session; MCP OAuth has the same host-only boundary.
+
+`POST /api/v1/group-occurrences/{id}/cancel`, MCP `cancel_group_occurrence` and CLI
+`cancel-group` cancel the whole future occurrence. MCP/CLI take `occurrenceId` and
+optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bookings`.
+Ordinary booking cancellation still cancels only one seat. Public and invitee-management
+reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
+for setup, privacy and limitations.
 
 ## Public meeting polls
 

@@ -837,6 +837,43 @@ function EventTypeForm({
             </div>
           </SettingsGroup>
 
+          <SettingsGroup label="Group events" initiallyOpen={draft.bookingMode === 'group'}>
+            <Field id="bookingMode" label={t('Booking mode')} error={errors.bookingMode}>
+              {(props) => (
+                <select
+                  {...props}
+                  value={draft.bookingMode}
+                  onChange={(event) =>
+                    set('bookingMode', event.target.value as 'individual' | 'group')
+                  }
+                >
+                  <option value="individual">{t('One invitee per session')}</option>
+                  <option value="group">{t('Group: multiple invitees per session')}</option>
+                </select>
+              )}
+            </Field>
+            <p className="hint">
+              {t(
+                'Group events use one host and 2–100 seats per session. Additional guests and invitee phone locations are unavailable. Booking mode cannot change while upcoming confirmed bookings exist.',
+              )}
+            </p>
+            {draft.bookingMode === 'group' && (
+              <Field id="groupCapacity" label={t('Seats per session')} error={errors.groupCapacity}>
+                {(props) => (
+                  <input
+                    {...props}
+                    type="number"
+                    min={2}
+                    max={100}
+                    step={1}
+                    value={draft.groupCapacity}
+                    onChange={(event) => set('groupCapacity', event.target.value)}
+                  />
+                )}
+              </Field>
+            )}
+          </SettingsGroup>
+
           <SettingsGroup
             label="Additional durations"
             initiallyOpen={editing && baseline.allowedDurationsMinutes.length > 1}

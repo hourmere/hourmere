@@ -1473,6 +1473,17 @@ clear a deadline. Wrong JSON types, fractions and out-of-range values return
 later PATCH never changes existing bookings. These fields are additive in `/api/v1`. See
 [reschedule and cancel deadlines](/docs/change-deadlines) for the rules.
 
+### Group booking fields and privacy
+
+Event-type configuration adds `bookingMode` (`individual` or `group`) and nullable
+`groupCapacity` (2–100 for group mode). Authenticated booking projections add optional
+`groupSlotId` for group seats. Clients must tolerate absent additive fields on older
+servers. Each booking still represents one independent seat. The occurrence attendee
+endpoint returns private names, email addresses, answers, status and no-show metadata
+only after host/current-membership authorization; non-host team owners/admins require
+a browser session. Public and invitee-management reads never return the roster.
+See [group events](https://hourmere.com/docs/group-events) for operations and constraints.
+
 ## Public meeting polls
 
 Meeting-poll public transports use POST bodies at `/api/v1/public/meeting-polls/`

@@ -168,8 +168,7 @@ keep their location empty.
 - Automatic Zoom supports only individual events with one authorized host. Collective and
   round-robin Zoom remain unsupported. Meet uses the required collective organizer or the
   actual assigned round-robin host; it never borrows another host’s connection.
-- Group mode is not available in event editors or REST/MCP/CLI configuration.
-  Internally seeded group types show remaining seats on public booking pages and embeds,
-  with full times omitted. Seats use the shared slot’s
-  default location and conference; per-invitee location selection and phone collection
-  are unavailable for group seats.
+- Group events show remaining seats on public booking pages and embeds, with full times
+  omitted. Seats use the shared occurrence’s default location and conference; per-invitee
+  location selection and phone collection are unavailable for group seats. The editor
+  therefore offers one location for a group event; see [group events](/docs/group-events).

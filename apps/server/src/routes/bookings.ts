@@ -4,9 +4,11 @@ import type { Db } from '@hourmere/db'
 import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
+  cancelGroupOccurrence,
   cancelHostBooking,
   cancelManagedBooking,
   exportBookingsCsv,
+  getGroupOccurrenceAttendees,
   getHostBooking,
   getManagedBookingDetails,
   LOCATION_KINDS,
@@ -134,6 +136,10 @@ export const Booking = z
     id: z.uuid(),
     eventTypeId: z.uuid().nullable(),
     status: z.enum(['confirmed', 'cancelled']),
+    groupSlotId: z.uuid().optional().openapi({
+      description:
+        'Authenticated host/team reads only: shared group occurrence identifier. Each booking is one independently managed seat.',
+    }),
     isGroupSeat: z.boolean().optional().openapi({
       description:
         'True for a group-seat booking, which does not support host reschedule requests.',
@@ -299,6 +305,34 @@ export const AttendeeNoShow = z
     noShowMarkedBy: z.string().nullable(),
   })
   .openapi('AttendeeNoShow')
+
+export const GroupOccurrenceAttendees = z
+  .object({
+    id: z.uuid(),
+    eventTypeId: z.uuid().nullable(),
+    title: z.string(),
+    start: Instant,
+    end: Instant,
+    capacity: z.int(),
+    activeSeats: z.int(),
+    state: z.enum(['open', 'retired', 'host_cancelled']),
+    attendees: z.array(
+      z.object({
+        bookingId: z.uuid(),
+        id: z.uuid(),
+        name: z.string(),
+        email: z.string(),
+        responses: Responses,
+        status: z.enum(['confirmed', 'cancelled']),
+        noShowMarkedAt: Instant.nullable(),
+        noShowMarkedBy: z.string().nullable(),
+      }),
+    ),
+  })
+  .openapi('GroupOccurrenceAttendees')
+export const CancelGroupOccurrenceResult = z
+  .object({ id: z.uuid(), cancelledSeatCount: z.int() })
+  .openapi('CancelGroupOccurrenceResult')
 
 export const CancelBody = z
   .strictObject({ reason: z.string().max(1000).optional() })
@@ -489,6 +523,76 @@ export function bookingRoutes({
       bookingExportMaxConcurrent,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/group-occurrences/{id}/attendees',
+        operationId: 'getGroupOccurrenceAttendees',
+        security: authenticated,
+        middleware: caller,
+        tags: ['Bookings'],
+        summary: 'Read the private attendee list for a group occurrence',
+        description:
+          'Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Includes cancelled seats. Invitee manage tokens grant no access.',
+        request: { params: z.object({ id: z.uuid() }) },
+        responses: {
+          200: {
+            description: 'Occurrence and private seat holders',
+            content: json(GroupOccurrenceAttendees),
+          },
+          400: invalidId,
+          401: unauthorized,
+          403: error('insufficient_scope'),
+          404: error('group_occurrence_not_found'),
+          429: keyRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await getGroupOccurrenceAttendees(context(c.var.principal), c.req.valid('param').id),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/group-occurrences/{id}/cancel',
+        operationId: 'cancelGroupOccurrence',
+        security: authenticated,
+        middleware: hostManage,
+        tags: ['Bookings'],
+        summary: 'Cancel a whole group occurrence',
+        description:
+          'Cancels all confirmed seats and closes the occurrence to new bookings. To cancel only one seat use the existing booking cancellation operation. Host or browser-session team owner/admin only; API keys and OAuth are host-only.',
+        request: {
+          params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
+          body: { required: true, content: json(CancelBody) },
+        },
+        responses: {
+          200: {
+            description: 'Cancelled occurrence and changed seat count',
+            content: json(CancelGroupOccurrenceResult),
+          },
+          400: invalidId,
+          401: unauthorized,
+          403: crossOrigin,
+          404: error('group_occurrence_not_found'),
+          409: error('booking_in_past or organization_context_changed'),
+          429: hostRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await cancelGroupOccurrence(
+            context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({

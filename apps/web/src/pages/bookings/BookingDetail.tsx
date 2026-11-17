@@ -39,6 +39,7 @@ import {
   SOURCE_LABELS,
 } from './booking-format.ts'
 import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
+import { GroupOccurrenceAttendees } from './GroupOccurrenceAttendees.tsx'
 import { NoShowAttendees, withNoShowChange } from './NoShowAttendees.tsx'
 import { RequestReschedule } from './RequestReschedule.tsx'
 import { RescheduleBooking } from './RescheduleBooking.tsx'
@@ -436,6 +437,15 @@ function BookingView({
         />
       )}
 
+      {booking.groupSlotId && (
+        <GroupOccurrenceAttendees
+          key={`${booking.groupSlotId}:${booking.status}`}
+          occurrenceId={booking.groupSlotId}
+          questions={questions}
+          expectedOrganizationId={expectedOrganizationId}
+          onCancelled={() => updateBooking({ ...booking, status: 'cancelled' })}
+        />
+      )}
       <NoShowAttendees
         booking={booking}
         expectedOrganizationId={expectedOrganizationId}
@@ -631,12 +641,16 @@ function CancelBooking({
 
   return (
     <section className="panel panel-danger" aria-labelledby="cancel-heading">
-      <h2 id="cancel-heading">{t('Cancel this booking')}</h2>
+      <h2 id="cancel-heading">
+        {t(booking.isGroupSeat ? 'Cancel this seat' : 'Cancel this booking')}
+      </h2>
       {!open ? (
         <>
           <p>
             {t(
-              'The time becomes free again. The invitee can see that it is cancelled, and why if you give a reason, with their booking.',
+              booking.isGroupSeat
+                ? 'Only this invitee’s seat is cancelled. Other attendees keep their bookings.'
+                : 'The time becomes free again. The invitee can see that it is cancelled, and why if you give a reason, with their booking.',
             )}
           </p>
           <button

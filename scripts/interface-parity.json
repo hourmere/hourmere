@@ -1,4 +1,9 @@
 {
+  "getGroupOccurrenceAttendees": {
+    "mcp": "get_group_occurrence_attendees",
+    "cli": "group-attendees"
+  },
+  "cancelGroupOccurrence": { "mcp": "cancel_group_occurrence", "cli": "cancel-group" },
   "duplicateEventType": { "mcp": "duplicate_event_type", "cli": "duplicate-event" },
   "createSsoProvider": {
     "exemption": "browser-session-only",

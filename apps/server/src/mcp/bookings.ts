@@ -8,6 +8,7 @@ import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
   type BookingOrigin,
+  cancelGroupOccurrence,
   cancelHostBooking,
   cancelManagedBooking,
   createOneTimeBooking,
@@ -15,6 +16,7 @@ import {
   createPublicTeamBooking,
   DomainError,
   getBookingActivity,
+  getGroupOccurrenceAttendees,
   getPublicEventType,
   getPublicTeamEventType,
   listBookingAttendeeNoShows,
@@ -40,6 +42,8 @@ import {
   BookingPage,
   BookingWithToken,
   CancelBody,
+  CancelGroupOccurrenceResult,
+  GroupOccurrenceAttendees,
   Instant,
   ListBookingsQuery,
   RequestRescheduleBody,
@@ -557,6 +561,42 @@ export function bookingTools({
     },
   })
 
+  const getGroupAttendees = defineTool({
+    name: 'get_group_occurrence_attendees',
+    title: 'Read group occurrence attendees',
+    description:
+      'Read private seat holders, answers, booking status and no-show markers for an occurrence ID from a booking groupSlotId. Host-only for API keys and OAuth; non-host team administrators use the browser dashboard. Includes cancelled seats. Invitee manage tokens do not authorize this operation.',
+    input: z.strictObject({ occurrenceId: z.uuid() }),
+    output: GroupOccurrenceAttendees,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return getGroupOccurrenceAttendees(context(call.caller), args.occurrenceId)
+    },
+  })
+  const cancelGroup = defineTool({
+    name: 'cancel_group_occurrence',
+    title: 'Cancel a whole group occurrence',
+    description:
+      'Cancel every confirmed seat and close the occurrence to new bookings. Host-only for API keys and OAuth. Use cancel_booking with bookingId to cancel only one seat. Repeating cancellation changes no further seats.',
+    input: z.strictObject({ occurrenceId: z.uuid(), reason: CancelBody.shape.reason }),
+    output: CancelGroupOccurrenceResult,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async run({ occurrenceId, ...input }, call) {
+      call.rateLimit(manageLimit)
+      return cancelGroupOccurrence(context(call.caller), occurrenceId, input, origin(call.caller))
+    },
+  })
+
   const getAttendees = defineTool({
     name: 'get_booking_attendees',
     title: 'Read booking attendees',
@@ -702,6 +742,8 @@ export function bookingTools({
     retryCalendarCopy,
     setNoShow,
     getAttendees,
+    getGroupAttendees,
+    cancelGroup,
     getActivity,
   ]
 }

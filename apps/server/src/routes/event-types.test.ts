@@ -390,6 +390,8 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       description: null,
       durationMinutes: 30,
       allowedDurationsMinutes: [30],
+      bookingMode: 'individual',
+      groupCapacity: null,
       slotStepMinutes: null,
       bufferBeforeMinutes: 0,
       bufferAfterMinutes: 0,

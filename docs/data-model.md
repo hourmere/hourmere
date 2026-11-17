@@ -2276,8 +2276,10 @@ of 2–100. A `group_slots` row owns one exact UTC interval, its pinned host, ca
 location, buffers, calendar destination and notification policy. Each seat is a separate
 `bookings` row with `group_slot_id`, one booker and private answers, management capability,
 idempotency scope and reschedule chain. Guests and multiple-seat purchases are unsupported.
-Group booking is an internal service capability. Application configuration, public
-enablement, editor controls and REST/MCP/CLI group configuration are not yet available.
+Group mode and capacity are configurable in the admin editor and REST/MCP/CLI.
+Occurrence attendee reads are authenticated and retain the existing host-only API-key/OAuth
+boundary; current team owners/admins may also read through a browser session. Public and
+invitee-managed projections never include sibling seats. See [group events](https://hourmere.com/docs/group-events).
 
 `booking_hosts` has a surrogate primary key and exactly one parent: an ordinary
 `booking_id` or a `group_slot_id`. A group slot has one exclusion-bearing host row,
