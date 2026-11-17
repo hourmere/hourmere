@@ -37,6 +37,27 @@ describe.skipIf(!serverUrl)('event type service', () => {
     await testDb?.drop()
   })
 
+  it('keeps SMS opt-in owner-authorized, additive and off by default', async () => {
+    const owner = await createTestUser(db)
+    const other = await createTestUser(db)
+    const ctx = testContext(db, owner.principal)
+    const event = await createEventType(ctx, { slug: 'sms', title: 'SMS', durationMinutes: 30 })
+    expect(event.smsRemindersEnabled).toBe(false)
+    expect(event.smsRemindersAvailable).toBe(false)
+    expect(
+      await updateEventType({ ...ctx, smsRemindersAvailable: true }, event.id, {
+        smsRemindersEnabled: true,
+      }),
+    ).toMatchObject({ smsRemindersEnabled: true, smsRemindersAvailable: true })
+    expect(await updateEventType(ctx, event.id, { title: 'Renamed' })).toMatchObject({
+      smsRemindersEnabled: true,
+    })
+    await expect(
+      updateEventType(testContext(db, other.principal), event.id, { smsRemindersEnabled: false }),
+    ).rejects.toMatchObject({ code: 'event_type_not_found' })
+    expect(await getEventType(ctx, event.id)).toMatchObject({ smsRemindersEnabled: true })
+  })
+
   const personal = (user: TestUser) => testContext(db, user.principal)
   const inTeam = (team: TestTeam, user: TestUser) => testContext(db, team.as(user))
   const input = (overrides: Partial<EventTypeInput> = {}): EventTypeInput => ({
@@ -312,6 +333,8 @@ describe.skipIf(!serverUrl)('event type service', () => {
       const user = await createTestUser(db)
       const created = await createEventType(personal(user), input())
       expect(created).toEqual({
+        smsRemindersAvailable: false,
+        smsRemindersEnabled: false,
         id: expect.any(String),
         organizationId: user.principal.organization.id,
         ownerUserId: user.id,

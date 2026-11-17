@@ -1,5 +1,11 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'SMS reminders': 'SMS reminders',
+  'SMS reminders are available for invitees who consent. Sender and carrier charges are managed by your operator.':
+    'SMS reminders are available for invitees who consent. Sender and carrier charges are managed by your operator.',
+  'SMS reminders are not configured on this instance.':
+    'SMS reminders are not configured on this instance.',
+  'SMS availability is unknown.': 'SMS availability is unknown.',
   'Stored value: {value} {unit}.': 'Stored value: {value} {unit}.',
   'Default duration presets': 'Default duration presets',
   'Custom duration': 'Custom duration',

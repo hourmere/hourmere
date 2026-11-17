@@ -5000,6 +5000,8 @@ export interface components {
             /** @description An id from the public event locations. Omission selects the default or first option. */
             locationOptionId?: string;
             responses?: components["schemas"]["Responses"];
+            /** @description Explicit invitee consent to SMS booking reminders. Requires inviteePhone. */
+            smsConsent?: boolean;
             /**
              * @description Optional untrusted attribution hint for an embedded public booking; never grants privileges
              * @enum {string}
@@ -5440,6 +5442,9 @@ export interface components {
              * @example intro-call
              */
             slug: string;
+            smsRemindersAvailable?: boolean;
+            /** @description Enable SMS reminders for consenting invitees when the operator configures SMS. */
+            smsRemindersEnabled: boolean;
             /** @description After-booking continuation for future successful public web/embed bookings only. Omitted on create = unset; omitted on update = unchanged; null clears. Explicitly supplied configuration must pass current operator policy; unrelated edits preserve a stale saved target. */
             successRedirect?: {
                 allowEmbedParent: boolean;
@@ -5625,6 +5630,8 @@ export interface components {
              * @example intro-call
              */
             slug: string;
+            /** @description Enable SMS reminders for consenting invitees when the operator configures SMS. */
+            smsRemindersEnabled?: boolean;
             /** @description After-booking continuation for future successful public web/embed bookings only. Omitted on create = unset; omitted on update = unchanged; null clears. Explicitly supplied configuration must pass current operator policy; unrelated edits preserve a stale saved target. */
             successRedirect?: {
                 /**
@@ -5858,6 +5865,8 @@ export interface components {
              * @example intro-call
              */
             slug?: string;
+            /** @description Enable SMS reminders for consenting invitees when the operator configures SMS. */
+            smsRemindersEnabled?: boolean;
             /** @description After-booking continuation for future successful public web/embed bookings only. Omitted on create = unset; omitted on update = unchanged; null clears. Explicitly supplied configuration must pass current operator policy; unrelated edits preserve a stale saved target. */
             successRedirect?: {
                 /**
@@ -5949,6 +5958,7 @@ export interface components {
             };
             /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
             slotSnippetsEnabled?: boolean;
+            smsRemindersAvailable?: boolean;
             /** @description Whether OIDC SSO is enabled; absent when unknown */
             ssoOidcEnabled?: boolean;
             /** @description Whether SAML SSO is enabled; absent when unknown */
@@ -6286,6 +6296,7 @@ export interface components {
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
             schedulingType?: "round_robin";
+            smsRemindersEnabled: boolean;
             team?: {
                 name: string;
             };
@@ -6404,6 +6415,7 @@ export interface components {
             /** @enum {string} */
             schedulingType?: "round_robin";
             slug: string;
+            smsRemindersEnabled: boolean;
             /** @description Present for a team booking link */
             team?: {
                 name: string;
@@ -7770,6 +7782,8 @@ export interface operations {
                     /** @description An id from the public event locations. Omission selects the default or first option. */
                     locationOptionId?: string;
                     responses?: components["schemas"]["Responses"];
+                    /** @description Explicit invitee consent to SMS booking reminders. Requires inviteePhone. */
+                    smsConsent?: boolean;
                     /**
                      * Format: date-time
                      * @description The start of an offered slot

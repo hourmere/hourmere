@@ -99,6 +99,7 @@ describe.skipIf(!serverUrl)('selected duration availability in Postgres', () => 
       locations: null,
       questions: [],
       allowGuests: false,
+      smsRemindersEnabled: false,
       host: { name: 'Ada Lovelace', timeZone: 'UTC' },
     })
   })

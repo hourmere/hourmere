@@ -2367,7 +2367,7 @@ count writeback. Count failures therefore cannot revoke a ready URL or resend in
 ### Operator SMS dispatch foundation
 
 Migration `0069_sms_delivery_limits.sql` adds `sms_deliveries`, an internal ledger,
-not a reminder queue. No host or invitee SMS surface exists yet. Each logical job has
+not a reminder queue. Booking reminders use separate pg-boss jobs. Each logical job has
 one purpose-keyed HMAC-SHA256 key digest, globally unique across organizations. The
 transaction takes a database-local advisory fence, checks rolling recipient/hour, recipient/day,
 instance/hour and organization/day budgets using database time, and commits a
@@ -2400,6 +2400,24 @@ while dispatching, unknown and expired records return `sms_delivery_unknown`. A 
 record returns `sms_rate_limited` and the remaining delay before its retry-not-before time.
 Status callbacks and final delivery receipts are deferred, so
 `accepted` means Twilio accepted the request, not that a handset received it.
+
+### SMS reminder consent and suppression
+
+Migration `0100_sms_reminders.sql` adds default-off `sms_reminders_enabled` to event types
+and bookings. New bookings snapshot the event's setting; rescheduling preserves that
+snapshot. `booking_attendees.sms_consent` defaults false, and nullable `sms_phone` stores
+the explicitly consented normalized number separately from meeting-location phone data.
+These private values are not added to public attendee lists or calendar payloads.
+
+`sms_suppressions` stores only the purpose-keyed recipient hash for an instance-wide
+opt-out. `sms_inbound_receipts` stores only a purpose-keyed inbound MessageSid hash;
+permanent receipts prevent replaying an old START after a later STOP. Inbound commands
+and send reservations share the SMS advisory transaction fence. Reservation also rechecks
+booking status, start and attendee consent. A committed reservation is the point after
+which cancellation or opt-out cannot recall an already-dispatched SMS.
+
+The ordinary SMS delivery ledger and rolling budgets remain in force. Job payloads carry
+booking/rule identity and scheduling instants, never phone numbers or message bodies.
 
 ## Audit events
 

@@ -82,6 +82,7 @@ it('submits the essentials create body with default deadlines when only essentia
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    smsRemindersEnabled: false,
   })
 })
 

@@ -137,6 +137,7 @@ export interface PublicEventTypeRecord {
   groupCapacity?: number | null
   questions: Question[]
   allowGuests: boolean
+  smsRemindersEnabled: boolean
   hostName: string
   hostImage?: string
   hostTimeZone: string
@@ -200,6 +201,7 @@ async function findPersonalEventType(
       'et.zoom_connection_id',
       'et.questions',
       'et.allow_guests',
+      'et.sms_reminders_enabled',
       'et.success_redirect',
       'et.waitlist_enabled',
       'p.user_id',
@@ -252,6 +254,7 @@ async function findPersonalEventType(
     groupCapacity: row.group_capacity,
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
+    smsRemindersEnabled: row.sms_reminders_enabled,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     waitlistEnabled: row.waitlist_enabled,
     hostName: row.name.trim() || row.handle,
@@ -391,6 +394,7 @@ async function findTeamEventType(
     groupCapacity: row.group_capacity,
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
+    smsRemindersEnabled: row.sms_reminders_enabled,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
     waitlistEnabled: row.waitlist_enabled,
     hostName:
@@ -435,7 +439,11 @@ export async function getOneTimeBookingPage(
   const link = await resolveOneTimeBookingLink(ctx, token)
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
-  const page = publicEventType({ ...eventType, waitlistEnabled: false })
+  const page = publicEventType(
+    { ...eventType, waitlistEnabled: false },
+    false,
+    ctx.smsRemindersAvailable,
+  )
   const branding = await getPublicBranding(ctx.db, eventType.organizationId)
   // Keep this projection explicit: additions to the reusable public page must not
   // silently expose an address or navigation capability to one-time recipients.
@@ -452,6 +460,7 @@ export async function getOneTimeBookingPage(
       locations: page.locations,
       questions: page.questions,
       allowGuests: page.allowGuests,
+      smsRemindersEnabled: page.smsRemindersEnabled,
       host: page.host,
       ...(page.hosts && { hosts: page.hosts }),
       ...(page.schedulingType && { schedulingType: page.schedulingType }),
@@ -479,6 +488,7 @@ export interface PublicEventType {
   locations: PublicLocationOption[] | null
   questions: Question[]
   allowGuests: boolean
+  smsRemindersEnabled: boolean
   waitlist?: { enabled: true }
   /** Only the saved parent-navigation opt-in; never the redirect target or parameters. */
   allowEmbedParentRedirect?: boolean
@@ -495,7 +505,7 @@ export async function getPublicEventType(
 ): Promise<PublicEventType> {
   const event = await findPublicEventType(ctx.db, handle, slug)
   if (!event) throw eventTypeNotFound()
-  const page = publicEventType(event, ctx.smtpConfigured)
+  const page = publicEventType(event, ctx.smtpConfigured, ctx.smsRemindersAvailable)
   const branding = await getPublicBranding(ctx.db, event.organizationId)
   return { ...page, ...(branding && { branding }) }
 }
@@ -506,7 +516,7 @@ export async function getPublicTeamEventType(
 ): Promise<PublicEventType> {
   const event = await findPublicTeamEventType(ctx.db, handle, slug)
   if (!event) throw eventTypeNotFound()
-  const page = publicEventType(event, ctx.smtpConfigured)
+  const page = publicEventType(event, ctx.smtpConfigured, ctx.smsRemindersAvailable)
   const branding = await getPublicBranding(ctx.db, event.organizationId)
   return { ...page, ...(branding && { branding }) }
 }
@@ -514,6 +524,7 @@ export async function getPublicTeamEventType(
 function publicEventType(
   et: PublicEventTypeRecord | undefined,
   smtpConfigured = false,
+  smsRemindersAvailable = false,
 ): PublicEventType {
   if (!et) throw eventTypeNotFound()
   return {
@@ -529,6 +540,7 @@ function publicEventType(
     locations: publicLocationOptions(et.locations),
     questions: et.questions,
     allowGuests: et.allowGuests,
+    smsRemindersEnabled: smsRemindersAvailable && et.smsRemindersEnabled,
     ...(smtpConfigured &&
       et.waitlistEnabled &&
       et.schedulingType === 'individual' &&

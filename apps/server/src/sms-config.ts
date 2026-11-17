@@ -28,6 +28,7 @@ export const smsConfigSchema = z.object({
   SMS_PROVIDER: optional(z.enum(['twilio'])),
   TWILIO_ACCOUNT_SID: sid('TWILIO_ACCOUNT_SID', 'AC'),
   TWILIO_AUTH_TOKEN: secret('TWILIO_AUTH_TOKEN'),
+  TWILIO_WEBHOOK_AUTH_TOKEN: secret('TWILIO_WEBHOOK_AUTH_TOKEN'),
   TWILIO_API_KEY_SID: sid('TWILIO_API_KEY_SID', 'SK'),
   TWILIO_API_KEY_SECRET: secret('TWILIO_API_KEY_SECRET'),
   TWILIO_MESSAGING_SERVICE_SID: sid('TWILIO_MESSAGING_SERVICE_SID', 'MG'),
@@ -52,6 +53,7 @@ export function validateSmsConfig(c: z.infer<typeof smsConfigSchema>, ctx: z.Ref
   const settings = [
     c.TWILIO_ACCOUNT_SID,
     c.TWILIO_AUTH_TOKEN,
+    c.TWILIO_WEBHOOK_AUTH_TOKEN,
     c.TWILIO_API_KEY_SID,
     c.TWILIO_API_KEY_SECRET,
     c.TWILIO_MESSAGING_SERVICE_SID,
@@ -65,6 +67,10 @@ export function validateSmsConfig(c: z.infer<typeof smsConfigSchema>, ctx: z.Ref
   }
   if (!c.TWILIO_ACCOUNT_SID || !c.SMS_HASH_KEY)
     issue('SMS requires TWILIO_ACCOUNT_SID and an independent SMS_HASH_KEY')
+  if (!c.TWILIO_AUTH_TOKEN && !c.TWILIO_WEBHOOK_AUTH_TOKEN)
+    issue(
+      'SMS requires the account Auth Token for signed inbound webhooks (TWILIO_WEBHOOK_AUTH_TOKEN when sending with an API key)',
+    )
   const apiKey = Boolean(c.TWILIO_API_KEY_SID && c.TWILIO_API_KEY_SECRET)
   if (
     Boolean(c.TWILIO_API_KEY_SID) !== Boolean(c.TWILIO_API_KEY_SECRET) ||
@@ -82,7 +88,12 @@ export function validateSmsConfig(c: z.infer<typeof smsConfigSchema>, ctx: z.Ref
 /** Resolve only SMS secrets, without including paths, contents or OS errors in diagnostics. */
 export function resolveSmsSecretFiles(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   let resolved = env
-  for (const name of ['TWILIO_AUTH_TOKEN', 'TWILIO_API_KEY_SECRET', 'SMS_HASH_KEY'] as const) {
+  for (const name of [
+    'TWILIO_AUTH_TOKEN',
+    'TWILIO_WEBHOOK_AUTH_TOKEN',
+    'TWILIO_API_KEY_SECRET',
+    'SMS_HASH_KEY',
+  ] as const) {
     const path = env[`${name}_FILE`]
     if (!path) continue
     if (env[name]) throw new Error(`invalid configuration: set only ${name} or ${name}_FILE`)

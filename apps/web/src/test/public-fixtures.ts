@@ -16,6 +16,7 @@ export const EVENT: Schemas['PublicEventType'] = {
   location: { kind: 'phone' },
   questions: [],
   // Guest-form scenarios explicitly model a host that opted in.
+  smsRemindersEnabled: false,
   allowGuests: true,
   host: { name: 'Ada Lovelace', timeZone: 'Europe/Berlin' },
 }

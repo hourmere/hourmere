@@ -9,12 +9,14 @@ export function eventTypeTools({
   db,
   automaticMeet,
   automaticZoom,
+  smsRemindersAvailable,
   followUpHostNotesEnabled,
   successRedirectPolicy,
 }: {
   db: Db
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  smsRemindersAvailable?: boolean | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
 }): Tool[] {
@@ -23,6 +25,7 @@ export function eventTypeTools({
     principal,
     automaticMeet,
     automaticZoom,
+    smsRemindersAvailable,
     successRedirectPolicy,
     followUpHostNotesEnabled,
     now: () => Temporal.Now.instant(),

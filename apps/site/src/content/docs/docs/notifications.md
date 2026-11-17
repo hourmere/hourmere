@@ -1068,12 +1068,15 @@ Public joining, host administration, REST/MCP/CLI operations, mail-link confirma
 optional public-booking attribution are available. See [booking waitlists](/docs/booking-waitlist)
 for setup, SMTP requirements, capacity errors and the complete lifecycle.
 
-## SMS foundation
+## SMS reminders
 
-An optional [operator-configured Twilio provider](/docs/sms-provider) supplies internal
-SMS sending with durable per-number, instance and organization limits. Costs are billed
-to your Twilio account. There are no user-facing SMS reminders or workflow actions yet;
-no SMS sending jobs or status callback endpoint are enabled by configuration.
+An optional [operator-configured Twilio provider](/docs/sms-provider) sends booking
+reminders to invitees who supply a mobile number and explicitly consent. Hosts enable
+SMS per event type. Existing per-number, instance and organization limits apply; charges
+belong to the operator's Twilio account. Signed inbound STOP messages suppress that
+number across the instance under the same transaction fence as send reservations, and
+START/UNSTOP re-enables it. SMS jobs and failures are separate from booking and email
+delivery. See the SMS guide for inbound webhook setup, replay protection and limitations.
 
 ## Internal meeting-poll credential mail
 

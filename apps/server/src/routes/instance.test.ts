@@ -73,6 +73,7 @@ describe('GET /api/v1/instance', () => {
     expect(await res.json()).toEqual({
       publicUrl,
       hostedSignupUrl: 'https://hourmere.com',
+      smsRemindersAvailable: false,
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,
@@ -94,6 +95,7 @@ describe('GET /api/v1/instance', () => {
     expect(JSON.parse(text)).toEqual({
       publicUrl,
       hostedSignupUrl: 'https://hourmere.com',
+      smsRemindersAvailable: false,
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,
@@ -111,6 +113,7 @@ describe('GET /api/v1/instance', () => {
     expect(await googleOnly.json()).toEqual({
       publicUrl,
       hostedSignupUrl: 'https://hourmere.com',
+      smsRemindersAvailable: false,
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,
@@ -132,6 +135,7 @@ describe('GET /api/v1/instance', () => {
     expect(await res.json()).toEqual({
       publicUrl,
       hostedSignupUrl: 'https://hourmere.com',
+      smsRemindersAvailable: false,
       automaticGoogleMeet: false,
       automaticZoom: false,
       followUpHostNotesEnabled: true,

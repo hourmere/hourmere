@@ -3,6 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { validateEventTypeRules } from '@hourmere/core'
 import { describe, expect, it } from 'vitest'
 import { validCutoff } from './change-deadlines.ts'
+import { DomainError } from './errors.ts'
 import { EVENT_TYPE_LIMITS } from './event-types.ts'
 import { engineValidation } from './internal.ts'
 import {
@@ -30,6 +31,7 @@ const bindings = {
   locationOptionsFromLegacy,
   validateLocationOptions,
   validCutoff,
+  invalid: (message: string) => new DomainError('invalid', 'invalid_event_type', message),
 }
 
 function sourceCopy(start: string, end: string, change?: Change) {
@@ -59,6 +61,7 @@ const fields = {
   isActive: true,
   isHidden: false,
   allowGuests: false,
+  smsRemindersEnabled: false,
   position: 0,
   locations: null,
 }
@@ -70,8 +73,14 @@ describe('booking limit service source-copy mutations', () => {
   ] as const) {
     it(`detects omitted ${field} validation with a real assertion failure`, () => {
       const verify = (normalize: ReturnType<typeof sourceCopy>) => {
-        expect(() => normalize({ ...fields, [field]: 1001 })).toThrowError()
-        expect(() => normalize({ ...fields, [field]: 1 })).toThrowError()
+        expect(normalize(fields)[field]).toBe(fields[field])
+        const invalidLimit = expect.objectContaining({
+          name: 'DomainError',
+          kind: 'invalid',
+          code: 'invalid_event_type',
+        })
+        expect(() => normalize({ ...fields, [field]: 1001 })).toThrowError(invalidLimit)
+        expect(() => normalize({ ...fields, [field]: 1 })).toThrowError(invalidLimit)
       }
       verify(sourceCopy('function validFields(', 'function validSlug('))
       const mutant = sourceCopy('function validFields(', 'function validSlug(', [

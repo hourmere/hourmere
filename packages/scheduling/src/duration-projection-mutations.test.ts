@@ -77,6 +77,7 @@ function verifyNormalization(normalize: ReturnType<typeof fieldNormalization>) {
     isActive: true,
     isHidden: false,
     allowGuests: false,
+    smsRemindersEnabled: false,
     position: 0,
   })
   expect(fields.allowedDurationsMinutes).toEqual([5, 30, 60])

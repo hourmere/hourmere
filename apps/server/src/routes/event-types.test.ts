@@ -380,6 +380,8 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     )
     expect(created.status).toBe(201)
     expect(created.body).toEqual({
+      smsRemindersAvailable: false,
+      smsRemindersEnabled: false,
       id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       organizationId: user.principal.organization.id,
       ownerUserId: user.id,

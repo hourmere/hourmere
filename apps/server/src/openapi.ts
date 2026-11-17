@@ -68,6 +68,7 @@ export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware 
 export interface ServiceDeps {
   db: Db
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
+  smsRemindersAvailable?: ServiceContext['smsRemindersAvailable']
   followUpHostNotesEnabled?: ServiceContext['followUpHostNotesEnabled']
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
@@ -83,6 +84,7 @@ export function serviceContext(
     automaticMeet,
     automaticZoom,
     successRedirectPolicy,
+    smsRemindersAvailable,
     followUpHostNotesEnabled,
   }: ServiceDeps,
   principal: Principal,
@@ -94,6 +96,7 @@ export function serviceContext(
     automaticMeet,
     automaticZoom,
     successRedirectPolicy,
+    smsRemindersAvailable,
     followUpHostNotesEnabled,
   }
 }

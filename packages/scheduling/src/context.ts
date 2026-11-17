@@ -44,6 +44,8 @@ export interface ServiceContext {
   db: Db
   /** Server-generated correlation ID; never a raw header value. */
   requestId?: string | undefined
+  /** Explicit operator SMS capability; defaults off. */
+  smsRemindersAvailable?: boolean | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined
@@ -65,6 +67,7 @@ export interface ServiceContext {
 
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
+  smsRemindersAvailable?: boolean | undefined
   /** Whether trusted server configuration enables SMTP; waitlist enrollment needs mail. */
   smtpConfigured?: boolean | undefined
   db: Db

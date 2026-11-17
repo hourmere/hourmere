@@ -49,6 +49,7 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     },
     isActive: true,
     isHidden: false,
+    smsRemindersEnabled: false,
     allowGuests: false,
     position: 0,
     scheduleId: null,

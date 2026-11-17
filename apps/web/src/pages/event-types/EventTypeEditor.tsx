@@ -73,6 +73,7 @@ interface Loaded {
   profile: Profile | null
   automaticGoogleMeet: boolean
   automaticZoom: boolean
+  smsRemindersAvailable: boolean | undefined
   followUpHostNotesEnabled: boolean
 }
 
@@ -108,6 +109,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
         profile,
         automaticGoogleMeet: instance.automaticGoogleMeet === true,
         automaticZoom: instance.automaticZoom === true,
+        smsRemindersAvailable: instance.smsRemindersAvailable,
         followUpHostNotesEnabled: instance.followUpHostNotesEnabled === true,
       }
     },
@@ -150,6 +152,7 @@ function EventTypeForm({
   profile,
   automaticGoogleMeet,
   automaticZoom,
+  smsRemindersAvailable,
   followUpHostNotesEnabled,
 }: Loaded) {
   const { t, text, ui, uiText, locale: displayLocale } = useI18n()
@@ -958,6 +961,23 @@ function EventTypeForm({
             />
           </SettingsGroup>
           <SettingsGroup label="Reminders and follow-ups" initiallyOpen={changed('notifications')}>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={draft.smsRemindersEnabled}
+                onChange={(e) => set('smsRemindersEnabled', e.target.checked)}
+              />
+              {t('SMS reminders')}
+            </label>
+            <p className="hint">
+              {t(
+                smsRemindersAvailable === true
+                  ? 'SMS reminders are available for invitees who consent. Sender and carrier charges are managed by your operator.'
+                  : smsRemindersAvailable === false
+                    ? 'SMS reminders are not configured on this instance.'
+                    : 'SMS availability is unknown.',
+              )}
+            </p>
             <NotificationsEditor
               notifications={draft.notifications}
               errors={errors}

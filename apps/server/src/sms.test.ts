@@ -14,9 +14,12 @@ const db = new Proxy({} as Db, {
 })
 
 describe('SMS server wiring', () => {
-  it('fails closed without database or network access and schedules only retention when unconfigured', async () => {
+  it('fails closed without database or network access and keeps workers registered when unconfigured', async () => {
     const config = loadConfig(base)
-    expect(configuredSmsJobs(config, db).map((job) => job.name)).toEqual(['sms-retention'])
+    expect(configuredSmsJobs(config, db).map((job) => job.name)).toEqual([
+      'sms-retention',
+      'booking-sms-reminder',
+    ])
     await expect(
       createConfiguredSmsService(config, db).sendSms({
         to: '+12025550123',
@@ -26,7 +29,7 @@ describe('SMS server wiring', () => {
       }),
     ).rejects.toMatchObject({ code: 'sms_not_configured' })
   })
-  it('schedules only retention when configured, without making a provider request', () => {
+  it('registers retention and reminder workers when configured, without making a provider request', () => {
     const config = loadConfig({
       ...base,
       SMS_PROVIDER: 'twilio',
@@ -36,7 +39,7 @@ describe('SMS server wiring', () => {
       SMS_HASH_KEY: Buffer.alloc(32, 3).toString('base64'),
     })
     expect(createConfiguredSmsService(config, db).sendSms).toBeTypeOf('function')
-    expect(configuredSmsJobs(config, db)).toHaveLength(1)
+    expect(configuredSmsJobs(config, db)).toHaveLength(2)
     expect(configuredSmsJobs(config, db)[0]).toMatchObject({ name: 'sms-retention' })
   })
 })
@@ -54,10 +57,14 @@ async function assertDisabledRetention(factory: typeof configuredSmsJobs) {
         decode(repeat('03',32),'hex'),'+****23','00000000-0000-4000-8000-000000000001',
         'SMsynthetic','accepted',clock_timestamp()-interval '721 hours')`)
     const jobs = factory(config, createDb(owned.pool))
-    expect(jobs.map((job) => job.name)).toEqual(['sms-retention'])
-    for (const job of jobs) {
+    expect(jobs.map((job) => job.name)).toEqual(['sms-retention', 'booking-sms-reminder'])
+    for (const job of jobs.filter((job) => job.name === 'sms-retention')) {
       expect(job.schedule).toEqual({ cron: '23 * * * *', payload: {} })
-      await job.handler({}, { id: 'synthetic', attempt: 1, signal: new AbortController().signal })
+      await job.handler({} as never, {
+        id: 'synthetic',
+        attempt: 1,
+        signal: new AbortController().signal,
+      })
     }
     expect(
       (
@@ -86,10 +93,10 @@ describe.skipIf(!process.env.DATABASE_URL)('disabled SMS retention', () => {
 
   it('detects a source-copy mutation that disables retention with SMS', async () => {
     const source = readFileSync(new URL('./sms.ts', import.meta.url), 'utf8')
-    const protection = 'return [smsRetentionJob({ db })]'
+    const protection = 'smsRetentionJob({ db })'
     expect(source).toContain(protection)
     const javascript = stripTypeScriptTypes(
-      source.replace(protection, 'return _config.SMS_PROVIDER ? [smsRetentionJob({ db })] : []'),
+      source.replace(protection, '...(config.SMS_PROVIDER ? [smsRetentionJob({ db })] : [])'),
     ).replace(
       /from '([^']+)'/g,
       (_, specifier: string) => `from '${import.meta.resolve(specifier)}'`,

@@ -29,6 +29,7 @@ const Instance = z
     termsUrl: z.url().optional().openapi({
       description: "This instance operator's terms; absent when not configured",
     }),
+    smsRemindersAvailable: z.boolean().optional(),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
     scimProvisioningEnabled: z.boolean().optional().openapi({
@@ -77,6 +78,7 @@ const Instance = z
 export function instanceRoutes({
   publicUrl,
   socialProviders,
+  smsRemindersAvailable = false,
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
@@ -91,6 +93,7 @@ export function instanceRoutes({
   termsUrl,
 }: {
   /** The normalized PUBLIC_URL, independent of request or forwarded host headers. */
+  smsRemindersAvailable?: boolean | undefined
   publicUrl: string
   /** The configured sign-in providers (config.socialProviders); only their presence counts. */
   socialProviders: { google?: unknown; microsoft?: unknown }
@@ -114,6 +117,7 @@ export function instanceRoutes({
     hostedSignupUrl,
     ...(privacyPolicyUrl && { privacyPolicyUrl }),
     ...(termsUrl && { termsUrl }),
+    smsRemindersAvailable,
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     followUpHostNotesEnabled,

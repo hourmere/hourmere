@@ -349,7 +349,6 @@ rejected. These operations remain unavailable (`workflows_disabled`).
 修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
 登记或执行记录。暂不支持 webhook 动作；功能仍关闭，返回 `workflows_disabled`。
 
-
 `delete_workflow` / `workflows delete` requires `full` scope and accepts `id` and
 `expectedRevision`. REST uses `DELETE /api/v1/workflows/{id}` with only
 `expectedRevision` in its JSON body and returns `204`; MCP/CLI return `{ "deleted": true }`.
@@ -366,3 +365,13 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+## SMS reminders
+
+`create_event_type` and `update_event_type` accept `smsRemindersEnabled`; event reads
+report the saved setting and `smsRemindersAvailable` operator capability. Full API-key
+scope and the usual owner/admin permissions are required for configuration.
+`create_booking` accepts `inviteePhone` and explicit `smsConsent` for the invitee. CLI
+`create-event`, `update-event` and `book` expose the same JSON inputs. See
+[SMS reminders and opt-out](https://hourmere.com/docs/sms-provider) for consent, provider
+configuration, signed STOP handling and limitations.

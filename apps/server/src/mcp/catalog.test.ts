@@ -575,6 +575,7 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
         'schedulingType',
         'isActive',
         'isHidden',
+        'smsRemindersEnabled',
         'allowGuests',
         'position',
       ].sort(),

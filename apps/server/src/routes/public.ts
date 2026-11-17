@@ -81,6 +81,7 @@ export const PublicEventType = z
         description:
           'Ordered location choices; private host details are disclosed only after booking.',
       }),
+    smsRemindersEnabled: z.boolean(),
     allowGuests: z.boolean().openapi({ description: 'Whether invitees may add guest recipients' }),
     allowEmbedParentRedirect: z.boolean().optional().openapi({
       description:
@@ -160,6 +161,9 @@ export const CreateBooking = z
       description:
         'An id from the public event locations. Omission selects the default or first option.',
     }),
+    smsConsent: z.boolean().optional().openapi({
+      description: 'Explicit invitee consent to SMS booking reminders. Requires inviteePhone.',
+    }),
     inviteePhone: z.string().optional().openapi({
       description:
         'Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation.',
@@ -232,6 +236,7 @@ export interface PublicRoutesDeps {
   publicUrl?: string | undefined
   successRedirectPolicy?: PublicContext['successRedirectPolicy']
   automaticMeet?: boolean | undefined
+  smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the booking's transaction; none are sent without it. */
@@ -249,6 +254,7 @@ export function publicRoutes({
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
+  smsRemindersAvailable,
   automaticZoom,
   successRedirectPolicy,
   waitlistSecret,
@@ -261,6 +267,7 @@ export function publicRoutes({
     now,
     notify,
     automaticMeet,
+    smsRemindersAvailable,
     automaticZoom,
     successRedirectPolicy,
     waitlistSecret,
@@ -491,6 +498,7 @@ export function publicRoutes({
               durationMinutes: body.durationMinutes,
               locationOptionId: body.locationOptionId,
               inviteePhone: body.inviteePhone,
+              smsConsent: body.smsConsent,
               invitee: body.invitee,
               guests: body.guests,
               responses: body.responses,

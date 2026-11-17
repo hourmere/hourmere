@@ -32,6 +32,7 @@ describe('operator SMS configuration', () => {
           ...configured,
           HOURMERE_ROLE,
           TWILIO_AUTH_TOKEN: '',
+          TWILIO_WEBHOOK_AUTH_TOKEN: 'synthetic-auth-token',
           TWILIO_FROM: '',
           TWILIO_API_KEY_SID: `SK${'2'.repeat(32)}`,
           TWILIO_API_KEY_SECRET: 'synthetic-api-key-secret',
@@ -49,6 +50,14 @@ describe('operator SMS configuration', () => {
       'SMS_HASH_KEY',
     ])
       expect(() => loadConfig({ ...configured, [key]: '' })).toThrow(/SMS/)
+    expect(() =>
+      loadConfig({
+        ...configured,
+        TWILIO_AUTH_TOKEN: '',
+        TWILIO_API_KEY_SID: `SK${'2'.repeat(32)}`,
+        TWILIO_API_KEY_SECRET: 'synthetic-api-key-secret',
+      }),
+    ).toThrow(/signed inbound/)
     for (const extra of [
       { TWILIO_API_KEY_SID: `SK${'2'.repeat(32)}` },
       {
@@ -64,6 +73,7 @@ describe('operator SMS configuration', () => {
       'SMS_PROVIDER',
       'TWILIO_ACCOUNT_SID',
       'TWILIO_AUTH_TOKEN',
+      'TWILIO_WEBHOOK_AUTH_TOKEN',
       'TWILIO_API_KEY_SID',
       'TWILIO_API_KEY_SECRET',
       'TWILIO_MESSAGING_SERVICE_SID',
@@ -93,13 +103,23 @@ describe('operator SMS configuration', () => {
   it('reads SMS secret files and rejects conflicts, empty or unreadable files privately', () => {
     const directory = mkdtempSync(join(tmpdir(), 'hourmere-sms-config-'))
     try {
-      for (const name of ['TWILIO_AUTH_TOKEN', 'TWILIO_API_KEY_SECRET', 'SMS_HASH_KEY']) {
+      for (const name of [
+        'TWILIO_AUTH_TOKEN',
+        'TWILIO_WEBHOOK_AUTH_TOKEN',
+        'TWILIO_API_KEY_SECRET',
+        'SMS_HASH_KEY',
+      ]) {
         const file = join(directory, name)
         const value = name === 'SMS_HASH_KEY' ? configured.SMS_HASH_KEY : 'synthetic-file-secret'
         writeFileSync(file, `${value}\n`)
         const env =
           name === 'TWILIO_API_KEY_SECRET'
-            ? { ...configured, TWILIO_AUTH_TOKEN: '', TWILIO_API_KEY_SID: `SK${'2'.repeat(32)}` }
+            ? {
+                ...configured,
+                TWILIO_AUTH_TOKEN: '',
+                TWILIO_WEBHOOK_AUTH_TOKEN: 'synthetic-auth-token',
+                TWILIO_API_KEY_SID: `SK${'2'.repeat(32)}`,
+              }
             : configured
         expect(
           loadConfig({ ...env, [name]: '', [`${name}_FILE`]: file })[name as 'SMS_HASH_KEY'],

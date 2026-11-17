@@ -290,6 +290,8 @@ export interface BookingAttendees {
   name: string;
   no_show_marked_at: Timestamp | null;
   no_show_marked_by: string | null;
+  sms_consent: Generated<boolean>;
+  sms_phone: string | null;
   time_zone: string;
 }
 
@@ -467,6 +469,7 @@ export interface Bookings {
   reschedule_cutoff_minutes: number | null;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
+  sms_reminders_enabled: Generated<boolean>;
   source: string;
   start_at: Timestamp;
   status: Generated<string>;
@@ -624,6 +627,7 @@ export interface EventTypes {
   scheduling_type: Generated<string>;
   slot_step_minutes: number | null;
   slug: string;
+  sms_reminders_enabled: Generated<boolean>;
   success_redirect: Json | null;
   title: string;
   updated_at: Generated<Timestamp>;
@@ -1233,6 +1237,14 @@ export interface SmsDeliveries {
   updated_at: Generated<Timestamp>;
 }
 
+export interface SmsInboundReceipts {
+  key_hash: Buffer;
+}
+
+export interface SmsSuppressions {
+  recipient_hash: Buffer;
+}
+
 export interface SsoAttempts {
   browser_binding_digest: string;
   consumed_at: Timestamp | null;
@@ -1739,6 +1751,8 @@ export interface DB {
   scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
   sms_deliveries: SmsDeliveries;
+  sms_inbound_receipts: SmsInboundReceipts;
+  sms_suppressions: SmsSuppressions;
   sso_attempts: SsoAttempts;
   sso_browser_proofs: SsoBrowserProofs;
   sso_delegation_bindings: SsoDelegationBindings;

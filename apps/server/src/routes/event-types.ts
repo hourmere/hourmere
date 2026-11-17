@@ -397,6 +397,9 @@ const fields = {
   }),
   location: Location,
   locations: Locations,
+  smsRemindersEnabled: z.boolean().openapi({
+    description: 'Enable SMS reminders for consenting invitees when the operator configures SMS.',
+  }),
   allowGuests: z.boolean().openapi({
     description:
       'Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved',
@@ -432,6 +435,7 @@ export const EventType = z
     conferenceOrganizer: z.object({ userId: z.uuid() }).nullable(),
     zoomConnectionId: z.uuid().nullable().optional(),
     questions: z.array(Question),
+    smsRemindersAvailable: z.boolean().optional(),
     notifications: NotificationSettings,
     waitlist: WaitlistSettings,
     successRedirect: SuccessRedirect.optional(),
@@ -471,6 +475,7 @@ export const EventTypeInput = z
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
+    smsRemindersEnabled: fields.smsRemindersEnabled.optional(),
     allowGuests: fields.allowGuests.optional().openapi({ default: false }),
     position: fields.position.optional().openapi({ default: 0 }),
     scheduleId: fields.scheduleId.optional(),
@@ -509,6 +514,7 @@ export const EventTypeUpdate = z
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
+    smsRemindersEnabled: fields.smsRemindersEnabled.optional(),
     allowGuests: fields.allowGuests.optional(),
     position: fields.position.optional(),
     scheduleId: fields.scheduleId.optional(),

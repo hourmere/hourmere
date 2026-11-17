@@ -232,6 +232,7 @@ export interface BookingToolsDeps {
   /** Queues the booking emails in the transaction of each change, as for REST. */
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
+  smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
   /**
    * Per-user limits for discovery, booking and both reschedule modes; defaults to the public
@@ -256,6 +257,7 @@ export function bookingTools({
   notify,
   notifyAttendeeNoShow,
   automaticMeet,
+  smsRemindersAvailable,
   automaticZoom,
   rateLimits = {},
 }: BookingToolsDeps): Tool[] {
@@ -266,6 +268,7 @@ export function bookingTools({
     now,
     notify,
     automaticMeet,
+    smsRemindersAvailable,
     automaticZoom,
     bookingMaxInviteeReschedules,
   }
@@ -276,6 +279,7 @@ export function bookingTools({
     now,
     notify,
     automaticMeet,
+    smsRemindersAvailable,
     automaticZoom,
   })
   const origin = (caller: McpCaller): BookingOrigin => ({
@@ -396,6 +400,7 @@ export function bookingTools({
             durationMinutes: args.durationMinutes,
             locationOptionId: args.locationOptionId,
             inviteePhone: args.inviteePhone,
+            smsConsent: args.smsConsent,
             invitee: args.invitee,
             guests: args.guests,
             responses: args.responses,
@@ -415,6 +420,7 @@ export function bookingTools({
           durationMinutes: args.durationMinutes,
           locationOptionId: args.locationOptionId,
           inviteePhone: args.inviteePhone,
+          smsConsent: args.smsConsent,
           invitee: args.invitee,
           guests: args.guests,
           responses: args.responses,

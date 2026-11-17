@@ -1,5 +1,10 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'SMS reminders': '短信提醒',
+  'SMS reminders are available for invitees who consent. Sender and carrier charges are managed by your operator.':
+    '已同意的受邀者可接收短信提醒。发件人和运营商费用由实例运营者管理。',
+  'SMS reminders are not configured on this instance.': '此实例尚未配置短信提醒。',
+  'SMS availability is unknown.': '短信可用状态未知。',
   'Stored value: {value} {unit}.': '存储值：{value} {unit}。',
   'Default duration presets': '默认时长快捷选项',
   'Custom duration': '自定义时长',

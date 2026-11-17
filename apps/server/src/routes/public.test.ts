@@ -85,6 +85,90 @@ describe.skipIf(!serverUrl)('public routes', () => {
   const book = (start: string, more: Record<string, unknown> = {}, headers = {}) =>
     post('/api/v1/public/ada/intro/bookings', bookingRequest(start, more), headers)
 
+  it('validates SMS numbers, requires explicit consent and preserves private consent on moves', async () => {
+    const host = await f.host({ handle: `sms-${randomUUID().slice(0, 8)}` })
+    await f.schedule(host.userId)
+    const event = await f.eventType(host.organizationId, host.userId, { slug: 'sms' })
+    await db
+      .updateTable('event_types')
+      .set({ sms_reminders_enabled: true })
+      .where('id', '=', event)
+      .execute()
+    const smsApp = createApp({
+      ...noAuth,
+      routes: [publicRoutes({ db, now: () => NOW, smsRemindersAvailable: true })],
+    })
+    const path = `/api/v1/public/${host.handle}/sms`
+    const input = {
+      start: '2026-11-02T09:00:00Z',
+      invitee: { name: 'Visitor', email: 'sms@example.com', timeZone: 'UTC' },
+    }
+    for (const inviteePhone of [undefined, '123', '+1234567']) {
+      const response = await post(`${path}/bookings`, { ...input, smsConsent: true, inviteePhone })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error: 'invalid_invitee_phone' })
+    }
+    const response = await post(
+      `${path}/bookings`,
+      {
+        ...input,
+        smsConsent: true,
+        inviteePhone: '+1 (415) 555-0123',
+      },
+      {},
+      smsApp,
+    )
+    expect(response.status).toBe(201)
+    const created = (await response.json()) as BookingBody
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('sms_reminders_enabled')
+        .where('id', '=', created.booking.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ sms_reminders_enabled: true })
+    expect(JSON.stringify(created)).not.toContain('smsPhone')
+    expect(JSON.stringify(created)).not.toContain('+14155550123')
+    expect(
+      await db
+        .selectFrom('booking_attendees')
+        .select(['sms_phone', 'sms_consent'])
+        .where('booking_id', '=', created.booking.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ sms_phone: '+14155550123', sms_consent: true })
+    const move = await post(
+      '/api/v1/bookings/manage/reschedule',
+      { start: '2026-11-03T09:00:00Z' },
+      { 'x-manage-token': created.manageToken as string },
+    )
+    expect(move.status).toBe(200)
+    const moved = (await move.json()) as BookingBody
+    expect(
+      await db
+        .selectFrom('booking_attendees')
+        .select(['sms_phone', 'sms_consent'])
+        .where('booking_id', '=', moved.booking.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ sms_phone: '+14155550123', sms_consent: true })
+    const noConsent = await post(`${path}/bookings`, { ...input, inviteePhone: '+14155550123' })
+    expect(noConsent.status).toBe(201)
+    const plain = (await noConsent.json()) as BookingBody
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('sms_reminders_enabled')
+        .where('id', '=', plain.booking.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ sms_reminders_enabled: false })
+    expect(
+      await db
+        .selectFrom('booking_attendees')
+        .select(['sms_phone', 'sms_consent'])
+        .where('booking_id', '=', plain.booking.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ sms_phone: null, sms_consent: false })
+  })
+
   it('books the selected phone option and rejects missing or invalid collected numbers', async () => {
     const host = await f.host({ handle: `choice-${randomUUID().slice(0, 8)}` })
     await f.schedule(host.userId)
@@ -133,6 +217,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
     const res = await get('/api/v1/public/ada/intro')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
+      smsRemindersEnabled: false,
       handle: 'ada',
       slug: 'intro',
       allowGuests: true,

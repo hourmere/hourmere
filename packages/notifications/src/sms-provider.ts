@@ -1,4 +1,4 @@
-import { PHONE_NUMBER_PATTERN } from '@hourmere/scheduling'
+import { PHONE_NUMBER_PATTERN } from '@hourmere/core'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 
 export type SmsErrorCode =
@@ -9,6 +9,8 @@ export type SmsErrorCode =
   | 'sms_idempotency_conflict'
   | 'sms_provider_rejected'
   | 'sms_timeout'
+  | 'sms_opted_out'
+  | 'sms_suppressed'
 
 /** Safe diagnostics only: never attach request/response bodies, phones or causes. */
 export class SmsError extends Error {
