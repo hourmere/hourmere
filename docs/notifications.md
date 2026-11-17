@@ -11,13 +11,3 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
-
-Offline SSO domain retirement durably records notices for the retired claim's team owners.
-The maintenance command sends them through configured SMTP; failed delivery can be retried
-with its `notify` operation. Recipients must still be verified owners when delivery runs.
-There is no notice to the requesting team or caller-supplied mailbox, and periodic
-recheck failures do not send mail. See the [operator runbook](sso.md#domain-lifecycle-operations).
-
-SSO 域名运维退役会为旧声明团队的所有者保存通知，并通过已配置的 SMTP 发送；失败后可用
-`notify` 重试。发送时仍须是邮箱已验证的所有者。不会向请求团队或调用者指定的地址发送，
-定期复查失败也不发送邮件。
