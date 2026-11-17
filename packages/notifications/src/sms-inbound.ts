@@ -81,7 +81,9 @@ export function createSmsInboundHandler(deps: {
     if (
       params.get('AccountSid') !== deps.accountSid ||
       !/^SM[0-9a-f]{32}$/i.test(sid) ||
-      !/^\+[1-9]\d{7,14}$/.test(phone) ||
+      // Same range as the stored numbers (PHONE_NUMBER_PATTERN in @hourmere/core): some valid mobile
+      // numbers have seven digits, and their STOP must not be dropped.
+      !/^\+[1-9]\d{6,14}$/.test(phone) ||
       (deps.from && params.get('To') !== deps.from) ||
       (deps.messagingServiceSid && params.get('MessagingServiceSid') !== deps.messagingServiceSid)
     )
