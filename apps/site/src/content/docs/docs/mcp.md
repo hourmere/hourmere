@@ -814,9 +814,10 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged. An answer to a request that expired, was
-replaced or was already resolved by a move fails with `reschedule_request_changed`, as
-does a pick after cancellation. With the request email's token, REST
+reschedule retry semantics remain unchanged. Except for that saved pick replay, an
+answer to a request that expired, was replaced or was resolved by a move fails with
+`reschedule_request_changed`, as does a pick after cancellation. Replaying a cancellation keeps its original reason even
+if a different reason is supplied. With the request email's token, REST
 `GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
 have no invitee read of a manage token.
 

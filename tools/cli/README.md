@@ -118,7 +118,58 @@ data can still be present.
 Use `reschedule` or `cancel` with `bookingId` for a booking you host, or `manageToken` for
 invitee authority. These commands act immediately and can send notifications. Calls are
 never automatically retried. After a lost booking response, inspect the instance and reuse
-the retained request and idempotency key; **rescheduling is not idempotent**.
+the retained request and idempotency key. Ordinary rescheduling is not idempotent;
+answers that include `rescheduleRequestId` have the replay contract described below.
+
+### Search and review bookings
+
+`hourmere list --input query.json` accepts `q`, `status`, `from`, `to`, `endAfter`,
+`endTo`, `order`, `limit` and `cursor`. For example:
+
+```json
+{ "q": "ada@example", "status": "cancelled", "order": "desc", "limit": 25 }
+```
+
+Only bookings you host in the key's current organization are returned, even for a team
+administrator. Omit `status` for confirmed and cancelled records; cancelled includes
+rescheduled predecessors. Ordering is by start and ID (`asc` by default). Pass
+`nextCursor` as `cursor` with all filters unchanged; each command fetches one page.
+These are live pages, not a snapshot. `from`/`to` filter starts (inclusive/exclusive);
+`endAfter`/`endTo` filter ends (exclusive/inclusive).
+
+Search matches a literal substring of the booker's name/email or current event-type title,
+not guests, notes or answers. It trims whitespace and accepts at most 100 UTF-16 code units;
+control characters are rejected. Case follows the database locale; accents are not folded.
+`%`, `_` and `\` are literal, not wildcards. Export does not accept `q`.
+
+### Ask the invitee to choose another time
+
+Save a private input file and run `hourmere request-reschedule --input request.json`:
+
+```json
+{ "bookingId": "<booking UUID>", "idempotencyKey": "<new UUID>", "note": "Could you choose another time?" }
+```
+
+A `bookings` or `full` key and actual host authority are required. The optional plain-text
+note accepts at most 2000 UTF-16 code units. Keep the identical key and input for a retry;
+a new key replaces the previous request. The confirmed booking keeps blocking its original
+time. `pendingReschedule` returns the request `id`, `expiresAt` and `note`; expiry is the
+earliest of 48 elapsed hours, the meeting start and the effective invitee change deadline.
+Expiry keeps the original booking. Requests after the deadline are refused; imported and
+group-seat bookings do not support them. Saving a request does not guarantee email delivery.
+
+When using `reschedule` or `cancel` to answer with a `manageToken`, include that request's
+`rescheduleRequestId`. Identical answer retries are safe; a replayed pick returns the same
+successor with `manageToken: null`, so retain the existing emailed link. A different picked time, opposite action or
+stale request returns `reschedule_request_changed`. Replaying a cancellation preserves
+the original reason even if the retry supplies a different reason. The CLI never retries automatically
+and has no invitee manage-token read; use the emailed page or REST to inspect request state.
+See [reschedule requests](https://hourmere.com/docs/request-reschedule) for the full contract.
+
+中文：`list` 只返回当前组织中由你主持的预约，支持部分姓名、邮箱或活动标题搜索；
+不折叠重音，不搜索同行者或备注。分页时保留全部筛选条件。`request-reschedule` 保留原预约，
+请求最迟在 48 小时、会议开始或有效改期截止时间三者中的最早时刻失效。重试发送时保留原键和正文；
+受邀人回答时传入 `rescheduleRequestId` 才具有对应的安全重放语义，CLI 不会自动重试。
 
 Imported bookings in `list` have `source: "import"` and
 `managementPolicy: "local_only_read_only"`. They keep the host busy and remain managed in
@@ -285,7 +336,8 @@ for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and 
 
 `whoami`, `profile`, `catalog`, `event`, `create-event`, `update-event`,
 `set-event-notifications`, `schedules`, `schedule`, `slots`, `open-time-snippet`, `book`, `list`, `reschedule`,
-`cancel`, `retry-meeting`, `retry-calendar-copy`.
+`cancel`, `request-reschedule`, `booking-attendees`, `set-no-show`, `retry-meeting`,
+`retry-calendar-copy`.
 
 `one-time-links create`, `one-time-links list` and `one-time-links revoke` manage private
 booking links for an `eventTypeId`. Create requires a `bookings` or `full` key and a retained random
@@ -363,7 +415,8 @@ Report bugs on [GitHub](https://github.com/hourmere/hourmere/issues).
 to mark, `false` to unmark). Read attendee IDs from authenticated booking lists.
 It requires `bookings` or `full` scope and booked-host authority in the current organization.
 Only bookings whose scheduled start has passed can be changed; cancelled and imported
-records refuse changes. Repeating the same state preserves its timestamp and actor.
+records refuse changes. Confirmed paid records are readable, but changes return
+`paid_booking_management_unavailable`. Repeating the same state preserves its timestamp and actor.
 No invitee email or manage-page indicator is added, and existing follow-ups remain scheduled.
 
 `booking-attendees` takes `{ "bookingId": "…" }` and returns attendee IDs and

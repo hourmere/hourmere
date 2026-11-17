@@ -2166,7 +2166,9 @@ remove an agreed meeting before the invitee accepts a replacement. A request the
 never promises that any alternative slot is reserved.
 
 `RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48` bounds a request's life to the earlier of 48 elapsed
-hours after creation and the original booking's start. Elapsed time makes the timeout
+hours after creation, the original booking's start and its effective invitee reschedule
+deadline (the earlier of the snapshotted reschedule and cancel deadline instants). New
+requests at or after that deadline fail with `booking_reschedule_deadline_passed`. Elapsed time makes the timeout
 unambiguous across DST changes. Expiry leaves the original booking intact and queues a host
 notice; it never cancels or moves the booking. Workers may deliver the notice later. A
 second request replaces the first; superseded jobs cannot send a new obsolete invitation.
@@ -2185,8 +2187,9 @@ the current booking without another email; changed input fails with
 `idempotency_key_reused`. Replaying an old key never replaces a newer request.
 The optional `rescheduleRequestId` on managed pick/cancel identifies the displayed request.
 The web interface submits it. A matching pick replay returns its saved successor without a
-new token; a matching cancellation replay returns the cancelled booking. A replaced,
-expired or differently answered request fails with `reschedule_request_changed`. Keep the
+new token; a cancellation replay returns the cancelled booking and preserves the original
+reason even when the retry supplies a different reason. A replaced or expired request,
+a different picked time or the opposite action fails with `reschedule_request_changed`. Keep the
 existing private email link when replay returns `manageToken: null`.
 
 Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
