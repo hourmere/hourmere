@@ -389,7 +389,7 @@ const fields = {
   ).nullable(),
   rescheduleCutoffMinutes: z.int().min(1).max(CHANGE_CUTOFF_MAX_MINUTES).nullable().openapi({
     description:
-      'Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it.',
+      "Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. The deadline is closed at the exact instant; the invitee display time zone does not change it. Authorized hosts can still move or cancel by booking ID. Non-host team owners/admins can cancel through the team browser-session route, but cannot move another host's booking.",
   }),
   cancelCutoffMinutes: z.int().min(1).max(CHANGE_CUTOFF_MAX_MINUTES).nullable().openapi({
     description:
