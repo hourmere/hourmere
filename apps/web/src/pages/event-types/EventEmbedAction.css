@@ -15,6 +15,7 @@
 }
 
 .event-actions-menu {
+  display: grid;
   position: absolute;
   right: 0;
   top: 100%;

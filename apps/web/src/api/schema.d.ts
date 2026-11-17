@@ -1121,7 +1121,7 @@ export interface paths {
         put?: never;
         /**
          * Upload and attach a logo, replacing the previous image
-         * @description Raw PNG, JPEG or WebP, at most 512 KiB and 2048 pixels per dimension; animation rejected. Decoded and re-encoded as PNG, also limited to 512 KiB. One stored image per organization.
+         * @description Raw PNG, JPEG or WebP, at most 512 KiB and 2048 pixels per dimension; animation rejected. Decoded, resized to at most 512 pixels per dimension and re-encoded as PNG at most 64 KiB; further resizing may be needed. One stored image per organization.
          */
         post: operations["uploadBrandLogo"];
         delete?: never;
@@ -1967,6 +1967,26 @@ export interface paths {
         get: operations["troubleshootAvailability"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/event-types/{id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate event type settings with a new booking link
+         * @description Copies configuration in the current organization with a unique -copy slug. Bookings, history, statistics, one-time links and round-robin activation are not copied. Requires the same permission as creation. Not idempotent; inspect the list after an uncertain response before retrying.
+         */
+        post: operations["duplicateEventType"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2875,6 +2895,23 @@ export interface paths {
          * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendPersonalWaitlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/branding/{organizationId}/logo/{hash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read an organization’s selected public logo by content hash */
+        get: operations["getPublicBrandLogo"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5452,7 +5489,7 @@ export interface components {
             /** @description Order on the page, ascending */
             position: number;
             questions: components["schemas"]["Question"][];
-            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. The deadline is closed at the exact instant; the invitee display time zone does not change it. Authorized hosts can still move or cancel by booking ID. Non-host team owners/admins can cancel through the team browser-session route, but cannot move another host's booking. */
             rescheduleCutoffMinutes: number | null;
             /** @description Explicit round-robin activation; metadata saves never enable it */
             roundRobinActive: boolean;
@@ -5642,7 +5679,7 @@ export interface components {
             position: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
-            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. The deadline is closed at the exact instant; the invitee display time zone does not change it. Authorized hosts can still move or cancel by booking ID. Non-host team owners/admins can cancel through the team browser-session route, but cannot move another host's booking. */
             rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
@@ -5877,7 +5914,7 @@ export interface components {
             position?: number;
             /** @description Extra booking-form fields */
             questions?: components["schemas"]["QuestionInput"][];
-            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it. */
+            /** @description Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. The deadline is closed at the exact instant; the invitee display time zone does not change it. Authorized hosts can still move or cancel by booking ID. Non-host team owners/admins can cancel through the team browser-session route, but cannot move another host's booking. */
             rescheduleCutoffMinutes?: number | null;
             /**
              * Format: uuid
@@ -6394,8 +6431,10 @@ export interface components {
             };
         };
         PublicBranding: {
-            /** @description Bounded normalized PNG data URL; no remote image request is needed */
+            /** @description Deprecated; always null. Use logoUrl for the cacheable PNG */
             logoDataUrl: string | null;
+            /** @description Organization-scoped content-hash PNG URL; immutable cacheable response */
+            logoUrl: string | null;
             /** @description Organization name for logo alternative text */
             name: string;
             primaryColor: string | null;
@@ -6460,12 +6499,15 @@ export interface components {
             branding?: components["schemas"]["PublicBranding"];
             /** @description Bookable event types, in the order the host arranged them */
             eventTypes: {
+                branding?: components["schemas"]["PublicBranding"];
                 description: string | null;
                 durationMinutes: number;
                 location: {
                     /** @enum {string} */
                     kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
                 } | null;
+                /** @description Owning team space name; omitted for personal event types */
+                organizationName?: string;
                 /** @description The booking page is /{handle}/{slug} */
                 slug: string;
                 title: string;
@@ -10497,6 +10539,89 @@ export interface operations {
             };
         };
     };
+    duplicateEventType: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The copied event type */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventType"];
+                };
+            };
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     setEventTypeNotifications: {
         parameters: {
             query?: never;
@@ -12074,6 +12199,38 @@ export interface operations {
             };
             /** @description Too many requests from this address (`rate_limited`); see Retry-After */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicBrandLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hash: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Normalized PNG, at most 512 pixels per dimension and 64 KiB */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description brand_logo_not_found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

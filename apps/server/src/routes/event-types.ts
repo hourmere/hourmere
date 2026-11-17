@@ -6,6 +6,7 @@ import {
   CHANGE_CUTOFF_MAX_MINUTES,
   createEventType,
   deleteEventType,
+  duplicateEventType,
   EVENT_TYPE_LIMITS,
   getEventType,
   getEventTypeWaitlist,
@@ -389,7 +390,7 @@ const fields = {
   ).nullable(),
   rescheduleCutoffMinutes: z.int().min(1).max(CHANGE_CUTOFF_MAX_MINUTES).nullable().openapi({
     description:
-      'Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. Hosts and team admins are not limited by it.',
+      "Invitee reschedule deadline: from this many minutes before the start, the invitee can no longer reschedule through their manage link (409 `booking_reschedule_deadline_passed`); null = no reschedule deadline of its own. Rescheduling also closes once the cancel deadline (cancelCutoffMinutes) has passed, so the earlier of the two applies. Elapsed minutes, so a deadline across a daylight saving change is still exactly this long before the start. Each booking keeps the value that applied when it was booked; changing it never affects existing bookings. The deadline is closed at the exact instant; the invitee display time zone does not change it. Authorized hosts can still move or cancel by booking ID. Non-host team owners/admins can cancel through the team browser-session route, but cannot move another host's booking.",
   }),
   cancelCutoffMinutes: z.int().min(1).max(CHANGE_CUTOFF_MAX_MINUTES).nullable().openapi({
     description:
@@ -820,6 +821,41 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
               writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
               c.req.valid('json'),
             ),
+          ),
+          201,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        middleware: callerWithBodyLimit(caller, 1024),
+        method: 'post',
+        path: '/api/v1/event-types/{id}/duplicate',
+        operationId: 'duplicateEventType',
+        summary: 'Duplicate event type settings with a new booking link',
+        description:
+          'Copies configuration in the current organization with a unique -copy slug. Bookings, history, statistics, one-time links and round-robin activation are not copied. Requires the same permission as creation. Not idempotent; inspect the list after an uncertain response before retrying.',
+        request: {
+          params: IdParams,
+          headers: ExpectedOrganizationHeaders,
+          body: { content: json(z.strictObject({})), required: true },
+        },
+        responses: {
+          201: { description: 'The copied event type', content: json(EventType) },
+          ...errorResponses({
+            400: invalid,
+            403: forbidden,
+            404: notFound,
+            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await duplicateEventType(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
           ),
           201,
         ),

@@ -8,6 +8,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 
 export const BRAND_LOGO_MAX_BYTES = 512 * 1024
+export const BRAND_LOGO_OUTPUT_MAX_BYTES = 64 * 1024
 export const BrandingUpdateInput = z.strictObject({
   brandLogo: z
     .string()
@@ -36,11 +37,7 @@ const invalidLogo = () =>
     'Choose a non-animated PNG, JPEG or WebP image up to 2048 pixels on each side',
   )
 const tooLarge = () =>
-  new DomainError(
-    'invalid',
-    'brand_logo_too_large',
-    'The logo must be at most 512 KB before and after conversion',
-  )
+  new DomainError('invalid', 'brand_logo_too_large', 'The upload must be at most 512 KiB')
 
 async function authorize(db: Db, ctx: ServiceContext, lock = false) {
   let query = db
@@ -206,9 +203,17 @@ export async function normalizeBrandLogo(data: Buffer, contentType: string) {
       (metadata.pages ?? 1) !== 1
     )
       throw invalidLogo()
-    const normalized = await image.rotate().png().toBuffer()
-    if (normalized.length > BRAND_LOGO_MAX_BYTES) throw tooLarge()
-    return normalized
+    // Progressively reduce dimensions to bound even noisy images without discarding transparency.
+    for (let size = 512; size >= 32; size = Math.floor(size / 2)) {
+      const normalized = await image
+        .clone()
+        .rotate()
+        .resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true })
+        .png({ compressionLevel: 9 })
+        .toBuffer()
+      if (normalized.length <= BRAND_LOGO_OUTPUT_MAX_BYTES) return normalized
+    }
+    throw tooLarge()
   } catch (error) {
     if (error instanceof DomainError) throw error
     throw invalidLogo()
@@ -243,20 +248,19 @@ export async function getBrandLogo(ctx: ServiceContext, hash: string) {
     .where('hash', '=', hash)
     .executeTakeFirst()
   if (!row) throw new DomainError('not_found', 'brand_logo_not_found')
-  return row.data
+  return normalizeBrandLogo(row.data, 'image/png')
 }
 
 /** Public presentation only: callers must resolve an authorized public entity first. */
 export interface PublicBranding {
   name: string
   primaryColor: string | null
-  logoDataUrl: string | null
+  /** Deprecated compatibility field. Public images are served through logoUrl. */
+  logoDataUrl: null
+  logoUrl: string | null
 }
 
-export async function getPublicBranding(
-  db: Db,
-  organizationId: string,
-): Promise<PublicBranding | undefined> {
+async function readBranding(db: Db, organizationId: string) {
   const row = await db
     .selectFrom('organization_branding as b')
     .innerJoin('auth.organization as o', 'o.id', 'b.organization_id')
@@ -284,15 +288,53 @@ export async function getPublicBranding(
     color && /^#[0-9a-fA-F]{6}$/.test(color) && brandContrast(color).buttonTextContrast >= 4.5
       ? color.toUpperCase()
       : null
-  // Only bounded, normalized PNGs stored by the upload service are public. No fetches.
-  const logoDataUrl =
-    row.data &&
-    row.data.length <= BRAND_LOGO_MAX_BYTES &&
-    row.data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-      ? `data:image/png;base64,${row.data.toString('base64')}`
-      : null
-  // A personal space's internal name can be an old name or the mailbox prefix it was created with.
-  // Publicly it carries what the person's booking pages already show: their name, else their handle.
+  // Legacy PNG rows are normalized on read, without a blocking rewrite or changing saved references.
+  let logo: Buffer | undefined
+  if (row.data) {
+    try {
+      logo = await normalizeBrandLogo(row.data, 'image/png')
+    } catch {
+      /* Corrupt images are omitted. */
+    }
+  }
+  // Never expose a personal space's internal name (which may be an email prefix).
   const name = row.personal_user_id ? row.user_name?.trim() || row.handle || '' : row.name
-  return primaryColor || logoDataUrl ? { name, primaryColor, logoDataUrl } : undefined
+  return primaryColor || logo ? { name, primaryColor, logo } : undefined
+}
+
+export async function getPublicBranding(
+  db: Db,
+  organizationId: string,
+): Promise<PublicBranding | undefined> {
+  const brand = await readBranding(db, organizationId)
+  if (!brand) return undefined
+  const hash = brand.logo ? createHash('sha256').update(brand.logo).digest('hex') : null
+  return {
+    name: brand.name,
+    primaryColor: brand.primaryColor,
+    logoDataUrl: null,
+    logoUrl: hash
+      ? `/api/v1/public/branding/${encodeURIComponent(organizationId)}/logo/${hash}`
+      : null,
+  }
+}
+
+/** Email transports keep a small CID attachment; never fetch a public or remote URL. */
+export async function getEmailBranding(db: Db, organizationId: string) {
+  const brand = await readBranding(db, organizationId)
+  return brand
+    ? {
+        name: brand.name,
+        primaryColor: brand.primaryColor,
+        logoDataUrl: brand.logo ? `data:image/png;base64,${brand.logo.toString('base64')}` : null,
+      }
+    : undefined
+}
+
+/** Hashes are content identities, not capabilities: both organization and selected image must match. */
+export async function getPublicBrandLogo(db: Db, organizationId: string, hash: string) {
+  const brand = await readBranding(db, organizationId)
+  if (!brand?.logo || createHash('sha256').update(brand.logo).digest('hex') !== hash)
+    throw new DomainError('not_found', 'brand_logo_not_found')
+  return brand.logo
 }

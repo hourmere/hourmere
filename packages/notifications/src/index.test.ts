@@ -379,7 +379,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     const own = await booked()
     const other = await booked()
     const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO1sAAAAASUVORK5CYII=',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==',
       'base64',
     )
     const hash = createHash('sha256').update(png).digest('hex')
@@ -401,7 +401,12 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       expect(mail.html).toContain('background-color: #005544;')
       expect(mail.html).not.toContain('#770033')
       expect(mail.html).toContain('src="cid:organization-logo@hourmere"')
-      expect(mail.attachments?.find((part) => part.cid)?.content).toBe(png.toString('base64'))
+      const attached = Buffer.from(
+        mail.attachments?.find((part) => part.cid)?.content as string,
+        'base64',
+      )
+      expect(attached.length).toBeLessThanOrEqual(64 * 1024)
+      expect(attached.subarray(0, 8)).toEqual(png.subarray(0, 8))
       expect(invitation(mail)?.method).toBe('REQUEST')
     }
     sent.length = 0
@@ -412,6 +417,30 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       expect(mail.html).not.toContain('#005544')
       expect(mail.html).not.toContain('cid:')
       expect(mail.attachments?.some((part) => part.cid)).toBe(false)
+    }
+  })
+
+  it('delivers explicit no-location wording without inventing a calendar location', async () => {
+    const host = await f.host({ name: 'No-location host' })
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'no-location', location: null })
+    const created = await createPublicBooking(ctx, {
+      handle: host.handle,
+      slug: 'no-location',
+      start: instant(START),
+      invitee: { name: 'Ada', email: 'ada@example.com', timeZone: 'UTC' },
+    })
+    const { mailer, sent } = testMailer()
+    await sendBookingNotification(deps(mailer), created.booking.id, 'confirmed')
+    expect(sent).toHaveLength(2)
+    for (const message of sent) {
+      expect(message.text).toContain(
+        'No location has been specified. Contact the host for meeting details.',
+      )
+      expect(message.html).toContain(
+        'No location has been specified. Contact the host for meeting details.',
+      )
+      expect(invitation(message)?.location).toBeNull()
     }
   })
 

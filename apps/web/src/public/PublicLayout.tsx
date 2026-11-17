@@ -71,11 +71,11 @@ export function CreateBookingLink() {
  */
 type PublicBrand = Schemas['PublicEventType']['branding']
 
-/** Only inline, re-encoded PNG logos are published; never introduce a remote image request. */
-function BrandLogo({ branding }: { branding: NonNullable<PublicBrand> }) {
+/** Only the same-origin organization-scoped logo endpoint is accepted. */
+export function BrandLogo({ branding }: { branding: NonNullable<PublicBrand> }) {
   const [failedImage, setFailedImage] = useState<string>()
-  const src = branding.logoDataUrl
-  if (!src || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(src)) return null
+  const src = branding.logoUrl
+  if (!src || !/^\/api\/v1\/public\/branding\/[^/?#]+\/logo\/[a-f0-9]{64}$/.test(src)) return null
   return (
     <div className="public-brand-logo">
       <img
@@ -91,6 +91,20 @@ function BrandLogo({ branding }: { branding: NonNullable<PublicBrand> }) {
   )
 }
 
+export function brandStyle(branding: PublicBrand): CSSProperties {
+  const palette = brandPalette(branding?.primaryColor)
+  const style: Record<string, string> = {}
+  if (palette) {
+    for (const mode of ['light', 'dark'] as const) {
+      for (const [role, value] of Object.entries(palette[mode])) {
+        const token = role.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
+        style[`--brand-${mode}-${token}`] = value
+      }
+    }
+  }
+  return style as CSSProperties
+}
+
 export function PublicLayout({
   children,
   wide = false,
@@ -101,15 +115,6 @@ export function PublicLayout({
   branding?: PublicBrand
 }) {
   const palette = brandPalette(branding?.primaryColor)
-  const brandStyle: Record<string, string> = {}
-  if (palette) {
-    for (const mode of ['light', 'dark'] as const) {
-      for (const [role, value] of Object.entries(palette[mode])) {
-        const token = role.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
-        brandStyle[`--brand-${mode}-${token}`] = value
-      }
-    }
-  }
   const { t, locale } = useI18n()
   // Interpolate first so Han/Latin boundary spacing also applies around the logo.
   const [beforeBrand, afterBrand] = t('Powered by {0}', { '0': 'Hourmere' }).split('Hourmere')
@@ -140,7 +145,7 @@ export function PublicLayout({
     <HostedSignupUrl value={hostedSignupUrl}>
       <div
         className={`public${embedded ? ' public-embedded' : ''}${palette ? ' public-branded' : ''}`}
-        style={brandStyle as CSSProperties}
+        style={brandStyle(branding)}
       >
         {!embedded && (
           <header className="public-language">

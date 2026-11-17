@@ -193,6 +193,7 @@ For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
 15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
 Omitted update fields keep their current values. The web editor's minute/hour/day
 selector is a display convenience; API input and output units do not change.
+Notice and buffers use elapsed minutes; a 1440-minute notice is exactly 24 hours.
 Booking windows retain calendar-day semantics in the host's schedule time zone across
 daylight saving time. See [event-type timing settings](https://hourmere.com/docs#notice-booking-window-and-buffers)
 for ranges, conversions and limitations.
@@ -256,6 +257,12 @@ instants, using the booking's snapshot; null contributes no limit from that side
 A refusal caused only by the cancel deadline still returns
 `booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
 deadline, and new requests are refused once it is reached.
+These are elapsed minutes, independent of the invitee's display time zone and daylight
+saving changes: `1440` means exactly 24 hours. With `cancelCutoffMinutes: 1440` and
+`rescheduleCutoffMinutes: 120`, both invitee actions close 24 hours before the start.
+The exact deadline instant is closed; 1 millisecond before it remains eligible, subject
+to the other booking rules. Host actions still require the caller to host the booking;
+team-admin status alone grants no extra MCP/CLI or API-key access.
 
 ## Configure an after-booking redirect
 
@@ -276,7 +283,7 @@ for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and 
 
 ## Commands
 
-`whoami`, `profile`, `catalog`, `event`, `create-event`, `update-event`,
+`whoami`, `profile`, `catalog`, `event`, `create-event`, `duplicate-event`, `update-event`,
 `set-event-notifications`, `schedules`, `schedule`, `slots`, `open-time-snippet`, `book`, `list`, `reschedule`,
 `cancel`, `retry-meeting`, `retry-calendar-copy`.
 
@@ -451,3 +458,13 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+## Duplicate an event type
+
+Save `{ "id": "EVENT_TYPE_UUID" }` in `duplicate.json`, then run
+`hourmere duplicate-event --input duplicate.json` with a `full` API key.
+The response contains the new event and its unique booking slug. It copies editable
+settings within the current space, with the same owner/admin permission as creation.
+Bookings, history, statistics and one-time links are excluded; round-robin activation
+starts off. Each successful call makes another copy. After a lost response, use `catalog`
+to check before retrying. See [event types](https://hourmere.com/docs/event-types).

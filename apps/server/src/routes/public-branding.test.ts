@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
+import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
 import { bookingRoutes } from './bookings.ts'
@@ -10,10 +11,9 @@ import { publicRoutes } from './public.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const now = () => Temporal.Instant.from('2026-11-01T00:00Z')
-const png = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4foAAAAASUVORK5CYII=',
-  'base64',
-)
+const png = await sharp({ create: { width: 1, height: 1, channels: 4, background: 'white' } })
+  .png()
+  .toBuffer()
 const hash = createHash('sha256').update(png).digest('hex')
 
 describe.skipIf(!serverUrl)('public organization branding isolation', () => {
@@ -73,7 +73,10 @@ describe.skipIf(!serverUrl)('public organization branding isolation', () => {
     const personal = await get(`${personalPath}/intro`)
     expect(personal.branding).toMatchObject({
       primaryColor: '#FFFFFF',
-      logoDataUrl: `data:image/png;base64,${png.toString('base64')}`,
+      logoDataUrl: null,
+      logoUrl: expect.stringMatching(
+        new RegExp(`^/api/v1/public/branding/${host.organizationId}/logo/[a-f0-9]{64}$`),
+      ),
     })
     expect((await get(personalPath)).branding).toEqual(personal.branding)
     const teamPath = `/api/v1/public/teams/${teamSlug}/intro`
@@ -81,6 +84,7 @@ describe.skipIf(!serverUrl)('public organization branding isolation', () => {
       name: teamSlug,
       primaryColor: '#000000',
       logoDataUrl: null,
+      logoUrl: null,
     })
     const token = randomBytes(32).toString('base64url')
     await db
@@ -111,6 +115,7 @@ describe.skipIf(!serverUrl)('public organization branding isolation', () => {
       name: teamSlug,
       primaryColor: '#000000',
       logoDataUrl: null,
+      logoUrl: null,
     })
     expect(
       (await app.request('/api/v1/bookings/manage/cancel', { method: 'POST', headers })).status,
@@ -125,6 +130,65 @@ describe.skipIf(!serverUrl)('public organization branding isolation', () => {
         .status,
     ).toBe(404)
     expect(JSON.stringify(personal)).not.toContain('#AABBCC')
+  })
+  it('serves bounded legacy images with immutable caching and uniform cross-organization misses', async () => {
+    const owner = await f.host()
+    const other = await f.host()
+    const legacy = await sharp({
+      create: { width: 1800, height: 900, channels: 3, background: '#123456' },
+    })
+      .png()
+      .toBuffer()
+    const legacyHash = createHash('sha256').update(legacy).digest('hex')
+    await db
+      .insertInto('organization_brand_logos')
+      .values({ organization_id: owner.organizationId, hash: legacyHash, data: legacy })
+      .execute()
+    await db
+      .insertInto('organization_branding')
+      .values({ organization_id: owner.organizationId, brand_logo: legacyHash })
+      .execute()
+    await f.eventType(owner.organizationId, owner.userId, { slug: 'logo' })
+    const app = appWith()
+    const page = (await (await app.request(`/api/v1/public/${owner.handle}/logo`)).json()) as {
+      branding: { logoUrl: string; logoDataUrl: null }
+    }
+    expect(page.branding.logoDataUrl).toBeNull()
+    expect(JSON.stringify(page)).not.toContain('data:image')
+    const response = await app.request(page.branding.logoUrl)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+    expect(response.headers.get('content-type')).toBe('image/png')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    const bytes = Buffer.from(await response.arrayBuffer())
+    expect(bytes.length).toBeLessThanOrEqual(64 * 1024)
+    expect(await sharp(bytes).metadata()).toMatchObject({ width: 512, height: 256 })
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    expect(page.branding.logoUrl).toContain(`/logo/${hash}`)
+    const missing = await app.request(
+      `/api/v1/public/branding/${other.organizationId}/logo/${'f'.repeat(64)}`,
+    )
+    const foreign = await app.request(
+      `/api/v1/public/branding/${other.organizationId}/logo/${hash}`,
+    )
+    expect(foreign.status).toBe(404)
+    expect(missing.status).toBe(404)
+    expect(await foreign.json()).toEqual(await missing.json())
+    expect(foreign.headers.get('cache-control')).toBe('no-store')
+    // The right organization with a wrong hash must miss too: a hit would be cached as immutable
+    // under a URL that does not match the bytes.
+    const wrongHash = await app.request(
+      `/api/v1/public/branding/${owner.organizationId}/logo/${'f'.repeat(64)}`,
+    )
+    expect(wrongHash.status).toBe(404)
+    expect(await wrongHash.json()).toEqual(
+      await (
+        await app.request(`/api/v1/public/branding/${other.organizationId}/logo/${'f'.repeat(64)}`)
+      ).json(),
+    )
+    expect(wrongHash.headers.get('cache-control')).toBe('no-store')
+    const malformed = await app.request(`/api/v1/public/branding/not-a-uuid/logo/${hash}`)
+    expect(malformed.status).toBe(400)
   })
   it('omits branding without configuration and never serves another organization’s same-hash logo', async () => {
     const host = await f.host()

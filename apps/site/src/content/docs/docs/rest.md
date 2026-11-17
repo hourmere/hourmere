@@ -88,6 +88,7 @@ For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
 15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
 Omitted update fields keep their current values. The web editor's minute/hour/day
 selector is a display convenience; API input and output units do not change.
+Notice and buffers use elapsed minutes; a 1440-minute notice is exactly 24 hours.
 Booking windows retain calendar-day semantics in the host's schedule time zone across
 daylight saving time. See [event-type timing settings](/docs#notice-booking-window-and-buffers)
 for ranges, conversions and limitations.
@@ -384,6 +385,12 @@ instants, using the booking's snapshot; null contributes no limit from that side
 A refusal caused only by the cancel deadline still returns
 `booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
 deadline, and new requests are refused once it is reached.
+These are elapsed minutes, independent of the invitee's display time zone and daylight
+saving changes: `1440` means exactly 24 hours. With `cancelCutoffMinutes: 1440` and
+`rescheduleCutoffMinutes: 120`, both invitee actions close 24 hours before the start.
+The exact deadline instant is closed; 1 millisecond before it remains eligible, subject
+to the other booking rules. Host actions still require the caller to host the booking;
+team-admin status alone grants no extra MCP/CLI or API-key access.
 
 ## Record attendee no-shows
 
@@ -402,3 +409,11 @@ See [booking waitlists](/docs/booking-waitlist) for host settings, entry managem
 invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
 Nothing is reserved: every eligible invitee can be notified and the first successful
 ordinary booking wins.
+
+## Duplicate an event type
+
+Send `POST /api/v1/event-types/{id}/duplicate` with an empty JSON object and a `full`
+API key. The HTTP 201 response is the newly created event, with its own unique booking
+slug. The same owner/admin and configuration checks as creation apply. The copy stays
+in the current organization. See [event types](/docs/event-types) for copied settings,
+excluded history and links, and retry behavior. Existing create defaults are unchanged.

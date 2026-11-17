@@ -38,7 +38,9 @@ describe.each(['en', 'zh-CN'] as const)('location options editor in %s', (langua
       'zoom',
     )
     await user.click(screen.getByRole('button', { name: t('Add location option') }))
-    expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
+    // The create form looks up connected services once to pick its default location; adding
+    // a Zoom option must not fetch them again.
+    expect(api.to('GET /api/v1/conference-connections')).toHaveLength(1)
     await user.click(
       screen.getByRole('checkbox', { name: t('Create a unique Zoom meeting for each booking') }),
     )

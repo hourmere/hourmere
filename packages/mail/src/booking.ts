@@ -618,6 +618,10 @@ export function bookingEmail(
         ? singleLine(location.label ?? '') || t('Online meeting')
         : locationForText(location, language)
     fields.push(field(t('Where'), locationText))
+  } else if (kind !== 'conference_failed') {
+    fields.push(
+      field(t('Where'), t('No location has been specified. Contact the host for meeting details.')),
+    )
   }
   if (isHost) {
     fields.push(field(t('Invitee'), `${invitee} <${singleLine(meeting.inviteeEmail)}>`))

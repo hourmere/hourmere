@@ -768,6 +768,31 @@ export const test = base.extend<{
         },
         auditState: async () => {
           if (auditState) return auditState
+          // Every public audit state exercises a real scoped logo and theme palette.
+          // The registry runs these fixtures in both light and dark modes.
+          const auditLogo = Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAGAAAAAgCAYAAADtwH1UAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAiklEQVRoge2VQQEEQQyD1hAKT8NozsngUR4xAE36/XgrT2PwBf+pB5gAEjAbQg3AB9EEcTP9ABIwG0INwAfRBHEz/QASMBtCDcAH0QRxM/0AEjAbQg3AB9EEcTP9ABIwG0INwAfRBHEz/QASMBtCDcAH0QRxM/0AEjAbQg3AB9EEcTP9ABIwG4KZP+/gcYfEh5rLAAAAAElFTkSuQmCC',
+            'base64',
+          )
+          const auditLogoHash = createHash('sha256').update(auditLogo).digest('hex')
+          for (const organizationId of [host.organizationId, team]) {
+            await db
+              .insertInto('organization_brand_logos')
+              .values({
+                organization_id: organizationId,
+                hash: auditLogoHash,
+                data: auditLogo,
+              })
+              .execute()
+            await db
+              .insertInto('organization_branding')
+              .values({
+                organization_id: organizationId,
+                brand_logo: auditLogoHash,
+                brand_primary_color: organizationId === team ? '#006B54' : '#7B2D8D',
+              })
+              .execute()
+          }
           const eventTypeId = await f.eventType(host.organizationId, host.userId, {
             slug: 'layout-audit',
             title: AUDIT_TITLE,

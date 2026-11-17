@@ -123,6 +123,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `get_schedule` | — | `schedule` | `full, read` |
 | `get_schedule_availability` | — | `schedule-availability` | `full, read` |
 | `save_schedule_availability` | — | `save-availability` | `full` |
+| `duplicate_event_type` | — | `duplicate-event` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
@@ -218,6 +219,7 @@ For example, `{"minimumNoticeMinutes": 120, "bufferBeforeMinutes": 15,
 15-minute buffer before, a 30-minute buffer after, and a 14-day booking window.
 Omitted update fields keep their current values. The web editor's minute/hour/day
 selector is a display convenience; API input and output units do not change.
+Notice and buffers use elapsed minutes; a 1440-minute notice is exactly 24 hours.
 Booking windows retain calendar-day semantics in the host's schedule time zone across
 daylight saving time. See [event-type timing settings](/docs#notice-booking-window-and-buffers)
 for ranges, conversions and limitations.
@@ -575,6 +577,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `get_profile` | Your booking-page handle, time zone and language | read-only |
 | `list_event_types` | Compact, paginated summaries of visible event types in the key's organization | read-only |
 | `get_event_type` | One visible event type's full configuration | read-only |
+| `duplicate_event_type` | Copies editable settings to a new unique booking link | — |
 | `create_event_type` | Creates an event type, including the default and allowed meeting lengths | — |
 | `update_event_type` | Changes an event type by `id`, including the default and allowed meeting lengths | destructive, idempotent |
 | `list_schedules` | Compact, paginated summaries of your working-hours schedules | read-only |
@@ -858,6 +861,12 @@ instants, using the booking's snapshot; null contributes no limit from that side
 A refusal caused only by the cancel deadline still returns
 `booking_reschedule_deadline_passed`. Reschedule requests expire at this effective
 deadline, and new requests are refused once it is reached.
+These are elapsed minutes, independent of the invitee's display time zone and daylight
+saving changes: `1440` means exactly 24 hours. With `cancelCutoffMinutes: 1440` and
+`rescheduleCutoffMinutes: 120`, both invitee actions close 24 hours before the start.
+The exact deadline instant is closed; 1 millisecond before it remains eligible, subject
+to the other booking rules. Host actions still require the caller to host the booking;
+team-admin status alone grants no extra MCP/CLI or API-key access.
 
 ## Attendee attendance access
 
@@ -907,3 +916,13 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+## Duplicate an event type
+
+Call `duplicate_event_type` with `{ "id": "EVENT_TYPE_UUID" }` and a `full` API key.
+It copies editable settings in the current organization and returns a new event with a
+unique `-copy` / `-copy-N` slug. Existing owner/admin and creation checks apply.
+Bookings, history, statistics and one-time links are not copied; round-robin activation
+starts off. Each successful call creates a new copy, so inspect the catalog after an
+uncertain response before retrying. See [event types](https://hourmere.com/docs/event-types)
+for copied settings and limitations.

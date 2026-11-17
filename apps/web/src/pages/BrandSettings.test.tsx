@@ -1,3 +1,4 @@
+import { brandColorContrast, brandPalette } from '@hourmere/core/brand-contrast'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
@@ -31,6 +32,83 @@ async function open() {
 }
 
 describe('branding settings', () => {
+  it('previews unsaved colours with readable light and dark booking samples', async () => {
+    const api = fakeApi({ ...signedInAs(ME), ...profile(), [READ]: () => json(200, BRAND) })
+    const form = await open()
+    for (const colour of ['#777777', '#FFFF00', '#000000']) {
+      fireEvent.change(within(form).getByLabelText('Primary colour'), { target: { value: colour } })
+      const palette = brandPalette(colour)
+      if (!palette) throw new Error('Expected a valid palette')
+      for (const mode of ['light', 'dark'] as const) {
+        const region = within(form).getByRole('region', {
+          name: mode === 'light' ? 'Light preview' : 'Dark preview',
+        })
+        const theme = palette[mode]
+        expect(region.getAttribute('data-brand-preview')).toBe(mode)
+        expect(within(region).getByText('Sample introduction call')).toBeDefined()
+        expect(within(region).getByText(`Displayed accent: ${theme.accent}`)).toBeDefined()
+        expect(
+          within(region).getByText(
+            `Button text contrast: ${brandColorContrast(theme.accent, theme.accentText).toFixed(2)}:1 (minimum 4.5:1).`,
+          ),
+        ).toBeDefined()
+        expect(brandColorContrast(theme.accent, theme.accentText)).toBeGreaterThanOrEqual(4.5)
+        expect(
+          brandColorContrast(theme.link, mode === 'light' ? '#FFFFFF' : '#0E1015'),
+        ).toBeGreaterThanOrEqual(4.5)
+        expect(within(region).getByText('Confirm booking').style.background).not.toBe('')
+      }
+    }
+    expect(api.to(WRITE)).toHaveLength(0)
+    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(within(form).getByRole('region', { name: '浅色预览' })).toBeDefined()
+    expect(within(form).getByRole('region', { name: '深色预览' })).toBeDefined()
+    expect(within(form).getByText(/最长边不超过 512 像素/)).toBeDefined()
+  })
+
+  it('previews a selected logo in both themes before upload and removes it locally', async () => {
+    const api = fakeApi({ ...signedInAs(ME), ...profile(), [READ]: () => json(200, BRAND) })
+    const form = await open()
+    fireEvent.change(within(form).getByLabelText('Brand logo'), {
+      target: { files: [new File(['sample'], 'logo.png', { type: 'image/png' })] },
+    })
+    for (const name of ['Light preview', 'Dark preview']) {
+      const region = within(form).getByRole('region', { name })
+      await waitFor(() =>
+        expect(region.querySelector('img')?.getAttribute('src')).toBe(
+          'data:image/png;base64,c2FtcGxl',
+        ),
+      )
+    }
+    expect(api.to(UPLOAD)).toHaveLength(0)
+    await userEvent.click(within(form).getByRole('button', { name: 'Remove logo' }))
+    await waitFor(() => expect(form.querySelectorAll('[data-brand-preview] img')).toHaveLength(0))
+    expect(api.to(UPLOAD)).toHaveLength(0)
+    expect(api.to(WRITE)).toHaveLength(0)
+  })
+
+  it('stages reset to defaults and only clears persisted settings on save', async () => {
+    const hash = 'c'.repeat(64)
+    const api = fakeApi({
+      ...signedInAs(ME),
+      ...profile(),
+      [READ]: () => json(200, { ...BRAND, brandLogo: hash }),
+      [`GET /api/v1/branding/logo/${hash}`]: () => new Response(new Uint8Array([1, 2, 3])),
+      [WRITE]: ({ body }) => json(200, { ...BRAND, ...(body as object) }),
+    })
+    const form = await open()
+    await within(form).findByAltText('Saved brand logo')
+    await userEvent.click(within(form).getByRole('button', { name: 'Reset to default' }))
+    expect((within(form).getByLabelText('Primary colour') as HTMLInputElement).value).toBe('')
+    await waitFor(() => expect(within(form).queryByAltText('Saved brand logo')).toBeNull())
+    expect(within(form).getByText('Displayed accent: #1F4FD8')).toBeDefined()
+    expect(within(form).getByText('Displayed accent: #3D68E6')).toBeDefined()
+    expect(api.to(WRITE)).toHaveLength(0)
+    await userEvent.click(within(form).getByRole('button', { name: 'Save branding' }))
+    await within(form).findByText('Branding saved.')
+    expect(api.to(WRITE)[0]?.body).toEqual({ brandLogo: null, brandPrimaryColor: null })
+  })
+
   it('saves colour with the opening space and displays readable text choice and informational contrast', async () => {
     const api = fakeApi({
       ...signedInAs(ME),
@@ -69,7 +147,7 @@ describe('branding settings', () => {
     ]) {
       fireEvent.change(within(form).getByLabelText('Brand logo'), { target: { files: [file] } })
       await userEvent.click(within(form).getByRole('button', { name: 'Save branding' }))
-      expect(within(form).getByRole('alert').textContent).toContain('up to 512 KB')
+      expect(within(form).getByRole('alert').textContent).toContain('up to 512 KiB')
     }
     expect(api.to(WRITE)).toHaveLength(0)
     expect(api.to(UPLOAD)).toHaveLength(0)

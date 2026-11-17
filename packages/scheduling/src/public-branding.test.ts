@@ -27,6 +27,7 @@ describe('public branding stored-value validation', () => {
         name: 'Example',
         primaryColor: color.toUpperCase(),
         logoDataUrl: null,
+        logoUrl: null,
       })
     },
   )

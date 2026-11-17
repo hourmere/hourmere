@@ -4,6 +4,7 @@ import {
   type BookingNotifier,
   createPublicBooking,
   createPublicTeamBooking,
+  getPublicBrandLogo,
   getPublicEventType,
   getPublicHost,
   getPublicTeamEventType,
@@ -137,6 +138,10 @@ export const PublicHost = z
     eventTypes: z
       .array(
         z.object({
+          branding: PublicBranding.optional(),
+          organizationName: z.string().optional().openapi({
+            description: 'Owning team space name; omitted for personal event types',
+          }),
           slug: z.string().openapi({ description: 'The booking page is /{handle}/{slug}' }),
           title: z.string(),
           description: z.string().nullable(),
@@ -280,6 +285,42 @@ export function publicRoutes({
   const bookLimit = limit('book')
 
   return ({ app }) => {
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/public/branding/{organizationId}/logo/{hash}',
+        operationId: 'getPublicBrandLogo',
+        tags: ['Public'],
+        summary: 'Read an organization’s selected public logo by content hash',
+        middleware: pageLimit,
+        request: {
+          params: z.object({
+            organizationId: z.uuid(),
+            hash: z.string().regex(/^[a-f0-9]{64}$/),
+          }),
+        },
+        responses: {
+          200: {
+            description: 'Normalized PNG, at most 512 pixels per dimension and 64 KiB',
+            content: { 'image/png': { schema: z.string().openapi({ format: 'binary' }) } },
+          },
+          404: { description: 'brand_logo_not_found', content: json(ErrorBody) },
+        },
+      }),
+      async (c) => {
+        const { organizationId, hash } = c.req.valid('param')
+        const data = await getPublicBrandLogo(db, organizationId, hash)
+        return new Response(new Uint8Array(data), {
+          headers: {
+            'Content-Type': 'image/png',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; sandbox",
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'Content-Disposition': 'inline; filename="logo.png"',
+          },
+        })
+      },
+    )
     app.openapi(
       createRoute({
         method: 'get',

@@ -147,6 +147,14 @@ calls the invitee or the invitee calls the host. Choosing an automatic
 video option starts the existing conference workflow, with pending/failure handling and
 ready-link invitations; other options create no conference.
 
+When no location is specified, confirmation and management pages and booking emails
+explicitly say so and ask invitees to contact the host for meeting details. This does
+not create a meeting link or promise a later automatic update. Calendar invitations
+keep their location empty.
+
+未指定会议地点时，确认页、预约管理页和预约邮件会明确说明，并提示受邀人联系主持人
+了解会议详情。这不会生成会议链接，也不代表系统稍后会自动补充地点；日历邀请的地点仍为空。
+
 ## Rescheduling and limits
 
 - Rescheduling preserves the original choice and phone/address/link, even if the host edits
