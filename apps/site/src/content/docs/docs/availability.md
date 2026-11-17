@@ -49,6 +49,20 @@ it against the reviewed version; another intervening change will conflict again.
 editor through a link, browser history, reload or closing the tab asks before
 abandoning changes. Reverting to the saved values removes that warning.
 
+## Time zones and daylight saving time
+
+Weekly hours and copied ranges are wall-clock times in the schedule's IANA time zone,
+not fixed UTC offsets. Copying 09:00–17:00 to another day in `America/Los_Angeles`
+keeps 09:00–17:00 there after a daylight-saving change; the corresponding UTC and
+`Asia/Shanghai` times shift by an hour. Invitees see those same available instants in
+their chosen display zone. Date overrides use dates in the schedule's zone as well.
+
+On a spring-forward date, nonexistent candidate start times are skipped. On a fall-back
+date, an ambiguous start uses the earlier occurrence; the repeated hour is not offered
+as a second set of starts. Interval boundaries use the earlier occurrence when ambiguous,
+and move forward by the gap length when nonexistent. Meeting lengths are elapsed minutes,
+so a meeting crossing a transition can look longer or shorter on the wall clock.
+
 ## REST, MCP and CLI
 
 Read one consistent snapshot with `GET /api/v1/schedules/{id}/availability`.
@@ -60,7 +74,9 @@ Each override is `{ "date": "2030-12-24", "intervals": [] }` or contains
 `start`/`end` local-time ranges. The response is a fresh snapshot and version.
 
 MCP provides `get_schedule_availability` and `save_schedule_availability` with the
-same fields, plus `id`. The CLI exposes `schedule-availability` and
+same fields, plus `id`. Copying is an editor action: API clients copy the desired
+local-time intervals into the destination weekdays in `weeklyHours`, then save the
+complete draft with its `expectedVersion`. The CLI exposes `schedule-availability` and
 `save-availability`; use their `--help` output for arguments and JSON input.
 Read access requires a `read` or `full` API key; saving requires `full`.
 The schedule must belong to the caller regardless of interface or key scope.
