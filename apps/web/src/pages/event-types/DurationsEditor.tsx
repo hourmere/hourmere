@@ -127,6 +127,11 @@ export function DurationsEditor({
           </button>
         ))}
       </fieldset>
+      {durations.length >= EVENT_TYPE.maxAllowedDurations && (
+        <p className="hint">
+          {t('All 12 lengths are in use. Remove a length before adding another.')}
+        </p>
+      )}
       <Field id="duration-to-add" label={t('Duration to add (minutes)')} error={error}>
         {(props) => (
           <input

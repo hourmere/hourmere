@@ -1,5 +1,16 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Current value: {value} {unit}.': 'Current value: {value} {unit}.',
+  minutes: 'minutes',
+  hours: 'hours',
+  days: 'days',
+  'No changes to save.': 'No changes to save.',
+  'How far into the future invitees can book, in calendar days.':
+    'How far into the future invitees can book, in calendar days.',
+  'All 12 lengths are in use. Remove a length in Additional durations before adding another.':
+    'All 12 lengths are in use. Remove a length in Additional durations before adding another.',
+  'All 12 lengths are in use. Remove a length before adding another.':
+    'All 12 lengths are in use. Remove a length before adding another.',
   'Group events': 'Group events',
   'Booking mode': 'Booking mode',
   'Seats per session': 'Seats per session',
@@ -38,7 +49,6 @@ export const admin = {
   'SMS reminders are not configured on this instance.':
     'SMS reminders are not configured on this instance.',
   'SMS availability is unknown.': 'SMS availability is unknown.',
-  'Stored value: {value} {unit}.': 'Stored value: {value} {unit}.',
   'Default duration presets': 'Default duration presets',
   'Custom duration': 'Custom duration',
   '{minutes} minutes': '{minutes} minutes',
