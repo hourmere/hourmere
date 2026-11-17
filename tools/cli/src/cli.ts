@@ -58,6 +58,7 @@ export const COMMANDS = {
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
+  'workflows update': 'update_workflow',
   'workflows create': 'create_workflow',
   'workflows list': 'list_workflows',
   'workflows get': 'get_workflow',
@@ -72,7 +73,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
-       hourmere workflows list|get|create [--input FILE|-] [--url ORIGIN]
+       hourmere workflows list|get|create|update [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
@@ -93,7 +94,8 @@ SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner
      with read/full scope. SSO is being built and is not available yet: sso_disabled.
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
-           Read or full scope for reads; full scope for create. All answer workflows_disabled until booking
+           workflows update (id, expectedRevision, and changed definition fields).
+           Read or full scope for reads; full scope for create/update. All answer workflows_disabled until booking
            workflows are enabled on the instance.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention

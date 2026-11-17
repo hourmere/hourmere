@@ -245,3 +245,54 @@ export async function getBrandLogo(ctx: ServiceContext, hash: string) {
   if (!row) throw new DomainError('not_found', 'brand_logo_not_found')
   return row.data
 }
+
+/** Public presentation only: callers must resolve an authorized public entity first. */
+export interface PublicBranding {
+  name: string
+  primaryColor: string | null
+  logoDataUrl: string | null
+}
+
+export async function getPublicBranding(
+  db: Db,
+  organizationId: string,
+): Promise<PublicBranding | undefined> {
+  const row = await db
+    .selectFrom('organization_branding as b')
+    .innerJoin('auth.organization as o', 'o.id', 'b.organization_id')
+    .leftJoin('organization_brand_logos as l', (join) =>
+      join
+        .onRef('l.organization_id', '=', 'b.organization_id')
+        .onRef('l.hash', '=', 'b.brand_logo'),
+    )
+    .leftJoin('personal_organizations as po', 'po.organization_id', 'o.id')
+    .leftJoin('auth.user as u', 'u.id', 'po.user_id')
+    .leftJoin('profiles as p', 'p.user_id', 'po.user_id')
+    .select([
+      'o.name',
+      'b.brand_primary_color',
+      'l.data',
+      'po.user_id as personal_user_id',
+      'u.name as user_name',
+      'p.handle',
+    ])
+    .where('b.organization_id', '=', organizationId)
+    .executeTakeFirst()
+  if (!row) return undefined
+  const color = row.brand_primary_color
+  const primaryColor =
+    color && /^#[0-9a-fA-F]{6}$/.test(color) && brandContrast(color).buttonTextContrast >= 4.5
+      ? color.toUpperCase()
+      : null
+  // Only bounded, normalized PNGs stored by the upload service are public. No fetches.
+  const logoDataUrl =
+    row.data &&
+    row.data.length <= BRAND_LOGO_MAX_BYTES &&
+    row.data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      ? `data:image/png;base64,${row.data.toString('base64')}`
+      : null
+  // A personal space's internal name can be an old name or the mailbox prefix it was created with.
+  // Publicly it carries what the person's booking pages already show: their name, else their handle.
+  const name = row.personal_user_id ? row.user_name?.trim() || row.handle || '' : row.name
+  return primaryColor || logoDataUrl ? { name, primaryColor, logoDataUrl } : undefined
+}

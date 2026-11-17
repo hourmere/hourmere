@@ -1,6 +1,15 @@
+import { brandPalette } from '@hourmere/core/brand-contrast'
 import { publicAvatarImage } from '@hourmere/core/public-avatar'
-import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
-import { api } from '../api/client.ts'
+import {
+  type CSSProperties,
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { api, type Schemas } from '../api/client.ts'
 import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
@@ -60,7 +69,47 @@ export function CreateBookingLink() {
  * The frame of the public pages (booking pages and invitee links): no app navigation, the
  * page itself and a small footer. These pages load nothing of the signed-in app.
  */
-export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+type PublicBrand = Schemas['PublicEventType']['branding']
+
+/** Only inline, re-encoded PNG logos are published; never introduce a remote image request. */
+function BrandLogo({ branding }: { branding: NonNullable<PublicBrand> }) {
+  const [failedImage, setFailedImage] = useState<string>()
+  const src = branding.logoDataUrl
+  if (!src || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(src)) return null
+  return (
+    <div className="public-brand-logo">
+      <img
+        src={src}
+        alt={branding.name}
+        width={192}
+        height={64}
+        referrerPolicy="no-referrer"
+        style={failedImage === src ? { visibility: 'hidden' } : undefined}
+        onError={() => setFailedImage(src)}
+      />
+    </div>
+  )
+}
+
+export function PublicLayout({
+  children,
+  wide = false,
+  branding,
+}: {
+  children: ReactNode
+  wide?: boolean
+  branding?: PublicBrand
+}) {
+  const palette = brandPalette(branding?.primaryColor)
+  const brandStyle: Record<string, string> = {}
+  if (palette) {
+    for (const mode of ['light', 'dark'] as const) {
+      for (const [role, value] of Object.entries(palette[mode])) {
+        const token = role.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
+        brandStyle[`--brand-${mode}-${token}`] = value
+      }
+    }
+  }
   const { t, locale } = useI18n()
   // Interpolate first so Han/Latin boundary spacing also applies around the logo.
   const [beforeBrand, afterBrand] = t('Powered by {0}', { '0': 'Hourmere' }).split('Hourmere')
@@ -89,13 +138,17 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
   }, [embedded, locale])
   return (
     <HostedSignupUrl value={hostedSignupUrl}>
-      <div className={`public${embedded ? ' public-embedded' : ''}`}>
+      <div
+        className={`public${embedded ? ' public-embedded' : ''}${palette ? ' public-branded' : ''}`}
+        style={brandStyle as CSSProperties}
+      >
         {!embedded && (
           <header className="public-language">
             <PublicLanguageSwitcher />
           </header>
         )}
         <main id="main" className={`public-main user-content${wide ? ' public-main-wide' : ''}`}>
+          {branding && <BrandLogo branding={branding} />}
           {children}
         </main>
         <footer className="public-footer">

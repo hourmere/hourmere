@@ -55,6 +55,9 @@ function fixture(scope: ApiKeyScope) {
       mcpAuth: { handler: async () => new Response(null) },
       socialProviders: {},
       invitationMailLimits: { secret },
+      // SSO reads answer sso_disabled before the scope check while hard-off; enabled
+      // here so their scope denial is covered too.
+      ssoOidcEnabled: true,
     }),
   })
   return { app, resource, notify }

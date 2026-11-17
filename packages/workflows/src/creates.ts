@@ -79,7 +79,7 @@ function fingerprint(input: z.output<typeof CreateWorkflowInputSchema>): Buffer 
 }
 
 /** Parent/owner locks precede membership and definition rows, with a late role recheck. */
-async function writableOwner(
+export async function writableOwner(
   trx: Db,
   ctx: WorkflowCreateContext,
   selector: CreateWorkflowInput['owner'],

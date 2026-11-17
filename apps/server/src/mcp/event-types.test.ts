@@ -61,6 +61,9 @@ function productSourceCopy(change?: Change): Factory {
     openTimeSnippetTools: () => [],
     availabilityTroubleshootingTools: () => [],
     workflowTools: () => [],
+    ssoReadTools: () => [],
+    ssoOidcEnabled: false,
+    ssoSamlEnabled: false,
   }
   return new Function(
     ...Object.keys(bindings),

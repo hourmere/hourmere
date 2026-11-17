@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { hardOffWorkflowAuditPort } from './audit.ts'
 import { CreateWorkflowInputSchema, createWorkflow } from './creates.ts'
 import * as hardOff from './hard-off.ts'
+import { UpdateWorkflowInputSchema, updateWorkflow } from './updates.ts'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 
@@ -24,6 +25,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url))
 const PACKAGE_EXPORTS = [
   'CreateWorkflowInputSchema',
   'PERSONAL_ONLY_CONDITION_FIELDS',
+  'UpdateWorkflowInputSchema',
   'WORKFLOWS_IMPLEMENTED',
   'WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES',
   'WORKFLOW_ANSWER_VARIABLE_PREFIX',
@@ -77,6 +79,7 @@ const PACKAGE_EXPORTS = [
   'scopeSelectsEventType',
   'templatePlaceholders',
   'templateVariableProblem',
+  'updateWorkflow',
   'validateWorkflowDefinition',
   'workflowCapture',
   'workflowDispatchWindow',
@@ -200,6 +203,8 @@ describe('workflow hard-off', () => {
     expect(Object.keys(workflows).sort()).toEqual(PACKAGE_EXPORTS)
     expect(workflows.createWorkflow).toBe(createWorkflow)
     expect(workflows.CreateWorkflowInputSchema).toBe(CreateWorkflowInputSchema)
+    expect(workflows.updateWorkflow).toBe(updateWorkflow)
+    expect(workflows.UpdateWorkflowInputSchema).toBe(UpdateWorkflowInputSchema)
   })
 
   it('exports the constant and its guards only, with no way to change them', () => {
@@ -382,6 +387,7 @@ describe('workflow hard-off', () => {
     // Creation adds hashing, scope enforcement and SQL; these dependencies are confined to
     // that service, while hard-off.ts and the other modules keep the existing import pin.
     const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
+    const updateImports = new Set(['@hourmere/auth', 'kysely'])
     const own = sources.filter(
       (path) => path.startsWith('packages/workflows/src/') && !path.endsWith('/testing.ts'),
     )
@@ -399,7 +405,8 @@ describe('workflow hard-off', () => {
           (specifier) =>
             !specifier.startsWith('./') &&
             !allowed.has(specifier) &&
-            !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)),
+            !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)),
         ),
         file,
       ).toEqual([])

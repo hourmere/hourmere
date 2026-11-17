@@ -62,6 +62,7 @@ const all = [
   'join_waitlist',
   'resend_waitlist_verification',
   'create_workflow',
+  'update_workflow',
   'list_workflows',
   'get_workflow',
   'list_sso_providers',
@@ -72,6 +73,7 @@ const all = [
 const ssoUnavailable = new Set(['list_sso_providers', 'get_sso_policy'])
 const unavailable = new Set([
   'create_workflow',
+  'update_workflow',
   'list_workflows',
   'get_workflow',
   ...ssoUnavailable,
@@ -83,6 +85,7 @@ const disabled = (name: string) => ({
 const auditReads = new Set(['list_audit_events', 'get_audit_log_settings'])
 const configurationWrites = new Set([
   'create_workflow',
+  'update_workflow',
   'set_audit_log_settings',
   'set_branding',
   'save_schedule_availability',
@@ -483,6 +486,7 @@ describe('CLI scope parity', () => {
     ['one-time-links create', 'create_one_time_link'],
     ['one-time-links list', 'list_one_time_links'],
     ['one-time-links revoke', 'revoke_one_time_link'],
+    ['workflows update', 'update_workflow'],
     ['workflows create', 'create_workflow'],
     ['workflows list', 'list_workflows'],
     ['workflows get', 'get_workflow'],
