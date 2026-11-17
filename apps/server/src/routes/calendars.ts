@@ -31,7 +31,7 @@ import { createRateLimiter, rateLimit } from '../rate-limit.ts'
 export const CalendarConnection = z
   .object({
     id: z.uuid(),
-    provider: z.enum(['google', 'microsoft']),
+    provider: z.enum(['google', 'microsoft', 'caldav']),
     accountEmail: z.string().nullable(),
     status: z.enum(['active', 'needs_reauth', 'revoked']),
     lastError: z
@@ -51,11 +51,13 @@ export const CalendarConnection = z
         accessRole: z.string(),
         lastSyncedAt: z.iso.datetime().nullable(),
         syncError: z.string().nullable(),
+        available: z.boolean(),
       }),
     ),
   })
   .openapi('CalendarConnection')
 export const CalendarConnections = z.object({
+  caldavEnabled: z.boolean(),
   googleEnabled: z.boolean(),
   microsoftEnabled: z.boolean(),
   destinationCalendarId: z.uuid().nullable(),

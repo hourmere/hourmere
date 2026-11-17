@@ -93,6 +93,8 @@ const restContract = {
     'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
+    'POST /api/v1/calendar-connections/caldav/discover',
+    'POST /api/v1/calendar-connections/caldav',
     'POST /api/v1/calendar-connections/google/authorize',
     'POST /api/v1/calendar-connections/microsoft/authorize',
     'DELETE /api/v1/conference-connections/{id}',

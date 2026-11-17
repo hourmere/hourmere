@@ -687,3 +687,41 @@ describe('loadConfig', () => {
     })
   })
 })
+
+describe('CalDAV operator outbound policy', () => {
+  it.each(['web', 'worker', 'all'])(
+    'uses separate bounded trust configuration for %s',
+    (HOURMERE_ROLE) => {
+      const defaults = loadConfig({ ...base, HOURMERE_ROLE })
+      expect(defaults.CALDAV_PRIVATE_TARGETS).toEqual([])
+      expect(defaults.CALDAV_ALLOWED_ORIGINS).toEqual([])
+      const configured = loadConfig({
+        ...base,
+        HOURMERE_ROLE,
+        CALDAV_ALLOWED_ORIGINS: 'https://p01-caldav.icloud.com,https://p01-caldav.icloud.com/',
+        CALDAV_PRIVATE_TARGETS: 'nextcloud.internal:443',
+      })
+      expect(configured.CALDAV_ALLOWED_ORIGINS).toEqual(['https://p01-caldav.icloud.com'])
+      expect(configured.CALDAV_PRIVATE_TARGETS).toEqual(
+        parseWebhookPrivateTargets('nextcloud.internal:443'),
+      )
+      expect(configured.WEBHOOK_PRIVATE_TARGETS).toEqual([])
+      for (const value of [
+        'http://example.com',
+        'https://*.icloud.com',
+        'https://example.com/path',
+        'https://user:password@example.com',
+        'https://example.com/?secret=value',
+        'https://example.com/#fragment',
+        Array(33).fill('https://example.com').join(','),
+      ]) {
+        expect(() => loadConfig({ ...base, HOURMERE_ROLE, CALDAV_ALLOWED_ORIGINS: value })).toThrow(
+          /CALDAV_ALLOWED_ORIGINS/,
+        )
+      }
+      expect(() => loadConfig({ ...base, CALDAV_PRIVATE_TARGETS: '169.254.169.254:443' })).toThrow(
+        /CALDAV_PRIVATE_TARGETS/,
+      )
+    },
+  )
+})

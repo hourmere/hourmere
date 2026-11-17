@@ -69,6 +69,17 @@ export interface CalendarDeps {
       ) => Promise<import('@hourmere/scheduling/conferences').ConferenceResult>)
     | undefined
   db: Db
+  caldav?:
+    | {
+        discoveryClient: import('./caldav-discovery.ts').CalDavDiscoveryClient
+        syncClient: import('./caldav-sync-client.ts').CalDavSyncClient
+        encryptionKey: string
+        enqueueSync?: ((calendarId: string, transaction: Db) => Promise<unknown>) | undefined
+        enqueueWritebackRecovery?:
+          | ((connectionId: string, transaction: Db) => Promise<unknown>)
+          | undefined
+      }
+    | undefined
   google?: { client: GoogleCalendarClient; encryptionKey: string } | undefined
   microsoft?: { client: MicrosoftCalendarClient; encryptionKey: string } | undefined
   now?: () => number
@@ -231,7 +242,7 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
       'scopes',
     ])
     .where('user_id', '=', principal.user.id)
-    .where('provider', 'in', ['google', 'microsoft'])
+    .where('provider', 'in', ['google', 'microsoft', 'caldav'])
     .orderBy('created_at')
     .orderBy('id')
     .execute()
@@ -248,6 +259,7 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
           'access_role',
           'last_synced_at',
           'sync_error',
+          'sync_state',
         ])
         .where(
           'connection_id',
@@ -259,12 +271,13 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
         .execute()
     : []
   return {
+    caldavEnabled: deps.caldav !== undefined,
     googleEnabled: deps.google !== undefined,
     microsoftEnabled: deps.microsoft !== undefined,
     destinationCalendarId: profile?.destination_calendar_id ?? null,
     data: connections.map((connection) => ({
       id: connection.id,
-      provider: connection.provider as CalendarProvider,
+      provider: connection.provider as CalendarProvider | 'caldav',
       accountEmail: connection.account_email,
       status: connection.status as 'active' | 'needs_reauth' | 'revoked',
       lastError: z
@@ -275,8 +288,9 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
       createdAt: connection.created_at.toISOString(),
       updatedAt: connection.updated_at.toISOString(),
       syncAuthorized:
-        connection.provider === 'google' &&
-        GOOGLE_CALENDAR_SYNC_SCOPES.every((scope) => connection.scopes.includes(scope)),
+        connection.provider === 'caldav' ||
+        (connection.provider === 'google' &&
+          GOOGLE_CALENDAR_SYNC_SCOPES.every((scope) => connection.scopes.includes(scope))),
       calendars: calendars
         .filter((c) => c.connection_id === connection.id)
         .map((c) => ({
@@ -288,6 +302,11 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
           accessRole: c.access_role,
           lastSyncedAt: c.last_synced_at?.toISOString() ?? null,
           syncError: c.sync_error,
+          available:
+            connection.provider !== 'caldav' ||
+            z
+              .object({ caldavDiscovery: z.object({ available: z.literal(true) }) })
+              .safeParse(c.sync_state).success,
         })),
     })),
   }
@@ -525,7 +544,7 @@ export async function disconnectCalendar(deps: CalendarDeps, principal: Principa
       .deleteFrom('calendar_connections')
       .where('id', '=', id)
       .where('user_id', '=', session.user.id)
-      .where('provider', 'in', ['google', 'microsoft'])
+      .where('provider', 'in', ['google', 'microsoft', 'caldav'])
       .returning('id')
       .executeTakeFirst()
     if (!deleted) throw notFound()
@@ -553,9 +572,11 @@ export async function refreshCalendarList(deps: CalendarDeps, principal: Princip
     .select('provider')
     .where('id', '=', id)
     .where('user_id', '=', principal.user.id)
-    .where('provider', 'in', ['google', 'microsoft'])
+    .where('provider', 'in', ['google', 'microsoft', 'caldav'])
     .executeTakeFirst()
   if (!connection) throw notFound()
+  if (connection.provider === 'caldav')
+    throw new DomainError('conflict', 'caldav_reconnect_required')
   return refreshCalendarProvider(deps, principal, id, connection.provider as CalendarProvider)
 }
 

@@ -46,9 +46,11 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
 | `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
-CalDAV is currently a [design and internal calendar services](docs/caldav.md) only.
-iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
-available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
+[CalDAV connections](https://hourmere.com/docs/caldav) are available on the Calendars
+page with iCloud, Fastmail, Nextcloud and generic HTTPS presets, busy-time sync and
+booking writes. Credential entry requires the owner’s browser session; MCP, CLI and
+API keys cannot submit provider passwords. No real-account acceptance has been completed;
+cross-origin iCloud discovery and private servers remain subject to the documented limits.
 
 ## Development
 

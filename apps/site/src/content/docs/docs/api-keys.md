@@ -178,6 +178,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `GET /api/v1/calendar-connections` | Session or API key | `full, read` |
 | `DELETE /api/v1/calendar-connections/{id}` | Browser session only | — |
 | `POST /api/v1/calendar-connections/{id}/refresh` | Session or API key | `full` |
+| `POST /api/v1/calendar-connections/caldav/discover` | Browser session only | — |
+| `POST /api/v1/calendar-connections/caldav` | Browser session only | — |
 | `POST /api/v1/calendar-connections/google/authorize` | Browser session only | — |
 | `POST /api/v1/calendar-connections/microsoft/authorize` | Browser session only | — |
 | `PUT /api/v1/calendar-destination` | Session or API key | `full` |
