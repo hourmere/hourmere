@@ -257,6 +257,19 @@ const schema = z
         { error: 'CALENDAR_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
       ),
     ),
+    SSO_ENCRYPTION_KEY: optional(
+      z.string().refine(
+        (value) => {
+          try {
+            calendarEncryptionKey(value)
+            return true
+          } catch {
+            return false
+          }
+        },
+        { error: 'SSO_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
+      ),
+    ),
     ZOOM_CLIENT_ID: optional(
       z
         .string()
@@ -378,6 +391,7 @@ const schema = z
       [
         c.BETTER_AUTH_SECRET,
         c.CALENDAR_ENCRYPTION_KEY,
+        c.SSO_ENCRYPTION_KEY,
         c.CONFERENCE_ENCRYPTION_KEY,
         c.WEBHOOK_ENCRYPTION_KEY,
       ].some(
@@ -494,6 +508,23 @@ const schema = z
         path: ['CALENDAR_ENCRYPTION_KEY'],
         message:
           'Use an independent CALENDAR_ENCRYPTION_KEY, separate from authentication and webhook keys',
+      })
+    if (
+      c.SSO_ENCRYPTION_KEY &&
+      ([
+        c.CALENDAR_ENCRYPTION_KEY,
+        c.CONFERENCE_ENCRYPTION_KEY,
+        c.WEBHOOK_ENCRYPTION_KEY,
+        c.SMS_HASH_KEY,
+        c.BETTER_AUTH_SECRET,
+      ].includes(c.SSO_ENCRYPTION_KEY) ||
+        Buffer.from(c.SSO_ENCRYPTION_KEY, 'base64').equals(Buffer.from(c.BETTER_AUTH_SECRET)))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SSO_ENCRYPTION_KEY'],
+        message:
+          'Use an independent SSO_ENCRYPTION_KEY, separate from authentication and other encryption keys',
       })
     if (
       c.CONFERENCE_ENCRYPTION_KEY &&

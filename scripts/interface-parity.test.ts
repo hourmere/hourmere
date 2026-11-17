@@ -696,6 +696,31 @@ describe('REST, MCP and CLI write parity', () => {
     ).toEqual([])
   })
 
+  it('keeps provider draft writes precisely session-only with no machine equivalents', async () => {
+    const inventory = await loadInterfaceInventory()
+    for (const [operationId, method, path] of [
+      ['createSsoProvider', 'post', '/api/v1/team/sso/providers'],
+      ['updateSsoProvider', 'patch', '/api/v1/team/sso/providers/{providerId}'],
+      ['deleteSsoProvider', 'delete', '/api/v1/team/sso/providers/{providerId}'],
+    ]) {
+      expect(
+        inventory.rest.find((operation) => operation.operationId === operationId),
+      ).toMatchObject({
+        method,
+        path,
+        security: [{ session: [] }],
+      })
+      expect((checkedMapping as Record<string, unknown>)[operationId as string]).toMatchObject({
+        exemption: 'browser-session-only',
+        reason: expect.any(String),
+      })
+    }
+    for (const tool of ['create_sso_provider', 'update_sso_provider', 'delete_sso_provider']) {
+      expect(inventory.mcp).not.toContain(tool)
+      expect(Object.values(inventory.cli)).not.toContain(tool)
+    }
+  })
+
   for (const { name, verify } of cases) it(name, () => verify(original))
 })
 

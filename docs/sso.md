@@ -872,6 +872,27 @@ No read creates a policy, changes trust, emits an audit event or returns identit
 提供者、密封配置、密钥、原始元数据或身份关联。验证和测试状态目前为 `unknown`，
 不能据此判断配置缺失。OIDC 和 SAML 仍在代码中保持关闭，读取返回 `sso_disabled`。
 
+Provider draft writes are registered as browser-session-only POST/PATCH/DELETE operations,
+with no MCP tool or CLI write command. They remain unavailable (`sso_disabled`) while
+both protocols are hard-off. With the internal OIDC test capability enabled, verified
+team owners/admins must send the exact Origin and `X-Expected-Organization-Id`, then
+complete the operation-bound fresh-proof retry. New providers are disabled; edits require
+`expectedRevision`. Omitted secrets are preserved and returned summaries never include
+sealed configuration or secrets. Changing trust configuration or retiring a provider
+increments the team trust generation; changing its display name alone does not.
+The issuer/client ID identity cannot change: create a replacement provider instead.
+Deletion retires the record and an authorized repeat deletion is idempotent.
+`SSO_ENCRYPTION_KEY` is an optional independent 32-byte base64 key for sealing drafts.
+Keep it stable and back it up privately; configuring it never enables a protocol.
+
+提供者草稿的创建、修改和删除仅允许浏览器会话使用，没有 MCP/CLI 写命令。
+OIDC 与 SAML 仍保持代码级关闭，接口返回 `sso_disabled`。内部测试开启 OIDC 后，
+已验证的团队所有者或管理员必须提供同源请求、预期团队和操作绑定的新鲜证明。
+修改须携带预期版本；省略密钥会保留旧值，响应不回显密钥或密封配置。
+信任配置变更和退役会递增团队信任代次，仅修改显示名称不会；重复退役具有幂等性。
+可选的 `SSO_ENCRYPTION_KEY` 是独立的 32 字节 base64 密钥，应保持稳定并私下备份；
+配置此密钥不会启用任何协议。
+
 Every write except `revokeSsoDelegation` accepts an optional opaque `proofAttemptId` in
 its strict input for the fresh-proof retry below. DELETE operations carry their strict
 JSON body, which OpenAPI 3.1 permits. Create accepts `{protocol, displayName, domainIds,

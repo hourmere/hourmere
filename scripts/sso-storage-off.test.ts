@@ -4,7 +4,7 @@
 // (apps/server/src/sso-mailbox-proof.ts): it reads and writes attempts and their mailbox tokens
 // and reads providers, nothing else, and both of its endpoints answer `404 sso_disabled` while
 // OIDC and SAML stay hard-off (apps/server/src/sso-mailbox-proof.test.ts). The fresh-proof
-// gate owns attempts and reads policies, with no production caller. Draft reads owns only
+// gate owns attempts and reads policies for browser draft writes. Draft reads owns only
 // the provider/domain inventory and policies, behind the same hard-off gate. The other module
 // that names the tables, apps/server/src/sso-storage-errors.ts, only recognises them in
 // database errors so that the error log omits their row details; it imports nothing and
@@ -26,6 +26,12 @@ const STORAGE_LAYER =
 const ERROR_RECOGNISER = 'apps/server/src/sso-storage-errors.ts'
 // The production modules that own SSO data access, each with the only tables it may name.
 const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
+  'apps/server/src/sso-drafts.ts': [
+    'sso_providers',
+    'sso_provider_domains',
+    'sso_domains',
+    'sso_policies',
+  ],
   'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
   'apps/server/src/sso-fresh-proof.ts': ['sso_attempts', 'sso_policies'],
   'apps/server/src/sso-reads.ts': [

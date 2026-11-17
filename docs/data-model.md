@@ -10,6 +10,13 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
+CalDAV's internal write service reuses these targets and mappings: the root booking UUID
+is the stable UID, `external_event_id` is the resource href, and `etag` is the last
+acknowledged strong ETag (null after deletion). Group copies use
+`group_slot_calendar_events`. `calendars.sync_state.caldavWriteback` stores the last
+bounded result and root identity separately from busy sync; successful busy reads retain
+write failures. No new schema is required. See [CalDAV](caldav.md).
+
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
 `period` (`tstzrange`) for a timed event, or `all_day_start` and `all_day_end` (`date`)
 with an exclusive end for an all-day event. The dates are finite, within years 0001–9999,
@@ -981,8 +988,9 @@ Migration 0074 installs the configuration storage of the [SSO design](sso.md)
 `sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. The mailbox proof module reads
 providers and the shared fresh-proof gate reads policies. The draft-read service
 reads an explicit safe projection of providers and policies for current team owners/admins;
-it never opens sealed configuration or reads identity links. No configuration write path or
-setting exists, and OIDC and SAML stay hard-off. A test restricts table references to
+it never opens sealed configuration or reads identity links. Browser-only provider draft writes
+use the fresh-proof gate, seal each new revision, and audit changes transactionally.
+OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 
 All six belong to a team: a personal organization's rows are refused, and deleting the
@@ -1029,8 +1037,8 @@ through `checkConstraintCoverage` (expectation file
 trigger rule also has source-copy mutations that remove or weaken it
 (`packages/db/src/sso-storage-protections.ts`), run against the predecessor schema. The
 upgrade test preserves a populated predecessor down to row versions and compares fresh and
-upgraded schemas. The operator key that seals provider configuration is configured by the
-first step that writes it.
+upgraded schemas. The optional `SSO_ENCRYPTION_KEY` seals provider configuration; it must be backed up
+privately and kept stable. Configuring a key does not enable either protocol.
 
 ## SSO identity storage
 
@@ -1044,7 +1052,7 @@ while OIDC and SAML stay hard-off, so nothing writes attempts in production yet.
 that keeps production modules from naming the configuration tables covers these too, and
 lets that module name only attempts, tokens and providers. The shared fresh-proof gate
 (`apps/server/src/sso-fresh-proof.ts`) creates and consumes operation-bound attempts and
-reads the team policy; it has no production caller or route yet. Its test-only operation
+reads the team policy for browser-only provider draft writes. Its test-only operation
 consumes proof in the same transaction as the protected write. Admission
 tombstones need no new table: they are the shared `scim_membership_blocks` of the
 [SCIM identity storage](scim.md), which keep the team-local mailbox through member and

@@ -46,7 +46,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
 | `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
-CalDAV is currently a [design and internal synchronization foundation](docs/caldav.md) only.
+CalDAV is currently a [design and internal calendar services](docs/caldav.md) only.
 iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
 available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
 
@@ -429,7 +429,9 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
-- Organization OIDC/SAML SSO is being built and is not available yet.
+- Organization OIDC/SAML SSO is being built and is not available yet. The optional
+  `SSO_ENCRYPTION_KEY` reserves an independent 32-byte base64 key for sealed provider
+  drafts; keep it stable and backed up privately. Setting it does not enable SSO.
 
 - Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
   and restarting cannot change a compiled image. Disabling installation requires a source
