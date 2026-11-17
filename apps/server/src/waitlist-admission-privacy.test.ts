@@ -166,8 +166,8 @@ describe('waitlist admission input privacy', () => {
   })
   it('detects source-copy raw private diagnostics', async () => {
     const module = await copy([
-      "isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)\n          ? 'private waitlist request failed'\n          : detail",
-      'detail',
+      'isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)',
+      'false',
     ])
     await expect(assertDiagnostics(module, 'unexpected')).rejects.toMatchObject({
       name: 'AssertionError',
@@ -176,10 +176,7 @@ describe('waitlist admission input privacy', () => {
   it.each(['message', 'detail'])('detects source-copy reflected private %s', async (field) => {
     const module = await copy(
       field === 'detail'
-        ? [
-            'if (isWaitlistAdmissionPath(c.req.path) || isSlackDestinationPath(c.req.path))\n        delete body.message',
-            'if (isSlackDestinationPath(c.req.path)) delete body.message',
-          ]
+        ? ['        isWaitlistAdmissionPath(c.req.path) ||\n', '']
         : [
             'err.message &&\n          !isOneTimeLinkPath(c.req.path) &&\n          !isWaitlistAdmissionPath(c.req.path)',
             'err.message && !isOneTimeLinkPath(c.req.path)',
