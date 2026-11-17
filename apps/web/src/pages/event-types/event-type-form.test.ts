@@ -606,3 +606,50 @@ it.each(['', 'google_meet', 'zoom', 'phone', 'in_person', 'link'] as const)(
     )
   },
 )
+
+it('validates the organizer and Zoom account for non-default automatic location options', () => {
+  const draft = {
+    ...emptyDraft(),
+    title: 'Choices',
+    slug: 'choices',
+    locationKind: 'in_person' as const,
+    address: '42 Main Street',
+    locationOptions: [
+      { id: 'primary', kind: 'in_person' as const, address: '42 Main Street' },
+      { id: 'meet', kind: 'google_meet' as const, autoCreate: true as const },
+      { id: 'zoom', kind: 'zoom' as const, autoCreate: true as const },
+    ],
+  }
+  expect(renderedDraftErrors(draft).zoomConnectionId).toBe(
+    'Choose your own authorized Zoom meetings account.',
+  )
+  const collective = { ...draft, schedulingType: 'collective' as const, hostUserIds: ['a', 'b'] }
+  expect(renderedDraftErrors(collective)).toMatchObject({
+    conferenceOrganizer: 'Choose the meeting organizer from the required hosts.',
+    'location-kind': 'Automatic Zoom supports individual meetings with exactly one host.',
+  })
+})
+
+it.each(['google_meet', 'zoom'] as const)(
+  'preserves the unchanged schedule for a secondary automatic %s option',
+  (kind) => {
+    const baseline = draftFromEventType(
+      eventType({
+        location: { kind: 'in_person', address: '42 Main Street' },
+        locations: [
+          { id: 'office', kind: 'in_person', address: '42 Main Street', isDefault: true },
+          { id: 'video', kind, autoCreate: true },
+        ],
+        zoomConnectionId: kind === 'zoom' ? 'saved-account' : null,
+      }),
+    )
+    const edited = { ...baseline, title: 'New title' }
+    expect(toPatchInput(edited, baseline)).not.toHaveProperty('scheduleId')
+    expect(toPatchInput(edited, baseline)).not.toHaveProperty('locations')
+    expect(toPatchInput(edited, baseline)).not.toHaveProperty('zoomConnectionId')
+    expect(toPatchInput({ ...edited, scheduleId: 'new-schedule' }, baseline)).toHaveProperty(
+      'scheduleId',
+      'new-schedule',
+    )
+  },
+)

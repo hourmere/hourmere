@@ -51,6 +51,7 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     rateLimits: BookingToolsDeps['rateLimits'] = {},
     automaticMeet = false,
     bookingMaxInviteeReschedules?: number,
+    automaticZoom = false,
   ) {
     const limits = { page: plenty, slots: plenty, book: plenty, manage: plenty, ...rateLimits }
     return createApp({
@@ -59,12 +60,13 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: PUBLIC_URL,
       routes: [
-        publicRoutes({ db, now: () => NOW, rateLimits: limits, automaticMeet }),
+        publicRoutes({ db, now: () => NOW, rateLimits: limits, automaticMeet, automaticZoom }),
         bookingRoutes({
           db,
           now: () => NOW,
           rateLimits: limits,
           automaticMeet,
+          automaticZoom,
           bookingMaxInviteeReschedules,
         }),
       ],
@@ -76,6 +78,7 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
             now: () => NOW,
             rateLimits: limits,
             automaticMeet,
+            automaticZoom,
             bookingMaxInviteeReschedules,
           }),
         ],
@@ -192,11 +195,251 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     ).toBe('idempotency_key_reused')
   })
 
+  // The same acceptance path exercises real REST and MCP transports. Provider connections
+  // are synthetic; booking only queues conference intents, with no external calls.
+  it.each(['rest', 'mcp'] as const)(
+    '%s discovers private-safe choices and books every supported location configuration',
+    async (transport) => {
+      const host = await f.host({ handle: `choices-${randomUUID().slice(0, 8)}` })
+      await f.schedule(host.userId)
+      const connection = await db
+        .insertInto('calendar_connections')
+        .values({
+          user_id: host.userId,
+          provider: 'google',
+          external_account_id: randomUUID(),
+          credentials: Buffer.from('synthetic-unused'),
+          scopes: [
+            'https://www.googleapis.com/auth/calendar.events.owned',
+            'https://www.googleapis.com/auth/calendar.events.readonly',
+          ],
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const calendar = await db
+        .insertInto('calendars')
+        .values({
+          connection_id: connection.id,
+          external_id: randomUUID(),
+          name: 'Synthetic',
+          access_role: 'owner',
+          supports_google_meet: true,
+          check_conflicts: false,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .updateTable('profiles')
+        .set({ destination_calendar_id: calendar.id })
+        .where('user_id', '=', host.userId)
+        .execute()
+      const zoom = await db
+        .insertInto('conference_connections')
+        .values({
+          user_id: host.userId,
+          provider: 'zoom',
+          mode: 'meetings',
+          status: 'active',
+          external_user_id: randomUUID(),
+          credentials: Buffer.from('synthetic-unused'),
+          scopes: [
+            'user:read:user',
+            'meeting:write:meeting',
+            'meeting:read:meeting',
+            'meeting:update:meeting',
+            'meeting:delete:meeting',
+          ],
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const enabled = appWith({}, true, undefined, true)
+      const options = [
+        { id: 'office', kind: 'in_person', address: 'Private acceptance office', isDefault: true },
+        { id: 'phone', kind: 'phone', number: '+14155550127' },
+        { id: 'link', kind: 'link', url: 'https://example.test/private-room' },
+        { id: 'meet', kind: 'google_meet', autoCreate: true },
+        { id: 'zoom', kind: 'zoom', autoCreate: true },
+      ]
+      for (const choice of [...options, { id: 'phone', kind: 'phone', askInvitee: true }]) {
+        const configured = options.map((option) => (option.id === choice.id ? choice : option))
+        const slug = `choice-${randomUUID().slice(0, 8)}`
+        const eventId = await f.eventType(host.organizationId, host.userId, { slug })
+        await db
+          .updateTable('event_types')
+          .set({
+            locations: JSON.stringify(configured),
+            zoom_connection_id: zoom.id,
+          })
+          .where('id', '=', eventId)
+          .execute()
+        const page = { handle: host.handle, slug }
+        const path = `/api/v1/public/${host.handle}/${slug}`
+        const expectedPublic = configured.map(({ id, kind, ...settings }) => ({
+          id,
+          kind,
+          ...('isDefault' in settings ? { isDefault: true } : {}),
+          ...('askInvitee' in settings ? { askInvitee: true } : {}),
+        }))
+        // Each configuration has its own offered time; the second phone mode uses Tuesday.
+        const day = 'askInvitee' in choice ? '2026-11-03' : '2026-11-02'
+        const hour = String(8 + options.findIndex((option) => option.id === choice.id)).padStart(
+          2,
+          '0',
+        )
+        const requestedStart = Temporal.Instant.from(`${day}T${hour}:00:00Z`)
+        let discovered: { locations: unknown }
+        let slots: { start: string }[]
+        if (transport === 'mcp') {
+          const found = ok<{ eventType: { locations: unknown }; slots: { start: string }[] }>(
+            await call(
+              'find_available_slots',
+              {
+                ...page,
+                timeZone: 'UTC',
+                startDate: day,
+                endDate: day,
+                locationOptionId: choice.id,
+              },
+              agent.key,
+              enabled,
+            ),
+          )
+          discovered = found.eventType
+          slots = found.slots
+        } else {
+          const metadata = await enabled.request(path)
+          expect(metadata.status).toBe(200)
+          discovered = (await metadata.json()) as { locations: unknown }
+          const query = new URLSearchParams({
+            start: `${day}T00:00:00Z`,
+            end: `${day}T23:59:59Z`,
+            locationOptionId: choice.id,
+          })
+          const response = await enabled.request(`${path}/slots?${query}`)
+          expect(response.status).toBe(200)
+          slots = ((await response.json()) as { data: { start: string }[] }).data
+        }
+        expect(discovered.locations).toEqual(expectedPublic)
+        for (const hidden of [
+          'Private acceptance office',
+          '+14155550127',
+          'private-room',
+          'autoCreate',
+        ])
+          expect(JSON.stringify(discovered)).not.toContain(hidden)
+        const offered = slots.find(
+          (slot) =>
+            Temporal.Instant.compare(Temporal.Instant.from(slot.start), requestedStart) === 0,
+        )
+        expect(offered).toBeDefined()
+        if (!offered) throw new Error('The selected location must offer the requested time')
+        const selectedStart = offered.start
+        const input = {
+          start: selectedStart,
+          locationOptionId: choice.id,
+          inviteePhone: '+1 (415) 555-0198',
+          invitee: { name: 'Location invitee', email: 'choice@example.test', timeZone: 'UTC' },
+        }
+        const create = async (body: Record<string, unknown>) => {
+          if (transport === 'mcp')
+            return call('create_booking', { ...page, ...body }, agent.key, enabled)
+          return enabled.request(`${path}/bookings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        }
+        const rejected = await create({ ...input, locationOptionId: 'not-offered' })
+        if (rejected instanceof Response) {
+          expect(rejected.status).toBe(400)
+          expect(await rejected.json()).toMatchObject({ error: 'invalid_location_choice' })
+        } else expect(errorOf(rejected).error).toBe('invalid_location_choice')
+        const result = await create(input)
+        if (result instanceof Response) expect(result.status).toBe(201)
+        const booked =
+          result instanceof Response ? ((await result.json()) as Booked) : ok<Booked>(result)
+        const snapshot = await db
+          .selectFrom('bookings')
+          .select(['location', 'location_option'])
+          .where('id', '=', booked.booking.id)
+          .executeTakeFirstOrThrow()
+        expect(snapshot.location_option).toEqual(choice)
+        const {
+          id: _id,
+          isDefault: _default,
+          ...settings
+        } = choice as (typeof options)[number] & { askInvitee?: true }
+        expect(snapshot.location).toEqual(
+          'askInvitee' in choice ? { kind: 'phone', number: '+14155550198' } : settings,
+        )
+        const intents = await db
+          .selectFrom('booking_conferences')
+          .select(['provider', 'organizer_user_id'])
+          .where('root_booking_id', '=', booked.booking.id)
+          .execute()
+        expect(intents).toEqual(
+          choice.kind === 'google_meet' || choice.kind === 'zoom'
+            ? [
+                {
+                  provider: choice.kind === 'google_meet' ? 'google_meet' : 'zoom',
+                  organizer_user_id: host.userId,
+                },
+              ]
+            : [],
+        )
+        // A later editor change cannot replace the accepted booking location on a move.
+        await db
+          .updateTable('event_types')
+          .set({ locations: JSON.stringify([options[0]]) })
+          .where('id', '=', eventId)
+          .execute()
+        const moveStart = Temporal.Instant.from(selectedStart).add({ minutes: 30 }).toString()
+        let moved: Booked
+        if (transport === 'mcp')
+          moved = ok<Booked>(
+            await call(
+              'reschedule_booking',
+              {
+                manageToken: booked.manageToken,
+                start: moveStart,
+              },
+              agent.key,
+              enabled,
+            ),
+          )
+        else {
+          const response = await enabled.request('/api/v1/bookings/manage/reschedule', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-manage-token': booked.manageToken as string,
+            },
+            body: JSON.stringify({ start: moveStart }),
+          })
+          expect(response.status).toBe(200)
+          moved = (await response.json()) as Booked
+        }
+        expect(
+          await db
+            .selectFrom('bookings')
+            .select(['location', 'location_option'])
+            .where('id', '=', moved.booking.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual(snapshot)
+      }
+    },
+  )
+
   it('documents host-pool and activation conflicts with availability refresh in create_booking', async () => {
     const client = await connect(agent.key)
     try {
       const { tools } = await client.listTools()
       const description = tools.find((tool) => tool.name === 'create_booking')?.description
+      expect(description).toContain('locationOptionId')
+      expect(description).toContain('inviteePhone')
+      expect(tools.find((tool) => tool.name === 'find_available_slots')?.description).toContain(
+        'eventType.locations',
+      )
       expect(description).toContain('booking_changed')
       expect(description).toContain('round-robin host pool or activation changed')
       expect(description).toContain('call find_available_slots again before retrying')
@@ -218,7 +461,13 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     })
     await db
       .updateTable('event_types')
-      .set({ scheduling_type: 'collective' })
+      .set({
+        scheduling_type: 'collective',
+        locations: JSON.stringify([
+          { id: 'office', kind: 'in_person', address: 'Team office', isDefault: true },
+          { id: 'room', kind: 'link', url: 'https://example.test/team-room' },
+        ]),
+      })
       .where('id', '=', eventId)
       .execute()
     const args = {
@@ -227,6 +476,7 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       timeZone: 'Europe/Berlin',
       startDate: '2026-11-03',
       endDate: '2026-11-03',
+      locationOptionId: 'room',
     }
     const found = ok<{
       eventType: { hosts: { name: string; timeZone: string }[] }
@@ -246,11 +496,15 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       teamSlug,
       slug: 'interview',
       start: found.slots[0]?.start,
+      locationOptionId: 'room',
       idempotencyKey: key,
       invitee: { name: 'Synthetic invitee', email: 'synthetic@example.com', timeZone: 'UTC' },
     }
     const created = ok<Booked>(await call('create_booking', request))
-    expect(created.booking.source).toBe('mcp')
+    expect(created.booking).toMatchObject({
+      source: 'mcp',
+      location: { kind: 'link', url: 'https://example.test/team-room' },
+    })
     expect(ok<Booked>(await call('create_booking', request)).replayed).toBe(true)
     expect(
       await db
@@ -266,7 +520,79 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       await call('cancel_booking', { manageToken: created.manageToken }),
     )
     expect(cancelled.status).toBe('cancelled')
+    const rest = await app.request(`/api/v1/public/teams/${teamSlug}/interview/bookings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        start: '2026-11-04T09:00:00Z',
+        locationOptionId: 'office',
+        invitee: request.invitee,
+      }),
+    })
+    expect(rest.status).toBe(201)
+    expect(await rest.json()).toMatchObject({
+      booking: { location: { kind: 'in_person', address: 'Team office' } },
+    })
   })
+
+  it.each(['rest', 'mcp'] as const)(
+    '%s keeps group seats on the shared default location',
+    async (transport) => {
+      const host = await f.host({ handle: `group-choice-${randomUUID().slice(0, 8)}` })
+      await f.schedule(host.userId)
+      const id = await f.eventType(host.organizationId, host.userId, { slug: 'group' })
+      await db
+        .updateTable('event_types')
+        .set({
+          booking_mode: 'group',
+          group_capacity: 3,
+          locations: JSON.stringify([
+            { id: 'room', kind: 'link', url: 'https://example.test/shared', isDefault: true },
+            { id: 'office', kind: 'in_person', address: 'Other room' },
+          ]),
+        })
+        .where('id', '=', id)
+        .execute()
+      const input = {
+        handle: host.handle,
+        slug: 'group',
+        start: '2026-11-02T09:00:00Z',
+        invitee: { name: 'Group invitee', email: 'group-choice@example.test', timeZone: 'UTC' },
+      }
+      if (transport === 'mcp') {
+        expect(
+          errorOf(await call('create_booking', { ...input, locationOptionId: 'office' })).error,
+        ).toBe('location_unavailable')
+        expect(
+          ok<Booked>(await call('create_booking', { ...input, locationOptionId: 'room' })).booking,
+        ).toMatchObject({ location: { kind: 'link', url: 'https://example.test/shared' } })
+      } else {
+        for (const [locationOptionId, status] of [
+          ['office', 409],
+          ['room', 201],
+        ] as const) {
+          const response = await app.request(`/api/v1/public/${host.handle}/group/bookings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ start: input.start, invitee: input.invitee, locationOptionId }),
+          })
+          expect(response.status).toBe(status)
+          expect(await response.json()).toMatchObject(
+            status === 409
+              ? { error: 'location_unavailable' }
+              : { booking: { location: { kind: 'link', url: 'https://example.test/shared' } } },
+          )
+        }
+      }
+      expect(
+        await db
+          .selectFrom('group_slots')
+          .select('active_seats')
+          .where('original_event_type_id', '=', id)
+          .execute(),
+      ).toEqual([{ active_seats: 1 }])
+    },
+  )
 
   const initialize = (key: string) =>
     app.request(`${PUBLIC_URL}/mcp`, {
@@ -340,7 +666,14 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     })
     await db
       .updateTable('event_types')
-      .set({ scheduling_type: 'collective', conference_organizer_user_id: second.userId })
+      .set({
+        scheduling_type: 'collective',
+        conference_organizer_user_id: second.userId,
+        locations: JSON.stringify([
+          { id: 'office', kind: 'in_person', address: 'Collective office', isDefault: true },
+          { id: 'meet', kind: 'google_meet', autoCreate: true },
+        ]),
+      })
       .where('id', '=', eventId)
       .execute()
     const teamSlug = (
@@ -357,7 +690,14 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     const found = ok<{ slots: unknown[] }>(
       await call(
         'find_available_slots',
-        { teamSlug, slug: 'meet', timeZone: 'UTC', startDate: '2030-11-04', endDate: '2030-11-04' },
+        {
+          teamSlug,
+          slug: 'meet',
+          timeZone: 'UTC',
+          startDate: '2030-11-04',
+          endDate: '2030-11-04',
+          locationOptionId: 'meet',
+        },
         agent.key,
         enabled,
       ),
@@ -366,6 +706,7 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     const request = {
       teamSlug,
       slug: 'meet',
+      locationOptionId: 'meet',
       start: '2030-11-04T09:00:00Z',
       invitee: { name: 'Synthetic invitee', email: 'meet-invitee@example.com', timeZone: 'UTC' },
       idempotencyKey: randomUUID(),

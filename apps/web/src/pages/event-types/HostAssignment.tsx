@@ -7,7 +7,7 @@ import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { UiText } from '../../i18n/translate.ts'
 import { PATHS } from '../../paths.ts'
-import type { EventTypeDraft } from './event-type-form.ts'
+import { type EventTypeDraft, hasAutomaticLocation } from './event-type-form.ts'
 
 interface Props {
   organizationId: string
@@ -211,58 +211,54 @@ export function HostAssignment({
           </>
         )}
       </fieldset>
-      {draft.locationKind === 'google_meet' &&
-        draft.autoCreateMeet &&
-        draft.schedulingType === 'collective' && (
-          <div>
-            <label htmlFor="conferenceOrganizer">{t('Meeting organizer')}</label>
-            <select
-              id="conferenceOrganizer"
-              value={draft.conferenceOrganizerUserId}
-              aria-invalid={!!organizerError}
-              onChange={(e) => set('conferenceOrganizerUserId', e.target.value)}
-            >
-              <option value="">{t('Choose an organizer')}</option>
-              {members
-                .filter((m) => draft.hostUserIds.includes(m.id))
-                .map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name.trim() || t('Unnamed team member')}
-                  </option>
-                ))}
-              {draft.conferenceOrganizerUserId &&
-                !members.some((m) => m.id === draft.conferenceOrganizerUserId) && (
-                  <option value={draft.conferenceOrganizerUserId}>
-                    {t('Selected organizer: load the member pages to check')}
-                  </option>
-                )}
-            </select>
-            {organizerError && (
-              <p role="alert" className="field-error">
-                {ui(organizerError)}
-              </p>
-            )}
-            <p className="hint">
-              {t(
-                'Choose one required host to create the Meet link. Existing bookings keep their organizer, invitation identity and original calendars.',
+      {hasAutomaticLocation(draft, 'google_meet') && draft.schedulingType === 'collective' && (
+        <div>
+          <label htmlFor="conferenceOrganizer">{t('Meeting organizer')}</label>
+          <select
+            id="conferenceOrganizer"
+            value={draft.conferenceOrganizerUserId}
+            aria-invalid={!!organizerError}
+            onChange={(e) => set('conferenceOrganizerUserId', e.target.value)}
+          >
+            <option value="">{t('Choose an organizer')}</option>
+            {members
+              .filter((m) => draft.hostUserIds.includes(m.id))
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name.trim() || t('Unnamed team member')}
+                </option>
+              ))}
+            {draft.conferenceOrganizerUserId &&
+              !members.some((m) => m.id === draft.conferenceOrganizerUserId) && (
+                <option value={draft.conferenceOrganizerUserId}>
+                  {t('Selected organizer: load the member pages to check')}
+                </option>
               )}
+          </select>
+          {organizerError && (
+            <p role="alert" className="field-error">
+              {ui(organizerError)}
             </p>
-          </div>
-        )}
+          )}
+          <p className="hint">
+            {t(
+              'Choose one required host to create the Meet link. Existing bookings keep their organizer, invitation identity and original calendars.',
+            )}
+          </p>
+        </div>
+      )}
       {draft.locationKind === 'zoom' && draft.schedulingType !== 'individual' && (
         <p className="hint">
           {t('Automatic Zoom supports individual meetings with exactly one host.')}
         </p>
       )}
-      {draft.locationKind === 'google_meet' &&
-        draft.autoCreateMeet &&
-        draft.schedulingType === 'round_robin' && (
-          <p>
-            {t(
-              'The assigned available host creates the Meet link. Only pool members with an eligible Google calendar can receive new bookings.',
-            )}
-          </p>
-        )}
+      {hasAutomaticLocation(draft, 'google_meet') && draft.schedulingType === 'round_robin' && (
+        <p>
+          {t(
+            'The assigned available host creates the Meet link. Only pool members with an eligible Google calendar can receive new bookings.',
+          )}
+        </p>
+      )}
       {state.status === 'ready' && state.data.nextAfter && (
         <button
           type="button"

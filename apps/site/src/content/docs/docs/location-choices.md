@@ -19,6 +19,24 @@ or team permissions. In the web event editor, choose one location in the initial
 Expand the location settings to add, edit or reorder choices and choose the default.
 Saving another setting preserves the ordered choices and their identities.
 
+In **Event types**, create or edit an event, then expand **Location options and conferencing**:
+
+1. Choose **Add location option** and fill in the address, phone number or custom link.
+   For a phone call, enable **Invitee provides a phone number** when the host should call;
+   otherwise enter the host number for the invitee to call.
+2. Give options optional public labels, such as “Office visit” or “Video call”. Do not
+   put private contact details in these labels.
+3. Use **Move location up** / **Move location down** to change the displayed order, and
+   **Default location** to select the initial choice. Reordering preserves the chosen default.
+4. Remove unwanted options, then save the event. Changes apply to future bookings;
+   existing bookings keep their saved location.
+
+The essentials-only form still starts with one location. Expanding it preserves that
+choice, including a preselected video provider. If you add Google Meet or Zoom as an
+alternative, its automatic-creation checkbox appears too; Zoom also needs the host's
+authorized meetings account. A collective automatic Meet option needs a required host
+selected as its organizer, even when another location is the default.
+
 `locations` is an ordered list of 1–5 options, or `null` to clear it. Each option needs a
 stable `id` and a distinct kind. IDs contain 1–64 ASCII letters, digits, underscores or
 hyphens, excluding `__proto__`. Optional labels are public single-line text of up to 100
@@ -67,6 +85,25 @@ asks the client to update `locations`. Configure invitee phone collection throug
 Public discovery exposes only option IDs, kinds, public labels, the default marker and
 whether a phone number is required. Host numbers, addresses, saved URLs and connected
 account details are not exposed before booking. Treat labels as public content.
+
+The saved details below appear in the booking confirmation, emails and calendar
+invitations (ICS), subject to the recipient-specific phone rules.
+
+| Option | Before booking | After booking |
+|---|---|---|
+| In person | Kind and optional public label | Saved address |
+| Invitee calls host | Phone kind and optional public label; no host number | Host number and call instructions |
+| Host calls invitee | Phone kind and a required invitee phone field | Host/invitee receive the collected number and call instructions; guests receive neutral phone-call text without that number |
+| Custom link | Kind and optional public label; no saved URL | Saved meeting link |
+| Google Meet or Zoom | Kind and optional public label | Automatic meetings follow pending/ready/failure status; the generated join link is sent when ready. Without automatic creation, only the meeting kind is available. |
+
+For agent discovery, REST `GET /api/v1/public/{handle}/{slug}` (or
+`GET /api/v1/public/teams/{teamSlug}/{slug}`) returns the safe `locations` list.
+MCP `find_available_slots` and CLI `slots` include it in `eventType.locations` alongside
+the slots. Ask the invitee which option they want, then query slots again with its
+`locationOptionId` and pass the same ID when booking. REST slot responses contain slots;
+read their choices from the public event-type endpoint. Do not use a private owner
+configuration response as public discovery.
 
 REST booking creation and MCP `create_booking` accept `locationOptionId` and, for the
 invitee-phone option, `inviteePhone`. The CLI `book` accepts the same fields in its JSON
@@ -125,6 +162,9 @@ keep their location empty.
   every interface. Automatic meetings keep their existing conference and organizer.
 - There is at most one option of each kind, so multiple addresses or phone numbers cannot
   be offered together. Options share hosts, durations, questions and booking rules.
+- “Ask the invitee” collects a phone number for a host-initiated call. It does not let an
+  invitee supply an arbitrary address or meeting URL, or offer both phone directions
+  on the same event type.
 - Automatic Zoom supports only individual events with one authorized host. Collective and
   round-robin Zoom remain unsupported. Meet uses the required collective organizer or the
   actual assigned round-robin host; it never borrows another host’s connection.
