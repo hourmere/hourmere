@@ -6,6 +6,17 @@ description: Versioning, authentication, validation, errors and booking semantic
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
 
+## Public branding
+
+Public host and event-type responses, one-time link event metadata and invitee managed
+bookings add optional `branding` with `name`, nullable `primaryColor` and nullable
+`logoDataUrl`. The name labels the logo; the logo is bounded inline normalized PNG data,
+not a remote URL. Omission retains the default theme. Clients should validate colours
+and derive accessible theme roles rather than use the raw primary colour for all text.
+The resource's owning personal or team organization determines the brand, independently
+of the viewer's current workspace. No organization ID or administrative permission is
+exposed by this projection; the existing branding administration APIs remain protected.
+
 ## Attendance API compatibility
 
 ### Webhook event compatibility
@@ -1236,6 +1247,22 @@ creating bookings, 30 for the other manage endpoints;
 beyond that 429 `rate_limited` with `Retry-After`, decided before the request body is read
 (only a `Content-Length` over the body limit is refused first). The counters live in each server process's memory, so with several instances a client gets that budget once per instance; a shared store
 comes with multi-instance deployments.
+
+### Public group-seat availability
+
+Public `Slot` responses add optional `seatsRemaining` and `capacity` integers for
+internally configured group event types. Individual slots keep their existing shape.
+Full and unusable group occurrences are omitted. Counts are aggregate snapshots, not
+reservations, and never include attendee identities or support mailbox lookup. A last-seat
+race still uses the existing `slot_taken` error and idempotency behavior. Existing
+occurrences use their pinned resources; new ones use current availability and limits.
+Group configuration through REST, MCP, CLI and the editor remains unavailable.
+
+Group-seat invitee moves through `POST /api/v1/bookings/manage/reschedule` require
+an `Idempotency-Key` header. Reuse the same key and request after a lost response;
+an exact replay returns the same successor without recovering its manage token.
+The public page retains this key while retrying the same move. The managed slot
+picker currently lists new available occurrences only, without group seat counts.
 
 ### Host rescheduling
 

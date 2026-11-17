@@ -23,6 +23,7 @@ import {
 import { publicAvatarImage } from '@hourmere/core/public-avatar'
 import type { Database, Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
+import { getPublicBranding, type PublicBranding } from './branding.ts'
 import {
   automaticMeet,
   automaticZoom,
@@ -35,6 +36,7 @@ import {
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertCanExplainEventType } from './event-types.ts'
+import { requireGroupSlotConferenceUsable } from './group-conferences.ts'
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { LOCATION_KINDS, type LocationKind } from './location-kinds.ts'
 import {
@@ -132,6 +134,7 @@ export interface PublicEventTypeRecord {
   location: Location | null
   locations: LocationOption[] | null
   bookingMode?: 'individual' | 'group'
+  groupCapacity?: number | null
   questions: Question[]
   allowGuests: boolean
   hostName: string
@@ -193,6 +196,7 @@ async function findPersonalEventType(
       'et.location',
       'et.locations',
       'et.booking_mode',
+      'et.group_capacity',
       'et.zoom_connection_id',
       'et.questions',
       'et.allow_guests',
@@ -245,6 +249,7 @@ async function findPersonalEventType(
     location: parseLocation(row.location),
     locations: row.locations as LocationOption[] | null,
     bookingMode: row.booking_mode === 'group' ? 'group' : 'individual',
+    groupCapacity: row.group_capacity,
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -383,6 +388,7 @@ async function findTeamEventType(
     location: parseLocation(row.location),
     locations: row.locations as LocationOption[] | null,
     bookingMode: row.booking_mode === 'group' ? 'group' : 'individual',
+    groupCapacity: row.group_capacity,
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
     successRedirect: row.success_redirect as unknown as SuccessRedirect | null,
@@ -430,10 +436,12 @@ export async function getOneTimeBookingPage(
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
   const page = publicEventType({ ...eventType, waitlistEnabled: false })
+  const branding = await getPublicBranding(ctx.db, eventType.organizationId)
   // Keep this projection explicit: additions to the reusable public page must not
   // silently expose an address or navigation capability to one-time recipients.
   return {
     eventType: {
+      ...(branding && { branding }),
       title: page.title,
       description: page.description,
       durationMinutes: page.durationMinutes,
@@ -459,6 +467,7 @@ export function eventTypeNotFound(): DomainError {
 
 /** What a public booking page shows. Location details are only revealed once booked. */
 export interface PublicEventType {
+  branding?: PublicBranding
   handle: string
   slug: string
   title: string
@@ -484,14 +493,22 @@ export async function getPublicEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicEventType(ctx.db, handle, slug), ctx.smtpConfigured)
+  const event = await findPublicEventType(ctx.db, handle, slug)
+  if (!event) throw eventTypeNotFound()
+  const page = publicEventType(event, ctx.smtpConfigured)
+  const branding = await getPublicBranding(ctx.db, event.organizationId)
+  return { ...page, ...(branding && { branding }) }
 }
 
 export async function getPublicTeamEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  return publicEventType(await findPublicTeamEventType(ctx.db, handle, slug), ctx.smtpConfigured)
+  const event = await findPublicTeamEventType(ctx.db, handle, slug)
+  if (!event) throw eventTypeNotFound()
+  const page = publicEventType(event, ctx.smtpConfigured)
+  const branding = await getPublicBranding(ctx.db, event.organizationId)
+  return { ...page, ...(branding && { branding }) }
 }
 
 function publicEventType(
@@ -540,6 +557,7 @@ export interface PublicEventTypeSummary {
 
 /** What the host's page at /{handle} shows: who they are and what can be booked. */
 export interface PublicHost {
+  branding?: PublicBranding
   handle: string
   host: { name: string; timeZone: string; image?: string }
   eventTypes: PublicEventTypeSummary[]
@@ -565,6 +583,12 @@ export async function getPublicHost(
           .where('p.handle', '=', h)
           .executeTakeFirst()
   if (!profile) throw new DomainError('not_found', 'host_not_found', 'No such booking page')
+  const personal = await ctx.db
+    .selectFrom('personal_organizations')
+    .select('organization_id')
+    .where('user_id', '=', profile.user_id)
+    .executeTakeFirst()
+  const branding = personal ? await getPublicBranding(ctx.db, personal.organization_id) : undefined
   const image = publicAvatarImage(profile.image)
   const rows = await ctx.db
     .selectFrom('event_types as et')
@@ -582,6 +606,7 @@ export async function getPublicHost(
     .orderBy('et.id')
     .execute()
   return {
+    ...(branding && { branding }),
     handle: profile.handle,
     host: {
       name: profile.name.trim() || profile.handle,
@@ -604,6 +629,9 @@ export async function getPublicHost(
 export interface SlotView {
   start: string
   end: string
+  /** Aggregate availability only; no attendee identity or occurrence capability. */
+  seatsRemaining?: number
+  capacity?: number
 }
 
 /**
@@ -795,6 +823,7 @@ async function eventSlots(
 ): Promise<SlotView[]> {
   const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
   const now = ctx.now()
+  if (et.bookingMode === 'group') return groupEventSlots(ctx, input, et, durationMinutes, now)
   const eligibleHostUserIds = await requireLocationAvailability(ctx, et, input.locationOptionId)
   // Without an explicit step, each selected duration supplies its own start grid.
   const rules = { ...et, slotStepMinutes: et.configuredSlotStepMinutes ?? durationMinutes }
@@ -820,6 +849,97 @@ async function eventSlots(
     et.hostUserIds.length > 1,
     durationMinutes,
   )
+}
+
+/**
+ * Existing occurrences already reserve the host and consume one booking-limit allowance.
+ * Mirror admission's mailbox-independent snapshot checks; never query seat membership here.
+ * New occurrences still pass the ordinary availability engine with all occupancy intact.
+ */
+async function groupEventSlots(
+  ctx: PublicContext,
+  input: { start: Temporal.Instant; end: Temporal.Instant; locationOptionId?: string },
+  et: PublicEventTypeRecord,
+  durationMinutes: number,
+  now: Temporal.Instant,
+): Promise<SlotView[]> {
+  if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1 || !et.groupCapacity)
+    return []
+  const rules = { ...et, slotStepMinutes: et.configuredSlotStepMinutes ?? durationMinutes }
+  if (!hasBookablePart(rules, input.start, input.end, now)) return []
+  const occurrences = await ctx.db
+    .selectFrom('group_slots')
+    .selectAll()
+    .where('original_event_type_id', '=', et.id)
+    .where('state', 'in', ['open', 'host_cancelled'])
+    .where('start_at', '>=', new Date(input.start.epochMilliseconds))
+    .where('end_at', '<=', new Date(input.end.epochMilliseconds))
+    .execute()
+  const offered: SlotView[] = []
+  for (const slot of occurrences) {
+    const start = toInstant(slot.start_at)
+    const end = toInstant(slot.end_at)
+    const location = parseLocation(slot.location)
+    if (
+      slot.state !== 'open' ||
+      slot.active_seats >= slot.capacity ||
+      slot.host_user_id !== et.hostUserIds[0] ||
+      end.since(start).total('minutes') !== durationMinutes ||
+      Temporal.Instant.compare(start, now.add({ minutes: et.minimumNoticeMinutes })) < 0 ||
+      (et.bookingWindowDays !== null &&
+        Temporal.Instant.compare(
+          start,
+          now
+            .toZonedDateTimeISO(slot.host_time_zone)
+            .add({ days: et.bookingWindowDays })
+            .toInstant(),
+        ) > 0) ||
+      (location?.kind === 'phone' && location.askInvitee === true) ||
+      (input.locationOptionId !== undefined &&
+        (slot.location_option as { id?: string } | null)?.id !== input.locationOptionId)
+    )
+      continue
+    try {
+      await requireGroupSlotConferenceUsable(ctx, ctx.db, slot)
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'slot_unavailable') continue
+      throw error
+    }
+    offered.push({
+      start: toIso(start),
+      end: toIso(end),
+      seatsRemaining: slot.capacity - slot.active_seats,
+      capacity: slot.capacity,
+    })
+  }
+  let fresh: SlotView[] = []
+  try {
+    await requireLocationAvailability(ctx, et, input.locationOptionId)
+    fresh = await intersectSlots(
+      ctx.db,
+      et.id,
+      et.hostUserIds,
+      input.start,
+      input.end,
+      now,
+      undefined,
+      false,
+      durationMinutes,
+    )
+  } catch (error) {
+    // Current logistics/calendar problems cannot invalidate an already reserved occurrence.
+    // Preserve the original error when there is no usable occurrence to offer.
+    if (!(error instanceof DomainError) || !offered.length) throw error
+  }
+  const occupied = new Set(
+    occurrences.map((slot) => `${slot.start_at.toISOString()}/${slot.end_at.toISOString()}`),
+  )
+  for (const slot of fresh) {
+    // Includes host-cancelled tuples: those cannot be recreated through public admission.
+    if (occupied.has(`${slot.start}/${slot.end}`)) continue
+    offered.push({ ...slot, seatsRemaining: et.groupCapacity, capacity: et.groupCapacity })
+  }
+  return offered.sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end))
 }
 
 // --- The database → engine mapping ------------------------------------------------------

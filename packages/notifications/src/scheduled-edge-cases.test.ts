@@ -60,6 +60,11 @@ async function moduleCopy<T>(
     }
     source = source.replace(item[0], '')
   }
+  // Function copies have no Vitest VM import callback. Resolve lazy dependencies here,
+  // preserving the real module and its delivery-time loading rather than stubbing it.
+  dependencies.loadModule = (specifier: string) =>
+    import(specifier.startsWith('.') ? new URL(specifier, url).href : specifier)
+  source = source.replace(/\bimport\(/g, 'loadModule(')
   Object.assign(dependencies, overrides)
   source = source.replace(/^export\s*\{[\s\S]*?\}\s*from '[^']+'\n/gm, '').replace(/\bexport /g, '')
   return new Function(...Object.keys(dependencies), `${source}; return { ${names.join(',')} }`)(

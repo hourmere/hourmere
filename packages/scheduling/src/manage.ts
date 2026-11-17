@@ -18,6 +18,7 @@ import {
   type ManagedRescheduleRequestState,
   managedLinkRescheduleRequest,
 } from './bookings.ts'
+import { getPublicBranding, type PublicBranding } from './branding.ts'
 import {
   assertInviteeChangeOpen,
   changeDeadline,
@@ -30,6 +31,7 @@ import { bookingHostIds, resolvedBookingHosts } from './hosts.ts'
 
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
+  branding?: PublicBranding
   /** The event type as it is now; null once it is deleted (or for a booking without one). */
   eventType: { title: string; durationMinutes: number; allowedDurationsMinutes?: number[] } | null
   /** The people the invitee meets: each host's name (their handle if they have no name). */
@@ -74,10 +76,11 @@ export async function getManagedBookingDetails(
     managedLinkRescheduleRequest(at, token, booking.id),
     ctx.db
       .selectFrom('bookings')
-      .select(['reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
+      .select(['organization_id', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
       .where('id', '=', booking.id)
       .executeTakeFirstOrThrow(),
   ])
+  const branding = await getPublicBranding(ctx.db, cutoffs.organization_id)
   const start = Temporal.Instant.from(booking.start)
   const instant = (minutes: number | null) => {
     const deadline = changeDeadline(start, minutes)
@@ -85,6 +88,7 @@ export async function getManagedBookingDetails(
   }
   return {
     ...booking,
+    ...(branding && { branding }),
     eventType: eventType
       ? {
           title: eventType.title,

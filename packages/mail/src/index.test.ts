@@ -2,6 +2,7 @@ import type { Server } from 'node:net'
 import addressparser from 'nodemailer/lib/addressparser'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  brandEmail,
   createLogMailer,
   createSmtpMailer,
   escapeHtml,
@@ -443,7 +444,45 @@ describe('createSmtpMailer', () => {
     await new Promise((resolve) => (server as Server).close(resolve))
   })
 
+  it('delivers the uploaded logo as a CID PNG without changing the calendar part', async () => {
+    const logo =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO1sAAAAASUVORK5CYII='
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    const branded = brandEmail(
+      {
+        to: 'ada@example.com',
+        subject: 'Meeting',
+        text: 'Meeting',
+        html: emailLayout('en', 'Meeting', '<p>Meeting</p>'),
+        attachments: [invitation],
+      },
+      { name: 'Example', primaryColor: '#005544', logoDataUrl: `data:image/png;base64,${logo}` },
+    )
+    await mailer.send(branded)
+    const raw = received.data ?? ''
+    expect(raw).toContain('Content-ID: <organization-logo@hourmere>')
+    const leaves = (part: ReturnType<typeof mimePart>): ReturnType<typeof mimePart>[] =>
+      part.children.length ? part.children.flatMap(leaves) : [part]
+    const parts = leaves(mimePart(raw))
+    expect(parts.find((part) => part.type.startsWith('image/png'))?.content).toEqual(
+      Buffer.from(logo, 'base64'),
+    )
+    expect(parts.find((part) => part.type.startsWith('text/html'))?.content.toString()).toContain(
+      'src="cid:organization-logo@hourmere"',
+    )
+    expect(parts.find((part) => part.type.startsWith('text/calendar'))?.content.toString()).toBe(
+      invitation.content,
+    )
+    expect(parts.find((part) => part.type.startsWith('text/plain'))?.content.toString()).toBe(
+      'Meeting',
+    )
+  })
+
   it('sends through the SMTP_URL server with percent-decoded credentials', async () => {
+    received.to.length = 0
     const mailer = createSmtpMailer({
       url: `smtp://resend:p%40ss%2Fword%23@127.0.0.1:${port}`,
       from: 'Hourmere <hourmere@example.com>',

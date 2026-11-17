@@ -979,7 +979,7 @@ export interface paths {
         put?: never;
         /**
          * Reschedule with the manage token
-         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
          */
         post: operations["rescheduleManagedBooking"];
         delete?: never;
@@ -4509,7 +4509,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Edit, enable or disable a booking workflow
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions are not available yet.
+         */
+        patch: operations["updateWorkflow"];
         trace?: never;
     };
 }
@@ -5785,6 +5789,7 @@ export interface components {
             };
         };
         ManagedBooking: components["schemas"]["Booking"] & {
+            branding?: components["schemas"]["PublicBranding"];
             /** @description The invitee's change deadlines this booking keeps (those of its event type when it was booked; later event type changes do not affect it). `rescheduleBy` is the earlier of the configured reschedule and cancel deadlines (a null setting imposes no limit from that side). From `rescheduleBy` on, rescheduling with this token fails with 409 `booking_reschedule_deadline_passed`; from `cancelBy` on, cancelling fails with 409 `booking_cancel_deadline_passed`. null = until the meeting starts. The host can still change the booking. */
             changeDeadlines: {
                 /** Format: date-time */
@@ -6045,6 +6050,7 @@ export interface components {
             allowedDurationsMinutes?: number[];
             /** @description Whether invitees may add guest recipients */
             allowGuests: boolean;
+            branding?: components["schemas"]["PublicBranding"];
             description: string | null;
             durationMinutes: number;
             host: {
@@ -6146,6 +6152,13 @@ export interface components {
                 url: string;
             };
         };
+        PublicBranding: {
+            /** @description Bounded normalized PNG data URL; no remote image request is needed */
+            logoDataUrl: string | null;
+            /** @description Organization name for logo alternative text */
+            name: string;
+            primaryColor: string | null;
+        };
         PublicEventType: {
             /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
             allowedDurationsMinutes?: number[];
@@ -6153,6 +6166,7 @@ export interface components {
             allowEmbedParentRedirect?: boolean;
             /** @description Whether invitees may add guest recipients */
             allowGuests: boolean;
+            branding?: components["schemas"]["PublicBranding"];
             description: string | null;
             durationMinutes: number;
             handle: string;
@@ -6201,6 +6215,7 @@ export interface components {
             };
         };
         PublicHost: {
+            branding?: components["schemas"]["PublicBranding"];
             /** @description Bookable event types, in the order the host arranged them */
             eventTypes: {
                 description: string | null;
@@ -6527,12 +6542,16 @@ export interface components {
             url: string;
         };
         Slot: {
+            /** @description Group sessions only: total capacity of this occurrence. No attendee identities are exposed. */
+            capacity?: number;
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
              * @example 2026-11-02T09:00:00.000Z
              */
             end: string;
+            /** @description Group sessions only: seats currently available. Full sessions are omitted; availability is not a reservation. */
+            seatsRemaining?: number;
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -6672,6 +6691,112 @@ export interface components {
             };
             /** Format: uuid */
             organizationId: string;
+        };
+        UpdateWorkflowInput: {
+            actions?: ({
+                content?: {
+                    de?: {
+                        body: string;
+                        subject: string;
+                    };
+                    en?: {
+                        body: string;
+                        subject: string;
+                    };
+                    es?: {
+                        body: string;
+                        subject: string;
+                    };
+                    fr?: {
+                        body: string;
+                        subject: string;
+                    };
+                    "pt-BR"?: {
+                        body: string;
+                        subject: string;
+                    };
+                    "zh-CN"?: {
+                        body: string;
+                        subject: string;
+                    };
+                };
+                recipients: ("booker" | "guests" | "hosts")[];
+                /** @enum {string} */
+                type: "email";
+            } | {
+                /** @enum {string} */
+                type: "webhook";
+                webhookId: string;
+            })[];
+            conditions?: ({
+                /** @enum {string} */
+                field: "event_type";
+                /** @enum {string} */
+                operator: "equals";
+                value: string;
+            } | {
+                /** @enum {string} */
+                field: "booking_source";
+                /** @enum {string} */
+                operator: "equals";
+                /** @enum {string} */
+                value: "web" | "embed" | "api" | "mcp";
+            } | {
+                /** @enum {string} */
+                field: "answer";
+                /** @enum {string} */
+                operator: "equals";
+                questionId: string;
+                value: string | boolean;
+            } | {
+                /** @enum {string} */
+                field: "location_kind";
+                /** @enum {string} */
+                operator: "equals";
+                /** @enum {string} */
+                value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            } | {
+                /** @enum {string} */
+                field: "guest_count";
+                /** @enum {string} */
+                operator: "equals" | "at_least" | "at_most";
+                value: number;
+            })[];
+            enabled?: boolean;
+            expectedRevision: number;
+            name?: string;
+            scope?: {
+                /** @enum {string} */
+                type: "all_event_types";
+            } | {
+                eventTypeId: string;
+                /** @enum {string} */
+                type: "event_type";
+            };
+            trigger?: {
+                /** @default 0 */
+                delayMinutes: number;
+                /** @enum {string} */
+                type: "booking.created";
+            } | {
+                /** @default 0 */
+                delayMinutes: number;
+                /** @enum {string} */
+                type: "booking.cancelled";
+            } | {
+                /** @default 0 */
+                delayMinutes: number;
+                /** @enum {string} */
+                type: "booking.rescheduled";
+            } | {
+                offsetMinutes: number;
+                /** @enum {string} */
+                type: "before_start";
+            } | {
+                offsetMinutes: number;
+                /** @enum {string} */
+                type: "after_end";
+            };
         };
         WaitlistAccepted: {
             /** @enum {boolean} */
@@ -7981,6 +8106,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                /** @description Required for group-seat moves. Reuse the same key and request after a lost response; replay returns the same seat without recovering its manage token. */
+                "idempotency-key"?: string;
                 /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
                 "x-manage-token"?: string;
             };
@@ -13641,6 +13768,89 @@ export interface operations {
             };
             /** @description workflows_disabled: workflows are not available on this instance; workflow_not_found: no such workflow of the owner the caller acts as */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateWorkflow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkflowInput"];
+            };
+        };
+        responses: {
+            /** @description Updated workflow */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workflow"];
+                };
+            };
+            /** @description invalid_request or invalid_workflow */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope or cross-origin session write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled or workflow_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflow_revision_conflict, workflow_limit_reached or organization_context_changed */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

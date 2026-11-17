@@ -29,6 +29,7 @@ function sourceCopy<T>(name: string, end: string, replacement?: [string, string]
     'parseQuestions',
     'publicAvatarImage',
     'DomainError',
+    'getPublicBranding',
     `${source}; return ${name}`,
   )(
     servedHandle,
@@ -37,6 +38,7 @@ function sourceCopy<T>(name: string, end: string, replacement?: [string, string]
     parseQuestions,
     publicAvatarImage,
     DomainError,
+    async () => undefined,
   ) as T
 }
 

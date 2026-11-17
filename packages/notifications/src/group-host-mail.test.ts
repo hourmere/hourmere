@@ -5,7 +5,14 @@ import { interfaceLanguage } from '@hourmere/core/language'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { defineJob } from '@hourmere/jobs'
-import { escapeHtml, icsAttachment, type MailMessage } from '@hourmere/mail'
+import {
+  brandEmail,
+  emailLayout,
+  escapeHtml,
+  icsAttachment,
+  type MailMessage,
+} from '@hourmere/mail'
+import { getPublicBranding } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -40,7 +47,12 @@ function sourceCopy(change?: [string, string], bindings: Record<string, unknown>
     /\bexport /g,
     '',
   )
+  // The Function copy cannot resolve a dynamic import in Vitest's VM; bind the real reader.
+  source = source.replace("const { getPublicBranding } = await import('@hourmere/scheduling')", '')
   const deps = {
+    brandEmail,
+    emailLayout,
+    getPublicBranding,
     sql,
     defineJob,
     z,
