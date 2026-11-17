@@ -15,6 +15,7 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 
 const PAGE = '/app/team/bookings'
 // The fixed booking must remain cancellable until a test explicitly advances this clock.
@@ -90,16 +91,18 @@ function member(me = TEAM, role = 'owner') {
   }
 }
 function server(overrides: Routes = {}, role = 'owner', me = TEAM) {
-  return fakeApi({
-    ...signedInAs(me),
-    ...profile(),
-    'GET /api/auth/organization/list': () =>
-      json(200, [ME.organization, TEAM.organization, OTHER_TEAM.organization]),
-    'GET /api/auth/organization/get-active-member': () => json(200, member(me, role)),
-    [LIST]: () => json(200, { data: [teamBooking()], nextCursor: null }),
-    [CANCEL]: () => json(200, { cancelled: true }),
-    ...overrides,
-  })
+  return fakeApi(
+    teamBookingPanelApi({
+      ...signedInAs(me),
+      ...profile(),
+      'GET /api/auth/organization/list': () =>
+        json(200, [ME.organization, TEAM.organization, OTHER_TEAM.organization]),
+      'GET /api/auth/organization/get-active-member': () => json(200, member(me, role)),
+      [LIST]: () => json(200, { data: [teamBooking()], nextCursor: null }),
+      [CANCEL]: () => json(200, { cancelled: true }),
+      ...overrides,
+    }),
+  )
 }
 const query = (path: string) =>
   Object.fromEntries(new URL(path, 'http://example.test').searchParams)
@@ -114,8 +117,8 @@ async function confirmCancellation(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
 }
 
-// This is an integration boundary: requests outside the list DTO and cancel route are
-// deliberately unscripted. fakeApi fails the test if a personal detail route is fetched.
+// This is an integration boundary: only the team list/detail DTOs and cancel route are
+// scripted. fakeApi fails the test if a personal detail route is fetched.
 describe('team bookings access and context', () => {
   it.each(['owner', 'admin', 'member, admin'])(
     'shows %s the team context, scope, bookings and navigation entry',
@@ -535,8 +538,10 @@ describe('team bookings list and DTO details', () => {
     const opener = await screen.findByRole('button', { name: 'Team discovery call' })
     opener.focus()
     await user.keyboard('{Enter}')
-    const heading = await screen.findByRole('heading', { name: 'Team booking details' })
-    await waitFor(() => expect(document.activeElement).toBe(heading))
+    await screen.findByRole('heading', { name: 'Team booking details' })
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close details' })),
+    )
     const close = screen.getByRole('button', { name: 'Close details' })
     close.focus()
     await user.keyboard('{Enter}')
@@ -599,13 +604,14 @@ describe('team booking cancellation', () => {
         }),
     })
     renderApp(PAGE)
+    await screen.findByRole('button', { name: 'Team discovery call' })
+    await userEvent.click(screen.getByText('Filter bookings', { selector: 'summary' }))
     const user = await openDetail()
-    await user.click(screen.getByText('Filter bookings', { selector: 'summary' }))
     await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
     await user.type(screen.getByLabelText(/Reason/), 'Original team reason')
     active = OTHER_TEAM
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
-    expect((await screen.findByRole('alert')).textContent).toContain(
+    expect((await screen.findAllByRole('alert'))[0]?.textContent).toContain(
       'Your team context changed. Reload before making changes.',
     )
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Cancel booking' }).disabled).toBe(
@@ -614,6 +620,7 @@ describe('team booking cancellation', () => {
     expect(api.to(CANCEL)[0]?.headers.get('X-Expected-Organization-Id')).toBe(TEAM.organization.id)
     expect(api.to(CANCEL)).toHaveLength(1)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
     const readsBeforeReload = api.to(LIST).length
     for (const name of ['Show more bookings', 'Apply filters', 'Clear filters']) {
       const control = screen.getByRole('button', { name })
@@ -626,7 +633,7 @@ describe('team booking cancellation', () => {
     expect(screen.getByTestId('location').textContent).toBe(PAGE)
     expect(api.to(LIST)).toHaveLength(readsBeforeReload)
     expect(api.to(CANCEL)).toHaveLength(1)
-    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    await user.click(screen.getAllByRole('button', { name: 'Reload' })[0] as HTMLElement)
     await waitFor(() =>
       expect(
         within(screen.getByRole('main')).getByText(OTHER_TEAM.organization.name),
@@ -661,14 +668,15 @@ describe('team booking cancellation', () => {
     const user = await openDetail()
     actualTeam = OTHER_TEAM
     await confirmCancellation(user)
-    await screen.findByRole('button', { name: 'Reload' })
+    await screen.findAllByRole('button', { name: 'Reload' })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
     await user.click(screen.getByRole('link', { name: 'Bookings' }))
     await screen.findByRole('heading', { name: 'Bookings', level: 1 })
-    await user.click(screen.getByRole('link', { name: 'Team bookings' }))
+    await user.click(screen.getAllByRole('link', { name: 'Team bookings' })[0] as HTMLAnchorElement)
     await screen.findByRole('heading', { name: 'Team bookings', level: 1 })
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeDefined()
-    expect(screen.getByRole('alert').textContent).toContain(
+    expect(screen.getAllByRole('button', { name: 'Reload' })[0] as HTMLElement).toBeDefined()
+    expect(screen.getAllByRole('alert')[0]?.textContent).toContain(
       'Your team context changed. Reload before making changes.',
     )
     expect(within(screen.getByRole('main')).getByText(TEAM.organization.name)).toBeDefined()
@@ -736,7 +744,10 @@ describe('team booking cancellation', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
     await screen.findByText(/This booking has already started, so it can no longer be cancelled/)
     expect(api.to(CANCEL)).toHaveLength(0)
-    expect(screen.getByRole('link', { name: 'Team bookings' })).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
+    expect(
+      screen.getAllByRole('link', { name: 'Team bookings' })[0] as HTMLAnchorElement,
+    ).toBeDefined()
     expect(screen.queryByText('Team bookings access is no longer available.')).toBeNull()
   })
 
@@ -826,17 +837,17 @@ describe('team bookings states and translations', () => {
       '主持人',
       '人员',
     ])
-    expect(panel.getByRole('button', { name: '关闭详情' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '关闭详情' })).toBeDefined()
     await user.click(panel.getByRole('button', { name: '取消预约…' }))
     await user.type(screen.getByLabelText(/原因/), '团队安排变化')
     expect(screen.getByRole('button', { name: '保留预约' })).toBeDefined()
     await user.click(screen.getByRole('button', { name: '取消预约' }))
-    expect((await screen.findByRole('alert')).textContent).toContain(
+    expect((await screen.findAllByRole('alert'))[0]?.textContent).toContain(
       '你的团队上下文已改变。请重新加载后再进行修改。',
     )
     expect(api.to(CANCEL)[0]?.headers.get('X-Expected-Organization-Id')).toBe(TEAM.organization.id)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    await user.click(screen.getByRole('button', { name: '重新加载' }))
+    await user.click(screen.getAllByRole('button', { name: '重新加载' })[0] as HTMLElement)
     await screen.findByRole('heading', { name: '团队预约访问权限已失效。' })
     expect(screen.queryByRole('table')).toBeNull()
     expect(screen.queryByText('Team discovery call')).toBeNull()

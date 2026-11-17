@@ -112,8 +112,8 @@ internal enrollment and verification service in
 `packages/scheduling/src/meeting-poll-voters.ts` enrolls public voters, invites and
 re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
 invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
-resend counters under the poll lock. It queues delivery rows only; no worker, transport,
-flag or UI is enabled. The internal ballot service in
+resend counters under the poll lock. It queues durable delivery rows. Credential mail workers now deliver those rows and an
+hourly sweep erases expired capability ciphertext; no transport, flag or UI is added. The internal ballot service in
 `packages/scheduling/src/meeting-poll-ballots.ts` submits and replaces complete ballots,
 withdraws and reactivates voters and records reminder opt-outs under the same locks and
 database deadline clock. Ballots and withdrawals advance the ballot and results revisions;
@@ -151,14 +151,14 @@ row. Its expectation file is
 `meeting-poll-key-state-coverage.test.ts` drops each of its five objects and requires a
 protection assertion to fail.
 
-The chosen cleanup schedule is hourly, at most 500 rows per transaction. It persists
-closure for abandoned open polls at their deadline, deletes expired public pending
-voters and their dependent personal data, and clears expired capability ciphertext.
+The cleanup schedule is hourly, at most 500 rows per transaction. It deletes expired
+public pending voters and their dependent personal data, and clears expired capability
+ciphertext. Persisting deadline closure belongs to the later reminder step.
 Capacity and voting expiry are synchronous database-clock decisions, never dependent on
 worker punctuality. Normal terminal poll history follows the installation's booking-data
 retention policy from its terminal transition (deadline for automatic closure); with no
 such policy, the current repository retains booking and terminal poll history until
-explicit deletion. This storage step does not install the later cleanup worker.
+explicit deletion. Both cleanup and capability-expiry workers are registered in worker roles.
 
 Mailbox digest counters and terminal delivery receipts remain for the entire retained
 poll lifetime so removing/recreating voters cannot reset mail budgets, reminder receipts
@@ -342,7 +342,10 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
   The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
-  discovery foundation; CalDAV is not yet enabled in the product.
+  discovery and busy-sync foundation; CalDAV is not yet enabled in the product.
+  Its internal sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
+  intervals, hashed instance IDs, resource href/etag mappings and an opaque sync token,
+  never event bodies, titles or attendee lists.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
   `event_type_id`. A rescheduled booking is a new row linked by `rescheduled_from_id`.
 - **Deleting an account** cascades to the user's own data (profile, schedules,

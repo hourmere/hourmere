@@ -8,8 +8,10 @@ services (enroll, invite, verify, recover and resend) by
 and replace ballots, withdraw, reactivate and reminder opt-out) by
 `packages/scheduling/src/meeting-poll-ballots.ts`, and the internal results and removal
 services (host results, voter removal and bulk removal of unverified enrollees) by
-`packages/scheduling/src/meeting-poll-results.ts`; cleanup, deletion cascades, transport,
-workers and UI remain proposed. Competitor research was checked
+`packages/scheduling/src/meeting-poll-results.ts`. Cleanup and deletion with receipt
+tombstones are implemented through migration `0088`; credential mail delivery and hourly
+capability ciphertext expiry are now implemented. Public and host transports, reminder and
+outcome mail, and UI remain proposed. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -165,8 +167,9 @@ choices below; later transport steps map them, and the error codes stay as liste
   entry's outcome (`invited`, `upgraded` or `unchanged`), voter ID and current roster
   state, never a credential; an exact replay reports every entry as `unchanged` with its
   current state.
-- Shared request buckets across processes and additional mail budgets remain transport
-  and delivery work (B1, B2); the opt-out credential is minted by the later mail steps.
+- Shared request buckets across processes remain transport work (B2). B1 delivery applies
+  shared instance and recipient mail budgets and mints the purpose-limited reminder
+  opt-out credential included with voting mail.
 
 Removal deletes the voter row with its votes, capabilities and deliveries and
 records `removed_at` on the mailbox counter row, whose `email_key` digest alone blocks
@@ -221,7 +224,7 @@ transport steps map them, and the error codes stay as listed here.
 - Verification and opt-out credentials never vote or withdraw, and voting credentials never
   opt out: each gets the same 404 `poll_not_found` as an unknown, revoked or removed
   voter's credential.
-- Opt-out uses the `reminder_opt_out` credential that the later mail steps mint. It records
+- Opt-out uses the `reminder_opt_out` credential that credential delivery mints. It records
   the mailbox's first `reminder_opted_out_at` on the counter row and skips the voter's queued
   reminders, without verification, ballot access or a revision. As a mail preference it is
   honoured whatever the poll's state and the credential's expiry while the credential is
@@ -401,7 +404,8 @@ under its own HKDF subkey, never the secret. `ensureMeetingPollKey` in
   invitation, verification, recovery mail or resend happens under another secret, and
   recovery for a well-formed poll ID fails instead of answering 202 with nothing queued.
 
-No transport supplies the secret yet, so nothing outside these services calls the fence.
+No transport supplies the secret yet. Internal credential-delivery and expiry workers use
+`BETTER_AUTH_SECRET` as the meeting-poll secret and call the fence in every transaction.
 The step that supplies it (B2) calls `ensureMeetingPollKey` at server start, before any
 meeting-poll route serves. Every worker that opens, mints or stores a credential ciphertext
 (B1 delivery, B4 reminders and opt-out credentials) calls it first in each transaction,
@@ -422,8 +426,8 @@ fail closed with `MeetingPollKeyMismatchError` until the operator either:
    start records the new secret. Those polls' rosters, ballots, tombstones, mail counters and
    queued credential mail are gone; polls without voters stay.
 
-No setting supplies the secret yet, so the operator documentation (the configuration entry
-of whichever setting B2 uses) lands with B2 and must state both procedures. Whether B2 also
+Internal workers use the existing `BETTER_AUTH_SECRET`; the transport startup check and
+operator documentation land with B2 and must state both procedures. Whether B2 also
 ships an operator command that performs the invalidation in one step is decided there.
 
 ## Proposed tables and invariants
@@ -783,11 +787,11 @@ reservation's capacity, or extends credential validity. The schedule is:
 
 The A4b cleanup job deletes expired public pending voters, terminal polls past an
 installation retention and due replay tombstones (see the A4b choices above). It does not
-yet persist deadline closure or clear expired capability ciphertext; the B4 and B1 rows below
-own those sweeps. No mail delivery is introduced by the storage
-steps. A poll
-privacy deletion never deletes its booking. Deleting a linked booking deletes its poll
-history first, preserving the scheduled-pair invariant and clearing receipt references.
+persist deadline closure (B4). The B1 `meeting-poll-capability-expiry-v1` job now clears
+expired capability ciphertext hourly using the `meeting_poll_capabilities_expiry` index,
+in bounded pages that skip locked polls and capabilities. Credential mail is dispatched
+by `meeting-poll-email-v1` every minute. A poll privacy deletion never deletes its booking.
+Deleting a linked booking deletes its poll history first, preserving the scheduled-pair invariant and clearing receipt references.
 Installation policies must delete poll history alongside due booking history rather than
 leave an indefinitely retained personal-data copy. Numeric cleanup and delivery bounds
 are named in `MEETING_POLL_RETENTION` alongside the admission constants.

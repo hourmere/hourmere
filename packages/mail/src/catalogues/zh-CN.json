@@ -107,5 +107,12 @@
   "rescheduleRequest.expiredSubject": "改期请求已到期：{event}",
   "rescheduleRequest.expiredIntroduction": "{invitee} 未在请求到期前选择新时间。原预约仍然有效。",
   "replyNotice.plain": "回复此邮件不会送达主持人。",
-  "replyNotice.manageLinks": "回复此邮件不会送达主持人。如需改期或取消，请使用此邮件中的链接。"
+  "replyNotice.manageLinks": "回复此邮件不会送达主持人。如需改期或取消，请使用此邮件中的链接。",
+  "poll.verify.subject": "验证 {poll} 的邮箱",
+  "poll.vote.subject": "查看会议投票：{poll}",
+  "poll.verify.body": "确认您的邮箱地址以参与 {poll}。",
+  "poll.vote.body": "使用您的私人链接参与 {poll}。",
+  "poll.expiry": "此链接有效期至 {expiry}。",
+  "poll.confirm": "打开链接不会确认邮箱或提交投票。",
+  "poll.optout": "停止接收此投票的提醒邮件。"
 }

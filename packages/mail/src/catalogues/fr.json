@@ -107,5 +107,12 @@
   "rescheduleRequest.expiredSubject": "Demande de report expirée : {event}",
   "rescheduleRequest.expiredIntroduction": "{invitee} n’a pas choisi de nouveau créneau avant l’expiration de la demande. La réservation initiale est maintenue.",
   "replyNotice.plain": "Les réponses à cet e-mail ne sont pas transmises aux hôtes.",
-  "replyNotice.manageLinks": "Les réponses à cet e-mail ne sont pas transmises aux hôtes. Pour replanifier ou annuler, utilisez les liens de cet e-mail."
+  "replyNotice.manageLinks": "Les réponses à cet e-mail ne sont pas transmises aux hôtes. Pour replanifier ou annuler, utilisez les liens de cet e-mail.",
+  "poll.verify.subject": "Vérifiez votre adresse e-mail pour {poll}",
+  "poll.vote.subject": "Voir le sondage de réunion : {poll}",
+  "poll.verify.body": "Confirmez votre adresse e-mail pour participer à {poll}.",
+  "poll.vote.body": "Utilisez votre lien privé pour participer à {poll}.",
+  "poll.expiry": "Ce lien est valable jusqu’au {expiry}.",
+  "poll.confirm": "Ouvrir ce lien ne confirme pas votre adresse e-mail et ne soumet aucun vote.",
+  "poll.optout": "Ne plus recevoir de rappels pour ce sondage."
 }

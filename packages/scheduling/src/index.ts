@@ -188,6 +188,7 @@ export {
   listManagedSlots,
   type ManagedBooking,
 } from './manage.ts'
+export { expireMeetingPollCapabilities } from './meeting-poll-capability-expiry.ts'
 export {
   cleanupMeetingPolls,
   type MeetingPollCleanupOptions,
@@ -297,6 +298,13 @@ export {
   type TeamReadinessPage,
   TeamReadinessPageSchema,
 } from './readiness.ts'
+export {
+  archiveRoutingForm,
+  createRoutingForm,
+  getRoutingForm,
+  listRoutingForms,
+  updateRoutingForm,
+} from './routing-form-service.ts'
 export {
   confirmDefaultSchedule,
   createSchedule,

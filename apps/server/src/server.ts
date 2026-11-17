@@ -46,7 +46,7 @@ import {
   paymentHoldsExpiryJob,
   routingRetentionJob,
 } from '@hourmere/jobs'
-import { meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
+import { meetingPollCapabilityExpiryJob, meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -55,11 +55,13 @@ import {
   conferenceNotificationDispatchJob,
   createInvitationEmailDispatcher,
   createInvitationEmailRepairer,
+  createMeetingPollEmailWorker,
   createWaitlistEmailWorker,
   groupHostMailJob,
   type InvitationEmailQueue,
   invitationEmailJob,
   invitationEmailRepairJob,
+  meetingPollEmailJob,
   notificationEmailCleanupJob,
   queuedSignInEmail,
   repairScheduledBookingEmails,
@@ -78,6 +80,7 @@ import {
   cleanupMeetingPolls,
   cleanupWaitlist,
   ensureWaitlistKey,
+  expireMeetingPollCapabilities,
   expirePaymentHolds,
   purgeAuditEvents,
   removeWaitlist,
@@ -107,6 +110,7 @@ import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
+import { routingFormConfigurationTools } from './mcp/routing-forms.ts'
 import { slackDestinationTools } from './mcp/slack-destinations.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
@@ -134,6 +138,7 @@ import { profileRoutes } from './routes/profile.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
+import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
@@ -313,6 +318,7 @@ export function productRoutes({
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    routingFormRoutes({ db, routingFormsEnabled: routingEnabled }),
     availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
     bookingRoutes({
       db,
@@ -345,6 +351,7 @@ export function productTools({
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
+  routingFormsEnabled: routingEnabled = routingFormsEnabled,
   followUpHostNotesEnabled,
   smsRemindersAvailable = false,
   successRedirectPolicy,
@@ -365,6 +372,7 @@ export function productTools({
   waitlistSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
+  routingFormsEnabled?: boolean | undefined
   publicUrl?: string | undefined
   smsRemindersAvailable?: boolean | undefined
   followUpHostNotesEnabled?: boolean | undefined
@@ -414,6 +422,7 @@ export function productTools({
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({ db }),
+    ...routingFormConfigurationTools({ db, routingFormsEnabled: routingEnabled }),
   ]
 }
 
@@ -808,6 +817,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
     log: (line) => console.info(line),
   })
+  const runMeetingPollEmail = createMeetingPollEmailWorker({
+    ...notificationDeps,
+    meetingPollSecret: config.BETTER_AUTH_SECRET,
+    smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
+    log: (line) => console.info(line),
+  })
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
@@ -818,6 +833,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' }),
       }),
       waitlistEmailJob(runWaitlistEmail),
+      meetingPollEmailJob(runMeetingPollEmail),
+      meetingPollCapabilityExpiryJob({
+        cleanup: () => expireMeetingPollCapabilities(db, config.BETTER_AUTH_SECRET),
+        continueCleanup: (): Promise<string | null> =>
+          jobs.enqueue('meeting-poll-capability-expiry-v1', {}, { singletonKey: 'continuation' }),
+      }),
       // No installation booking-data retention exists yet, so terminal polls stay until
       // explicit poll, linked-booking or organization deletion (docs/meeting-polls.md).
       meetingPollCleanupJob({

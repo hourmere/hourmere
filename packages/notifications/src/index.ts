@@ -1477,7 +1477,13 @@ export {
   listPendingInvitationDeliveries,
   type PendingInvitationDelivery,
 } from './invitation-deliveries.ts'
-
+export {
+  createMeetingPollEmailWorker,
+  deliverMeetingPollEmail,
+  type MeetingPollEmailDeps,
+  type MeetingPollEmailRequest,
+  meetingPollEmailJob,
+} from './meeting-polls.ts'
 export {
   deliverScheduledBookingEmail,
   enqueueScheduledBookingEmails,

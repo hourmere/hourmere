@@ -29,6 +29,7 @@ export class CalDavError extends Error {
 }
 export interface CalDavRequest {
   url: string
+  method?: 'PROPFIND' | 'REPORT'
   body: string
   authorization: string
   depth: '0' | '1'
@@ -36,7 +37,7 @@ export interface CalDavRequest {
   privateTargets: readonly CalDavPrivateTarget[]
 }
 export function redactCalDavRequest(input: CalDavRequest): CalDavRequest {
-  return redactCalDavField(input, 'authorization')
+  return redactCalDavField(redactCalDavField(input, 'authorization'), 'body')
 }
 export interface CalDavResponse {
   status: number
@@ -94,7 +95,7 @@ export const sendCalDav: CalDavTransport = async (input) => {
       const req = request(
         url,
         {
-          method: 'PROPFIND',
+          method: input.method ?? 'PROPFIND',
           agent: false,
           signal,
           family: selected.family,

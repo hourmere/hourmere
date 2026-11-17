@@ -107,6 +107,36 @@ pools still require explicit activation. These form changes are included in self
 REST, MCP and CLI defaults and permissions are unchanged. Group seats and paid-booking
 configuration remain unavailable in the editor, as described below.
 
+## Review bookings
+
+In **Bookings**, select an event title to open its detail. On wide screens the detail
+slides in from the right over the list; on phones it replaces the list as an ordinary page,
+with the app navigation still available. **Team bookings**
+uses the same view for owners and admins, with its existing limited team information
+and actions. Close the detail to return to your view, search, loaded pages and scroll
+position. Attendance and booking changes made there update the retained list.
+
+Use **Previous booking** and **Next booking** to follow the current filtered list order.
+The next page loads when needed; controls are unavailable at the ends. Opening adds one
+browser history entry, and stepping replaces that entry, so browser Back returns to the
+list. Copy the detail URL to open it later: a direct visit or reload shows the ordinary
+full detail page without a background list or previous/next controls.
+
+The desktop detail is a modal dialog: focus moves inside when opened, and Tab and
+Shift+Tab stay within its controls. The list stays visible behind it, but cannot receive
+keyboard or pointer input until the detail closes; this keeps covered controls out of
+the keyboard path. Closing returns focus to the original row. Escape closes the detail when a nested form or text field is not using that key;
+there are no arrow-key shortcuts. The slide respects reduced-motion preferences.
+
+List position is kept only during the current in-app visit, not after a reload. Results
+are loaded with the current filters rather than a fixed server snapshot, so concurrent
+changes can affect later pages. Team bookings has date/status/order filters but no text
+search. Team detail keeps the loaded list snapshot until a list refresh; a fresh access
+check still runs when selecting a booking, and writes recheck its current state.
+Direct links retain all existing access checks; unavailable bookings show the
+usual error without discarding the retained list. This interface is included in
+self-hosting and does not change REST, MCP or CLI operations.
+
 ## Known limitations
 
 - Event-type timing units are a web display preference and are not persisted. Notice and
@@ -154,7 +184,8 @@ configuration remain unavailable in the editor, as described below.
   successful ordinary booking wins, and email delivery is not guaranteed.
 - CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
   The [design and internal connection foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
-  adds no busy-time sync, event writes or UI/API/MCP/CLI access. Real-account acceptance
+  includes internal busy-time sync, with no production worker registration, event writes
+  or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
 - [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe
   processing, payment settings and automatic refunds are not available.

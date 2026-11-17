@@ -4,7 +4,8 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
-import { meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
+import { meetingPollCapabilityExpiryJob, meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
+import { meetingPollEmailJob } from '@hourmere/notifications'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startServer } from './server.ts'
 
@@ -90,6 +91,63 @@ describe.skipIf(!databaseUrl)('meeting poll cleanup in server composition', () =
           'running worker roles install the hourly cleanup schedule',
         ).toEqual([{ name: queueName, cron: '0 * * * *', data: {} }])
       })
+    }
+  }, 60_000)
+
+  it('registers credential delivery and expiry only in worker roles', async () => {
+    const expected = [
+      { name: 'meeting-poll-capability-expiry-v1', cron: '0 * * * *', data: {} },
+      { name: 'meeting-poll-email-v1', cron: '* * * * *', data: {} },
+    ] as const
+    const schedules = async () =>
+      (
+        await owned.pool.query(
+          'SELECT name,cron,data FROM pgboss.schedule WHERE name=ANY($1) ORDER BY name',
+          [expected.map((row) => row.name)],
+        )
+      ).rows
+    await owned.pool.query('DELETE FROM pgboss.schedule WHERE name=ANY($1)', [
+      expected.map((row) => row.name),
+    ])
+    await withServer('web', startServer, async () => {
+      expect(await schedules()).toEqual([])
+    })
+    const producer = createJobs({
+      connectionString: owned.url,
+      definitions: [
+        meetingPollCapabilityExpiryJob({ cleanup: async () => ({ more: false }) }),
+        meetingPollEmailJob(),
+      ],
+      migrate: true,
+      work: false,
+      maxConnections: 1,
+      log: () => {},
+    })
+    try {
+      await producer.start()
+      for (const role of ['worker', 'all'] as const) {
+        await withServer(role, startServer, async () => {
+          expect(await schedules()).toEqual(expected)
+          for (const { name } of expected) {
+            const id = await producer.enqueue(name, {})
+            const deadline = Date.now() + 8000
+            let state: string | undefined
+            do {
+              state = (
+                await owned.pool.query<{ state: string }>(
+                  'SELECT state FROM pgboss.job WHERE id=$1',
+                  [id],
+                )
+              ).rows[0]?.state
+              if (state === 'completed') break
+              await new Promise((resolve) => setTimeout(resolve, 50))
+            } while (Date.now() < deadline)
+            expect(state, `${name} completes through production composition`).toBe('completed')
+          }
+        })
+      }
+    } finally {
+      await producer.stop()
     }
   }, 60_000)
 

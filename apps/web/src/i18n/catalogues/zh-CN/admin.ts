@@ -794,6 +794,8 @@ export const admin = {
   ' + {0} guests': ' + {0}位来宾',
   'Co-hosts': '共同主持人',
   'Team booking details': '团队预约详情',
+  'Previous booking': '上一个预约',
+  'Next booking': '下一个预约',
   'Close details': '关闭详情',
   'Booking ID': '预约ID',
   'Event type ID': '活动类型ID',

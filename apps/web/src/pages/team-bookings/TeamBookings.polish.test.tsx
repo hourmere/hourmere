@@ -17,6 +17,7 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 import bookingStyles from './team-bookings.css?raw'
 
 const PAGE = '/app/team/bookings'
@@ -71,12 +72,14 @@ function booking(
   }
 }
 function server(overrides: Routes = {}, current = booking()) {
-  return fakeApi({
-    ...signedInAs(TEAM),
-    ...profile({ ...PROFILE, timeZone: 'America/New_York' }),
-    [LIST]: () => json(200, { data: [current], nextCursor: null }),
-    ...overrides,
-  })
+  return fakeApi(
+    teamBookingPanelApi({
+      ...signedInAs(TEAM),
+      ...profile({ ...PROFILE, timeZone: 'America/New_York' }),
+      [LIST]: () => json(200, { data: [current], nextCursor: null }),
+      ...overrides,
+    }),
+  )
 }
 function required<T>(value: T | null | undefined): T {
   if (value == null) throw new Error('Expected fixture or rendered booking field')

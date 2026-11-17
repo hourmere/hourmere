@@ -51,8 +51,8 @@ export function RequestReschedule({
           body: attempt.current,
         }),
       )
-      if (!mounted.current) return
       onChange(updated)
+      if (!mounted.current) return
       setOpen(false)
       setSent(true)
       setNote('')

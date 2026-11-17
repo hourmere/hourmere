@@ -24,6 +24,7 @@ export interface AuditFixtureState {
   eventTypeId: string
   scheduleId: string
   bookingId: string
+  teamBookingId: string
   manageToken: string
   bookingPath: string
   teamBookingPath: string

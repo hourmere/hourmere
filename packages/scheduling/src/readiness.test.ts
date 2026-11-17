@@ -494,6 +494,25 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     },
   )
 
+  it('evaluates CalDAV freshness without presenting unknown sync as missing selection', async () => {
+    const s = await personal()
+    const c = await calendar(s.user.id, { provider: 'caldav' })
+    let result = await getSelfReadiness(s.ctx)
+    expect(signal(result.member, 'conflict_calendar_selection').state).toBe('satisfied')
+    expect(signal(result.member, 'selected_calendar_sync').state).toBe('satisfied')
+    await db
+      .updateTable('calendars')
+      .set({ sync_error: 'permissions_missing' })
+      .where('id', '=', c.id)
+      .execute()
+    result = await getSelfReadiness(s.ctx)
+    expect(signal(result.member, 'conflict_calendar_selection').state).toBe('satisfied')
+    expect(signal(result.member, 'selected_calendar_sync')).toMatchObject({
+      state: 'dependency_unavailable',
+      reasonCode: 'calendar_attention_required',
+    })
+  })
+
   it('keeps missing sync metadata distinct from another healthy selected calendar', async () => {
     const s = await personal()
     await calendar(s.user.id, { syncedAt: null, syncState: null })

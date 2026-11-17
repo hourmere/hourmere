@@ -107,5 +107,12 @@
   "rescheduleRequest.expiredSubject": "Reschedule request expired: {event}",
   "rescheduleRequest.expiredIntroduction": "{invitee} did not choose a new time before the request expired. The original booking remains in place.",
   "replyNotice.plain": "Replies to this email are not delivered to the hosts.",
-  "replyNotice.manageLinks": "Replies to this email are not delivered to the hosts. To reschedule or cancel, use the links in this email."
+  "replyNotice.manageLinks": "Replies to this email are not delivered to the hosts. To reschedule or cancel, use the links in this email.",
+  "poll.verify.subject": "Verify your email for {poll}",
+  "poll.vote.subject": "View meeting poll: {poll}",
+  "poll.verify.body": "Confirm your email address to take part in {poll}.",
+  "poll.vote.body": "Use your private link to take part in {poll}.",
+  "poll.expiry": "This link is valid until {expiry}.",
+  "poll.confirm": "Opening this link does not confirm your email or submit a vote.",
+  "poll.optout": "Stop reminder emails for this poll."
 }

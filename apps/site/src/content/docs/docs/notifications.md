@@ -1077,3 +1077,45 @@ belong to the operator's Twilio account. Signed inbound STOP messages suppress t
 number across the instance under the same transaction fence as send reservations, and
 START/UNSTOP re-enables it. SMS jobs and failures are separate from booking and email
 delivery. See the SMS guide for inbound webhook setup, replay protection and limitations.
+
+## Internal meeting-poll credential mail
+
+Meeting polls have internal delivery workers, but no public or host transport yet.
+`meeting-poll-email-v1` scans durable invitation, verification and recovery intents every
+minute in `worker` and `all` roles. Messages use the voter's saved language and time zone,
+with complete English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese
+copy. They never look up account membership or include other voters, ballots, booking
+management links, conference links or calendar files. Links carry credentials only in
+fragments and target the later voter and reminder opt-out pages; opening a link itself
+neither verifies nor votes. Host creation remains unavailable until those pages land.
+
+Each transaction checks the meeting-poll key fence before locks or ciphertext access.
+Internal workers use `BETTER_AUTH_SECRET` for the poll key. Claims lock the poll before
+its delivery row; SMTP runs outside transactions. A committed claim has a five-minute
+lease, consumes an attempt and reserves the shared notification instance/hour and
+recipient/hour/day budget atomically. Defaults remain 100 instance messages/hour and
+5 recipient messages/hour, 20/day; configured limits apply. These reservations share
+booking-mail recipient accounting. Failed, interrupted and uncertain sends conservatively
+consume budget, so concurrent workers cannot exceed a last available slot. Public request
+and host actor/organization admission wiring belongs to the later transport steps;
+existing poll/mailbox recovery and resend cooldowns and caps remain unchanged.
+
+Temporary failures retry after 1, 2, 4 and 8 minutes, with at most five attempts including
+crashed claims. Permanent failures and missing SMTP configuration stop delivery. Terminal
+sent, suppressed or skipped rows erase their ciphertext. Recovery repeats the current
+credential unchanged; it sends nothing after public pending expiry or the poll deadline.
+Only recovery can send after early closure. Cancellation, scheduling, withdrawal, removal,
+event deletion and superseded credentials suppress unsent work. Voting mail also includes
+an independent reminder opt-out capability, stable across recovery and resend.
+
+A state change after the final eligibility check can race an in-flight SMTP send; the
+credential's service checks still enforce current authority. SMTP acceptance followed by
+a failed receipt commit can cause a duplicate when the lease expires. This is the existing
+mail acceptance/receipt window, bounded by attempts and budgets, not an exactly-once claim.
+No raw provider/database error or capability is logged; without SMTP, sensitive poll mail
+is skipped rather than sent to the development log mailer.
+
+`meeting-poll-capability-expiry-v1` clears expired capability ciphertext hourly in batches
+of at most 500, skipping locked polls and capabilities. It retains digest-only credentials
+for permitted read-only history. Poll/voter deletion and the existing cleanup cascades
+continue to remove their dependent private data. No migration or feature flag is added.

@@ -825,6 +825,8 @@ export const admin = {
   ' + {0} guests': ' + {0} guests',
   'Co-hosts': 'Co-hosts',
   'Team booking details': 'Team booking details',
+  'Previous booking': 'Previous booking',
+  'Next booking': 'Next booking',
   'Close details': 'Close details',
   'Booking ID': 'Booking ID',
   'Event type ID': 'Event type ID',
