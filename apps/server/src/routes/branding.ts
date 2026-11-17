@@ -128,7 +128,7 @@ export function brandingRoutes(deps: ServiceDeps): RouteModule {
         tags: ['Branding'],
         summary: 'Upload and attach a logo, replacing the previous image',
         description:
-          'Raw PNG, JPEG or WebP, at most 512 KiB and 2048 pixels per dimension; animation rejected. Decoded and re-encoded as PNG, also limited to 512 KiB. One stored image per organization.',
+          'Raw PNG, JPEG or WebP, at most 512 KiB and 2048 pixels per dimension; animation rejected. Decoded, resized to at most 512 pixels per dimension and re-encoded as PNG at most 64 KiB; further resizing may be needed. One stored image per organization.',
         security: authenticated,
         middleware: callerWithBodyLimit(caller, BRAND_LOGO_MAX_BYTES),
         request: {

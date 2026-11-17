@@ -145,3 +145,13 @@ These session webhook compatibility rows mirror the canonical documentation for 
 | Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
 | Session webhook writes: the caller's own expected personal organization differs from the current space | 2xx success (header ignored; request used the current organization) | 409 `organization_context_changed` |
 | Session webhook reads: malformed expected ID or a different expected personal organization | 200 (header ignored) | 403 `team_management_access_denied` |
+
+### Public branding images
+
+Public branding adds `logoUrl`, an organization-scoped, same-origin URL keyed by the
+normalized PNG content hash. The nullable legacy `logoDataUrl` remains present as null
+instead of carrying inline bytes; clients should use `logoUrl` when supplied. The public
+image route serves immutable cache headers and returns the same unavailable response for
+an unknown hash or a hash belonging only to another organization. Host event summaries
+add optional owning-space branding and the team organization name so cards can match
+the destination booking page. See [branding](https://hourmere.com/docs/branding).

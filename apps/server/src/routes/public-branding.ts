@@ -7,8 +7,11 @@ export const PublicBranding = z
       .string()
       .regex(/^#[0-9A-F]{6}$/)
       .nullable(),
+    logoUrl: z.string().nullable().openapi({
+      description: 'Organization-scoped content-hash PNG URL; immutable cacheable response',
+    }),
     logoDataUrl: z.string().nullable().openapi({
-      description: 'Bounded normalized PNG data URL; no remote image request is needed',
+      description: 'Deprecated; always null. Use logoUrl for the cacheable PNG',
     }),
   })
   .openapi('PublicBranding')

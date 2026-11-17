@@ -10,8 +10,12 @@ one-time booking links, and invitee manage, reschedule and cancel pages. Inline,
 and floating-button embeds use the same branded booking page. Booking emails to invitees,
 guests and hosts use the brand in their HTML part; plain text and calendar invitations are unchanged.
 
-Personal pages use the host's **personal space** brand. Team event types use the **team's**
-brand, even when a host belongs to other teams. One-time links follow their event type;
+The personal home page (`/{handle}`) uses the host's **personal space** brand around the
+event list. Each event card uses its **owning space's** brand, matching the booking page it
+opens. Team-owned cards also show the team name; a team without custom branding uses the
+Hourmere defaults, not the surrounding personal brand. This includes individually owned
+event types created in a team space. Team event types use the **team's** brand, even when
+a host belongs to other teams. One-time links follow their event type;
 management links and emails follow their booking's owning space. The viewer's signed-in
 workspace never chooses the brand. Branding is read when a page loads or an email is sent,
 so edits also affect later views and messages for existing bookings.
@@ -25,8 +29,11 @@ pages, including embeds. There is no setting to hide them.
 2. Open **Settings**, then **Booking page branding → Manage branding**.
 3. Enter the primary colour, choose a logo file, or use **Remove logo**. Leave the
    colour field empty to clear the custom colour.
-4. Choose **Save branding**. Review the saved logo preview, button-text choice and
-   contrast against white. Changing spaces discards the old space's editor.
+4. Review the sample booking page in both **Light** and **Dark** previews and the
+   contrast feedback, then choose **Save branding**. Changing spaces discards the old
+   space's editor.
+5. To remove all custom branding, choose **Reset to default**, then **Save branding**.
+   This clears the logo and primary colour for the current space.
 
 The interface supports English and Simplified Chinese. Access and loading failures
 are reported separately from unset settings. If the active space changes in another
@@ -56,14 +63,19 @@ retains the ordinary page layout without a custom logo.
 Upload PNG, JPEG or WebP, at most **512 KiB (524,288 bytes)**, with width and height each
 at most **2048 pixels**. SVG and animated images are refused. The server checks the actual
 image data and decodes and re-encodes accepted images as PNG before storing them. The
-encoded result must also fit the size limit. Original metadata and appended non-image
+stored result is a PNG with longest side at most **512 pixels** and at most
+**64 KiB (65,536 bytes)**. Detailed images may be reduced further to meet this budget;
+small images are not enlarged. Existing stored logos are normalized when read, without
+a blocking data migration. Original metadata and appended non-image
 payloads are not served. Uploaded files are never served as HTML; image responses have
 fixed `image/png` content type, `X-Content-Type-Options: nosniff` and a restrictive
 Content Security Policy.
 
 The database stores one current logo per organization, addressed by its SHA-256 content
 hash. Uploading replaces the previous logo atomically. Old references are unavailable after
-replacement. Include the database in normal backups; no external object store is required.
+replacement at the origin. Public browser caches can retain an already fetched image
+until its cache lifetime ends; replacing or removing a logo is not a recall of downloaded
+images. Include the database in normal backups; no external object store is required.
 
 ## Interfaces and permissions
 
@@ -99,11 +111,15 @@ Upload raw image bytes to `POST /api/v1/branding/logo` with the matching `Conten
 or base64 JSON. The response contains the updated branding, including `brandLogo`.
 Authorized clients can retrieve it at `GET /api/v1/branding/logo/{hash}` in the same space.
 The administrative image endpoint is protected; a hash is not a public sharing link.
-Authorized public page responses include only their owning space's current logo as inline
-PNG data, with the space name as alternative text and a reserved, bounded display area.
-A saved logo is therefore visible to visitors who can open that public page. No third-party
-image URL is requested. Booking emails attach the PNG inline with a Content-ID reference;
-viewing the logo does not fetch a remote image or report an open.
+Public page responses include a same-origin `logoUrl`, with the space name as alternative
+text and a reserved, bounded display area. The deprecated `logoDataUrl` field is now null.
+`GET /api/v1/public/branding/{organizationId}/logo/{hash}` serves the current normalized
+PNG with `Cache-Control: public, max-age=31536000, immutable`. The hash identifies the
+bytes actually served. Lookup is scoped to the named organization: another organization's
+hash and an unknown hash return the same unavailable response. A saved logo is a public
+asset; the administrative image endpoint still requires authorization. No third-party
+image URL is requested. Booking emails attach the same small PNG inline with a Content-ID
+reference; viewing the email logo does not fetch a remote image or report an open.
 
 The CLI uses the same API key and instance options as its other commands:
 
@@ -119,6 +135,28 @@ same content hash; it does not retain another copy. Concurrent changes are seria
 the last committed write wins for fields both callers change. Clients should send only
 edited fields and reload before restoring an older logo reference.
 
+## Preview walkthrough (text descriptions)
+
+- **Light screenshot description:** the settings editor includes a sample booking
+  card on a light surface. The space logo appears above the sample meeting title;
+  available-time and booking controls use the accessible light palette. Contrast feedback
+  identifies the selected button text and the saved colour's contrast against white.
+- **Dark screenshot description:** the same sample booking content appears on dark
+  surfaces. Links, selected times and the booking action use the derived dark palette;
+  the uploaded logo keeps its original colours. Compare both previews before saving,
+  especially for transparent logos. The preview is illustrative and creates no booking.
+- **Mixed-space home screenshot description:** a personal-branded header surrounds an
+  event list. A team-owned event card names that team and shows its own colours and logo.
+  Opening the card preserves that event's owning-space brand.
+
+中文：个人主页外框使用个人空间品牌，每张事件卡片与其预约页使用同一所属空间品牌；
+团队事件卡片显示团队名称，未配置品牌的团队使用默认样式，不继承个人品牌。
+设置页提供浅色、深色示例预约预览及对比度反馈，并可重置为默认品牌。
+上传支持 PNG、JPEG、WebP（不含动画），原文件最多 512 KiB、每边最多 2048 像素；
+服务端输出最长边不超过 512 像素、最多 64 KiB 的 PNG，旧图片读取时同样处理。
+网页使用按组织隔离、由内容哈希标识的可缓存图片地址；邮件仍使用 CID 内嵌图片。
+邮件客户端可能调整深色模式颜色、隐藏图片或将其显示为附件，不能保证与网页完全一致。
+
 ## Current limits
 
 - There are no custom fonts, theme CSS, per-event branding or removal of Hourmere attribution.
@@ -130,5 +168,7 @@ edited fields and reload before restoring an older logo reference.
   appearance across clients is not guaranteed. Text and actions remain usable without images.
 - Logo colours are not analysed for contrast. Use a logo that works on light and dark
   backgrounds; the space name remains its alternative text.
+- Popup and floating embed trigger buttons retain their neutral styles; the booking page
+  inside the iframe carries the brand.
 - Sign-in and team invitation emails keep the default Hourmere identity. Branding does not
   change sender addresses, subjects, delivery settings or calendar invitation contents.

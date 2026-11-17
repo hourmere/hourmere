@@ -560,6 +560,9 @@ function publicEventType(
 
 /** One event type as the host's page (/{handle}) lists it. */
 export interface PublicEventTypeSummary {
+  branding?: PublicBranding
+  /** Team space name when the event belongs outside the host’s personal space. */
+  organizationName?: string
   slug: string
   title: string
   description: string | null
@@ -609,7 +612,16 @@ export async function getPublicHost(
         .onRef('m.organizationId', '=', 'et.organization_id')
         .on('m.userId', '=', profile.user_id),
     )
-    .select(['et.slug', 'et.title', 'et.description', 'et.duration_minutes', 'et.location'])
+    .innerJoin('auth.organization as o', 'o.id', 'et.organization_id')
+    .select([
+      'et.slug',
+      'et.title',
+      'et.description',
+      'et.duration_minutes',
+      'et.location',
+      'et.organization_id',
+      'o.name as organization_name',
+    ])
     .where('et.owner_user_id', '=', profile.user_id)
     .where('et.is_active', '=', true)
     .where('et.is_hidden', '=', false)
@@ -617,6 +629,13 @@ export async function getPublicHost(
     .orderBy('et.position')
     .orderBy('et.id')
     .execute()
+  // Resolve each listed space once; never project branding from hidden or departed-owner types.
+  const brands = new Map<string, PublicBranding | undefined>()
+  if (personal) brands.set(personal.organization_id, branding)
+  for (const row of rows) {
+    if (!brands.has(row.organization_id))
+      brands.set(row.organization_id, await getPublicBranding(ctx.db, row.organization_id))
+  }
   return {
     ...(branding && { branding }),
     handle: profile.handle,
@@ -627,7 +646,12 @@ export async function getPublicHost(
     },
     eventTypes: rows.map((row) => {
       const location = parseLocation(row.location)
+      const eventBranding = brands.get(row.organization_id)
       return {
+        ...(eventBranding && { branding: eventBranding }),
+        ...(row.organization_id !== personal?.organization_id && {
+          organizationName: row.organization_name,
+        }),
         slug: row.slug,
         title: row.title,
         description: row.description,
