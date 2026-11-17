@@ -1,4 +1,11 @@
 /** Internal foundation; no REST, MCP, CLI or scheduler integration is enabled yet. */
+
+export {
+  type CalDavConnectionDeps,
+  connectCalDav,
+  disconnectCalDav,
+  listCalDavConnections,
+} from './caldav-connection.ts'
 export {
   type CalDavCredentialRecord,
   type CalDavCredentials,

@@ -12,7 +12,9 @@ storage of the Identity storage step (see
 [Data model](data-model.md#sso-identity-storage)). The Mailbox proof step added the first
 code that uses that storage: the two mailbox proof endpoints, which answer `404 sso_disabled`
 while both protocols are hard-off, the worker job that delivers their email and the bounded
-cleanup of attempts. No SSO provider, sign-in route or feature flag is enabled. SSO will be available to every
+cleanup of attempts. The Fresh proof step adds the shared operation-bound retry gate,
+exercised only by a test operation; no production route calls it yet. No SSO provider,
+sign-in route or feature flag is enabled. SSO will be available to every
 instance, including self-hosted ones; there is no license, subscription or hosted-service
 requirement.
 
@@ -930,6 +932,20 @@ input digest) is treated as absent: a new attempt is returned and the old one is
 consumed. Recovery use and nominee acceptance need only `mailbox`: no SSO proof and no
 prior recovery authority. Proof completion never executes an operation. MCP and CLI never receive this response, because
 no machine write changes SSO trust.
+
+The shared gate now lives in `apps/server/src/sso-fresh-proof.ts`. It registers no route,
+MCP tool or CLI command. A future browser-only write supplies its strict input schema,
+transaction-time authorization/revision check and mutation callback. The gate checks the
+switch, exact Origin and absence of Authorization, freezes the canonical validated input
+(excluding only the top-level `proofAttemptId`), and binds the attempt to the browser cookie,
+user, session, team and operation. A missing binding cookie is issued as HttpOnly with
+SameSite=Strict, Path=/, and Secure plus the `__Host-` prefix on HTTPS. The response adapter
+must append that cookie and return the challenge as HTTP 403, after its attempt commits.
+Successful proof consumption and the protected mutation share one transaction; a failed
+mutation rolls back consumption. The database clock is read after the row locks, and an
+expired recorded mailbox proof requires a new attempt. Teams without enforcement need
+`mailbox`; seeded enforced teams need `sso`, which this gate deliberately cannot satisfy
+until a protocol step-up implementation exists. Both protocols remain hard-off in production.
 
 Mailbox proof is an authentication protocol surface, outside `/api/v1` and the product
 interface-parity inventory, like sign-in/callback below; it has no MCP/CLI equivalent:

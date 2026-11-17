@@ -37,7 +37,10 @@ beforeAll(async () => {
 })
 
 const location = () => screen.getByTestId('location').textContent
-const field = (name: string | RegExp) => screen.getByLabelText<HTMLInputElement>(name)
+const field = (name: string | RegExp) =>
+  screen.getByLabelText<HTMLInputElement>(name, {
+    selector: 'input, textarea, select:not([aria-label])',
+  })
 const CREATED_ID = 'e0000000-0000-7000-8000-000000000002'
 
 /** The event type endpoints over an in-memory list, plus profile and schedules. */
@@ -274,10 +277,12 @@ describe('creating an event type', () => {
     eventTypeServer([])
     await openNew()
     const hint = document.getElementById('minimumNoticeMinutes-hint')
-    expect(hint?.textContent).toBe('How far ahead a meeting must be booked. 0–525,600.')
-    await user.clear(field('Minimum notice (minutes)'))
-    await user.type(field('Minimum notice (minutes)'), '1440')
-    expect(hint?.textContent).toBe('How far ahead a meeting must be booked. 0–525,600. = 1 day.')
+    expect(hint?.textContent).toContain(
+      'How far ahead a meeting must be booked. Enter 0–525600 Minutes, in whole Minutes.',
+    )
+    await user.clear(field('Minimum notice'))
+    await user.type(field('Minimum notice'), '1440')
+    expect(hint?.textContent).toContain('Stored value: 1440 Minutes.')
   })
 
   it('translates the minimum notice and buffer hints in Simplified Chinese', async () => {
@@ -377,16 +382,16 @@ describe('creating an event type', () => {
     await user.type(field('Your phone number'), '+14155550123')
     await user.selectOptions(screen.getByLabelText('Schedule'), 'Evenings')
     await user.type(field(/Start times every/), '15')
-    await user.clear(field('Minimum notice (minutes)'))
-    await user.type(field('Minimum notice (minutes)'), '240')
+    await user.clear(field('Minimum notice'))
+    await user.type(field('Minimum notice'), '240')
     await user.type(field(/Booking window/), '60')
     await user.type(field(/Daily limit/), '4')
     await user.type(field(/Weekly limit/), '8')
     await user.type(field(/Monthly limit/), '20')
-    await user.clear(field('Buffer before (minutes)'))
-    await user.type(field('Buffer before (minutes)'), '5')
-    await user.clear(field('Buffer after (minutes)'))
-    await user.type(field('Buffer after (minutes)'), '10')
+    await user.clear(field('Buffer before'))
+    await user.type(field('Buffer before'), '5')
+    await user.clear(field('Buffer after'))
+    await user.type(field('Buffer after'), '10')
     await user.type(field(/Invitee reschedule deadline/), '1440')
     await user.type(field(/Invitee cancellation deadline/), '60')
     await user.click(screen.getByRole('button', { name: 'Create event type' }))
@@ -750,8 +755,10 @@ describe('editing an event type', () => {
     expect(field(/Weekly limit/).value).toBe('5')
     expect(field(/Monthly limit/).value).toBe('10')
     expect(field('Address').value).toBe('Unter den Linden 1')
-    expect(field('Minimum notice (minutes)').value).toBe('1440')
-    expect(screen.getByText(/= 1 day\./)).toBeDefined()
+    expect(field('Minimum notice').value).toBe('1')
+    expect(
+      screen.getByRole<HTMLSelectElement>('combobox', { name: 'Minimum notice unit' }).value,
+    ).toBe('days')
     expect(screen.getByLabelText<HTMLSelectElement>('Schedule').value).toBe(SCHEDULE_ID)
 
     await user.clear(field('Title'))
@@ -769,12 +776,7 @@ describe('editing an event type', () => {
         title: 'First call',
         slug: 'intro-call',
         description: 'A first call.',
-        durationMinutes: 45,
         slotStepMinutes: null,
-        bufferBeforeMinutes: 0,
-        bufferAfterMinutes: 0,
-        minimumNoticeMinutes: 1440,
-        bookingWindowDays: null,
         // Saved questions keep their ids, so earlier answers stay attached.
         questions: [
           { id: 'company', label: 'Company', type: 'short_text', required: true },

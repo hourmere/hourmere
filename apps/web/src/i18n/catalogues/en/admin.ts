@@ -1,5 +1,17 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Stored value: {value} {unit}.': 'Stored value: {value} {unit}.',
+  'Default duration presets': 'Default duration presets',
+  'Custom duration': 'Custom duration',
+  '{minutes} minutes': '{minutes} minutes',
+  Minutes: 'Minutes',
+  'Time unit: hours': 'Hours',
+  Days: 'Days',
+  '{label} unit': '{label} unit',
+  'Enter {min}–{max} {unit}, in whole {storageUnit}.':
+    'Enter {min}–{max} {unit}, in whole {storageUnit}.',
+  'Empty: no limit.': 'Empty: no limit.',
+
   'Location options': 'Location options',
   'Default location': 'Default location',
   'Location label': 'Location label',
@@ -60,8 +72,8 @@ export const admin = {
   'Saved brand logo': 'Saved brand logo',
 
   'Booking page branding': 'Booking page branding',
-  'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.':
-    'Save a logo and primary colour for this space. Applying them to booking pages and emails is not available yet.',
+  'Use this space’s logo and primary colour on booking pages, embeds and booking emails.':
+    'Use this space’s logo and primary colour on booking pages, embeds and booking emails.',
   'Branding access has not been confirmed.': 'Branding access has not been confirmed.',
   'Only the personal owner or team owners and admins can manage branding.':
     'Only the personal owner or team owners and admins can manage branding.',
@@ -86,8 +98,7 @@ export const admin = {
     'Saved colour: {colour}. Button text: {text}. Contrast against white: {ratio}:1.',
   Black: 'Black',
   White: 'White',
-  'Branding saved. Booking pages and emails are unchanged.':
-    'Branding saved. Booking pages and emails are unchanged.',
+  'Branding saved.': 'Branding saved.',
   'Event type filter': 'Event type filter',
   'All event types': 'All event types',
   'Saved event type — details unavailable': 'Saved event type — details unavailable',

@@ -88,6 +88,12 @@ export {
   workflowTimerDueAt,
 } from './timers.ts'
 export {
+  type UpdateWorkflowInput,
+  UpdateWorkflowInputSchema,
+  updateWorkflow,
+  type WorkflowUpdateContext,
+} from './updates.ts'
+export {
   templatePlaceholders,
   templateVariableProblem,
   WORKFLOW_ANSWER_VARIABLE_PREFIX,

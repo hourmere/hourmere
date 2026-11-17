@@ -1,12 +1,23 @@
 ---
 title: Booking page branding
-description: Store an organization logo and primary colour with safe image handling and readable button text.
+description: Apply your space’s logo and accessible brand colours to booking pages, embeds and booking emails.
 ---
 
 Personal owners and team owners or admins can store a logo and primary colour for their
 current space. The feature is available in self-hosted installations without a paid plan.
-These settings prepare the organization for branding; public booking pages and emails do
-not apply them yet.
+The saved brand appears on public host and team pages, booking forms and confirmations,
+one-time booking links, and invitee manage, reschedule and cancel pages. Inline, popup-button
+and floating-button embeds use the same branded booking page. Booking emails to invitees,
+guests and hosts use the brand in their HTML part; plain text and calendar invitations are unchanged.
+
+Personal pages use the host's **personal space** brand. Team event types use the **team's**
+brand, even when a host belongs to other teams. One-time links follow their event type;
+management links and emails follow their booking's owning space. The viewer's signed-in
+workspace never chooses the brand. Branding is read when a page loads or an email is sent,
+so edits also affect later views and messages for existing bookings.
+
+**Powered by Hourmere** and existing signup links remain on both self-hosted and cloud
+pages, including embeds. There is no setting to hide them.
 
 ## Save settings
 
@@ -34,8 +45,11 @@ white button text and black button text. It selects whichever text colour has th
 contrast. Every opaque sRGB colour has a black or white text choice meeting 4.5:1, so
 rejecting otherwise valid colours would unnecessarily restrict branding. The background
 contrast is reported separately: a light brand colour can have readable black button text
-while remaining hard to distinguish from a white page. These calculations describe the
-stored colour, not an accessibility certification of future pages or emails.
+while remaining hard to distinguish from a white page. Public pages derive separate light and dark palettes from the saved colour. Colours may
+be darkened or lightened to keep links and selected controls readable against the actual
+page surfaces; hover colours, button text and focus indicators are derived too. Invalid
+stored colours and unset colours retain the default Hourmere palette. Removing a logo
+retains the ordinary page layout without a custom logo.
 
 ## Logo safety
 
@@ -84,7 +98,12 @@ Upload raw image bytes to `POST /api/v1/branding/logo` with the matching `Conten
 (`image/png`, `image/jpeg` or `image/webp`). This is a binary body, not multipart form data
 or base64 JSON. The response contains the updated branding, including `brandLogo`.
 Authorized clients can retrieve it at `GET /api/v1/branding/logo/{hash}` in the same space.
-The image endpoint is protected; a hash is not a public sharing link.
+The administrative image endpoint is protected; a hash is not a public sharing link.
+Authorized public page responses include only their owning space's current logo as inline
+PNG data, with the space name as alternative text and a reserved, bounded display area.
+A saved logo is therefore visible to visitors who can open that public page. No third-party
+image URL is requested. Booking emails attach the PNG inline with a Content-ID reference;
+viewing the logo does not fetch a remote image or report an open.
 
 The CLI uses the same API key and instance options as its other commands:
 
@@ -102,11 +121,14 @@ edited fields and reload before restoring an older logo reference.
 
 ## Current limits
 
-- Storage and validation are available now. Applying branding to public booking pages,
-  embeds and email templates is a separate change.
 - There are no custom fonts, theme CSS, per-event branding or removal of Hourmere attribution.
-- `backgroundContrast` uses white (#FFFFFF) only. It does not measure contrast against
-  the light page background (#F7F9FE) or dark-mode backgrounds. Future themes need to
-  check their actual backgrounds and other interface elements separately.
-- Logo colours are not analysed for contrast. Keep meaningful content accessible through
-  text as well as images when the display feature becomes available.
+- Exact brand colours can change to meet contrast requirements. The administrative
+  `backgroundContrast` still reports contrast against white only; rendered pages use
+  separate palettes for their light and dark surfaces.
+- Emails request a light colour scheme with explicit inline colours. Email clients can
+  override colours in dark mode, hide inline images or show them as attachments; identical
+  appearance across clients is not guaranteed. Text and actions remain usable without images.
+- Logo colours are not analysed for contrast. Use a logo that works on light and dark
+  backgrounds; the space name remains its alternative text.
+- Sign-in and team invitation emails keep the default Hourmere identity. Branding does not
+  change sender addresses, subjects, delivery settings or calendar invitation contents.

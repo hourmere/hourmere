@@ -55,7 +55,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 Open **Event types**, then **New event type** in your Hourmere instance. Start with four
 things: **Title**, **Booking link**, **Duration (minutes)** and **Where the meeting happens**. The link follows your title and
-meeting length until you edit it yourself. A location can be left unset; phone, address
+meeting length until you edit it yourself. Choose a 15, 30, 45 or 60-minute duration
+preset, or enter a custom whole-minute duration. A location can be left unset; phone, address
 and meeting-link choices ask for the details needed for that choice.
 
 The other settings are grouped in closed disclosures. Open a group to configure
@@ -70,6 +71,37 @@ them. Closing a group keeps its values. A validation error in a closed group ope
 group and moves focus to the affected field. Saving a title change preserves other saved
 configuration, including settings configured through REST, MCP or CLI.
 
+### Notice, booking window and buffers
+
+In the notice and buffer settings, choose **Minutes**, **Hours** or **Days** for minimum
+notice, the booking window, and the buffers before and after a meeting. On opening an
+event, a minute-based value uses the largest unit that expresses it as a whole number:
+1440 minutes becomes 1 day, 120 minutes becomes 2 hours, and 90 minutes stays 90 minutes.
+Zero stays in minutes. A saved booking window opens in days; an empty window has no limit.
+
+Changing only the unit changes the display, not the saved value, and does not mark the
+form as changed. Saving an unchanged editor sends no update. Saving another field omits
+untouched timing settings, so a timing setting
+changed concurrently through the API is preserved. The selected display unit is not saved.
+
+| Setting | Stored unit and inclusive range |
+|---|---|
+| Default duration | 1–1440 whole minutes |
+| Minimum notice | 0–525600 whole minutes |
+| Buffer before / after | 0–1440 whole minutes each |
+| Booking window | 1–3650 whole days, or empty for no limit |
+
+Unit conversion uses 60 minutes per hour and 24 hours per day. The booking window still
+counts calendar days in the host's schedule time zone, including across daylight saving
+time changes; its hour/minute display does not turn it into an elapsed-time window.
+Decimal input is accepted only when it resolves exactly to whole stored minutes, or
+whole stored days for the booking window: for example, 1.5 hours is 90 minutes. Switching
+a value such as 1 minute to hours may display a rounded decimal, while its exact stored
+value remains unchanged until you edit it.
+Fractional-day booking windows and sub-minute notice or buffers are not supported.
+Validation uses these stored ranges and shows the permitted range in your selected unit.
+See [multiple meeting lengths](/docs/multiple-durations) to offer more than one duration.
+
 After saving, use **View and share** to open or copy the saved booking link. Round-robin
 pools still require explicit activation. These form changes are included in self-hosting;
 REST, MCP and CLI defaults and permissions are unchanged. Group seats and paid-booking
@@ -77,6 +109,9 @@ configuration remain unavailable in the editor, as described below.
 
 ## Known limitations
 
+- Event-type timing units are a web display preference and are not persisted. Notice and
+  buffers require whole minutes; booking windows require whole calendar days, even when
+  shown in hours or minutes. REST, MCP and CLI retain their existing units.
 - [Audit events](/docs/audit-log) are recorded only for the management changes listed
   there. Owners and admins can read and filter them; export is not available yet.
 - Prebuilt image installs have no runtime switch to disable app installation or the
@@ -118,7 +153,7 @@ configuration remain unavailable in the editor, as described below.
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
 - CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
-  The [design and credential/discovery foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
+  The [design and internal connection foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
   adds no busy-time sync, event writes or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
 - [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe
@@ -133,9 +168,21 @@ configuration remain unavailable in the editor, as described below.
   user and two exports total by default (`export_user_in_progress` / `export_busy`);
   these concurrency limits are per process, not cluster-wide. Files contain personal data; there is no
   scheduled export or automatic delivery. Answers use a JSON column.
-- Group seats currently have internal storage and service support only. Public booking
-  pages, event editors and REST/MCP/CLI group configuration do not enable group mode yet;
-  this limitation applies equally to self-hosted installations. Existing occurrences retain
+- Group mode cannot yet be enabled in event editors or REST/MCP/CLI configuration;
+  this limitation applies equally to self-hosted installations. For internally seeded group
+  types, public booking pages and inline, popup and manual iframe embeds show exact seats
+  remaining beside each offered time. Full occurrences are omitted. The public slots API
+  adds `seatsRemaining` and `capacity` only for group times; these are aggregate totals,
+  with no attendee names, addresses or seat identities. Counts are a snapshot, not a
+  reservation. If another visitor takes the last seat, the page asks you to choose another
+  time and keeps your form entries. Cancellation or moving a seat releases its place; a
+  refreshed availability request shows it again if admission is still allowed.
+  When the existing waitlist is enabled, an empty selected window uses that same waitlist;
+  a window with free seats does not offer enrollment. No seat is reserved by joining it.
+  The invitee reschedule picker still lists new available occurrences only; it does not
+  display remaining seats or offer other already occupied group occurrences. Moving or
+  canceling a seat nevertheless updates the counts on the public booking page.
+  Existing occurrences retain
   their shared location, schedule and conference settings when event settings change, and
   continue accepting seats until full, subject to current booking cutoffs and usable pinned
   conference resources. Later time off, external-calendar conflicts and stale calendar sync

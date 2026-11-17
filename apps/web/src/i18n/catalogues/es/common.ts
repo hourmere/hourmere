@@ -1,4 +1,6 @@
 export const common = {
+  '{count} seat left': 'Queda {count} plaza',
+  '{count} seats left': 'Quedan {count} plazas',
   'Meeting location': 'Lugar de la reunión',
   'Your phone number': 'Tu número de teléfono',
   'Choose one of the available locations.': 'Elige uno de los lugares disponibles.',

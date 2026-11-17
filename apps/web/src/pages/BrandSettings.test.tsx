@@ -47,9 +47,7 @@ describe('branding settings', () => {
     const colour = within(form).getByLabelText('Primary colour')
     fireEvent.change(colour, { target: { value: '#123456' } })
     await userEvent.click(within(form).getByRole('button', { name: 'Save branding' }))
-    expect(
-      await within(form).findByText('Branding saved. Booking pages and emails are unchanged.'),
-    ).toBeDefined()
+    expect(await within(form).findByText('Branding saved.')).toBeDefined()
     expect(api.to(WRITE)[0]?.body).toEqual({ brandPrimaryColor: '#123456' })
     for (const route of [READ, WRITE])
       expect(api.to(route)[0]?.headers.get('X-Expected-Organization-Id')).toBe(ME.organization.id)
@@ -94,7 +92,7 @@ describe('branding settings', () => {
       target: { files: [new File(['{}'], 'logo.png', { type: 'image/png' })] },
     })
     await userEvent.click(within(form).getByRole('button', { name: 'Save branding' }))
-    await within(form).findByText('Branding saved. Booking pages and emails are unchanged.')
+    await within(form).findByText('Branding saved.')
     expect(api.to(UPLOAD)[0]?.headers.get('content-type')).toBe('image/png')
     expect(api.to(UPLOAD)[0]?.headers.get('X-Expected-Organization-Id')).toBe(ME.organization.id)
     expect(api.to(WRITE)).toHaveLength(0)
@@ -135,7 +133,7 @@ describe('branding settings', () => {
     await within(form).findByRole('alert')
     expect(await within(form).findByAltText('Saved brand logo')).toBeDefined()
     await userEvent.click(within(form).getByRole('button', { name: 'Save branding' }))
-    await within(form).findByText('Branding saved. Booking pages and emails are unchanged.')
+    await within(form).findByText('Branding saved.')
     expect(api.to(UPLOAD)).toHaveLength(1)
     expect(api.to(WRITE).map((call) => call.body)).toEqual([
       { brandPrimaryColor: '#123456' },

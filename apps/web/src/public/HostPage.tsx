@@ -47,9 +47,9 @@ function HostPageContent({ handle }: { handle: string }) {
       </PublicLayout>
     )
   }
-  const { host, eventTypes } = state.data
+  const { host, eventTypes, branding } = state.data
   return (
-    <PublicLayout>
+    <PublicLayout branding={branding}>
       <header className="host-header">
         <HostAvatar name={host.name} image={host.image} />
         <h1>{host.name}</h1>

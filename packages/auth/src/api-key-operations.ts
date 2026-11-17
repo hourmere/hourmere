@@ -246,6 +246,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('PATCH', '/api/v1/webhooks/{id}', 'other_write', 'key'),
   rest('GET', '/api/v1/webhooks/{id}/deliveries', 'other_read', 'key'),
   rest('POST', '/api/v1/webhooks/{id}/rotate-secret', 'other_write', 'key'),
+  rest('PATCH', '/api/v1/workflows/{id}', 'other_write', 'key'),
   rest('POST', '/api/v1/workflows', 'other_write', 'key'),
   rest('GET', '/api/v1/workflows', 'other_read', 'key'),
   rest('GET', '/api/v1/workflows/{id}', 'other_read', 'key'),
@@ -389,6 +390,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
       mcp(tool, 'booking_write', [team], 'team'),
     ]
   }),
+  mcp('update_workflow', 'other_write', ['PATCH /api/v1/workflows/{id}']),
   mcp('create_workflow', 'other_write', ['POST /api/v1/workflows']),
   mcp('list_workflows', 'other_read', ['GET /api/v1/workflows']),
   mcp('get_workflow', 'other_read', ['GET /api/v1/workflows/{id}']),
@@ -458,6 +460,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('one-time-links create', 'create_one_time_link'),
   cli('one-time-links list', 'list_one_time_links'),
   cli('one-time-links revoke', 'revoke_one_time_link'),
+  cli('workflows update', 'update_workflow'),
   cli('workflows create', 'create_workflow'),
   cli('workflows list', 'list_workflows'),
   cli('workflows get', 'get_workflow'),
