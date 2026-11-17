@@ -1,4 +1,6 @@
 export const common = {
+  'No location has been specified. Contact the host for meeting details.':
+    'Nenhum local foi especificado. Entre em contato com o anfitrião para saber os detalhes da reunião.',
   '{count} seat left': 'Resta {count} vaga',
   '{count} seats left': 'Restam {count} vagas',
   'I agree to SMS booking reminders. Reply STOP to opt out. Message and data rates may apply.':

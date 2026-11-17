@@ -87,6 +87,8 @@ export const ME: Schemas['Me'] = {
 }
 
 export const signedInAs = (me: Schemas['Me']): Routes => ({
+  'GET /api/v1/calendar-connections': () => json(200, { data: [] }),
+  'GET /api/v1/conference-connections': () => json(200, { data: [] }),
   'GET /api/v1/instance': () =>
     json(200, {
       automaticGoogleMeet: false,

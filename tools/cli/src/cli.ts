@@ -30,6 +30,7 @@ export const COMMANDS = {
   catalog: 'list_event_types',
   event: 'get_event_type',
   'create-event': 'create_event_type',
+  'duplicate-event': 'duplicate_event_type',
   'update-event': 'update_event_type',
   'set-event-notifications': 'set_event_type_notifications',
   'event-waitlist': 'get_event_type_waitlist',
@@ -91,7 +92,7 @@ Slack: slack create|list|update|delete|test (JSON input; list read/full, writes 
 Supply incoming-webhook URLs only through private JSON input; responses are masked.
 Slack events: booking.created, booking.rescheduled, booking.cancelled,
   booking.reschedule_requested, booking.reschedule_request_expired.
-Commands: whoami, profile, catalog, event, create-event, update-event,
+Commands: whoami, profile, catalog, event, create-event, duplicate-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           troubleshoot-availability,
           schedule-availability, save-availability,

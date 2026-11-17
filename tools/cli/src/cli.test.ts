@@ -765,6 +765,7 @@ describe('CLI transport and arguments', () => {
     ['catalog', 'list_event_types'],
     ['event', 'get_event_type'],
     ['create-event', 'create_event_type'],
+    ['duplicate-event', 'duplicate_event_type'],
     ['update-event', 'update_event_type'],
     ['set-event-notifications', 'set_event_type_notifications'],
     ['schedules', 'list_schedules'],
@@ -785,7 +786,12 @@ describe('CLI transport and arguments', () => {
   ])(
     'maps %s to the existing %s tool and sends one authenticated request',
     async (command, tool) => {
-      const input = command === 'book' ? { idempotencyKey: 'random-test-key' } : { limit: 7 }
+      const input =
+        command === 'book'
+          ? { idempotencyKey: 'random-test-key' }
+          : command === 'duplicate-event'
+            ? { id: '019a0000-0000-7000-8000-000000000001' }
+            : { limit: 7 }
       const fetcher = vi.fn<typeof fetch>(async (url, init) => {
         expect(String(url)).toBe('https://hourmere.example/mcp')
         expect(init?.redirect).toBe('error')

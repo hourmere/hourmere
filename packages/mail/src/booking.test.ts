@@ -293,7 +293,9 @@ describe('bookingEmail', () => {
     expect(where({ kind: 'link', url: 'https://zoom.example.com/j/1' })).toBe(
       'Where: Online meeting',
     )
-    expect(where(null)).toBeUndefined()
+    expect(where(null)).toBe(
+      'Where: No location has been specified. Contact the host for meeting details.',
+    )
   })
 
   it('attaches the invitation it is given', () => {

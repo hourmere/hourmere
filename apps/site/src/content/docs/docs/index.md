@@ -23,6 +23,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   weekly hours and date overrides together.
 - [Multiple meeting lengths](/docs/multiple-durations): configure the offered lengths and
   default, and learn how invitees choose and reschedule.
+- [Manage event types](/docs/event-types): start with a connected meeting service,
+  duplicate settings and enable or disable booking links from the list.
 - [Booking limits](/docs/booking-limits): set daily, weekly and monthly allowances in
   the editor, REST, MCP or CLI.
 - [Reschedule and cancel deadlines](/docs/change-deadlines): stop invitees from moving or

@@ -633,11 +633,19 @@ export async function createEventType(
   ctx: ServiceContext,
   input: EventTypeInput,
 ): Promise<EventType> {
-  const fields = validFields({ ...DEFAULTS, ...defined(input) }, ctx.successRedirectPolicy)
-  const notifications =
-    input.notifications === undefined ? undefined : validateNotifications(input.notifications, ctx)
-  const waitlist =
-    input.waitlist === undefined ? undefined : WaitlistSettingsSchema.parse(input.waitlist)
+  return createEventTypeWrite(ctx, input)
+}
+
+/** Copies configuration only, under the same owner admission lock as ordinary creation. */
+export async function duplicateEventType(ctx: ServiceContext, id: string): Promise<EventType> {
+  return createEventTypeWrite(ctx, undefined, id)
+}
+
+async function createEventTypeWrite(
+  ctx: ServiceContext,
+  originalInput?: EventTypeInput,
+  sourceId?: string,
+): Promise<EventType> {
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
@@ -647,6 +655,53 @@ export async function createEventType(
         throw insufficientRole()
       }
       await lockWorkflowOwner(trx, ctx.principal.organization.id, personalOwnerId)
+      let input = originalInput
+      if (sourceId !== undefined) {
+        await visibleRow(trx, ctx, sourceId, { lock: true })
+        const source = toEventType(await loadEventType(trx, sourceId), ctx.smsRemindersAvailable)
+        const slugs = new Set(
+          (
+            await trx
+              .selectFrom('event_types')
+              .select('slug')
+              .where('organization_id', '=', ctx.principal.organization.id)
+              .where('deleted_at', 'is', null)
+              .execute()
+          ).map((row) => row.slug),
+        )
+        let suffix = '-copy'
+        let slug = source.slug.slice(0, EVENT_TYPE_LIMITS.slugMaxLength - suffix.length) + suffix
+        for (let number = 2; slugs.has(slug); number++) {
+          suffix = `-copy-${number}`
+          slug = source.slug.slice(0, EVENT_TYPE_LIMITS.slugMaxLength - suffix.length) + suffix
+        }
+        // Explicit allow-list: identity, activation and related history are never copied.
+        input = {
+          ...Object.fromEntries(
+            FIELD_NAMES.filter((name) => name !== 'location').map((name) => [name, source[name]]),
+          ),
+          slug,
+          title: source.title,
+          durationMinutes: source.durationMinutes,
+          locations: source.locations,
+          schedulingType: source.schedulingType,
+          hosts: source.hosts,
+          scheduleId: source.scheduleId,
+          conferenceOrganizer: source.conferenceOrganizer,
+          zoomConnectionId: source.zoomConnectionId,
+          notifications: source.notifications,
+          waitlist: source.waitlist,
+        }
+      }
+      if (!input) throw notFound()
+      const fields = validFields({ ...DEFAULTS, ...defined(input) }, ctx.successRedirectPolicy)
+      const notifications =
+        input.notifications === undefined
+          ? undefined
+          : validateNotifications(input.notifications, ctx)
+      const waitlist =
+        input.waitlist === undefined ? undefined : WaitlistSettingsSchema.parse(input.waitlist)
+
       const schedulingType = input.schedulingType ?? 'individual'
       const hostIds = validHosts(
         input.hosts ?? [{ userId: ctx.principal.user.id }],

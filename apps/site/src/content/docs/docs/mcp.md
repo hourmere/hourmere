@@ -125,6 +125,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `get_schedule` | — | `schedule` | `full, read` |
 | `get_schedule_availability` | — | `schedule-availability` | `full, read` |
 | `save_schedule_availability` | — | `save-availability` | `full` |
+| `duplicate_event_type` | — | `duplicate-event` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
@@ -580,6 +581,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `get_profile` | Your booking-page handle, time zone and language | read-only |
 | `list_event_types` | Compact, paginated summaries of visible event types in the key's organization | read-only |
 | `get_event_type` | One visible event type's full configuration | read-only |
+| `duplicate_event_type` | Copies editable settings to a new unique booking link | — |
 | `create_event_type` | Creates an event type, including the default and allowed meeting lengths | — |
 | `update_event_type` | Changes an event type by `id`, including the default and allowed meeting lengths | destructive, idempotent |
 | `list_schedules` | Compact, paginated summaries of your working-hours schedules | read-only |
@@ -939,3 +941,13 @@ optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bo
 Ordinary booking cancellation still cancels only one seat. Public and invitee-management
 reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
 for setup, privacy and limitations.
+
+## Duplicate an event type
+
+Call `duplicate_event_type` with `{ "id": "EVENT_TYPE_UUID" }` and a `full` API key.
+It copies editable settings in the current organization and returns a new event with a
+unique `-copy` / `-copy-N` slug. Existing owner/admin and creation checks apply.
+Bookings, history, statistics and one-time links are not copied; round-robin activation
+starts off. Each successful call creates a new copy, so inspect the catalog after an
+uncertain response before retrying. See [event types](https://hourmere.com/docs/event-types)
+for copied settings and limitations.

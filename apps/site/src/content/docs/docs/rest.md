@@ -430,3 +430,11 @@ optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bo
 Ordinary booking cancellation still cancels only one seat. Public and invitee-management
 reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
 for setup, privacy and limitations.
+
+## Duplicate an event type
+
+Send `POST /api/v1/event-types/{id}/duplicate` with an empty JSON object and a `full`
+API key. The HTTP 201 response is the newly created event, with its own unique booking
+slug. The same owner/admin and configuration checks as creation apply. The copy stays
+in the current organization. See [event types](/docs/event-types) for copied settings,
+excluded history and links, and retry behavior. Existing create defaults are unchanged.
