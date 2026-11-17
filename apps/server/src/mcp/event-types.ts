@@ -1,6 +1,11 @@
 import { z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
-import { createEventType, type ServiceContext, updateEventType } from '@hourmere/scheduling'
+import {
+  createEventType,
+  duplicateEventType,
+  type ServiceContext,
+  updateEventType,
+} from '@hourmere/scheduling'
 import { EventType, EventTypeInput, EventTypeUpdate } from '../routes/event-types.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
 
@@ -31,6 +36,23 @@ export function eventTypeTools({
     now: () => Temporal.Now.instant(),
   })
   return [
+    defineTool({
+      name: 'duplicate_event_type',
+      title: 'Duplicate an event type',
+      description:
+        'Copies event settings in the current organization with a new unique booking slug, as POST /api/v1/event-types/{id}/duplicate does. Requires full API-key scope and the same ownership or team owner/admin permission as creation. Bookings, history, statistics, one-time links and round-robin activation are not copied. Not idempotent: inspect the event list after an uncertain response before retrying.',
+      input: z.strictObject({ id: z.uuid() }),
+      output: EventType,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      async run({ id }, call) {
+        return duplicateEventType(context(call.caller), id)
+      },
+    }),
     defineTool({
       name: 'create_event_type',
       title: 'Create an event type',

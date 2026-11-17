@@ -29,7 +29,8 @@ function safeUrl(value: unknown): string | undefined {
 export function LocationDetails({ location }: { location: Booking['location'] }) {
   const { t, ui } = useI18n()
 
-  if (!location) return <>{t('To be confirmed by the host')}</>
+  if (!location)
+    return <>{t('No location has been specified. Contact the host for meeting details.')}</>
   const url =
     location.kind === 'google_meet' || location.kind === 'zoom'
       ? displayConferenceUrl(location.kind, location.url)

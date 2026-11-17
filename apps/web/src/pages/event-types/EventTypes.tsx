@@ -1,6 +1,7 @@
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { useCallback, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
+import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import {
   type EventType,
@@ -14,7 +15,7 @@ import { EmptyState } from '../../components/EmptyState.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
-import { useLoad, usePageTitle } from '../../hooks.ts'
+import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { formatMinutes } from '../../i18n/duration.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { UiText } from '../../i18n/translate.ts'
@@ -26,6 +27,7 @@ import {
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
+import { useTeamManagementAccess } from '../../team-management.tsx'
 import { validDefault } from '../availability/valid-default.ts'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { EventEmbedAction } from './EventEmbedAction.tsx'
@@ -174,6 +176,7 @@ export function EventTypesPage() {
               me={me}
               profile={state.data.profile}
               readinessVersion={readinessVersion}
+              onChanged={reloadSetup}
             />
           )}
         </>
@@ -187,17 +190,62 @@ function EventTypeTable({
   me,
   profile,
   readinessVersion,
+  onChanged,
 }: {
   eventTypes: EventType[]
   me: Me
   profile: Profile | null
   readinessVersion: number
+  onChanged?: () => void
 }) {
-  const { t, locale: displayLocale } = useI18n()
+  const { t, uiText, locale: displayLocale } = useI18n()
+  const navigate = useNavigate()
+  const mounted = useMounted()
+  const access = useTeamManagementAccess()
+  const canManage = me.organization.personal || (access.status === 'ready' && access.role !== null)
+  const [expectedOrganizationId] = useState(me.organization.id)
+  const headers = { 'X-Expected-Organization-Id': expectedOrganizationId }
+  const [overrides, setOverrides] = useState<Record<string, { base: EventType; value: EventType }>>(
+    {},
+  )
+  const [deleted, setDeleted] = useState<string[]>([])
+  const [busy, setBusy] = useState<string[]>([])
+  const [failure, setFailure] = useState<UiText | null>(null)
+
+  async function toggle(event: EventType, original: EventType) {
+    setFailure(null)
+    setBusy((ids) => [...ids, event.id])
+    setOverrides((values) => ({
+      ...values,
+      [event.id]: { base: original, value: { ...event, isActive: !event.isActive } },
+    }))
+    try {
+      const saved = await unwrap(
+        api.PATCH('/api/v1/event-types/{id}', {
+          params: { path: { id: event.id } },
+          headers,
+          body: { isActive: !event.isActive },
+        }),
+      )
+      if (!mounted.current) return
+      setOverrides((values) => ({ ...values, [event.id]: { base: original, value: saved } }))
+      onChanged?.()
+    } catch (error) {
+      setOverrides((values) => ({ ...values, [event.id]: { base: original, value: event } }))
+      setFailure(errorMessage(error))
+    } finally {
+      setBusy((ids) => ids.filter((id) => id !== event.id))
+    }
+  }
   const [readiness, retryChecks] = useEventReadiness(me, readinessVersion)
 
   return (
     <div className="table-container">
+      {failure && (
+        <p className="alert alert-error" role="alert">
+          {uiText(failure)}
+        </p>
+      )}
       <table className="table table-event-types">
         {readiness.status !== 'unavailable' && (
           <caption>
@@ -223,135 +271,185 @@ function EventTypeTable({
           </tr>
         </thead>
         <tbody>
-          {eventTypes.map((e) => {
-            const item = readiness.status === 'ready' ? readiness.data.get(e.id) : undefined
-            const isActive =
-              e.isActive && (e.ownerUserId !== null || item?.enablement !== 'disabled')
-            const roundRobinActive = e.roundRobinActive && item?.activation !== 'inactive'
-            const url =
-              e.ownerUserId === null &&
-              !me.organization.personal &&
-              isActive &&
-              !teamReadinessBlocksSharing(item) &&
-              ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
-                (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8) ||
-                (e.schedulingType === 'round_robin' &&
-                  roundRobinActive &&
-                  e.hosts.length >= 1 &&
-                  e.hosts.length <= 8)) &&
-              isPublicTeamSlug(me.organization.slug)
-                ? publicTeamPageUrl(me.organization.slug, e.slug)
-                : profile && e.ownerUserId === me.user.id
-                  ? publicPageUrl(profile.handle, e.slug)
-                  : null
-            const pathname = url ? new URL(url).pathname : ''
-            return (
-              <tr key={e.id} className={!isActive ? 'event-type-inactive' : undefined}>
-                <th scope="row" data-label={t('Title')} className="user-content">
-                  <Link to={eventTypePath(e.id)}>{e.title}</Link>
-                </th>
-                <td data-label={t('Duration')} className="fit nowrap">
-                  <div className="table-value">
-                    {formatMinutes(e.durationMinutes, displayLocale)}
-                  </div>
-                </td>
-                <td data-label={t('Booking link')} className="link-cell user-content">
-                  <div className="table-value">
-                    {url ? (
-                      <span className="booking-link">
-                        <a
-                          href={url}
-                          title={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mono booking-link-path"
-                        >
-                          <span className="booking-link-handle">
-                            {pathname.slice(0, pathname.lastIndexOf('/'))}
-                          </span>
-                          <span className="booking-link-slug">/{encodeURIComponent(e.slug)}</span>
-                          <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
-                        </a>
-                        <CopyButton
-                          text={url}
-                          label={t('Copy link')}
-                          accessibleLabel={t('Copy link for {0}', { '0': e.title })}
-                        />
-                      </span>
-                    ) : (
-                      <span className="muted">
-                        {e.ownerUserId === null
-                          ? e.schedulingType !== 'round_robin' &&
-                            !isPublicTeamSlug(me.organization.slug)
-                            ? TEAM_LINK_SLUG_HINT
-                            : t('No public booking link')
-                          : `/${e.slug}`}
-                      </span>
-                    )}
-                    {e.ownerUserId === null && readiness.status === 'unavailable' && (
-                      <span className="muted">
-                        {t('Readiness checks are unavailable for this account.')}
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td data-label={t('Status')} className="fit">
-                  <div className="table-value event-enablement">
-                    {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
-                    {isActive ? (
-                      <span className="badge badge-success">{t('Active')}</span>
-                    ) : e.ownerUserId === null ? (
-                      <Link to={`${eventTypePath(e.id)}#event-enablement`} className="badge">
-                        {t('Inactive')}
-                      </Link>
-                    ) : (
-                      <span className="badge">{t('Inactive')}</span>
-                    )}
-                    {e.schedulingType === 'round_robin' &&
-                      (roundRobinActive ? (
-                        <span className="badge">{t('Round robin activated')}</span>
-                      ) : (
-                        <Link to={eventTypePath(e.id)} className="badge">
-                          {t('Needs activation')}
-                        </Link>
-                      ))}
-                  </div>
-                </td>
-                {readiness.status !== 'unavailable' && (
-                  <td data-label={t('Configuration checks')}>
-                    <ConfigurationChecks
-                      event={e}
-                      item={item}
-                      status={readiness.status}
-                      retry={retryChecks}
-                    />
+          {eventTypes
+            .filter((event) => !deleted.includes(event.id))
+            .map((original) => {
+              const override = overrides[original.id]
+              const currentOverride =
+                override && (busy.includes(original.id) || override.base === original)
+              const e = currentOverride ? override.value : original
+              const item = readiness.status === 'ready' ? readiness.data.get(e.id) : undefined
+              const isActive =
+                e.isActive &&
+                (currentOverride || e.ownerUserId !== null || item?.enablement !== 'disabled')
+              const roundRobinActive = e.roundRobinActive && item?.activation !== 'inactive'
+              const url =
+                e.ownerUserId === null &&
+                !me.organization.personal &&
+                isActive &&
+                !teamReadinessBlocksSharing(item) &&
+                ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
+                  (e.schedulingType === 'collective' &&
+                    e.hosts.length >= 2 &&
+                    e.hosts.length <= 8) ||
+                  (e.schedulingType === 'round_robin' &&
+                    roundRobinActive &&
+                    e.hosts.length >= 1 &&
+                    e.hosts.length <= 8)) &&
+                isPublicTeamSlug(me.organization.slug)
+                  ? publicTeamPageUrl(me.organization.slug, e.slug)
+                  : profile && e.ownerUserId === me.user.id
+                    ? publicPageUrl(profile.handle, e.slug)
+                    : null
+              const pathname = url ? new URL(url).pathname : ''
+              return (
+                <tr key={e.id} className={!isActive ? 'event-type-inactive' : undefined}>
+                  <th scope="row" data-label={t('Title')} className="user-content">
+                    <Link to={eventTypePath(e.id)}>{e.title}</Link>
+                  </th>
+                  <td data-label={t('Duration')} className="fit nowrap">
+                    <div className="table-value">
+                      {formatMinutes(e.durationMinutes, displayLocale)}
+                    </div>
                   </td>
-                )}
-                <td className="actions">
-                  <span className="event-row-actions">
-                    <Link
-                      to={eventTypePath(e.id)}
-                      className="button button-small"
-                      aria-label={t('Edit {0}', { '0': e.title })}
-                    >
-                      {t('Edit')}
-                    </Link>
-                    <EventEmbedAction
-                      inMenu
-                      event={{ ...e, isActive }}
-                      bookingPath={
-                        e.schedulingType === 'round_robin' && !roundRobinActive
-                          ? null
-                          : url
-                            ? new URL(url).pathname
-                            : null
-                      }
-                    />
-                  </span>
-                </td>
-              </tr>
-            )
-          })}
+                  <td data-label={t('Booking link')} className="link-cell user-content">
+                    <div className="table-value">
+                      {url ? (
+                        <span className="booking-link">
+                          <a
+                            href={url}
+                            title={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mono booking-link-path"
+                          >
+                            <span className="booking-link-handle">
+                              {pathname.slice(0, pathname.lastIndexOf('/'))}
+                            </span>
+                            <span className="booking-link-slug">/{encodeURIComponent(e.slug)}</span>
+                            <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
+                          </a>
+                          <CopyButton
+                            text={url}
+                            label={t('Copy link')}
+                            accessibleLabel={t('Copy link for {0}', { '0': e.title })}
+                          />
+                        </span>
+                      ) : (
+                        <span className="muted">
+                          {e.ownerUserId === null
+                            ? e.schedulingType !== 'round_robin' &&
+                              !isPublicTeamSlug(me.organization.slug)
+                              ? TEAM_LINK_SLUG_HINT
+                              : t('No public booking link')
+                            : `/${e.slug}`}
+                        </span>
+                      )}
+                      {e.ownerUserId === null && readiness.status === 'unavailable' && (
+                        <span className="muted">
+                          {t('Readiness checks are unavailable for this account.')}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td data-label={t('Status')} className="fit">
+                    <div className="table-value event-enablement">
+                      {canManage && (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={isActive}
+                          aria-label={t('Enable {0}', { '0': e.title })}
+                          className="button button-small event-enable-toggle"
+                          disabled={busy.includes(e.id)}
+                          onClick={() => void toggle({ ...e, isActive }, original)}
+                        >
+                          <span aria-hidden="true">{isActive ? '✓' : '—'}</span>
+                        </button>
+                      )}
+                      {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
+                      {isActive ? (
+                        <span className="badge badge-success">{t('Active')}</span>
+                      ) : e.ownerUserId === null ? (
+                        <Link to={`${eventTypePath(e.id)}#event-enablement`} className="badge">
+                          {t('Inactive')}
+                        </Link>
+                      ) : (
+                        <span className="badge">{t('Inactive')}</span>
+                      )}
+                      {e.schedulingType === 'round_robin' &&
+                        (roundRobinActive ? (
+                          <span className="badge">{t('Round robin activated')}</span>
+                        ) : (
+                          <Link to={eventTypePath(e.id)} className="badge">
+                            {t('Needs activation')}
+                          </Link>
+                        ))}
+                    </div>
+                  </td>
+                  {readiness.status !== 'unavailable' && (
+                    <td data-label={t('Configuration checks')}>
+                      <ConfigurationChecks
+                        event={e}
+                        item={item}
+                        status={readiness.status}
+                        retry={retryChecks}
+                      />
+                    </td>
+                  )}
+                  <td className="actions">
+                    <span className="event-row-actions">
+                      <Link
+                        to={eventTypePath(e.id)}
+                        className="button button-small"
+                        aria-label={t('Edit {0}', { '0': e.title })}
+                      >
+                        {t('Edit')}
+                      </Link>
+                      <EventEmbedAction
+                        inMenu
+                        disabled={busy.includes(e.id)}
+                        onDuplicate={
+                          canManage
+                            ? async () => {
+                                const copy = await unwrap(
+                                  api.POST('/api/v1/event-types/{id}/duplicate', {
+                                    params: { path: { id: e.id } },
+                                    headers,
+                                    body: {},
+                                  }),
+                                )
+                                if (mounted.current) navigate(eventTypePath(copy.id))
+                              }
+                            : undefined
+                        }
+                        onDelete={
+                          canManage
+                            ? async () => {
+                                await unwrap(
+                                  api.DELETE('/api/v1/event-types/{id}', {
+                                    params: { path: { id: e.id } },
+                                    headers,
+                                  }),
+                                )
+                                setDeleted((ids) => [...ids, e.id])
+                              }
+                            : undefined
+                        }
+                        event={{ ...e, isActive }}
+                        bookingPath={
+                          e.schedulingType === 'round_robin' && !roundRobinActive
+                            ? null
+                            : url
+                              ? new URL(url).pathname
+                              : null
+                        }
+                      />
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
         </tbody>
       </table>
     </div>

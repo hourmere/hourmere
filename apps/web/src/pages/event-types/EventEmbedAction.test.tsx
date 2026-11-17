@@ -341,13 +341,17 @@ describe('event page entry points', () => {
       const menu = screen.getByRole('menu', { name: 'More actions for Intro call' })
       expect(menu.id).toBe(trigger.getAttribute('aria-controls'))
       const item = within(menu).getByRole('menuitem', { name: 'Embed' })
-      expect(document.activeElement).toBe(item)
-      await user.keyboard('{End}{Home}{ArrowUp}{ArrowDown}')
+      expect(document.activeElement).toBe(
+        within(menu).getByRole('menuitem', { name: role === 'owner' ? 'Duplicate' : 'Embed' }),
+      )
+      await user.keyboard(
+        role === 'owner' ? '{Home}{ArrowDown}' : '{End}{Home}{ArrowUp}{ArrowDown}',
+      )
       expect(document.activeElement).toBe(item)
       await user.keyboard('{Escape}')
       expect(document.activeElement).toBe(trigger)
       expect(screen.queryByRole('menu')).toBeNull()
-      await user.keyboard('{ArrowUp}{Enter}')
+      await user.keyboard(role === 'owner' ? '{ArrowUp}{ArrowUp}{Enter}' : '{ArrowUp}{Enter}')
       await screen.findByLabelText('Embed code')
       expect(code().value).toContain(`${PUBLIC_URL}/team/Design-TEAM/intro-call`)
       await user.click(screen.getByRole('button', { name: 'Close' }))

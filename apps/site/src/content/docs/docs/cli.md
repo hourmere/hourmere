@@ -73,6 +73,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `catalog` | `list_event_types` | optional `limit`, `after` |
 | `event` | `get_event_type` | `id` from `catalog` |
 | `create-event` | `create_event_type` | `slug`, `title`, `durationMinutes`; optional `allowedDurationsMinutes` and other event-type fields |
+| `duplicate-event` | `duplicate_event_type` | `id` of the event type to copy |
 | `update-event` | `update_event_type` | `id` beside the changed event-type fields, including optional `durationMinutes`, `allowedDurationsMinutes` |
 | `set-event-notifications` | `set_event_type_notifications` | `id`, complete `notifications` (`reminders` and `followUps`); `full` scope required |
 | `schedules` | `list_schedules` | optional `limit`, `after` |
@@ -496,3 +497,13 @@ See [booking waitlists](/docs/booking-waitlist) for host settings, entry managem
 invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
 Nothing is reserved: every eligible invitee can be notified and the first successful
 ordinary booking wins.
+
+## Duplicate an event type
+
+Save `{ "id": "EVENT_TYPE_UUID" }` in `duplicate.json`, then run
+`hourmere duplicate-event --input duplicate.json` with a `full` API key.
+The response contains the new event and its unique booking slug. It copies editable
+settings within the current space, with the same owner/admin permission as creation.
+Bookings, history, statistics and one-time links are excluded; round-robin activation
+starts off. Each successful call makes another copy. After a lost response, use `catalog`
+to check before retrying. See [event types](https://hourmere.com/docs/event-types).

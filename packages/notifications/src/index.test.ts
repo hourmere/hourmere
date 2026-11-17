@@ -420,6 +420,30 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     }
   })
 
+  it('delivers explicit no-location wording without inventing a calendar location', async () => {
+    const host = await f.host({ name: 'No-location host' })
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'no-location', location: null })
+    const created = await createPublicBooking(ctx, {
+      handle: host.handle,
+      slug: 'no-location',
+      start: instant(START),
+      invitee: { name: 'Ada', email: 'ada@example.com', timeZone: 'UTC' },
+    })
+    const { mailer, sent } = testMailer()
+    await sendBookingNotification(deps(mailer), created.booking.id, 'confirmed')
+    expect(sent).toHaveLength(2)
+    for (const message of sent) {
+      expect(message.text).toContain(
+        'No location has been specified. Contact the host for meeting details.',
+      )
+      expect(message.html).toContain(
+        'No location has been specified. Contact the host for meeting details.',
+      )
+      expect(invitation(message)?.location).toBeNull()
+    }
+  })
+
   it('confirms to the host, the invitee and guests, each in their own time zone', async () => {
     const { bookingId, hostEmail } = await booked({ guests: true })
     const { mailer, sent } = testMailer()

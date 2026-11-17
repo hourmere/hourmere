@@ -1871,6 +1871,7 @@ input[type="radio"] {
 }
 
 .event-type-inactive {
+  color: var(--muted);
   background: var(--bg);
 }
 

@@ -177,6 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
           'update_event_type',
           { id: event, durationMinutes: 30, allowedDurationsMinutes: [15, 30, 60] },
         ],
+        ['duplicate_event_type', { id: event }],
       ] as const) {
         const result = await call(key, name, args)
         if (scope === 'full') {

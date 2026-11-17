@@ -548,6 +548,26 @@ describe('the booking page', () => {
     },
   )
 
+  it('explains that no location was specified on the confirmation page', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking({ location: null }), manageToken: TOKEN }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(
+      screen.getByText('No location has been specified. Contact the host for meeting details.'),
+    ).toBeDefined()
+    await selectPublicLanguage(user, 'zh-CN')
+    expect(screen.getByText('尚未指定会议地点。请联系主持人了解会议详情。')).toBeDefined()
+  })
+
   it('explains calendar responses and opens cancellation with the existing private capability', async () => {
     const user = userEvent.setup()
     const api = fakeApi({

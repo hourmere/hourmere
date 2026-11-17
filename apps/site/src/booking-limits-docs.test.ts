@@ -94,8 +94,11 @@ describe('booking limit documentation', () => {
 
   it('keeps live MCP descriptions aligned with the guide', () => {
     // Registration reads no database and invokes no write handlers.
-    for (const tool of eventTypeTools({ db: {} as Db })) {
-      expect(['create_event_type', 'update_event_type']).toContain(tool.name)
+    const tools = eventTypeTools({ db: {} as Db }).filter((tool) =>
+      ['create_event_type', 'update_event_type'].includes(tool.name),
+    )
+    expect(tools.map((tool) => tool.name)).toEqual(['create_event_type', 'update_event_type'])
+    for (const tool of tools) {
       for (const field of fields) expect(tool.description).toContain(field)
       const { min, max } = EVENT_TYPE_RULE_BOUNDS.maxBookingsPerWeek
       for (const fact of [

@@ -68,3 +68,35 @@ describe('localized booking detail punctuation', () => {
     expect(container.querySelector('.muted')?.textContent).toBe('（Europe/Berlin，GMT+01:00）')
   })
 })
+
+describe('unspecified location', () => {
+  it.each([
+    ['en', 'No location has been specified. Contact the host for meeting details.'],
+    ['zh-CN', '尚未指定会议地点。请联系主持人了解会议详情。'],
+    [
+      'de',
+      'Es wurde kein Ort angegeben. Wenden Sie sich für die Besprechungsdetails an die gastgebende Person.',
+    ],
+    [
+      'fr',
+      'Aucun lieu n’a été précisé. Contactez l’hôte pour connaître les détails de la réunion.',
+    ],
+    [
+      'es',
+      'No se ha especificado un lugar. Contacta con el anfitrión para conocer los detalles de la reunión.',
+    ],
+    [
+      'pt-BR',
+      'Nenhum local foi especificado. Entre em contato com o anfitrião para saber os detalhes da reunião.',
+    ],
+  ] as const)(
+    'explains the absent location in %s without inventing a calendar location',
+    (locale, expected) => {
+      chooseLanguage(locale)
+      const { container } = render(<LocationDetails location={null} />)
+      expect(container.textContent).toBe(expected)
+      expect(screen.queryByRole('link')).toBeNull()
+      expect(locationText(null)).toBeUndefined()
+    },
+  )
+})

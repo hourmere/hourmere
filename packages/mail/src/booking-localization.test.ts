@@ -846,3 +846,44 @@ describe('localized dates and generated copy', () => {
     expect(message.html).toContain('&lt;img src=x onerror=alert(1)&gt;')
   })
 })
+
+describe('unspecified meeting location', () => {
+  it.each([
+    ['en', 'No location has been specified. Contact the host for meeting details.'],
+    ['zh-CN', '尚未指定会议地点。请联系主持人了解会议详情。'],
+    [
+      'de',
+      'Es wurde kein Ort angegeben. Wenden Sie sich für die Besprechungsdetails an die gastgebende Person.',
+    ],
+    [
+      'fr',
+      'Aucun lieu n’a été précisé. Contactez l’hôte pour connaître les détails de la réunion.',
+    ],
+    [
+      'es',
+      'No se ha especificado un lugar. Contacta con el anfitrión para conocer los detalles de la reunión.',
+    ],
+    [
+      'pt-BR',
+      'Nenhum local foi especificado. Entre em contato com o anfitrião para saber os detalhes da reunião.',
+    ],
+  ])('explains absent location in %s text and HTML emails', (locale, expected) => {
+    for (const kind of ['confirmed', 'rescheduled', 'reminder', 'cancelled'] as const) {
+      for (const role of roles) {
+        const output = bookingEmail(
+          kind,
+          { ...meeting, location: null },
+          { ...recipients[role], locale },
+        )
+        expect(output.text).toContain(expected)
+        expect(output.html).toContain(expected)
+      }
+    }
+    const failure = bookingEmail(
+      'conference_failed',
+      { ...meeting, location: null },
+      { ...recipients.invitee, locale },
+    )
+    expect(failure.text).not.toContain(expected)
+  })
+})
