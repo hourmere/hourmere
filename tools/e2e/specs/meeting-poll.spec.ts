@@ -14,7 +14,7 @@ for (const width of [320, 1280]) {
           expect(
             await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
           ).toBe(true)
-          expect(new URL(page.url()).hash).toBe('')
+          expect(await page.evaluate(() => window.location.hash === '')).toBe(true)
         }
       })
     }
