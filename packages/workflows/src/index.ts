@@ -52,6 +52,12 @@ export {
   type WorkflowDeleteContext,
 } from './deletes.ts'
 export {
+  type RenderedWorkflowEmail,
+  renderWorkflowEmail,
+  type WorkflowEmailAction,
+  type WorkflowEmailInput,
+} from './email.ts'
+export {
   requireWorkflowsImplemented,
   WORKFLOWS_IMPLEMENTED,
   workflowCapture,

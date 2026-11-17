@@ -364,7 +364,7 @@ export function productRoutes({
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
     // Registered while hard-off: every operation answers 404 workflows_disabled.
-    workflowRoutes({ db }),
+    workflowRoutes({ db, followUpHostNotesEnabled }),
   ]
 }
 
@@ -450,7 +450,7 @@ export function productTools({
     ...meetingPollTools({ db, meetingPollSecret }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
-    ...workflowTools({ db }),
+    ...workflowTools({ db, followUpHostNotesEnabled }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
     ...routingFormConfigurationTools({ db, routingFormsEnabled: routingEnabled }),
   ]

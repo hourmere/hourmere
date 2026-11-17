@@ -251,6 +251,18 @@ switch or relax the Cloud requirement. Step 11a owns validation and the renderer
 built-in fallback that dispatch uses; step 11b owns safe built-in catalogs, and step 12b
 integrates and tests the live switch recheck at dispatch.
 
+The internal shared renderer now bounds interpolation, escapes HTML and applies the
+host-text fallback before reading custom content. Save and ordinary updates enforce the
+same switch for bookers, guests and hosts; disabling a stored definition remains possible.
+The renderer currently supplies English and zh-CN built-ins; the complete public-locale
+catalog, preview endpoint and live delivery integration follow in their planned steps.
+Workflows remain hard-off and no email is dispatched by this implementation.
+
+中文：内部共享渲染器限制变量展开长度、转义 HTML，并在读取自定义内容前应用主持人文本
+开关。保存和普通更新对预约者、嘉宾及主持人统一执行该策略；仍可停用已有定义。
+当前内置英文及简体中文文本；完整公开语言目录、预览接口和实际投递将在后续步骤接入。
+工作流仍硬关闭，此实现不会发送邮件。
+
 Templates are plain text with a typed allowlist of variables. Built-in localized wrappers
 and templates cover every public locale in `packages/core/src/locales.ts`; administrator
 screens cover English and zh-CN. Use recipient profile locale for hosts and the saved

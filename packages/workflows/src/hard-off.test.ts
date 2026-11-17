@@ -80,6 +80,8 @@ const PACKAGE_EXPORTS = [
   'ownsEventType',
   'ownsWebhook',
   'parseWorkflowDefinition',
+  // Pure rendering has no delivery or other side effects.
+  'renderWorkflowEmail',
   'requireWorkflowsImplemented',
   'scopeSelectsEventType',
   'templatePlaceholders',
@@ -463,7 +465,8 @@ describe('workflow hard-off', () => {
             !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
             !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)) &&
             !(file === 'packages/workflows/src/capture.ts' && captureImports.has(specifier)) &&
-            !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)),
+            !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/email.ts' && specifier === '@hourmere/mail/text'),
         ),
         file,
       ).toEqual([])

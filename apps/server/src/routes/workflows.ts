@@ -213,7 +213,15 @@ const errors = {
 }
 
 /** Booking workflow definitions of the personal owner or team the caller acts as. */
-export function workflowRoutes({ db, audit }: { db: Db; audit?: WorkflowAuditPort }): RouteModule {
+export function workflowRoutes({
+  db,
+  audit,
+  followUpHostNotesEnabled,
+}: {
+  db: Db
+  audit?: WorkflowAuditPort
+  followUpHostNotesEnabled?: boolean | undefined
+}): RouteModule {
   const contextAccess =
     (
       principal: Principal,
@@ -240,6 +248,7 @@ export function workflowRoutes({ db, audit }: { db: Db; audit?: WorkflowAuditPor
     db,
     principal,
     audit,
+    followUpHostNotesEnabled,
     prepareOrganizationWrite: async (trx: Db) => {
       await organizationContextWriteLock(principal)(trx)
       await contextAccess(principal, expectedOrganizationId)(trx, principal.organization.id)

@@ -9,6 +9,7 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { hardOffWorkflowAuditPort, type WorkflowAuditPort } from './audit.ts'
 import {
+  assertWorkflowTextPolicy,
   validateWorkflowDefinition,
   WorkflowDefinitionSchema,
   workflowReferences,
@@ -24,6 +25,7 @@ export const CreateWorkflowInputSchema = WorkflowDefinitionSchema.extend({
 })
 export type CreateWorkflowInput = z.input<typeof CreateWorkflowInputSchema>
 export interface WorkflowCreateContext {
+  followUpHostNotesEnabled?: boolean | undefined
   db: Db
   principal: Principal
   audit?: WorkflowAuditPort | undefined
@@ -144,6 +146,7 @@ export async function createWorkflowDefinition(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     const owner = await writableOwner(trx, ctx, request.owner)
+    assertWorkflowTextPolicy(request, ctx.followUpHostNotesEnabled)
     const credential =
       ctx.principal.kind === 'api_key'
         ? ctx.principal.apiKeyId
@@ -195,6 +198,7 @@ export async function createWorkflowDefinition(
       : []
     const definition = validateWorkflowDefinition(candidate, {
       owner,
+      followUpHostNotesEnabled: ctx.followUpHostNotesEnabled,
       webhooks: new Map(),
       eventTypes: new Map(
         events.map((event) => [

@@ -131,6 +131,8 @@ export type WorkflowDefinition = z.output<typeof WorkflowDefinitionSchema>
 
 /** Facts a service loaded for the IDs a definition references (workflowReferences). */
 export interface WorkflowValidationContext {
+  /** The existing host-text policy applies to every recipient class. Defaults to true. */
+  followUpHostNotesEnabled?: boolean | undefined
   owner: WorkflowOwner
   eventTypes: ReadonlyMap<string, WorkflowEventTypeFacts>
   webhooks: ReadonlyMap<string, WorkflowWebhookFacts>
@@ -247,7 +249,11 @@ function checkedTemplate(
 ): string {
   const normalized = (multiline ? text.replace(/\r\n?/g, '\n') : text).trim()
   if (!normalized) throw invalid(path, 'must not be empty')
-  if (!(multiline ? isMultiLineText(normalized) : isSingleLineText(normalized)))
+  if (
+    /\p{Cf}/u.test(text) ||
+    (!multiline && /[\r\n]/.test(text)) ||
+    !(multiline ? isMultiLineText(normalized) : isSingleLineText(normalized))
+  )
     throw invalid(
       path,
       multiline
@@ -292,6 +298,17 @@ function checkedCondition(
   }
 }
 
+/** Reject custom text even on creation replay; built-in actions remain usable. */
+export function assertWorkflowTextPolicy(
+  definition: Pick<WorkflowDefinition, 'actions'>,
+  followUpHostNotesEnabled: boolean | undefined,
+): void {
+  if (followUpHostNotesEnabled !== false) return
+  for (const [index, action] of definition.actions.entries())
+    if (action.type === 'email' && action.content !== undefined)
+      throw invalid(`actions[${index}].content`, 'custom text is disabled')
+}
+
 /**
  * Validates a candidate definition for `context.owner` and returns its canonical form: the
  * trimmed name, default delay and enabled flag, and normalized custom text. Every referenced
@@ -303,6 +320,7 @@ export function validateWorkflowDefinition(
   context: WorkflowValidationContext,
 ): WorkflowDefinition {
   const definition = parseWorkflowDefinition(value)
+  assertWorkflowTextPolicy(definition, context.followUpHostNotesEnabled)
   const name = checkedName(definition.name)
   const scopeEventType =
     definition.scope.type === 'event_type'
