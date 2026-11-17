@@ -18,7 +18,7 @@ Each event type has two optional settings, both in whole minutes before the star
 - **Cancel deadline** (`cancelCutoffMinutes`): from this point the invitee can no longer
   cancel or choose another time.
 
-Each accepts a whole number from **1 to 525600** (one year), or no value for no deadline.
+Each accepts a whole number from **1 to 525600** (365 elapsed days), or no value for no deadline.
 No deadline is the default: the invitee can change the booking until it starts. The two
 settings are independent, but invitee rescheduling closes at the **earlier** of the two
 deadline instants. A blank setting contributes no limit from that side. For example,
@@ -29,7 +29,22 @@ until 24 hours before (`1440`). With only a 24-hour cancel deadline, both action
 A change is allowed strictly before the deadline instant. At exactly the deadline, and
 afterwards, it is refused. Minutes are elapsed time: across a daylight-saving change, a
 1440-minute deadline is exactly 24 hours before the start, which can be a different
-wall-clock time on the previous day.
+wall-clock time on the previous day. With a **24-hour cancel deadline** (`1440`) and a
+**2-hour reschedule deadline** (`120`), both actions close 24 hours before the start;
+the 2-hour setting does not keep rescheduling open for another 22 hours.
+
+For a host in `America/Los_Angeles` and an invitee in `Asia/Shanghai`, these are the
+same instants shown in different zones:
+
+| Los Angeles meeting start | 24-hour deadline in Los Angeles | Same deadline in Shanghai |
+|---|---|---|
+| March 14, 2027, 09:00 PDT | March 13, 2027, 08:00 PST | March 14, 2027, 00:00 |
+| November 7, 2027, 09:00 PST | November 6, 2027, 10:00 PDT | November 7, 2027, 01:00 |
+
+Changing the invitee's display zone never changes the deadline. A request checked
+1 millisecond before it is still eligible; one checked exactly at it is refused.
+The server checks after acquiring the booking locks, so clicking before the displayed
+time does not guarantee acceptance if the request reaches that check after the cutoff.
 
 ### Each booking keeps its own deadlines
 
@@ -45,7 +60,8 @@ back from the booking's current start, so after a move it follows the new time.
 
 Open **Event types**, edit the event, and set the reschedule and cancel deadlines beside
 the other scheduling rules. Leave a deadline blank for none. Save the event to apply it to
-new bookings.
+new bookings. These two inputs use whole **minutes**, without the minute/hour/day
+selector used by notice and buffers: enter `1440` for 24 hours and `120` for 2 hours.
 
 ### REST
 
@@ -92,7 +108,8 @@ and `event` returns the saved settings. See the [REST guide](/docs/rest),
 While a change is still open, the booking management page says until when the invitee can
 reschedule or cancel online. After a deadline, the page explains that the change is no
 longer available online and asks the invitee to contact the host, instead of showing that
-button.
+button. Dates and times use the management page's selected time zone, initially the
+booker's saved zone (or the browser zone if no valid saved zone is available).
 
 The deadlines apply to every use of the invitee's management link: the management page,
 the public REST endpoints called with `X-Manage-Token`
@@ -109,10 +126,15 @@ setting and is null when that setting is null.
 
 ## What hosts and team admins can do
 
-Hosts are not limited by either deadline. They can reschedule and cancel inside it from
-the booking detail page, REST, MCP or CLI with `bookingId`. Team admins can still cancel
-team bookings from the dashboard. A host move does not reset the deadline: the booking
-keeps its original minutes, counted from the new start.
+Hosts are not limited by either invitee deadline. They can reschedule and cancel inside
+it from the booking detail page, REST, MCP or CLI using the authenticated host action
+(`bookingId` in MCP/CLI). Normal permissions and other booking restrictions still apply;
+this does not allow changing a booking that has already started.
+
+Team owners/admins who are not hosts can still cancel future team bookings through the
+dashboard's team-booking action and its browser-session REST endpoint. This does not
+grant them non-host rescheduling, or team-wide management through API keys, MCP or CLI.
+A host move keeps the original cutoff minutes, counted from the new start.
 
 ### Requests to choose another time
 
