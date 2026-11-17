@@ -75,6 +75,7 @@ export {
   mailboxProofRecipientHash,
   notificationEmailCleanupJob,
   signInEmailBudget,
+  workflowRecipientHash,
 } from './mail-limits.ts'
 export {
   createWaitlistEmailWorker,

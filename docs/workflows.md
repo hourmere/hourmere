@@ -28,6 +28,16 @@ attributed to another product. Existing reminders and follow-ups remain availabl
 通知；已有提醒优先，其次按工作流创建时间和 ID 排序。付款保留、导入及团体预约不登记。
 生产入口仍受硬关闭常量保护，不会捕获或发送工作流。
 
+Shared mail admission now records workflow reservations in the existing notification ledger,
+using the owner-organization lock before the shared budget lock. Retry admission restamps the
+same charge after recounting capacity. Internal instance/owner sub-cap settings default to
+20/5 per sliding hour and are forwarded by Compose; neither setting enables workflows.
+No dispatcher or SMTP attempt is added by this admission primitive.
+
+中文：共享邮件准入已将工作流预留写入现有通知账本，先锁定所属组织，再取得共享额度锁。
+重试会重新计算额度并更新时间戳，不增加账本记录。内部实例和组织每小时子额度默认为
+20 和 5，Compose 已转发配置；这些配置不会启用工作流。本次不增加调度器或 SMTP 发送。
+
 ## Evidence and existing foundations
 
 Official help checked on 2026-11-06:

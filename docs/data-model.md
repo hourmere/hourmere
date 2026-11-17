@@ -1180,8 +1180,10 @@ Migration 0079 installs the execution storage of the [booking workflows design](
 pending runs after tombstoning their definition; it preserves the other execution rows.
 Creation capture writes immutable enrollments, due runs and recipient intents in the booking
 transaction after core notifications, sharing live definitions in ID order after the organization
-lock. Timer skips also write minimal history. There is no dispatcher, retention worker or
-setting, and workflows stay hard-off behind
+lock. Timer skips also write minimal history. Internal mail admission writes reservations and
+shared ledger charges atomically, and retry admission restamps both under the same organization
+and mail-budget locks. Instance and owner sub-cap settings do not enable delivery. There is no
+dispatcher or retention worker, and workflows stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 
