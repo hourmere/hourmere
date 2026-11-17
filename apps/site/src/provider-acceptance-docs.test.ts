@@ -68,7 +68,7 @@ const providerClaimAllowlist: Record<string, readonly string[]> = {
     'The self-hoster is responsible for any required [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification) for their project.',
     'Each Google Cloud project is verified separately; a self-hosted instance uses your own project.',
     'See [Google Calendar publishing requirements](/docs/google-calendar#publishing-status-and-verification) for recovery and exceptions.',
-    '| | `CONFERENCE_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key for conference credentials and OAuth verifiers.',
+    '| `CONFERENCE_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key for conference credentials and OAuth verifiers.',
   ],
   'apps/site/src/content/docs/docs/self-hosting.md': [
     "External unverified apps requesting sensitive or restricted scopes still show an **unverified app warning screen** and have a **100-user cap**; see Google's [app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).",
@@ -76,11 +76,13 @@ const providerClaimAllowlist: Record<string, readonly string[]> = {
   ],
 }
 
-// Separate Markdown blocks before sentences to keep headings out of adjacent prose.
+// Separate Markdown blocks and table rows before sentences. Otherwise an OAuth endpoint
+// in one scope-table row and an unrelated domain /verify endpoint in another look like
+// one provider-verification claim. Prose claims inside a row are still checked.
 const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' })
 const sentences = (text: string) =>
   text
-    .split(/\r?\n\s*\r?\n/)
+    .split(/\r?\n\s*\r?\n|(?<=\|)\r?\n(?=\|)/)
     .flatMap((paragraph) =>
       [...segmenter.segment(normalize(paragraph))].map(({ segment }) => normalize(segment)),
     )
@@ -150,6 +152,17 @@ describe('provider real-account acceptance documentation', () => {
 })
 
 describe('provider publication and verification claims throughout documentation', () => {
+  it('keeps unrelated API table rows separate while checking provider claims in table cells', () => {
+    const rows = [
+      '| `POST /api/v1/calendar-connections/google/authorize` | Browser session only |',
+      '| `POST /api/v1/team/sso/domains/{domainId}/verify` | Browser session only |',
+    ].join('\n')
+    expect(unapprovedProviderClaims(rows, [])).toEqual([])
+    const claim = '| The hosted Google app is verified. |'
+    expect(unapprovedProviderClaims(`${rows}\n${claim}`, [])).toEqual([
+      '| The hosted Google app is verified.',
+    ])
+  })
   // Discover pages from their complete text, so publishing another provider or delivery
   // guide automatically gives it the same claim guard, even if its allowlist is empty.
   const pages = globSync('**/*.md', { cwd: join(root, siteDocs) })

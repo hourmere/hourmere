@@ -245,12 +245,31 @@ profile defaults, empty-result handling, DST boundaries and taken-time fallback.
 ## Explain why times cannot be booked
 
 Call `troubleshoot_availability` with `eventTypeId` and a local `date` (`YYYY-MM-DD`), plus
-optional `timeZone` and `durationMinutes`. It returns every possible start time of that day
-with `status` and ordered reason codes, the same object as the REST endpoint. Only personal
-owners and team owners/admins may call it, with a `full` key or an `mcp:tools` OAuth grant;
-anything else answers `event_type_not_found`. `calendar_sync_unavailable` means connected
-calendars could not be read right now. See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting) for every reason
-code and the known limitations.
+optional `timeZone` and `durationMinutes`. Its `structuredContent` matches the REST response:
+`available` slots have empty reasons; unavailable slots list blocking reasons in priority
+order. Personal owners and current team owners/admins may call it with a `full` key or an
+`mcp:tools` OAuth grant. `read`/`bookings` keys get `insufficient_scope`; other unauthorized
+callers get the same `event_type_not_found` as an unknown event.
+
+`calendar_sync_unavailable` means selected Google/CalDAV cached snapshots cannot establish
+fresh, complete availability; it does not mean a known busy event or missing setup. The tool
+does not refresh providers. CalDAV busy sync and write-back exist as internal services but
+are not exposed through user connection flows yet. Microsoft connections currently list
+calendars only: there is no busy sync or sync-freshness check. An available explanation does
+not establish that an Outlook calendar is free.
+
+This diagnoses new slots, not invitee permission to change an existing booking. Change
+deadlines are separate action errors. Busy intervals omit event titles, attendees, locations
+and calendar/booking IDs. See [Troubleshoot availability](https://hourmere.com/docs/availability-troubleshooting) for
+reason-by-reason actions, DST behavior, privacy and provider limitations.
+
+中文：`troubleshoot_availability` 输入事件 ID、本地日期，可选时区和时长；
+`structuredContent` 与 REST 一致，原因按优先级排列，可预约时原因为空。
+仅所有者/团队管理员使用 `full` 密钥或有权限的 MCP OAuth 可调用；低权限密钥返回
+`insufficient_scope`，其他越权与不存在均返回 `event_type_not_found`。
+Google/内部 CalDAV 快照过期或不完整返回 `calendar_sync_unavailable`，不能说成缺少配置。
+CalDAV 同步及写回尚未开放连接入口；Microsoft 只有日历列表，没有忙碌同步或新鲜度检查。
+此工具不刷新日历、不检查已有预约的改期截止时间，也不返回事件详情。
 
 ## Configure an after-booking redirect
 

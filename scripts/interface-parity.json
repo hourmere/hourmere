@@ -1,4 +1,16 @@
 {
+  "createSsoDomainChallenge": {
+    "exemption": "browser-session-only",
+    "reason": "Claiming domain authority requires interactive administrator proof."
+  },
+  "verifySsoDomain": {
+    "exemption": "browser-session-only",
+    "reason": "Activating domain authority requires interactive administrator proof."
+  },
+  "deleteSsoDomain": {
+    "exemption": "browser-session-only",
+    "reason": "Releasing domain authority requires interactive administrator proof."
+  },
   "getGroupOccurrenceAttendees": {
     "mcp": "get_group_occurrence_attendees",
     "cli": "group-attendees"

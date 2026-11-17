@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { SSO_DOMAIN_LIMITS } from '../apps/server/src/sso-domains.ts'
 import { SSO_AUDIT_LIMITS } from '../packages/db/src/sso-audit.ts'
 import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
 
@@ -13,9 +14,7 @@ const limits = {
   ssoDelegationLifetime: 2592000,
   freshAdministrationProof: 300,
   ssoRecoveryNominationLifetime: 259200,
-  domainChallengeLifetime: 86400,
-  domainRecheckInterval: 86400,
-  domainVerificationLifetime: 604800,
+  ...SSO_DOMAIN_LIMITS,
   jwksCacheMaximum: 3600,
 } as const
 
