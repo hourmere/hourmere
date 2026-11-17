@@ -184,8 +184,8 @@ self-hosting and does not change REST, MCP or CLI operations.
   successful ordinary booking wins, and email delivery is not guaranteed.
 - CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
   The [design and internal connection foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
-  includes internal busy-time sync, with no production worker registration, event writes
-  or UI/API/MCP/CLI access. Real-account acceptance
+  includes internal busy-time sync and conditional booking writes, with no production
+  worker registration or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
 - [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe
   processing, payment settings and automatic refunds are not available.

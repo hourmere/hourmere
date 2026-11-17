@@ -185,13 +185,20 @@ CalDAV connections are not available in the app yet. The
 [design and foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
 provides encrypted credentials, guarded discovery (including calendar colour and advisory
 write permission), internal owner-authorized persistence, and bounded busy-time
-synchronization with sync-token recovery. Production workers and booking writes remain
-unavailable. Unsupported recurrence/timezone responses fail closed; no real-account
+synchronization with sync-token recovery. Internal booking copies now support stable-resource
+create, reschedule and cancel with conditional ETags and replay recovery. Production
+workers and connection surfaces remain unavailable. Calendar copies do not send provider
+invitations; Hourmere email delivery remains separate. External edits cause a conflict
+instead of being overwritten. Unsupported recurrence/timezone responses fail closed; no real-account
 compatibility is claimed. Relative discovery hrefs resolve against
 the request URI, including nested endpoints that respond without redirects. Internal
 decrypted credentials hide usernames and passwords from routine serialization and
 spread/clone copies; explicit field reads remain sensitive. Raw caller inputs are not
 protected by that wrapper. Real-provider compatibility testing is still pending.
+
+中文：CalDAV 仍未开放应用入口或生产任务。内部服务已支持预约写入、同一资源改期及
+取消，使用 ETag 防止覆盖外部修改，重放不会重复创建；不通过日历服务器发送邀请。
+真实账号兼容性仍待验证。
 
 Future CalDAV workers will need outbound DNS and verified HTTPS to the calendar server;
 no new inbound port is needed. For private Nextcloud installations, the internal

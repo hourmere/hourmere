@@ -22,6 +22,7 @@ export class CalDavError extends Error {
     | 'forbidden'
     | 'rate_limited'
     | 'unavailable'
+    | 'conflict'
   constructor(code: CalDavError['code']) {
     super(`CalDAV ${code}`)
     this.code = code
@@ -29,7 +30,10 @@ export class CalDavError extends Error {
 }
 export interface CalDavRequest {
   url: string
-  method?: 'PROPFIND' | 'REPORT'
+  method?: 'PROPFIND' | 'REPORT' | 'GET' | 'PUT' | 'DELETE'
+  ifMatch?: string
+  ifNoneMatch?: '*'
+  contentType?: 'text/calendar; charset=utf-8'
   body: string
   authorization: string
   depth: '0' | '1'
@@ -43,6 +47,7 @@ export interface CalDavResponse {
   status: number
   body: string
   location?: string
+  etag?: string
 }
 export type CalDavTransport = (input: CalDavRequest) => Promise<CalDavResponse>
 export function calDavUrl(
@@ -107,7 +112,9 @@ export const sendCalDav: CalDavTransport = async (input) => {
           headers: {
             authorization: input.authorization,
             depth: input.depth,
-            'content-type': 'application/xml; charset=utf-8',
+            'content-type': input.contentType ?? 'application/xml; charset=utf-8',
+            ...(input.ifMatch ? { 'if-match': input.ifMatch } : {}),
+            ...(input.ifNoneMatch ? { 'if-none-match': input.ifNoneMatch } : {}),
             'content-length': Buffer.byteLength(input.body).toString(),
             'user-agent': 'Hourmere-CalDAV/1',
           },
@@ -131,6 +138,7 @@ export const sendCalDav: CalDavTransport = async (input) => {
               status: res.statusCode ?? 500,
               body: Buffer.concat(chunks).toString('utf8'),
               location: res.headers.location,
+              ...(res.headers.etag ? { etag: res.headers.etag } : {}),
             }),
           )
         },
