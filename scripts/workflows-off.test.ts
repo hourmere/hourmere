@@ -102,6 +102,7 @@ const DATA_ACCESS = [
   'packages/workflows/src/updates.ts',
   'packages/workflows/src/deletes.ts',
   'packages/workflows/src/capture.ts',
+  'packages/workflows/src/dispatcher.ts',
 ]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
 
@@ -617,7 +618,10 @@ describe('booking workflows are off and expose only definition reads, creation, 
             ![...DEFINITION_TABLES, 'workflow_runs', 'workflow_enrollments'].includes(table),
         )
         for (const table of forbidden) expect(source).not.toContain(table)
-      } else if (file === 'packages/workflows/src/capture.ts') {
+      } else if (
+        file === 'packages/workflows/src/capture.ts' ||
+        file === 'packages/workflows/src/dispatcher.ts'
+      ) {
         for (const table of [
           'workflow_enrollments',
           'workflow_runs',
@@ -632,7 +636,7 @@ describe('booking workflows are off and expose only definition reads, creation, 
     // Only the package entry and definition services load definition modules. Production
     // callers outside those modules receive only the guarded operations.
     const loaders = sources.filter((file) =>
-      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture))(?:\.ts)?['"`]/.test(
+      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture|dispatcher))(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
@@ -700,6 +704,22 @@ describe('booking workflows are off and expose only definition reads, creation, 
     expect(service).toContain(
       'export const captureWorkflowBooking = workflowCapture(captureBookingWorkflows)',
     )
+  })
+
+  it('keeps dispatcher and repair handlers guarded and absent from production registration', () => {
+    const service = readFileSync(new URL('packages/workflows/src/dispatcher.ts', root), 'utf8')
+    expect(service).toContain(
+      'export const dispatchWorkflowRuns = workflowExecution(dispatchDueWorkflowRuns)',
+    )
+    expect(service).toContain(
+      'export const repairWorkflowWakes = workflowExecution(repairWorkflowRunWakes)',
+    )
+    for (const file of productionSources().filter(
+      (file) => !file.startsWith('packages/workflows/src/'),
+    )) {
+      const source = readFileSync(new URL(file, root), 'utf8')
+      expect(source, file).not.toMatch(/\bworkflowJobs\b|workflow-dispatch-v1|workflow-repair-v1/)
+    }
   })
 
   it.each(['mock', 'doMock', 'importMock'])(
