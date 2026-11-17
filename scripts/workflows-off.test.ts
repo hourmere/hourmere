@@ -1,4 +1,4 @@
-// Workflow reads, creation and updates ship behind the pinned hard-off guard. This inventory admits
+// Workflow reads, creation, updates and deletion ship behind the pinned hard-off guard. This inventory admits
 // only those interfaces and confines data access to the definition services below.
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
@@ -39,7 +39,13 @@ const operations = [
 }))
 
 /** The operations shipped while workflows are off; every other one is still absent. */
-const SHIPPED = ['listWorkflows', 'createWorkflow', 'getWorkflow', 'updateWorkflow']
+const SHIPPED = [
+  'listWorkflows',
+  'createWorkflow',
+  'getWorkflow',
+  'updateWorkflow',
+  'deleteWorkflow',
+]
 const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
 const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
 
@@ -88,12 +94,13 @@ const STORAGE_NAMES = new RegExp(
   `workflow-storage|(?<![A-Za-z0-9_])(?:${[...STORAGE_TABLES, ...STORAGE_TABLES.map(rowType)].join('|')})(?![A-Za-z0-9_])`,
   'i',
 )
-// The modules that own workflow data access: the guarded definition reads, creation and updates;
-// no execution table is accessed.
+// The modules that own workflow data access: the guarded definition reads, creation, updates and deletion;
+// Deletion alone may access runs and enrollments to retire pending work.
 const DATA_ACCESS = [
   'packages/workflows/src/reads.ts',
   'packages/workflows/src/creates.ts',
   'packages/workflows/src/updates.ts',
+  'packages/workflows/src/deletes.ts',
 ]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
 
@@ -338,7 +345,7 @@ const toolError = (message: Awaited<ReturnType<typeof mcp>>) => {
   return JSON.parse(message.result?.content?.[0]?.text ?? '{}')
 }
 
-describe('booking workflows are off and expose only definition reads, creation and updates', () => {
+describe('booking workflows are off and expose only definition reads, creation, updates and deletion', () => {
   it('reads every documented workflow operation from the design', () => {
     expect(operations.map(({ operationId }) => operationId)).toEqual([
       'listWorkflows',
@@ -357,6 +364,7 @@ describe('booking workflows are off and expose only definition reads, creation a
       'POST /api/v1/workflows',
       'GET /api/v1/workflows/{id}',
       'PATCH /api/v1/workflows/{id}',
+      'DELETE /api/v1/workflows/{id}',
     ])
   })
 
@@ -387,7 +395,7 @@ describe('booking workflows are off and expose only definition reads, creation a
     ])
     for (const path of ['/api/v1/workflows', '/api/v1/workflows/{id}'])
       expect(Object.keys(paths[path] ?? {}).sort(), path).toEqual(
-        path === '/api/v1/workflows' ? ['get', 'post'] : ['get', 'patch'],
+        path === '/api/v1/workflows' ? ['get', 'post'] : ['delete', 'get', 'patch'],
       )
     expect(
       operationIds.filter((id) => typeof id === 'string' && /workflow/i.test(id)).sort(),
@@ -443,7 +451,8 @@ describe('booking workflows are off and expose only definition reads, creation a
       for (const { method, url } of urls) {
         for (const scope of ['full', 'read'] as const) {
           const res = await app.request(url, { method, headers: { authorization: bearer(scope) } })
-          const refusedScope = (method === 'POST' || method === 'PATCH') && scope === 'read'
+          const refusedScope =
+            (method === 'POST' || method === 'PATCH' || method === 'DELETE') && scope === 'read'
           expect(res.status, `${scope} ${method} ${url}`).toBe(refusedScope ? 403 : 404)
           expect(await res.json()).toMatchObject({
             error: refusedScope ? 'insufficient_scope' : 'workflows_disabled',
@@ -490,7 +499,8 @@ describe('booking workflows are off and expose only definition reads, creation a
               toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
             ).toMatchObject({
               error:
-                ['create_workflow', 'update_workflow'].includes(tool) && scope === 'read'
+                ['create_workflow', 'update_workflow', 'delete_workflow'].includes(tool) &&
+                scope === 'read'
                   ? 'insufficient_scope'
                   : 'workflows_disabled',
             })
@@ -588,7 +598,7 @@ describe('booking workflows are off and expose only definition reads, creation a
       .filter((file) => !isStorageLayer(file) && !DATA_ACCESS.includes(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
-    // The definition services name the definition tables and creation keys only, never an execution table.
+    // Only deletion can name the execution tables needed for retirement.
     const executionNames = new RegExp(
       `(?<![A-Za-z0-9_])(?:${STORAGE_TABLES.filter((table) => !DEFINITION_TABLES.includes(table))
         .flatMap((table) => [table, rowType(table)])
@@ -596,17 +606,28 @@ describe('booking workflows are off and expose only definition reads, creation a
       'i',
     )
     expect(executionNames.test('selectFrom("workflow_runs")')).toBe(true)
-    for (const file of DATA_ACCESS)
-      expect(executionNames.test(readFileSync(new URL(file, root), 'utf8')), file).toBe(false)
+    for (const file of DATA_ACCESS) {
+      const source = readFileSync(new URL(file, root), 'utf8')
+      if (file === 'packages/workflows/src/deletes.ts') {
+        for (const table of ['workflow_runs', 'workflow_enrollments'])
+          expect(source).toContain(table)
+        const forbidden = STORAGE_TABLES.filter(
+          (table) =>
+            ![...DEFINITION_TABLES, 'workflow_runs', 'workflow_enrollments'].includes(table),
+        )
+        for (const table of forbidden) expect(source).not.toContain(table)
+      } else expect(executionNames.test(source), file).toBe(false)
+    }
     // Only the package entry and definition services load definition modules. Production
     // callers outside those modules receive only the guarded operations.
     const loaders = sources.filter((file) =>
-      /['"`](?:\.\/(?:reads|creates|updates)|[^'"`]*workflows\/src\/(?:reads|creates|updates))(?:\.ts)?['"`]/.test(
+      /['"`](?:\.\/(?:reads|creates|updates|deletes)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes))(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
     expect(loaders).toEqual([
       'packages/workflows/src/creates.ts',
+      'packages/workflows/src/deletes.ts',
       'packages/workflows/src/index.ts',
       'packages/workflows/src/updates.ts',
     ])
@@ -717,10 +738,11 @@ describe('booking workflows are off and expose only definition reads, creation a
 
   it('exports only the guarded definition operations, which refuse before touching their context', async () => {
     const exported = Object.keys(workflows).filter((name) =>
-      /^(?:list|get|create|update)Workflow/.test(name),
+      /^(?:list|get|create|update|delete)Workflow/.test(name),
     )
     expect(exported.sort()).toEqual([
       'createWorkflow',
+      'deleteWorkflow',
       'getWorkflow',
       'listWorkflows',
       'updateWorkflow',
@@ -738,6 +760,7 @@ describe('booking workflows are off and expose only definition reads, creation a
       () => workflows.getWorkflow(untouchable, randomUUID()),
       () => workflows.createWorkflow(untouchable, {} as never),
       () => workflows.updateWorkflow(untouchable, randomUUID(), {} as never),
+      () => workflows.deleteWorkflow(untouchable, randomUUID(), {} as never),
     ])
       await expect(read()).rejects.toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
   })

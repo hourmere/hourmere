@@ -85,9 +85,28 @@ const GUARDED_SSO_AUTH_PATHS = [
   '/api/auth/sso/mailbox-proof/consume',
 ] as const
 
+const GUARDED_SSO_READS = [
+  {
+    path: '/api/v1/team/sso/providers',
+    operationId: 'listSsoProviders',
+    tool: 'list_sso_providers',
+    command: 'sso providers list',
+  },
+  {
+    path: '/api/v1/team/sso/policy',
+    operationId: 'getSsoPolicy',
+    tool: 'get_sso_policy',
+    command: 'sso policy',
+  },
+] as const
+
 function expectNoUnguardedSsoRoutes(paths: string[]) {
   expectNoSsoRoutes(
-    paths.filter((path) => !(GUARDED_SSO_AUTH_PATHS as readonly string[]).includes(path)),
+    paths.filter(
+      (path) =>
+        !(GUARDED_SSO_AUTH_PATHS as readonly string[]).includes(path) &&
+        !GUARDED_SSO_READS.some((read) => read.path === path),
+    ),
   )
 }
 
@@ -103,6 +122,8 @@ const unavailable = async (): Promise<never> => {
 }
 const productionEnv = {
   DATABASE_URL: 'postgres://catalogue@127.0.0.1:9/catalogue',
+  SSO_OIDC_ENABLED: 'true',
+  SSO_SAML_ENABLED: 'true',
   BETTER_AUTH_SECRET: 'catalogue-test-only-secret-at-least-32-characters',
   PUBLIC_URL: 'http://localhost',
   MCP_OAUTH_ENABLED: 'true',
@@ -375,12 +396,18 @@ const NOT_SHIPPED: readonly RegExp[] = [
 
 type Document = { paths: Record<string, Record<string, { operationId?: string }>> }
 function expectNoSsoOperations(document: Document) {
-  expectNoSso(Object.keys(document.paths))
-  expectNoSso(
-    Object.values(document.paths).flatMap((path) =>
-      Object.values(path).flatMap((operation) => operation.operationId ?? []),
-    ),
-  )
+  for (const [path, methods] of Object.entries(document.paths)) {
+    for (const [method, operation] of Object.entries(methods)) {
+      if (
+        GUARDED_SSO_READS.some(
+          (read) =>
+            read.path === path && method === 'get' && read.operationId === operation.operationId,
+        )
+      )
+        continue
+      expectNoSso([path, ...(operation.operationId ? [operation.operationId] : [])])
+    }
+  }
 }
 
 // Parse syntax rather than hashing source: unrelated routes, formatting and comments
@@ -423,8 +450,11 @@ function webRouteNames(app: string, paths: string) {
 }
 
 describe('SSO hard-off excludes only SSO from the published catalogues', () => {
-  it('publishes no SSO OpenAPI paths or designed operation ids', async () => {
-    expectNoSsoOperations((await openApiDocument()) as Document)
+  it('publishes exactly the guarded SSO draft reads in OpenAPI', async () => {
+    const document = (await openApiDocument()) as Document
+    for (const read of GUARDED_SSO_READS)
+      expect(document.paths[read.path]?.get?.operationId).toBe(read.operationId)
+    expectNoSsoOperations(document)
   })
 
   it('registers no SSO route as production assembles the app, OpenAPI or not', async () => {
@@ -520,6 +550,42 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
         if (value === undefined) delete process.env[name]
         else process.env[name] = value
       await db.destroy()
+    }
+  })
+
+  it('answers disabled for draft reads before caller resolution or database access', async () => {
+    const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
+    try {
+      const app = createApp(productionOptions(db))
+      for (const read of GUARDED_SSO_READS) {
+        for (const query of ['', '?cursor=invalid&limit=not-a-number']) {
+          for (const headers of [
+            {},
+            { authorization: 'Bearer hm_invalid', cookie: 'session=invalid' },
+          ]) {
+            const response = await app.request(`${read.path}${query}`, { headers })
+            expect(response.status).toBe(404)
+            expect(await response.json()).toEqual({ error: 'sso_disabled' })
+          }
+        }
+      }
+    } finally {
+      await db.destroy()
+    }
+  })
+
+  it('exempts only exact draft read paths, methods and operation IDs', () => {
+    for (const read of GUARDED_SSO_READS) {
+      expectNoSsoOperations({ paths: { [read.path]: { get: { operationId: read.operationId } } } })
+      for (const [path, method, operationId] of [
+        [read.path, 'post', read.operationId],
+        [`${read.path}/`, 'get', read.operationId],
+        [read.path, 'get', 'updateSsoProvider'],
+        ['/api/v1/other', 'get', read.operationId],
+      ] as const)
+        expect(() =>
+          expectNoSsoOperations({ paths: { [path]: { [method]: { operationId } } } }),
+        ).toThrow()
     }
   })
 
@@ -713,6 +779,11 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       const tools = (await client.listTools()).tools.map((tool) => tool.name)
       expect(tools).toEqual(expect.arrayContaining(['whoami', 'generate_open_time_snippet']))
       expectNoSso(tools)
+      for (const read of GUARDED_SSO_READS) {
+        const result = await client.callTool({ name: read.tool, arguments: {} })
+        expect(result.isError).toBe(true)
+        expect(JSON.stringify(result)).toContain('sso_disabled')
+      }
     } finally {
       await client.close()
       await db.destroy()
@@ -739,8 +810,18 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     }
   })
 
-  it('publishes no SSO CLI commands or targets', () => {
-    expectNoSso(Object.entries({ ...COMMANDS, ...REST_COMMANDS }).flat())
+  it('publishes exactly the guarded SSO draft CLI commands and targets', () => {
+    const commands = { ...COMMANDS, ...REST_COMMANDS }
+    for (const read of GUARDED_SSO_READS)
+      expect(commands[read.command as keyof typeof commands]).toBe(read.tool)
+    expectNoSso(
+      Object.entries(commands)
+        .filter(
+          ([command, target]) =>
+            !GUARDED_SSO_READS.some((read) => read.command === command && read.tool === target),
+        )
+        .flat(),
+    )
   })
 
   it('publishes no SSO web routes or shared paths', async () => {

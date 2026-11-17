@@ -1,0 +1,119 @@
+import { createRoute, z } from '@hono/zod-openapi'
+import type { MiddlewareHandler } from 'hono'
+import type { CallerEnv } from '../caller.ts'
+import { authenticated, errorResponses, json, type RouteModule } from '../openapi.ts'
+import { requireSsoEnabled } from '../sso.ts'
+import { authorizeSsoRead, getSsoPolicy, listSsoProviders, type SsoReadDeps } from '../sso-reads.ts'
+import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from '../team-management.ts'
+import { queryLimit } from './audit-log.ts'
+
+export const SsoProviderPage = z
+  .object({
+    data: z.array(
+      z.object({
+        id: z.uuid(),
+        protocol: z.string(),
+        revision: z.number().int(),
+        enabled: z.boolean(),
+        displayName: z.string(),
+        issuer: z.string(),
+        clientId: z.string().nullable(),
+        createdAt: z.iso.datetime(),
+        validationStatus: z.string(),
+        testStatus: z.string(),
+        domains: z.array(
+          z.object({
+            id: z.uuid(),
+            name: z.string(),
+            generation: z.number().int(),
+            status: z.string(),
+          }),
+        ),
+      }),
+    ),
+    nextCursor: z.string().nullable(),
+  })
+  .openapi('SsoProviderPage')
+export const SsoPolicy = z
+  .object({
+    requireSso: z.boolean(),
+    admission: z.string(),
+    policyRevision: z.number().int(),
+    trustGeneration: z.number().int(),
+  })
+  .openapi('SsoPolicy')
+
+export function ssoRoutes(deps: SsoReadDeps): RouteModule {
+  const enabled: MiddlewareHandler<CallerEnv> = async (_c, next) => {
+    requireSsoEnabled(deps.capabilities)
+    await next()
+  }
+  const responses = errorResponses({
+    400: 'invalid_request, invalid_limit or invalid_cursor',
+    403: 'team_management_access_denied',
+    404: 'sso_disabled',
+    409: 'organization_context_changed',
+  })
+  return ({ app, caller }) => {
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/team/sso/providers',
+        operationId: 'listSsoProviders',
+        tags: ['SSO'],
+        summary: 'List safe SSO provider drafts for the current team',
+        description:
+          'Owner/admin only; read/full API key or authorized MCP OAuth. SSO is being built and is not available yet. Follow nextCursor for all providers. Configuration, secrets, raw metadata and identities are never returned. Objects and status strings may gain values.',
+        security: authenticated,
+        middleware: [enabled, caller] as const,
+        request: {
+          query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
+        },
+        responses: {
+          200: { description: 'A page of provider drafts', content: json(SsoProviderPage) },
+          ...responses,
+        },
+      }),
+      async (c) => {
+        await authorizeSsoRead(deps, c.var.principal)
+        await organizationContextAccess(
+          c.var.principal,
+          c.req.header(EXPECTED_ORGANIZATION_HEADER),
+        )(deps.db, c.var.principal.organization.id)
+        const query = c.req.valid('query')
+        return c.json(
+          await listSsoProviders(deps, c.var.principal, {
+            ...query,
+            limit: queryLimit(query.limit),
+          }),
+          200,
+        )
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/team/sso/policy',
+        operationId: 'getSsoPolicy',
+        tags: ['SSO'],
+        summary: 'Read the current team SSO policy',
+        description:
+          'Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. SSO is being built and is not available yet.',
+        security: authenticated,
+        middleware: [enabled, caller] as const,
+        responses: {
+          200: { description: 'The team policy', content: json(SsoPolicy) },
+          ...responses,
+        },
+      }),
+      async (c) => {
+        await authorizeSsoRead(deps, c.var.principal)
+        await organizationContextAccess(
+          c.var.principal,
+          c.req.header(EXPECTED_ORGANIZATION_HEADER),
+        )(deps.db, c.var.principal.organization.id)
+        return c.json(await getSsoPolicy(deps, c.var.principal), 200)
+      },
+    )
+  }
+}

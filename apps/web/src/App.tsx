@@ -165,21 +165,27 @@ function AppRoutes() {
     wasActive.current = active
   }, [active])
   const routes = useRoutes(appRoutes, active ? background : location)
+  // Each opened or stepped detail gets its own id. The detail replaces its own entry to
+  // remember its space (keeping this state), which changes the location key but must not
+  // turn a step the user already asked for into a stale one.
+  const entries = useRef(0)
+  const panelState = () => ({ bookingPanel: token, bookingPanelEntry: ++entries.current })
   const panel = {
     location,
     active,
     open(id: string, trigger: HTMLElement) {
       opener.current = trigger
       if (!active) setBackground(location)
-      navigate(bookingPath(id), { replace: active, state: { bookingPanel: token } })
+      navigate(bookingPath(id), { replace: active, state: panelState() })
     },
     step(id: string) {
+      const current = currentLocation.current.state
       if (
-        currentLocation.current.key !== location.key ||
-        currentLocation.current.state?.bookingPanel !== token
+        current?.bookingPanel !== token ||
+        current?.bookingPanelEntry !== location.state?.bookingPanelEntry
       )
         return
-      navigate(bookingPath(id), { replace: true, state: { bookingPanel: token } })
+      navigate(bookingPath(id), { replace: true, state: panelState() })
     },
     close() {
       navigate(-1)

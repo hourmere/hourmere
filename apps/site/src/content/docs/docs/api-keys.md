@@ -266,10 +266,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/webhooks/{id}` | Session or API key | `full` |
 | `GET /api/v1/webhooks/{id}/deliveries` | Session or API key | `full, read` |
 | `POST /api/v1/webhooks/{id}/rotate-secret` | Session or API key | `full` |
+| `DELETE /api/v1/workflows/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/workflows/{id}` | Session or API key | `full` |
 | `POST /api/v1/workflows` | Session or API key | `full` |
 | `GET /api/v1/workflows` | Session or API key | `full, read` |
 | `GET /api/v1/workflows/{id}` | Session or API key | `full, read` |
+| `GET /api/v1/team/sso/providers` | Session or API key | `full, read` |
+| `GET /api/v1/team/sso/policy` | Session or API key | `full, read` |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
 
 ### MCP tools and CLI commands
@@ -340,8 +343,11 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `delete_workflow` | — | `workflows delete` | `full` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
+| `list_sso_providers` | — | `sso providers list` | `full, read` |
+| `get_sso_policy` | — | `sso policy` | `full, read` |
 | `list_workflows` | — | `workflows list` | `full, read` |
 | `get_workflow` | — | `workflows get` | `full, read` |
 
@@ -358,6 +364,16 @@ These routes keep their own authentication; API key scopes do not authorize them
 | `POST /api/conference/zoom/events` | Provider signature |
 
 <!-- api-key-scope-table:end -->
+
+SSO is being built and is not available yet. The SSO operations in these tables return
+`404 sso_disabled` until an operator can enable the protocol; OIDC and SAML currently
+remain hard-off in code, so no setting enables them. MCP omits `list_sso_providers`
+and `get_sso_policy` from `tools/list` while off; direct MCP calls and CLI
+`sso providers list` / `sso policy` report `sso_disabled` for otherwise allowed scopes.
+
+SSO 正在开发中，尚不可用。表中的 SSO 操作在运营者能够启用协议之前返回
+`404 sso_disabled`；目前 OIDC 和 SAML 在代码中保持关闭，任何配置均无法启用。
+关闭时 MCP 工具列表不包含上述工具；允许范围内的直接调用和 CLI 命令返回相同错误。
 
 Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id}`,
 `list_workflows`, `get_workflow`, `workflows list` and `workflows get`) are listed before the

@@ -2,6 +2,7 @@ import { z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
   createWorkflow,
+  deleteWorkflow,
   getWorkflow,
   listWorkflows,
   updateWorkflow,
@@ -9,6 +10,7 @@ import {
 } from '@hourmere/workflows'
 import {
   CreateWorkflowInput,
+  DeleteWorkflowInput,
   ListWorkflowsInput,
   UpdateWorkflowInput,
   WORKFLOWS_NOT_AVAILABLE,
@@ -51,6 +53,18 @@ export function workflowTools({ db, audit }: { db: Db; audit?: WorkflowAuditPort
       annotations: { ...annotations, readOnlyHint: false, idempotentHint: false },
       run({ id, ...args }, call) {
         return updateWorkflow({ db, audit, principal: call.caller }, id, args)
+      },
+    }),
+    defineTool({
+      name: 'delete_workflow',
+      title: 'Delete a booking workflow',
+      description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Supply id and expectedRevision. Tombstones the definition and retires pending runs; authorized repeats are safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; minimal history follows retention.`,
+      input: DeleteWorkflowInput.extend({ id: z.string() }),
+      output: z.object({ deleted: z.literal(true) }),
+      annotations: { ...annotations, readOnlyHint: false, destructiveHint: true },
+      async run({ id, ...args }, call) {
+        await deleteWorkflow({ db, audit, principal: call.caller }, id, args)
+        return { deleted: true as const }
       },
     }),
     defineTool({

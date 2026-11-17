@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { hardOffWorkflowAuditPort } from './audit.ts'
 import { CreateWorkflowInputSchema, createWorkflow } from './creates.ts'
+import { DeleteWorkflowInputSchema, deleteWorkflow } from './deletes.ts'
 import * as hardOff from './hard-off.ts'
 import { UpdateWorkflowInputSchema, updateWorkflow } from './updates.ts'
 
@@ -24,6 +25,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url))
  */
 const PACKAGE_EXPORTS = [
   'CreateWorkflowInputSchema',
+  'DeleteWorkflowInputSchema',
   'PERSONAL_ONLY_CONDITION_FIELDS',
   'UpdateWorkflowInputSchema',
   'WORKFLOWS_IMPLEMENTED',
@@ -64,6 +66,7 @@ const PACKAGE_EXPORTS = [
   'WorkflowTriggerSchema',
   // Definition creation is workflowOperation-wrapped, so off while hard-off.
   'createWorkflow',
+  'deleteWorkflow',
   'evaluateConditions',
   // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
   'getWorkflow',
@@ -205,6 +208,8 @@ describe('workflow hard-off', () => {
     expect(workflows.CreateWorkflowInputSchema).toBe(CreateWorkflowInputSchema)
     expect(workflows.updateWorkflow).toBe(updateWorkflow)
     expect(workflows.UpdateWorkflowInputSchema).toBe(UpdateWorkflowInputSchema)
+    expect(workflows.deleteWorkflow).toBe(deleteWorkflow)
+    expect(workflows.DeleteWorkflowInputSchema).toBe(DeleteWorkflowInputSchema)
   })
 
   it('exports the constant and its guards only, with no way to change them', () => {
@@ -388,6 +393,7 @@ describe('workflow hard-off', () => {
     // that service, while hard-off.ts and the other modules keep the existing import pin.
     const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
     const updateImports = new Set(['@hourmere/auth', 'kysely'])
+    const deleteImports = new Set(['@hourmere/auth', 'kysely'])
     const own = sources.filter(
       (path) => path.startsWith('packages/workflows/src/') && !path.endsWith('/testing.ts'),
     )
@@ -406,7 +412,8 @@ describe('workflow hard-off', () => {
             !specifier.startsWith('./') &&
             !allowed.has(specifier) &&
             !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
-            !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)),
+            !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)),
         ),
         file,
       ).toEqual([])

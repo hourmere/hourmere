@@ -19,6 +19,8 @@ import {
 // Permission expectations are the accepted contract, independent of the runtime classification.
 const restContract = {
   other_read: [
+    'GET /api/v1/team/sso/providers',
+    'GET /api/v1/team/sso/policy',
     'GET /api/v1/routing-forms',
     'GET /api/v1/routing-forms/{id}',
     'GET /api/v1/branding',
@@ -123,6 +125,7 @@ const restContract = {
     'PATCH /api/v1/routing-forms/{id}',
     'DELETE /api/v1/routing-forms/{id}',
     'PATCH /api/v1/workflows/{id}',
+    'DELETE /api/v1/workflows/{id}',
     'POST /api/v1/workflows',
     'PUT /api/v1/audit-log/settings',
     'PATCH /api/v1/branding',
@@ -374,6 +377,7 @@ describe('shared API-key scope policy', () => {
   it('preserves the exact MCP discovery sets and CLI inheritance', () => {
     const expected = {
       full: [
+        'delete_workflow',
         'list_routing_forms',
         'get_routing_form',
         'create_routing_form',
@@ -427,6 +431,8 @@ describe('shared API-key scope policy', () => {
         'remove_waitlist_entry',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_sso_providers',
+        'get_sso_policy',
         'list_workflows',
         'get_workflow',
       ],
@@ -453,6 +459,8 @@ describe('shared API-key scope policy', () => {
         'list_conference_connections',
         'get_event_type_waitlist',
         'list_waitlist_entries',
+        'list_sso_providers',
+        'get_sso_policy',
         'list_workflows',
         'get_workflow',
       ],

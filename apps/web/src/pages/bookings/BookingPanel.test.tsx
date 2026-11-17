@@ -7,12 +7,14 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
 import type { Booking } from '../../api/resources.ts'
+import { AppShell, BookingsPage, RequireSession, SessionLayout } from '../../lazy-pages.tsx'
 import { fakeApi, json, later, profile, type Routes, signedIn } from '../../test/fake-api.tsx'
 import { booking } from '../../test/fixtures.ts'
 import { slotsAnswer } from '../../test/public-fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 
 const first = booking({ title: 'First appointment', questions: [] })
 const second = booking({
@@ -28,10 +30,11 @@ const third = booking({
 const listRoute = 'GET /api/v1/bookings'
 const address = () => screen.getByTestId('panel-location').textContent
 let navigate: ReturnType<typeof useNavigate>
+let current: ReturnType<typeof useLocation>
 function History() {
   navigate = useNavigate()
-  const location = useLocation()
-  return <output data-testid="panel-location">{location.pathname + location.search}</output>
+  current = useLocation()
+  return <output data-testid="panel-location">{current.pathname + current.search}</output>
 }
 function open(path = '/app/bookings') {
   return render(
@@ -67,6 +70,7 @@ function viewport(width: number) {
     })),
   )
 }
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, BookingsPage))
 beforeEach(() => viewport(1200))
 const close = () => screen.getByRole('button', { name: 'Close details' })
 const next = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Next booking' })
@@ -360,7 +364,8 @@ it('reschedules inside the panel and updates the predecessor row while opening i
   await user.click(screen.getByRole('button', { name: '5:00 PM' }))
   await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
   await screen.findByRole('heading', { name: 'Third appointment' })
-  expect(screen.getByRole('dialog', { name: /Third appointment/ })).toBeTruthy()
+  // The successor is not a list row, so the panel takes its name from the detail once loaded.
+  expect(await screen.findByRole('dialog', { name: /Third appointment/ })).toBeTruthy()
   expect(trigger.isConnected).toBe(true)
   expect(row.getByText('Rescheduled')).toBeTruthy()
   expect(api.to(listRoute)).toHaveLength(1)
@@ -407,6 +412,27 @@ it('does not reopen a closed detail when a neighbouring page finishes loading', 
   expect(document.activeElement).toBe(trigger)
 })
 
+it('still steps when the open detail refreshes its own history state while the next page loads', async () => {
+  const pending = later()
+  server({
+    [listRoute]: ({ path }) =>
+      new URL(path, 'http://test').searchParams.has('cursor')
+        ? pending.response
+        : json(200, { data: [first], nextCursor: 'more' }),
+  })
+  open()
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('link', { name: 'First appointment' }))
+  await screen.findByRole('heading', { name: 'First appointment' })
+  await user.click(next())
+  // Like the detail remembering its space: the same entry is replaced with extended state.
+  const { pathname, state } = current
+  await act(async () => navigate(pathname, { replace: true, state: { ...state, refreshed: true } }))
+  await pending.answer(json(200, { data: [second], nextCursor: null }))
+  await screen.findByRole('heading', { name: 'Second appointment' })
+  expect(address()).toBe(`/app/bookings/${second.id}`)
+})
+
 it('uses the detail breadcrumb to restore the exact filtered list', async () => {
   server()
   open('/app/bookings?tab=cancelled&q=Grace')
@@ -451,7 +477,7 @@ it.each(['Close', 'Back'])(
         '/app/bookings?tab=past&q=Grace',
       ),
     )
-    expect(document.activeElement).toBe(trigger)
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
     router.dispose()
   },
 )

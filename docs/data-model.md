@@ -975,7 +975,9 @@ counts; receipt lifetime, encryption and admission services land in later steps.
 Migration 0074 installs the configuration storage of the [SSO design](sso.md)
 (Configuration storage step): `sso_policies`, `sso_providers`, `sso_domains`,
 `sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. The mailbox proof module reads
-providers and the shared fresh-proof gate reads policies. No configuration write path or
+providers and the shared fresh-proof gate reads policies. The draft-read service
+reads an explicit safe projection of providers and policies for current team owners/admins;
+it never opens sealed configuration or reads identity links. No configuration write path or
 setting exists, and OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 
@@ -1102,8 +1104,9 @@ upgrade test preserves a populated predecessor, including the SSO configuration 
 Migration 0076 installs the definition storage of the [booking workflows design](workflows.md)
 (step 2 of its plan): `workflow_definitions` and `workflow_revisions`. Only the definition
 reads of step 4 (`packages/workflows/src/reads.ts`), creation of step 5
-(`packages/workflows/src/creates.ts`) and updates of step 6
-(`packages/workflows/src/updates.ts`) access them, behind the hard-off guard, so
+(`packages/workflows/src/creates.ts`), updates of step 6
+(`packages/workflows/src/updates.ts`) and deletion of step 7
+(`packages/workflows/src/deletes.ts`) access them, behind the hard-off guard, so
 they answer `workflows_disabled` while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
 with its retained creation key. Updates check the expected revision, append immutable content
@@ -1160,8 +1163,9 @@ row versions, and compares fresh and upgraded schemas.
 Migration 0079 installs the execution storage of the [booking workflows design](workflows.md)
 (step 3 of its plan): `workflow_enrollments`, `workflow_runs`, `workflow_recipient_claims`,
 `workflow_run_history` and `workflow_mail_reservations`, plus a nullable
-`workflow_reservation_id` on the shared mail ledger. Nothing reads or writes them yet: there is
-no route, worker, read path or setting, and workflows stay hard-off behind
+`workflow_reservation_id` on the shared mail ledger. Deletion reads enrollments to retire
+pending runs after tombstoning their definition; it preserves the other execution rows.
+There is no capture, dispatcher, retention worker or setting, and workflows stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 
@@ -1316,7 +1320,7 @@ email and webhook actions, durable execution records and workflow sub-caps withi
 Only its definition, execution and creation key storage exist ([workflow definition
 storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
 [workflow creation key storage](#workflow-creation-key-storage)),
-with definition read, creation and update operations that answer `workflows_disabled` while hard-off;
+with definition read, creation, update and deletion operations that answer `workflows_disabled` while hard-off;
 no worker or runtime enablement exists yet.
 
 | When | Change |
