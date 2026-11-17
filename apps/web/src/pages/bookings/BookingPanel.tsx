@@ -51,7 +51,7 @@ export function BookingListReturnLink({ to, children }: { to: string; children: 
   )
 }
 
-/** The overlay is modal on desktop; the retained list stays inaccessible until close. */
+/** The overlay is modal on desktop and a full page on phones; the retained list stays inaccessible until close. */
 export function BookingPanel({
   name,
   previous,
@@ -85,11 +85,16 @@ export function BookingPanel({
     return () => media.removeEventListener('change', change)
   }, [])
   useEffect(() => close.current?.focus({ preventScroll: true }), [])
+  // Read during the first render, before the list is covered or hidden.
+  const listScroll = useRef((document.scrollingElement ?? document.documentElement).scrollTop)
+  // Desktop: a modal overlay; everything outside it is inert and hidden from assistive technology.
+  // Phones: an in-flow full page; the rest of the main content is hidden, the app navigation stays.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reapply hiding when list/detail rendering adds siblings
   useEffect(() => {
     if (!region.current) return
     if (!region.current.contains(document.activeElement))
       close.current?.focus({ preventScroll: true })
+    const boundary = narrow ? (region.current.closest('main') ?? document.body) : document.body
     const hidden: { element: HTMLElement; inert: boolean; aria: string | null }[] = []
     let current: HTMLElement = region.current
     while (current.parentElement) {
@@ -102,21 +107,32 @@ export function BookingPanel({
         })
         sibling.inert = true
         sibling.setAttribute('aria-hidden', 'true')
+        if (narrow) sibling.setAttribute('data-booking-panel-covered', '')
       }
       current = current.parentElement
-      if (current === document.body) break
+      if (current === boundary) break
     }
     const overflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    if (!narrow) document.body.style.overflow = 'hidden'
     return () => {
       for (const { element, inert, aria } of hidden) {
         element.inert = inert
         if (aria === null) element.removeAttribute('aria-hidden')
         else element.setAttribute('aria-hidden', aria)
+        element.removeAttribute('data-booking-panel-covered')
       }
       document.body.style.overflow = overflow
     }
   }, [narrow, children])
+  // Declared after the hiding effect so the list is visible again before its scroll returns.
+  useEffect(() => {
+    const page = document.scrollingElement ?? document.documentElement
+    if (!narrow) return
+    page.scrollTop = 0
+    return () => {
+      page.scrollTop = listScroll.current
+    }
+  }, [narrow])
   async function move(action: () => void | Promise<void>) {
     if (busy || !confirmLeave()) return
     setBusy(true)

@@ -15,7 +15,21 @@ import {
 import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 
 const PAGE = '/app/team/bookings'
-beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z')))
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z'))
+  // On desktop the open detail is a modal, so the space switcher is unreachable behind it.
+  // On a phone the detail is an in-flow page and the app navigation stays usable: test there.
+  vi.stubGlobal('innerWidth', 390)
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({
+      matches: query.includes('max-width'),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  )
+})
 const MEMBER = 'GET /api/auth/organization/get-active-member'
 const LIST = 'GET /api/v1/team/bookings'
 const TEAM: Schemas['Me'] = {
@@ -79,11 +93,11 @@ async function openDraft() {
     user,
     detail: screen.getByRole('region', { name: 'Team booking details' }),
     draft: screen.getByDisplayValue('Draft reason'),
-    list: screen.getByRole('table'),
+    list: screen.getByRole('table', { hidden: true }),
   }
 }
 function expectDraftKept(opened: Awaited<ReturnType<typeof openDraft>>) {
-  expect(screen.getByRole('table')).toBe(opened.list)
+  expect(screen.getByRole('table', { hidden: true })).toBe(opened.list)
   expect(screen.getByRole('region', { name: 'Team booking details' })).toBe(opened.detail)
   expect(screen.getByDisplayValue('Draft reason')).toBe(opened.draft)
   expect(screen.getByRole('link', { name: 'Team bookings' })).toBeDefined()
@@ -174,7 +188,7 @@ describe('team bookings membership refresh', () => {
     const revoked = await screen.findByRole('heading', {
       name: 'Team bookings access is no longer available.',
     })
-    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByRole('table', { hidden: true })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Team booking details' })).toBeNull()
     expect(screen.queryByDisplayValue('Draft reason')).toBeNull()
     expect(screen.queryByRole('link', { name: 'Team bookings' })).toBeNull()
@@ -202,7 +216,7 @@ describe('team bookings membership refresh', () => {
       await opened.user.click(screen.getByRole('button', { name: /Switch space/ }))
 
       await screen.findByRole('heading', { name: 'Team bookings access is no longer available.' })
-      expect(screen.queryByRole('table')).toBeNull()
+      expect(screen.queryByRole('table', { hidden: true })).toBeNull()
       expect(screen.queryByDisplayValue('Draft reason')).toBeNull()
       expect(screen.queryByRole('link', { name: 'Team bookings' })).toBeNull()
       expect(api.to(MEMBER)).toHaveLength(2)
@@ -236,7 +250,7 @@ describe('team bookings membership refresh', () => {
 
     expect(api.to(MEMBER)).toHaveLength(4)
     expect(screen.queryByRole('link', { name: 'Team bookings' })).toBeNull()
-    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByRole('table', { hidden: true })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Team booking details' })).toBeNull()
     expect(api.to(LIST)).toHaveLength(1)
   })
@@ -269,7 +283,7 @@ describe('team bookings membership refresh', () => {
       screen.getByRole('heading', { name: 'Team bookings access is no longer available.' }),
     ).toBe(revoked)
     expect(screen.queryByRole('link', { name: 'Team bookings' })).toBeNull()
-    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByRole('table', { hidden: true })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Team booking details' })).toBeNull()
     expect(api.to(cancel)).toHaveLength(1)
     expect(api.to(LIST)).toHaveLength(1)
@@ -305,7 +319,7 @@ describe('team bookings membership refresh', () => {
     expect(main.getByText('Admin')).toBeDefined()
     expect(main.queryByText('Owner')).toBeNull()
     expect(screen.getByRole('link', { name: 'Team bookings' })).toBeDefined()
-    expect(screen.getByRole('table')).toBeDefined()
+    expect(screen.getByRole('table', { hidden: true })).toBeDefined()
     expect(
       screen.queryByRole('heading', { name: 'Team bookings access is no longer available.' }),
     ).toBeNull()

@@ -217,13 +217,21 @@ describe('booking list detail navigation', () => {
     server()
     open('/app/bookings?tab=past&q=Grace')
     const trigger = await screen.findByRole('link', { name: 'First appointment' })
+    document.documentElement.scrollTop = 240
     await userEvent.click(trigger)
     await screen.findByRole('heading', { name: 'First appointment' })
     expect(screen.queryByRole('dialog', { name: /First appointment/ })).toBeNull()
     expect(screen.queryByRole('searchbox', { name: 'Search bookings' })).toBeNull()
+    // An in-flow page: the rest of the main content is taken out of view, the page starts at the top.
+    expect(trigger.closest('[data-booking-panel-covered]')).not.toBeNull()
+    expect(document.body.style.overflow).toBe('')
+    expect(document.documentElement.scrollTop).toBe(0)
     await act(async () => navigate(-1))
     await waitFor(() => expect(address()).toBe('/app/bookings?tab=past&q=Grace'))
     expect(await screen.findByRole('link', { name: 'First appointment' })).toBe(trigger)
+    expect(trigger.closest('[data-booking-panel-covered]')).toBeNull()
+    expect(document.documentElement.scrollTop).toBe(240)
+    document.documentElement.scrollTop = 0
   })
 
   it('reflects a detail cancellation in the existing row without reloading the list', async () => {

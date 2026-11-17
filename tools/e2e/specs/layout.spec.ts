@@ -241,9 +241,9 @@ test.describe('team administrator bookings at 320px', () => {
       const detail = page.locator('.team-booking-detail')
       await expect(panel).toBeVisible()
       await expect(panel).toHaveClass(/booking-detail-full-page/)
-      const bounds = await panel.boundingBox()
-      expect(bounds?.x).toBe(0)
-      expect(bounds?.width).toBe(viewport.width)
+      // Phones get the detail as an ordinary page: no overlay, and the list is out of view.
+      expect(await panel.evaluate((element) => getComputedStyle(element).position)).toBe('static')
+      await expect(page.locator('.team-bookings-list table')).toBeHidden()
       await expect(detail).toBeVisible()
       const close = panel.getByRole('button', { name: /^(Close details|关闭详情)$/ })
       await expect(close).toBeFocused()

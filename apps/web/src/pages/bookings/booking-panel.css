@@ -21,13 +21,19 @@
   opacity: 0.5;
   cursor: default;
 }
+/* Phones: the detail is an ordinary page in the main content, not an overlay. */
 .booking-detail-full-page {
-  inset: 0;
-  width: 100%;
-  padding: 1rem;
+  position: static;
+  z-index: auto;
+  width: auto;
+  overflow: visible;
+  padding: 0;
   border: 0;
   box-shadow: none;
   animation: none;
+}
+[data-booking-panel-covered] {
+  display: none !important;
 }
 @keyframes booking-panel-enter {
   from {
