@@ -302,7 +302,7 @@ describe('one-time capability privacy source-copy controls', () => {
   })
   it('detects skipping administration request logs', async () => {
     const module = await copy([
-      'if (\n    !isOneTimeLinkPath(c.req.path) &&\n    !isSlackDestinationPath(c.req.path) &&\n    !(isSsoProviderPath(c.req.path) || isCalDavConnectionPath(c.req.path))\n  )\n    return ordinaryRequestLogger(c, next)',
+      'if (\n    !isOneTimeLinkPath(c.req.path) &&\n    !isSlackDestinationPath(c.req.path) &&\n    !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))\n  )\n    return ordinaryRequestLogger(c, next)',
       'if (isOneTimeLinkPath(c.req.path)) return next()',
     ])
     await expect(verifyAdminRequestLogs(module)).rejects.toMatchObject({ name: 'AssertionError' })

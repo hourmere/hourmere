@@ -97,6 +97,7 @@ function productSourceCopy(change?: Change): Factory {
     routingFormsEnabled: false,
     routingFormConfigurationTools: () => [],
     waitlistTools: () => [],
+    meetingPollTools: () => [],
     brandingTools: () => [],
     auditLogTools: () => [],
   }

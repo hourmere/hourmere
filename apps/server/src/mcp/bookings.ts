@@ -8,6 +8,7 @@ import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
   type BookingOrigin,
+  cancelGroupOccurrence,
   cancelHostBooking,
   cancelManagedBooking,
   createOneTimeBooking,
@@ -15,6 +16,7 @@ import {
   createPublicTeamBooking,
   DomainError,
   getBookingActivity,
+  getGroupOccurrenceAttendees,
   getPublicEventType,
   getPublicTeamEventType,
   listBookingAttendeeNoShows,
@@ -40,6 +42,8 @@ import {
   BookingPage,
   BookingWithToken,
   CancelBody,
+  CancelGroupOccurrenceResult,
+  GroupOccurrenceAttendees,
   Instant,
   ListBookingsQuery,
   RequestRescheduleBody,
@@ -533,7 +537,7 @@ export function bookingTools({
     name: 'list_bookings',
     title: 'List my bookings',
     description:
-      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time and id, ascending by default, a page at a time. Use order=desc for newest first. Filter by start time (from inclusive, to exclusive, RFC 3339) and status (cancelled for the cancelled view). q searches the invitee name, invitee email and event type title, ignoring case, within these bookings only. When nextCursor is not null, call again with it as cursor and the same filters, q and order for the next page. Times are UTC; each attendee has their own timeZone. Imported records carry managementPolicy=local_only_read_only and remain managed in the original system; they cannot be changed or retried here.",
+      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time and id, ascending by default, a page at a time. Use order=desc for newest first. Filter by start time (from inclusive, to exclusive, RFC 3339) and status (cancelled for the cancelled view). q searches partial invitee names, invitee emails and event type titles, ignoring case but not accents (Jose does not match José), within these bookings only. Guests and answers are not searched. Search is trimmed, limited to 100 characters, and treats % and _ literally; blank means no search. Cancelled results include predecessors replaced by rescheduling (rescheduledToId identifies them). When nextCursor is not null, call again with it as cursor and the same filters, q and order for the next page. Times are UTC; each attendee has their own timeZone. Imported records carry managementPolicy=local_only_read_only and remain managed in the original system; they cannot be changed or retried here.",
     input: ListBookingsInput,
     output: BookingPage,
     annotations: {
@@ -554,6 +558,42 @@ export function bookingTools({
         limit: args.limit,
         cursor: args.cursor,
       })
+    },
+  })
+
+  const getGroupAttendees = defineTool({
+    name: 'get_group_occurrence_attendees',
+    title: 'Read group occurrence attendees',
+    description:
+      'Read private seat holders, answers, booking status and no-show markers for an occurrence ID from a booking groupSlotId. Host-only for API keys and OAuth; non-host team administrators use the browser dashboard. Includes cancelled seats. Invitee manage tokens do not authorize this operation.',
+    input: z.strictObject({ occurrenceId: z.uuid() }),
+    output: GroupOccurrenceAttendees,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run(args, call) {
+      return getGroupOccurrenceAttendees(context(call.caller), args.occurrenceId)
+    },
+  })
+  const cancelGroup = defineTool({
+    name: 'cancel_group_occurrence',
+    title: 'Cancel a whole group occurrence',
+    description:
+      'Cancel every confirmed seat and close the occurrence to new bookings. Host-only for API keys and OAuth. Use cancel_booking with bookingId to cancel only one seat. Repeating cancellation changes no further seats.',
+    input: z.strictObject({ occurrenceId: z.uuid(), reason: CancelBody.shape.reason }),
+    output: CancelGroupOccurrenceResult,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async run({ occurrenceId, ...input }, call) {
+      call.rateLimit(manageLimit)
+      return cancelGroupOccurrence(context(call.caller), occurrenceId, input, origin(call.caller))
     },
   })
 
@@ -702,6 +742,8 @@ export function bookingTools({
     retryCalendarCopy,
     setNoShow,
     getAttendees,
+    getGroupAttendees,
+    cancelGroup,
     getActivity,
   ]
 }

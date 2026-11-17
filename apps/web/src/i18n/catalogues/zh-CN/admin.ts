@@ -33,7 +33,37 @@ export const admin = {
     '请选择用于检查冲突的日历，也可选择一个可写日历接收新预约。现有预约保留原写入目标。',
   'No event calendars were found. Check the account and server URL.':
     '未发现事件日历，请检查账号和服务器网址。',
-
+  'Group events': '群组活动',
+  'Booking mode': '预约模式',
+  'Seats per session': '每场席位数',
+  'One invitee per session': '每场一位受邀人',
+  'Group: multiple invitees per session': '群组：每场多位受邀人',
+  'Group events use one host and 2–100 seats per session. Additional guests and invitee phone locations are unavailable. Booking mode cannot change while upcoming confirmed bookings exist.':
+    '群组活动由一位主持人主持，每场提供 2–100 个席位。不支持额外来宾和受邀人提供的会议电话号码。有未开始的有效预约时不能切换预约模式。',
+  'Group events require a single host, not collective or round-robin scheduling.':
+    '群组活动需要一位主持人，不支持集体或轮流分配模式。',
+  'Turn off additional guests before enabling group events.': '启用群组活动前，请关闭额外来宾。',
+  'Group events cannot ask invitees for a meeting phone number.':
+    '群组活动不能要求受邀人提供会议电话号码。',
+  'Check the group settings: use one host, 2–100 seats, no additional guests and no invitee phone location.':
+    '请检查群组设置：一位主持人、2–100 个席位、不允许额外来宾且不使用受邀人提供的会议电话号码。',
+  'Booking mode cannot change while upcoming confirmed bookings exist.':
+    '有未开始的有效预约时不能切换预约模式。',
+  'Session attendee list': '本场参会名单',
+  'Only the host and authorized team administrators can see this list. Invitees cannot see each other.':
+    '仅主持人和有权限的团队管理员可查看此名单。受邀人无法看到彼此。',
+  'Loading attendees…': '正在加载参会名单…',
+  'Could not load the attendee list.': '无法加载参会名单。',
+  '{active} of {capacity} seats booked': '已预约{active} / {capacity}个席位',
+  'No attendees in this session.': '本场暂无参会者。',
+  'Cancel whole session…': '取消整场…',
+  'Cancel every active seat in this session? All affected invitees will be notified.':
+    '取消本场所有有效席位？所有受影响的受邀人都会收到通知。',
+  'Cancel whole session': '取消整场',
+  'Could not cancel the session.': '无法取消本场活动。',
+  'Cancel this seat': '取消此席位',
+  'Only this invitee’s seat is cancelled. Other attendees keep their bookings.':
+    '仅取消这位受邀人的席位。其他参会者的预约保持不变。',
   'SMS reminders': '短信提醒',
   'SMS reminders are available for invitees who consent. Sender and carrier charges are managed by your operator.':
     '已同意的受邀者可接收短信提醒。发件人和运营商费用由实例运营者管理。',

@@ -123,12 +123,12 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | Operation group | `full` | `read` | `bookings` |
 | --- | --- | --- | --- |
+| Booking workflow reads | Allowed | Allowed | Allowed |
+| Booking actions and repairs | Allowed | — | Allowed |
 | Other account reads | Allowed | Allowed | — |
 | Account settings and configuration writes | Allowed | — | — |
 | Browser session operations | — | — | — |
 | Audit log reads | Allowed | — | — |
-| Booking workflow reads | Allowed | Allowed | Allowed |
-| Booking actions and repairs | Allowed | — | Allowed |
 | Availability diagnostics | Allowed | — | — |
 | Public instance and API metadata | Allowed | Allowed | Allowed |
 
@@ -136,6 +136,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
+| `POST /api/v1/public/meeting-polls/read` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/public/meeting-polls/enroll` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/meeting-polls/recover` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/meeting-polls/verify` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/meeting-polls/vote` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/meeting-polls/withdraw` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/meeting-polls/reminder-opt-out` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
 | `GET /api/v1/routing-forms` | Session or API key | `full, read` |
 | `GET /api/v1/routing-forms/{id}` | Session or API key | `full, read` |
@@ -157,6 +164,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `GET /api/v1/book/{token}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/bookings/{id}/attendees` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/group-occurrences/{id}/attendees` | Session or API key | `full, read, bookings` |
+| `POST /api/v1/group-occurrences/{id}/cancel` | Session or API key | `full, bookings` |
 | `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/export.csv` | Session or API key | `full, read` |
 | `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
@@ -272,6 +281,9 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/workflows` | Session or API key | `full` |
 | `GET /api/v1/workflows` | Session or API key | `full, read` |
 | `GET /api/v1/workflows/{id}` | Session or API key | `full, read` |
+| `POST /api/v1/team/sso/domains` | Browser session only | — |
+| `POST /api/v1/team/sso/domains/{domainId}/verify` | Browser session only | — |
+| `DELETE /api/v1/team/sso/domains/{domainId}` | Browser session only | — |
 | `POST /api/v1/team/sso/providers` | Browser session only | — |
 | `PATCH /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `DELETE /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
@@ -283,6 +295,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
+| `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
+| `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
+| `verify_meeting_poll_voter` | — | `polls verify` | `full, bookings` |
+| `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
+| `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
+| `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |
@@ -316,6 +335,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `list_bookings` | — | `list` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
+| `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |
+| `cancel_group_occurrence` | — | `cancel-group` | `full, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |

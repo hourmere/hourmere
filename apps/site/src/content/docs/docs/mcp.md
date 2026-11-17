@@ -78,6 +78,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
+| `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
+| `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
+| `verify_meeting_poll_voter` | — | `polls verify` | `full, bookings` |
+| `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
+| `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
+| `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |
@@ -111,6 +118,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `list_bookings` | — | `list` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
+| `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |
+| `cancel_group_occurrence` | — | `cancel-group` | `full, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
@@ -202,12 +211,31 @@ profile defaults, empty-result handling, DST boundaries and taken-time fallback.
 ## Explain why times cannot be booked
 
 Call `troubleshoot_availability` with `eventTypeId` and a local `date` (`YYYY-MM-DD`), plus
-optional `timeZone` and `durationMinutes`. It returns every possible start time of that day
-with `status` and ordered reason codes, the same object as the REST endpoint. Only personal
-owners and team owners/admins may call it, with a `full` key or an `mcp:tools` OAuth grant;
-anything else answers `event_type_not_found`. `calendar_sync_unavailable` means connected
-calendars could not be read right now. See [Troubleshoot availability](/docs/availability-troubleshooting) for every reason
-code and the known limitations.
+optional `timeZone` and `durationMinutes`. Its `structuredContent` matches the REST response:
+`available` slots have empty reasons; unavailable slots list blocking reasons in priority
+order. Personal owners and current team owners/admins may call it with a `full` key or an
+`mcp:tools` OAuth grant. `read`/`bookings` keys get `insufficient_scope`; other unauthorized
+callers get the same `event_type_not_found` as an unknown event.
+
+`calendar_sync_unavailable` means selected Google/CalDAV cached snapshots cannot establish
+fresh, complete availability; it does not mean a known busy event or missing setup. The tool
+does not refresh providers. CalDAV busy sync and write-back exist as internal services but
+are not exposed through user connection flows yet. Microsoft connections currently list
+calendars only: there is no busy sync or sync-freshness check. An available explanation does
+not establish that an Outlook calendar is free.
+
+This diagnoses new slots, not invitee permission to change an existing booking. Change
+deadlines are separate action errors. Busy intervals omit event titles, attendees, locations
+and calendar/booking IDs. See [Troubleshoot availability](/docs/availability-troubleshooting) for
+reason-by-reason actions, DST behavior, privacy and provider limitations.
+
+中文：`troubleshoot_availability` 输入事件 ID、本地日期，可选时区和时长；
+`structuredContent` 与 REST 一致，原因按优先级排列，可预约时原因为空。
+仅所有者/团队管理员使用 `full` 密钥或有权限的 MCP OAuth 可调用；低权限密钥返回
+`insufficient_scope`，其他越权与不存在均返回 `event_type_not_found`。
+Google/内部 CalDAV 快照过期或不完整返回 `calendar_sync_unavailable`，不能说成缺少配置。
+CalDAV 同步及写回尚未开放连接入口；Microsoft 只有日历列表，没有忙碌同步或新鲜度检查。
+此工具不刷新日历、不检查已有预约的改期截止时间，也不返回事件详情。
 
 ## Configure notice, booking window and buffers
 
@@ -305,6 +333,8 @@ for update compatibility, editor steps, invitee selection and shared-rule limits
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
 | `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
+| `get_group_occurrence_attendees` | `occurrenceId`; returns authorized seat holders, answers, status and no-show state. |
+| `cancel_group_occurrence` | `occurrenceId` and optional `reason`; cancels all active seats of a hosted future occurrence. |
 | `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. `status: "cancelled"` gives the cancelled view; `q` searches invitee name, invitee email and event type title. |
 
 For example, after confirming the booking page, test recipient and time zone with your agent:
@@ -816,9 +846,10 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged. An answer to a request that expired, was
-replaced or was already resolved by a move fails with `reschedule_request_changed`, as
-does a pick after cancellation. With the request email's token, REST
+reschedule retry semantics remain unchanged. Except for that saved pick replay, an
+answer to a request that expired, was replaced or was resolved by a move fails with
+`reschedule_request_changed`, as does a pick after cancellation. Replaying a cancellation keeps its original reason even
+if a different reason is supplied. With the request email's token, REST
 `GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
 have no invitee read of a manage token.
 
@@ -916,6 +947,27 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+## Group events
+
+Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
+`allowGuests: false` and individual single-host scheduling. Configuration requires `full`
+API-key scope. Omitted update fields preserve saved values; existing future booked work
+prevents switching mode. Capacity edits affect new occurrences only.
+
+Authorized booking reads/lists represent each seat separately and include `groupSlotId`.
+`GET /api/v1/group-occurrences/{id}/attendees`, MCP `get_group_occurrence_attendees` and
+CLI `group-attendees` return the private occurrence roster, including answers, booking
+status and no-show state. MCP/CLI take `occurrenceId`. Reads allow `full`, `read` and
+`bookings` keys, with actual host authority in the current organization. Non-host team
+owners/admins need a browser session; MCP OAuth has the same host-only boundary.
+
+`POST /api/v1/group-occurrences/{id}/cancel`, MCP `cancel_group_occurrence` and CLI
+`cancel-group` cancel the whole future occurrence. MCP/CLI take `occurrenceId` and
+optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bookings`.
+Ordinary booking cancellation still cancels only one seat. Public and invitee-management
+reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
+for setup, privacy and limitations.
 
 ## Duplicate an event type
 

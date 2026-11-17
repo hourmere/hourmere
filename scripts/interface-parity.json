@@ -1,4 +1,21 @@
 {
+  "createSsoDomainChallenge": {
+    "exemption": "browser-session-only",
+    "reason": "Claiming domain authority requires interactive administrator proof."
+  },
+  "verifySsoDomain": {
+    "exemption": "browser-session-only",
+    "reason": "Activating domain authority requires interactive administrator proof."
+  },
+  "deleteSsoDomain": {
+    "exemption": "browser-session-only",
+    "reason": "Releasing domain authority requires interactive administrator proof."
+  },
+  "getGroupOccurrenceAttendees": {
+    "mcp": "get_group_occurrence_attendees",
+    "cli": "group-attendees"
+  },
+  "cancelGroupOccurrence": { "mcp": "cancel_group_occurrence", "cli": "cancel-group" },
   "duplicateEventType": { "mcp": "duplicate_event_type", "cli": "duplicate-event" },
   "createSsoProvider": {
     "exemption": "browser-session-only",
@@ -256,5 +273,33 @@
   "saveCalDavConnection": {
     "exemption": "browser-session-only",
     "reason": "Installing or replacing provider credentials requires the owner’s live browser session."
+  },
+  "readMeetingPoll": {
+    "mcp": "read_meeting_poll",
+    "cli": "polls view"
+  },
+  "enrollMeetingPollVoter": {
+    "mcp": "enroll_meeting_poll_voter",
+    "cli": "polls join"
+  },
+  "recoverMeetingPollVoter": {
+    "mcp": "recover_meeting_poll_voter",
+    "cli": "polls recover"
+  },
+  "verifyMeetingPollVoter": {
+    "mcp": "verify_meeting_poll_voter",
+    "cli": "polls verify"
+  },
+  "submitMeetingPollVote": {
+    "mcp": "submit_meeting_poll_vote",
+    "cli": "polls vote"
+  },
+  "withdrawMeetingPollVote": {
+    "mcp": "withdraw_meeting_poll_vote",
+    "cli": "polls withdraw"
+  },
+  "optOutMeetingPollReminder": {
+    "mcp": "opt_out_meeting_poll_reminder",
+    "cli": "polls reminder-opt-out"
   }
 }

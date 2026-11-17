@@ -83,7 +83,8 @@ describe.skipIf(!serverUrl)('reschedule request source-copy mutations', () => {
       ),
       {
         name: 'group-seat capability marker',
-        change: ['...(r.group_slot_id ? { isGroupSeat: true } : {}),', ''],
+        // Remove only the capability marker; keep the authenticated occurrence identifier.
+        change: ['isGroupSeat: true, ', ''],
         verify: async (copy) => {
           const { groupFixture, occupiedSlot } = await import(
             '../../db/src/group-seats-fixtures.ts'

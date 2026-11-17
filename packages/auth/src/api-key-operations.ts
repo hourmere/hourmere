@@ -73,6 +73,14 @@ function rest(
 
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
+  rest('POST', '/api/v1/public/meeting-polls/read', 'booking_read', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/enroll', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/recover', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/verify', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/vote', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/withdraw', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/reminder-opt-out', 'booking_write', 'optional_key'),
+
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
   rest('GET', '/api/v1/routing-forms', 'other_read', 'key'),
   rest('GET', '/api/v1/routing-forms/{id}', 'other_read', 'key'),
@@ -115,6 +123,8 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/book/{token}/slots', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/book/{token}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/bookings/{id}/attendees', 'booking_read', 'key'),
+  rest('GET', '/api/v1/group-occurrences/{id}/attendees', 'booking_read', 'key'),
+  rest('POST', '/api/v1/group-occurrences/{id}/cancel', 'booking_write', 'key'),
   rest('GET', '/api/v1/bookings', 'booking_read', 'key'),
   rest('GET', '/api/v1/bookings/export.csv', 'other_read', 'key'),
   rest('GET', '/api/v1/bookings/{id}', 'booking_read', 'key'),
@@ -260,6 +270,9 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('POST', '/api/v1/workflows', 'other_write', 'key'),
   rest('GET', '/api/v1/workflows', 'other_read', 'key'),
   rest('GET', '/api/v1/workflows/{id}', 'other_read', 'key'),
+  rest('POST', '/api/v1/team/sso/domains', 'session_only', 'session_only'),
+  rest('POST', '/api/v1/team/sso/domains/{domainId}/verify', 'session_only', 'session_only'),
+  rest('DELETE', '/api/v1/team/sso/domains/{domainId}', 'session_only', 'session_only'),
   rest('POST', '/api/v1/team/sso/providers', 'session_only', 'session_only'),
   rest('PATCH', '/api/v1/team/sso/providers/{providerId}', 'session_only', 'session_only'),
   rest('DELETE', '/api/v1/team/sso/providers/{providerId}', 'session_only', 'session_only'),
@@ -285,6 +298,18 @@ function mcp(
 }
 
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
+  mcp('read_meeting_poll', 'booking_read', ['POST /api/v1/public/meeting-polls/read']),
+  mcp('enroll_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/enroll']),
+  mcp('recover_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/recover']),
+  mcp('verify_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/verify']),
+  mcp('submit_meeting_poll_vote', 'booking_write', ['POST /api/v1/public/meeting-polls/vote']),
+  mcp('withdraw_meeting_poll_vote', 'booking_write', [
+    'POST /api/v1/public/meeting-polls/withdraw',
+  ]),
+  mcp('opt_out_meeting_poll_reminder', 'booking_write', [
+    'POST /api/v1/public/meeting-polls/reminder-opt-out',
+  ]),
+
   mcp('list_routing_forms', 'other_read', ['GET /api/v1/routing-forms']),
   mcp('get_routing_form', 'other_read', ['GET /api/v1/routing-forms/{id}']),
   mcp('create_routing_form', 'other_write', ['POST /api/v1/routing-forms']),
@@ -358,6 +383,10 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
   ]),
   mcp('get_booking_attendees', 'booking_read', ['GET /api/v1/bookings/{id}/attendees']),
+  mcp('get_group_occurrence_attendees', 'booking_read', [
+    'GET /api/v1/group-occurrences/{id}/attendees',
+  ]),
+  mcp('cancel_group_occurrence', 'booking_write', ['POST /api/v1/group-occurrences/{id}/cancel']),
   mcp('export_bookings', 'other_read', ['GET /api/v1/bookings/export.csv']),
   mcp('get_booking_activity', 'other_read', ['GET /api/v1/analytics/bookings']),
   mcp('retry_conference', 'booking_write', ['POST /api/v1/bookings/{id}/conference/retry']),
@@ -430,6 +459,14 @@ function cli(command: string, tool: string): ApiKeyCliOperation {
 }
 
 export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.freeze([
+  cli('polls view', 'read_meeting_poll'),
+  cli('polls join', 'enroll_meeting_poll_voter'),
+  cli('polls recover', 'recover_meeting_poll_voter'),
+  cli('polls verify', 'verify_meeting_poll_voter'),
+  cli('polls vote', 'submit_meeting_poll_vote'),
+  cli('polls withdraw', 'withdraw_meeting_poll_vote'),
+  cli('polls reminder-opt-out', 'opt_out_meeting_poll_reminder'),
+
   cli('whoami', 'whoami'),
   cli('routing-forms list', 'list_routing_forms'),
   cli('routing-forms get', 'get_routing_form'),
@@ -460,6 +497,8 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('request-reschedule', 'request_reschedule'),
   cli('cancel', 'cancel_booking'),
   cli('booking-attendees', 'get_booking_attendees'),
+  cli('group-attendees', 'get_group_occurrence_attendees'),
+  cli('cancel-group', 'cancel_group_occurrence'),
   cli('set-no-show', 'set_attendee_no_show'),
   cli('booking-activity', 'get_booking_activity'),
   cli('retry-meeting', 'retry_conference'),

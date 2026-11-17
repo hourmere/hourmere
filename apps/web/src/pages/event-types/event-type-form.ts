@@ -72,6 +72,8 @@ export interface QuestionDraft {
 }
 
 export interface EventTypeDraft {
+  bookingMode: 'individual' | 'group'
+  groupCapacity: string
   schedulingType: EventType['schedulingType']
   hostUserIds: string[]
   title: string
@@ -136,6 +138,8 @@ export const newOption = (text = ''): OptionDraft => ({ key: newKey('o'), text }
 /** A new event type: the API's defaults, 30 minutes long. */
 export function emptyDraft(): EventTypeDraft {
   return {
+    bookingMode: 'individual',
+    groupCapacity: '2',
     schedulingType: 'individual',
     hostUserIds: [],
     title: '',
@@ -185,6 +189,8 @@ const text = (n: number | null) => (n === null ? '' : String(n))
 export function draftFromEventType(e: EventType): EventTypeDraft {
   const location = e.location
   return {
+    bookingMode: e.bookingMode ?? 'individual',
+    groupCapacity: String(e.groupCapacity ?? 2),
     schedulingType: e.schedulingType,
     hostUserIds: (e.hosts ?? []).map((h) => h.userId),
     title: e.title,
@@ -336,6 +342,29 @@ const BOOKING_LIMIT_PAIRS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  if (draft.bookingMode === 'group') {
+    const capacityProblem = wholeNumberProblem(draft.groupCapacity, { min: 2, max: 100 }, true)
+    if (capacityProblem) errors.groupCapacity = capacityProblem
+    if (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
+      errors.bookingMode =
+        'Group events require a single host, not collective or round-robin scheduling.'
+    if (draft.allowGuests)
+      errors.bookingMode = 'Turn off additional guests before enabling group events.'
+    const locations = orderedLocations(draft)
+    const defaultLocation = locations.find((location) => location.isDefault) ?? locations[0]
+    if (defaultLocation?.kind === 'phone' && defaultLocation.askInvitee)
+      errors.bookingMode = 'Group events cannot ask invitees for a meeting phone number.'
+    // Every seat uses the occurrence's shared default, so the booking service refuses any
+    // other option. Stop new configurations from offering choices nobody can book; an
+    // untouched saved list is preserved on unrelated edits.
+    if (
+      locations.length > 1 &&
+      (baseline?.bookingMode !== 'group' ||
+        JSON.stringify(orderedLocations(baseline)) !== JSON.stringify(locations))
+    )
+      errors['location-kind'] =
+        'Group events use one shared location for every seat. Remove the other location options.'
+  }
   if (
     draft.waitlistEnabled &&
     draft.waitlistEnabled !== baseline?.waitlistEnabled &&
@@ -605,6 +634,10 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     ...(hasAutomaticLocation(draft, 'zoom') && {
       zoomConnectionId: draft.zoomConnectionId || null,
     }),
+    ...(draft.bookingMode === 'group' && {
+      bookingMode: draft.bookingMode,
+      groupCapacity: whole(draft.groupCapacity),
+    }),
     title: draft.title.trim(),
     slug: draft.slug.trim(),
     description: draft.description.trim() || null,
@@ -650,6 +683,16 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
 export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
   const body = toInput(draft)
+  if (draft.bookingMode === baseline.bookingMode) delete body.bookingMode
+  else {
+    body.bookingMode = draft.bookingMode
+    body.groupCapacity = draft.bookingMode === 'group' ? whole(draft.groupCapacity) : null
+  }
+  if (
+    draft.bookingMode === baseline.bookingMode &&
+    whole(draft.groupCapacity) === whole(baseline.groupCapacity)
+  )
+    delete body.groupCapacity
   // Omit untouched timing settings, limits and deadlines so metadata saves preserve
   // concurrent configuration edits. Display-unit changes never modify these values.
   for (const name of [
@@ -718,6 +761,8 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
 /** Field labels for the error summary, by field id. */
 export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
   const labels: Record<string, UiText> = {
+    bookingMode: 'Booking mode',
+    groupCapacity: 'Seats per session',
     hosts: 'Hosts',
     zoomConnectionId: 'Zoom meetings account',
     conferenceOrganizer: 'Meeting organizer',
@@ -819,6 +864,16 @@ export function serverErrors(
     if (message) return field(err.field, message)
   }
   switch (err.code) {
+    case 'invalid_group_configuration':
+      return field(
+        'bookingMode',
+        'Check the group settings: use one host, 2–100 seats, no additional guests and no invitee phone location.',
+      )
+    case 'group_mode_has_bookings':
+      return field(
+        'bookingMode',
+        'Booking mode cannot change while upcoming confirmed bookings exist.',
+      )
     case 'location_options_conflict':
       return {
         fields: {},

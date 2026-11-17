@@ -176,10 +176,7 @@ describe('waitlist admission input privacy', () => {
   it.each(['message', 'detail'])('detects source-copy reflected private %s', async (field) => {
     const module = await copy(
       field === 'detail'
-        ? [
-            'if (isWaitlistAdmissionPath(c.req.path) || isSlackDestinationPath(c.req.path))\n        delete body.message',
-            'if (isSlackDestinationPath(c.req.path)) delete body.message',
-          ]
+        ? ['        isWaitlistAdmissionPath(c.req.path) ||\n', '']
         : [
             'err.message &&\n          !isOneTimeLinkPath(c.req.path) &&\n          !isWaitlistAdmissionPath(c.req.path)',
             'err.message && !isOneTimeLinkPath(c.req.path)',

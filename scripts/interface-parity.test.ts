@@ -110,41 +110,55 @@ check('accepts real MCP/CLI equivalents and a reasoned exemption', ({ interfaceP
   ).toEqual([])
 })
 
-check('requires all three interfaces for the declared SSO reads', ({ interfaceParityErrors }) => {
-  for (const [operationId, path, tool, command] of [
-    ['listSsoProviders', '/api/v1/team/sso/providers', 'list_sso_providers', 'sso providers list'],
-    ['getSsoPolicy', '/api/v1/team/sso/policy', 'get_sso_policy', 'sso policy'],
-  ] as const) {
-    const inventory: InterfaceInventory = {
-      rest: [{ path, method: 'get', operationId }],
-      mcp: [tool],
-      cli: { [command]: tool },
+check(
+  'requires all three interfaces for the declared private reads',
+  ({ interfaceParityErrors }) => {
+    for (const [operationId, path, tool, command] of [
+      [
+        'listSsoProviders',
+        '/api/v1/team/sso/providers',
+        'list_sso_providers',
+        'sso providers list',
+      ],
+      [
+        'getGroupOccurrenceAttendees',
+        '/api/v1/group-occurrences/{id}/attendees',
+        'get_group_occurrence_attendees',
+        'group-attendees',
+      ],
+      ['getSsoPolicy', '/api/v1/team/sso/policy', 'get_sso_policy', 'sso policy'],
+    ] as const) {
+      const inventory: InterfaceInventory = {
+        rest: [{ path, method: 'get', operationId }],
+        mcp: [tool],
+        cli: { [command]: tool },
+      }
+      const entries = { [operationId]: { mcp: tool, cli: command } }
+      expect(interfaceParityErrors(inventory, entries)).toEqual([])
+      expect(interfaceParityErrors(inventory, {})).toContainEqual(
+        expect.stringContaining(missingMapping),
+      )
+      expect(interfaceParityErrors({ ...inventory, mcp: [] }, entries)).toContainEqual(
+        expect.stringContaining('is not registered'),
+      )
+      expect(interfaceParityErrors({ ...inventory, cli: {} }, entries)).toContainEqual(
+        expect.stringContaining('does not exist'),
+      )
+      expect(interfaceParityErrors({ ...inventory, rest: [] }, entries)).toContainEqual(
+        expect.stringContaining('stale mapping'),
+      )
+      expect(
+        interfaceParityErrors(
+          {
+            ...inventory,
+            rest: [{ path: '/api/v1/other', method: 'get', operationId }],
+          },
+          entries,
+        ),
+      ).toContainEqual(expect.stringContaining('expected GET'))
     }
-    const entries = { [operationId]: { mcp: tool, cli: command } }
-    expect(interfaceParityErrors(inventory, entries)).toEqual([])
-    expect(interfaceParityErrors(inventory, {})).toContainEqual(
-      expect.stringContaining(missingMapping),
-    )
-    expect(interfaceParityErrors({ ...inventory, mcp: [] }, entries)).toContainEqual(
-      expect.stringContaining('is not registered'),
-    )
-    expect(interfaceParityErrors({ ...inventory, cli: {} }, entries)).toContainEqual(
-      expect.stringContaining('does not exist'),
-    )
-    expect(interfaceParityErrors({ ...inventory, rest: [] }, entries)).toContainEqual(
-      expect.stringContaining('stale mapping'),
-    )
-    expect(
-      interfaceParityErrors(
-        {
-          ...inventory,
-          rest: [{ path: '/api/v1/other', method: 'get', operationId }],
-        },
-        entries,
-      ),
-    ).toContainEqual(expect.stringContaining('expected GET'))
-  }
-})
+  },
+)
 
 check('accepts exact nested CLI commands', ({ interfaceParityErrors }) => {
   expect(
@@ -696,9 +710,12 @@ describe('REST, MCP and CLI write parity', () => {
     ).toEqual([])
   })
 
-  it('keeps provider draft writes precisely session-only with no machine equivalents', async () => {
+  it('keeps SSO trust writes precisely session-only with no machine equivalents', async () => {
     const inventory = await loadInterfaceInventory()
     for (const [operationId, method, path] of [
+      ['createSsoDomainChallenge', 'post', '/api/v1/team/sso/domains'],
+      ['verifySsoDomain', 'post', '/api/v1/team/sso/domains/{domainId}/verify'],
+      ['deleteSsoDomain', 'delete', '/api/v1/team/sso/domains/{domainId}'],
       ['createSsoProvider', 'post', '/api/v1/team/sso/providers'],
       ['updateSsoProvider', 'patch', '/api/v1/team/sso/providers/{providerId}'],
       ['deleteSsoProvider', 'delete', '/api/v1/team/sso/providers/{providerId}'],
@@ -715,7 +732,14 @@ describe('REST, MCP and CLI write parity', () => {
         reason: expect.any(String),
       })
     }
-    for (const tool of ['create_sso_provider', 'update_sso_provider', 'delete_sso_provider']) {
+    for (const tool of [
+      'create_sso_provider',
+      'update_sso_provider',
+      'delete_sso_provider',
+      'create_sso_domain_challenge',
+      'verify_sso_domain',
+      'delete_sso_domain',
+    ]) {
       expect(inventory.mcp).not.toContain(tool)
       expect(Object.values(inventory.cli)).not.toContain(tool)
     }

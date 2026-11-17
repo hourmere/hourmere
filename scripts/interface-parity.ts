@@ -12,6 +12,7 @@ const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(['post', 'put', 'patch', 
 // outside required parity coverage. Exact routes prevent an operation ID from moving silently.
 const REQUIRED_READS: Readonly<Record<string, string>> = {
   listSsoProviders: 'GET /api/v1/team/sso/providers',
+  getGroupOccurrenceAttendees: 'GET /api/v1/group-occurrences/{id}/attendees',
   getSsoPolicy: 'GET /api/v1/team/sso/policy',
 }
 

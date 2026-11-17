@@ -124,17 +124,27 @@ describe('published API key scope tables', () => {
     },
   )
 
-  it('documents provider draft writes as session-only without machine write commands', () => {
+  it('documents SSO trust writes as session-only without machine write commands', () => {
     for (const { document, section } of documents) {
       if (section !== 'all') continue
       for (const operation of [
+        'POST /api/v1/team/sso/domains',
+        'POST /api/v1/team/sso/domains/{domainId}/verify',
+        'DELETE /api/v1/team/sso/domains/{domainId}',
         'POST /api/v1/team/sso/providers',
         'PATCH /api/v1/team/sso/providers/{providerId}',
         'DELETE /api/v1/team/sso/providers/{providerId}',
       ])
         expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
     }
-    for (const tool of ['create_sso_provider', 'update_sso_provider', 'delete_sso_provider'])
+    for (const tool of [
+      'create_sso_provider',
+      'update_sso_provider',
+      'delete_sso_provider',
+      'create_sso_domain_challenge',
+      'verify_sso_domain',
+      'delete_sso_domain',
+    ])
       expect(API_KEY_MCP_OPERATIONS.some((operation) => operation.tool === tool)).toBe(false)
   })
 

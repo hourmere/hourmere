@@ -31,6 +31,8 @@ const bindings = {
   locationOptionsFromLegacy,
   validateLocationOptions,
   validCutoff,
+  invalidGroup: (message: string) =>
+    new DomainError('invalid', 'invalid_group_configuration', message),
   invalid: (message: string) => new DomainError('invalid', 'invalid_event_type', message),
 }
 
@@ -49,6 +51,8 @@ function sourceCopy(start: string, end: string, change?: Change) {
 }
 
 const fields = {
+  bookingMode: 'individual',
+  groupCapacity: null,
   slug: 'intro',
   title: 'Intro',
   durationMinutes: 30,

@@ -4,7 +4,7 @@ description: Record attendance privately for individual invitees and guests thro
 ---
 
 Hosts can mark an attendee as a no-show after the booking's scheduled start, or remove
-that mark if it was a mistake. In **Bookings**, past confirmed bookings show **Mark no-show**
+that mark if it was a mistake. In **Bookings**, confirmed bookings whose start has passed show **Mark no-show**
 or **Clear no-show** directly in the list row, next to the status, with a **No-show** badge
 for marked attendees; bookings with guests list each attendee by name, and every seat of a group
 event is its own row.

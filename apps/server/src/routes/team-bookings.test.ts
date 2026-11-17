@@ -784,6 +784,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       'cancelledAt',
       'end',
       'eventType',
+      'groupSlotId',
       'hosts',
       'id',
       'isRescheduled',

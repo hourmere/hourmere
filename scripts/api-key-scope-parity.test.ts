@@ -148,8 +148,8 @@ describe('scope interface parity guard', () => {
 
   it('rejects duplicate policies, registrations and wildcard authority', () => {
     const actual = inventory()
-    const firstRoute = actual.rest[0]
-    const firstCli = API_KEY_CLI_OPERATIONS[0]
+    const firstRoute = actual.rest.find((route) => route.path === '/api/v1/analytics/bookings')
+    const firstCli = API_KEY_CLI_OPERATIONS.find((operation) => operation.command === 'whoami')
     if (!firstRoute || !firstCli) throw new Error('Parity fixtures must not be empty')
     actual.rest = [...actual.rest, firstRoute, { method: 'get', path: '/api/v1/*' }]
     actual.mcp = [...actual.mcp, { name: 'whoami' }]

@@ -19,6 +19,8 @@ import { withAuditRequest } from '@hourmere/db/audit'
 import {
   DomainError,
   type DomainErrorKind,
+  MeetingPollKeyMismatchError,
+  MeetingPollRateLimitError,
   ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
 } from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
@@ -153,9 +155,9 @@ function isSlackDestinationPath(path: string): boolean {
   return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
 }
 
-/** Provider writes carry replacement credentials, including arbitrary invalid input keys. */
-function isSsoProviderPath(path: string): boolean {
-  return /^\/api\/v1\/team\/sso\/providers(?:\/|$)/i.test(path)
+/** SSO trust writes carry credentials and proof material, including arbitrary invalid input keys. */
+function isSsoTrustPath(path: string): boolean {
+  return /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path)
 }
 
 /** CalDAV credential input must never be reflected, including invalid property names. */
@@ -182,7 +184,9 @@ function isWaitlistEntryPath(path: string): boolean {
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
-  if (isSsoProviderPath(c.req.path) || isCalDavConnectionPath(c.req.path))
+  if (c.req.path.toLowerCase().includes('/meeting-polls'))
+    return c.json({ error: 'invalid_request' }, 400)
+  if (isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
@@ -357,7 +361,9 @@ const requestLineLogger = logger((line, ...rest) =>
 // Use the decoded path to catch encoded route segments too. Confirmation transports
 // carry their capabilities in fragments/bodies; booking suggestions carry them here.
 const ordinaryRequestLogger = createMiddleware((c, next) =>
-  isWaitlistLinkPath(c.req.path) ? next() : requestLineLogger(c, next),
+  isWaitlistLinkPath(c.req.path) || c.req.path.toLowerCase().includes('/meeting-polls')
+    ? next()
+    : requestLineLogger(c, next),
 )
 
 // A one-time capability is carried by the path. Do not hand that request to a
@@ -373,7 +379,7 @@ const requestLogger = createMiddleware(async (c, next) => {
   if (
     !isOneTimeLinkPath(c.req.path) &&
     !isSlackDestinationPath(c.req.path) &&
-    !(isSsoProviderPath(c.req.path) || isCalDavConnectionPath(c.req.path))
+    !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
   )
     return ordinaryRequestLogger(c, next)
   await next()
@@ -399,6 +405,12 @@ export function createApp({
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Generate correlation IDs locally; caller headers may contain private or forged values.
   app.use('*', async (_c, next) => withAuditRequest(randomUUID(), next))
+  app.use('/api/v1/public/meeting-polls/*', async (c, next) => {
+    c.header('Cache-Control', 'private, no-store')
+    c.header('Referrer-Policy', 'no-referrer')
+    c.header('X-Robots-Tag', 'noindex, nofollow')
+    await next()
+  })
   const apiNotFound = (c: Context) => c.json({ error: 'not_found' }, 404)
   const unclassifiedScopeGuard = installRestApiKeyScopes(app, resolveCaller, apiNotFound)
   // Logs one line with control characters escaped: error text can carry request input
@@ -406,23 +418,27 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
-    const text = isCalDavConnectionPath(c.req.path)
-      ? '[private CalDAV diagnostic omitted]'
-      : isSsoProviderPath(c.req.path)
-        ? '[private SSO diagnostic omitted]'
-        : isSlackDestinationPath(c.req.path)
-          ? '[private Slack diagnostic omitted]'
-          : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
-            ? 'private waitlist request failed'
-            : detail
-    const path = isOneTimeCapabilityPath(c.req.path)
-      ? '/book/[redacted]'
-      : isOneTimeLinkPath(c.req.path) ||
-          isSlackDestinationPath(c.req.path) ||
-          isSsoProviderPath(c.req.path) ||
-          isCalDavConnectionPath(c.req.path)
-        ? routePath(c)
-        : c.req.path
+    const text = c.req.path.toLowerCase().includes('/meeting-polls')
+      ? 'private meeting poll request failed'
+      : isCalDavConnectionPath(c.req.path)
+        ? '[private CalDAV diagnostic omitted]'
+        : isSsoTrustPath(c.req.path)
+          ? '[private SSO diagnostic omitted]'
+          : isSlackDestinationPath(c.req.path)
+            ? '[private Slack diagnostic omitted]'
+            : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
+              ? 'private waitlist request failed'
+              : detail
+    const path = c.req.path.toLowerCase().includes('/meeting-polls')
+      ? '/api/v1/public/meeting-polls/[redacted]'
+      : isOneTimeCapabilityPath(c.req.path)
+        ? '/book/[redacted]'
+        : isOneTimeLinkPath(c.req.path) ||
+            isSlackDestinationPath(c.req.path) ||
+            isSsoTrustPath(c.req.path) ||
+            isCalDavConnectionPath(c.req.path)
+          ? routePath(c)
+          : c.req.path
     const message = c.req.path.includes('/provisioning-tokens')
       ? 'Provisioning credential request failed'
       : `${c.req.method} ${path}: ${text}`
@@ -468,13 +484,21 @@ export function createApp({
         err.message &&
           !isOneTimeLinkPath(c.req.path) &&
           !isWaitlistAdmissionPath(c.req.path) &&
+          !c.req.path.toLowerCase().includes('/meeting-polls') &&
           !isSlackDestinationPath(c.req.path) &&
-          !(isSsoProviderPath(c.req.path) || isCalDavConnectionPath(c.req.path))
+          !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
           ? { error, message: err.message }
           : { error },
         err.status,
       )
     }
+    if (err instanceof MeetingPollRateLimitError) {
+      if (err.retryAfterSeconds !== undefined)
+        c.header('Retry-After', String(err.retryAfterSeconds))
+      return c.json({ error: 'rate_limited' }, 429)
+    }
+    if (err instanceof MeetingPollKeyMismatchError)
+      return c.json({ error: 'meeting_poll_key_mismatch' }, 503)
     if (err instanceof ScimTokenError)
       return c.json({ error: `scim_token_${err.code}` }, err.status)
     if (err instanceof ApiKeyScopeError) {
@@ -497,7 +521,7 @@ export function createApp({
         ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail &&
           !isOneTimeLinkPath(c.req.path) &&
-          !(isSsoProviderPath(c.req.path) || isCalDavConnectionPath(c.req.path)) && {
+          !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path)) && {
             message: err.detail,
           }),
         ...(err.code === 'one_time_link_already_created' &&
@@ -505,7 +529,11 @@ export function createApp({
             message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
           }),
       }
-      if (isWaitlistAdmissionPath(c.req.path) || isSlackDestinationPath(c.req.path))
+      if (
+        isWaitlistAdmissionPath(c.req.path) ||
+        isSlackDestinationPath(c.req.path) ||
+        c.req.path.toLowerCase().includes('/meeting-polls')
+      )
         delete body.message
       return c.json(body, domainStatus[err.kind])
     }

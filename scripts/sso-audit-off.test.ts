@@ -19,6 +19,12 @@ const AUDIT_LAYER = new Set([
   'packages/db/src/sso-audit-check-source.ts',
 ])
 const EMITTERS: Readonly<Record<string, readonly string[]>> = {
+  'apps/server/src/sso-domains.ts': [
+    'sso_domain.challenged',
+    'sso_domain.verified',
+    'sso_domain.renewed',
+    'sso_domain.released',
+  ],
   'apps/server/src/sso-drafts.ts': [
     'sso_provider.created',
     'sso_provider.updated',
