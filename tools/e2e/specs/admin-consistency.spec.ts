@@ -100,6 +100,13 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
       .first()
     await more.focus()
     await page.keyboard.press('ArrowDown')
+    await expect(
+      page.getByRole('menuitem', {
+        name: locale === 'zh-CN' ? '复制' : 'Duplicate',
+        exact: true,
+      }),
+    ).toBeFocused()
+    await page.keyboard.press('ArrowDown')
     const embed = page.getByRole('menuitem', {
       name: locale === 'zh-CN' ? '嵌入' : 'Embed',
       exact: true,

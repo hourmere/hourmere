@@ -66,6 +66,10 @@ function assertTable(
 ) {
   const Table = copy(code, 'EventTypeTable', {
     ...common,
+    useState: react.useState,
+    useNavigate: () => () => {},
+    useMounted: () => ({ current: true }),
+    useTeamManagementAccess: () => ({ status: 'ready', role: 'owner' }),
     useEventReadiness: () => [{ status, data: new Map(item ? [[EVENT.id, item]] : []) }, () => {}],
     ConfigurationChecks: EmptyComponent,
     formatMinutes: () => '30 min',

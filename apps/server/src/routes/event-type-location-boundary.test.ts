@@ -126,7 +126,14 @@ async function verifyPublishedLocation(schemas: Schemas) {
     'description',
     expect.stringContaining('accepted only as an unchanged echo'),
   )
-  for (const tool of prepareTools(eventTypeTools({ db: {} as Db }))) {
+  const configurationTools = eventTypeTools({ db: {} as Db }).filter((tool) =>
+    ['create_event_type', 'update_event_type'].includes(tool.name),
+  )
+  expect(configurationTools.map((tool) => tool.name)).toEqual([
+    'create_event_type',
+    'update_event_type',
+  ])
+  for (const tool of prepareTools(configurationTools)) {
     const schema = tool.inputSchema['~standard'].jsonSchema.input({ target: 'draft-07' }) as {
       properties: { location: { description: string } }
     }

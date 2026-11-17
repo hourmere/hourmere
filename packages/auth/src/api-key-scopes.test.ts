@@ -151,6 +151,7 @@ const restContract = {
     'PATCH /api/v1/calendars/{id}',
     'POST /api/v1/calendars/{id}/sync',
     'POST /api/v1/event-types',
+    'POST /api/v1/event-types/{id}/duplicate',
     'DELETE /api/v1/event-types/{id}',
     'PATCH /api/v1/event-types/{id}',
     'PUT /api/v1/event-types/{id}/notifications',
@@ -313,13 +314,13 @@ function verifyOneTimeManagementScopes(operation: typeof apiKeyOperation) {
 }
 
 function verifyEventTypeConfigurationScopes(operation: typeof apiKeyOperation) {
-  for (const tool of ['create_event_type', 'update_event_type']) {
+  for (const tool of ['create_event_type', 'update_event_type', 'duplicate_event_type']) {
     expect(operation(`mcp:${tool}`)).toMatchObject({
       operationClass: 'other_write',
       allowedScopes: ['full'],
     })
   }
-  for (const command of ['create-event', 'update-event']) {
+  for (const command of ['create-event', 'update-event', 'duplicate-event']) {
     expect(operation(`cli:${command}`)).toMatchObject({
       operationClass: 'other_write',
       allowedScopes: ['full'],
@@ -434,6 +435,7 @@ describe('shared API-key scope policy', () => {
         'get_schedule',
         'get_schedule_availability',
         'create_event_type',
+        'duplicate_event_type',
         'update_event_type',
         'create_one_time_link',
         'list_one_time_links',
@@ -564,6 +566,7 @@ describe('shared API-key scope policy', () => {
   it('returns an opaque uniform insufficient_scope error', () => {
     for (const id of [
       'POST /api/v1/event-types',
+      'POST /api/v1/event-types/{id}/duplicate',
       'POST /api/v1/public/{handle}/{slug}/bookings',
       'mcp:create_booking',
       'unknown',

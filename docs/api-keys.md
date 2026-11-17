@@ -211,6 +211,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/event-types/{eventTypeId}/one-time-links` | Session or API key | `full, bookings` |
 | `GET /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, read` |
 | `DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}` | Session or API key | `full, bookings` |
+| `POST /api/v1/event-types/{id}/duplicate` | Session or API key | `full` |
 | `POST /api/v1/event-types/{id}/round-robin/activate` | Session or API key | `full` |
 | `GET /api/v1/instance` | Public; no key needed | `full, read, bookings` |
 | `GET /api/v1/instance/embed` | Browser session only | — |
@@ -339,6 +340,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `get_schedule` | — | `schedule` | `full, read` |
 | `get_schedule_availability` | — | `schedule-availability` | `full, read` |
 | `save_schedule_availability` | — | `save-availability` | `full` |
+| `duplicate_event_type` | — | `duplicate-event` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |

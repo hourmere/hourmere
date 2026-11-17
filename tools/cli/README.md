@@ -283,7 +283,7 @@ for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and 
 
 ## Commands
 
-`whoami`, `profile`, `catalog`, `event`, `create-event`, `update-event`,
+`whoami`, `profile`, `catalog`, `event`, `create-event`, `duplicate-event`, `update-event`,
 `set-event-notifications`, `schedules`, `schedule`, `slots`, `open-time-snippet`, `book`, `list`, `reschedule`,
 `cancel`, `retry-meeting`, `retry-calendar-copy`.
 
@@ -485,3 +485,13 @@ creation/lifecycle commands and the browser ballot page are not available yet.
 找回只需投票 ID 与邮箱，无需有效令牌；验证首次返回的新投票令牌须保密，邮件也会发送。
 只提交投票者明确同意的完整选择和当前选票版本，遇到 `poll_changed` 应重新读取核对，
 不要自动重试。目前无功能开关，管理端命令和浏览器投票页面尚未提供。
+
+## Duplicate an event type
+
+Save `{ "id": "EVENT_TYPE_UUID" }` in `duplicate.json`, then run
+`hourmere duplicate-event --input duplicate.json` with a `full` API key.
+The response contains the new event and its unique booking slug. It copies editable
+settings within the current space, with the same owner/admin permission as creation.
+Bookings, history, statistics and one-time links are excluded; round-robin activation
+starts off. Each successful call makes another copy. After a lost response, use `catalog`
+to check before retrying. See [event types](https://hourmere.com/docs/event-types).

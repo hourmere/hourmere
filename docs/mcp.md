@@ -108,6 +108,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `get_schedule` | — | `schedule` | `full, read` |
 | `get_schedule_availability` | — | `schedule-availability` | `full, read` |
 | `save_schedule_availability` | — | `save-availability` | `full` |
+| `duplicate_event_type` | — | `duplicate-event` | `full` |
 | `create_event_type` | — | `create-event` | `full` |
 | `update_event_type` | — | `update-event` | `full` |
 | `generate_open_time_snippet` | — | `open-time-snippet` | `full, read, bookings` |
@@ -428,3 +429,13 @@ Host creation and lifecycle transports and the browser voting page are not avail
 投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
 `poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
 管理端创建/生命周期接口和浏览器投票页面尚未提供。
+
+## Duplicate an event type
+
+Call `duplicate_event_type` with `{ "id": "EVENT_TYPE_UUID" }` and a `full` API key.
+It copies editable settings in the current organization and returns a new event with a
+unique `-copy` / `-copy-N` slug. Existing owner/admin and creation checks apply.
+Bookings, history, statistics and one-time links are not copied; round-robin activation
+starts off. Each successful call creates a new copy, so inspect the catalog after an
+uncertain response before retrying. See [event types](https://hourmere.com/docs/event-types)
+for copied settings and limitations.
