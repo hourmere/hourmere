@@ -463,7 +463,8 @@ The write-parity guard in
 CI `check` job. It inventories every `POST`, `PUT`, `PATCH` and `DELETE` under `/api/v1`
 from the server's generated `openApiDocument`, the tools registered by `productTools` in
 `apps/server/src/server.ts`, and the actual `COMMANDS` table in `tools/cli/src/cli.ts`.
-Read operations are outside this guard's required coverage.
+Read operations are outside this guard's required coverage except the explicitly mapped
+SSO provider and policy reads, which must ship on all three interfaces together.
 
 When adding or changing a write operation:
 

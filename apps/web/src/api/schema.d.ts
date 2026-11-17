@@ -4244,6 +4244,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/sso/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current team SSO policy
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. SSO is being built and is not available yet.
+         */
+        get: operations["getSsoPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List safe SSO provider drafts for the current team
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. SSO is being built and is not available yet. Follow nextCursor for all providers. Configuration, secrets, raw metadata and identities are never returned. Objects and status strings may gain values.
+         */
+        get: operations["listSsoProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{teamId}/leave": {
         parameters: {
             query?: never;
@@ -6852,6 +6892,36 @@ export interface components {
              * @example 2026-11-02T09:00:00.000Z
              */
             start: string;
+        };
+        SsoPolicy: {
+            admission: string;
+            policyRevision: number;
+            requireSso: boolean;
+            trustGeneration: number;
+        };
+        SsoProviderPage: {
+            data: {
+                clientId: string | null;
+                /** Format: date-time */
+                createdAt: string;
+                displayName: string;
+                domains: {
+                    generation: number;
+                    /** Format: uuid */
+                    id: string;
+                    name: string;
+                    status: string;
+                }[];
+                enabled: boolean;
+                /** Format: uuid */
+                id: string;
+                issuer: string;
+                protocol: string;
+                revision: number;
+                testStatus: string;
+                validationStatus: string;
+            }[];
+            nextCursor: string | null;
         };
         TeamAdminBooking: {
             attendees: {
@@ -13792,6 +13862,157 @@ export interface operations {
                             owner?: "another_owner_is_needed_before_you_can_leave";
                         };
                     };
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSsoPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The team policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoPolicy"];
+                };
+            };
+            /** @description invalid_request, invalid_limit or invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSsoProviders: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of provider drafts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoProviderPage"];
+                };
+            };
+            /** @description invalid_request, invalid_limit or invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description The API key's rate limit is used up */

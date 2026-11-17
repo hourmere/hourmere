@@ -1,6 +1,6 @@
 # Organization SSO: evaluation and implementation design
 
-Status: design and storage only. The plugin evaluation was first run 2026-11-06 against the Better
+Status: being built and not available yet. The plugin evaluation was first run 2026-11-06 against the Better
 Auth 1.7.12 family and re-run 2026-11-09, in the Upgrade step, against the installed
 1.7.16 family that main pins since the November security upgrade. `@better-auth/sso`
 1.7.16 is a development dependency of the auth workspace: no shipped source imports or
@@ -13,7 +13,9 @@ storage of the Identity storage step (see
 code that uses that storage: the two mailbox proof endpoints, which answer `404 sso_disabled`
 while both protocols are hard-off, the worker job that delivers their email and the bounded
 cleanup of attempts. The Fresh proof step adds the shared operation-bound retry gate,
-exercised only by a test operation; no production route calls it yet. No SSO provider,
+exercised only by a test operation; no production route calls it yet. Draft reads adds
+the redacted provider list and policy read across REST, MCP and CLI; both return
+`404 sso_disabled` before lookup in production, and their MCP tools are hidden while off. No SSO provider,
 sign-in route or feature flag is enabled. SSO will be available to every
 instance, including self-hosted ones; there is no license, subscription or hosted-service
 requirement.
@@ -847,11 +849,28 @@ The existing leave, member-removal and role-change operations gain
 | POST `/delegations` | `bindSsoDelegation` | Session: binding an owned API key or OAuth grant requires fresh interactive SSO proof. |
 | DELETE `/delegations/{bindingId}` | `revokeSsoDelegation` | Session: withdrawing the caller's delegated SSO proof requires the owning browser session. |
 
-Provider and policy reads ship on all three surfaces, despite reads being outside
-the parity guard. Require owner/admin plus `read`/`full` API key or authorized MCP
+Provider and policy reads ship on all three surfaces and have explicit required-read
+entries in the parity guard. Require owner/admin plus `read`/`full` API key or authorized MCP
 OAuth `mcp:tools`, subject to SSO enforcement. Ordinary members get their own required
 provider/proof summary through an additive session-only `/api/v1/me` projection,
 not administrator inventories. No first-release machine write changes SSO trust.
+
+The built draft reads use the current team context and freshly check verified owner/admin
+membership. `listSsoProviders` accepts `limit` (1–100, default 50) and `cursor`; it returns
+`{data, nextCursor}` in provider-ID order, omits retired providers, and binds the cursor
+to the team. Each provider exposes `id`, `protocol`, `revision`, `enabled`, `displayName`,
+`issuer`, nullable `clientId`, `createdAt`, `validationStatus`, `testStatus` and `domains`.
+Domain summaries expose only `id`, `name`, `generation` and `status`; failed and unknown
+checks remain distinct. Validation and test status are currently `unknown`: these reads
+neither decrypt configuration nor infer successful provider tests from proof attempts.
+`getSsoPolicy` returns `requireSso`, `admission`, `policyRevision` and `trustGeneration`;
+a team without a stored policy gets `false`, `invitation_only`, `1` and `1` respectively.
+No read creates a policy, changes trust, emits an audit event or returns identity links.
+
+当前草稿读取仅允许当前团队中已验证的所有者或管理员使用；API 密钥须具有 `read` 或
+`full` 范围，MCP OAuth 须具有 `mcp:tools` 权限。提供者列表按团队分页，不返回已退役
+提供者、密封配置、密钥、原始元数据或身份关联。验证和测试状态目前为 `unknown`，
+不能据此判断配置缺失。OIDC 和 SAML 仍在代码中保持关闭，读取返回 `sso_disabled`。
 
 Every write except `revokeSsoDelegation` accepts an optional opaque `proofAttemptId` in
 its strict input for the fresh-proof retry below. DELETE operations carry their strict
@@ -1130,9 +1149,10 @@ setting before `useSsoRecovery` and the operator recovery command exist.
 
 **Published catalogues.** From Draft reads on, each row that adds SSO REST operations,
 MCP tools or CLI commands registers them in `packages/auth/src/api-key-operations.ts`,
-as the registry's parity tests require. OpenAPI, MCP `tools/list`, CLI help and the
+as the registry's parity tests require. OpenAPI, CLI help and the
 generated scope tables in `docs/api-keys.md`, `docs/mcp.md` and their documentation-site copies
-therefore list them in every release, while hard-off. Draft reads adds a static note
+therefore list them in every release, while hard-off. MCP `tools/list` omits disabled
+SSO tools; direct tool calls still return `sso_disabled` before lookup. Draft reads adds a static note
 beside those tables, outside the generated `api-key-scope-table` markers, stating that
 SSO operations return `404 sso_disabled` until an operator enables the protocol, and
 rewords the Known limitations bullet from "in design" to "being built and not available
@@ -1189,7 +1209,13 @@ camelCase, separators, digits, the plural or version suffix — `ssos`, `SSOv2`,
 `listSSOs` — and a short list of words run together with it: `ssoconfig`,
 `ssoprovider`, `ssologin`, `ssologout`, `ssocallback`, `ssosettings`, `ssoflow`,
 `ssodomain`, `teamsso`, `orgsso`, `getsso`) and `single sign on` in any spelling. There
-are three exemptions, each for exact paths. The guarded auth-protocol endpoints that a
+are narrow exemptions, each for exact paths or operation mappings. Draft reads exempts
+only GET `/api/v1/team/sso/providers` (`listSsoProviders`) and GET
+`/api/v1/team/sso/policy` (`getSsoPolicy`) in OpenAPI, route and literal inventories,
+and their exact CLI command/tool mappings. Production requests prove that both reads
+return `404 sso_disabled` before caller or database lookup, including malformed query
+parameters. MCP lists neither tool while off and direct calls return `sso_disabled`. There
+are also three earlier exact-path exemptions. The guarded auth-protocol endpoints that a
 built step mounts while hard-off, because each must answer `404 sso_disabled` itself
 (today the Mailbox proof pair `/api/auth/sso/mailbox-proof/send` and `/consume`), are exempt
 in the route inventory and the source literals only, and only because the suite requests
@@ -1217,7 +1243,7 @@ recovery, mailbox proof, links and delegations). Each REST operation, MCP tool, 
 command and auth-protocol endpoint returns `404 sso_disabled`, at the point the code
 table defines: while both protocols are off, before any lookup, write or rate-limit
 count, identically for known and unknown IDs. The registered operations still appear in
-the published catalogues with the note above. `GET /api/v1/instance` reports
+OpenAPI, CLI help and the scope tables with the note above; disabled MCP tools are not listed. `GET /api/v1/instance` reports
 `ssoOidcEnabled`/`ssoSamlEnabled` as `false`, `/me` adds no SSO fields, the web shows no
 SSO navigation or sign-in option, and the domain recheck worker is not scheduled. The
 mailbox proof delivery job drops every job, and the attempt cleanup, which only deletes,

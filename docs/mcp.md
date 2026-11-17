@@ -122,10 +122,22 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
+| `list_sso_providers` | — | `sso providers list` | `full, read` |
+| `get_sso_policy` | — | `sso policy` | `full, read` |
 | `list_workflows` | — | `workflows list` | `full, read` |
 | `get_workflow` | — | `workflows get` | `full, read` |
 
 <!-- api-key-scope-table:end -->
+
+SSO is being built and is not available yet. The SSO operations in these tables return
+`404 sso_disabled` until an operator can enable the protocol; OIDC and SAML currently
+remain hard-off in code, so no setting enables them. MCP omits `list_sso_providers`
+and `get_sso_policy` from `tools/list` while off; direct MCP calls and CLI
+`sso providers list` / `sso policy` report `sso_disabled` for otherwise allowed scopes.
+
+SSO 正在开发中，尚不可用。表中的 SSO 操作在运营者能够启用协议之前返回
+`404 sso_disabled`；目前 OIDC 和 SAML 在代码中保持关闭，任何配置均无法启用。
+关闭时 MCP 工具列表不包含上述工具；允许范围内的直接调用和 CLI 命令返回相同错误。
 
 `list_workflows` and `get_workflow` are listed before booking workflows are available:
 until they are enabled, `tools/list` omits them and a direct call by a `read` or `full` key

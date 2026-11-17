@@ -1,4 +1,6 @@
 {
+  "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
+  "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },
   "createRoutingForm": { "mcp": "create_routing_form", "cli": "routing-forms create" },
   "updateRoutingForm": { "mcp": "update_routing_form", "cli": "routing-forms update" },
   "archiveRoutingForm": { "mcp": "archive_routing_form", "cli": "routing-forms archive" },

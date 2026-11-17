@@ -97,6 +97,8 @@ const classes = {
     'GET /api/v1/webhooks/{id}/deliveries',
     'GET /api/v1/workflows',
     'GET /api/v1/workflows/{id}',
+    'GET /api/v1/team/sso/providers',
+    'GET /api/v1/team/sso/policy',
   ],
   audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [
@@ -322,6 +324,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
           slotSnippetsEnabled: true,
           routingFormsEnabled: true,
           scimProvisioningEnabled: true,
+          // SSO reads answer sso_disabled before any scope check while hard-off; enable
+          // them here so the matrix proves their scope enforcement.
+          ssoOidcEnabled: true,
           mcpAuth: auth,
           publicUrl,
           googleCalendar: calendar.google,
@@ -801,14 +806,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 132-operation contract and all 396 scope combinations', () => {
+    it('covers the exact 134-operation contract and all 402 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(132)
-      expect(new Set(ids).size).toBe(132)
+      expect(ids).toHaveLength(134)
+      expect(new Set(ids).size).toBe(134)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(396)
+      expect(cases).toHaveLength(402)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

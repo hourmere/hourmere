@@ -149,7 +149,7 @@ self-hosting and does not change REST, MCP or CLI operations.
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
 - [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
   Users, Groups, discovery and IdP synchronization are not available yet.
-- Organization OIDC/SAML SSO is in design and is not available yet. The
+- Organization OIDC/SAML SSO is being built and is not available yet. The
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
   self-hosting, linking, enforcement and the planned implementation sequence.
   Planned SSO is available to every instance without a paid-plan requirement.
