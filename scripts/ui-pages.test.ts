@@ -31,6 +31,17 @@ afterAll(() => rmSync(directory, { recursive: true, force: true }))
 
 it('covers every requested real page and limits en-GB to the booking page', () => {
   expect(auditPages.map((page) => page.id)).toEqual([
+    'poll-unavailable',
+    'poll-enroll',
+    'poll-check-email',
+    'poll-verify',
+    'poll-ballot',
+    'poll-saved',
+    'poll-withdrawn',
+    'poll-closed',
+    'poll-recover',
+    'poll-opt-out',
+    'poll-opted-out',
     'host',
     'booking',
     'booking-form',
@@ -347,6 +358,17 @@ const data=await import('./audit-data.ts')
 assert.notEqual(data.AUDIT_CONFIRMATION_EMAIL,data.AUDIT_EMAIL,'Confirmation email must not duplicate the admin-list fixture')
 assert.match(data.AUDIT_CONFIRMATION_EMAIL,/^[a-z.]+[a-z]@hourmere[.]invalid$/,'Confirmation email must pass real form validation')
 const expected={
+  'poll-unavailable':{path:'/poll',public:true,wait:'[data-poll-state="unavailable"]'},
+  'poll-enroll':{path:'/poll',public:true,wait:'[data-poll-state="enroll"]'},
+  'poll-check-email':{path:'/poll',public:true,wait:'[data-poll-state="check-email"]'},
+  'poll-verify':{path:'/poll/voter',public:true,wait:'[data-poll-state="verify"]'},
+  'poll-ballot':{path:'/poll/voter',public:true,wait:'[data-poll-state="ballot"]'},
+  'poll-saved':{path:'/poll/voter',public:true,wait:'[data-poll-state="saved"]'},
+  'poll-withdrawn':{path:'/poll/voter',public:true,wait:'[data-poll-state="withdrawn"]'},
+  'poll-closed':{path:'/poll/voter',public:true,wait:'[data-poll-state="closed"]'},
+  'poll-recover':{path:'/poll/recover',public:true,wait:'[data-poll-state="recover"]'},
+  'poll-opt-out':{path:'/poll/reminder-opt-out',public:true,wait:'[data-poll-state="opt-out"]'},
+  'poll-opted-out':{path:'/poll/reminder-opt-out',public:true,wait:'[data-poll-state="opted-out"]'},
   'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
   'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
   'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},
@@ -382,7 +404,7 @@ for(const [id,state] of Object.entries(expected)) {
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
     waitForFunction:async()=>{},evaluate:async(callback)=>{calls.push(['evaluate',callback.name]);if(callback.name==='expandEventSettings')callback()},url:()=> 'http://127.0.0.1:42421'+path,
   }
-  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',eventTypeId:'synthetic-event',teamBookingId:'synthetic-team-booking',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
+  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditPollState:async()=>({publicToken:'synthetic-public',voterToken:'synthetic-voter',optOutToken:'synthetic-opt-out'}),auditState:async()=>({organizationId:'synthetic-org',eventTypeId:'synthetic-event',teamBookingId:'synthetic-team-booking',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
   await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
   assert.deepEqual(calls[0],['clock',data.AUDIT_NOW],'Audit browser clock must be fixed before navigation: '+id)
   assert.deepEqual(calls.at(-1),['evaluate','settleAuditLayout'],'Audit layout must settle after content verification: '+id)
