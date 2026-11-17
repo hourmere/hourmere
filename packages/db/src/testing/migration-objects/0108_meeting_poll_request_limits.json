@@ -1,0 +1,10 @@
+{
+  "migration": "0108_meeting_poll_request_limits.sql",
+  "objects": {
+    "constraint public.meeting_poll_request_limits.meeting_poll_request_limits_digest_length": "CHECK ((octet_length(key_digest) = 32))",
+    "constraint public.meeting_poll_request_limits.meeting_poll_request_limits_pkey": "PRIMARY KEY (key_digest)",
+    "constraint public.meeting_poll_request_limits.meeting_poll_request_limits_positive_hits": "CHECK ((hits > 0))",
+    "not_null public.meeting_poll_request_limits.hits": "NOT NULL",
+    "not_null public.meeting_poll_request_limits.reset_at": "NOT NULL"
+  }
+}

@@ -6,6 +6,7 @@ import { DomainError } from './errors.ts'
 /** SQLSTATE codes services map to DomainErrors. */
 export const SQLSTATE = {
   uniqueViolation: '23505',
+  checkViolation: '23514',
   foreignKeyViolation: '23503',
 } as const
 

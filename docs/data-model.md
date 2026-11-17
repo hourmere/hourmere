@@ -2170,7 +2170,9 @@ remove an agreed meeting before the invitee accepts a replacement. A request the
 never promises that any alternative slot is reserved.
 
 `RESCHEDULE_REQUEST_TIMEOUT_HOURS = 48` bounds a request's life to the earlier of 48 elapsed
-hours after creation and the original booking's start. Elapsed time makes the timeout
+hours after creation, the original booking's start and its effective invitee reschedule
+deadline (the earlier of the snapshotted reschedule and cancel deadline instants). New
+requests at or after that deadline fail with `booking_reschedule_deadline_passed`. Elapsed time makes the timeout
 unambiguous across DST changes. Expiry leaves the original booking intact and queues a host
 notice; it never cancels or moves the booking. Workers may deliver the notice later. A
 second request replaces the first; superseded jobs cannot send a new obsolete invitation.
@@ -2189,8 +2191,9 @@ the current booking without another email; changed input fails with
 `idempotency_key_reused`. Replaying an old key never replaces a newer request.
 The optional `rescheduleRequestId` on managed pick/cancel identifies the displayed request.
 The web interface submits it. A matching pick replay returns its saved successor without a
-new token; a matching cancellation replay returns the cancelled booking. A replaced,
-expired or differently answered request fails with `reschedule_request_changed`. Keep the
+new token; a cancellation replay returns the cancelled booking and preserves the original
+reason even when the retry supplies a different reason. A replaced or expired request,
+a different picked time or the opposite action fails with `reschedule_request_changed`. Keep the
 existing private email link when replay returns `manageToken: null`.
 
 Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
@@ -2273,8 +2276,10 @@ of 2–100. A `group_slots` row owns one exact UTC interval, its pinned host, ca
 location, buffers, calendar destination and notification policy. Each seat is a separate
 `bookings` row with `group_slot_id`, one booker and private answers, management capability,
 idempotency scope and reschedule chain. Guests and multiple-seat purchases are unsupported.
-Group booking is an internal service capability. Application configuration, public
-enablement, editor controls and REST/MCP/CLI group configuration are not yet available.
+Group mode and capacity are configurable in the admin editor and REST/MCP/CLI.
+Occurrence attendee reads are authenticated and retain the existing host-only API-key/OAuth
+boundary; current team owners/admins may also read through a browser session. Public and
+invitee-managed projections never include sibling seats. See [group events](https://hourmere.com/docs/group-events).
 
 `booking_hosts` has a surrogate primary key and exactly one parent: an ordinary
 `booking_id` or a `group_slot_id`. A group slot has one exclusion-bearing host row,
@@ -2440,3 +2445,8 @@ booking/rule identity and scheduling instants, never phone numbers or message bo
 `audit_events` is the append-only management journal available to every instance.
 See [Audit event journal](audit-log.md) for fields, actions, privacy, transaction
 boundaries, indexes and future retention. Events are recorded but not yet viewable.
+
+Public poll transport request budgets use `meeting_poll_request_limits` (migration `0108`):
+a purpose-bound keyed IP digest, bounded positive request count and reset timestamp. REST
+and MCP share the same 60-second windows; expired rows are deleted in bounded batches
+during requests. No mailbox, raw IP or capability is stored in this table.

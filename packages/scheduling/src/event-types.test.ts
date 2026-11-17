@@ -333,6 +333,8 @@ describe.skipIf(!serverUrl)('event type service', () => {
       const user = await createTestUser(db)
       const created = await createEventType(personal(user), input())
       expect(created).toEqual({
+        bookingMode: 'individual',
+        groupCapacity: null,
         smsRemindersAvailable: false,
         smsRemindersEnabled: false,
         id: expect.any(String),

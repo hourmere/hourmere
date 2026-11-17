@@ -303,11 +303,18 @@ delivery state, attempts, fixed error classification and current resend eligibil
 Expiry uses the database clock. API keys and OAuth are denied, including alongside a
 session cookie. See the [field, pagination and error contract](/docs/api-conventions#team-invitation-delivery-summaries).
 
+Host cancellation uses `POST /api/v1/bookings/{id}/cancel` with an optional `reason`
+(at most 1000 characters). The caller must host the booking in the acting organization;
+team-admin status alone is insufficient for API keys and MCP. Host cancellation and moves
+bypass invitee change deadlines, but refuse started or imported read-only bookings.
+Cancellation retains the record and sends ordinary cancellation notifications.
+
 ## Search the booking list
 
 `status=cancelled` lists only cancelled bookings, a page at a time like every other view.
 It includes bookings replaced by a reschedule; their `rescheduledToId` points to the new
-booking. `status=confirmed` lists the others.
+booking when the caller can access that successor. `status=confirmed` lists confirmed
+bookings; omitting `status` includes both confirmed and cancelled records.
 
 `q` searches the list you already have access to. A booking matches when the invitee's name
 or email, or the title of its event type, contains the text, ignoring case:
@@ -318,7 +325,7 @@ curl --fail-with-body -G "$HOURMERE_URL/api/v1/bookings" \
   --data-urlencode "status=cancelled" --data-urlencode "q=ada@example.com"
 ```
 
-- The text is trimmed and may have at most 100 characters; longer text or control
+- The text is trimmed and may have at most 100 UTF-16 code units; longer text or control
   characters return `400 invalid_request`. Blank text means no search.
 - `%`, `_` and `\` match themselves; there are no wildcards.
 - Search only narrows the list you already see. It never adds bookings outside it: on the
@@ -326,9 +333,10 @@ curl --fail-with-body -G "$HOURMERE_URL/api/v1/bookings" \
   (`GET /api/v1/team/bookings`, which accepts the same `status` and `q`), bookings from
   another team.
 - Keep `q`, `status`, the time filters and `order` unchanged while following `nextCursor`.
-  Ordering stays by start time and ID, so a booking that still matches is neither repeated
-  nor skipped while other bookings are added or cancelled. A booking cancelled behind the
-  cursor leaves a `status=confirmed` list and shows in `status=cancelled` from its first page.
+  Ordering stays by start time and ID in the same direction, including equal start times.
+  Pages are live, not a fixed snapshot: rows added or changed behind the cursor require
+  a fresh list to see. A booking cancelled behind the cursor leaves a `status=confirmed`
+  list and shows in `status=cancelled` from its first page.
 
 Known limitations: search matches the invitee who booked, not guests; the current title
 of an event type that still exists, not stored booking titles, answers or notes; and whole
@@ -370,9 +378,10 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged. An answer to a request that expired, was
-replaced or was already resolved by a move fails with `reschedule_request_changed`, as
-does a pick after cancellation. With the request email's token, REST
+reschedule retry semantics remain unchanged. Except for that saved pick replay, an
+answer to a request that expired, was replaced or was resolved by a move fails with
+`reschedule_request_changed`, as does a pick after cancellation. Replaying a cancellation keeps its original reason even
+if a different reason is supplied. With the request email's token, REST
 `GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
 have no invitee read of a manage token.
 
@@ -429,6 +438,27 @@ See [booking waitlists](/docs/booking-waitlist) for host settings, entry managem
 invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
 Nothing is reserved: every eligible invitee can be notified and the first successful
 ordinary booking wins.
+
+## Group events
+
+Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
+`allowGuests: false` and individual single-host scheduling. Configuration requires `full`
+API-key scope. Omitted update fields preserve saved values; existing future booked work
+prevents switching mode. Capacity edits affect new occurrences only.
+
+Authorized booking reads/lists represent each seat separately and include `groupSlotId`.
+`GET /api/v1/group-occurrences/{id}/attendees`, MCP `get_group_occurrence_attendees` and
+CLI `group-attendees` return the private occurrence roster, including answers, booking
+status and no-show state. MCP/CLI take `occurrenceId`. Reads allow `full`, `read` and
+`bookings` keys, with actual host authority in the current organization. Non-host team
+owners/admins need a browser session; MCP OAuth has the same host-only boundary.
+
+`POST /api/v1/group-occurrences/{id}/cancel`, MCP `cancel_group_occurrence` and CLI
+`cancel-group` cancel the whole future occurrence. MCP/CLI take `occurrenceId` and
+optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bookings`.
+Ordinary booking cancellation still cancels only one seat. Public and invitee-management
+reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
+for setup, privacy and limitations.
 
 ## Duplicate an event type
 

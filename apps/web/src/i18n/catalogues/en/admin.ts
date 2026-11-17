@@ -11,6 +11,38 @@ export const admin = {
     'All 12 lengths are in use. Remove a length in Additional durations before adding another.',
   'All 12 lengths are in use. Remove a length before adding another.':
     'All 12 lengths are in use. Remove a length before adding another.',
+  'Group events': 'Group events',
+  'Booking mode': 'Booking mode',
+  'Seats per session': 'Seats per session',
+  'One invitee per session': 'One invitee per session',
+  'Group: multiple invitees per session': 'Group: multiple invitees per session',
+  'Group events use one host and 2–100 seats per session. Additional guests and invitee phone locations are unavailable. Booking mode cannot change while upcoming confirmed bookings exist.':
+    'Group events use one host and 2–100 seats per session. Additional guests and invitee phone locations are unavailable. Booking mode cannot change while upcoming confirmed bookings exist.',
+  'Group events require a single host, not collective or round-robin scheduling.':
+    'Group events require a single host, not collective or round-robin scheduling.',
+  'Turn off additional guests before enabling group events.':
+    'Turn off additional guests before enabling group events.',
+  'Group events cannot ask invitees for a meeting phone number.':
+    'Group events cannot ask invitees for a meeting phone number.',
+  'Check the group settings: use one host, 2–100 seats, no additional guests and no invitee phone location.':
+    'Check the group settings: use one host, 2–100 seats, no additional guests and no invitee phone location.',
+  'Booking mode cannot change while upcoming confirmed bookings exist.':
+    'Booking mode cannot change while upcoming confirmed bookings exist.',
+  'Session attendee list': 'Session attendee list',
+  'Only the host and authorized team administrators can see this list. Invitees cannot see each other.':
+    'Only the host and authorized team administrators can see this list. Invitees cannot see each other.',
+  'Loading attendees…': 'Loading attendees…',
+  'Could not load the attendee list.': 'Could not load the attendee list.',
+  '{active} of {capacity} seats booked': '{active} of {capacity} seats booked',
+  'No attendees in this session.': 'No attendees in this session.',
+  'Cancel whole session…': 'Cancel whole session…',
+  'Cancel every active seat in this session? All affected invitees will be notified.':
+    'Cancel every active seat in this session? All affected invitees will be notified.',
+  'Cancel whole session': 'Cancel whole session',
+  'Could not cancel the session.': 'Could not cancel the session.',
+  'Cancel this seat': 'Cancel this seat',
+  'Only this invitee’s seat is cancelled. Other attendees keep their bookings.':
+    'Only this invitee’s seat is cancelled. Other attendees keep their bookings.',
   'SMS reminders': 'SMS reminders',
   'SMS reminders are available for invitees who consent. Sender and carrier charges are managed by your operator.':
     'SMS reminders are available for invitees who consent. Sender and carrier charges are managed by your operator.',

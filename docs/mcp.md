@@ -56,6 +56,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
+| `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
+| `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
+| `verify_meeting_poll_voter` | — | `polls verify` | `full, bookings` |
+| `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
+| `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
+| `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |
@@ -89,6 +96,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `list_bookings` | — | `list` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
+| `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |
+| `cancel_group_occurrence` | — | `cancel-group` | `full, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
@@ -183,6 +192,41 @@ Before upgrading, stop every old web/all/worker and other old key-authenticating
 apply migrations and restart every role with the new code before allowing scoped keys.
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
+
+## Manage hosted bookings
+
+`list_bookings` (CLI `list`) reads only bookings hosted by the caller in the acting
+organization, including for a team administrator. `q` searches literal substrings of the
+booker's name/email or current event-type title; it excludes guests, answers and notes.
+Case follows the database locale; accents are not folded. Queries are trimmed, bounded to
+100 UTF-16 code units, and reject controls. `%`, `_` and `\` match themselves.
+Use `status: "cancelled"` for cancelled records, including rescheduled predecessors;
+omission includes confirmed and cancelled records. Start time and ID determine order
+(`asc` by default); use `order: "desc"` to reverse both. Follow `nextCursor` as `cursor`
+with unchanged filters. Pages are live, not a snapshot, and export does not accept `q`.
+
+`request_reschedule` takes `bookingId`, a UUID `idempotencyKey` and optional plain-text
+`note` (up to 2000 UTF-16 code units). The host needs `bookings` or `full` scope. The same
+key and normalized body replay without another request; a new key replaces it. The original
+booking stays confirmed and blocks its time until moved or cancelled. Expiry is the earliest
+of 48 elapsed hours, the meeting start and its effective invitee reschedule deadline. A new
+request at or after that deadline is refused. Imported records and group seats are unsupported.
+
+Answer with `reschedule_booking` or `cancel_booking`, using `manageToken` and
+`rescheduleRequestId`. An identical answer replays safely; a repeated pick returns its saved
+successor with `manageToken: null`. Preserve the existing emailed link. A different picked time, the
+opposite action, or a replaced or expired request returns `reschedule_request_changed`.
+Cancellation replay preserves the original reason even if a retry changes it. MCP and CLI have no
+invitee management-token read; REST `GET /api/v1/bookings/manage` and the emailed page
+explain the request state. Ordinary moves without a request ID should not be retried
+automatically. Host moves and cancellations use `bookingId`, require actual host authority,
+and bypass invitee deadlines, but still enforce other booking rules.
+See [reschedule requests](https://hourmere.com/docs/request-reschedule) and
+[booking management](https://hourmere.com/docs#review-bookings).
+
+中文：列表只返回当前组织中你主持的预约；姓名、邮箱和当前活动标题支持部分文字搜索，
+但不折叠重音。分页时保留筛选条件。改期请求保留原时段，截止后不会自动取消预约。
+重试请求保留原幂等键和正文；受邀人回答需携带 `rescheduleRequestId` 才有对应的安全重放语义。
 
 ## Generate open-time email snippets
 
@@ -404,6 +448,65 @@ scope and the usual owner/admin permissions are required for configuration.
 `create-event`, `update-event` and `book` expose the same JSON inputs. See
 [SMS reminders and opt-out](https://hourmere.com/docs/sms-provider) for consent, provider
 configuration, signed STOP handling and limitations.
+
+## Group events
+
+Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
+`allowGuests: false` and individual single-host scheduling. Configuration requires `full`
+API-key scope. Omitted update fields preserve saved values; existing future booked work
+prevents switching mode. Capacity edits affect new occurrences only.
+
+Authorized booking reads/lists represent each seat separately and include `groupSlotId`.
+`GET /api/v1/group-occurrences/{id}/attendees`, MCP `get_group_occurrence_attendees` and
+CLI `group-attendees` return the private occurrence roster, including answers, booking
+status and no-show state. MCP/CLI take `occurrenceId`. Reads allow `full`, `read` and
+`bookings` keys, with actual host authority in the current organization. Non-host team
+owners/admins need a browser session; MCP OAuth has the same host-only boundary.
+
+`POST /api/v1/group-occurrences/{id}/cancel`, MCP `cancel_group_occurrence` and CLI
+`cancel-group` cancel the whole future occurrence. MCP/CLI take `occurrenceId` and
+optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bookings`.
+Ordinary booking cancellation still cancels only one seat. Public and invitee-management
+reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
+for setup, privacy and limitations.
+
+## Public meeting polls
+
+Public poll capability tools are available without a feature flag. `read_meeting_poll`
+accepts `token` and a `read`, `bookings` or `full` key. The following writes require
+`bookings` or `full`: `enroll_meeting_poll_voter`, `recover_meeting_poll_voter`,
+`verify_meeting_poll_voter`, `submit_meeting_poll_vote`, `withdraw_meeting_poll_vote` and
+`opt_out_meeting_poll_reminder`. MCP still authenticates its connection; REST public poll
+operations also work without login or a key. A host key alone cannot identify or impersonate
+a voter: relay only the voter's explicit choices with their own capability.
+
+Read returns the safe snapshot and own ballot. Only a verified voter in an `aggregate`
+poll sees separate yes/if-need-be/no counts; no public operation lists other voters or
+mailboxes. Enrollment uses `publicToken`, `name`, `email`, `timeZone` and optional `locale`.
+It answers uniformly with `accepted: true`, except that a full poll answers `poll_full`
+for every mailbox. Recovery needs only `pollId` and `email`, always answers accepted,
+and sends the unchanged credential only to an eligible existing voter under cooldowns/caps.
+Verification explicitly consumes a verification token; a replacement `votingToken` is
+returned once and sent by email. Reads never verify or vote.
+
+Voting takes `token`, all candidate `votes` (`slotId`, `value`: `yes`, `if_need_be`, `no`),
+`consent: true`, optional question `responses` and `expectedBallotRevision` (initially 0).
+Withdraw takes the token and revision. On `poll_changed`, read and reconcile before a new
+submission; never automatically retry a lost response. Reminder opt-out takes the separate
+mail opt-out token and cannot access ballots. Admission requests share 10 per minute per
+trusted IP across REST/MCP/processes; reads use 120 and vote/withdraw/opt-out share 30.
+Host creation and lifecycle transports and the browser voting page are not available yet.
+
+中文：公开投票工具已提供，无功能开关。读取需要 `read`、`bookings` 或 `full` 密钥，
+写入需要 `bookings` 或 `full`；MCP 连接仍需认证，公开 REST 不要求登录或密钥。
+密钥不代替投票者的专用令牌，也不能用于冒充投票者。只转达投票者明确授权的选择。
+读取仅返回安全快照和自己的选票；只有已验证且采用 `aggregate` 可见性的投票者能查看
+汇总数量，不会公开其他人的姓名、邮箱或选票。报名对已知和未知邮箱统一应答，满员时
+对全部邮箱返回 `poll_full`。找回仅需 `pollId` 和邮箱，统一返回接受；符合条件时重发
+原令牌，不轮换或延长有效期。验证需明确提交，首次返回的新 `votingToken` 须保密。
+投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
+`poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
+管理端创建/生命周期接口和浏览器投票页面尚未提供。
 
 ## Duplicate an event type
 

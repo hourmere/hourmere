@@ -106,6 +106,8 @@ export interface Booking {
   canManageNoShow?: boolean
   id: string
   isGroupSeat?: boolean
+  /** Private occurrence identifier, present only in authenticated host reads. */
+  groupSlotId?: string
   pendingReschedule?: { id: string; expiresAt: string; note: string | null }
   eventTypeId: string | null
   status: BookingStatus
@@ -708,7 +710,9 @@ async function toBookings(
     const location = view ? view.location : r.location
     return {
       id: r.id,
-      ...(r.group_slot_id ? { isGroupSeat: true } : {}),
+      ...(r.group_slot_id
+        ? { isGroupSeat: true, ...(host ? { groupSlotId: r.group_slot_id } : {}) }
+        : {}),
       eventTypeId: r.event_type_id,
       status: r.status as BookingStatus,
       start: toIso(toInstant(r.start_at)),
@@ -2899,4 +2903,38 @@ async function managedRequest(trx: Db, bookingId: string, requestId: string) {
     .executeTakeFirst()
   if (!request) throw requestChanged()
   return request
+}
+
+/** Internal occurrence cancellation: caller has authorized and locked the whole occurrence. */
+export async function cancelOccurrenceSeatInTransaction(
+  db: Db,
+  ctx: ServiceContext,
+  id: string,
+  options: { reason?: string | undefined },
+  origin?: BookingOrigin,
+) {
+  const row = await db
+    .selectFrom('bookings')
+    .select(['id', 'organization_id', 'status', 'start_at'])
+    .where('id', '=', id)
+    .where('organization_id', '=', ctx.principal.organization.id)
+    .forUpdate()
+    .executeTakeFirstOrThrow()
+  await cancelLocked(
+    db,
+    row,
+    ctx.now(),
+    normalizeReason(options.reason),
+    ctx.notify,
+    {
+      source:
+        ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
+      apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+      oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
+      ...origin,
+      audit: auditActor(ctx.principal),
+      requestId: ctx.requestId,
+    },
+    ctx.principal.user.id,
+  )
 }

@@ -10,7 +10,13 @@ import {
   type Principal,
   requireApiKeyOperation,
 } from '@hourmere/auth'
-import { DomainError, type DomainErrorKind, WaitlistRateLimitError } from '@hourmere/scheduling'
+import {
+  DomainError,
+  type DomainErrorKind,
+  MeetingPollKeyMismatchError,
+  MeetingPollRateLimitError,
+  WaitlistRateLimitError,
+} from '@hourmere/scheduling'
 import {
   type CallToolResult,
   type McpServer,
@@ -292,6 +298,10 @@ export async function runTool(
     }
     if (err instanceof WaitlistRateLimitError)
       return errorResult({ error: 'rate_limited', retryAfterSeconds: err.retryAfterSeconds })
+    if (err instanceof MeetingPollRateLimitError)
+      return errorResult({ error: 'rate_limited', retryAfterSeconds: err.retryAfterSeconds })
+    if (err instanceof MeetingPollKeyMismatchError)
+      return errorResult({ error: 'meeting_poll_key_mismatch' })
     // An unknown kind (only possible by bypassing the type) is a bug, as in the REST API.
     if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.

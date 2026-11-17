@@ -337,6 +337,16 @@ export const WaitlistEntryPage = z
   })
 
 const fields = {
+  bookingMode: z.enum(['individual', 'group']).openapi({
+    description:
+      'individual (default) or group: independent seats in a single-host occurrence. Group mode requires no guests and capacity 2–100. Mode cannot change after bookings exist.',
+  }),
+  groupCapacity: z.int().nullable().openapi({
+    description:
+      'Group capacity, 2–100; null in individual mode. Changes apply to future occurrences only.',
+    minimum: 2,
+    maximum: 100,
+  }),
   slug: z.string().openapi({
     description:
       'The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit',
@@ -455,6 +465,8 @@ export const EventTypeInput = z
     title: fields.title,
     durationMinutes: fields.durationMinutes,
     allowedDurationsMinutes: fields.allowedDurationsMinutes.optional(),
+    bookingMode: fields.bookingMode.optional(),
+    groupCapacity: fields.groupCapacity.optional(),
     description: fields.description.optional(),
     slotStepMinutes: fields.slotStepMinutes.optional(),
     bufferBeforeMinutes: fields.bufferBeforeMinutes.optional().openapi({ default: 0 }),
@@ -494,6 +506,8 @@ export const EventTypeUpdate = z
     title: fields.title.optional(),
     durationMinutes: fields.durationMinutes.optional(),
     allowedDurationsMinutes: fields.allowedDurationsMinutes.optional(),
+    bookingMode: fields.bookingMode.optional(),
+    groupCapacity: fields.groupCapacity.optional(),
     description: fields.description.optional(),
     slotStepMinutes: fields.slotStepMinutes.optional(),
     bufferBeforeMinutes: fields.bufferBeforeMinutes.optional(),
