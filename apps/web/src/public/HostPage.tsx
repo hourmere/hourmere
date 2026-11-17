@@ -1,4 +1,5 @@
-import { useCallback } from 'react'
+import { brandPalette } from '@hourmere/core/brand-contrast'
+import { type CSSProperties, useCallback } from 'react'
 import { Link, Navigate, useParams } from 'react-router'
 import { usePageTitle } from '../hooks.ts'
 import { formatDuration } from '../i18n/duration.ts'
@@ -7,7 +8,14 @@ import { literal } from '../i18n/translate.ts'
 import { codeOf, failureMessage, getHost } from './api.ts'
 import { locationLabel } from './BookingDetails.tsx'
 import { collapseBlankLines } from './description.ts'
-import { HostAvatar, PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
+import {
+  BrandLogo,
+  HostAvatar,
+  PublicLayout,
+  PublicNotFound,
+  PublicStatus,
+} from './PublicLayout.tsx'
+import './HostPage.css'
 import { normalizedHandle, useRequest } from './paths.ts'
 
 /** /{handle}: the host and the event types people can book with them. */
@@ -59,22 +67,41 @@ function HostPageContent({ handle }: { handle: string }) {
       </header>
       {eventTypes.length ? (
         <ul className="event-list">
-          {eventTypes.map((et) => (
-            <li key={et.slug}>
-              <Link className="event-card" to={`/${handle}/${et.slug}`}>
-                <span className="event-card-title">{et.title}</span>
-                <span className="event-card-meta">
-                  {formatDuration(et.durationMinutes, displayLocale)}
-                  {et.location && ` · ${ui(locationLabel(et.location.kind))}`}
-                </span>
-                {et.description && (
-                  <span className="event-card-description">
-                    {collapseBlankLines(et.description)}
+          {eventTypes.map((et) => {
+            const palette = brandPalette(et.branding?.primaryColor)
+            const style: Record<string, string> = {}
+            if (palette) {
+              for (const theme of ['light', 'dark'] as const) {
+                for (const role of ['link', 'accent', 'focus'] as const) {
+                  style[`--event-brand-${theme}-${role}`] = palette[theme][role]
+                }
+              }
+            }
+            return (
+              <li key={et.slug}>
+                <Link
+                  className="event-card event-card-own-brand"
+                  style={style as CSSProperties}
+                  to={`/${handle}/${et.slug}`}
+                >
+                  {et.branding && <BrandLogo branding={et.branding} />}
+                  {et.organizationName && (
+                    <span className="event-card-meta">{et.organizationName}</span>
+                  )}
+                  <span className="event-card-title">{et.title}</span>
+                  <span className="event-card-meta">
+                    {formatDuration(et.durationMinutes, displayLocale)}
+                    {et.location && ` · ${ui(locationLabel(et.location.kind))}`}
                   </span>
-                )}
-              </Link>
-            </li>
-          ))}
+                  {et.description && (
+                    <span className="event-card-description">
+                      {collapseBlankLines(et.description)}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            )
+          })}
         </ul>
       ) : (
         <div className="empty">

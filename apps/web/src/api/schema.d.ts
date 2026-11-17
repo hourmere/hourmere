@@ -1121,7 +1121,7 @@ export interface paths {
         put?: never;
         /**
          * Upload and attach a logo, replacing the previous image
-         * @description Raw PNG, JPEG or WebP, at most 512 KiB and 2048 pixels per dimension; animation rejected. Decoded and re-encoded as PNG, also limited to 512 KiB. One stored image per organization.
+         * @description Raw PNG, JPEG or WebP, at most 512 KiB and 2048 pixels per dimension; animation rejected. Decoded, resized to at most 512 pixels per dimension and re-encoded as PNG at most 64 KiB; further resizing may be needed. One stored image per organization.
          */
         post: operations["uploadBrandLogo"];
         delete?: never;
@@ -2915,6 +2915,23 @@ export interface paths {
          * @description Personal and team individual events only, including hidden direct links and embedded pages. The admission service rechecks current availability, eligibility and durable email/IP/event/capacity limits. SMTP must be configured. A full waitlist returns 409 waitlist_full. The same accepted response covers new, existing and rate-suppressed requests; no capability or entry identity is returned. Resend is explicit and subject to the same limits and a 15-minute cooldown.
          */
         post: operations["resendPersonalWaitlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/branding/{organizationId}/logo/{hash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read an organization’s selected public logo by content hash */
+        get: operations["getPublicBrandLogo"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6510,8 +6527,10 @@ export interface components {
             };
         };
         PublicBranding: {
-            /** @description Bounded normalized PNG data URL; no remote image request is needed */
+            /** @description Deprecated; always null. Use logoUrl for the cacheable PNG */
             logoDataUrl: string | null;
+            /** @description Organization-scoped content-hash PNG URL; immutable cacheable response */
+            logoUrl: string | null;
             /** @description Organization name for logo alternative text */
             name: string;
             primaryColor: string | null;
@@ -6576,12 +6595,15 @@ export interface components {
             branding?: components["schemas"]["PublicBranding"];
             /** @description Bookable event types, in the order the host arranged them */
             eventTypes: {
+                branding?: components["schemas"]["PublicBranding"];
                 description: string | null;
                 durationMinutes: number;
                 location: {
                     /** @enum {string} */
                     kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
                 } | null;
+                /** @description Owning team space name; omitted for personal event types */
+                organizationName?: string;
                 /** @description The booking page is /{handle}/{slug} */
                 slug: string;
                 title: string;
@@ -12342,6 +12364,38 @@ export interface operations {
             };
             /** @description Too many requests from this address (`rate_limited`); see Retry-After */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicBrandLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hash: string;
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Normalized PNG, at most 512 pixels per dimension and 64 KiB */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description brand_logo_not_found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

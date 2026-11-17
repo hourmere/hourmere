@@ -103,6 +103,22 @@ export const admin = {
 
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '已配置{0}个地点选项。请通过 REST、MCP 或 CLI 管理。保存其他字段会保留这些选项。',
+  'Reset to default': '恢复默认',
+  'Reset clears the logo and colour when you save branding.':
+    '保存品牌设置后，将清除标志和主色并恢复默认外观。',
+  'Logos are converted to PNG, at most 512 pixels on the longest side and 64 KiB. Smaller images are not enlarged.':
+    '标志会转换为 PNG，最长边不超过 512 像素，大小不超过 64 KiB。较小的图片不会放大。',
+  'Booking page preview': '预约页预览',
+  'Sample only. Changes apply after saving. Colours adjust in each theme for readable text and controls.':
+    '此处仅为示例，保存后才会应用更改。颜色会随主题调整，以确保文字和控件清晰可读。',
+  'Light preview': '浅色预览',
+  'Dark preview': '深色预览',
+  'Sample introduction call': '示例介绍通话',
+  '30 minutes · Online meeting': '30 分钟 · 线上会议',
+  'Choose a time that works for you.': '请选择适合你的时间。',
+  'Button text contrast: {ratio}:1 (minimum 4.5:1).': '按钮文字对比度：{ratio}:1（最低 4.5:1）。',
+  'Link contrast: {ratio}:1 (minimum 4.5:1).': '链接对比度：{ratio}:1（最低 4.5:1）。',
+  'Displayed accent: {colour}': '显示的强调色：{colour}',
   'Loading logo preview…': '正在加载标志预览…',
   'Logo preview is unavailable.': '暂时无法预览标志。',
   'Saved brand logo': '已保存的品牌标志',
@@ -118,10 +134,10 @@ export const admin = {
   'Could not load branding.': '无法加载品牌设置。',
   'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
     '请输入 #RRGGBB 格式的颜色，留空即可清除。',
-  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
-    '请选择不超过 512 KB 的 PNG、JPEG 或 WebP 图片。不支持 SVG。',
-  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
-    '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
+  'Choose a PNG, JPEG or WebP image up to 512 KiB. SVG is not supported.':
+    '请选择不超过 512 KiB 的 PNG、JPEG 或 WebP 图片。不支持 SVG。',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KiB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
   'Edit branding': '编辑品牌设置',
   'Primary colour': '主色',
   'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':

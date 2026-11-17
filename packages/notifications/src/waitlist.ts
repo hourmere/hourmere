@@ -341,8 +341,8 @@ export async function deliverWaitlistEmail(
       const suppressed = await notificationEmailBudget(db, deps, hash, true, at)
       if (suppressed) return finish(db, claim, row, 'suppressed', at, suppressed)
       if (!deps.smtpConfigured) return finish(db, claim, row, 'failed', at, 'smtp_not_configured')
-      const { getPublicBranding } = await import('@hourmere/scheduling')
-      const branding = await getPublicBranding(db, prepared.entry.organization_id)
+      const { getEmailBranding } = await import('@hourmere/scheduling')
+      const branding = await getEmailBranding(db, prepared.entry.organization_id)
       // Sample after all database reads. Rendering and provider time consume the lease.
       const anchor = performance.now()
       const ready = await clock(db, deps)

@@ -12,7 +12,7 @@ import {
   icsAttachment,
   type MailMessage,
 } from '@hourmere/mail'
-import { getPublicBranding } from '@hourmere/scheduling'
+import { getEmailBranding } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -48,11 +48,11 @@ function sourceCopy(change?: [string, string], bindings: Record<string, unknown>
     '',
   )
   // The Function copy cannot resolve a dynamic import in Vitest's VM; bind the real reader.
-  source = source.replace("const { getPublicBranding } = await import('@hourmere/scheduling')", '')
+  source = source.replace("const { getEmailBranding } = await import('@hourmere/scheduling')", '')
   const deps = {
     brandEmail,
     emailLayout,
-    getPublicBranding,
+    getEmailBranding,
     sql,
     defineJob,
     z,

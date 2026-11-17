@@ -15,7 +15,8 @@ vi.mock('./env.ts', async (importOriginal) => ({
 const BRAND = {
   name: 'Example organization',
   primaryColor: '#5c248a',
-  logoDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+  logoDataUrl: null,
+  logoUrl: `/api/v1/public/branding/example/logo/${'a'.repeat(64)}`,
 }
 const START = '2026-11-02T14:00:00Z'
 const ONE_TIME = 'pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB'
@@ -32,7 +33,7 @@ beforeEach(() => window.history.replaceState(null, '', '/'))
 
 function expectBrand() {
   const logo = screen.getByRole('img', { name: BRAND.name })
-  expect(logo.getAttribute('src')).toBe(BRAND.logoDataUrl)
+  expect(logo.getAttribute('src')).toBe(BRAND.logoUrl)
   expect(logo.getAttribute('width')).toBe('192')
   expect(logo.getAttribute('height')).toBe('64')
   const frame = screen.getByRole('main').parentElement as HTMLElement
@@ -123,7 +124,7 @@ describe('organization branding on public pages', () => {
 
   it.each([
     undefined,
-    { ...BRAND, primaryColor: 'not-a-color', logoDataUrl: 'https://external.example/logo.png' },
+    { ...BRAND, primaryColor: 'not-a-color', logoUrl: 'https://external.example/logo.png' },
   ])('uses the default theme for absent or invalid stored branding', async (branding) => {
     fakeApi({
       'GET /api/v1/public/ada/intro': () => json(200, { ...EVENT, branding }),
