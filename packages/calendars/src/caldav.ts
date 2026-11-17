@@ -34,3 +34,12 @@ export {
   type CalDavResponse,
   type CalDavTransport,
 } from './caldav-transport.ts'
+export { type CalDavWriteClient, createCalDavWriteClient } from './caldav-write-client.ts'
+export { configureCalDavWriteCalendar } from './caldav-write-selection.ts'
+export {
+  type CalDavBookingPayload,
+  type CalDavWritebackDeps,
+  calDavBookingNotifier,
+  writeCalDavBooking,
+} from './caldav-writeback.ts'
+export { calDavBookingJob, createCalDavBookingEnqueuer } from './caldav-writeback-jobs.ts'

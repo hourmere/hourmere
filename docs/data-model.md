@@ -10,6 +10,13 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
+CalDAV's internal write service reuses these targets and mappings: the root booking UUID
+is the stable UID, `external_event_id` is the resource href, and `etag` is the last
+acknowledged strong ETag (null after deletion). Group copies use
+`group_slot_calendar_events`. `calendars.sync_state.caldavWriteback` stores the last
+bounded result and root identity separately from busy sync; successful busy reads retain
+write failures. No new schema is required. See [CalDAV](caldav.md).
+
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
 `period` (`tstzrange`) for a timed event, or `all_day_start` and `all_day_end` (`date`)
 with an exclusive end for an all-day event. The dates are finite, within years 0001–9999,
@@ -204,7 +211,11 @@ Contrast calculations select black or white text with the greater WCAG 2.x ratio
 report the primary colour's ratio against white separately. Public pages, embeds and booking
 email HTML read the owning organization's current brand; personal bookings use the personal
 organization and team bookings use the team. Rendering validates colours again and derives
-accessible theme roles. Logos travel as inline PNG data on pages and CID attachments in mail. See [branding](https://hourmere.com/docs/branding)
+accessible theme roles. Uploads and legacy reads normalize logos to PNG, at most 512 pixels
+on the longest side and 64 KiB. Public pages use organization-scoped, content-hash image
+URLs with immutable cache headers; emails retain bounded CID attachments. No migration
+is needed: legacy stored rows remain readable. Personal home event cards carry their
+owning space's brand and identify team-owned events, matching their booking pages. See [branding](https://hourmere.com/docs/branding)
 for limits and client instructions.
 
 ### `auth` (Better Auth: core + organization + api-key plugins)

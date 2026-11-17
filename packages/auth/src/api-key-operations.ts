@@ -185,6 +185,12 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/profile', 'booking_read', 'key'),
   rest('PUT', '/api/v1/profile', 'other_write', 'key'),
   rest('PATCH', '/api/v1/profile/name', 'other_write', 'key'),
+  rest(
+    'GET',
+    '/api/v1/public/branding/{organizationId}/logo/{hash}',
+    'public_metadata',
+    'public_metadata',
+  ),
   rest('GET', '/api/v1/public/{handle}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/public/{handle}/{slug}', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/public/{handle}/{slug}/bookings', 'booking_write', 'optional_key'),

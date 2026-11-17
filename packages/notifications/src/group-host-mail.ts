@@ -293,9 +293,9 @@ export async function deliverGroupHostMail(
       const remaining = row.lease_until.getTime() - row.wall_now.getTime() - 1_000
       if (remaining <= 0) throw new Error('Slot host mail claim deadline reached')
       const timeout = AbortSignal.timeout(Math.min(60_000, remaining))
-      const { getPublicBranding } = await import('@hourmere/scheduling')
+      const { getEmailBranding } = await import('@hourmere/scheduling')
       await deps.mailer.send(
-        brandEmail(groupHostMessage(row, deps), await getPublicBranding(trx, row.organization_id)),
+        brandEmail(groupHostMessage(row, deps), await getEmailBranding(trx, row.organization_id)),
         {
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         },

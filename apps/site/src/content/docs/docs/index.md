@@ -92,6 +92,7 @@ changed concurrently through the API is preserved. The selected display unit is 
 | Minimum notice | 0–525600 whole minutes |
 | Buffer before / after | 0–1440 whole minutes each |
 | Booking window | 1–3650 whole days, or empty for no limit |
+| Invitee reschedule / cancel deadline | 1–525600 whole minutes each, or empty for no deadline from that setting |
 
 Unit conversion uses 60 minutes per hour and 24 hours per day. The booking window still
 counts calendar days in the host's schedule time zone, including across daylight saving
@@ -102,6 +103,13 @@ a value such as 1 minute to hours may display a rounded decimal, while its exact
 value remains unchanged until you edit it.
 Fractional-day booking windows and sub-minute notice or buffers are not supported.
 Validation uses these stored ranges and shows the permitted range in your selected unit.
+Minimum notice and buffers use elapsed minutes. A 1-day notice means 1440 minutes,
+including on a 23-hour or 25-hour local day; a 1-day booking window instead adds one
+calendar day in the host schedule zone. If that local end time falls in a daylight-saving
+gap, it moves forward by the gap length. Meeting duration is elapsed minutes too.
+The invitee reschedule and cancellation deadline fields remain minute-only inputs; their
+[effective deadline rules](/docs/change-deadlines) are separate from minimum notice,
+which controls the new times offered for booking or rescheduling.
 See [multiple meeting lengths](/docs/multiple-durations) to offer more than one duration.
 
 After saving, use **View and share** to open or copy the saved booking link. Round-robin
@@ -186,8 +194,8 @@ self-hosting and does not change REST, MCP or CLI operations.
   successful ordinary booking wins, and email delivery is not guaranteed.
 - CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
   The [design and internal connection foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
-  includes internal busy-time sync, with no production worker registration, event writes
-  or UI/API/MCP/CLI access. Real-account acceptance
+  includes internal busy-time sync and conditional booking writes, with no production
+  worker registration or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
 - [Paid bookings](/docs/payments) have an internal hold foundation only. Checkout, Stripe
   processing, payment settings and automatic refunds are not available.

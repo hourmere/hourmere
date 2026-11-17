@@ -13,6 +13,7 @@
     "@hourmere/auth": "*",
     "@hourmere/db": "*",
     "@hourmere/jobs": "*",
+    "@hourmere/mail": "*",
     "@hourmere/scheduling": "*",
     "@hourmere/webhooks": "*",
     "kysely": "0.29.7",

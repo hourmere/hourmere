@@ -73,6 +73,23 @@ export const admin = {
 
   '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.':
     '{0} location options are configured. Manage them through REST, MCP or CLI. Saving other fields keeps these options.',
+  'Reset to default': 'Reset to default',
+  'Reset clears the logo and colour when you save branding.':
+    'Reset clears the logo and colour when you save branding.',
+  'Logos are converted to PNG, at most 512 pixels on the longest side and 64 KiB. Smaller images are not enlarged.':
+    'Logos are converted to PNG, at most 512 pixels on the longest side and 64 KiB. Smaller images are not enlarged.',
+  'Booking page preview': 'Booking page preview',
+  'Sample only. Changes apply after saving. Colours adjust in each theme for readable text and controls.':
+    'Sample only. Changes apply after saving. Colours adjust in each theme for readable text and controls.',
+  'Light preview': 'Light preview',
+  'Dark preview': 'Dark preview',
+  'Sample introduction call': 'Sample introduction call',
+  '30 minutes · Online meeting': '30 minutes · Online meeting',
+  'Choose a time that works for you.': 'Choose a time that works for you.',
+  'Button text contrast: {ratio}:1 (minimum 4.5:1).':
+    'Button text contrast: {ratio}:1 (minimum 4.5:1).',
+  'Link contrast: {ratio}:1 (minimum 4.5:1).': 'Link contrast: {ratio}:1 (minimum 4.5:1).',
+  'Displayed accent: {colour}': 'Displayed accent: {colour}',
   'Loading logo preview…': 'Loading logo preview…',
   'Logo preview is unavailable.': 'Logo preview is unavailable.',
   'Saved brand logo': 'Saved brand logo',
@@ -88,10 +105,10 @@ export const admin = {
   'Could not load branding.': 'Could not load branding.',
   'Enter a colour in #RRGGBB format, or leave it empty to clear it.':
     'Enter a colour in #RRGGBB format, or leave it empty to clear it.',
-  'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.':
-    'Choose a PNG, JPEG or WebP image up to 512 KB. SVG is not supported.',
-  'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.':
-    'Choose a valid PNG, JPEG or WebP image up to 512 KB and 2048 × 2048 pixels. SVG and animated images are not supported.',
+  'Choose a PNG, JPEG or WebP image up to 512 KiB. SVG is not supported.':
+    'Choose a PNG, JPEG or WebP image up to 512 KiB. SVG is not supported.',
+  'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.':
+    'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.',
   'Edit branding': 'Edit branding',
   'Primary colour': 'Primary colour',
   'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
