@@ -4277,11 +4277,39 @@ export interface paths {
          */
         get: operations["listSsoProviders"];
         put?: never;
-        post?: never;
+        /**
+         * Create a disabled SSO provider draft
+         * @description Verified team owner/admin browser session with fresh proof only. Secrets are write-only. OIDC and SAML are being built and remain unavailable.
+         */
+        post: operations["createSsoProvider"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/providers/{providerId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Retire an SSO provider
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An authorized repeat retirement is idempotent. SSO remains unavailable.
+         */
+        delete: operations["deleteSsoProvider"];
+        options?: never;
+        head?: never;
+        /**
+         * Update an SSO provider draft
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.
+         */
+        patch: operations["updateSsoProvider"];
         trace?: never;
     };
     "/api/v1/teams/{teamId}/leave": {
@@ -6912,11 +6940,31 @@ export interface components {
              */
             start: string;
         };
+        SsoFreshProofChallenge: components["schemas"]["Error"] & {
+            /** Format: uuid */
+            attemptId?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            proofMethods?: string[];
+        };
         SsoPolicy: {
             admission: string;
             policyRevision: number;
             requireSso: boolean;
             trustGeneration: number;
+        };
+        SsoProviderDraft: {
+            clientId: string | null;
+            displayName: string;
+            enabled: boolean;
+            hasClientSecret: boolean;
+            /** Format: uuid */
+            id: string;
+            issuer: string;
+            protocol: string;
+            revision: number;
+            testStatus: string;
+            validationStatus: string;
         };
         SsoProviderPage: {
             data: {
@@ -14028,6 +14076,304 @@ export interface operations {
                 };
             };
             /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createSsoProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    displayName: string;
+                    domainIds: string[];
+                    oidc?: {
+                        algorithms?: "RS256"[];
+                        /** Format: uri */
+                        authorizationEndpoint?: string;
+                        clientId: string;
+                        clientSecret: string;
+                        /** Format: uri */
+                        issuer: string;
+                        /** Format: uri */
+                        jwksUrl?: string;
+                        /** Format: uri */
+                        tokenEndpoint?: string;
+                    };
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                    /** @enum {string} */
+                    protocol: "oidc" | "saml";
+                    saml?: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Safe provider draft */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        provider: components["schemas"]["SsoProviderDraft"];
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteSsoProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                providerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Provider retired */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        deleted: boolean;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateSsoProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                providerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    displayName?: string;
+                    domainIds?: string[];
+                    expectedRevision: number;
+                    oidc?: {
+                        algorithms?: "RS256"[];
+                        /** Format: uri */
+                        authorizationEndpoint?: string;
+                        clientId?: string;
+                        clientSecret?: string;
+                        /** Format: uri */
+                        issuer?: string;
+                        /** Format: uri */
+                        jwksUrl?: string;
+                        /** Format: uri */
+                        tokenEndpoint?: string;
+                    };
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                    saml?: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Safe provider draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        provider: components["schemas"]["SsoProviderDraft"];
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
             409: {
                 headers: {
                     [name: string]: unknown;
