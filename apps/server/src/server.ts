@@ -143,6 +143,7 @@ import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
@@ -295,6 +296,11 @@ export function productRoutes({
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
+    ssoDomainRoutes({
+      db,
+      publicUrl,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
     ssoDraftRoutes({
       db,
       publicUrl,

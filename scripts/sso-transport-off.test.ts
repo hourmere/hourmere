@@ -1,8 +1,8 @@
-// The SSO transport profile exists with no SSO caller (docs/sso.md, Transport): no production
-// module imports `packages/outbound/src/sso.ts`, and `SSO_PRIVATE_TARGETS` is parsed by the
-// configuration loader and read by nothing else, so the allowlist routes nothing. OIDC and
+// The SSO transport profile is called only by the hard-off domain service for TXT
+// proofs. Only the configuration loader parses `SSO_PRIVATE_TARGETS`, so the allowlist
+// routes nothing. OIDC and
 // SAML stay hard-off (apps/server/src/sso.test.ts starts the server with both settings and a
-// populated allowlist). The first step that calls the profile narrows this to its callers.
+// populated allowlist). HTTP federation transport still has no caller.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -58,7 +58,7 @@ const importsTargets = (file: string, source: string) =>
     (target) => target === TARGETS || target === '@hourmere/outbound/sso-private-targets',
   )
 
-describe('SSO transport has no caller while OIDC and SAML are hard-off', () => {
+describe('SSO transport permits only the hard-off domain TXT caller', () => {
   it('recognises every import form of the profile and nothing else', () => {
     const server = 'apps/server/src/example.ts'
     const outbound = 'packages/outbound/src/example.ts'
@@ -83,7 +83,7 @@ describe('SSO transport has no caller while OIDC and SAML are hard-off', () => {
       expect(importsProfile(file, source), source).toBe(false)
   })
 
-  it('imports the profile from no production module', () => {
+  it('imports the profile only for guarded domain TXT verification', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     // The scan sees the profile, its package and the server, so a caller cannot hide.
@@ -101,7 +101,10 @@ describe('SSO transport has no caller while OIDC and SAML are hard-off', () => {
     const callers = sources.filter((file) =>
       importsProfile(file, readFileSync(new URL(file, root), 'utf8')),
     )
-    expect(callers).toEqual([])
+    expect(callers).toEqual(['apps/server/src/sso-domains.ts'])
+    const domainSource = readFileSync(new URL('apps/server/src/sso-domains.ts', root), 'utf8')
+    expect(domainSource).toContain('resolveSsoDomainTxt')
+    expect(domainSource).not.toContain('sendSsoRequest')
   })
 
   it('reads SSO_PRIVATE_TARGETS only in the configuration loader, and routes nothing with it', () => {

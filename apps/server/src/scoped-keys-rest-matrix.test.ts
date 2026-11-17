@@ -141,6 +141,9 @@ const classes = {
     'POST /api/v1/webhooks/{id}/rotate-secret',
   ],
   session_only: [
+    'POST /api/v1/team/sso/domains',
+    'POST /api/v1/team/sso/domains/{domainId}/verify',
+    'DELETE /api/v1/team/sso/domains/{domainId}',
     'POST /api/v1/team/sso/providers',
     'PATCH /api/v1/team/sso/providers/{providerId}',
     'DELETE /api/v1/team/sso/providers/{providerId}',
@@ -818,14 +821,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 139-operation contract and all 417 scope combinations', () => {
+    it('covers the exact 142-operation contract and all 426 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(139)
-      expect(new Set(ids).size).toBe(139)
+      expect(ids).toHaveLength(142)
+      expect(new Set(ids).size).toBe(142)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(417)
+      expect(cases).toHaveLength(426)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

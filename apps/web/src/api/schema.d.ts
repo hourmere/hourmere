@@ -4261,6 +4261,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/sso/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create or rotate a DNS domain challenge
+         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. OIDC and SAML are being built and remain unavailable.
+         */
+        post: operations["createSsoDomainChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/domains/{domainId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Retire a domain claim
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. SSO remains unavailable.
+         */
+        delete: operations["deleteSsoDomain"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/domains/{domainId}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify an exact domain through trusted DNS
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. SSO remains unavailable.
+         */
+        post: operations["verifySsoDomain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/sso/policy": {
         parameters: {
             query?: never;
@@ -13985,6 +14045,293 @@ export interface operations {
                             owner?: "another_owner_is_needed_before_you_can_leave";
                         };
                     };
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createSsoDomainChallenge: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    domain: string;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description One-time DNS challenge */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        domain: {
+                            generation: number;
+                            /** Format: uuid */
+                            id: string;
+                            name: string;
+                            status: string;
+                        };
+                        /** Format: date-time */
+                        expiresAt: string;
+                        txtName: string;
+                        txtValue: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, sso_configuration_changed or sso_domain_unverified */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteSsoDomain: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                domainId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedGeneration: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Domain retired */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        deleted: boolean;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, sso_configuration_changed or sso_domain_unverified */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    verifySsoDomain: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                domainId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedGeneration: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Safe domain verification status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        domain: {
+                            generation: number;
+                            /** Format: uuid */
+                            id: string;
+                            name: string;
+                            /** Format: date-time */
+                            nextCheckAt: string | null;
+                            status: string;
+                            /** Format: date-time */
+                            verificationExpiresAt: string | null;
+                            /** Format: date-time */
+                            verifiedAt: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, sso_configuration_changed or sso_domain_unverified */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description The API key's rate limit is used up */

@@ -153,9 +153,9 @@ function isSlackDestinationPath(path: string): boolean {
   return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
 }
 
-/** Provider writes carry replacement credentials, including arbitrary invalid input keys. */
-function isSsoProviderPath(path: string): boolean {
-  return /^\/api\/v1\/team\/sso\/providers(?:\/|$)/i.test(path)
+/** SSO trust writes carry credentials and proof material, including arbitrary invalid input keys. */
+function isSsoTrustPath(path: string): boolean {
+  return /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path)
 }
 
 /** Admission bodies carry private contacts and arbitrary keys can themselves contain PII. */
@@ -177,7 +177,7 @@ function isWaitlistEntryPath(path: string): boolean {
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
-  if (isSsoProviderPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
+  if (isSsoTrustPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
@@ -367,7 +367,7 @@ const requestLogger = createMiddleware(async (c, next) => {
   if (
     !isOneTimeLinkPath(c.req.path) &&
     !isSlackDestinationPath(c.req.path) &&
-    !isSsoProviderPath(c.req.path)
+    !isSsoTrustPath(c.req.path)
   )
     return ordinaryRequestLogger(c, next)
   await next()
@@ -400,7 +400,7 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
-    const text = isSsoProviderPath(c.req.path)
+    const text = isSsoTrustPath(c.req.path)
       ? '[private SSO diagnostic omitted]'
       : isSlackDestinationPath(c.req.path)
         ? '[private Slack diagnostic omitted]'
@@ -411,7 +411,7 @@ export function createApp({
       ? '/book/[redacted]'
       : isOneTimeLinkPath(c.req.path) ||
           isSlackDestinationPath(c.req.path) ||
-          isSsoProviderPath(c.req.path)
+          isSsoTrustPath(c.req.path)
         ? routePath(c)
         : c.req.path
     const message = c.req.path.includes('/provisioning-tokens')
@@ -460,7 +460,7 @@ export function createApp({
           !isOneTimeLinkPath(c.req.path) &&
           !isWaitlistAdmissionPath(c.req.path) &&
           !isSlackDestinationPath(c.req.path) &&
-          !isSsoProviderPath(c.req.path)
+          !isSsoTrustPath(c.req.path)
           ? { error, message: err.message }
           : { error },
         err.status,
@@ -488,7 +488,7 @@ export function createApp({
         ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail &&
           !isOneTimeLinkPath(c.req.path) &&
-          !isSsoProviderPath(c.req.path) && { message: err.detail }),
+          !isSsoTrustPath(c.req.path) && { message: err.detail }),
         ...(err.code === 'one_time_link_already_created' &&
           /\/one-time-links(?:\/|$)/i.test(c.req.path) && {
             message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,

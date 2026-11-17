@@ -142,7 +142,11 @@ export async function listSsoProviders(
           name: d.name,
           generation: d.generation,
           status: !d.verified_at
-            ? 'pending'
+            ? d.last_check_outcome === 'unknown'
+              ? 'unknown'
+              : d.last_check_outcome === 'failed'
+                ? 'failed'
+                : 'pending'
             : !d.verification_expires_at || new Date(d.verification_expires_at).getTime() <= now
               ? 'expired'
               : d.last_check_outcome === 'positive'

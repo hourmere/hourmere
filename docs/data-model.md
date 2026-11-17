@@ -990,6 +990,9 @@ providers and the shared fresh-proof gate reads policies. The draft-read service
 reads an explicit safe projection of providers and policies for current team owners/admins;
 it never opens sealed configuration or reads identity links. Browser-only provider draft writes
 use the fresh-proof gate, seal each new revision, and audit changes transactionally.
+Browser-only domain challenge, verification and retirement also use that gate, store only
+bound TXT digests and serialize exact-domain authority changes with the domain lock;
+pending challenges never reserve the name.
 OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 
