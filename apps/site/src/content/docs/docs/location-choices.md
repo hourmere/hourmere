@@ -86,7 +86,10 @@ Public discovery exposes only option IDs, kinds, public labels, the default mark
 whether a phone number is required. Host numbers, addresses, saved URLs and connected
 account details are not exposed before booking. Treat labels as public content.
 
-| Option | Before booking | Confirmation, email and calendar invitation (ICS) |
+The saved details below appear in the booking confirmation, emails and calendar
+invitations (ICS), subject to the recipient-specific phone rules.
+
+| Option | Before booking | After booking |
 |---|---|---|
 | In person | Kind and optional public label | Saved address |
 | Invitee calls host | Phone kind and optional public label; no host number | Host number and call instructions |
