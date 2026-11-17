@@ -26,6 +26,7 @@ const STORAGE_LAYER =
 const ERROR_RECOGNISER = 'apps/server/src/sso-storage-errors.ts'
 // The production modules that own SSO data access, each with the only tables it may name.
 const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
+  'apps/server/src/sso-domains.ts': ['sso_domains'],
   'apps/server/src/sso-drafts.ts': [
     'sso_providers',
     'sso_provider_domains',

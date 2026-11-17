@@ -104,6 +104,24 @@ const GUARDED_SSO_READS = [
 const GUARDED_SSO_DRAFT_WRITES = [
   {
     method: 'post',
+    path: '/api/v1/team/sso/domains',
+    runtimePath: '/api/v1/team/sso/domains',
+    operationId: 'createSsoDomainChallenge',
+  },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/domains/{domainId}/verify',
+    runtimePath: '/api/v1/team/sso/domains/:domainId/verify',
+    operationId: 'verifySsoDomain',
+  },
+  {
+    method: 'delete',
+    path: '/api/v1/team/sso/domains/{domainId}',
+    runtimePath: '/api/v1/team/sso/domains/:domainId',
+    operationId: 'deleteSsoDomain',
+  },
+  {
+    method: 'post',
     path: '/api/v1/team/sso/providers',
     runtimePath: '/api/v1/team/sso/providers',
     operationId: 'createSsoProvider',
@@ -596,11 +614,14 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
             {},
             { origin: 'https://attacker.example', authorization: 'Bearer hm_x', cookie: 'a=b' },
           ]) {
-            const response = await app.request(write.path.replace('{providerId}', providerId), {
-              method: write.method.toUpperCase(),
-              headers,
-              body: '{invalid-json',
-            })
+            const response = await app.request(
+              write.path.replace('{providerId}', providerId).replace('{domainId}', providerId),
+              {
+                method: write.method.toUpperCase(),
+                headers,
+                body: '{invalid-json',
+              },
+            )
             expect(response.status).toBe(404)
             expect(await response.json()).toEqual({ error: 'sso_disabled' })
           }
