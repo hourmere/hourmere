@@ -84,6 +84,9 @@ const restContract = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   session_only: [
+    'POST /api/v1/team/sso/domains',
+    'POST /api/v1/team/sso/domains/{domainId}/verify',
+    'DELETE /api/v1/team/sso/domains/{domainId}',
     'POST /api/v1/team/sso/providers',
     'PATCH /api/v1/team/sso/providers/{providerId}',
     'DELETE /api/v1/team/sso/providers/{providerId}',
