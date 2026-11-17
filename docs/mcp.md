@@ -184,6 +184,41 @@ apply migrations and restart every role with the new code before allowing scoped
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
 
+## Manage hosted bookings
+
+`list_bookings` (CLI `list`) reads only bookings hosted by the caller in the acting
+organization, including for a team administrator. `q` searches literal substrings of the
+booker's name/email or current event-type title; it excludes guests, answers and notes.
+Case follows the database locale; accents are not folded. Queries are trimmed, bounded to
+100 UTF-16 code units, and reject controls. `%`, `_` and `\` match themselves.
+Use `status: "cancelled"` for cancelled records, including rescheduled predecessors;
+omission includes confirmed and cancelled records. Start time and ID determine order
+(`asc` by default); use `order: "desc"` to reverse both. Follow `nextCursor` as `cursor`
+with unchanged filters. Pages are live, not a snapshot, and export does not accept `q`.
+
+`request_reschedule` takes `bookingId`, a UUID `idempotencyKey` and optional plain-text
+`note` (up to 2000 UTF-16 code units). The host needs `bookings` or `full` scope. The same
+key and normalized body replay without another request; a new key replaces it. The original
+booking stays confirmed and blocks its time until moved or cancelled. Expiry is the earliest
+of 48 elapsed hours, the meeting start and its effective invitee reschedule deadline. A new
+request at or after that deadline is refused. Imported records and group seats are unsupported.
+
+Answer with `reschedule_booking` or `cancel_booking`, using `manageToken` and
+`rescheduleRequestId`. An identical answer replays safely; a repeated pick returns its saved
+successor with `manageToken: null`. Preserve the existing emailed link. A different picked time, the
+opposite action, or a replaced or expired request returns `reschedule_request_changed`.
+Cancellation replay preserves the original reason even if a retry changes it. MCP and CLI have no
+invitee management-token read; REST `GET /api/v1/bookings/manage` and the emailed page
+explain the request state. Ordinary moves without a request ID should not be retried
+automatically. Host moves and cancellations use `bookingId`, require actual host authority,
+and bypass invitee deadlines, but still enforce other booking rules.
+See [reschedule requests](https://hourmere.com/docs/request-reschedule) and
+[booking management](https://hourmere.com/docs#review-bookings).
+
+中文：列表只返回当前组织中你主持的预约；姓名、邮箱和当前活动标题支持部分文字搜索，
+但不折叠重音。分页时保留筛选条件。改期请求保留原时段，截止后不会自动取消预约。
+重试请求保留原幂等键和正文；受邀人回答需携带 `rescheduleRequestId` 才有对应的安全重放语义。
+
 ## Generate open-time email snippets
 
 Call `generate_open_time_snippet` with exactly one of `eventTypeId` or `slug`, required

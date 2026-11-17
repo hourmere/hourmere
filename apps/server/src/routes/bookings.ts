@@ -365,7 +365,7 @@ export const ListBookingsQuery = z.object({
     .refine((value) => !/\p{Cc}/u.test(value), 'q must not contain control characters')
     .optional()
     .openapi({
-      description: `Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most ${MAX_SEARCH_LENGTH} characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages.`,
+      description: `Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case but not accents (Jose does not match José). Guests and answers are not searched. Trimmed; at most ${MAX_SEARCH_LENGTH} characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages.`,
     }),
   limit: z.coerce
     .number()
@@ -769,6 +769,8 @@ export function bookingRoutes({
         path: '/api/v1/bookings/manage/cancel',
         operationId: 'cancelManagedBooking',
         summary: 'Cancel with the manage token',
+        description:
+          'When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.',
         middleware: manageLimit,
         request: {
           headers: ManageToken,
@@ -804,7 +806,7 @@ export function bookingRoutes({
         operationId: 'rescheduleManagedBooking',
         summary: 'Reschedule with the manage token',
         description:
-          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.',
+          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.',
         middleware: manageLimit,
         request: {
           headers: ManageToken.extend({

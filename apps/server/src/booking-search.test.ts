@@ -5,6 +5,7 @@ import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runCli } from '../../../tools/cli/src/cli.ts'
@@ -35,9 +36,14 @@ describe.skipIf(!serverUrl)('booking search through REST, MCP and CLI', () => {
     | 'strangerAda'
     | 'teamAda'
     | 'teamCancelled'
-    | 'teamOther',
+    | 'teamOther'
+    | 'accent'
+    | 'plainAccent'
+    | 'scopePersonal'
+    | 'scopeTeam',
     string
   >
+  let tiedIds: string[]
   let tokens: Record<'host' | 'stranger' | 'ownerKey' | 'ownerSession' | 'memberSession', string>
 
   beforeAll(async () => {
@@ -105,7 +111,20 @@ describe.skipIf(!serverUrl)('booking search through REST, MCP and CLI', () => {
         status: 'cancelled',
       }),
       teamOther: await book(team.id, owner.id, at(5, 11), 'Someone Else'),
+      accent: await book(personal, host.id, at(6, 9), 'Renée Müller'),
+      plainAccent: await book(personal, host.id, at(6, 10), 'Renee Muller'),
+      scopePersonal: await book(personal, host.id, at(6, 11), 'Scope sentinel'),
+      scopeTeam: await book(team.id, host.id, at(6, 12), 'Scope sentinel'),
     }
+
+    // Cancelled meetings can share one host and exact start without occupying the slot.
+    tiedIds = []
+    for (let i = 0; i < 4; i++) {
+      tiedIds.push(
+        await book(personal, host.id, at(7, 9), `Tied invitee ${i}`, { status: 'cancelled' }),
+      )
+    }
+    tiedIds.sort()
 
     const key = (principal: Principal) => {
       const token = `hm_${randomUUID()}`
@@ -158,10 +177,45 @@ describe.skipIf(!serverUrl)('booking search through REST, MCP and CLI', () => {
       const params = new URLSearchParams({ ...query, limit: '1', ...(cursor ? { cursor } : {}) })
       const { status, body } = await rest(`${path}?${params}`, token)
       expect(status, JSON.stringify(body)).toBe(200)
-      seen.push(...body.data.map((booking) => booking.id))
+      for (const row of body.data) {
+        expect(seen).not.toContain(row.id)
+        seen.push(row.id)
+      }
       cursor = body.nextCursor
     } while (cursor)
     return seen
+  }
+
+  /** Exercise MCP transport/tool validation directly, separately from the CLI adapter. */
+  async function mcpPages(input: Record<string, unknown>, token = tokens.host) {
+    const client = new Client({ name: 'search-acceptance', version: '1.0.0' })
+    try {
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(`${PUBLIC_URL}/mcp`), {
+          fetch: async (url, init) => app.request(url, init),
+          requestInit: { headers: { authorization: `Bearer ${token}` } },
+        }),
+      )
+      const seen: string[] = []
+      let cursor: string | null = null
+      do {
+        const result = await client.callTool({
+          name: 'list_bookings',
+          arguments: { ...input, limit: 1, ...(cursor ? { cursor } : {}) },
+        })
+        expect(result.isError, JSON.stringify(result.content)).toBeFalsy()
+        const page = result.structuredContent as Page
+        expect(page.data.length).toBeLessThanOrEqual(1)
+        for (const row of page.data) {
+          expect(seen).not.toContain(row.id)
+          seen.push(row.id)
+        }
+        cursor = page.nextCursor
+      } while (cursor)
+      return seen
+    } finally {
+      await client.close()
+    }
   }
 
   async function cli(input: Record<string, unknown>, token = tokens.host) {
@@ -206,12 +260,20 @@ describe.skipIf(!serverUrl)('booking search through REST, MCP and CLI', () => {
 
   it('returns the same cancelled view and search results through REST, MCP and CLI', async () => {
     const cases: [Record<string, string>, string[]][] = [
-      [{ status: 'cancelled' }, [ids.adaCancelled, ids.otherCancelled]],
+      [{ status: 'cancelled' }, [ids.adaCancelled, ids.otherCancelled, ...tiedIds]],
       [{ q: 'ada' }, [ids.ada, ids.adaCancelled]],
       [{ q: 'ADA', status: 'cancelled' }, [ids.adaCancelled]],
       [{ q: 'ada', status: 'confirmed' }, [ids.ada]],
       [{ q: 'strategy session' }, [ids.strategy]],
       [{ q: 'GRACE.HOPPER@EXAMPLE' }, [ids.strategy]],
+      [{ q: 'lovela' }, [ids.ada]],
+      [{ q: 'king@EXAMPLE' }, [ids.adaCancelled]],
+      [{ q: 'king@EXAMPLE', status: 'cancelled' }, [ids.adaCancelled]],
+      [{ q: 'RENÉE' }, [ids.accent]],
+      [{ q: 'müll' }, [ids.accent]],
+      // Search ignores case but does not strip accents.
+      [{ q: 'renee' }, [ids.plainAccent]],
+      [{ q: 'muller' }, [ids.plainAccent]],
       [{ q: '100%' }, [ids.percent]],
       [{ q: '%' }, [ids.percent]],
       [{ q: '  club ' }, [ids.percent, ids.lookalike]],
@@ -220,11 +282,32 @@ describe.skipIf(!serverUrl)('booking search through REST, MCP and CLI', () => {
     ]
     for (const [query, expected] of cases) {
       expect(await restPages('/api/v1/bookings', query), JSON.stringify(query)).toEqual(expected)
+      expect(await mcpPages(query), JSON.stringify(query)).toEqual(expected)
       expect(await cliPages(query), JSON.stringify(query)).toEqual(expected)
     }
     // Statuses in the cancelled view really are cancelled.
     const { body } = await rest('/api/v1/bookings?status=cancelled', tokens.host)
-    expect(body.data.map((booking) => booking.status)).toEqual(['cancelled', 'cancelled'])
+    expect(body.data.map((booking) => booking.status)).toEqual(Array(6).fill('cancelled'))
+  })
+
+  it('paginates equal start times without gaps or duplicates in both directions', async () => {
+    for (const order of ['asc', 'desc'] as const) {
+      const query = { q: 'TIED INVITEE', status: 'cancelled', order }
+      const expected = order === 'asc' ? tiedIds : [...tiedIds].reverse()
+      expect(await restPages('/api/v1/bookings', query)).toEqual(expected)
+      expect(await mcpPages(query)).toEqual(expected)
+      expect(await cliPages(query)).toEqual(expected)
+    }
+  })
+
+  it('does not return another organization’s matching booking even for the same host', async () => {
+    const query = { q: 'scope sentinel' }
+    expect(await restPages('/api/v1/bookings', query)).toEqual([ids.scopePersonal])
+    expect(await mcpPages(query)).toEqual([ids.scopePersonal])
+    expect(await cliPages(query)).toEqual([ids.scopePersonal])
+    expect(await restPages('/api/v1/team/bookings', query, tokens.ownerSession)).toEqual([
+      ids.scopeTeam,
+    ])
   })
 
   it('refuses a search that is too long or has control characters on every interface', async () => {

@@ -119,6 +119,27 @@ configuration remain unavailable in the editor, as described below.
 
 ## Review bookings
 
+Choose **Upcoming**, **Past** or **Cancelled**. Upcoming includes meetings still in
+progress (their end is after the time the view opened), in ascending start order. Past
+uses end times at or before that instant, newest start first. These two time views also
+include cancelled bookings. Cancelled shows only cancelled records at any date, newest
+start first, including the old records of rescheduled meetings. **Rescheduled** and
+**View rescheduled booking** distinguish an accessible successor from an ordinary
+cancellation. Equal start times are ordered by booking ID. Use **Load more** for later pages.
+
+**Search bookings** matches part of the booker's name or email, or the current event-type
+title. It ignores case according to the database locale, but does not fold accents:
+`Jose` does not match `José`. It does not search guests, answers, notes or deleted event
+titles. Search runs after a brief typing pause or immediately on Enter; Escape clears it.
+The search follows you between views and is saved in the URL. It searches all matching
+bookings you host in the current space, not just loaded rows. Text is limited to 100
+UTF-16 code units; `%`, `_` and `\` are literal characters. CSV export is offered only
+without a search because exports do not accept the search filter.
+
+中文：**即将到来**和**过去**按结束时间分组，也包含已取消的预约；**已取消**只显示取消记录，
+包括改期前的旧记录。搜索支持预约人的姓名、邮箱和当前活动标题的部分文字，不搜索同行者、
+回答或备注。大小写按数据库区域设置忽略，但重音符号不折叠；切换视图保留搜索条件。
+
 In **Bookings**, select an event title to open its detail. On wide screens the detail
 slides in from the right over the list; on phones it replaces the list as an ordinary page,
 with the app navigation still available. **Team bookings**
@@ -146,6 +167,26 @@ check still runs when selecting a booking, and writes recheck its current state.
 Direct links retain all existing access checks; unavailable bookings show the
 usual error without discarding the retained list. This interface is included in
 self-hosting and does not change REST, MCP or CLI operations.
+
+### Cancel or move a booking
+
+Open a future confirmed booking you host, then use **Reschedule**, **Request reschedule**
+or **Cancel booking** in its detail. A direct move checks available times and creates a
+replacement booking; the original becomes cancelled. A request instead leaves the original
+time booked while the invitee decides; see [requests and expiry](/docs/request-reschedule).
+Cancellation accepts an optional reason and sends the usual cancellation notifications.
+These actions are unavailable for imported read-only records and after the meeting starts.
+Host moves and cancellations bypass invitee [change deadlines](/docs/change-deadlines),
+but requests cannot be sent after the effective invitee reschedule deadline.
+
+Attendance is separate: after the scheduled start, mark or clear each attendee's no-show
+in the row or detail. It is private and sends no email; see [no-shows](/docs/no-shows).
+Team owners/admins use the team view's limited actions; team administration alone does
+not grant host rescheduling or reschedule-request authority through REST, MCP or CLI.
+
+中文：主持人可在未来且已确认的预约详情中直接改期、请求受邀人另选时间或取消预约。
+直接改期会创建替代预约；改期请求在受邀人回答前保留原时段。缺席标记是开始后的私人管理记录，
+不会发送邮件，也不会取消预约。导入记录仍需在原系统管理。
 
 ## Known limitations
 
