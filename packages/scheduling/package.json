@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./meeting-poll-delivery": "./src/meeting-poll-delivery.ts",
     "./errors": "./src/errors.ts",
     "./text": "./src/text.ts",
     "./conferences": "./src/conferences.ts",

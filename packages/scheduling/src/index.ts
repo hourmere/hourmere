@@ -187,6 +187,7 @@ export {
   listManagedSlots,
   type ManagedBooking,
 } from './manage.ts'
+export { expireMeetingPollCapabilities } from './meeting-poll-capability-expiry.ts'
 export {
   cleanupMeetingPolls,
   type MeetingPollCleanupOptions,

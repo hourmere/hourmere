@@ -46,7 +46,7 @@ import {
   paymentHoldsExpiryJob,
   routingRetentionJob,
 } from '@hourmere/jobs'
-import { meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
+import { meetingPollCapabilityExpiryJob, meetingPollCleanupJob } from '@hourmere/jobs/meeting-polls'
 import { waitlistMaintenanceJobs } from '@hourmere/jobs/waitlist'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
@@ -55,11 +55,13 @@ import {
   conferenceNotificationDispatchJob,
   createInvitationEmailDispatcher,
   createInvitationEmailRepairer,
+  createMeetingPollEmailWorker,
   createWaitlistEmailWorker,
   groupHostMailJob,
   type InvitationEmailQueue,
   invitationEmailJob,
   invitationEmailRepairJob,
+  meetingPollEmailJob,
   notificationEmailCleanupJob,
   queuedSignInEmail,
   repairScheduledBookingEmails,
@@ -78,6 +80,7 @@ import {
   cleanupMeetingPolls,
   cleanupWaitlist,
   ensureWaitlistKey,
+  expireMeetingPollCapabilities,
   expirePaymentHolds,
   purgeAuditEvents,
   removeWaitlist,
@@ -800,6 +803,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
     log: (line) => console.info(line),
   })
+  const runMeetingPollEmail = createMeetingPollEmailWorker({
+    ...notificationDeps,
+    meetingPollSecret: config.BETTER_AUTH_SECRET,
+    smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
+    log: (line) => console.info(line),
+  })
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
@@ -810,6 +819,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           jobs.enqueue('waitlist-cleanup-v1', {}, { singletonKey: 'continuation' }),
       }),
       waitlistEmailJob(runWaitlistEmail),
+      meetingPollEmailJob(runMeetingPollEmail),
+      meetingPollCapabilityExpiryJob({
+        cleanup: () => expireMeetingPollCapabilities(db, config.BETTER_AUTH_SECRET),
+        continueCleanup: (): Promise<string | null> =>
+          jobs.enqueue('meeting-poll-capability-expiry-v1', {}, { singletonKey: 'continuation' }),
+      }),
       // No installation booking-data retention exists yet, so terminal polls stay until
       // explicit poll, linked-booking or organization deletion (docs/meeting-polls.md).
       meetingPollCleanupJob({

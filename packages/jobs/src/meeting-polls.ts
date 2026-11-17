@@ -29,3 +29,14 @@ export function meetingPollCleanupJob(handlers: {
     },
   })
 }
+
+/** Hourly bounded ciphertext expiry; uses the same page and shutdown budget as cleanup. */
+export function meetingPollCapabilityExpiryJob(handlers: {
+  cleanup: () => Promise<{ more: boolean }>
+  continueCleanup?: (() => Promise<unknown>) | undefined
+}) {
+  return {
+    ...meetingPollCleanupJob(handlers),
+    name: 'meeting-poll-capability-expiry-v1' as const,
+  }
+}

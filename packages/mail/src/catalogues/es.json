@@ -107,5 +107,12 @@
   "rescheduleRequest.expiredSubject": "Solicitud de cambio de horario vencida: {event}",
   "rescheduleRequest.expiredIntroduction": "{invitee} no eligió un nuevo horario antes de que venciera la solicitud. La reserva original se mantiene.",
   "replyNotice.plain": "Las respuestas a este correo electrónico no se entregan a los anfitriones.",
-  "replyNotice.manageLinks": "Las respuestas a este correo electrónico no se entregan a los anfitriones. Para reprogramar o cancelar, utilice los enlaces de este correo."
+  "replyNotice.manageLinks": "Las respuestas a este correo electrónico no se entregan a los anfitriones. Para reprogramar o cancelar, utilice los enlaces de este correo.",
+  "poll.verify.subject": "Verifica tu correo para {poll}",
+  "poll.vote.subject": "Ver encuesta de reunión: {poll}",
+  "poll.verify.body": "Confirma tu dirección de correo para participar en {poll}.",
+  "poll.vote.body": "Usa tu enlace privado para participar en {poll}.",
+  "poll.expiry": "Este enlace es válido hasta {expiry}.",
+  "poll.confirm": "Abrir este enlace no confirma tu correo ni envía un voto.",
+  "poll.optout": "Dejar de recibir recordatorios de esta encuesta."
 }

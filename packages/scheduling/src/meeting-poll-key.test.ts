@@ -764,11 +764,12 @@ function verifyEveryServiceFenced(modules: { file: string; source: string }[]) {
 }
 
 // The fence names that production code may use, and where: the generated table types, the
-// storage test support and the meeting-poll services. The transport step that supplies the
-// secret adds its server start (and its workers) here when it wires the startup check.
+// storage test support, the meeting-poll services and the internal meeting-poll mail workers.
+// The transport step that supplies the secret adds its server start here when it wires the
+// startup check.
 const FENCE_NAMES = /ensureMeetingPollKey|MeetingPollKeyMismatchError|meeting[-_]poll[-_]key/i
 const FENCE_USERS =
-  /^packages\/(db\/src\/(tables|meeting-poll-key-state-[a-z]+)\.ts|scheduling\/src\/meeting-poll-[a-z-]+\.ts)$/
+  /^packages\/(db\/src\/(tables|meeting-poll-key-state-[a-z]+)\.ts|scheduling\/src\/meeting-poll-[a-z-]+\.ts|notifications\/src\/meeting-polls\.ts)$/
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {

@@ -107,5 +107,12 @@
   "rescheduleRequest.expiredSubject": "Terminänderungsanfrage abgelaufen: {event}",
   "rescheduleRequest.expiredIntroduction": "{invitee} hat vor Ablauf der Anfrage keinen neuen Termin gewählt. Die ursprüngliche Buchung bleibt bestehen.",
   "replyNotice.plain": "Antworten auf diese E-Mail werden nicht an die gastgebenden Personen zugestellt.",
-  "replyNotice.manageLinks": "Antworten auf diese E-Mail werden nicht an die gastgebenden Personen zugestellt. Um den Termin zu verschieben oder zu stornieren, verwenden Sie die Links in dieser E-Mail."
+  "replyNotice.manageLinks": "Antworten auf diese E-Mail werden nicht an die gastgebenden Personen zugestellt. Um den Termin zu verschieben oder zu stornieren, verwenden Sie die Links in dieser E-Mail.",
+  "poll.verify.subject": "E-Mail für {poll} bestätigen",
+  "poll.vote.subject": "Terminabstimmung ansehen: {poll}",
+  "poll.verify.body": "Bestätigen Sie Ihre E-Mail-Adresse, um an {poll} teilzunehmen.",
+  "poll.vote.body": "Verwenden Sie Ihren privaten Link, um an {poll} teilzunehmen.",
+  "poll.expiry": "Dieser Link ist bis {expiry} gültig.",
+  "poll.confirm": "Das Öffnen dieses Links bestätigt weder Ihre E-Mail-Adresse noch gibt es eine Stimme ab.",
+  "poll.optout": "Erinnerungs-E-Mails für diese Abstimmung abbestellen."
 }
