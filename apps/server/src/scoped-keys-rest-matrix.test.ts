@@ -120,6 +120,7 @@ const classes = {
     'PATCH /api/v1/calendars/{id}',
     'POST /api/v1/calendars/{id}/sync',
     'POST /api/v1/event-types',
+    'POST /api/v1/event-types/{id}/duplicate',
     'DELETE /api/v1/event-types/{id}',
     'PATCH /api/v1/event-types/{id}',
     'PUT /api/v1/event-types/{id}/notifications',
@@ -617,7 +618,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
             .set({ scheduling_type: 'round_robin' })
             .where('id', '=', id)
             .execute()
-        else if (method === 'POST') {
+        else if (method === 'POST' && template.endsWith('/duplicate')) {
+          payload = {}
+          expectedStatus = 201
+        } else if (method === 'POST') {
           payload = {
             slug: nonce,
             title: 'Matrix event',
@@ -807,14 +811,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 135-operation contract and all 405 scope combinations', () => {
+    it('covers the exact 136-operation contract and all 408 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(135)
-      expect(new Set(ids).size).toBe(135)
+      expect(ids).toHaveLength(136)
+      expect(new Set(ids).size).toBe(136)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(405)
+      expect(cases).toHaveLength(408)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

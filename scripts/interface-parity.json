@@ -1,4 +1,5 @@
 {
+  "duplicateEventType": { "mcp": "duplicate_event_type", "cli": "duplicate-event" },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
   "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },
