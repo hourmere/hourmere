@@ -66,22 +66,28 @@ const all = [
   'delete_workflow',
   'list_workflows',
   'get_workflow',
+  'list_sso_providers',
+  'get_sso_policy',
   'list_routing_forms',
   'get_routing_form',
   'create_routing_form',
   'update_routing_form',
   'archive_routing_form',
 ]
-// In the catalog but not available: never listed, and a direct call that passes the scope
-// check answers workflows_disabled without reaching its handler.
+// Hidden catalog entries never reach handlers. Workflows check scope first; SSO
+// answers sso_disabled before scope or arguments while both protocols are hard-off.
+const ssoUnavailable = new Set(['list_sso_providers', 'get_sso_policy'])
 const unavailable = new Set([
   'create_workflow',
   'update_workflow',
   'delete_workflow',
   'list_workflows',
   'get_workflow',
+  ...ssoUnavailable,
 ])
-const disabled = { error: 'workflows_disabled' }
+const disabled = (name: string) => ({
+  error: ssoUnavailable.has(name) ? 'sso_disabled' : 'workflows_disabled',
+})
 // Full scope only: audit reads reveal who did what (see api-key-operations.ts).
 const auditReads = new Set(['list_audit_events', 'get_audit_log_settings'])
 const configurationWrites = new Set([
@@ -136,6 +142,8 @@ const otherReads = new Set([
   'list_one_time_links',
   'list_workflows',
   'get_workflow',
+  'list_sso_providers',
+  'get_sso_policy',
 ])
 // Read-only diagnostics that can reveal busy timings: full keys only.
 const fullOnlyReads = new Set(['troubleshoot_availability'])
@@ -297,9 +305,12 @@ describe('MCP scoped discovery and dispatch', () => {
           tool.run.mockClear()
           const { res, message } = await rpc(tool.name, scope, era, {}, target)
           expect(res.status, `${scope}/${era}/${tool.name}`).toBe(200)
-          if (expected(scope).includes(tool.name) && unavailable.has(tool.name)) {
+          if (
+            (expected(scope).includes(tool.name) && unavailable.has(tool.name)) ||
+            ssoUnavailable.has(tool.name)
+          ) {
             expect(message.result.isError, `${scope}/${tool.name}`).toBe(true)
-            expect(textOf(message.result)).toEqual(disabled)
+            expect(textOf(message.result)).toEqual(disabled(tool.name))
             expect(tool.run).not.toHaveBeenCalled()
           } else if (expected(scope).includes(tool.name)) {
             expect(message.result.isError, `${scope}/${tool.name}`).toBeFalsy()
@@ -363,8 +374,11 @@ describe('MCP scoped discovery and dispatch', () => {
               throw Error('Unexpected tool error')
             },
           )
-          if (expected(scope).includes(tool.name) && unavailable.has(tool.name)) {
-            expect(textOf(result as { content: { text: string }[] })).toEqual(disabled)
+          if (
+            (expected(scope).includes(tool.name) && unavailable.has(tool.name)) ||
+            ssoUnavailable.has(tool.name)
+          ) {
+            expect(textOf(result as { content: { text: string }[] })).toEqual(disabled(tool.name))
             expect(tool.run).not.toHaveBeenCalled()
           } else if (expected(scope).includes(tool.name)) expect(tool.run).toHaveBeenCalledTimes(1)
           else {
@@ -490,6 +504,8 @@ describe('CLI scope parity', () => {
     ['workflows create', 'create_workflow'],
     ['workflows list', 'list_workflows'],
     ['workflows get', 'get_workflow'],
+    ['sso providers list', 'list_sso_providers'],
+    ['sso policy', 'get_sso_policy'],
     ['routing-forms list', 'list_routing_forms'],
     ['routing-forms get', 'get_routing_form'],
     ['routing-forms create', 'create_routing_form'],
@@ -521,10 +537,10 @@ describe('CLI scope parity', () => {
         })
         expect(fetcher).toHaveBeenCalledTimes(1)
         expect((stdout + stderr).includes(key)).toBe(false)
-        if (expected(scope).includes(name) && unavailable.has(name)) {
+        if ((expected(scope).includes(name) && unavailable.has(name)) || ssoUnavailable.has(name)) {
           expect(code, `${scope}/${command}`).toBe(1)
           expect(stdout).toBe('')
-          expect(JSON.parse(stderr)).toMatchObject(disabled)
+          expect(JSON.parse(stderr)).toMatchObject(disabled(name))
         } else if (expected(scope).includes(name)) {
           expect(code, `${scope}/${command}`).toBe(0)
           expect(JSON.parse(stdout)).toEqual({ dispatched: name })

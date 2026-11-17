@@ -12,6 +12,8 @@ import {
 } from './client.ts'
 
 export const COMMANDS = {
+  'sso providers list': 'list_sso_providers',
+  'sso policy': 'get_sso_policy',
   'routing-forms list': 'list_routing_forms',
   'routing-forms get': 'get_routing_form',
   'routing-forms create': 'create_routing_form',
@@ -76,6 +78,8 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
+       hourmere sso providers list [--input FILE|-] [--url ORIGIN]
+       hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive [--input FILE|-] [--url ORIGIN]
        hourmere workflows list|get|create|update|delete [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
@@ -94,6 +98,8 @@ Commands: whoami, profile, catalog, event, create-event, update-event,
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
+SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
+     with read/full scope. SSO is being built and is not available yet: sso_disabled.
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
            workflows update (id, expectedRevision, and changed definition fields).
@@ -160,14 +166,18 @@ function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
-    first === 'one-time-links' ||
-    first === 'branding' ||
-    first === 'slack' ||
-    first === 'workflows' ||
-    first === 'routing-forms' ||
-    first === 'audit-log'
-      ? `${first} ${parts.shift() ?? ''}`
-      : first
+    first === 'sso'
+      ? parts[0] === 'providers'
+        ? `${first} ${parts.shift()} ${parts.shift() ?? ''}`
+        : `${first} ${parts.shift() ?? ''}`
+      : first === 'one-time-links' ||
+          first === 'branding' ||
+          first === 'slack' ||
+          first === 'workflows' ||
+          first === 'routing-forms' ||
+          first === 'audit-log'
+        ? `${first} ${parts.shift() ?? ''}`
+        : first
   const rest = parts
   if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
     throw new CliError('invalid_command')
