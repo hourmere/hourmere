@@ -777,6 +777,8 @@ describe('CLI transport and arguments', () => {
     ['reschedule', 'reschedule_booking'],
     ['request-reschedule', 'request_reschedule'],
     ['cancel', 'cancel_booking'],
+    ['group-attendees', 'get_group_occurrence_attendees'],
+    ['cancel-group', 'cancel_group_occurrence'],
     ['retry-meeting', 'retry_conference'],
     ['retry-calendar-copy', 'retry_calendar_copy'],
     ['set-no-show', 'set_attendee_no_show'],

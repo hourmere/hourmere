@@ -330,7 +330,7 @@ describe.skipIf(!process.env.DATABASE_URL)('collapsed event editor persistence',
     },
   )
 
-  it('preserves internal group mode and seat capacity even though the editor does not configure them', async () => {
+  it('preserves group mode and seat capacity when the editor changes only the title', async () => {
     const formModule = '../../../web/src/pages/event-types/event-type-form.ts'
     const { draftFromEventType, toPatchInput } = await import(formModule)
     const user = await createTestUser(app.db)

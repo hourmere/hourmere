@@ -2071,6 +2071,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/group-occurrences/{id}/attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the private attendee list for a group occurrence
+         * @description Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Includes cancelled seats. Invitee manage tokens grant no access.
+         */
+        get: operations["getGroupOccurrenceAttendees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group-occurrences/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a whole group occurrence
+         * @description Cancels all confirmed seats and closes the occurrence to new bookings. To cancel only one seat use the existing booking cancellation operation. Host or browser-session team owner/admin only; API keys and OAuth are host-only.
+         */
+        post: operations["cancelGroupOccurrence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -4842,6 +4882,11 @@ export interface components {
             eventTypeId: string | null;
             /** @description Authenticated host reads only: the event type's current title, or null when deleted. The stored booking title remains historical; clients must verify its exact composition before localizing it. */
             eventTypeTitle?: string | null;
+            /**
+             * Format: uuid
+             * @description Authenticated host/team reads only: shared group occurrence identifier. Each booking is one independently managed seat.
+             */
+            groupSlotId?: string;
             /** Format: uuid */
             id: string;
             /** @description True for a group-seat booking, which does not support host reschedule requests. */
@@ -4987,6 +5032,11 @@ export interface components {
         };
         CancelBooking: {
             reason?: string;
+        };
+        CancelGroupOccurrenceResult: {
+            cancelledSeatCount: number;
+            /** Format: uuid */
+            id: string;
         };
         ConferenceConnection: {
             accountEmail: string | null;
@@ -5313,6 +5363,11 @@ export interface components {
             allowedDurationsMinutes: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;
+            /**
+             * @description individual (default) or group: independent seats in a single-host occurrence. Group mode requires no guests and capacity 2–100. Mode cannot change after bookings exist.
+             * @enum {string}
+             */
+            bookingMode: "individual" | "group";
             /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays: number | null;
             /** @description Free time kept after a meeting, in whole minutes */
@@ -5330,6 +5385,8 @@ export interface components {
             description: string | null;
             /** @description Default length of a meeting, in whole minutes */
             durationMinutes: number;
+            /** @description Group capacity, 2–100; null in individual mode. Changes apply to future occurrences only. */
+            groupCapacity: number | null;
             hosts: {
                 /** Format: uuid */
                 userId: string;
@@ -5497,6 +5554,11 @@ export interface components {
              * @default false
              */
             allowGuests: boolean;
+            /**
+             * @description individual (default) or group: independent seats in a single-host occurrence. Group mode requires no guests and capacity 2–100. Mode cannot change after bookings exist.
+             * @enum {string}
+             */
+            bookingMode?: "individual" | "group";
             /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays?: number | null;
             /**
@@ -5517,6 +5579,8 @@ export interface components {
             description?: string | null;
             /** @description Default length of a meeting, in whole minutes */
             durationMinutes: number;
+            /** @description Group capacity, 2–100; null in individual mode. Changes apply to future occurrences only. */
+            groupCapacity?: number | null;
             hosts?: {
                 userId: string;
             }[];
@@ -5750,6 +5814,11 @@ export interface components {
             allowedDurationsMinutes?: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests?: boolean;
+            /**
+             * @description individual (default) or group: independent seats in a single-host occurrence. Group mode requires no guests and capacity 2–100. Mode cannot change after bookings exist.
+             * @enum {string}
+             */
+            bookingMode?: "individual" | "group";
             /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays?: number | null;
             /** @description Free time kept after a meeting, in whole minutes */
@@ -5764,6 +5833,8 @@ export interface components {
             description?: string | null;
             /** @description Default length of a meeting, in whole minutes */
             durationMinutes?: number;
+            /** @description Group capacity, 2–100; null in individual mode. Changes apply to future occurrences only. */
+            groupCapacity?: number | null;
             hosts?: {
                 userId: string;
             }[];
@@ -5945,6 +6016,47 @@ export interface components {
              */
             to: string;
         };
+        GroupOccurrenceAttendees: {
+            activeSeats: number;
+            attendees: {
+                /** Format: uuid */
+                bookingId: string;
+                email: string;
+                /** Format: uuid */
+                id: string;
+                name: string;
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                noShowMarkedAt: string | null;
+                noShowMarkedBy: string | null;
+                responses: components["schemas"]["Responses"];
+                /** @enum {string} */
+                status: "confirmed" | "cancelled";
+            }[];
+            capacity: number;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            end: string;
+            /** Format: uuid */
+            eventTypeId: string | null;
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
+            /** @enum {string} */
+            state: "open" | "retired" | "host_cancelled";
+            title: string;
+        };
         Health: {
             /** @enum {string} */
             database: "ok" | "unreachable";
@@ -6124,6 +6236,8 @@ export interface components {
                         id: string;
                         title: string | null;
                     } | null;
+                    /** Format: uuid */
+                    groupSlotId?: string;
                     /** @enum {string} */
                     handling: "coordinate_cancellation" | "wait_until_end_or_coordinate_offline";
                     hosts: {
@@ -6220,6 +6334,8 @@ export interface components {
                         id: string;
                         title: string | null;
                     } | null;
+                    /** Format: uuid */
+                    groupSlotId?: string;
                     /** @enum {string} */
                     handling: "coordinate_cancellation" | "wait_until_end_or_coordinate_offline";
                     hosts: {
@@ -7015,6 +7131,8 @@ export interface components {
                 publicBookingPath: string | null;
                 title: string | null;
             } | null;
+            /** Format: uuid */
+            groupSlotId?: string;
             hosts: {
                 /** @description Additive, read-only: whether this saved host is currently a member of the booking team; null when unavailable */
                 isCurrentMember: boolean | null;
@@ -10940,6 +11058,156 @@ export interface operations {
                 };
             };
             /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getGroupOccurrenceAttendees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Occurrence and private seat holders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupOccurrenceAttendees"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description group_occurrence_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelGroupOccurrence: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelBooking"];
+            };
+        };
+        responses: {
+            /** @description Cancelled occurrence and changed seat count */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelGroupOccurrenceResult"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`). insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description group_occurrence_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_in_past or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;

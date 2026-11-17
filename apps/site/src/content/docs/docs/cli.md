@@ -84,6 +84,8 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `list` | `list_bookings` | optional `from`, `to`, `status` (`cancelled` for the cancelled view), `q` (search), `order`, `limit`, `cursor` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
+| `group-attendees` | `get_group_occurrence_attendees` | `occurrenceId`; private hosted occurrence roster |
+| `cancel-group` | `cancel_group_occurrence` | `occurrenceId`; optional `reason`; cancels all active seats |
 | `booking-activity` | `get_booking_activity` | `startDate`, `endDate` (inclusive `YYYY-MM-DD`, at most 90 dates), `timeZone`; requires `read` or `full` and the personal owner or a team owner/admin |
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
 | `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
@@ -489,3 +491,24 @@ See [booking waitlists](/docs/booking-waitlist) for host settings, entry managem
 invitee consent and verification, REST/MCP/CLI inputs, scopes, privacy and retention.
 Nothing is reserved: every eligible invitee can be notified and the first successful
 ordinary booking wins.
+
+## Group events
+
+Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
+`allowGuests: false` and individual single-host scheduling. Configuration requires `full`
+API-key scope. Omitted update fields preserve saved values; existing future booked work
+prevents switching mode. Capacity edits affect new occurrences only.
+
+Authorized booking reads/lists represent each seat separately and include `groupSlotId`.
+`GET /api/v1/group-occurrences/{id}/attendees`, MCP `get_group_occurrence_attendees` and
+CLI `group-attendees` return the private occurrence roster, including answers, booking
+status and no-show state. MCP/CLI take `occurrenceId`. Reads allow `full`, `read` and
+`bookings` keys, with actual host authority in the current organization. Non-host team
+owners/admins need a browser session; MCP OAuth has the same host-only boundary.
+
+`POST /api/v1/group-occurrences/{id}/cancel`, MCP `cancel_group_occurrence` and CLI
+`cancel-group` cancel the whole future occurrence. MCP/CLI take `occurrenceId` and
+optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bookings`.
+Ordinary booking cancellation still cancels only one seat. Public and invitee-management
+reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
+for setup, privacy and limitations.

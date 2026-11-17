@@ -53,6 +53,8 @@ export const COMMANDS = {
   cancel: 'cancel_booking',
   'set-no-show': 'set_attendee_no_show',
   'booking-attendees': 'get_booking_attendees',
+  'group-attendees': 'get_group_occurrence_attendees',
+  'cancel-group': 'cancel_group_occurrence',
   'booking-activity': 'get_booking_activity',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
@@ -93,7 +95,7 @@ Commands: whoami, profile, catalog, event, create-event, update-event,
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           troubleshoot-availability,
           schedule-availability, save-availability,
-          book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees,
+          book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
           booking-activity, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,

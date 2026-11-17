@@ -167,6 +167,7 @@ export {
   type WaitlistSettings,
   WaitlistSettingsSchema,
 } from './event-types.ts'
+export { cancelGroupOccurrence, getGroupOccurrenceAttendees } from './group-occurrences.ts'
 export { validTimeZone } from './internal.ts'
 export {
   compatLocation,

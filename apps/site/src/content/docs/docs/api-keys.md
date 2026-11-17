@@ -160,6 +160,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `GET /api/v1/book/{token}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/book/{token}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/bookings/{id}/attendees` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/group-occurrences/{id}/attendees` | Session or API key | `full, read, bookings` |
+| `POST /api/v1/group-occurrences/{id}/cancel` | Session or API key | `full, bookings` |
 | `GET /api/v1/bookings` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/bookings/export.csv` | Session or API key | `full, read` |
 | `GET /api/v1/bookings/{id}` | Session or API key | `full, read, bookings` |
@@ -315,6 +317,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `list_bookings` | — | `list` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
+| `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |
+| `cancel_group_occurrence` | — | `cancel-group` | `full, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |

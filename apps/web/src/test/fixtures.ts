@@ -30,6 +30,8 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     rescheduleCutoffMinutes: null,
     cancelCutoffMinutes: null,
     schedulingType: 'individual',
+    bookingMode: 'individual',
+    groupCapacity: null,
     roundRobinActive: false,
     conferenceOrganizer: null,
     hosts: [{ userId: ME.user.id }],

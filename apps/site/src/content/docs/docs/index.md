@@ -199,9 +199,8 @@ self-hosting and does not change REST, MCP or CLI operations.
   user and two exports total by default (`export_user_in_progress` / `export_busy`);
   these concurrency limits are per process, not cluster-wide. Files contain personal data; there is no
   scheduled export or automatic delivery. Answers use a JSON column.
-- Group mode cannot yet be enabled in event editors or REST/MCP/CLI configuration;
-  this limitation applies equally to self-hosted installations. For internally seeded group
-  types, public booking pages and inline, popup and manual iframe embeds show exact seats
+- [Group events](/docs/group-events) can be configured in the editor and REST/MCP/CLI,
+  with one host and 2–100 seats. Public booking pages and inline, popup and manual iframe embeds show exact seats
   remaining beside each offered time. Full occurrences are omitted. The public slots API
   adds `seatsRemaining` and `capacity` only for group times; these are aggregate totals,
   with no attendee names, addresses or seat identities. Counts are a snapshot, not a

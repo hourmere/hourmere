@@ -9,6 +9,7 @@ import { z } from 'zod'
 export const TeamAdminBookingSchema = z.strictObject({
   canManageNoShow: z.boolean().optional(),
   id: z.uuid(),
+  groupSlotId: z.uuid().optional(),
   status: z.enum(['confirmed', 'cancelled']),
   start: z.iso.datetime(),
   end: z.iso.datetime(),
@@ -95,6 +96,7 @@ export type TeamAdminBookingListPage = z.infer<typeof TeamAdminBookingListPageSc
  */
 export interface TeamAdminBookingRecord {
   id: string
+  group_slot_id?: string | null
   status: 'confirmed' | 'cancelled'
   start_at: Date
   end_at: Date
@@ -114,6 +116,7 @@ export interface TeamAdminBookingRecord {
 export function toTeamAdminBooking(record: TeamAdminBookingRecord): TeamAdminBooking {
   return {
     id: record.id,
+    ...(record.group_slot_id ? { groupSlotId: record.group_slot_id } : {}),
     status: record.status,
     start: record.start_at.toISOString(),
     end: record.end_at.toISOString(),

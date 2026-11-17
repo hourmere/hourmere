@@ -41,6 +41,7 @@ const classes = {
     'GET /api/v1/book/{token}/slots',
     'GET /api/v1/bookings',
     'GET /api/v1/bookings/{id}/attendees',
+    'GET /api/v1/group-occurrences/{id}/attendees',
     'GET /api/v1/bookings/{id}',
     'GET /api/v1/bookings/{id}/slots',
     'GET /api/v1/bookings/manage',
@@ -61,6 +62,7 @@ const classes = {
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/bookings/{id}/calendar-copy/retry',
     'POST /api/v1/bookings/{id}/cancel',
+    'POST /api/v1/group-occurrences/{id}/cancel',
     'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
     'POST /api/v1/bookings/{id}/conference/retry',
     'POST /api/v1/bookings/{id}/reschedule',
@@ -462,6 +464,40 @@ describe.skipIf(!process.env.DATABASE_URL)(
               .execute()
           expectedStatus = 204
         }
+      } else if (template.startsWith('/api/v1/group-occurrences/')) {
+        cleanupEvent = await f.eventType(teamId, null, {
+          slug: nonce,
+          hosts: [{ userId: owner.user.id }],
+        })
+        await db
+          .updateTable('event_types')
+          .set({ booking_mode: 'group', group_capacity: 2 })
+          .where('id', '=', cleanupEvent)
+          .execute()
+        const groupEventId = cleanupEvent
+        const slot = await db.transaction().execute(async (trx) => {
+          const created = await trx
+            .insertInto('group_slots')
+            .values({
+              organization_id: teamId,
+              event_type_id: groupEventId,
+              original_event_type_id: groupEventId,
+              host_user_id: owner.user.id,
+              start_at: start,
+              end_at: `${date}T09:30:00Z`,
+              capacity: 2,
+              title: 'Group matrix',
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          await trx
+            .updateTable('group_slots')
+            .set({ state: 'retired' })
+            .where('id', '=', created.id)
+            .execute()
+          return created
+        })
+        id = slot.id
       } else if (template.startsWith('/api/v1/book/{token}')) {
         cleanupEvent = await f.eventType(teamId, null, {
           slug: nonce,
@@ -811,14 +847,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 138-operation contract and all 414 scope combinations', () => {
+    it('covers the exact 140-operation contract and all 420 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(138)
-      expect(new Set(ids).size).toBe(138)
+      expect(ids).toHaveLength(140)
+      expect(new Set(ids).size).toBe(140)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(414)
+      expect(cases).toHaveLength(420)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
