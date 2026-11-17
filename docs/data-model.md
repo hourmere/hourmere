@@ -201,8 +201,10 @@ stored settings; concurrent writes are ordered, with the last committed value wi
 for a field changed by both callers.
 
 Contrast calculations select black or white text with the greater WCAG 2.x ratio and
-report the primary colour's ratio against white separately. These settings do not yet
-change public pages, bookings or mail. See [branding](https://hourmere.com/docs/branding)
+report the primary colour's ratio against white separately. Public pages, embeds and booking
+email HTML read the owning organization's current brand; personal bookings use the personal
+organization and team bookings use the team. Rendering validates colours again and derives
+accessible theme roles. Logos travel as inline PNG data on pages and CID attachments in mail. See [branding](https://hourmere.com/docs/branding)
 for limits and client instructions.
 
 ### `auth` (Better Auth: core + organization + api-key plugins)

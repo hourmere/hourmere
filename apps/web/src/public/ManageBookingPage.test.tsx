@@ -179,6 +179,27 @@ describe('the invitee’s manage page', () => {
     }
   })
 
+  it('retains a group move key for the same request and replaces it for another time', async () => {
+    const user = userEvent.setup()
+    const api = manageServer(managed(), {
+      more: { 'POST /api/v1/bookings/manage/reschedule': () => json(409, { error: 'slot_taken' }) },
+    })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await user.click(await screen.findByRole('button', { name: 'Tuesday, November 3, available' }))
+    for (const time of ['10:00 AM', '10:00 AM', '11:00 AM']) {
+      await user.click(await screen.findByRole('button', { name: time }))
+      await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+      await screen.findByRole('heading', { name: 'Pick a new time' })
+    }
+    const keys = api
+      .to('POST /api/v1/bookings/manage/reschedule')
+      .map((call) => call.headers.get('idempotency-key'))
+    expect(keys).toHaveLength(3)
+    expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/)
+    expect(keys[1]).toBe(keys[0])
+    expect(keys[2]).not.toBe(keys[0])
+  })
+
   it.each(['Pick another time', 'conflict'])(
     'restores the browsed month and day after returning through %s',
     async (back) => {

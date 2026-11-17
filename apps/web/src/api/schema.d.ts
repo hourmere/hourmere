@@ -979,7 +979,7 @@ export interface paths {
         put?: never;
         /**
          * Reschedule with the manage token
-         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
          */
         post: operations["rescheduleManagedBooking"];
         delete?: never;
@@ -5796,6 +5796,7 @@ export interface components {
             };
         };
         ManagedBooking: components["schemas"]["Booking"] & {
+            branding?: components["schemas"]["PublicBranding"];
             /** @description The invitee's change deadlines this booking keeps (those of its event type when it was booked; later event type changes do not affect it). `rescheduleBy` is the earlier of the configured reschedule and cancel deadlines (a null setting imposes no limit from that side). From `rescheduleBy` on, rescheduling with this token fails with 409 `booking_reschedule_deadline_passed`; from `cancelBy` on, cancelling fails with 409 `booking_cancel_deadline_passed`. null = until the meeting starts. The host can still change the booking. */
             changeDeadlines: {
                 /** Format: date-time */
@@ -6056,6 +6057,7 @@ export interface components {
             allowedDurationsMinutes?: number[];
             /** @description Whether invitees may add guest recipients */
             allowGuests: boolean;
+            branding?: components["schemas"]["PublicBranding"];
             description: string | null;
             durationMinutes: number;
             host: {
@@ -6157,6 +6159,13 @@ export interface components {
                 url: string;
             };
         };
+        PublicBranding: {
+            /** @description Bounded normalized PNG data URL; no remote image request is needed */
+            logoDataUrl: string | null;
+            /** @description Organization name for logo alternative text */
+            name: string;
+            primaryColor: string | null;
+        };
         PublicEventType: {
             /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
             allowedDurationsMinutes?: number[];
@@ -6164,6 +6173,7 @@ export interface components {
             allowEmbedParentRedirect?: boolean;
             /** @description Whether invitees may add guest recipients */
             allowGuests: boolean;
+            branding?: components["schemas"]["PublicBranding"];
             description: string | null;
             durationMinutes: number;
             handle: string;
@@ -6212,6 +6222,7 @@ export interface components {
             };
         };
         PublicHost: {
+            branding?: components["schemas"]["PublicBranding"];
             /** @description Bookable event types, in the order the host arranged them */
             eventTypes: {
                 description: string | null;
@@ -6538,12 +6549,16 @@ export interface components {
             url: string;
         };
         Slot: {
+            /** @description Group sessions only: total capacity of this occurrence. No attendee identities are exposed. */
+            capacity?: number;
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
              * @example 2026-11-02T09:00:00.000Z
              */
             end: string;
+            /** @description Group sessions only: seats currently available. Full sessions are omitted; availability is not a reservation. */
+            seatsRemaining?: number;
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -8098,6 +8113,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                /** @description Required for group-seat moves. Reuse the same key and request after a lost response; replay returns the same seat without recovering its manage token. */
+                "idempotency-key"?: string;
                 /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
                 "x-manage-token"?: string;
             };

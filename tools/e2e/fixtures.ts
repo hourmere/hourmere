@@ -50,6 +50,7 @@ export interface FixtureApp {
   parentUrl: string
   personalPath: string
   setEmbedSnippet: (snippet: string) => void
+  configureGroupSeats: () => Promise<void>
   configureDurations: () => Promise<void>
   configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
   configureWaitlist: (kind: 'personal' | 'team', enabled?: boolean) => Promise<string>
@@ -521,6 +522,14 @@ export const test = base.extend<{
         personalPath: '/fixture-host/call',
         setEmbedSnippet: (snippet) => {
           embedSnippet = snippet
+        },
+        configureGroupSeats: async () => {
+          await db
+            .updateTable('event_types')
+            .set({ booking_mode: 'group', group_capacity: 2 })
+            .where('organization_id', '=', host.organizationId)
+            .where('slug', '=', 'call')
+            .execute()
         },
         configureDurations: async () => {
           await db

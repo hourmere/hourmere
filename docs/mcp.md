@@ -234,8 +234,9 @@ Upload a PNG, JPEG or WebP through REST `POST /api/v1/branding/logo` or
 `hourmere branding upload --file logo.png --content-type image/png`; MCP accepts the
 returned reference, not binary image data or remote URLs. Uploads are limited to
 512 KiB and 2048 pixels on each side, decoded and re-encoded as PNG, and attached to
-the current organization. SVG and animated images are rejected. This stores branding;
-public page and email theme application is not included yet.
+the current organization. SVG and animated images are rejected. Saved branding applies to
+that space’s public pages, embeds and booking email HTML; see [branding](https://hourmere.com/docs/branding)
+for personal/team ownership, accessible colour adjustments and email client limitations.
 
 ## Meeting location choices
 

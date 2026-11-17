@@ -378,10 +378,11 @@ describe.skipIf(!serverUrl)('team cancellation removed-host security audit', () 
         'if (!member) throw new RecipientUnavailable()',
         bypassFinalMembership ? '' : 'if (!member) throw new RecipientUnavailable()',
       )
+    // A data URL has no package resolution base, including for lazy service imports.
     const code = stripTypeScriptTypes(changed).replace(
-      /from '([^']+)'/g,
-      (_, specifier: string) =>
-        `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+      /(from |import\()'([^']+)'/g,
+      (_, prefix: string, specifier: string) =>
+        `${prefix}'${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
     )
     return (await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`))
       .sendBookingNotification
