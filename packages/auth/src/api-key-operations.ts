@@ -73,6 +73,14 @@ function rest(
 
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
+  rest('POST', '/api/v1/public/meeting-polls/read', 'booking_read', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/enroll', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/recover', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/verify', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/vote', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/withdraw', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/public/meeting-polls/reminder-opt-out', 'booking_write', 'optional_key'),
+
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
   rest('GET', '/api/v1/routing-forms', 'other_read', 'key'),
   rest('GET', '/api/v1/routing-forms/{id}', 'other_read', 'key'),
@@ -283,6 +291,18 @@ function mcp(
 }
 
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
+  mcp('read_meeting_poll', 'booking_read', ['POST /api/v1/public/meeting-polls/read']),
+  mcp('enroll_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/enroll']),
+  mcp('recover_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/recover']),
+  mcp('verify_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/verify']),
+  mcp('submit_meeting_poll_vote', 'booking_write', ['POST /api/v1/public/meeting-polls/vote']),
+  mcp('withdraw_meeting_poll_vote', 'booking_write', [
+    'POST /api/v1/public/meeting-polls/withdraw',
+  ]),
+  mcp('opt_out_meeting_poll_reminder', 'booking_write', [
+    'POST /api/v1/public/meeting-polls/reminder-opt-out',
+  ]),
+
   mcp('list_routing_forms', 'other_read', ['GET /api/v1/routing-forms']),
   mcp('get_routing_form', 'other_read', ['GET /api/v1/routing-forms/{id}']),
   mcp('create_routing_form', 'other_write', ['POST /api/v1/routing-forms']),
@@ -428,6 +448,14 @@ function cli(command: string, tool: string): ApiKeyCliOperation {
 }
 
 export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.freeze([
+  cli('polls view', 'read_meeting_poll'),
+  cli('polls join', 'enroll_meeting_poll_voter'),
+  cli('polls recover', 'recover_meeting_poll_voter'),
+  cli('polls verify', 'verify_meeting_poll_voter'),
+  cli('polls vote', 'submit_meeting_poll_vote'),
+  cli('polls withdraw', 'withdraw_meeting_poll_vote'),
+  cli('polls reminder-opt-out', 'opt_out_meeting_poll_reminder'),
+
   cli('whoami', 'whoami'),
   cli('routing-forms list', 'list_routing_forms'),
   cli('routing-forms get', 'get_routing_form'),

@@ -224,5 +224,33 @@
   "testSlackDestination": {
     "mcp": "test_slack_destination",
     "cli": "slack test"
+  },
+  "readMeetingPoll": {
+    "mcp": "read_meeting_poll",
+    "cli": "polls view"
+  },
+  "enrollMeetingPollVoter": {
+    "mcp": "enroll_meeting_poll_voter",
+    "cli": "polls join"
+  },
+  "recoverMeetingPollVoter": {
+    "mcp": "recover_meeting_poll_voter",
+    "cli": "polls recover"
+  },
+  "verifyMeetingPollVoter": {
+    "mcp": "verify_meeting_poll_voter",
+    "cli": "polls verify"
+  },
+  "submitMeetingPollVote": {
+    "mcp": "submit_meeting_poll_vote",
+    "cli": "polls vote"
+  },
+  "withdrawMeetingPollVote": {
+    "mcp": "withdraw_meeting_poll_vote",
+    "cli": "polls withdraw"
+  },
+  "optOutMeetingPollReminder": {
+    "mcp": "opt_out_meeting_poll_reminder",
+    "cli": "polls reminder-opt-out"
   }
 }

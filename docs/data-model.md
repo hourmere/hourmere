@@ -2443,3 +2443,8 @@ booking/rule identity and scheduling instants, never phone numbers or message bo
 `audit_events` is the append-only management journal available to every instance.
 See [Audit event journal](audit-log.md) for fields, actions, privacy, transaction
 boundaries, indexes and future retention. Events are recorded but not yet viewable.
+
+Public poll transport request budgets use `meeting_poll_request_limits` (migration `0108`):
+a purpose-bound keyed IP digest, bounded positive request count and reset timestamp. REST
+and MCP share the same 60-second windows; expired rows are deleted in bounded batches
+during requests. No mailbox, raw IP or capability is stored in this table.

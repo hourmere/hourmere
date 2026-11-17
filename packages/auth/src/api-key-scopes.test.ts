@@ -45,6 +45,7 @@ const restContract = {
     'GET /api/v1/workflows/{id}',
   ],
   booking_read: [
+    'POST /api/v1/public/meeting-polls/read',
     'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
@@ -65,6 +66,13 @@ const restContract = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/public/meeting-polls/enroll',
+    'POST /api/v1/public/meeting-polls/recover',
+    'POST /api/v1/public/meeting-polls/verify',
+    'POST /api/v1/public/meeting-polls/vote',
+    'POST /api/v1/public/meeting-polls/withdraw',
+    'POST /api/v1/public/meeting-polls/reminder-opt-out',
+
     'POST /api/v1/event-types/{eventTypeId}/one-time-links',
     'DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'POST /api/v1/book/{token}/bookings',
@@ -440,12 +448,21 @@ describe('shared API-key scope policy', () => {
         'remove_waitlist_entry',
         'join_waitlist',
         'resend_waitlist_verification',
+        'read_meeting_poll',
+        'enroll_meeting_poll_voter',
+        'recover_meeting_poll_voter',
+        'verify_meeting_poll_voter',
+        'submit_meeting_poll_vote',
+        'withdraw_meeting_poll_vote',
+        'opt_out_meeting_poll_reminder',
+
         'list_sso_providers',
         'get_sso_policy',
         'list_workflows',
         'get_workflow',
       ],
       read: [
+        'read_meeting_poll',
         'list_routing_forms',
         'get_routing_form',
         'get_branding',
@@ -493,6 +510,13 @@ describe('shared API-key scope policy', () => {
         'get_event_type',
         'join_waitlist',
         'resend_waitlist_verification',
+        'read_meeting_poll',
+        'enroll_meeting_poll_voter',
+        'recover_meeting_poll_voter',
+        'verify_meeting_poll_voter',
+        'submit_meeting_poll_vote',
+        'withdraw_meeting_poll_vote',
+        'opt_out_meeting_poll_reminder',
       ],
     }
     for (const apiKeyScope of ['full', 'read', 'bookings'] as const) {

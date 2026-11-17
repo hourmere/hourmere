@@ -36,6 +36,7 @@ const scopes = ['full', 'read', 'bookings'] as const
 // Do not derive expectations from the production registry being tested.
 const classes = {
   booking_read: [
+    'POST /api/v1/public/meeting-polls/read',
     'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
@@ -56,6 +57,13 @@ const classes = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/public/meeting-polls/enroll',
+    'POST /api/v1/public/meeting-polls/recover',
+    'POST /api/v1/public/meeting-polls/verify',
+    'POST /api/v1/public/meeting-polls/vote',
+    'POST /api/v1/public/meeting-polls/withdraw',
+    'POST /api/v1/public/meeting-polls/reminder-opt-out',
+
     'POST /api/v1/event-types/{eventTypeId}/one-time-links',
     'DELETE /api/v1/event-types/{eventTypeId}/one-time-links/{id}',
     'POST /api/v1/book/{token}/bookings',
@@ -342,6 +350,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           socialProviders: {},
           invitationMailLimits: { secret },
           waitlistSecret: secret,
+          meetingPollSecret: secret,
           smtpConfigured: true,
           webhooks: webhookSettings,
           webhookQueue: { enqueue: async () => randomUUID() },
@@ -367,6 +376,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
+      if (template.startsWith('/api/v1/public/meeting-polls/')) {
+        payload = template.endsWith('/recover')
+          ? { pollId: randomUUID(), email: 'missing@example.test' }
+          : template.endsWith('/enroll')
+            ? {
+                publicToken: 'unavailable',
+                name: 'Voter',
+                email: 'voter@example.test',
+                timeZone: 'UTC',
+              }
+            : template.endsWith('/vote')
+              ? { token: 'unavailable', votes: [], consent: true, expectedBallotRevision: 0 }
+              : template.endsWith('/withdraw')
+                ? { token: 'unavailable', expectedBallotRevision: 0 }
+                : { token: 'unavailable' }
+        expectedStatus = template.endsWith('/recover') ? 202 : 404
+      }
       if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
         path = path
@@ -500,7 +526,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }
           expectedStatus = 201
         }
-      } else if (template.startsWith('/api/v1/public/')) {
+      } else if (
+        template.startsWith('/api/v1/public/') &&
+        !template.startsWith('/api/v1/public/meeting-polls/')
+      ) {
         const team = template.includes('/teams/')
         path = path
           .replace('{handle}', team ? 'rest-scoped-team' : 'rest-scoped-host')
@@ -822,14 +851,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 140-operation contract and all 420 scope combinations', () => {
+    it('covers the exact 147-operation contract and all 441 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(140)
-      expect(new Set(ids).size).toBe(140)
+      expect(ids).toHaveLength(147)
+      expect(new Set(ids).size).toBe(147)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(420)
+      expect(cases).toHaveLength(441)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -889,6 +918,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
           } else if (operation.includes(' /api/v1/workflows')) {
             expect(await response.json()).toEqual({ error: 'workflows_disabled' })
+          } else if (operation.includes('/public/meeting-polls/') && response.status === 404) {
+            expect(await response.json()).toMatchObject({ error: 'poll_not_found' })
           } else if (response.status !== 204) {
             const data = await response.json()
             expect(data).not.toHaveProperty('error')
@@ -966,6 +997,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             ? 'public, max-age=31536000, immutable'
             : operation === 'GET /api/v1/instance/embed' ||
                 operation.includes('/provisioning-tokens') ||
+                operation.includes('/public/meeting-polls/') ||
                 (operation === 'GET /api/v1/branding/logo/{hash}' && response.ok)
               ? 'private, no-store'
               : 'no-store',
