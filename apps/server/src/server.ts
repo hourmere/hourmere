@@ -107,6 +107,7 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
+import { captureWorkflowCreation } from '@hourmere/workflows'
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -1089,6 +1090,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
       if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
       await webhookNotifier(trx, event, now)
+      // Core notification intents precede workflow capture in the booking's transaction.
+      await captureWorkflowCreation(trx, event, now, config.BETTER_AUTH_SECRET)
     }
     const auth = createAuth(
       productionAuthOptions({

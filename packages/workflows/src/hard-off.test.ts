@@ -65,6 +65,7 @@ const PACKAGE_EXPORTS = [
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
   // Definition creation is workflowOperation-wrapped, so off while hard-off.
+  'captureWorkflowCreation',
   'createWorkflow',
   'deleteWorkflow',
   'evaluateConditions',
@@ -90,6 +91,7 @@ const PACKAGE_EXPORTS = [
   'workflowMatches',
   'workflowOperation',
   'workflowOwnerSelector',
+  'workflowRecipientHash',
   'workflowReferences',
   'workflowRunTiming',
   'workflowTimerDueAt',
@@ -176,6 +178,26 @@ describe('workflow hard-off', () => {
   it('is off', () => {
     expect(hardOff.WORKFLOWS_IMPLEMENTED).toBe(false)
     expect(workflows.WORKFLOWS_IMPLEMENTED).toBe(false)
+  })
+
+  it('captures nothing through the production entry before touching the booking transaction', async () => {
+    const trx = new Proxy({} as Db, {
+      get: () => {
+        throw new Error('hard-off capture touched the transaction')
+      },
+    })
+    await expect(
+      workflows.captureWorkflowCreation(
+        trx,
+        {
+          type: 'created',
+          bookingId: '10000000-0000-4000-8000-000000000001',
+          start: Temporal.Instant.from('2026-11-16T12:00Z'),
+        },
+        Temporal.Instant.from('2026-11-16T00:00Z'),
+        'synthetic-capture-secret',
+      ),
+    ).resolves.toBeUndefined()
   })
 
   it('refuses at every guarded entry point', async () => {
@@ -394,6 +416,11 @@ describe('workflow hard-off', () => {
     const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
     const updateImports = new Set(['@hourmere/auth', 'kysely'])
     const deleteImports = new Set(['@hourmere/auth', 'kysely'])
+    const captureImports = new Set([
+      'node:crypto',
+      'kysely',
+      '@hourmere/scheduling/notification-settings',
+    ])
     const own = sources.filter(
       (path) => path.startsWith('packages/workflows/src/') && !path.endsWith('/testing.ts'),
     )
@@ -413,6 +440,7 @@ describe('workflow hard-off', () => {
             !allowed.has(specifier) &&
             !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
             !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/capture.ts' && captureImports.has(specifier)) &&
             !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)),
         ),
         file,

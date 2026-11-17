@@ -1118,8 +1118,9 @@ Migration 0076 installs the definition storage of the [booking workflows design]
 reads of step 4 (`packages/workflows/src/reads.ts`), creation of step 5
 (`packages/workflows/src/creates.ts`), updates of step 6
 (`packages/workflows/src/updates.ts`) and deletion of step 7
-(`packages/workflows/src/deletes.ts`) access them, behind the hard-off guard, so
-they answer `workflows_disabled` while workflows stay off behind
+(`packages/workflows/src/deletes.ts`) and creation capture
+(`packages/workflows/src/capture.ts`) access them behind the hard-off guard. Definition
+operations answer `workflows_disabled`, and capture does nothing, while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
 with its retained creation key. Updates check the expected revision, append immutable content
 revisions and change the live enabled flag without touching execution snapshots; no worker
@@ -1177,7 +1178,10 @@ Migration 0079 installs the execution storage of the [booking workflows design](
 `workflow_run_history` and `workflow_mail_reservations`, plus a nullable
 `workflow_reservation_id` on the shared mail ledger. Deletion reads enrollments to retire
 pending runs after tombstoning their definition; it preserves the other execution rows.
-There is no capture, dispatcher, retention worker or setting, and workflows stay hard-off behind
+Creation capture writes immutable enrollments, due runs and recipient intents in the booking
+transaction after core notifications, sharing live definitions in ID order after the organization
+lock. Timer skips also write minimal history. There is no dispatcher, retention worker or
+setting, and workflows stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 

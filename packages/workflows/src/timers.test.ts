@@ -27,6 +27,7 @@ const MINUTE_NS = 60_000_000_000n
 const HOST_ZONES = [
   'UTC',
   'America/New_York',
+  'America/Los_Angeles',
   'Europe/Berlin',
   'Australia/Lord_Howe',
   'Pacific/Chatham',
@@ -362,6 +363,30 @@ describe('workflow timers across DST transitions and non-hour offsets', () => {
   // Each anchor and expected due instant is local time in its zone; a day is 1440 elapsed
   // minutes, so across a transition the local wall clock of the due instant moves.
   it.each([
+    [
+      'Los Angeles spring, before the skipped hour',
+      beforeStart(60),
+      '2027-03-14T03:30:00-07:00[America/Los_Angeles]',
+      '2027-03-14T01:30:00-08:00[America/Los_Angeles]',
+    ],
+    [
+      'Los Angeles spring, after the skipped hour',
+      afterEnd(60),
+      '2027-03-14T01:30:00-08:00[America/Los_Angeles]',
+      '2027-03-14T03:30:00-07:00[America/Los_Angeles]',
+    ],
+    [
+      'Los Angeles fall, into the first repeated hour',
+      beforeStart(60),
+      '2027-11-07T01:30:00-08:00[America/Los_Angeles]',
+      '2027-11-07T01:30:00-07:00[America/Los_Angeles]',
+    ],
+    [
+      'Los Angeles fall, into the second repeated hour',
+      afterEnd(60),
+      '2027-11-07T01:30:00-07:00[America/Los_Angeles]',
+      '2027-11-07T01:30:00-08:00[America/Los_Angeles]',
+    ],
     [
       'New York spring, a day before',
       beforeStart(1440),
@@ -717,5 +742,46 @@ describe('workflow timer source', () => {
     // Zero (comparison results and the smallest lifecycle delay) is the only literal number.
     expect(new Set(code.match(/\b\d[\d_]*(?:\.\d+)?\b/g))).toEqual(new Set(['0']))
     expect(code).toContain("import { REMINDER_MIN_GAP } from '@hourmere/scheduling'")
+  })
+})
+
+// Millisecond boundaries match persisted timestamps; nanosecond cases above preserve precision.
+describe('workflow timing at millisecond boundaries', () => {
+  it.each([-1, 0, 1])('checks capture at boundary %i ms', (milliseconds) => {
+    const dueAt = at('2027-06-01T08:00:00Z')
+    expect(
+      workflowRunTiming(
+        beforeStart(120),
+        booking,
+        dueAt.subtract(REMINDER_MIN_GAP).add({ milliseconds }),
+      ).skipReason,
+    ).toBe(milliseconds < 0 ? undefined : 'minimum_gap')
+    for (const trigger of [beforeStart(120), afterEnd(30)]) {
+      const due = workflowRunTiming(trigger, booking, booking.start.subtract({ hours: 24 })).dueAt
+      expect(workflowRunTiming(trigger, booking, due.add({ milliseconds })).skipReason).toBe(
+        milliseconds >= 0
+          ? 'offset_not_future'
+          : trigger.type === 'before_start'
+            ? 'minimum_gap'
+            : undefined,
+      )
+    }
+  })
+
+  it.each([-1, 0, 1])('checks dispatch at boundary %i ms', (milliseconds) => {
+    for (const trigger of [
+      beforeStart(5),
+      beforeStart(120),
+      afterEnd(30),
+      lifecycle('booking.created', 0),
+    ]) {
+      const timing = workflowRunTiming(trigger, booking, booking.start.subtract({ hours: 24 }))
+      expect(workflowDispatchWindow(timing, timing.dueAt.add({ milliseconds }))).toBe(
+        milliseconds < 0 ? 'not_due' : 'open',
+      )
+      expect(workflowDispatchWindow(timing, timing.expiresAt.add({ milliseconds }))).toBe(
+        milliseconds < 0 ? 'open' : 'expired',
+      )
+    }
   })
 })

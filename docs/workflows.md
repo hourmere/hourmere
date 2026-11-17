@@ -16,9 +16,17 @@ hard-off guard. Content edits append immutable revisions; enable/disable changes
 definition row. Neither operation rewrites enrollments or execution rows. Step 7 adds deletion
 (`deleteWorkflow`, `delete_workflow`, `workflows delete`) behind the same hard-off guard.
 It checks the expected revision, tombstones the definition and retires every pending run
-in one transaction, retaining creation keys and execution identities. No dispatcher,
+in one transaction, retaining creation keys and execution identities. Creation capture now
+uses the pure timer rules to enroll original confirmed native bookings and record due runs
+and recipient intents in the booking transaction, after core notifications. Existing reminders
+win overlapping intents; workflows then win by creation time and ID. The production capture
+entry remains a no-op under the pinned hard-off constant. No dispatcher,
 retention worker or web interface exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
+
+中文：原生预约确认时的工作流登记、到期记录和收件人意图已在预约事务内实现，先记录核心
+通知；已有提醒优先，其次按工作流创建时间和 ID 排序。付款保留、导入及团体预约不登记。
+生产入口仍受硬关闭常量保护，不会捕获或发送工作流。
 
 ## Evidence and existing foundations
 
