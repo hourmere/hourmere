@@ -64,6 +64,8 @@ function productSourceCopy(change?: Change): Factory {
     ssoReadTools: () => [],
     ssoOidcEnabled: false,
     ssoSamlEnabled: false,
+    routingFormsEnabled: false,
+    routingFormConfigurationTools: () => [],
   }
   return new Function(
     ...Object.keys(bindings),

@@ -107,6 +107,7 @@ import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
+import { routingFormConfigurationTools } from './mcp/routing-forms.ts'
 import { slackDestinationTools } from './mcp/slack-destinations.ts'
 import { ssoReadTools } from './mcp/sso.ts'
 import type { Tool } from './mcp/tools.ts'
@@ -135,6 +136,7 @@ import { profileRoutes } from './routes/profile.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
+import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { ssoRoutes } from './routes/sso.ts'
@@ -310,6 +312,7 @@ export function productRoutes({
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
     openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    routingFormRoutes({ db, routingFormsEnabled: routingEnabled }),
     availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
     bookingRoutes({
       db,
@@ -341,6 +344,7 @@ export function productTools({
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
+  routingFormsEnabled: routingEnabled = routingFormsEnabled,
   followUpHostNotesEnabled,
   successRedirectPolicy,
   notify,
@@ -360,6 +364,7 @@ export function productTools({
   waitlistSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
+  routingFormsEnabled?: boolean | undefined
   publicUrl?: string | undefined
   followUpHostNotesEnabled?: boolean | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -407,6 +412,7 @@ export function productTools({
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({ db }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
+    ...routingFormConfigurationTools({ db, routingFormsEnabled: routingEnabled }),
   ]
 }
 

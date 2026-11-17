@@ -94,6 +94,8 @@ function productSourceCopy(change?: Change): Factory {
     ssoReadTools: () => [],
     ssoOidcEnabled: false,
     ssoSamlEnabled: false,
+    routingFormsEnabled: false,
+    routingFormConfigurationTools: () => [],
     waitlistTools: () => [],
     brandingTools: () => [],
     auditLogTools: () => [],

@@ -102,7 +102,9 @@ export async function loadInterfaceInventory(): Promise<InterfaceInventory> {
   try {
     return {
       rest,
-      mcp: productTools({ db, slotSnippetsEnabled: true }).map((tool) => tool.name),
+      mcp: productTools({ db, slotSnippetsEnabled: true, routingFormsEnabled: true }).map(
+        (tool) => tool.name,
+      ),
       cli: COMMANDS,
       restCli: REST_COMMANDS,
     }

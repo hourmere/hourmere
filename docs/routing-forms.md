@@ -1,12 +1,13 @@
 # Routing forms — proposed design
 
-Status: storage and internal services only; no routing form is available yet. Migration
-0072 adds the five storage tables and migration 0083 their idempotency records; no routes,
-UI, execution path or plan checks exist. The shared validator, evaluator and target checks
-(step a2) and the configuration and publication services (steps a3 and a3b) exist as
-internal functions that no transport calls yet. Target invalidation and retention cleanup
-(step a4) run inside existing event-type and member-removal mutations and in a background
-job; with no routing form they change nothing.
+Status: storage, internal services and hard-off configuration interfaces. Migration
+0072 adds the five storage tables and migration 0083 their idempotency records. The
+configuration list/get/create/update/archive operations are registered together in REST,
+MCP and CLI, but production always returns `routing_forms_disabled`; discovery omits
+these five MCP tools. There is no operator setting or public routing execution yet.
+The shared validator, evaluator, target checks and configuration/publication services
+are implemented. Target invalidation and retention cleanup run inside existing mutations
+and in a background job; with no routing form they change nothing.
 The eventual feature is free on self-hosted and Cloud alike,
 and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
 [Data model](data-model.md), [API conventions](api-conventions.md),

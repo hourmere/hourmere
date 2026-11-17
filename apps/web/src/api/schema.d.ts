@@ -3204,6 +3204,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing-forms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List routing forms
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         */
+        get: operations["listRoutingForms"];
+        put?: never;
+        /**
+         * Create a routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         */
+        post: operations["createRoutingForm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routing-forms/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         */
+        get: operations["getRoutingForm"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive a routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         */
+        delete: operations["archiveRoutingForm"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         */
+        patch: operations["updateRoutingForm"];
+        trace?: never;
+    };
     "/api/v1/schedules": {
         parameters: {
             query?: never;
@@ -4560,6 +4612,9 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ArchiveRoutingForm: {
+            expectedRevision: number;
+        };
         Attendee: {
             email: string;
             /**
@@ -4972,6 +5027,106 @@ export interface components {
                 email?: string | null;
                 name?: string | null;
             };
+        };
+        CreateRoutingForm: {
+            description?: string | null;
+            fallback: {
+                /** Format: uuid */
+                eventTypeId: string;
+                /** @enum {string} */
+                kind: "event";
+                mappings?: {
+                    destination: {
+                        /** @enum {string} */
+                        kind: "inviteeName";
+                    } | {
+                        /** @enum {string} */
+                        kind: "inviteeEmail";
+                    } | {
+                        /** @enum {string} */
+                        kind: "question";
+                        questionId: string;
+                    };
+                    options?: {
+                        [key: string]: string;
+                    };
+                    /** Format: uuid */
+                    questionId: string;
+                }[];
+            } | {
+                /** @enum {string} */
+                kind: "message";
+                message: string;
+            };
+            questions?: ({
+                /** Format: uuid */
+                id: string;
+                label: string;
+                required?: boolean;
+                /** @enum {string} */
+                type: "short_text" | "email";
+            } | {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                options: {
+                    /** Format: uuid */
+                    id: string;
+                    label: string;
+                }[];
+                required?: boolean;
+                /** @enum {string} */
+                type: "select";
+            })[];
+            /** Format: uuid */
+            requestId?: string;
+            rules?: {
+                conditions: ({
+                    /** @enum {string} */
+                    operator: "equals";
+                    /** Format: uuid */
+                    questionId: string;
+                    value: string;
+                } | {
+                    /** @enum {string} */
+                    operator: "one_of";
+                    /** Format: uuid */
+                    questionId: string;
+                    values: string[];
+                })[];
+                /** Format: uuid */
+                id: string;
+                target: {
+                    /** Format: uuid */
+                    eventTypeId: string;
+                    /** @enum {string} */
+                    kind: "event";
+                    mappings?: {
+                        destination: {
+                            /** @enum {string} */
+                            kind: "inviteeName";
+                        } | {
+                            /** @enum {string} */
+                            kind: "inviteeEmail";
+                        } | {
+                            /** @enum {string} */
+                            kind: "question";
+                            questionId: string;
+                        };
+                        options?: {
+                            [key: string]: string;
+                        };
+                        /** Format: uuid */
+                        questionId: string;
+                    }[];
+                } | {
+                    /** @enum {string} */
+                    kind: "message";
+                    message: string;
+                };
+            }[];
+            slug: string;
+            title: string;
         };
         CreateWorkflowInput: {
             actions: ({
@@ -6329,6 +6484,145 @@ export interface components {
         Responses: {
             [key: string]: string | string[] | boolean;
         };
+        RoutingForm: {
+            createdAt: string;
+            description: string | null;
+            draftRevision: number;
+            enabled: boolean;
+            fallback: {
+                /** Format: uuid */
+                eventTypeId: string;
+                /** @enum {string} */
+                kind: "event";
+                mappings: {
+                    destination: {
+                        /** @enum {string} */
+                        kind: "inviteeName";
+                    } | {
+                        /** @enum {string} */
+                        kind: "inviteeEmail";
+                    } | {
+                        /** @enum {string} */
+                        kind: "question";
+                        questionId: string;
+                    };
+                    options?: {
+                        [key: string]: string;
+                    };
+                    /** Format: uuid */
+                    questionId: string;
+                }[];
+            } | {
+                /** @enum {string} */
+                kind: "message";
+                message: string;
+            };
+            health: {
+                /** @enum {string} */
+                status: "ok" | "unavailable" | "unknown";
+                targets: {
+                    /** Format: uuid */
+                    eventTypeId: string | null;
+                    /** @enum {string} */
+                    health: "ok" | "unavailable" | "unknown";
+                    reason: string | null;
+                    ruleId: string;
+                }[];
+                /** Format: uuid */
+                versionId: string;
+            } | null;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            publishedVersionId: string | null;
+            publishedVersionNumber: number | null;
+            questions: ({
+                /** Format: uuid */
+                id: string;
+                label: string;
+                required: boolean;
+                /** @enum {string} */
+                type: "short_text" | "email";
+            } | {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                options: {
+                    /** Format: uuid */
+                    id: string;
+                    label: string;
+                }[];
+                required: boolean;
+                /** @enum {string} */
+                type: "select";
+            })[];
+            rules: {
+                conditions: ({
+                    /** @enum {string} */
+                    operator: "equals";
+                    /** Format: uuid */
+                    questionId: string;
+                    value: string;
+                } | {
+                    /** @enum {string} */
+                    operator: "one_of";
+                    /** Format: uuid */
+                    questionId: string;
+                    values: string[];
+                })[];
+                /** Format: uuid */
+                id: string;
+                target: {
+                    /** Format: uuid */
+                    eventTypeId: string;
+                    /** @enum {string} */
+                    kind: "event";
+                    mappings: {
+                        destination: {
+                            /** @enum {string} */
+                            kind: "inviteeName";
+                        } | {
+                            /** @enum {string} */
+                            kind: "inviteeEmail";
+                        } | {
+                            /** @enum {string} */
+                            kind: "question";
+                            questionId: string;
+                        };
+                        options?: {
+                            [key: string]: string;
+                        };
+                        /** Format: uuid */
+                        questionId: string;
+                    }[];
+                } | {
+                    /** @enum {string} */
+                    kind: "message";
+                    message: string;
+                };
+            }[];
+            slug: string;
+            title: string;
+            updatedAt: string;
+        };
+        RoutingFormList: {
+            data: {
+                createdAt: string;
+                draftRevision: number;
+                enabled: boolean;
+                /** @enum {string|null} */
+                health: "ok" | "unavailable" | "unknown" | null;
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                publishedVersionId: string | null;
+                publishedVersionNumber: number | null;
+                slug: string;
+                title: string;
+                updatedAt: string;
+            }[];
+            nextCursor: string | null;
+        };
         Schedule: {
             /** Format: date-time */
             createdAt: string;
@@ -6761,6 +7055,106 @@ export interface components {
             };
             /** Format: uuid */
             organizationId: string;
+        };
+        UpdateRoutingForm: {
+            description?: string | null;
+            enabled?: boolean;
+            expectedRevision: number;
+            fallback?: {
+                /** Format: uuid */
+                eventTypeId: string;
+                /** @enum {string} */
+                kind: "event";
+                mappings?: {
+                    destination: {
+                        /** @enum {string} */
+                        kind: "inviteeName";
+                    } | {
+                        /** @enum {string} */
+                        kind: "inviteeEmail";
+                    } | {
+                        /** @enum {string} */
+                        kind: "question";
+                        questionId: string;
+                    };
+                    options?: {
+                        [key: string]: string;
+                    };
+                    /** Format: uuid */
+                    questionId: string;
+                }[];
+            } | {
+                /** @enum {string} */
+                kind: "message";
+                message: string;
+            };
+            questions?: ({
+                /** Format: uuid */
+                id: string;
+                label: string;
+                required?: boolean;
+                /** @enum {string} */
+                type: "short_text" | "email";
+            } | {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                options: {
+                    /** Format: uuid */
+                    id: string;
+                    label: string;
+                }[];
+                required?: boolean;
+                /** @enum {string} */
+                type: "select";
+            })[];
+            rules?: {
+                conditions: ({
+                    /** @enum {string} */
+                    operator: "equals";
+                    /** Format: uuid */
+                    questionId: string;
+                    value: string;
+                } | {
+                    /** @enum {string} */
+                    operator: "one_of";
+                    /** Format: uuid */
+                    questionId: string;
+                    values: string[];
+                })[];
+                /** Format: uuid */
+                id: string;
+                target: {
+                    /** Format: uuid */
+                    eventTypeId: string;
+                    /** @enum {string} */
+                    kind: "event";
+                    mappings?: {
+                        destination: {
+                            /** @enum {string} */
+                            kind: "inviteeName";
+                        } | {
+                            /** @enum {string} */
+                            kind: "inviteeEmail";
+                        } | {
+                            /** @enum {string} */
+                            kind: "question";
+                            questionId: string;
+                        };
+                        options?: {
+                            [key: string]: string;
+                        };
+                        /** Format: uuid */
+                        questionId: string;
+                    }[];
+                } | {
+                    /** @enum {string} */
+                    kind: "message";
+                    message: string;
+                };
+            }[];
+            slug?: string;
+            title?: string;
         };
         UpdateWorkflowInput: {
             actions?: ({
@@ -11866,6 +12260,410 @@ export interface operations {
                 };
             };
             /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listRoutingForms: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Optional on reads; ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active forms with current published target health; newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingFormList"];
+                };
+            };
+            /** @description invalid_request, invalid_routing_form, invalid_routing_target, invalid_cursor, invalid_limit */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled, routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, slug_taken, routing_form_limit_reached, routing_form_not_published */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Optional on reads; ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRoutingForm"];
+            };
+        };
+        responses: {
+            /** @description Created form or same-request replay */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingForm"];
+                };
+            };
+            /** @description invalid_request, invalid_routing_form, invalid_routing_target, invalid_cursor, invalid_limit */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled, routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, slug_taken, routing_form_limit_reached, routing_form_not_published */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Optional on reads; ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Draft and current published target health, per rule and fallback */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingForm"];
+                };
+            };
+            /** @description invalid_request, invalid_routing_form, invalid_routing_target, invalid_cursor, invalid_limit */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled, routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, slug_taken, routing_form_limit_reached, routing_form_not_published */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    archiveRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Optional on reads; ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveRoutingForm"];
+            };
+        };
+        responses: {
+            /** @description Archived and disabled; excluded from active reads */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request, invalid_routing_form, invalid_routing_target, invalid_cursor, invalid_limit */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled, routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, slug_taken, routing_form_limit_reached, routing_form_not_published */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Optional on reads; ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRoutingForm"];
+            };
+        };
+        responses: {
+            /** @description Updated draft and revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingForm"];
+                };
+            };
+            /** @description invalid_request, invalid_routing_form, invalid_routing_target, invalid_cursor, invalid_limit */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled, routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, slug_taken, routing_form_limit_reached, routing_form_not_published */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
             429: {
                 headers: {
                     [name: string]: unknown;

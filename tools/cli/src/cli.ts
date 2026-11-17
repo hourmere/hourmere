@@ -14,6 +14,12 @@ import {
 export const COMMANDS = {
   'sso providers list': 'list_sso_providers',
   'sso policy': 'get_sso_policy',
+  'routing-forms list': 'list_routing_forms',
+  'routing-forms get': 'get_routing_form',
+  'routing-forms create': 'create_routing_form',
+  'routing-forms update': 'update_routing_form',
+  'routing-forms archive': 'archive_routing_form',
+
   'audit-log list': 'list_audit_events',
   'audit-log settings': 'get_audit_log_settings',
   'audit-log set-retention': 'set_audit_log_settings',
@@ -73,6 +79,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
+       hourmere routing-forms list|get|create|update|archive [--input FILE|-] [--url ORIGIN]
        hourmere workflows list|get|create|update [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
@@ -165,6 +172,7 @@ function parse(argv: readonly string[]): Options {
           first === 'branding' ||
           first === 'slack' ||
           first === 'workflows' ||
+          first === 'routing-forms' ||
           first === 'audit-log'
         ? `${first} ${parts.shift() ?? ''}`
         : first

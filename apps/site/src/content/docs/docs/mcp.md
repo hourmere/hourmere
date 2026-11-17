@@ -72,10 +72,17 @@ equivalent. Your current role, organization, ownership and host restrictions sti
 visible attendee details, answers or ready meeting links. Normal booking actions can send
 notifications and trigger configured integrations.
 
+Routing operations return `routing_forms_disabled` until an operator enables routing.
+
 <!-- api-key-scope-table:start -->
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_routing_forms` | — | `routing-forms list` | `full, read` |
+| `get_routing_form` | — | `routing-forms get` | `full, read` |
+| `create_routing_form` | — | `routing-forms create` | `full` |
+| `update_routing_form` | — | `routing-forms update` | `full` |
+| `archive_routing_form` | — | `routing-forms archive` | `full` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
