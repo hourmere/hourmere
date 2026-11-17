@@ -43,6 +43,7 @@ import {
   BookingWithToken,
   CancelBody,
   CancelGroupOccurrenceResult,
+  GroupAttendeesQuery,
   GroupOccurrenceAttendees,
   Instant,
   ListBookingsQuery,
@@ -565,8 +566,8 @@ export function bookingTools({
     name: 'get_group_occurrence_attendees',
     title: 'Read group occurrence attendees',
     description:
-      'Read private seat holders, answers, booking status and no-show markers for an occurrence ID from a booking groupSlotId. Host-only for API keys and OAuth; non-host team administrators use the browser dashboard. Includes cancelled seats. Invitee manage tokens do not authorize this operation.',
-    input: z.strictObject({ occurrenceId: z.uuid() }),
+      'Read private seat holders, answers, booking status and no-show markers for an occurrence ID from a booking groupSlotId. Host-only for API keys and OAuth; non-host team administrators use the browser dashboard. Defaults to active seats; request cancelled or all explicitly. Pages contain at most 100 seats. Invitee manage tokens do not authorize this operation.',
+    input: z.strictObject({ occurrenceId: z.uuid(), ...GroupAttendeesQuery.shape }),
     output: GroupOccurrenceAttendees,
     annotations: {
       readOnlyHint: true,
@@ -575,7 +576,7 @@ export function bookingTools({
       openWorldHint: false,
     },
     async run(args, call) {
-      return getGroupOccurrenceAttendees(context(call.caller), args.occurrenceId)
+      return getGroupOccurrenceAttendees(context(call.caller), args.occurrenceId, args)
     },
   })
   const cancelGroup = defineTool({

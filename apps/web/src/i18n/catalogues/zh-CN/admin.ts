@@ -16,6 +16,13 @@ export const admin = {
     '请检查群组设置：一位主持人、2–100 个席位、不允许额外来宾且不使用受邀人提供的会议电话号码。',
   'Booking mode cannot change while upcoming confirmed bookings exist.':
     '有未开始的有效预约时不能切换预约模式。',
+  'Seat status': '席位状态',
+  'Active seats': '有效席位',
+  'Cancelled seats': '已取消席位',
+  'All seats': '全部席位',
+  'No seats match this filter on this page.': '本页没有符合筛选条件的席位。',
+  'Attendee list pages': '参会名单分页',
+  'Page {page}': '第 {page} 页',
   'Session attendee list': '本场参会名单',
   'Only the host and authorized team administrators can see this list. Invitees cannot see each other.':
     '仅主持人和有权限的团队管理员可查看此名单。受邀人无法看到彼此。',
