@@ -64,6 +64,7 @@ export const COMMANDS = {
   'one-time-links create': 'create_one_time_link',
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
+  'workflows delete': 'delete_workflow',
   'workflows update': 'update_workflow',
   'workflows create': 'create_workflow',
   'workflows list': 'list_workflows',
@@ -80,7 +81,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive [--input FILE|-] [--url ORIGIN]
-       hourmere workflows list|get|create|update [--input FILE|-] [--url ORIGIN]
+       hourmere workflows list|get|create|update|delete [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
@@ -102,7 +103,8 @@ SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
            workflows update (id, expectedRevision, and changed definition fields).
-           Read or full scope for reads; full scope for create/update. All answer workflows_disabled until booking
+           workflows delete (id, expectedRevision); authorized repeats are safe.
+           Read or full scope for reads; full scope for create/update/delete. All answer workflows_disabled until booking
            workflows are enabled on the instance.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention

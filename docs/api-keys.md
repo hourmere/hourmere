@@ -263,6 +263,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/webhooks/{id}` | Session or API key | `full` |
 | `GET /api/v1/webhooks/{id}/deliveries` | Session or API key | `full, read` |
 | `POST /api/v1/webhooks/{id}/rotate-secret` | Session or API key | `full` |
+| `DELETE /api/v1/workflows/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/workflows/{id}` | Session or API key | `full` |
 | `POST /api/v1/workflows` | Session or API key | `full` |
 | `GET /api/v1/workflows` | Session or API key | `full, read` |
@@ -339,6 +340,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `resend_waitlist_verification` | — | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
+| `delete_workflow` | — | `workflows delete` | `full` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
 | `list_sso_providers` | — | `sso providers list` | `full, read` |

@@ -41,6 +41,12 @@ export {
   workflowReferences,
 } from './definition.ts'
 export {
+  type DeleteWorkflowInput,
+  DeleteWorkflowInputSchema,
+  deleteWorkflow,
+  type WorkflowDeleteContext,
+} from './deletes.ts'
+export {
   requireWorkflowsImplemented,
   WORKFLOWS_IMPLEMENTED,
   workflowCapture,

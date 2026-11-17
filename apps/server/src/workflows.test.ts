@@ -153,6 +153,7 @@ describe('workflow creation REST while off', () => {
         for (const [method, path] of [
           ['POST', '/api/v1/workflows'],
           ['PATCH', '/api/v1/workflows/not-a-uuid'],
+          ['DELETE', '/api/v1/workflows/not-a-uuid'],
         ] as const) {
           for (const input of [
             '{',
@@ -181,14 +182,17 @@ describe('workflow MCP tools while off', () => {
     expect(tools.map(({ name }) => name)).toEqual([
       'create_workflow',
       'update_workflow',
+      'delete_workflow',
       'list_workflows',
       'get_workflow',
     ])
     for (const tool of tools) {
       expect(tool.requireEnabled).toBeUndefined()
       expect(tool.annotations).toEqual({
-        readOnlyHint: !['create_workflow', 'update_workflow'].includes(tool.name),
-        destructiveHint: false,
+        readOnlyHint: !['create_workflow', 'update_workflow', 'delete_workflow'].includes(
+          tool.name,
+        ),
+        destructiveHint: tool.name === 'delete_workflow',
         idempotentHint: tool.name !== 'update_workflow',
         openWorldHint: false,
       })
@@ -209,6 +213,7 @@ describe('workflow MCP tools while off', () => {
         for (const [name, args] of [
           ['create_workflow', {}],
           ['update_workflow', {}],
+          ['delete_workflow', {}],
           ['list_workflows', {}],
           ['list_workflows', { owner: { kind: 'personal', id: user.id } }],
           ['list_workflows', 'not an object'],
@@ -226,7 +231,7 @@ describe('workflow MCP tools while off', () => {
           }
           expect(called.result.isError, `${authorization} ${name}`).toBe(true)
           expect(textOf(called.result)).toEqual(
-            ['create_workflow', 'update_workflow'].includes(name) &&
+            ['create_workflow', 'update_workflow', 'delete_workflow'].includes(name) &&
               authorization === 'Bearer hm_read'
               ? denial
               : disabled,
@@ -234,7 +239,13 @@ describe('workflow MCP tools while off', () => {
         }
       }
       // The API-key scope check keeps its precedence.
-      for (const name of ['create_workflow', 'update_workflow', 'list_workflows', 'get_workflow']) {
+      for (const name of [
+        'create_workflow',
+        'update_workflow',
+        'delete_workflow',
+        'list_workflows',
+        'get_workflow',
+      ]) {
         const called = await rpc(app, 'Bearer hm_bookings', {
           method: 'tools/call',
           params: { name, arguments: { id: 'x' } },
@@ -255,7 +266,9 @@ describe('workflow MCP tools while off', () => {
           throw new Error('nothing is logged')
         })
         expect(textOf(read as never)).toEqual(
-          ['create_workflow', 'update_workflow'].includes(tool.name) ? denial : disabled,
+          ['create_workflow', 'update_workflow', 'delete_workflow'].includes(tool.name)
+            ? denial
+            : disabled,
         )
         const bookings = await runTool(
           tool,
@@ -334,6 +347,7 @@ describe('workflow CLI commands while off', () => {
     ['get', 'get_workflow', { id: randomUUID() }],
     ['create', 'create_workflow', {}],
     ['update', 'update_workflow', {}],
+    ['delete', 'delete_workflow', {}],
   ] as const)(
     'workflows %s calls %s and reports workflows_disabled',
     async (command, tool, input) => {
