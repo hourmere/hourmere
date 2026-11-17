@@ -1043,6 +1043,23 @@ upgrade test preserves a populated predecessor down to row versions and compares
 upgraded schemas. The optional `SSO_ENCRYPTION_KEY` seals provider configuration; it must be backed up
 privately and kept stable. Configuring a key does not enable either protocol.
 
+## SSO domain retirement storage
+
+Migration 0117 adds `sso_domain_retirements` and
+`sso_domain_retirement_notifications` for offline operator maintenance. A ceremony binds
+one old claim ID and generation to a different requesting team, the instance-bound TXT
+digest and a deadline. Completion atomically preserves both team IDs, the old verification
+and expiry times, the new proof time and retirement time, alongside the system audit event.
+The completed ceremony is immutable; replay cannot transfer trust or retire a later
+claim generation. Pending ceremonies reserve no domains. Ordinary verification remains
+necessary for the requesting team.
+
+The notification outbox stores owner user IDs, never mailbox addresses. Delivery resolves
+a still-current verified owner of the old team; successful processing is recorded for
+retries. Delivery is at least once across an SMTP-success/database-commit crash. No
+notification goes to the requesting team or an arbitrary supplied address. See the
+[domain lifecycle runbook](sso.md#domain-lifecycle-operations).
+
 ## SSO identity storage
 
 Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage

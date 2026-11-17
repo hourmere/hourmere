@@ -1,7 +1,7 @@
-// The SSO transport profile is called only by the hard-off domain service for TXT
-// proofs. Only the configuration loader parses `SSO_PRIVATE_TARGETS`, so the allowlist
-// routes nothing. OIDC and
-// SAML stay hard-off (apps/server/src/sso.test.ts starts the server with both settings and a
+// The SSO transport profile is called only by domain services for TXT proofs.
+// Interactive writes and rechecks are hard-off; offline retirement only removes trust.
+// Only the configuration loader parses `SSO_PRIVATE_TARGETS`, so the allowlist routes nothing.
+// OIDC and SAML stay hard-off (apps/server/src/sso.test.ts starts the server with both settings and a
 // populated allowlist). HTTP federation transport still has no caller.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -58,7 +58,7 @@ const importsTargets = (file: string, source: string) =>
     (target) => target === TARGETS || target === '@hourmere/outbound/sso-private-targets',
   )
 
-describe('SSO transport permits only the hard-off domain TXT caller', () => {
+describe('SSO transport permits only domain TXT callers', () => {
   it('recognises every import form of the profile and nothing else', () => {
     const server = 'apps/server/src/example.ts'
     const outbound = 'packages/outbound/src/example.ts'
@@ -101,10 +101,16 @@ describe('SSO transport permits only the hard-off domain TXT caller', () => {
     const callers = sources.filter((file) =>
       importsProfile(file, readFileSync(new URL(file, root), 'utf8')),
     )
-    expect(callers).toEqual(['apps/server/src/sso-domains.ts'])
-    const domainSource = readFileSync(new URL('apps/server/src/sso-domains.ts', root), 'utf8')
-    expect(domainSource).toContain('resolveSsoDomainTxt')
-    expect(domainSource).not.toContain('sendSsoRequest')
+    expect(callers).toEqual([
+      'apps/server/src/sso-domain-recheck.ts',
+      'apps/server/src/sso-domain-retirement.ts',
+      'apps/server/src/sso-domains.ts',
+    ])
+    for (const caller of callers) {
+      const domainSource = readFileSync(new URL(caller, root), 'utf8')
+      expect(domainSource).toContain('resolveSsoDomainTxt')
+      expect(domainSource).not.toContain('sendSsoRequest')
+    }
   })
 
   it('reads SSO_PRIVATE_TARGETS only in the configuration loader, and routes nothing with it', () => {

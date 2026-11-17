@@ -1310,6 +1310,27 @@ export interface SsoDelegationBindings {
   user_id: string;
 }
 
+export interface SsoDomainRetirementNotifications {
+  delivered_at: Timestamp | null;
+  retirement_id: string;
+  user_id: string;
+}
+
+export interface SsoDomainRetirements {
+  challenge_digest: string;
+  created_at: Generated<Timestamp>;
+  domain_id: string;
+  expires_at: Timestamp;
+  generation: number;
+  id: Generated<string>;
+  old_expires_at: Timestamp | null;
+  old_organization_id: string;
+  old_verified_at: Timestamp | null;
+  proved_at: Timestamp | null;
+  requesting_organization_id: string;
+  retired_at: Timestamp | null;
+}
+
 export interface SsoDomains {
   challenge_digest: string;
   challenge_expires_at: Timestamp;
@@ -1763,6 +1784,8 @@ export interface DB {
   sso_attempts: SsoAttempts;
   sso_browser_proofs: SsoBrowserProofs;
   sso_delegation_bindings: SsoDelegationBindings;
+  sso_domain_retirement_notifications: SsoDomainRetirementNotifications;
+  sso_domain_retirements: SsoDomainRetirements;
   sso_domains: SsoDomains;
   sso_identity_links: SsoIdentityLinks;
   sso_mailbox_tokens: SsoMailboxTokens;
