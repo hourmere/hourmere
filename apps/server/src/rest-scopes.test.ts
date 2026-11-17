@@ -51,6 +51,7 @@ function fixture(scope: ApiKeyScope) {
     publicUrl: 'http://localhost',
     routes: productRoutes({
       db,
+      routingFormsEnabled: true,
       notify,
       mcpAuth: { handler: async () => new Response(null) },
       socialProviders: {},

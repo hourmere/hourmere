@@ -115,6 +115,8 @@ is listed explicitly. CLI `--help`, no arguments and `--version` are local and r
 New operations require explicit classification; `read` and `bookings` do not gain access
 because an endpoint uses GET or a tool advertises itself as read-only.
 
+Routing operations return `routing_forms_disabled` until an operator enables routing.
+
 <!-- api-key-scope-table:start -->
 
 ### Operation groups
@@ -122,9 +124,9 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Operation group | `full` | `read` | `bookings` |
 | --- | --- | --- | --- |
 | Other account reads | Allowed | Allowed | — |
+| Account settings and configuration writes | Allowed | — | — |
 | Browser session operations | — | — | — |
 | Audit log reads | Allowed | — | — |
-| Account settings and configuration writes | Allowed | — | — |
 | Booking workflow reads | Allowed | Allowed | Allowed |
 | Booking actions and repairs | Allowed | — | Allowed |
 | Availability diagnostics | Allowed | — | — |
@@ -135,6 +137,11 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
+| `GET /api/v1/routing-forms` | Session or API key | `full, read` |
+| `GET /api/v1/routing-forms/{id}` | Session or API key | `full, read` |
+| `POST /api/v1/routing-forms` | Session or API key | `full` |
+| `PATCH /api/v1/routing-forms/{id}` | Session or API key | `full` |
+| `DELETE /api/v1/routing-forms/{id}` | Session or API key | `full` |
 | `GET /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Browser session only | — |
@@ -267,6 +274,11 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_routing_forms` | — | `routing-forms list` | `full, read` |
+| `get_routing_form` | — | `routing-forms get` | `full, read` |
+| `create_routing_form` | — | `routing-forms create` | `full` |
+| `update_routing_form` | — | `routing-forms update` | `full` |
+| `archive_routing_form` | — | `routing-forms archive` | `full` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |

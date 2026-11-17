@@ -1,5 +1,8 @@
 {
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
+  "createRoutingForm": { "mcp": "create_routing_form", "cli": "routing-forms create" },
+  "updateRoutingForm": { "mcp": "update_routing_form", "cli": "routing-forms update" },
+  "archiveRoutingForm": { "mcp": "archive_routing_form", "cli": "routing-forms archive" },
   "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {

@@ -18,7 +18,7 @@ import {
 } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { getScheduleAvailability } from '@hourmere/scheduling'
+import { createRoutingForm, getScheduleAvailability } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { createSlackDestination, createWebhook } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -75,6 +75,8 @@ const classes = {
     'POST /api/v1/public/teams/{handle}/{slug}/waitlist/resend',
   ],
   other_read: [
+    'GET /api/v1/routing-forms',
+    'GET /api/v1/routing-forms/{id}',
     'GET /api/v1/branding',
     'GET /api/v1/branding/logo/{hash}',
     'GET /api/v1/bookings/export.csv',
@@ -98,6 +100,9 @@ const classes = {
   ],
   audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [
+    'POST /api/v1/routing-forms',
+    'PATCH /api/v1/routing-forms/{id}',
+    'DELETE /api/v1/routing-forms/{id}',
     'POST /api/v1/workflows',
     'PATCH /api/v1/workflows/{id}',
     'DELETE /api/v1/workflows/{id}',
@@ -316,6 +321,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           slotSnippetsEnabled: true,
+          routingFormsEnabled: true,
           scimProvisioningEnabled: true,
           mcpAuth: auth,
           publicUrl,
@@ -704,6 +710,28 @@ describe.skipIf(!process.env.DATABASE_URL)(
         }
         if (method === 'PATCH') payload = { isActive: false }
         if (method === 'DELETE') expectedStatus = 204
+      } else if (template.startsWith('/api/v1/routing-forms')) {
+        const input = {
+          slug: nonce,
+          title: 'Routing scope matrix',
+          fallback: { kind: 'message', message: 'Thanks' },
+        }
+        if (template.includes('{id}'))
+          id = (
+            await createRoutingForm(
+              { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
+              input,
+            )
+          ).id
+        if (method === 'POST') {
+          payload = input
+          expectedStatus = 201
+        }
+        if (method === 'PATCH') payload = { expectedRevision: 1, title: 'Updated' }
+        if (method === 'DELETE') {
+          payload = { expectedRevision: 1 }
+          expectedStatus = 204
+        }
       } else if (template.startsWith('/api/v1/workflows')) {
         // Booking workflows are hard-off: an allowed key gets 404 workflows_disabled.
         if (template === '/api/v1/workflows') path += `?ownerKind=team&ownerId=${teamId}`
@@ -774,14 +802,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 128-operation contract and all 384 scope combinations', () => {
+    it('covers the exact 133-operation contract and all 399 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(128)
-      expect(new Set(ids).size).toBe(128)
+      expect(ids).toHaveLength(133)
+      expect(new Set(ids).size).toBe(133)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(384)
+      expect(cases).toHaveLength(399)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

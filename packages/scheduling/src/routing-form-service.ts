@@ -1,7 +1,7 @@
 // Routing-form configuration and publication services (docs/routing-forms.md, step a3): draft
 // create/read/update/archive with optimistic revisions, atomic immutable publication with its
 // target dependencies, and a side-effect-free preview. Service entry points only: no transport
-// calls them while routing is hard-off, and nothing here is exported from the package.
+// calls them while routing is hard-off. Only configuration operations are exported from the package.
 //
 // Lock order, the same in every write path: the organization boundary (a personal
 // organization's owner, the organization share lock, then the actor and member share locks),
