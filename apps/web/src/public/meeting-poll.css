@@ -1,0 +1,68 @@
+.meeting-poll {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.meeting-poll form,
+.poll-ballot-fields {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.meeting-poll fieldset {
+  min-width: 0;
+  margin: 0;
+}
+.meeting-poll legend {
+  max-width: 100%;
+  padding-inline: 0.25rem;
+}
+.poll-field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  margin-block: 0.75rem;
+}
+.poll-field :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.poll-option {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+.poll-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+.poll-choices label,
+.poll-consent {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding-block: 0.4rem;
+}
+.poll-choices input,
+.poll-consent input {
+  flex-shrink: 0;
+}
+.poll-ballot-fields {
+  padding: 0;
+  border: 0;
+}
+.meeting-poll button {
+  max-width: 100%;
+  white-space: normal;
+}
+@media (max-width: 420px) {
+  .poll-choices {
+    flex-direction: column;
+  }
+}
+
+.meeting-poll > button,
+.meeting-poll form + button {
+  margin-top: 1rem;
+}

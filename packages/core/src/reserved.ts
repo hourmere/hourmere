@@ -100,11 +100,12 @@ export function isReservedName(name: string): boolean {
 /**
  * Lowercase personal handles nobody may newly claim or change to, although, unlike
  * RESERVED_NAMES, they are still served where already stored. `route` opens the routing-form
- * pages /route/{handle}/{slug} (docs/routing-forms.md); listing it in RESERVED_NAMES would stop
+ * pages /route/{handle}/{slug} (docs/routing-forms.md); `poll` has explicit public poll entries.
+ * Listing either in RESERVED_NAMES would stop
  * serving a legacy `route` owner's pages. Team slugs are unaffected: team pages live under
  * /team/. See isClaimReservedHandle.
  */
-export const CLAIM_RESERVED_HANDLES: ReadonlySet<string> = new Set(['route'])
+export const CLAIM_RESERVED_HANDLES: ReadonlySet<string> = new Set(['route', 'poll'])
 
 /** Whether `name` (case-insensitively, e.g. `Route`) may not be claimed as a personal handle. */
 export function isClaimReservedHandle(name: string): boolean {

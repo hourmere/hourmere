@@ -53,6 +53,9 @@ The website at hourmere.com is separate from your Hourmere instance.
   receive notification when a matching time opens; manage entries in the editor, REST,
   MCP or CLI. Available in full to self-hosters.
 
+- [Voting in a meeting poll](/docs/meeting-poll-voting): understand verification, ballots
+  and privacy. The voter page is implemented; poll creation is not available yet.
+
 ## Create an event type
 
 Open **Event types**, then **New event type** in your Hourmere instance. Start with four

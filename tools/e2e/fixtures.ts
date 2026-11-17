@@ -43,6 +43,7 @@ import {
 } from './audit-data.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
+import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
 
 export interface FixtureApp {
@@ -61,6 +62,7 @@ export interface FixtureApp {
   openWaitlistVerification: (page: Page) => Promise<void>
   waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
+  auditPollState: (state: PollAuditState) => ReturnType<typeof seedPollAuditData>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
   auditOAuthQuery: () => Promise<string>
@@ -520,6 +522,12 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        auditPollState: async (state) => {
+          const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+            title: AUDIT_TITLE,
+          })
+          return seedPollAuditData(db, host, eventTypeId, authSecret, state)
+        },
         setEmbedSnippet: (snippet) => {
           embedSnippet = snippet
         },
