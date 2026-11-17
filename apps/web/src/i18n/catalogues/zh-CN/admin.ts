@@ -21,7 +21,7 @@ export const admin = {
     '仅主持人和有权限的团队管理员可查看此名单。受邀人无法看到彼此。',
   'Loading attendees…': '正在加载参会名单…',
   'Could not load the attendee list.': '无法加载参会名单。',
-  '{active} of {capacity} seats booked': '已预约 {active} / {capacity} 个席位',
+  '{active} of {capacity} seats booked': '已预约{active} / {capacity}个席位',
   'No attendees in this session.': '本场暂无参会者。',
   'Cancel whole session…': '取消整场…',
   'Cancel every active seat in this session? All affected invitees will be notified.':

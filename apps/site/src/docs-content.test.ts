@@ -479,6 +479,7 @@ const publishedGuides = [
   'analytics',
   'interface-languages',
   'api-conventions',
+  'group-events',
   'embedding',
   'google-calendar',
   'mcp',
@@ -576,6 +577,10 @@ describe('complete public documentation', () => {
       expect(summaryPolicy).toBeDefined()
       const webhookRows = source.split('\n').filter((line) => line.startsWith('| Session webhook'))
       expect(webhookRows.length).toBeGreaterThan(0)
+      const groupPolicy = source
+        .match(/^### Group booking fields and privacy\n[\s\S]*$/m)?.[0]
+        ?.trimEnd()
+      expect(groupPolicy).toBeDefined()
       expect(read(original)).toBe(
         [
           '[API conventions](https://hourmere.com/docs/api-conventions).',
@@ -607,6 +612,8 @@ describe('complete public documentation', () => {
           '| Request and supplied expectation | Previous response | Current response |',
           '|---|---|---|',
           ...webhookRows,
+          '',
+          groupPolicy,
           '',
         ].join('\n'),
       )
