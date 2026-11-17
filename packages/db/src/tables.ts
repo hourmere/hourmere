@@ -904,6 +904,12 @@ export interface MeetingPollOperations {
   updated_at: Generated<Timestamp>;
 }
 
+export interface MeetingPollRequestLimits {
+  hits: number;
+  key_digest: Buffer;
+  reset_at: Timestamp;
+}
+
 export interface MeetingPolls {
   admission_mode: string;
   api_key_id: string | null;
@@ -1724,6 +1730,7 @@ export interface DB {
   meeting_poll_key_state: MeetingPollKeyState;
   meeting_poll_mailbox_counters: MeetingPollMailboxCounters;
   meeting_poll_operations: MeetingPollOperations;
+  meeting_poll_request_limits: MeetingPollRequestLimits;
   meeting_poll_slots: MeetingPollSlots;
   meeting_poll_voters: MeetingPollVoters;
   meeting_poll_votes: MeetingPollVotes;

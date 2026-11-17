@@ -356,7 +356,11 @@ async function skipQueuedMail(
     .execute()
 }
 
-async function ownBallot(trx: Db, poll: VoterPoll, voterId: string): Promise<MeetingPollOwnBallot> {
+export async function ownBallot(
+  trx: Db,
+  poll: VoterPoll,
+  voterId: string,
+): Promise<MeetingPollOwnBallot> {
   const row = await trx
     .selectFrom('meeting_poll_voters')
     .select([

@@ -87,9 +87,11 @@ return `manageToken: null`; keep the existing emailed management link. Clients t
 the request identity retain ordinary management semantics and should not automatically
 retry a move. Responses are additive; ignore unknown fields and error codes.
 
-An answer to a request that expired, was replaced or was already resolved by a move
-returns 409 `reschedule_request_changed`; so does a pick after the booking was cancelled,
-while repeating the cancellation returns the cancelled booking. With the token from the
+Except for a replay of its saved pick, an answer to a request already resolved by a move,
+or to a request that expired or was replaced, returns 409 `reschedule_request_changed`.
+So does a pick after cancellation, while repeating cancellation returns the cancelled
+booking and keeps the original
+reason, even if the retry supplies a different reason. With the token from the
 request email, `GET /api/v1/bookings/manage` reports what happened in the optional
 `rescheduleRequest`: that request's `id` and its `state`, one of `pending`, `expired`,
 `replaced`, `rescheduled` (moved since the email, by the invitee or a host) or
@@ -104,6 +106,8 @@ status `confirmed`. Neither includes the note or private management link.
 
 - Imported bookings are read-only; request a change in their original system.
 - Group-seat bookings do not support this action.
+- Confirmed paid bookings remain readable, but management actions return
+  `paid_booking_management_unavailable`; payment management is not available yet.
 - The timeout is fixed at 48 hours, capped by the meeting start and the booking's
   effective reschedule deadline (including the cancel deadline); it is not configurable separately.
 - Expiry keeps the original meeting. It does not cancel the meeting or free the slot.

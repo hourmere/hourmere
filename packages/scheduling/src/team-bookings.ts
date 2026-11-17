@@ -376,6 +376,7 @@ export async function readTeamBookingPage(
   const rows = await query
     .select([
       'b.id',
+      'b.group_slot_id',
       'b.status',
       'b.start_at',
       'b.end_at',
@@ -404,6 +405,7 @@ export async function readTeamBookingPage(
     data: page.map((row) =>
       toTeamAdminBooking({
         id: row.id,
+        group_slot_id: row.group_slot_id,
         status: row.status as TeamAdminBookingRecord['status'],
         start_at: row.start_at,
         end_at: row.end_at,

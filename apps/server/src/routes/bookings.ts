@@ -4,9 +4,11 @@ import type { Db } from '@hourmere/db'
 import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
+  cancelGroupOccurrence,
   cancelHostBooking,
   cancelManagedBooking,
   exportBookingsCsv,
+  getGroupOccurrenceAttendees,
   getHostBooking,
   getManagedBookingDetails,
   LOCATION_KINDS,
@@ -134,6 +136,10 @@ export const Booking = z
     id: z.uuid(),
     eventTypeId: z.uuid().nullable(),
     status: z.enum(['confirmed', 'cancelled']),
+    groupSlotId: z.uuid().optional().openapi({
+      description:
+        'Authenticated host/team reads only: shared group occurrence identifier. Each booking is one independently managed seat.',
+    }),
     isGroupSeat: z.boolean().optional().openapi({
       description:
         'True for a group-seat booking, which does not support host reschedule requests.',
@@ -300,6 +306,34 @@ export const AttendeeNoShow = z
   })
   .openapi('AttendeeNoShow')
 
+export const GroupOccurrenceAttendees = z
+  .object({
+    id: z.uuid(),
+    eventTypeId: z.uuid().nullable(),
+    title: z.string(),
+    start: Instant,
+    end: Instant,
+    capacity: z.int(),
+    activeSeats: z.int(),
+    state: z.enum(['open', 'retired', 'host_cancelled']),
+    attendees: z.array(
+      z.object({
+        bookingId: z.uuid(),
+        id: z.uuid(),
+        name: z.string(),
+        email: z.string(),
+        responses: Responses,
+        status: z.enum(['confirmed', 'cancelled']),
+        noShowMarkedAt: Instant.nullable(),
+        noShowMarkedBy: z.string().nullable(),
+      }),
+    ),
+  })
+  .openapi('GroupOccurrenceAttendees')
+export const CancelGroupOccurrenceResult = z
+  .object({ id: z.uuid(), cancelledSeatCount: z.int() })
+  .openapi('CancelGroupOccurrenceResult')
+
 export const CancelBody = z
   .strictObject({ reason: z.string().max(1000).optional() })
   .openapi('CancelBooking')
@@ -365,7 +399,7 @@ export const ListBookingsQuery = z.object({
     .refine((value) => !/\p{Cc}/u.test(value), 'q must not contain control characters')
     .optional()
     .openapi({
-      description: `Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most ${MAX_SEARCH_LENGTH} characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages.`,
+      description: `Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case but not accents (Jose does not match José). Guests and answers are not searched. Trimmed; at most ${MAX_SEARCH_LENGTH} characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages.`,
     }),
   limit: z.coerce
     .number()
@@ -489,6 +523,76 @@ export function bookingRoutes({
       bookingExportMaxConcurrent,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/group-occurrences/{id}/attendees',
+        operationId: 'getGroupOccurrenceAttendees',
+        security: authenticated,
+        middleware: caller,
+        tags: ['Bookings'],
+        summary: 'Read the private attendee list for a group occurrence',
+        description:
+          'Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Includes cancelled seats. Invitee manage tokens grant no access.',
+        request: { params: z.object({ id: z.uuid() }) },
+        responses: {
+          200: {
+            description: 'Occurrence and private seat holders',
+            content: json(GroupOccurrenceAttendees),
+          },
+          400: invalidId,
+          401: unauthorized,
+          403: error('insufficient_scope'),
+          404: error('group_occurrence_not_found'),
+          429: keyRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await getGroupOccurrenceAttendees(context(c.var.principal), c.req.valid('param').id),
+          200,
+        ),
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/group-occurrences/{id}/cancel',
+        operationId: 'cancelGroupOccurrence',
+        security: authenticated,
+        middleware: hostManage,
+        tags: ['Bookings'],
+        summary: 'Cancel a whole group occurrence',
+        description:
+          'Cancels all confirmed seats and closes the occurrence to new bookings. To cancel only one seat use the existing booking cancellation operation. Host or browser-session team owner/admin only; API keys and OAuth are host-only.',
+        request: {
+          params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
+          body: { required: true, content: json(CancelBody) },
+        },
+        responses: {
+          200: {
+            description: 'Cancelled occurrence and changed seat count',
+            content: json(CancelGroupOccurrenceResult),
+          },
+          400: invalidId,
+          401: unauthorized,
+          403: crossOrigin,
+          404: error('group_occurrence_not_found'),
+          409: error('booking_in_past or organization_context_changed'),
+          429: hostRateLimited,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await cancelGroupOccurrence(
+            context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({
@@ -769,6 +873,8 @@ export function bookingRoutes({
         path: '/api/v1/bookings/manage/cancel',
         operationId: 'cancelManagedBooking',
         summary: 'Cancel with the manage token',
+        description:
+          'When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.',
         middleware: manageLimit,
         request: {
           headers: ManageToken,
@@ -804,7 +910,7 @@ export function bookingRoutes({
         operationId: 'rescheduleManagedBooking',
         summary: 'Reschedule with the manage token',
         description:
-          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.',
+          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.',
         middleware: manageLimit,
         request: {
           headers: ManageToken.extend({

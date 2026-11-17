@@ -91,6 +91,7 @@ export default defineConfig({
             { label: 'Availability', link: '/docs/availability' },
             { label: 'Round-robin scheduling', link: '/docs/round-robin-scheduling' },
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
+            { label: 'Group events', link: '/docs/group-events' },
             { label: 'Multiple meeting lengths', link: '/docs/multiple-durations' },
             { label: 'Meeting location choices', link: '/docs/location-choices' },
             { label: 'Booking limits', link: '/docs/booking-limits' },

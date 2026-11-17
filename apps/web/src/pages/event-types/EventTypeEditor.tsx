@@ -45,8 +45,10 @@ import {
   type EventTypeDraft,
   emptyDraft,
   fieldLabels,
+  hasAutomaticLocation,
   LOCATION_KINDS,
   type LocationKind,
+  orderedLocations,
   serverErrors,
   slugify,
   suggestedBookingSlug,
@@ -266,6 +268,14 @@ function EventTypeForm({
     setDraft((d) => ({
       ...d,
       [name]: value,
+      ...((name === 'autoCreateMeet' || name === 'autoCreateZoom') &&
+        d.locationKind !== (name === 'autoCreateMeet' ? 'google_meet' : 'zoom') && {
+          locationOptions: orderedLocations(d).map((option) => {
+            if (option.kind !== (name === 'autoCreateMeet' ? 'google_meet' : 'zoom')) return option
+            const { autoCreate: _automatic, ...rest } = option
+            return value ? { ...rest, autoCreate: true as const } : rest
+          }),
+        }),
       ...(name === 'locationKind' && changeLocationKind(d, value as LocationKind | '')),
       ...(name === 'durationMinutes' &&
         !slugTouched && {
@@ -827,6 +837,43 @@ function EventTypeForm({
             </div>
           </SettingsGroup>
 
+          <SettingsGroup label="Group events" initiallyOpen={draft.bookingMode === 'group'}>
+            <Field id="bookingMode" label={t('Booking mode')} error={errors.bookingMode}>
+              {(props) => (
+                <select
+                  {...props}
+                  value={draft.bookingMode}
+                  onChange={(event) =>
+                    set('bookingMode', event.target.value as 'individual' | 'group')
+                  }
+                >
+                  <option value="individual">{t('One invitee per session')}</option>
+                  <option value="group">{t('Group: multiple invitees per session')}</option>
+                </select>
+              )}
+            </Field>
+            <p className="hint">
+              {t(
+                'Group events use one host and 2–100 seats per session. Additional guests and invitee phone locations are unavailable. Booking mode cannot change while upcoming confirmed bookings exist.',
+              )}
+            </p>
+            {draft.bookingMode === 'group' && (
+              <Field id="groupCapacity" label={t('Seats per session')} error={errors.groupCapacity}>
+                {(props) => (
+                  <input
+                    {...props}
+                    type="number"
+                    min={2}
+                    max={100}
+                    step={1}
+                    value={draft.groupCapacity}
+                    onChange={(event) => set('groupCapacity', event.target.value)}
+                  />
+                )}
+              </Field>
+            )}
+          </SettingsGroup>
+
           <SettingsGroup
             label="Additional durations"
             initiallyOpen={editing && baseline.allowedDurationsMinutes.length > 1}
@@ -940,9 +987,9 @@ function EventTypeForm({
               {t('Location')}
             </h2>
             <OrderedLocationsEditor draft={draft} errors={errors} set={set} />
-            {draft.locationKind === 'zoom' && (
+            {orderedLocations(draft).some((option) => option.kind === 'zoom') && (
               <ZoomMeetingFields
-                draft={draft}
+                draft={{ ...draft, autoCreateZoom: hasAutomaticLocation(draft, 'zoom') }}
                 errors={errors}
                 set={set}
                 enabled={automaticZoom}
@@ -951,13 +998,13 @@ function EventTypeForm({
                 session={me.principal.kind === 'session'}
               />
             )}
-            {draft.locationKind === 'google_meet' && (
+            {orderedLocations(draft).some((option) => option.kind === 'google_meet') && (
               <div>
                 <label className="checkbox">
                   <input
                     type="checkbox"
-                    checked={draft.autoCreateMeet}
-                    disabled={!automaticGoogleMeet && !draft.autoCreateMeet}
+                    checked={hasAutomaticLocation(draft, 'google_meet')}
+                    disabled={!automaticGoogleMeet && !hasAutomaticLocation(draft, 'google_meet')}
                     onChange={(e) => set('autoCreateMeet', e.target.checked)}
                   />
                   {t('Create a unique Google Meet link for each booking')}

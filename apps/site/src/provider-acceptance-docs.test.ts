@@ -86,8 +86,13 @@ const sentences = (text: string) =>
     .flatMap((paragraph) =>
       [...segmenter.segment(normalize(paragraph))].map(({ segment }) => normalize(segment)),
     )
+// Method/path code spans are interface identifiers, not provider publication claims.
+// In particular, a poll /verify route must not combine with a Google route elsewhere
+// in the same Markdown table into a purported OAuth verification sentence.
 const unapprovedProviderClaims = (text: string, allowed: readonly string[]) =>
-  sentences(text).filter(
+  sentences(
+    text.replace(/`(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \/api\/[^`\s]+`/g, '[API route]'),
+  ).filter(
     (sentence) =>
       (/marketplace/i.test(sentence) ||
         (/\b(?:google|oauth2?)\b/i.test(sentence) && /verif/i.test(sentence))) &&
@@ -240,6 +245,17 @@ describe('provider publication and verification claims throughout documentation'
     expect(unapprovedProviderClaims(claim, zoomAllowed)).toEqual([])
     expect(unapprovedProviderClaims(`${source(googlePath)}\n\n${claim}\n`, googleAllowed)).toEqual([
       claim,
+    ])
+  })
+})
+
+describe('provider claims alongside API route identifiers', () => {
+  it('does not combine poll verification and provider route names into a claim', () => {
+    const table =
+      '| Route |\n| --- |\n| `POST /api/v1/public/meeting-polls/verify` |\n| `POST /api/v1/calendar-connections/google/authorize` |'
+    expect(unapprovedProviderClaims(table, [])).toEqual([])
+    expect(unapprovedProviderClaims(`${table}\n\nGoogle has verified the OAuth app.`, [])).toEqual([
+      'Google has verified the OAuth app.',
     ])
   })
 })

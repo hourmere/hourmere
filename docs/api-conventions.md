@@ -145,3 +145,14 @@ These session webhook compatibility rows mirror the canonical documentation for 
 | Session webhook writes and reads with the optional header: the expected team differs from the current space | Header ignored; request used the current organization | 409 `organization_context_changed` when the caller still owns/administers the expected team, otherwise uniform 403 `team_management_access_denied` |
 | Session webhook writes: the caller's own expected personal organization differs from the current space | 2xx success (header ignored; request used the current organization) | 409 `organization_context_changed` |
 | Session webhook reads: malformed expected ID or a different expected personal organization | 200 (header ignored) | 403 `team_management_access_denied` |
+
+### Group booking fields and privacy
+
+Event-type configuration adds `bookingMode` (`individual` or `group`) and nullable
+`groupCapacity` (2–100 for group mode). Authenticated booking projections add optional
+`groupSlotId` for group seats. Clients must tolerate absent additive fields on older
+servers. Each booking still represents one independent seat. The occurrence attendee
+endpoint returns private names, email addresses, answers, status and no-show metadata
+only after host/current-membership authorization; non-host team owners/admins require
+a browser session. Public and invitee-management reads never return the roster.
+See [group events](https://hourmere.com/docs/group-events) for operations and constraints.

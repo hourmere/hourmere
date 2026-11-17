@@ -34,21 +34,45 @@ export function decodeQuotedPrintable(body: string) {
   return Buffer.from(bytes).toString('utf8')
 }
 
+/**
+ * Walks the MIME tree by the boundaries each multipart header declares. Splitting on any line
+ * that starts with `--` is not enough: a quoted-printable soft break can put `--` from random
+ * content (a management token) at the start of a body line, which then swallowed the next part.
+ */
+function leafParts(entity: string, leaves: { head: string; body: string }[]) {
+  const split = entity.indexOf('\r\n\r\n')
+  const head = unfold(split === -1 ? entity : entity.slice(0, split))
+  const body = split === -1 ? '' : entity.slice(split + 4)
+  const boundary = /^Content-Type:\s*multipart\/[^\r\n]*?boundary="?([^";\r\n]+)"?/im.exec(
+    head,
+  )?.[1]
+  if (!boundary) {
+    leaves.push({ head, body })
+    return
+  }
+  // Delimiters are whole lines: CRLF, "--", the boundary, then "--" (close) or the line end.
+  const sections = `\r\n${body}`.split(`\r\n--${boundary}`)
+  for (const section of sections.slice(1)) {
+    if (section.startsWith('--')) break
+    leafParts(section.slice(section.indexOf('\r\n') + 2), leaves)
+  }
+}
+
 /** Every MIME part's body decoded (base64, quoted-printable), plus RFC 2047 encoded words. */
 export function decodeMime(raw: string): Omit<RawMessage, 'to' | 'envelope'> {
   const parts: string[] = [unfold(raw)]
   let ics: string | undefined
-  const partPattern = /((?:^[^\r\n]+\r\n)+)\r\n([\s\S]*?)(?=\r\n--|$(?![\s\S]))/gm
-  for (const [, head = '', body = ''] of raw.matchAll(partPattern)) {
-    const unfolded = unfold(head)
-    const encoding = unfolded.match(/^Content-Transfer-Encoding:\s*([\w-]+)/im)?.[1]?.toLowerCase()
+  const leaves: { head: string; body: string }[] = []
+  leafParts(raw, leaves)
+  for (const { head, body } of leaves) {
+    const encoding = head.match(/^Content-Transfer-Encoding:\s*([\w-]+)/im)?.[1]?.toLowerCase()
     const decoded =
       encoding === 'base64'
         ? Buffer.from(body.replace(/\s+/g, ''), 'base64').toString('utf8')
         : encoding === 'quoted-printable'
           ? decodeQuotedPrintable(body)
           : body
-    if (/^Content-Type:\s*text\/calendar/im.test(unfolded)) ics ??= unfold(decoded)
+    if (/^Content-Type:\s*text\/calendar/im.test(head)) ics ??= unfold(decoded)
     parts.push(unfold(decoded))
   }
   for (const [, charset, kind, word = ''] of raw.matchAll(/=\?([^?]+)\?([BQ])\?([^?]*)\?=/gi))

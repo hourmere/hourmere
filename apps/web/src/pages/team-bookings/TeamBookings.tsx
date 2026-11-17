@@ -1,3 +1,4 @@
+import { GroupOccurrenceAttendees } from '../bookings/GroupOccurrenceAttendees.tsx'
 import {
   NoShowAttendees,
   type NoShowChange,
@@ -1045,6 +1046,15 @@ export function BookingDetail({
             )}
           </p>
         ))}
+      {booking.groupSlotId && (
+        <GroupOccurrenceAttendees
+          key={`${booking.groupSlotId}:${booking.status}`}
+          occurrenceId={booking.groupSlotId}
+          expectedOrganizationId={expectedOrganizationId}
+          disabled={!!conflict}
+          onCancelled={() => onCancelled()}
+        />
+      )}
       <NoShowAttendees
         booking={booking}
         expectedOrganizationId={expectedOrganizationId}

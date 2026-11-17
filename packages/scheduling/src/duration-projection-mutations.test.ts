@@ -15,6 +15,7 @@ import {
   effectiveRescheduleCutoff,
   validCutoff,
 } from './change-deadlines.ts'
+import { DomainError } from './errors.ts'
 import { EVENT_TYPE_LIMITS } from './event-types.ts'
 import { engineValidation } from './internal.ts'
 import {
@@ -45,6 +46,9 @@ function fieldNormalization(change?: Change) {
     validateSuccessRedirect: identity,
     validateQuestions: identity,
     validCutoff,
+    invalid: (message: string) => new DomainError('invalid', 'invalid_event_type', message),
+    invalidGroup: (message: string) =>
+      new DomainError('invalid', 'invalid_group_configuration', message),
   }
   return new Function(...Object.keys(bindings), `${copy}; return validFields`)(
     ...Object.values(bindings),
@@ -69,6 +73,8 @@ function legacyFieldProjection(change?: Change) {
 function verifyNormalization(normalize: ReturnType<typeof fieldNormalization>) {
   const allowedDurationsMinutes = [60, 30, 5]
   const fields = normalize({
+    bookingMode: 'individual',
+    groupCapacity: null,
     durationMinutes: 30,
     allowedDurationsMinutes,
     bufferBeforeMinutes: 0,

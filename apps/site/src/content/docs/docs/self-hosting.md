@@ -1141,3 +1141,45 @@ SMS per event type. Existing per-number, instance and organization limits apply;
 belong to the operator's Twilio account. Signed inbound STOP messages suppress that
 number across the instance, and START/UNSTOP re-enables it. SMS failures are isolated from
 booking and email delivery. See the SMS guide for inbound webhook setup and limitations.
+
+## Meeting poll credentials and recovery
+
+The public meeting-poll REST operations are enabled without a feature switch. Host creation
+and the voter web page are not available yet. MCP and CLI expose the same public operations
+through their usual API-key authentication; REST capabilities need no account.
+
+Meeting polls use `BETTER_AUTH_SECRET` for mailbox/IP digests and encrypted mail credentials.
+Back up this secret with the database and use the same value on every web and worker process.
+Startup checks the stored key fingerprint before serving polls; every public operation also
+checks it. Changing this secret while voters or mailbox counters exist fails closed with
+`meeting_poll_key_mismatch`. Never delete the fingerprint row to bypass this protection.
+
+To recover, stop all application and worker processes and choose one procedure:
+
+1. Restore the previous `BETTER_AUTH_SECRET` on every process, then restart. This preserves
+   ballots, rosters, removal tombstones and mail budgets.
+2. If the previous secret is lost or compromised, take a database backup and deliberately
+   invalidate the affected polls using an operator database connection. In a transaction,
+   delete from `meeting_polls` every row for which a `meeting_poll_voters` or
+   `meeting_poll_mailbox_counters` row exists with that `poll_id`. Foreign-key cascades erase
+   their voters, ballots, credentials and queued mail. This is irreversible without the backup;
+   linked ordinary bookings remain. Set the replacement secret consistently and restart.
+   With no voter or mailbox-counter rows left, startup records the replacement fingerprint.
+   Polls without those rows remain. There is no dedicated invalidation CLI command.
+
+Do not rotate live instances one process at a time. The shared request budget stores only
+keyed IP digests with 60-second windows and expires old windows during requests. Reads allow
+120 requests per minute; enrollment, recovery and verification share 10; voting, withdrawal
+and reminder opt-out share 30. REST and MCP share these PostgreSQL counters across processes.
+Keep proxy trust settings correct; IPv6 addresses within a /64 share one budget.
+
+中文：公共投票 REST 接口直接可用，无功能开关；主办方创建及投票网页尚未提供。
+MCP/CLI 仍需通常的 API 密钥，REST 能力凭据无需登录。投票使用 `BETTER_AUTH_SECRET`
+生成邮箱/IP 摘要并加密邮件凭据，所有网页及工作进程必须使用同一值，并与数据库一起备份。
+有投票人或邮箱计数记录时更换密钥会在启动及每次公共操作中拒绝服务。
+恢复时先停掉所有应用及工作进程：恢复旧密钥可保留全部数据；若旧密钥丢失或泄露，
+先备份数据库，再由运维在事务中删除所有拥有投票人或邮箱计数记录的投票，利用级联删除
+清除凭据、选票及待发邮件，然后统一设置新密钥并重启。普通预约保留；没有投票人及邮箱
+计数的投票保留。不得删除密钥指纹绕过检查，也不要逐台在线轮换。没有专用失效 CLI 命令。
+每分钟读取限 120 次，报名/找回/验证共享 10 次，投票/撤回/提醒退订共享 30 次；
+REST 与 MCP 跨进程共享数据库限额，IPv6 /64 共用计数，需正确设置可信代理。

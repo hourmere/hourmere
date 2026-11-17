@@ -746,6 +746,7 @@ function verifyEveryServiceFenced(modules: { file: string; source: string }[]) {
   )
   expect(services.map((entry) => entry.service)).toEqual(
     expect.arrayContaining([
+      'readMeetingPoll',
       'enrollMeetingPollVoter',
       'verifyMeetingPollVoter',
       'recoverMeetingPollVoter',
@@ -765,11 +766,22 @@ function verifyEveryServiceFenced(modules: { file: string; source: string }[]) {
 
 // The fence names that production code may use, and where: the generated table types, the
 // storage test support, the meeting-poll services and the internal meeting-poll mail workers.
-// The transport step that supplies the secret adds its server start here when it wires the
-// startup check.
+// B2 adds only the public adapters, shared error handling, startup check and generated schema.
+// Host transports remain unavailable until their assigned implementation steps.
 const FENCE_NAMES = /ensureMeetingPollKey|MeetingPollKeyMismatchError|meeting[-_]poll[-_]key/i
-const FENCE_USERS =
+const INTERNAL_FENCE_USERS =
   /^packages\/(db\/src\/(tables|meeting-poll-key-state-[a-z]+)\.ts|scheduling\/src\/meeting-poll-[a-z-]+\.ts|notifications\/src\/meeting-polls\.ts)$/
+
+const PUBLIC_FENCE_USERS = new Set([
+  'packages/scheduling/src/index.ts',
+  'apps/server/src/server.ts',
+  'apps/server/src/app.ts',
+  'apps/server/src/meeting-poll-rate-limit.ts',
+  'apps/server/src/routes/meeting-polls.ts',
+  'apps/server/src/mcp/meeting-polls.ts',
+  'apps/server/src/mcp/tools.ts',
+  'apps/web/src/api/schema.d.ts',
+])
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -795,7 +807,7 @@ function productionSources(): string[] {
   return files.sort()
 }
 
-describe('meeting poll key fence wiring (off: no transport supplies the secret)', () => {
+describe('meeting poll key fence wiring (public transports only)', () => {
   it('runs every voter service through the key fence before anything else', () => {
     verifyEveryServiceFenced(voterModules())
   })
@@ -827,23 +839,47 @@ describe('meeting poll key fence wiring (off: no transport supplies the secret)'
     )
   })
 
-  it('is used only by the meeting-poll services, so no production surface calls it yet', () => {
+  it('is used only by internal services and the exact public transport composition', () => {
     const users = productionSources().filter((file) =>
       FENCE_NAMES.test(readFileSync(join(root, file), 'utf8')),
     )
-    expect(users.filter((file) => !FENCE_USERS.test(file))).toEqual([])
+    expect(
+      users.filter((file) => !INTERNAL_FENCE_USERS.test(file) && !PUBLIC_FENCE_USERS.has(file)),
+    ).toEqual([])
     expect(users).toEqual(
       expect.arrayContaining([
         'packages/db/src/tables.ts',
         'packages/scheduling/src/meeting-poll-key.ts',
         'packages/scheduling/src/meeting-poll-voters.ts',
+        'packages/scheduling/src/meeting-poll-public.ts',
+        ...PUBLIC_FENCE_USERS,
       ]),
     )
-    for (const name of ['server.ts', 'jobs.ts', 'index.ts'])
-      expect(
-        users.some((file) => file.endsWith(`/${name}`)),
-        name,
-      ).toBe(false)
+  })
+
+  it('exposes exactly the seven public operations and no host poll transport', () => {
+    const routes = readFileSync(join(root, 'apps/server/src/routes/meeting-polls.ts'), 'utf8')
+    expect([...routes.matchAll(/path: '([^']+)'/g)].map((match) => match[1]).sort()).toEqual(
+      ['read', 'enroll', 'recover', 'verify', 'vote', 'withdraw', 'reminder-opt-out']
+        .map((action) => `/api/v1/public/meeting-polls/${action}`)
+        .sort(),
+    )
+    const tools = readFileSync(join(root, 'apps/server/src/mcp/meeting-polls.ts'), 'utf8')
+    expect([...tools.matchAll(/name: '([^']+)'/g)].map((match) => match[1]).sort()).toEqual(
+      [
+        'read_meeting_poll',
+        'enroll_meeting_poll_voter',
+        'recover_meeting_poll_voter',
+        'verify_meeting_poll_voter',
+        'submit_meeting_poll_vote',
+        'withdraw_meeting_poll_vote',
+        'opt_out_meeting_poll_reminder',
+      ].sort(),
+    )
+    const hostServices =
+      /\b(?:createMeetingPoll|listMeetingPolls|getMeetingPoll|closeMeetingPoll|cancelMeetingPoll|deleteMeetingPoll|rotateMeetingPollLink|inviteMeetingPollVoters|resendMeetingPollInvitation|getMeetingPollResults|removeMeetingPollVoter|removeUnverifiedMeetingPollVoters|finalizeMeetingPoll)\b/
+    for (const file of productionSources().filter((file) => /^(apps|tools)\//.test(file)))
+      expect(hostServices.test(readFileSync(join(root, file), 'utf8')), file).toBe(false)
   })
 })
 
@@ -866,7 +902,7 @@ describe.skipIf(!serverUrl)('meeting poll key fence', { timeout: 60_000 }, () =>
   it('records a keyed fingerprint once on first use, never the secret', () => verifyFirstUse(real))
   it('refuses every voter write under a switched secret and writes nothing', () =>
     verifySwitchedSecret(real))
-  it('off: the startup check refuses a mismatched key while keyed data exists', () =>
+  it('the startup check refuses a mismatched key while keyed data exists', () =>
     verifyStartupCheck(real))
   it('refuses near misses of the recorded secret', () => verifyNearMisses(real))
   it('refuses another secret without waiting for in-flight writers', () =>

@@ -78,6 +78,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
+| `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
+| `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
+| `verify_meeting_poll_voter` | — | `polls verify` | `full, bookings` |
+| `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
+| `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
+| `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |
@@ -111,6 +118,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `list_bookings` | — | `list` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
+| `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |
+| `cancel_group_occurrence` | — | `cancel-group` | `full, bookings` |
 | `export_bookings` | — | `export` | `full, read` |
 | `get_booking_activity` | — | `booking-activity` | `full, read` |
 | `retry_conference` | — | `retry-meeting` | `full, bookings` |
@@ -305,6 +314,8 @@ for update compatibility, editor steps, invitee selection and shared-rule limits
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
 | `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
+| `get_group_occurrence_attendees` | `occurrenceId`; returns authorized seat holders, answers, status and no-show state. |
+| `cancel_group_occurrence` | `occurrenceId` and optional `reason`; cancels all active seats of a hosted future occurrence. |
 | `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. `status: "cancelled"` gives the cancelled view; `q` searches invitee name, invitee email and event type title. |
 
 For example, after confirming the booking page, test recipient and time zone with your agent:
@@ -816,9 +827,10 @@ When answering a request through REST or MCP, include `rescheduleRequestId` from
 `pendingReschedule.id` with the managed pick or cancel input. This rejects stale
 replaced requests and makes identical retries safe; a replayed pick returns the
 same successor with `manageToken: null`. Without that field, existing ordinary
-reschedule retry semantics remain unchanged. An answer to a request that expired, was
-replaced or was already resolved by a move fails with `reschedule_request_changed`, as
-does a pick after cancellation. With the request email's token, REST
+reschedule retry semantics remain unchanged. Except for that saved pick replay, an
+answer to a request that expired, was replaced or was resolved by a move fails with
+`reschedule_request_changed`, as does a pick after cancellation. Replaying a cancellation keeps its original reason even
+if a different reason is supplied. With the request email's token, REST
 `GET /api/v1/bookings/manage` reports what happened in `rescheduleRequest`; MCP and CLI
 have no invitee read of a manage token.
 
@@ -916,6 +928,27 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+## Group events
+
+Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
+`allowGuests: false` and individual single-host scheduling. Configuration requires `full`
+API-key scope. Omitted update fields preserve saved values; existing future booked work
+prevents switching mode. Capacity edits affect new occurrences only.
+
+Authorized booking reads/lists represent each seat separately and include `groupSlotId`.
+`GET /api/v1/group-occurrences/{id}/attendees`, MCP `get_group_occurrence_attendees` and
+CLI `group-attendees` return the private occurrence roster, including answers, booking
+status and no-show state. MCP/CLI take `occurrenceId`. Reads allow `full`, `read` and
+`bookings` keys, with actual host authority in the current organization. Non-host team
+owners/admins need a browser session; MCP OAuth has the same host-only boundary.
+
+`POST /api/v1/group-occurrences/{id}/cancel`, MCP `cancel_group_occurrence` and CLI
+`cancel-group` cancel the whole future occurrence. MCP/CLI take `occurrenceId` and
+optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bookings`.
+Ordinary booking cancellation still cancels only one seat. Public and invitee-management
+reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
+for setup, privacy and limitations.
 
 ## Duplicate an event type
 

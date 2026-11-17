@@ -386,7 +386,7 @@ export interface paths {
                     limit?: number;
                     /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                     order?: "asc" | "desc";
-                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
+                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case but not accents (Jose does not match José). Guests and answers are not searched. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
                     q?: string;
                     /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                     status?: "confirmed" | "cancelled";
@@ -960,7 +960,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel with the manage token */
+        /**
+         * Cancel with the manage token
+         * @description When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.
+         */
         post: operations["cancelManagedBooking"];
         delete?: never;
         options?: never;
@@ -979,7 +982,7 @@ export interface paths {
         put?: never;
         /**
          * Reschedule with the manage token
-         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
          */
         post: operations["rescheduleManagedBooking"];
         delete?: never;
@@ -2091,6 +2094,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/group-occurrences/{id}/attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the private attendee list for a group occurrence
+         * @description Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Includes cancelled seats. Invitee manage tokens grant no access.
+         */
+        get: operations["getGroupOccurrenceAttendees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group-occurrences/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a whole group occurrence
+         * @description Cancels all confirmed seats and closes the occurrence to new bookings. To cancel only one seat use the existing booking cancellation operation. Host or browser-session team owner/admin only; API keys and OAuth are host-only.
+         */
+        post: operations["cancelGroupOccurrence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -2918,6 +2961,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/meeting-polls/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request mailbox verification to join a public poll */
+        post: operations["enrollMeetingPollVoter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/meeting-polls/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read a meeting poll and your own ballot */
+        post: operations["readMeetingPoll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/meeting-polls/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover a lost voter link by poll ID and mailbox */
+        post: operations["recoverMeetingPollVoter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/meeting-polls/reminder-opt-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Opt out of reminders with a purpose-limited mail capability */
+        post: operations["optOutMeetingPollReminder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/meeting-polls/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Explicitly verify a voter mailbox */
+        post: operations["verifyMeetingPollVoter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/meeting-polls/vote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit or replace a complete ballot, or reactivate after withdrawal */
+        post: operations["submitMeetingPollVote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/meeting-polls/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw your ballot and opt out of poll mail */
+        post: operations["withdrawMeetingPollVote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/teams/{handle}/{slug}": {
         parameters: {
             query?: never;
@@ -3673,7 +3835,7 @@ export interface paths {
                     limit?: number;
                     /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                     order?: "asc" | "desc";
-                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
+                    /** @description Search: bookings whose invitee name or email, or whose event type title, contains this text, ignoring case but not accents (Jose does not match José). Guests and answers are not searched. Trimmed; at most 100 characters; % and _ match themselves; blank means no search. Narrows the caller's own list and never widens it. Keep it unchanged between pages. */
                     q?: string;
                     /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
                     status?: "confirmed" | "cancelled";
@@ -4939,6 +5101,11 @@ export interface components {
             eventTypeId: string | null;
             /** @description Authenticated host reads only: the event type's current title, or null when deleted. The stored booking title remains historical; clients must verify its exact composition before localizing it. */
             eventTypeTitle?: string | null;
+            /**
+             * Format: uuid
+             * @description Authenticated host/team reads only: shared group occurrence identifier. Each booking is one independently managed seat.
+             */
+            groupSlotId?: string;
             /** Format: uuid */
             id: string;
             /** @description True for a group-seat booking, which does not support host reschedule requests. */
@@ -5084,6 +5251,11 @@ export interface components {
         };
         CancelBooking: {
             reason?: string;
+        };
+        CancelGroupOccurrenceResult: {
+            cancelledSeatCount: number;
+            /** Format: uuid */
+            id: string;
         };
         ConferenceConnection: {
             accountEmail: string | null;
@@ -5410,6 +5582,11 @@ export interface components {
             allowedDurationsMinutes: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;
+            /**
+             * @description individual (default) or group: independent seats in a single-host occurrence. Group mode requires no guests and capacity 2–100. Mode cannot change after bookings exist.
+             * @enum {string}
+             */
+            bookingMode: "individual" | "group";
             /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays: number | null;
             /** @description Free time kept after a meeting, in whole minutes */
@@ -5427,6 +5604,8 @@ export interface components {
             description: string | null;
             /** @description Default length of a meeting, in whole minutes */
             durationMinutes: number;
+            /** @description Group capacity, 2–100; null in individual mode. Changes apply to future occurrences only. */
+            groupCapacity: number | null;
             hosts: {
                 /** Format: uuid */
                 userId: string;
@@ -5594,6 +5773,11 @@ export interface components {
              * @default false
              */
             allowGuests: boolean;
+            /**
+             * @description individual (default) or group: independent seats in a single-host occurrence. Group mode requires no guests and capacity 2–100. Mode cannot change after bookings exist.
+             * @enum {string}
+             */
+            bookingMode?: "individual" | "group";
             /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays?: number | null;
             /**
@@ -5614,6 +5798,8 @@ export interface components {
             description?: string | null;
             /** @description Default length of a meeting, in whole minutes */
             durationMinutes: number;
+            /** @description Group capacity, 2–100; null in individual mode. Changes apply to future occurrences only. */
+            groupCapacity?: number | null;
             hosts?: {
                 userId: string;
             }[];
@@ -5847,6 +6033,11 @@ export interface components {
             allowedDurationsMinutes?: number[];
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests?: boolean;
+            /**
+             * @description individual (default) or group: independent seats in a single-host occurrence. Group mode requires no guests and capacity 2–100. Mode cannot change after bookings exist.
+             * @enum {string}
+             */
+            bookingMode?: "individual" | "group";
             /** @description How many whole calendar days ahead can be booked in the host schedule time zone; null = no limit */
             bookingWindowDays?: number | null;
             /** @description Free time kept after a meeting, in whole minutes */
@@ -5861,6 +6052,8 @@ export interface components {
             description?: string | null;
             /** @description Default length of a meeting, in whole minutes */
             durationMinutes?: number;
+            /** @description Group capacity, 2–100; null in individual mode. Changes apply to future occurrences only. */
+            groupCapacity?: number | null;
             hosts?: {
                 userId: string;
             }[];
@@ -6042,6 +6235,47 @@ export interface components {
              */
             to: string;
         };
+        GroupOccurrenceAttendees: {
+            activeSeats: number;
+            attendees: {
+                /** Format: uuid */
+                bookingId: string;
+                email: string;
+                /** Format: uuid */
+                id: string;
+                name: string;
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                noShowMarkedAt: string | null;
+                noShowMarkedBy: string | null;
+                responses: components["schemas"]["Responses"];
+                /** @enum {string} */
+                status: "confirmed" | "cancelled";
+            }[];
+            capacity: number;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            end: string;
+            /** Format: uuid */
+            eventTypeId: string | null;
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
+            /** @enum {string} */
+            state: "open" | "retired" | "host_cancelled";
+            title: string;
+        };
         Health: {
             /** @enum {string} */
             database: "ok" | "unreachable";
@@ -6196,6 +6430,46 @@ export interface components {
                 name: string;
             };
         };
+        MeetingPollAccepted: {
+            /** @enum {boolean} */
+            accepted: true;
+        };
+        MeetingPollOwnBallot: {
+            ballotRevision: number;
+            consentedAt: string | null;
+            responses: {
+                [key: string]: unknown;
+            };
+            submittedAt: string | null;
+            voter: components["schemas"]["MeetingPollVoter"];
+            votes: {
+                slotId: string;
+                /** @enum {string} */
+                value: "yes" | "if_need_be" | "no";
+            }[];
+        } | null;
+        MeetingPollReminderOptOut: {
+            optedOutAt: string;
+            /** Format: uuid */
+            pollId: string;
+        };
+        MeetingPollVerification: {
+            voter: components["schemas"]["MeetingPollVoter"];
+            votingToken: string | null;
+        };
+        MeetingPollVoter: {
+            deadlineAt: string;
+            email: string;
+            locale: string;
+            name: string;
+            /** Format: uuid */
+            pollId: string;
+            /** @enum {string} */
+            status: "pending" | "invited" | "verified" | "withdrawn";
+            timeZone: string;
+            /** Format: uuid */
+            voterId: string;
+        };
         MemberDepartureImpact: {
             bookings: {
                 data: {
@@ -6221,6 +6495,8 @@ export interface components {
                         id: string;
                         title: string | null;
                     } | null;
+                    /** Format: uuid */
+                    groupSlotId?: string;
                     /** @enum {string} */
                     handling: "coordinate_cancellation" | "wait_until_end_or_coordinate_offline";
                     hosts: {
@@ -6317,6 +6593,8 @@ export interface components {
                         id: string;
                         title: string | null;
                     } | null;
+                    /** Format: uuid */
+                    groupSlotId?: string;
                     /** @enum {string} */
                     handling: "coordinate_cancellation" | "wait_until_end_or_coordinate_offline";
                     hosts: {
@@ -6580,6 +6858,50 @@ export interface components {
                 /** @description The host's IANA time zone */
                 timeZone: string;
             };
+        };
+        PublicMeetingPoll: {
+            /** @enum {string} */
+            admissionMode: "public_link" | "invited";
+            allowGuests: boolean;
+            candidates: {
+                endAt: string;
+                /** Format: uuid */
+                id: string;
+                position: number;
+                startAt: string;
+            }[];
+            /** Format: uuid */
+            chosenSlotId: string | null;
+            counts: {
+                ifNeedBe: number;
+                no: number;
+                /** Format: uuid */
+                slotId: string;
+                yes: number;
+            }[] | null;
+            deadlineAt: string;
+            displayTimeZone: string;
+            durationMinutes: number;
+            /** Format: uuid */
+            id: string;
+            locations: {
+                /** @enum {boolean} */
+                askInvitee?: true;
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                label?: string;
+            }[] | null;
+            ownBallot: components["schemas"]["MeetingPollOwnBallot"];
+            questions: components["schemas"]["Question"][];
+            readOnly: boolean;
+            /** @enum {string} */
+            status: "open" | "closed" | "canceled" | "scheduled";
+            title: string;
+            /** @enum {string} */
+            visibility: "private" | "aggregate";
         };
         /** @description A booking-form field beyond name and email. Its answer goes in `responses` under `id`: text for short_text, long_text and phone; one of `options` for select; a list of distinct `options` for multi_select; true or false for checkbox (a required checkbox must be true). */
         Question: {
@@ -7117,6 +7439,8 @@ export interface components {
                 publicBookingPath: string | null;
                 title: string | null;
             } | null;
+            /** Format: uuid */
+            groupSlotId?: string;
             hosts: {
                 /** @description Additive, read-only: whether this saved host is currently a member of the booking team; null when unavailable */
                 isCurrentMember: boolean | null;
@@ -11135,6 +11459,156 @@ export interface operations {
             };
         };
     };
+    getGroupOccurrenceAttendees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Occurrence and private seat holders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupOccurrenceAttendees"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description group_occurrence_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelGroupOccurrence: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelBooking"];
+            };
+        };
+        responses: {
+            /** @description Cancelled occurrence and changed seat count */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelGroupOccurrenceResult"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`). insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description group_occurrence_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description booking_in_past or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     revokeMcpOAuthConnection: {
         parameters: {
             query?: never;
@@ -12291,6 +12765,648 @@ export interface operations {
             };
             /** @description brand_logo_not_found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    enrollMeetingPollVoter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    locale?: string;
+                    name: string;
+                    publicToken: string;
+                    timeZone: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Uniform acceptance, without revealing mailbox membership */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollAccepted"];
+                };
+            };
+            /** @description invalid_request, invalid_voter, invalid_time_zone, invalid_ballot or invalid_responses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: invalid, expired, revoked, removed or unknown capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_full, poll_closed, poll_canceled or poll_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After when known */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    readMeetingPoll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Privacy-filtered poll; no other voter identities */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicMeetingPoll"];
+                };
+            };
+            /** @description invalid_request, invalid_voter, invalid_time_zone, invalid_ballot or invalid_responses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: invalid, expired, revoked, removed or unknown capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_full, poll_closed, poll_canceled or poll_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After when known */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    recoverMeetingPollVoter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    pollId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Uniform acceptance; no valid capability required and no credential rotation */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollAccepted"];
+                };
+            };
+            /** @description invalid_request, invalid_voter, invalid_time_zone, invalid_ballot or invalid_responses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: invalid, expired, revoked, removed or unknown capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_full, poll_closed, poll_canceled or poll_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After when known */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    optOutMeetingPollReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Opted-out state, without voter or ballot data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollReminderOptOut"];
+                };
+            };
+            /** @description invalid_request, invalid_voter, invalid_time_zone, invalid_ballot or invalid_responses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: invalid, expired, revoked, removed or unknown capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_full, poll_closed, poll_canceled or poll_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After when known */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    verifyMeetingPollVoter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Own voter state; new voting token returned only once */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollVerification"];
+                };
+            };
+            /** @description invalid_request, invalid_voter, invalid_time_zone, invalid_ballot or invalid_responses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: invalid, expired, revoked, removed or unknown capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_full, poll_closed, poll_canceled or poll_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After when known */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    submitMeetingPollVote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    consent: boolean;
+                    expectedBallotRevision: number;
+                    locale?: string;
+                    name?: string;
+                    responses?: {
+                        [key: string]: unknown;
+                    };
+                    timeZone?: string;
+                    token: string;
+                    votes: {
+                        slotId: string;
+                        /** @enum {string} */
+                        value: "yes" | "if_need_be" | "no";
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Own ballot and new revision; stale revisions return poll_changed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollOwnBallot"];
+                };
+            };
+            /** @description invalid_request, invalid_voter, invalid_time_zone, invalid_ballot or invalid_responses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: invalid, expired, revoked, removed or unknown capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_full, poll_closed, poll_canceled or poll_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After when known */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    withdrawMeetingPollVote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedBallotRevision: number;
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Own withdrawn state and ballot revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollOwnBallot"];
+                };
+            };
+            /** @description invalid_request, invalid_voter, invalid_time_zone, invalid_ballot or invalid_responses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: invalid, expired, revoked, removed or unknown capability */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_full, poll_closed, poll_canceled or poll_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; Retry-After when known */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

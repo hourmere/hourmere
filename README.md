@@ -5,6 +5,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 
 ## Features
 
+- [Group events](https://hourmere.com/docs/group-events) with independent seats and a private host attendee list through the dashboard, REST, MCP and CLI.
+
 - Private [per-attendee no-show marking](https://hourmere.com/docs/no-shows) through the dashboard, REST, MCP and CLI.
 - Personal and team booking pages, including [collective meetings](https://hourmere.com/docs/collective-scheduling)
   and [round-robin scheduling](https://hourmere.com/docs/round-robin-scheduling).

@@ -97,6 +97,8 @@ export interface EventType {
   rescheduleCutoffMinutes: number | null
   /** Minutes before the start from which the invitee may no longer cancel; null = none. */
   cancelCutoffMinutes: number | null
+  bookingMode: 'individual' | 'group'
+  groupCapacity: number | null
   schedulingType: SchedulingType
   /** Round-robin booking requires a separate explicit activation action. */
   roundRobinActive: boolean
@@ -127,6 +129,8 @@ export interface EventType {
 }
 
 export interface EventTypeInput {
+  bookingMode?: 'individual' | 'group' | undefined
+  groupCapacity?: number | null | undefined
   schedulingType?: SchedulingType | undefined
   hosts?: { userId: string }[] | undefined
   zoomConnectionId?: string | null | undefined
@@ -186,6 +190,8 @@ export const EVENT_TYPE_LIMITS = {
 
 /** The columns a caller sets, validated and normalized. */
 interface Fields {
+  bookingMode: 'individual' | 'group'
+  groupCapacity: number | null
   slug: string
   title: string
   description: string | null
@@ -215,6 +221,8 @@ interface Fields {
 }
 
 const FIELD_NAMES = [
+  'bookingMode',
+  'groupCapacity',
   'slug',
   'title',
   'description',
@@ -242,6 +250,8 @@ const FIELD_NAMES = [
 ] as const satisfies readonly (keyof Fields)[]
 
 const DEFAULTS = {
+  bookingMode: 'individual',
+  groupCapacity: null,
   description: null,
   slotStepMinutes: null,
   bufferBeforeMinutes: 0,
@@ -698,6 +708,7 @@ async function createEventTypeWrite(
         schedulingType,
         personalOwnerId,
       )
+      validateGroupConfiguration(fields, schedulingType)
       const scheduleId = validScheduleId(input.scheduleId) ?? null
       if (schedulingType !== 'individual' && scheduleId !== null) throw invalidScheduleId()
       await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
@@ -818,6 +829,7 @@ export async function updateEventType(
           input.successRedirect !== undefined,
           changes.locations !== undefined,
         )
+        validateGroupConfiguration(fields, schedulingType)
         if (
           zoomConnection &&
           zoomConnection !== row.zoom_connection_id &&
@@ -1062,6 +1074,12 @@ async function withWriteErrors<T>(write: () => Promise<T>): Promise<T> {
   try {
     return await write()
   } catch (error) {
+    if (isConstraintViolation(error, SQLSTATE.checkViolation, 'event_types_group_mode_work'))
+      throw new DomainError(
+        'conflict',
+        'group_mode_has_bookings',
+        'Booking mode cannot change while confirmed bookings have not ended',
+      )
     const unique = SQLSTATE.uniqueViolation
     if (
       isConstraintViolation(error, unique, 'event_types_personal_slug') ||
@@ -1120,6 +1138,18 @@ function validFields(
   validateLocations = true,
 ): Fields {
   const c = candidate
+  if (c.bookingMode !== 'individual' && c.bookingMode !== 'group')
+    throw invalidGroup('bookingMode must be individual or group')
+  if (
+    c.bookingMode === 'group'
+      ? !Number.isInteger(c.groupCapacity) ||
+        (c.groupCapacity as number) < 2 ||
+        (c.groupCapacity as number) > 100
+      : c.groupCapacity !== null
+  )
+    throw invalidGroup(
+      'Group capacity must be a whole number from 2 to 100; individual bookings require null',
+    )
   const locations = validateLocations
     ? validateLocationOptions(c.locations)
     : (c.locations as LocationOption[] | null)
@@ -1157,6 +1187,8 @@ function validFields(
     throw invalid(`position must be a whole number from ${positionMin} to ${positionMax}`)
   }
   return {
+    bookingMode: c.bookingMode,
+    groupCapacity: c.groupCapacity as number | null,
     slug: validSlug(c.slug),
     title: validTitle(c.title),
     description: validDescription(c.description),
@@ -1313,6 +1345,8 @@ function validLocation(value: unknown): LocationSettings | null {
 }
 
 function fieldsOf(row: {
+  booking_mode: string
+  group_capacity: number | null
   slug: string
   title: string
   description: string | null
@@ -1342,6 +1376,8 @@ function fieldsOf(row: {
     (row.locations as LocationOption[] | null) ??
     locationOptionsFromLegacy(row.location as EventTypeLocation | null)
   return {
+    bookingMode: row.booking_mode as 'individual' | 'group',
+    groupCapacity: row.group_capacity,
     slug: row.slug,
     title: row.title,
     description: row.description,
@@ -1385,6 +1421,8 @@ function insertColumns(fields: Fields) {
 
 function columns(fields: Fields) {
   return {
+    booking_mode: fields.bookingMode,
+    group_capacity: fields.groupCapacity,
     slug: fields.slug,
     title: fields.title,
     description: fields.description,
@@ -1616,4 +1654,15 @@ async function auditEventType(
     targetId: id,
     requestId: ctx.requestId,
   })
+}
+
+const invalidGroup = (message: string) =>
+  new DomainError('invalid', 'invalid_group_configuration', message)
+function validateGroupConfiguration(fields: Fields, schedulingType: string) {
+  if (fields.bookingMode !== 'group') return
+  if (schedulingType !== 'individual') throw invalidGroup('Group bookings require a single host')
+  if (fields.allowGuests) throw invalidGroup('Group bookings cannot allow guests')
+  const location = fields.locations?.find((option) => option.isDefault) ?? fields.locations?.[0]
+  if (location?.kind === 'phone' && 'askInvitee' in location)
+    throw invalidGroup('Group bookings require a shared location, not an invitee phone number')
 }
