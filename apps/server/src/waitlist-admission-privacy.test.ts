@@ -166,8 +166,8 @@ describe('waitlist admission input privacy', () => {
   })
   it('detects source-copy raw private diagnostics', async () => {
     const module = await copy([
-      "isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)\n          ? 'private waitlist request failed'\n          : detail",
-      'detail',
+      'isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)',
+      'false',
     ])
     await expect(assertDiagnostics(module, 'unexpected')).rejects.toMatchObject({
       name: 'AssertionError',

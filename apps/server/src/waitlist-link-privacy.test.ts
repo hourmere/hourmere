@@ -202,6 +202,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isOneTimeLinkPath',
         'isSlackDestinationPath',
         'isSsoProviderPath',
+        'isCalDavConnectionPath',
         'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
@@ -215,10 +216,14 @@ describe('waitlist capability privacy source-copy controls', () => {
         isOneTimeLinkPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/team\/sso\/providers(?:\/|$)/i.test(path),
+        (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),
         routePath,
         /x^/,
       )
       const app = new Hono()
+      app.onError((error) => {
+        throw error
+      })
       app.use('*', middleware)
       app.get('*', (c) => c.text('ok'))
       for (const segment of ['waitlist', '%77aitlist']) {
@@ -252,6 +257,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isOneTimeLinkPath',
         'isSlackDestinationPath',
         'isSsoProviderPath',
+        'isCalDavConnectionPath',
         'routePath',
         'COLORS',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
@@ -265,10 +271,14 @@ describe('waitlist capability privacy source-copy controls', () => {
         isOneTimeLinkPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/team\/sso\/providers(?:\/|$)/i.test(path),
+        (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),
         routePath,
         /x^/,
       )
       const app = new Hono()
+      app.onError((error) => {
+        throw error
+      })
       app.use('*', middleware)
       app.get('*', (c) => c.text('ok'))
       const id = '00000000-0000-4000-8000-000000000092'
