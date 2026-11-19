@@ -1,6 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   type BookingNotifier,
+  bookingMeetingPollLinked,
   cancelTeamAdminBooking,
   getTeamAdminBooking,
   listTeamAdminBookings,
@@ -174,6 +175,12 @@ export function teamBookingRoutes(
         const expectedOrganizationId = c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? ''
         const { notify } = deps
         if (!notify) throw new Error('Team booking cancellation requires a notifier')
+        // Unlocked, before the write check's locks, so ordinary bookings skip the poll lookup.
+        const meetingPollLinked = await bookingMeetingPollLinked(
+          deps.db,
+          c.var.principal.organization.id,
+          c.req.valid('param').id,
+        )
         await access.write(
           c.var.principal,
           c.var.principal.organization.id,
@@ -189,6 +196,7 @@ export function teamBookingRoutes(
                   c.var.principal.kind === 'session' ? c.var.principal.sessionId : undefined,
                 reason,
                 notify,
+                meetingPollLinked,
               },
             ),
           { expectedOrganizationId },

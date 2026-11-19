@@ -60,7 +60,11 @@ import {
   resolveLocationChoice,
   selectLocationOption,
 } from './location-options.ts'
-import { enqueueMeetingPollBookingUpdate } from './meeting-poll-outcomes.ts'
+import {
+  bookingMeetingPollLinked,
+  enqueueMeetingPollBookingUpdate,
+  meetingPollChainLinked,
+} from './meeting-poll-outcomes.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -160,7 +164,7 @@ const MAX_LOCALE = 35
 const MAX_REASON = 1000
 // A BCP 47 language tag's shape, e.g. "en", "en-US", "zh-Hant-TW".
 const LOCALE = /^[A-Za-z0-9]{1,8}(?:-[A-Za-z0-9]{1,8})*$/
-const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
+export const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
 const MANAGE_TOKEN = /^[A-Za-z0-9_-]{43}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -268,10 +272,10 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest()
+export const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest()
 
 /** A new manage-link secret (32 random bytes, base64url) and the SHA-256 that is stored. */
-function newManageToken(): { token: string; hash: Buffer } {
+export function newManageToken(): { token: string; hash: Buffer } {
   const token = randomBytes(32).toString('base64url')
   return { token, hash: sha256(token) }
 }
@@ -976,6 +980,7 @@ export async function requireOfferedSlot(
 interface NewBooking {
   paymentHoldExpiresAt?: string | undefined
   groupSlotId?: string | undefined
+  seriesRoot?: { bookingId: string; occurrenceId: string } | undefined
   locationOption?: Json | null | undefined
   successRedirect?: BookingSuccessRedirect | undefined
   organizationId: string
@@ -1015,6 +1020,10 @@ export async function insertBooking(
   const { id } = await db
     .insertInto('bookings')
     .values({
+      ...(b.seriesRoot && {
+        id: b.seriesRoot.bookingId,
+        series_occurrence_id: b.seriesRoot.occurrenceId,
+      }),
       status: b.paymentHoldExpiresAt ? 'pending_payment' : 'confirmed',
       payment_hold_expires_at: b.paymentHoldExpiresAt ?? null,
       organization_id: b.organizationId,
@@ -1133,6 +1142,8 @@ async function cancelLocked(
   notify: BookingNotifier | undefined,
   origin: BookingOrigin,
   actorUserId: string | null,
+  /** meetingPollChainLinked, read before the first lock; false skips the poll lookup. */
+  meetingPollLinked: boolean,
   /** Only the invitee's own link is limited by the booking's cancel deadline. */
   asInvitee = false,
 ): Promise<Booking> {
@@ -1178,7 +1189,7 @@ async function cancelLocked(
   await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
-  if (!seat?.group_slot_id)
+  if (meetingPollLinked && !seat?.group_slot_id)
     await enqueueMeetingPollBookingUpdate(db, row.organization_id, row.id, 'cancelled', now)
   // In this transaction: the cancellation email exists exactly when the cancellation does.
   await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
@@ -1492,7 +1503,9 @@ function bookingEventUnavailable(oneTimeLink: boolean): DomainError {
   return oneTimeLink ? new DomainError('not_found', 'one_time_link_not_found') : eventTypeNotFound()
 }
 
-function prepareBookingAttendees(input: Omit<CreateBookingInput, 'handle' | 'slug'>) {
+function prepareBookingAttendees(
+  input: Pick<CreateBookingInput, 'invitee' | 'guests' | 'inviteePhone' | 'smsConsent'>,
+) {
   const invitee = validateInvitee(input.invitee)
   if (input.smsConsent !== undefined && typeof input.smsConsent !== 'boolean')
     throw new DomainError('invalid', 'invalid_sms_consent', 'SMS consent must be true or false.')
@@ -1528,8 +1541,8 @@ function prepareBookingAttendees(input: Omit<CreateBookingInput, 'handle' | 'slu
 /**
  * Admit the booking and write its intents in the caller's transaction. The caller holds
  * the event organization's authority lock (and the waitlist key fence, if applicable).
- * The resolver must lock and reread the event and host eligibility when asked to lock.
- * An additional event check runs against this locked configuration, before admission.
+ * A series caller also holds the host and event locks and has checked and assigned the
+ * full batch. Otherwise the resolver must lock and reread the event and host eligibility.
  * The check and notifier must use only transactional database work, with provider work
  * left to the existing outbox workers.
  */
@@ -1545,18 +1558,37 @@ async function createBookingInTransaction(
     scope,
     oneTimeLink,
     checkEvent,
+    seriesOccurrence,
   }: {
     input: Omit<CreateBookingInput, 'handle' | 'slug'>
     origin: BookingOrigin
     event: PublicEventTypeRecord
-    resolve: BookingEventResolver
     attendees: ReturnType<typeof prepareBookingAttendees>
-    scope?: IdempotencyScope | undefined
-    oneTimeLink?: { id: string; token: string } | undefined
-    checkEvent?: ((current: PublicEventTypeRecord) => Promise<void>) | undefined
-  },
+  } & (
+    | {
+        resolve: BookingEventResolver
+        scope?: IdempotencyScope | undefined
+        oneTimeLink?: { id: string; token: string } | undefined
+        checkEvent?: ((current: PublicEventTypeRecord) => Promise<void>) | undefined
+        seriesOccurrence?: undefined
+      }
+    | {
+        resolve?: never
+        scope?: never
+        oneTimeLink?: never
+        checkEvent?: never
+        seriesOccurrence: {
+          bookingId: string
+          occurrenceId: string
+          hostUserIds: string[]
+          now: Temporal.Instant
+        }
+      }
+  ),
 ): Promise<CreateBookingResult> {
-  await lockHosts(trx, et.hostUserIds)
+  if (!seriesOccurrence) {
+    await lockHosts(trx, et.hostUserIds)
+  }
   // A concurrent request with the same key may have committed while we waited.
   if (scope) {
     const replay = await findReplay(trx, scope)
@@ -1564,7 +1596,7 @@ async function createBookingInTransaction(
   }
   // The event type may have changed while we waited (duration, questions, rules), and
   // waiting took time: read both again now that the host is locked.
-  const current = await resolve(trx, { lock: true })
+  const current = seriesOccurrence ? et : await resolve(trx, { lock: true })
   if (!current || current.id !== et.id || current.organizationId !== et.organizationId) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
@@ -1580,7 +1612,7 @@ async function createBookingInTransaction(
   if (guests.length > 0 && !current.allowGuests) {
     throw new DomainError('invalid', 'guests_not_allowed', 'This event type does not allow guests')
   }
-  const now = ctx.now()
+  const now = seriesOccurrence?.now ?? ctx.now()
   // resolve(...lock:true) holds the event row until commit. This read sees exactly
   // the policy serialized with a concurrent full configuration replacement.
   const policy = await trx
@@ -1592,22 +1624,26 @@ async function createBookingInTransaction(
   const responses = validateResponses(current.questions, input.responses ?? {})
   const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
   const end = input.start.add({ minutes: durationMinutes })
-  const groupSlot = await admitGroupSlot(trx, {
-    event: current,
-    bookerEmail: invitee.email,
-    start: input.start,
-    end,
-    now,
-    snapshot,
-    expectedSlotId: input.expectedGroupSlotId,
-    locationOptionId: input.locationOptionId,
-    conference: ctx,
-  })
+  const groupSlot = seriesOccurrence
+    ? null
+    : await admitGroupSlot(trx, {
+        event: current,
+        bookerEmail: invitee.email,
+        start: input.start,
+        end,
+        now,
+        snapshot,
+        expectedSlotId: input.expectedGroupSlotId,
+        locationOptionId: input.locationOptionId,
+        conference: ctx,
+      })
   const chosenOption = groupSlot
     ? null
     : selectBookableLocationOption(current, input.locationOptionId)
   let selectedHostIds = current.hostUserIds
-  if (current.schedulingType === 'round_robin') {
+  if (seriesOccurrence) {
+    selectedHostIds = seriesOccurrence.hostUserIds
+  } else if (current.schedulingType === 'round_robin') {
     await lockRoundRobinState(trx, current.id)
     const available: string[] = []
     let stale = false
@@ -1661,7 +1697,9 @@ async function createBookingInTransaction(
   let settings: SuccessRedirect | null = null
   if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
     try {
-      settings = validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
+      settings = seriesOccurrence
+        ? null
+        : validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
     } catch (error) {
       if (!(error instanceof DomainError) || error.code !== 'invalid_success_redirect') throw error
       // An operator can tighten policy after this target was saved. Keep booking
@@ -1684,6 +1722,8 @@ async function createBookingInTransaction(
   const { id, manageToken } = await insertBooking(trx, {
     successRedirect,
     groupSlotId: groupSlot?.id,
+    seriesRoot: seriesOccurrence,
+    manageTokenHash: seriesOccurrence ? null : undefined,
     organizationId: current.organizationId,
     eventTypeId: current.id,
     start: input.start,
@@ -1828,11 +1868,12 @@ export async function cancelManagedBooking(
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
     const target = await resolveManagedTarget(trx, hash)
+    // The poll link belongs to the whole chain: the booking the lock follows to shares it.
     const parent =
       target &&
       (await trx
         .selectFrom('bookings')
-        .select('organization_id')
+        .select(['organization_id', meetingPollChainLinked(target.id).as('meeting_poll_linked')])
         .where('id', '=', target.id)
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
@@ -1857,6 +1898,7 @@ export async function cancelManagedBooking(
       ctx.notify,
       origin,
       origin.actorUserId ?? null,
+      parent.meeting_poll_linked,
       true,
     )
   })
@@ -1899,11 +1941,12 @@ export async function rescheduleManagedBooking(
     )
     if (receiptReplay) return receiptReplay
     const target = await resolveManagedTarget(trx, hash)
+    // The poll link belongs to the whole chain: the booking the lock follows to shares it.
     const parent =
       target &&
       (await trx
         .selectFrom('bookings')
-        .select('organization_id')
+        .select(['organization_id', meetingPollChainLinked(target.id).as('meeting_poll_linked')])
         .where('id', '=', target.id)
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
@@ -1942,6 +1985,7 @@ export async function rescheduleManagedBooking(
         kind: 'capability',
         hash: groupMoveCapabilityAuthority(hash, origin),
       },
+      parent.meeting_poll_linked,
     )
   })
 }
@@ -1956,6 +2000,8 @@ async function rescheduleLocked(
   carryManageToken = false,
   selectedDuration?: number | undefined,
   expectedGroupSlotId?: string | undefined,
+  /** meetingPollChainLinked, read before the first lock; false skips the poll lookup. */
+  meetingPollLinked = true,
 ): Promise<BookingWithToken> {
   await assertBookingLocallyManaged(trx, old.id)
   // The status cannot change while the row is locked; the time check waits for the locks.
@@ -2098,7 +2144,8 @@ async function rescheduleLocked(
     requestId: origin.requestId ?? ctx.requestId,
   })
   await prepareBookingConference(ctx, trx, id)
-  await enqueueMeetingPollBookingUpdate(trx, old.organization_id, id, 'confirmed', now)
+  if (meetingPollLinked)
+    await enqueueMeetingPollBookingUpdate(trx, old.organization_id, id, 'confirmed', now)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
   return { booking: await loadBooking(trx, id), manageToken }
 }
@@ -2185,6 +2232,7 @@ async function replayableGroupMove(
   origin: BookingOrigin,
   carry: boolean,
   authority: { kind: string; hash: Buffer; sourceId?: string },
+  meetingPollLinked: boolean,
 ): Promise<BookingWithToken> {
   if (old.group_slot_id && input.idempotencyKey === undefined)
     throw new DomainError(
@@ -2202,6 +2250,7 @@ async function replayableGroupMove(
       carry,
       input.durationMinutes,
       input.expectedGroupSlotId,
+      meetingPollLinked,
     )
   if (!IDEMPOTENCY_KEY.test(input.idempotencyKey))
     throw new DomainError(
@@ -2243,6 +2292,7 @@ async function replayableGroupMove(
     carry,
     input.durationMinutes,
     input.expectedGroupSlotId,
+    meetingPollLinked,
   )
   const successor = await trx
     .selectFrom('bookings')
@@ -2482,6 +2532,7 @@ export async function rescheduleHostBooking(
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
+    const meetingPollLinked = await bookingMeetingPollLinked(trx, ctx.principal.organization.id, id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     await lockGroupBooking(trx, id, start, durationMinutes, ctx.principal.organization.id)
@@ -2539,6 +2590,7 @@ export async function rescheduleHostBooking(
         ),
         sourceId: id,
       },
+      meetingPollLinked,
     )
   })
 }
@@ -2553,6 +2605,7 @@ export async function cancelHostBooking(
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    const meetingPollLinked = await bookingMeetingPollLinked(trx, ctx.principal.organization.id, id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
     await lockGroupBooking(trx, id, undefined, undefined, ctx.principal.organization.id)
@@ -2587,6 +2640,7 @@ export async function cancelHostBooking(
         requestId: ctx.requestId,
       },
       ctx.principal.user.id,
+      meetingPollLinked,
     )
   })
 }
@@ -2607,6 +2661,11 @@ export async function cancelTeamBookingInTransaction(
     reason?: string | undefined
     notify?: BookingNotifier | undefined
     sessionId?: string | undefined
+    /**
+     * bookingMeetingPollLinked, read before the caller's write check takes its locks.
+     * Omitted, the poll lookup runs under the locks.
+     */
+    meetingPollLinked?: boolean | undefined
   } = {},
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
@@ -2634,6 +2693,7 @@ export async function cancelTeamBookingInTransaction(
       },
     },
     actor.userId,
+    options.meetingPollLinked ?? true,
   )
 }
 
@@ -3004,6 +3064,8 @@ export async function cancelOccurrenceSeatInTransaction(
       requestId: ctx.requestId,
     },
     ctx.principal.user.id,
+    // Occurrence seats are group seats, which polls never book.
+    false,
   )
 }
 

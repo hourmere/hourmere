@@ -38,6 +38,7 @@ export {
   buildAvailabilityInput,
   type ExplainEventAvailabilityQuery,
   explainEventAvailability,
+  findPublicBookingPath,
   findSlots,
   getOneTimeBookingPage,
   getPublicEventType,
@@ -214,6 +215,7 @@ export {
   MeetingPollAlreadyScheduledError,
 } from './meeting-poll-finalize.ts'
 export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
+export { bookingMeetingPollLinked } from './meeting-poll-outcomes.ts'
 export { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
 export { getMeetingPollResults, type MeetingPollResults } from './meeting-poll-results.ts'
@@ -361,6 +363,15 @@ export {
   type RecurringAvailabilityInput,
   type RecurringAvailabilityResult,
 } from './recurring-availability.ts'
+export {
+  BookingSeriesRateLimitError,
+  type CreateBookingSeriesInput,
+  type CreateBookingSeriesOptions,
+  type CreateBookingSeriesResult,
+  createPublicBookingSeries,
+  createPublicTeamBookingSeries,
+  type ExpectedBookingSeriesPreview,
+} from './recurring-creation.ts'
 export {
   expandRecurringRule,
   MAX_RECURRING_HORIZON_DAYS,

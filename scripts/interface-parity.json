@@ -29,6 +29,10 @@
     "exemption": "browser-session-only",
     "reason": "Retiring authentication authority requires interactive administrator proof."
   },
+  "testSsoProvider": {
+    "exemption": "browser-session-only",
+    "reason": "Testing a provider binds the current administrator and browser to a configuration revision."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
   "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },
@@ -41,6 +45,12 @@
   "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
+  "listWebhooks": { "mcp": "list_webhooks", "cli": "webhooks list" },
+  "createWebhook": { "mcp": "create_webhook", "cli": "webhooks create" },
+  "updateWebhook": { "mcp": "update_webhook", "cli": "webhooks update" },
+  "deleteWebhook": { "mcp": "delete_webhook", "cli": "webhooks delete" },
+  "rotateWebhookSecret": { "mcp": "rotate_webhook_secret", "cli": "webhooks rotate-secret" },
+  "listWebhookDeliveries": { "mcp": "list_webhook_deliveries", "cli": "webhooks deliveries" },
   "generateOpenTimeSnippet": {
     "mcp": "generate_open_time_snippet",
     "cli": "open-time-snippet"

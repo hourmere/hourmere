@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { checkTeamManagementMembership, TeamManagementError } from '@hourmere/auth'
 import { decryptCredential, encryptCredential } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
@@ -7,7 +8,8 @@ import { type SsoProviderRevision, ssoProviderConfigurationAad } from './sso-con
 import { browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
 import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 
-const operation = 'oidcSignIn'
+export const TEST_SSO_PROVIDER = 'testSsoProvider'
+const signInOperation = 'oidcSignIn'
 const maxReturnPathLength = 2048
 const maxStateLength = 4096
 const appOrigin = 'https://app.invalid'
@@ -37,6 +39,11 @@ interface AttemptDependencies {
 }
 
 type OriginatingBrowser = SsoProviderRevision & { browserBinding: string | undefined }
+export interface OidcTestActor {
+  userId: string
+  id: string
+}
+type Ceremony = { kind: 'sign_in' } | { kind: 'test'; actor: OidcTestActor }
 
 /** A canonical, same-origin destination under /app, or undefined for unsafe input. */
 export function oidcReturnDestination(raw: string): string | undefined {
@@ -79,7 +86,11 @@ function stateAad(browser: OriginatingBrowser, id: string, binding: string): str
   ])
 }
 
-export async function lockOidcProvider(trx: Db, browser: SsoProviderRevision): Promise<void> {
+export async function lockOidcProvider(
+  trx: Db,
+  browser: SsoProviderRevision,
+  enabled = true,
+): Promise<void> {
   // Match the team-write order. Hold the provider revision stable until the attempt commits.
   const organization = await trx
     .selectFrom('auth.organization')
@@ -95,25 +106,67 @@ export async function lockOidcProvider(trx: Db, browser: SsoProviderRevision): P
     .where('organization_id', '=', browser.organizationId)
     .where('revision', '=', browser.revision)
     .where('protocol', '=', 'oidc')
-    .where('enabled', '=', true)
+    .where('enabled', '=', enabled)
     .where('retired_at', 'is', null)
     .forShare()
     .executeTakeFirst()
   if (!provider) throw refused()
 }
 
-/** Builds authorization parameters for a fresh browser-bound OIDC sign-in attempt. */
+/** Recheck the original test session and current authority around the outbound exchange. */
+export async function lockOidcTestActor(
+  trx: Db,
+  provider: SsoProviderRevision,
+  actor: OidcTestActor,
+) {
+  const user = await trx
+    .selectFrom('auth.user')
+    .select('id')
+    .where('id', '=', actor.userId)
+    .where('emailVerified', '=', true)
+    .forShare()
+    .executeTakeFirst()
+  if (!user) throw refused()
+  await lockOidcProvider(trx, provider, false)
+  try {
+    const member = await checkTeamManagementMembership(
+      trx,
+      actor.userId,
+      provider.organizationId,
+      true,
+    )
+    const session = await trx
+      .selectFrom('auth.session')
+      .select(['expiresAt', 'activeOrganizationId'])
+      .where('id', '=', actor.id)
+      .where('userId', '=', actor.userId)
+      .forShare()
+      .executeTakeFirst()
+    if (session?.activeOrganizationId !== provider.organizationId) throw refused()
+    const { live } = await trx
+      .selectNoFrom(sql<boolean>`${session.expiresAt}::timestamptz > clock_timestamp()`.as('live'))
+      .executeTakeFirstOrThrow()
+    if (!live) throw refused()
+    return member.role
+  } catch (error) {
+    if (error instanceof TeamManagementError) throw refused()
+    throw error
+  }
+}
+
+/** Builds authorization parameters for a fresh browser-bound OIDC attempt. */
 export async function startOidcAttempt(
   { db, configurationKey }: AttemptDependencies,
   browser: OriginatingBrowser & { returnPath: string; endpointsDigest?: string },
+  ceremony: Ceremony = { kind: 'sign_in' },
 ) {
   const binding = bindingDigest(browser)
   const returnPath = oidcReturnDestination(browser.returnPath)
   if (!returnPath) throw refused()
   const codeVerifier = randomBytes(32).toString('base64url')
   const nonce = randomBytes(32).toString('base64url')
-  const state = await db.transaction().execute(async (trx) => {
-    await lockOidcProvider(trx, browser)
+  const write = async (trx: Db) => {
+    await lockOidcProvider(trx, browser, ceremony.kind === 'sign_in')
     const { id, now } = await trx
       .selectNoFrom([
         sql<string>`uuidv7()`.as('id'),
@@ -134,20 +187,26 @@ export async function startOidcAttempt(
       .insertInto('sso_attempts')
       .values({
         id,
-        kind: 'sign_in',
+        kind: ceremony.kind,
         organization_id: browser.organizationId,
         provider_id: browser.providerId,
         provider_revision: browser.revision,
+        ...(ceremony.kind === 'test' && {
+          user_id: ceremony.actor.userId,
+          session_id: ceremony.actor.id,
+        }),
         browser_binding_digest: binding,
-        operation,
+        operation: ceremony.kind === 'test' ? TEST_SSO_PROVIDER : signInOperation,
         input_digest: sha256(state),
         created_at: now,
         expires_at: sql`${now}::timestamptz + make_interval(secs => ${authenticationAttemptLifetime})`,
       })
       .execute()
-    return state
-  })
+    return { id, state }
+  }
+  const { id, state } = await (db.isTransaction ? write(db) : db.transaction().execute(write))
   return {
+    id,
     state,
     nonce,
     code_challenge: createHash('sha256').update(codeVerifier, 'ascii').digest('base64url'),
@@ -176,6 +235,7 @@ function openState(configurationKey: Buffer, aad: string, envelope: string) {
 export async function consumeOidcAttempt(
   { db, configurationKey }: AttemptDependencies,
   browser: OriginatingBrowser & { state: string | null },
+  ceremony: Ceremony = { kind: 'sign_in' },
 ) {
   const binding = bindingDigest(browser)
   const state = browser.state
@@ -187,18 +247,25 @@ export async function consumeOidcAttempt(
   const material = openState(configurationKey, stateAad(browser, id, binding), envelope)
 
   const attempt = await db.transaction().execute(async (trx) => {
-    await lockOidcProvider(trx, browser)
-    const eligible = await trx
+    if (ceremony.kind === 'test') await lockOidcTestActor(trx, browser, ceremony.actor)
+    else await lockOidcProvider(trx, browser)
+    const query = trx
       .selectFrom('sso_attempts')
       .select(['id', 'consumed_at'])
       .where('id', '=', id)
-      .where('kind', '=', 'sign_in')
-      .where('operation', '=', operation)
+      .where('kind', '=', ceremony.kind)
+      .where('operation', '=', ceremony.kind === 'test' ? TEST_SSO_PROVIDER : signInOperation)
       .where('organization_id', '=', browser.organizationId)
       .where('provider_id', '=', browser.providerId)
       .where('provider_revision', '=', browser.revision)
       .where('browser_binding_digest', '=', binding)
       .where('input_digest', '=', sha256(state))
+    const eligible = await (ceremony.kind === 'test'
+      ? query
+          .where('user_id', '=', ceremony.actor.userId)
+          .where('session_id', '=', ceremony.actor.id)
+      : query
+    )
       .forUpdate()
       .executeTakeFirst()
     if (!eligible) throw refused()

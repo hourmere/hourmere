@@ -292,22 +292,45 @@ describe.skipIf(!serverUrl)('private webhook configuration and signed HTTP deliv
     expect(stored).toEqual({ status: 'delivered', attempts: 1 })
   })
 
-  it('refuses a previously captured private endpoint when the delivery setting is removed', async () => {
+  it('refuses delivery after policy removal and skips the queued retry after pausing', async () => {
     const data = await captured(`127.0.0.1:${port}`, `http://127.0.0.1:${port}/hook`)
-    await expect(
+    const current = { enabled: true, encryptionKey: key }
+    const retry = () =>
       deliverWebhook(
-        { db, enabled: true, encryptionKey: key, now: () => now },
+        { db, ...current, now: () => now },
         data.delivery.id,
         new AbortController().signal,
-      ),
-    ).rejects.toThrow('Webhook delivery failed')
+      )
+    const deliveryState = () =>
+      db
+        .selectFrom('webhook_deliveries')
+        .select(['status', 'last_error', 'attempts'])
+        .where('id', '=', data.delivery.id)
+        .executeTakeFirstOrThrow()
+
+    await expect(retry()).rejects.toThrow('Webhook delivery failed')
     expect(requests).toBe(0)
-    const stored = await db
-      .selectFrom('webhook_deliveries')
-      .select(['status', 'last_error', 'attempts'])
-      .where('id', '=', data.delivery.id)
-      .executeTakeFirstOrThrow()
-    expect(stored).toEqual({ status: 'pending', last_error: 'transport_error', attempts: 1 })
+    expect(await deliveryState()).toEqual({
+      status: 'pending',
+      last_error: 'transport_error',
+      attempts: 1,
+    })
+
+    const paused = await data.request(
+      'PATCH',
+      `/${data.delivery.webhook_id}`,
+      { isActive: false },
+      current,
+    )
+    expect(paused.status).toBe(200)
+    expect(await paused.json()).toMatchObject({ isActive: false })
+    await retry()
+    expect(await deliveryState()).toEqual({
+      status: 'skipped',
+      last_error: 'disabled',
+      attempts: 1,
+    })
+    expect(requests).toBe(0)
   })
 
   it('records redirects as failure and never visits the redirect target', async () => {

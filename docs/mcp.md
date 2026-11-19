@@ -88,6 +88,12 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `update_slack_destination` | — | `slack update` | `full` |
 | `delete_slack_destination` | — | `slack delete` | `full` |
 | `test_slack_destination` | — | `slack test` | `full` |
+| `list_webhooks` | — | `webhooks list` | `full, read` |
+| `create_webhook` | — | `webhooks create` | `full` |
+| `update_webhook` | — | `webhooks update` | `full` |
+| `delete_webhook` | — | `webhooks delete` | `full` |
+| `rotate_webhook_secret` | — | `webhooks rotate-secret` | `full` |
+| `list_webhook_deliveries` | — | `webhooks deliveries` | `full, read` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -202,6 +208,46 @@ Before upgrading, stop every old web/all/worker and other old key-authenticating
 apply migrations and restart every role with the new code before allowing scoped keys.
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
+
+## Manage booking webhooks
+
+`list_webhooks` takes `{}` and returns `{ data: [...] }` with up to ten endpoint records
+in the acting organization, with metadata only. Use a `read` or `full` API key.
+`create_webhook` requires a `full` API key and accepts `url`, `events` and optional
+`isActive` (default `true`). It returns `{ webhook, secret }` once. Save `secret` directly
+to the receiver's secret store and keep the tool result out of logs.
+
+`update_webhook` (CLI `webhooks update`) takes `id` and at least one of `events` or
+`isActive`, then returns the updated metadata. The URL is immutable. To pause after
+a destination's allowlist entry is removed, pass only `id` and `isActive: false`.
+`delete_webhook` (CLI `webhooks delete`) takes `{ id }` and returns `{ "deleted": true }`
+after removing the endpoint and its retained deliveries. Both writes require a `full`
+API key. IDs that are missing or belong to another organization return `webhook_not_found`.
+
+`rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
+call replaces the signing secret and returns the new `{ secret }` once. Save it directly
+to the receiver's secret store and keep the result out of logs. Coordinate one rotation
+at a time so the receiver uses the most recent secret.
+
+`list_webhook_deliveries` takes `{ id, after? }` and accepts a `read` or `full` API key.
+It returns `{ data, nextAfter }` with up to fifty delivery metadata rows from the last
+thirty days, newest first. Omit `after` for the first page, then pass `nextAfter` as
+`after` until it is null. Payloads, headers and secrets are omitted. Rotation and
+history both return `webhook_not_found` for missing or out-of-organization endpoints.
+
+An authorized `mcp:tools` OAuth grant can use these tools. They take the organization from
+the credential and require a verified personal owner or current team owner/admin.
+Disallowed API key scopes return `insufficient_scope`, and callers without the required
+role get `insufficient_role`, matching REST. See [Booking webhooks](https://hourmere.com/docs/webhooks)
+for supported events, URL policy and configuration.
+
+中文：`list_webhooks` 接受 `read` 或 `full` 密钥，`create_webhook` 需要 `full` 密钥。
+所有操作均检查凭证所属组织及当前角色。创建仅返回一次签名密钥，请保存到接收端的密钥存储。
+`update_webhook` 和 `delete_webhook` 均需要 `full` 密钥。更新可修改订阅事件和启用状态，
+目标 URL 固定。删除会清除保留的投递记录。不存在或属于其他组织的端点均返回 `webhook_not_found`。
+`rotate_webhook_secret` 需要 `full` 密钥，每次成功轮换仅在本次响应中返回新签名密钥。
+`list_webhook_deliveries` 接受 `read` 或 `full` 密钥，每页最多返回最近 30 天的 50 条元数据。
+下一页将 `nextAfter` 作为 `after` 传入，直至其为 null。投递历史不包含正文、请求头或密钥。
 
 ## Manage hosted bookings
 

@@ -28,7 +28,7 @@ import {
   organizationContextWriteLock,
 } from '../team-management.ts'
 
-const Webhook = z
+export const Webhook = z
   .object({
     id: z.uuid(),
     organizationId: z.uuid(),
@@ -39,11 +39,12 @@ const Webhook = z
     updatedAt: z.iso.datetime(),
   })
   .openapi('Webhook')
-const Secret = z.object({
+export const WebhookSecret = z.object({
   secret: z
     .string()
     .openapi({ description: 'Shown only once; store securely. Never returned by lists.' }),
 })
+export const WebhookCreated = WebhookSecret.extend({ webhook: Webhook })
 const Delivery = z
   .object({
     id: z.uuid(),
@@ -59,6 +60,10 @@ const Delivery = z
     deliveredAt: z.iso.datetime().nullable(),
   })
   .openapi('WebhookDelivery')
+export const WebhookDeliveryPage = z.object({
+  data: z.array(Delivery),
+  nextAfter: z.string().nullable(),
+})
 const Params = z.object({ id: z.string() })
 const ExpectedReadHeaders = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
@@ -149,7 +154,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         responses: {
           201: {
             description: 'Endpoint and one-time secret',
-            content: json(Secret.extend({ webhook: Webhook })),
+            content: json(WebhookCreated),
           },
           ...errors,
         },
@@ -228,7 +233,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         middleware: caller,
         request: { params: Params, headers: ExpectedWriteHeaders },
         responses: {
-          200: { description: 'New one-time secret', content: json(Secret) },
+          200: { description: 'New one-time secret', content: json(WebhookSecret) },
           ...errors,
         },
       }),
@@ -260,7 +265,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         responses: {
           200: {
             description: 'Newest first, at most fifty; no payloads or signatures',
-            content: json(z.object({ data: z.array(Delivery), nextAfter: z.string().nullable() })),
+            content: json(WebhookDeliveryPage),
           },
           ...errors,
         },

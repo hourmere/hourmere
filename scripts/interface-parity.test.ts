@@ -127,6 +127,13 @@ check(
         'group-attendees',
       ],
       ['getSsoPolicy', '/api/v1/team/sso/policy', 'get_sso_policy', 'sso policy'],
+      ['listWebhooks', '/api/v1/webhooks', 'list_webhooks', 'webhooks list'],
+      [
+        'listWebhookDeliveries',
+        '/api/v1/webhooks/{id}/deliveries',
+        'list_webhook_deliveries',
+        'webhooks deliveries',
+      ],
     ] as const) {
       const inventory: InterfaceInventory = {
         rest: [{ path, method: 'get', operationId }],
@@ -719,6 +726,7 @@ describe('REST, MCP and CLI write parity', () => {
       ['createSsoProvider', 'post', '/api/v1/team/sso/providers'],
       ['updateSsoProvider', 'patch', '/api/v1/team/sso/providers/{providerId}'],
       ['deleteSsoProvider', 'delete', '/api/v1/team/sso/providers/{providerId}'],
+      ['testSsoProvider', 'post', '/api/v1/team/sso/providers/{providerId}/test'],
     ]) {
       expect(
         inventory.rest.find((operation) => operation.operationId === operationId),
@@ -736,6 +744,7 @@ describe('REST, MCP and CLI write parity', () => {
       'create_sso_provider',
       'update_sso_provider',
       'delete_sso_provider',
+      'test_sso_provider',
       'create_sso_domain_challenge',
       'verify_sso_domain',
       'delete_sso_domain',
