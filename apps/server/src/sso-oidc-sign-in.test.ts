@@ -421,6 +421,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
         .where('organization_id', '=', fixture.team)
         .execute(),
     ).toEqual([])
+    const existingBinding = `${bindingCookie}=${randomBytes(32).toString('base64url')}`
+    const restarted = await post(body, app, { cookie: existingBinding })
+    const [cookie] = restarted.headers.getSetCookie()
+    expect(restarted.status).toBe(200)
+    expect(cookie?.startsWith(`${existingBinding};`) === true).toBe(true)
+    expect(cookie).toContain('SameSite=Lax')
   })
 
   it('issues a native session and an immutable team proof for the exact linked identity', async () => {

@@ -1109,6 +1109,8 @@ Provider tests and self-link ceremonies get their authorization URL from
 The OIDC adapter implements `sign_in` for an enabled OIDC provider. The POST requires
 an exact `Origin` from `PUBLIC_URL` and refuses Authorization headers. It creates a
 browser-bound attempt before returning `200 {"url": "…", "redirect": true}`.
+Initiation preserves any existing binding value and issues the cookie with
+SameSite=Lax for the provider's top-level GET callback.
 The callback atomically consumes the state before exchanging the authorization code.
 The S256 verifier binds that exchange to this attempt, and the IdP enforces single use
 of its code. The state also pins the resolved endpoints through the callback. The

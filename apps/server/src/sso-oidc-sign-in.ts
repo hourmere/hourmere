@@ -191,13 +191,14 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
             redirect_uri: callbackUrl(provider.providerId),
             scope: 'openid email profile',
           }).toString()
-          if (!reuse)
-            setCookie(c, cookie, browserBinding, {
-              httpOnly: true,
-              secure,
-              path: '/',
-              sameSite: 'Lax',
-            })
+          // A binding issued by fresh administration can still have SameSite=Strict.
+          // Keep its value and allow the top-level GET back from the provider.
+          setCookie(c, cookie, browserBinding, {
+            httpOnly: true,
+            secure,
+            path: '/',
+            sameSite: 'Lax',
+          })
           return c.json({ url: authorization.href, redirect: true })
         } catch (error) {
           if (error instanceof OidcAttemptRefused) return c.json({ error: 'sso_not_found' }, 404)
