@@ -5,6 +5,7 @@ import {
   createRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  publishRoutingForm,
   updateRoutingForm,
 } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
@@ -13,6 +14,7 @@ import {
   authenticated,
   type CallerMiddleware,
   callerWithBodyLimit,
+  ErrorBody,
   errorResponses,
   json,
   type RouteModule,
@@ -24,6 +26,8 @@ import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from '../team
 
 export const ROUTING_FORMS_DISABLED =
   'Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance.'
+export const ROUTING_FORM_PUBLICATION_BEHAVIOR =
+  'Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.'
 const identity = z.uuid()
 const label = z.string().min(1).max(200)
 const option = z.strictObject({ id: identity, label })
@@ -81,6 +85,9 @@ export const CreateRoutingForm = z
 export const ArchiveRoutingForm = z
   .strictObject({ expectedRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) })
   .openapi('ArchiveRoutingForm')
+export const PublishRoutingForm = z
+  .strictObject({ ...ArchiveRoutingForm.shape, requestId: identity.optional() })
+  .openapi('PublishRoutingForm')
 export const UpdateRoutingForm = z
   .strictObject(draft)
   .partial()
@@ -175,6 +182,20 @@ export const RoutingFormResponse = summary
 export const RoutingFormList = z
   .object({ data: z.array(summary), nextCursor: z.string().nullable() })
   .openapi('RoutingFormList')
+const RoutingFormVersion = z
+  .object({
+    id: identity,
+    formId: identity,
+    versionNumber: z.number().int(),
+    questions: z.array(responseQuestion),
+    rules: z.array(responseRule),
+    fallback: responseTarget,
+    publishedAt: z.iso.datetime(),
+  })
+  .openapi('RoutingFormVersion')
+export const RoutingFormPublication = z
+  .object({ form: RoutingFormResponse, version: RoutingFormVersion })
+  .openapi('RoutingFormPublication')
 const headers = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
     description:
@@ -341,6 +362,43 @@ export function routingFormRoutes(
         )
         return c.body(null, 204)
       },
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'post',
+        path: '/api/v1/routing-forms/{id}/publish',
+        operationId: 'publishRoutingForm',
+        summary: 'Publish a routing form',
+        description: `${ROUTING_FORMS_DISABLED} Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. ${ROUTING_FORM_PUBLICATION_BEHAVIOR}`,
+        request: {
+          params: RoutingFormId,
+          headers,
+          body: { required: true, content: json(PublishRoutingForm) },
+        },
+        responses: {
+          201: {
+            description: 'Current form and the immutable version created by the original request',
+            content: json(RoutingFormPublication),
+          },
+          ...errorResponses({
+            400: 'invalid_request, invalid_routing_form, invalid_routing_target',
+            403: 'team_management_access_denied, insufficient_scope, cross_origin_write',
+            404: 'routing_forms_disabled, routing_form_not_found',
+            409: 'organization_context_changed, routing_revision_conflict, idempotency_key_reused, routing_form_version_limit_reached',
+          }),
+          413: { description: 'payload_too_large', content: json(ErrorBody) },
+        },
+      }),
+      async (c) =>
+        c.json(
+          await publishRoutingForm(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          201,
+        ),
     )
   }
 }

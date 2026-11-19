@@ -8,6 +8,9 @@ export const { version } = JSON.parse(
 
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024 - 4096
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+// Publication returns two configurations (current form and immutable version), each
+// encoded twice by MCP. Draft fields can be saved in separate bounded requests.
+const MAX_PUBLICATION_RESPONSE_BYTES = 32 * 1024 * 1024
 const PROTOCOL = '2026-07-28'
 
 export class CliError extends Error {
@@ -116,7 +119,7 @@ function redirectField(code: string, value: unknown): string | undefined {
     : undefined
 }
 
-async function readResponse(response: Response): Promise<unknown> {
+async function readResponse(response: Response, maxBytes = MAX_RESPONSE_BYTES): Promise<unknown> {
   const reader = response.body?.getReader()
   if (!reader) throw new CliError('invalid_response')
   const chunks: Uint8Array[] = []
@@ -126,7 +129,7 @@ async function readResponse(response: Response): Promise<unknown> {
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > MAX_RESPONSE_BYTES) throw new CliError('response_too_large')
+      if (size > maxBytes) throw new CliError('response_too_large')
       chunks.push(value)
     }
   } finally {
@@ -200,7 +203,11 @@ export async function callTool(options: {
     })
     let reply: unknown
     try {
-      reply = await readResponse(response)
+      const maxBytes =
+        response.ok && tool === 'publish_routing_form'
+          ? MAX_PUBLICATION_RESPONSE_BYTES
+          : MAX_RESPONSE_BYTES
+      reply = await readResponse(response, maxBytes)
     } catch (error) {
       if (response.ok) throw error
       // Proxies may answer with HTML. Preserve the HTTP category without echoing their body.
