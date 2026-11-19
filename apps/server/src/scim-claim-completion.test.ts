@@ -1239,7 +1239,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       // The addressee no longer rechecked after the locks.
       [
         'addressee',
-        [['      stored.email.trim().toLowerCase() !== user.email.trim().toLowerCase() ||\n', '']],
+        [['    stored.email.trim().toLowerCase() !== email.trim().toLowerCase() ||\n', '']],
       ],
       // The claim and entry locked before the organization.
       [
@@ -1264,11 +1264,11 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
         ["          .where('completed_at', 'is', null)\n", ''],
       ] as [string, string][],
       policy: [
-        ["||\n      stored.status !== 'pending'\n", '\n'],
-        ['    if (member) throw recipientAlreadyMember()\n', ''],
+        ["||\n    stored.status !== 'pending'\n", '\n'],
+        ['  if (member) throw recipientAlreadyMember()\n', ''],
         [
-          "            .where('id', '=', stored.id)\n            .where('status', '=', 'pending')\n",
-          "            .where('id', '=', stored.id)\n",
+          "    .where('id', '=', stored.id)\n    .where('status', '=', 'pending')\n",
+          "    .where('id', '=', stored.id)\n",
         ],
       ] as [string, string][],
     }

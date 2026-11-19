@@ -181,6 +181,7 @@ const classes = {
     'PATCH /api/v1/team/sso/providers/{providerId}',
     'DELETE /api/v1/team/sso/providers/{providerId}',
     'POST /api/v1/team/sso/providers/{providerId}/test',
+    'POST /api/v1/team/sso/providers/{providerId}/link',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -972,14 +973,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 172-operation contract and all 516 scope combinations', () => {
+    it('covers the exact 173-operation contract and all 519 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(172)
-      expect(new Set(ids).size).toBe(172)
+      expect(ids).toHaveLength(173)
+      expect(new Set(ids).size).toBe(173)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(516)
+      expect(cases).toHaveLength(519)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

@@ -195,8 +195,8 @@ describe('UI measurement CI contract', () => {
     // Lint, types, generated types, the build, the CLI tarball and MCP metadata.
     ['check-static', '3bce9a980ab6c404fbf4ccc83607a7da40b8feb11e75b4918e8fe9c2057d5a0c'],
     // The suite in seven shards. Also runs the isolated Caddy upgrade integration; PostgreSQL
-    // limits stay unchanged.
-    ['check-tests', '65308b7f42b4185b4361e703050c88357bdb4375e61756ebcbcdc26a61c08a1a'],
+    // limits stay unchanged. The deployment-test shell comes from the Actions cache when present.
+    ['check-tests', '8b59583e0e92eb77d66a08cffe92d8fa0707033f2f7a390f4a63017876c68de8'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],

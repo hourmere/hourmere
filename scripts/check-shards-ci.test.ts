@@ -120,7 +120,15 @@ function verify(source: string) {
     (step) => step.name === 'Install the interactive deployment-test shell',
   )
   expect(shell).toBeGreaterThan(-1)
-  expect(steps[shell]?.run ?? '').toMatch(/apt-get .*install .*\bzsh$/)
+  // The shell comes from the Actions cache when present and from the mirror only on a miss.
+  const shellRun = steps[shell]?.run ?? ''
+  expect(shellRun).toMatch(/^\s*sudo apt-get [^\n]*install [^\n]*\bzsh$/m)
+  expect(shellRun).toMatch(/dpkg -i "\$HOME"\/zsh-debs\/\*\.deb/)
+  const cache = steps.findIndex(
+    (step) => step.name === 'Restore the deployment-test shell packages',
+  )
+  expect(cache).toBeGreaterThan(-1)
+  expect(cache).toBeLessThan(shell)
   expect(shell).toBeLessThan(steps.indexOf(suite[0] as Step))
   // Each shard has its own database server, with the default connection limit.
   expect(tests?.services?.postgres?.image).toBe('postgres:18-alpine')
@@ -163,7 +171,7 @@ describe('required check aggregation in CI', () => {
     ],
     [
       'the deployment-test shell',
-      '      - name: Install the interactive deployment-test shell\n        run: sudo apt-get -o Acquire::Retries=3 update && sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y zsh\n',
+      '          sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y zsh\n',
       '',
     ],
   ])('detects removal of %s', (_name, from, to) => {

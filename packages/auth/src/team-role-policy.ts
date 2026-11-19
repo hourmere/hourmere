@@ -14,6 +14,7 @@ import {
 import { recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid, personalOwner } from './organizations.ts'
 import type { ScimClaimCompletion, ScimClaimFinish } from './scim-claims.ts'
+import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import {
   checkTeamManagementAccess,
   checkTeamManagementMembership,
@@ -132,6 +133,110 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
+/** The caller holds the organization write lock and has independently verified the recipient. */
+export async function lockTeamInvitationAcceptance(
+  trx: Db,
+  {
+    invitationId,
+    organizationId,
+    userId,
+    email,
+  }: {
+    invitationId: string
+    organizationId: string
+    userId: string
+    email: string
+  },
+) {
+  const stored = await trx
+    .selectFrom('auth.invitation')
+    .selectAll()
+    .where('id', '=', invitationId)
+    .where('organizationId', '=', organizationId)
+    .forUpdate()
+    .executeTakeFirst()
+  if (
+    stored?.role !== 'member' ||
+    stored.email.trim().toLowerCase() !== email.trim().toLowerCase() ||
+    stored.status !== 'pending'
+  ) {
+    throw teamRoleDenied()
+  }
+  // Check wall time after every lock wait, on the database clock rather than the
+  // process clock or transaction start time. A SCIM claim's expiry is checked at the
+  // same instant, so the invitation and its claim never disagree about it.
+  const validity = (
+    await sql<{ active: boolean; now: string }>`SELECT
+      ${stored.expiresAt}::timestamptz > clock.at AS active, clock.at::text AS now
+      FROM (SELECT clock_timestamp() AS at) AS clock`.execute(trx)
+  ).rows[0] as { active: boolean; now: string }
+  if (!validity.active) throw teamRoleDenied()
+  const personal = await trx
+    .selectFrom('personal_organizations')
+    .select('organization_id')
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  if (personal) throw teamRoleDenied()
+  // Departures/removals hold this same organization lock. Read current membership
+  // after waiting for it and retain the original inviter without requiring their
+  // former management role: demotion alone does not invalidate an invitation.
+  const inviter = await trx
+    .selectFrom('auth.member')
+    .select('id')
+    .where('organizationId', '=', organizationId)
+    .where('userId', '=', stored.inviterId)
+    .executeTakeFirst()
+  if (!inviter) {
+    throw new APIError('BAD_REQUEST', {
+      code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
+      message: 'Inviter is no longer a member of the organization',
+    })
+  }
+  const member = await trx
+    .selectFrom('auth.member')
+    .select('id')
+    .where('organizationId', '=', organizationId)
+    .where('userId', '=', userId)
+    .executeTakeFirst()
+  if (member) throw recipientAlreadyMember()
+  // Native counts before taking the organization lock. Recheck under it so two
+  // different recipients cannot consume the same last membership slot.
+  const count = await trx
+    .selectFrom('auth.member')
+    .select((eb) => eb.fn.countAll<string>().as('total'))
+    .where('organizationId', '=', organizationId)
+    .executeTakeFirstOrThrow()
+  if (Number(count.total) >= teamMembershipLimit) {
+    throw new APIError('FORBIDDEN', {
+      code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED',
+      message: 'Organization membership limit reached',
+    })
+  }
+  return { stored, checkedAt: validity.now }
+}
+
+/** Commit the invitation transition in the same transaction as membership and session. */
+export async function writeTeamInvitationAcceptance(
+  trx: Db,
+  stored: { id: string; organizationId: string },
+  actor: Parameters<typeof auditActor>[0],
+) {
+  await writeAuditEvent(trx, {
+    organizationId: stored.organizationId,
+    ...auditActor(actor),
+    action: 'membership.accepted',
+    targetType: 'invitation',
+    targetId: stored.id,
+  })
+  return trx
+    .updateTable('auth.invitation')
+    .set({ status: 'accepted' })
+    .where('id', '=', stored.id)
+    .where('status', '=', 'pending')
+    .returningAll()
+    .executeTakeFirstOrThrow()
+}
+
 /**
  * Keep Better Auth's handlers and hooks. Whenever a native adapter transaction is active,
  * this policy's locks and writes join it, including administrative member removal.
@@ -148,6 +253,7 @@ export function createTeamRolePolicy(
     transaction?: Db,
   ) => Promise<{ organizationId: string }>,
   scimClaims?: ScimClaimCompletion,
+  recordAdmissionRemoval?: SsoAdmissionRemoval,
 ) {
   const requests = new AsyncLocalStorage<{ ctx?: AuthMiddlewareContext }>()
   const transactions = new AsyncLocalStorage<Transaction<Database>>()
@@ -285,70 +391,12 @@ export function createTeamRolePolicy(
     // Native session activation writes this row before commit. Reserve that mode now
     // so concurrent trusted acceptances cannot both take SHARE and deadlock upgrading.
     await teamSession(trx, actor, 'no-key-update')
-    const stored = await trx
-      .selectFrom('auth.invitation')
-      .selectAll()
-      .where('id', '=', invitationId)
-      .where('organizationId', '=', organization.id)
-      .forUpdate()
-      .executeTakeFirst()
-    if (
-      stored?.role !== 'member' ||
-      stored.email.trim().toLowerCase() !== user.email.trim().toLowerCase() ||
-      stored.status !== 'pending'
-    ) {
-      throw teamRoleDenied()
-    }
-    // Check wall time after every lock wait, on the database clock rather than the
-    // process clock or transaction start time. A SCIM claim's expiry is checked at the
-    // same instant, so the invitation and its claim never disagree about it.
-    const validity = (
-      await sql<{ active: boolean; now: string }>`SELECT
-        ${stored.expiresAt}::timestamptz > clock.at AS active, clock.at::text AS now
-        FROM (SELECT clock_timestamp() AS at) AS clock`.execute(trx)
-    ).rows[0] as { active: boolean; now: string }
-    if (!validity.active) throw teamRoleDenied()
-    const personal = await trx
-      .selectFrom('personal_organizations')
-      .select('organization_id')
-      .where('organization_id', '=', organization.id)
-      .executeTakeFirst()
-    if (personal) throw teamRoleDenied()
-    // Departures/removals hold this same organization lock. Read current membership
-    // after waiting for it and retain the original inviter without requiring their
-    // former management role: demotion alone does not invalidate an invitation.
-    const inviter = await trx
-      .selectFrom('auth.member')
-      .select('id')
-      .where('organizationId', '=', organization.id)
-      .where('userId', '=', stored.inviterId)
-      .executeTakeFirst()
-    if (!inviter) {
-      throw new APIError('BAD_REQUEST', {
-        code: 'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',
-        message: 'Inviter is no longer a member of the organization',
-      })
-    }
-    const member = await trx
-      .selectFrom('auth.member')
-      .select('id')
-      .where('organizationId', '=', organization.id)
-      .where('userId', '=', actor.user.id)
-      .executeTakeFirst()
-    if (member) throw recipientAlreadyMember()
-    // Native counts before taking the organization lock. Recheck under it so two
-    // different recipients cannot consume the same last membership slot.
-    const count = await trx
-      .selectFrom('auth.member')
-      .select((eb) => eb.fn.countAll<string>().as('total'))
-      .where('organizationId', '=', organization.id)
-      .executeTakeFirstOrThrow()
-    if (Number(count.total) >= teamMembershipLimit) {
-      throw new APIError('FORBIDDEN', {
-        code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED',
-        message: 'Organization membership limit reached',
-      })
-    }
+    const { stored, checkedAt } = await lockTeamInvitationAcceptance(trx, {
+      invitationId,
+      organizationId: organization.id,
+      userId: actor.user.id,
+      email: user.email,
+    })
     // A SCIM-issued invitation's claim, after the organization and invitation locks: a live
     // admission blocker refuses, and a completable claim is finished with the member row.
     const claim = await scimClaims?.invitation(trx, {
@@ -356,7 +404,7 @@ export function createTeamRolePolicy(
       invitationId: stored.id,
       userId: actor.user.id,
       mailbox: user.email.trim().toLowerCase(),
-      checkedAt: validity.now,
+      checkedAt,
       audit: auditActor(actor),
     })
     if (claim?.refused) throw teamRoleDenied()
@@ -531,6 +579,7 @@ export function createTeamRolePolicy(
               teamId: actor.organizationId,
               memberUserId: member.userId,
               expectedOrganizationId,
+              recordAdmissionRemoval,
             })
           })
         }
@@ -840,22 +889,7 @@ export function createTeamRolePolicy(
           const stored = await acceptance(ctx, trx)
           const actor = await principal(ctx)
           if (!actor) throw teamRoleDenied()
-          await writeAuditEvent(trx, {
-            organizationId: stored.organizationId,
-            ...auditActor(actor),
-            action: 'membership.accepted',
-            targetType: 'invitation',
-            targetId: stored.id,
-          })
-          // The native endpoint's enclosing transaction also owns the member/session
-          // writes, so neither an exception nor process death can publish this alone.
-          return trx
-            .updateTable('auth.invitation')
-            .set({ status: 'accepted' })
-            .where('id', '=', stored.id)
-            .where('status', '=', 'pending')
-            .returningAll()
-            .executeTakeFirstOrThrow() as never
+          return (await writeTeamInvitationAcceptance(trx, stored, actor)) as never
         })
       }
       return adapter

@@ -15,6 +15,7 @@ import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
+import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:3000'
@@ -84,17 +85,19 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     /** Enables Microsoft sign-in, as this account. */
     microsoft?: string
     pool?: pg.Pool
+    ssoOidcEnabled?: boolean
   }
 
   function instance(
     signup: SignupPolicy,
-    { mailer, google, microsoft, pool }: InstanceOptions = {},
+    { mailer, google, microsoft, pool, ssoOidcEnabled }: InstanceOptions = {},
   ) {
+    const secret = randomBytes(32).toString('base64')
     const auth = createAuth({
       pool: pool ?? authPool(signup),
       db,
       baseURL: origin,
-      secret: randomBytes(32).toString('base64'),
+      secret,
       mailer: mailer ?? { send: async (m) => void outbox.push(m) },
       signup,
       socialProviders: {
@@ -111,6 +114,18 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: origin,
+      ...(ssoOidcEnabled !== undefined && {
+        ssoOidcSignIn: oidcSignInRoutes({
+          db,
+          capabilities: { ssoOidcEnabled, ssoSamlEnabled: false },
+          configurationKey: randomBytes(32),
+          privateTargets: [],
+          session: { secret },
+          signup,
+          send: async () => expect.unreachable('ordinary signup and acceptance must skip OIDC'),
+          readSession: async () => expect.unreachable('ordinary auth uses its native session'),
+        }),
+      }),
     })
     return Object.assign(app, { auth })
   }
@@ -434,6 +449,112 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         .returningAll()
         .executeTakeFirstOrThrow()
     }
+
+    it.each([false, true])(
+      'keeps native signup and acceptance responses with OIDC enabled=%s',
+      async (ssoOidcEnabled) => {
+        const app = instance(FIRST_USER, { ssoOidcEnabled })
+        const first = await askForLink(app, 'first@outside.example')
+        const late = await askForLink(app, 'late@outside.example')
+        expect(await useLink(app, first)).toMatchObject({ status: 302 })
+        expectSignupDisabled(await useLink(app, late))
+
+        const invitation = await invite()
+        const callbackURL = `/app/join?invitationId=${invitation.id}`
+        const signedIn = await useLink(app, await askForLink(app, invitation.email, callbackURL))
+        expect(signedIn.status).toBe(302)
+        expect(signedIn.headers.get('location')).toBe(`${origin}${callbackURL}`)
+        expect(hasSession(signedIn)).toBe(true)
+        expect(outbox.map(({ to }) => to)).toEqual([
+          'first@outside.example',
+          'late@outside.example',
+          invitation.email,
+        ])
+        const user = await db
+          .selectFrom('auth.user')
+          .innerJoin('personal_organizations as personal', 'personal.user_id', 'auth.user.id')
+          .select(['auth.user.id', 'auth.user.emailVerified', 'personal.organization_id'])
+          .where('auth.user.email', '=', invitation.email)
+          .executeTakeFirstOrThrow()
+        const session = () =>
+          db
+            .selectFrom('auth.session')
+            .select(['id', 'activeOrganizationId'])
+            .where('userId', '=', user.id)
+            .executeTakeFirstOrThrow()
+        expect(user.emailVerified).toBe(true)
+        expect((await session()).activeOrganizationId).toBe(user.organization_id)
+        const members = () =>
+          db
+            .selectFrom('auth.member')
+            .selectAll()
+            .where('userId', '=', user.id)
+            .where('organizationId', '=', invitation.organizationId)
+            .execute()
+        expect(await members()).toEqual([])
+
+        const accept = () =>
+          app.request('/api/auth/organization/accept-invitation', {
+            method: 'POST',
+            headers: {
+              origin,
+              'content-type': 'application/json',
+              cookie: signedIn.headers
+                .getSetCookie()
+                .map((c) => c.split(';')[0])
+                .join('; '),
+            },
+            body: JSON.stringify({ invitationId: invitation.id }),
+          })
+        const accepted = await accept()
+        expect(accepted.status).toBe(200)
+        expect(accepted.headers.getSetCookie()).toEqual([])
+        const [member] = await members()
+        expect(member?.role).toBe('member')
+        expect(await accepted.json()).toEqual(
+          JSON.parse(
+            JSON.stringify({
+              invitation: { ...invitation, status: 'accepted' },
+              member,
+            }),
+          ),
+        )
+        expect(await session()).toMatchObject({ activeOrganizationId: invitation.organizationId })
+        const repeat = await accept()
+        expect(repeat.status).toBe(400)
+        expect(await repeat.text()).toBe(
+          '{"message":"Invitation not found","code":"INVITATION_NOT_FOUND"}',
+        )
+        expect(await members()).toEqual([member])
+        expect(outbox).toHaveLength(3)
+        expect(await db.selectFrom('sso_attempts').select('id').execute()).toEqual([])
+        expect(
+          await db
+            .selectFrom('audit_events')
+            .select([
+              'action',
+              'actor_type',
+              'actor_id',
+              'credential_type',
+              'credential_id',
+              'target_id',
+              'details',
+            ])
+            .where('organization_id', '=', invitation.organizationId)
+            .execute(),
+        ).toEqual([
+          {
+            action: 'membership.accepted',
+            actor_type: 'user',
+            actor_id: user.id,
+            credential_type: 'session',
+            credential_id: (await session()).id,
+            target_id: invitation.id,
+            details: {},
+          },
+        ])
+      },
+    )
 
     it.each(restricted)(
       'keeps invitation callbacks and repeated sign-in separate from acceptance in $mode',
