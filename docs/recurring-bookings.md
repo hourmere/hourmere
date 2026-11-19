@@ -341,7 +341,9 @@ also ask the booker to pick another time for one member with the existing resche
 request takes the series row before the booking row, as member moves and cancels do. The
 existing request-expiry job (`expireRescheduleRequest`) keeps locking only the member's
 booking row: it holds no other lock and never touches the series row, so it adds no
-booking-row -> series-row edge. Its request mail is ordinary per-occurrence mail with the
+booking-row -> series-row edge. Creating or replacing a request advances the series
+revision once. Expiry is visible through the request's own deadline and state.
+Its request mail is ordinary per-occurrence mail with the
 existing occurrence link. The booker answers through the occurrence link or in series mode;
 both series-mode member routes, reschedule and cancel, accept the existing optional
 `rescheduleRequestId` with today's fence. The pick is a single-occurrence move under the
@@ -397,6 +399,8 @@ a mismatch returns 409 `series_changed`, except for the reschedule-request repla
 above. Thus one delivered series link reaches every
 occurrence without needing twelve separately delivered links. Series token lookup checks
 both API and successful notification digests, role, retained ownership and revocation.
+Booker and guest receipts use the recipient's retained booking-attendee ID from the same
+series. Delivery can use the attendee ID from the first root across message kinds.
 
 Ordinary per-occurrence mail for a series member keeps today's per-booking pipeline:
 reminders, follow-ups and the one email of a single-occurrence move or cancel. The booker's
@@ -412,7 +416,11 @@ failure through authorized reads and document host assistance, not guaranteed de
 
 Bulk cancel accepts `scope: "all" | "following"`, `fromOrdinal` only for following,
 `expectedRevision`, a request key and optional reason. Sample one clock after locks; compute
-and return affected/unchanged IDs explicitly. An empty eligible set succeeds without mail.
+and return affected/unchanged IDs explicitly within the caller's visibility. For the booker,
+if any selected, upcoming confirmed occurrence has reached its snapshotted cancellation
+deadline, the whole action is refused with `booking_cancel_deadline_passed`. Hosts bypass
+that deadline. An empty eligible set records a receipt and advances the revision without
+queuing mail. A replay uses its saved affected IDs and returns the current state.
 Every member move or cancel, through any route, and every bulk cancellation increments the
 series revision in the same transaction. Occurrence-token and host operations keep their
 existing inputs. A non-replay stale revision returns `series_changed` for a reload; never

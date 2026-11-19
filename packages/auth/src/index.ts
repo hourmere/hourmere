@@ -27,6 +27,7 @@ import { organizationOperationRecords } from './organization-operations.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import type { ScimClaimCompletion } from './scim-claims.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
+import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
 import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
 
@@ -62,7 +63,7 @@ export {
   createCallerResolver,
   type Principal,
 } from './caller.ts'
-export { DISPLAY_NAME_MAX_LENGTH } from './display-name.ts'
+export { DISPLAY_NAME_MAX_LENGTH, sanitizeInitialDisplayName } from './display-name.ts'
 export {
   cancelTeamInvitation,
   invitationCancellationRules,
@@ -114,6 +115,11 @@ export {
   type SignupPolicy,
 } from './signup.ts'
 export {
+  checkSsoAdmissionBlocks,
+  recordSsoAdmissionRemoval,
+  type SsoAdmissionRemoval,
+} from './sso-admission-blocks.ts'
+export {
   checkTeamManagementAccess,
   checkTeamManagementMembership,
   TeamManagementError,
@@ -125,6 +131,11 @@ export {
   type TeamMemberRemoval,
   type TeamMemberRemovalInput,
 } from './team-member-removal.ts'
+export {
+  lockTeamInvitationAcceptance,
+  teamMembershipLimit,
+  writeTeamInvitationAcceptance,
+} from './team-role-policy.ts'
 
 /**
  * The organization-context lock pool waits this many times the connection timeout. It is a
@@ -254,6 +265,8 @@ export interface AuthConfig {
    * setting reaches it. The SSO linking completion step extends the same dependency.
    */
   scimClaims?: ScimClaimCompletion | undefined
+  /** Optional SSO tombstone write in the existing administrative removal transaction. */
+  recordAdmissionRemoval?: SsoAdmissionRemoval | undefined
   socialProviderOptions?: { google?: Partial<GoogleOptions>; microsoft?: Partial<MicrosoftOptions> }
 }
 
@@ -282,11 +295,17 @@ export function createAuth({
   mcpMetadataFetcher,
   leaveTeamMember,
   scimClaims,
+  recordAdmissionRemoval,
 }: AuthConfig) {
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
   const { google, microsoft } = socialProviders
-  const teamRolePolicy = createTeamRolePolicy(db, leaveTeamMember, scimClaims)
+  const teamRolePolicy = createTeamRolePolicy(
+    db,
+    leaveTeamMember,
+    scimClaims,
+    recordAdmissionRemoval,
+  )
   const auth = betterAuth({
     database: teamTransactionAdapter(createDb(pool), teamRolePolicy.withTransaction),
     disabledPaths: [

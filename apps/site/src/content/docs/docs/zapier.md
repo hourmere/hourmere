@@ -80,6 +80,8 @@ Rate-limit errors use `Retry-After` to ask Zapier to delay a retry.
 
 ## Delivery verification and limits
 
+The Zapier app does not offer a `workflow.executed` trigger. Workflows are hard-off.
+
 The app verifies each delivery's HMAC-SHA256 against the exact raw request body using
 the signing secret returned by webhook registration. Zapier supplies that saved secret
 through `bundle.subscribeData` during the hook's `perform`; its raw headers use the

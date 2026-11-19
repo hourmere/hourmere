@@ -15,6 +15,7 @@ import {
   type Booking,
   getHostBooking,
   getManagedBooking,
+  type ManagedBookingSelector,
   type ManagedRescheduleRequestState,
   managedLinkRescheduleRequest,
 } from './bookings.ts'
@@ -49,7 +50,7 @@ export interface ManagedBooking extends Booking {
 /** getManagedBooking plus the event type, the hosts' names and the link's own request. */
 export async function getManagedBookingDetails(
   ctx: PublicContext,
-  token: string | undefined,
+  token: ManagedBookingSelector,
 ): Promise<ManagedBooking> {
   // One decision time for the request deadline in both reads (they are separate statements,
   // so a write committing between them can still show a moment apart).
@@ -73,7 +74,7 @@ export async function getManagedBookingDetails(
       .where('bh.booking_id', '=', booking.id)
       .orderBy('bh.user_id')
       .execute(),
-    managedLinkRescheduleRequest(at, token, booking.id),
+    typeof token !== 'object' ? managedLinkRescheduleRequest(at, token, booking.id) : undefined,
     ctx.db
       .selectFrom('bookings')
       .select(['organization_id', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
@@ -117,7 +118,7 @@ export async function getManagedBookingDetails(
  */
 export async function listManagedSlots(
   ctx: PublicContext,
-  token: string | undefined,
+  token: ManagedBookingSelector,
   {
     start,
     end,

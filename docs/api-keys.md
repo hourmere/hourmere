@@ -294,6 +294,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `DELETE /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `POST /api/v1/team/sso/providers/{providerId}/test` | Browser session only | — |
+| `POST /api/v1/team/sso/providers/{providerId}/link` | Browser session only | — |
 | `GET /api/v1/team/sso/providers` | Session or API key | `full, read` |
 | `GET /api/v1/team/sso/policy` | Session or API key | `full, read` |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
@@ -332,6 +333,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `create_webhook` | — | `webhooks create` | `full` |
 | `update_webhook` | — | `webhooks update` | `full` |
 | `delete_webhook` | — | `webhooks delete` | `full` |
+| `rotate_webhook_secret` | — | `webhooks rotate-secret` | `full` |
+| `list_webhook_deliveries` | — | `webhooks deliveries` | `full, read` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |

@@ -8,6 +8,13 @@ stores durable delivery intents. The hourly email cleanup deletes admission rows
 than 48 hours in batches of up to 500. Admissions store an actor digest, including a
 server-keyed HMAC for a client's rate-limit address.
 
+Single-occurrence moves retain the same `series_occurrence_id` on the successor.
+Member writes use the ordinary organization lock, then the series row and the booking
+row before the operation's existing host locks. Moves, cancellations and new or
+replacement reschedule requests advance the series revision in that transaction and
+use the ordinary per-booking notification pipeline. Request expiry uses only the
+booking row lock and resolves the request without advancing the series revision.
+
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
 profile's default calendar and provider retries, and cascades away on booking/user/calendar
@@ -140,6 +147,19 @@ unverified public enrollees. Removal deletes the voter row with its votes, crede
 deliveries and marks the mailbox counter row removed, which alone outlives it with its mail
 counts and opt-out. Removal checks only the host revision and advances the host and results
 revisions, so voter activity cannot make it fail.
+The internal finalize service in `packages/scheduling/src/meeting-poll-finalize.ts`
+selects a consenting booker and eligible guests for one candidate. It checks the consent
+snapshot against the locked event and delegates current availability and booking writes to
+the ordinary booking core. The booking, poll link and voter roles, finalize receipt, and
+delivery intents commit together. Selected attendees use the ordinary booking outbox;
+eligible non-selected voters get a poll outcome intent. An exact retry rechecks manager
+authority and returns a whitelist of current booking metadata from the original booking's
+reschedule chain.
+Ordinary booking reschedules and cancellations write `booking_update` deliveries in the
+same transaction. Update sequences count the moves from the original booking and its
+eventual cancellation, starting at zero. The poll email worker uses the current booking
+status and sequence to skip superseded notices and uses the existing recipient lease to
+deduplicate sends.
 The internal cleanup service in `packages/scheduling/src/meeting-poll-cleanup.ts`, run by the
 hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending voters and
 replay tombstones past their purge instant (and terminal polls once an installation
@@ -2049,6 +2069,12 @@ request_id)`, a null value would make every later sample a duplicate of the firs
 with a null `booking_id`, `request_id` is this sample marker, not a reschedule-request ID. Slack requires `WEBHOOKS_ENABLED=true` and
 `WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
 processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
+
+Migration 0143 permits up to seven signed webhook subscription kinds and admits
+`workflow.executed` in webhook audit details. Existing subscription arrays and audit rows
+are preserved. The runner holds `ACCESS EXCLUSIVE` locks on `webhooks` and `audit_events`
+while it replaces both checks and validates the existing rows. Adding the new kind
+requires workflows to be enabled. Slack and delivery capture still use their existing catalogues.
 
 ## Independent conference identities
 

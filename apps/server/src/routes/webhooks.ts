@@ -33,23 +33,27 @@ export const Webhook = z
     id: z.uuid(),
     organizationId: z.uuid(),
     url: z.string(),
-    events: z.array(z.enum(WEBHOOK_EVENTS)),
+    events: z.array(z.enum(WEBHOOK_EVENTS)).openapi({
+      description: 'Subscription event kinds. Open enum. Ignore unknown event kinds.',
+    }),
     isActive: z.boolean(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
   .openapi('Webhook')
-const Secret = z.object({
+export const WebhookSecret = z.object({
   secret: z
     .string()
     .openapi({ description: 'Shown only once; store securely. Never returned by lists.' }),
 })
-export const WebhookCreated = Secret.extend({ webhook: Webhook })
+export const WebhookCreated = WebhookSecret.extend({ webhook: Webhook })
 const Delivery = z
   .object({
     id: z.uuid(),
     eventId: z.uuid(),
-    eventType: z.enum(WEBHOOK_EVENTS),
+    eventType: z.enum(WEBHOOK_EVENTS).openapi({
+      description: 'Delivery event kind. Open enum. Ignore unknown event kinds.',
+    }),
     bookingId: z.uuid(),
     status: z.enum(['pending', 'delivered', 'failed', 'skipped']),
     attempts: z.number().int(),
@@ -60,6 +64,10 @@ const Delivery = z
     deliveredAt: z.iso.datetime().nullable(),
   })
   .openapi('WebhookDelivery')
+export const WebhookDeliveryPage = z.object({
+  data: z.array(Delivery),
+  nextAfter: z.string().nullable(),
+})
 const Params = z.object({ id: z.string() })
 const ExpectedReadHeaders = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
@@ -79,6 +87,10 @@ const errors = errorResponses({
   404: 'webhook_not_found',
   409: 'webhooks_disabled, webhook_limit_reached or organization_context_changed',
 })
+const subscriptionErrors = {
+  ...errors,
+  ...errorResponses({ 404: 'webhook_not_found or workflows_disabled' }),
+}
 
 /** Organization-wide outbound booking events; ordinary hosts have no administrative access. */
 export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule {
@@ -152,7 +164,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
             description: 'Endpoint and one-time secret',
             content: json(WebhookCreated),
           },
-          ...errors,
+          ...subscriptionErrors,
         },
       }),
       async (c) =>
@@ -180,7 +192,10 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
           headers: ExpectedWriteHeaders,
           body: { required: true, content: json(WebhookUpdateInput) },
         },
-        responses: { 200: { description: 'Updated endpoint', content: json(Webhook) }, ...errors },
+        responses: {
+          200: { description: 'Updated endpoint', content: json(Webhook) },
+          ...subscriptionErrors,
+        },
       }),
       async (c) =>
         c.json(
@@ -229,7 +244,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         middleware: caller,
         request: { params: Params, headers: ExpectedWriteHeaders },
         responses: {
-          200: { description: 'New one-time secret', content: json(Secret) },
+          200: { description: 'New one-time secret', content: json(WebhookSecret) },
           ...errors,
         },
       }),
@@ -261,7 +276,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         responses: {
           200: {
             description: 'Newest first, at most fifty; no payloads or signatures',
-            content: json(z.object({ data: z.array(Delivery), nextAfter: z.string().nullable() })),
+            content: json(WebhookDeliveryPage),
           },
           ...errors,
         },

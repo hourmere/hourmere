@@ -100,6 +100,8 @@ export {
   listHostBookings,
   MAX_GUESTS,
   MAX_PAGE_SIZE,
+  type ManagedBookingMutationSelector,
+  type ManagedBookingSelector,
   type PersonInput,
   RESCHEDULE_REQUEST_TIMEOUT_HOURS,
   RescheduleRequestNoteSchema,
@@ -209,6 +211,7 @@ export {
   type MeetingPollCleanupResult,
 } from './meeting-poll-cleanup.ts'
 export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
+export { bookingMeetingPollLinked } from './meeting-poll-outcomes.ts'
 export { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
 export {
@@ -345,6 +348,18 @@ export {
   type RecurringAvailabilityResult,
 } from './recurring-availability.ts'
 export {
+  type CancelBookingSeriesInput,
+  type CancelBookingSeriesResult,
+  cancelHostBookingSeries,
+  cancelManagedBookingSeries,
+} from './recurring-cancellation.ts'
+export {
+  resolveSeriesCapability,
+  resolveSeriesMember,
+  type SeriesMemberMutationSelector,
+  type SeriesMemberSelector,
+} from './recurring-capabilities.ts'
+export {
   BookingSeriesRateLimitError,
   type CreateBookingSeriesInput,
   type CreateBookingSeriesOptions,
@@ -353,6 +368,7 @@ export {
   createPublicTeamBookingSeries,
   type ExpectedBookingSeriesPreview,
 } from './recurring-creation.ts'
+export { bookingPreLockLinks } from './recurring-members.ts'
 export {
   expandRecurringRule,
   MAX_RECURRING_HORIZON_DAYS,

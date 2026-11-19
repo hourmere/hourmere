@@ -54,6 +54,7 @@ import {
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 import type { MailboxProofModule } from './sso-mailbox-proof.ts'
+import { readSsoMe, type SsoMeDeps } from './sso-me.ts'
 import type { OidcSignInModule } from './sso-oidc-sign-in.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 import {
@@ -107,6 +108,7 @@ export interface AppDeps {
    */
   ssoMailboxProof?: MailboxProofModule | undefined
   ssoOidcSignIn?: OidcSignInModule | undefined
+  ssoMe?: SsoMeDeps | undefined
 }
 
 const Health = z
@@ -414,6 +416,7 @@ export function createApp({
   waitlist,
   ssoMailboxProof,
   ssoOidcSignIn,
+  ssoMe,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Generate correlation IDs locally; caller headers may contain private or forged values.
@@ -438,11 +441,12 @@ export function createApp({
       )
       return
     }
+    const ssoTrust = c.var.oidcInvitationAcceptance || isSsoTrustPath(c.req.path)
     const text = c.req.path.toLowerCase().includes('/meeting-polls')
       ? 'private meeting poll request failed'
       : isCalDavConnectionPath(c.req.path)
         ? '[private CalDAV diagnostic omitted]'
-        : isSsoTrustPath(c.req.path)
+        : ssoTrust
           ? '[private SSO diagnostic omitted]'
           : isSlackDestinationPath(c.req.path)
             ? '[private Slack diagnostic omitted]'
@@ -455,7 +459,7 @@ export function createApp({
         ? '/book/[redacted]'
         : isOneTimeLinkPath(c.req.path) ||
             isSlackDestinationPath(c.req.path) ||
-            isSsoTrustPath(c.req.path) ||
+            ssoTrust ||
             isCalDavConnectionPath(c.req.path)
           ? routePath(c)
           : c.req.path
@@ -681,6 +685,7 @@ export function createApp({
     }
   }
   ssoMailboxProof?.mount({ app, resolveCaller, publicUrl })
+  ssoOidcSignIn?.mountInvitationAcceptance(app, publicUrl)
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),
   )
@@ -712,7 +717,12 @@ export function createApp({
       429: { description: "The API key's rate limit is used up", content: json(ErrorBody) },
     },
   })
-  app.openapi(meRoute, (c) => c.json(describeCaller(c.var.principal), 200))
+  app.openapi(meRoute, async (c) => {
+    const principal = c.var.principal
+    const identity = describeCaller(principal)
+    const sso = ssoMe && (await readSsoMe(ssoMe, principal, c.req.raw.headers, publicUrl))
+    return c.json(sso ? { ...identity, sso } : identity, 200)
+  })
 
   for (const register of routes) register({ app, caller })
   mcp?.mount({ app, resolveCaller, publicUrl })

@@ -378,16 +378,27 @@ and requires `read` or `full`. `webhooks create` requires `full` and accepts JSO
 `url`, `events` and optional `isActive` (default `true`). All webhook commands require the
 verified personal owner or a current team owner/admin and use REST's error codes.
 
+The subscription kinds are `booking.created`, `booking.rescheduled`, `booking.cancelled`,
+`booking.reschedule_requested`, `booking.reschedule_request_expired`,
+`booking.attendee_no_show_changed` and `workflow.executed`. Adding `workflow.executed`
+through create or update is disabled. The CLI exits `1` with `workflows_disabled` on stderr,
+the equivalent of REST's HTTP 404. On create this takes precedence over `webhooks_disabled`
+(REST HTTP 409). Existing subscriptions to that kind can be kept or removed.
+
 ```sh
 hourmere webhooks list --json
 hourmere webhooks create --input webhook.json --output webhook-result.json
 printf '%s\n' '{"id":"WEBHOOK_UUID","isActive":false}' | hourmere webhooks update --input - --json
 printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks delete --input - --yes --json
+printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks rotate-secret --input - --output rotated-secret.json
+printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks deliveries --input - --json
 hourmere --help
 ```
 
-Creation returns `{ webhook, secret }` once. It requires `--output FILE` to save the full
-response in a new `0600` file, or explicit `--json` to send the full response to stdout.
+Creation returns `{ webhook, secret }` once. `webhooks rotate-secret` requires `full`,
+takes `{ id }` and returns the replacement `{ secret }` once. Both commands require
+`--output FILE` to save the full response in a new `0600` file, or explicit `--json`
+to send the response to stdout. `--output` refuses existing paths and symlinks.
 Use `--output` when stdout is logged. It prints only `{"outputWritten":true}` on success.
 Copy the signing secret into the receiver's secret store and keep the response out of
 shell history and logs. See [Booking webhooks](https://hourmere.com/docs/webhooks) for the
@@ -398,7 +409,21 @@ least one of `events` and `isActive`, and returns the updated metadata. The URL 
 immutable. To pause after a destination's allowlist entry is removed, pass only `id`
 and `isActive: false`. Delete takes `{ id }`, requires `--yes` and returns
 `{ "deleted": true }` after removing the endpoint and its retained deliveries.
-Both commands return `webhook_not_found` for a missing or out-of-organization endpoint.
+`webhooks deliveries` accepts `read` or `full` and takes `{ id, after? }`. It returns
+`{ data, nextAfter }` with up to fifty metadata rows from the last thirty days, newest
+first. Pass `nextAfter` as `after` until it is null. Payloads, headers and secrets are
+omitted. Update, delete, rotation and history return `webhook_not_found` for a missing
+or out-of-organization endpoint.
+
+`Webhook.events` and delivery `eventType` are open enums. Consumers should ignore unknown
+event types and continue processing known ones. Every delivery has a required `bookingId` UUID.
+
+中文：`webhooks rotate-secret` 使用 `full` 密钥，仅在本次响应中返回新签名密钥，需指定
+`--output` 或 `--json`。`webhooks deliveries` 使用 `read` 或 `full` 密钥，按 `nextAfter`
+分页，每页最多返回 50 条投递元数据，每条均有必填的 `bookingId`（UUID）。创建或更新时
+新增 `workflow.executed` 订阅会返回 `workflows_disabled`（对应 REST 404）。创建时该错误
+优先于 `webhooks_disabled`（对应 REST 409）。`Webhook.events` 和投递的 `eventType`
+均为开放枚举，请忽略未知事件类型。
 
 `workflows list` (JSON `owner` as `{"kind":"personal","id":USER_ID}` or
 `{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)

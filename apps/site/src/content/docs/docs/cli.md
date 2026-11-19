@@ -95,6 +95,8 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `webhooks create` | `create_webhook` | `url`, `events` and optional `isActive`. Requires `full` and either `--output FILE` or `--json`. |
 | `webhooks update` | `update_webhook` | `id` and at least one of `events` and `isActive`. Requires `full`. |
 | `webhooks delete` | `delete_webhook` | `id`. Requires `full` and `--yes`. |
+| `webhooks rotate-secret` | `rotate_webhook_secret` | `id`. Requires `full` and either `--output FILE` or `--json`. |
+| `webhooks deliveries` | `list_webhook_deliveries` | `id` and optional `after`. Requires `read` or `full`. |
 | `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full`; not available yet (`workflows_disabled`) |
@@ -205,17 +207,26 @@ hourmere webhooks list --json
 hourmere webhooks create --input webhook.json --output webhook-result.json
 printf '%s\n' '{"id":"WEBHOOK_UUID","isActive":false}' | hourmere webhooks update --input - --json
 printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks delete --input - --yes --json
+printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks rotate-secret --input - --output rotated-secret.json
+printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks deliveries --input - --json
 hourmere --help
 ```
 
 The list command accepts a `read` or `full` API key and returns `{ data: [...] }` with
-endpoint metadata only. Creation, update and deletion require a `full` key. Use a key
+endpoint metadata only. Creation, update, deletion and rotation require a `full` key. Use a key
 from the organization you want to manage, held by its verified personal owner or a
 current team owner/admin. Denials retain REST codes such as `insufficient_scope` and
 `insufficient_role`.
 
 Save the destination and subscriptions in a JSON file such as `webhook.json`, or
 pass the JSON on standard input with `--input -`.
+
+The `events` values for `webhooks create` and `webhooks update` are `booking.created`,
+`booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
+`booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and
+`workflow.executed`. Workflows are hard-off. Adding `workflow.executed` exits with
+status `1` and `workflows_disabled` on stderr (REST 404). On create, this takes
+precedence over `webhooks_disabled` (REST 409).
 
 ```json
 {
@@ -225,13 +236,15 @@ pass the JSON on standard input with `--input -`.
 ```
 
 The server defaults `isActive` to `true`. Creation returns `{ webhook, secret }` once.
-`--output FILE` saves it to a new file with permissions `0600` and prints only
+Rotation takes `{ id }` and returns `{ secret }` once. On either command, `--output FILE`
+saves the response to a new file with permissions `0600`, refuses existing paths and
+symlinks, and prints only
 `{"outputWritten":true}`. Use this mode in environments that capture terminal output.
-For a private pipe, explicit `--json` sends the complete creation response to stdout.
-Creation requires one of these options. Keep the response out of shell history and
+For a private pipe, explicit `--json` sends the complete response to stdout.
+Both commands require one of these options. Keep the response out of shell history and
 logs, and install the secret in the receiver's secret store. For a lost response,
-use the list to check whether the endpoint was created, then use REST to rotate its
-secret if needed. See [Booking webhooks](/docs/webhooks) for event kinds, destination
+use the list to check whether the endpoint was created, then rotate its secret if needed.
+See [Booking webhooks](/docs/webhooks) for receiver rotation, event kinds, destination
 policy and configuration.
 
 Update returns the changed endpoint metadata. Pass the fields you want to change, using
@@ -241,11 +254,23 @@ allowlist entry is removed, pass just `id` and `isActive: false`. Delete require
 after removing the endpoint and its retained deliveries. Missing and out-of-organization
 IDs return `webhook_not_found` for both commands.
 
+Delivery history accepts `read` or `full` and returns `{ data, nextAfter }` with up to
+fifty metadata rows from the last thirty days, newest first. Pass `nextAfter` as `after`
+in the next JSON input until it is null. Payloads, headers and secrets are omitted.
+History and rotation also return `webhook_not_found` for missing and foreign endpoints.
+Treat `Webhook.events` and `WebhookDelivery.eventType` as open enums and ignore unknown
+event types. Every delivery record has a required UUID `bookingId`.
+
 中文：`webhooks list` 使用 `read` 或 `full` 密钥。`webhooks create` 使用 `full`
 密钥，并要求 `--output` 或显式 `--json`。带日志采集的环境请使用 `--output`，它会把
 一次性签名密钥写入新建的私有文件，标准输出仅确认文件已写入。
 `webhooks update` 和 `webhooks delete` 均使用 `full` 密钥。更新可修改订阅事件和启用状态，
 目标 URL 固定。删除必须加 `--yes`，成功时会清除保留的投递记录。
+`webhooks rotate-secret` 使用 `full` 密钥，需指定 `--output` 或 `--json`，仅在本次响应中返回新密钥。
+`webhooks deliveries` 使用 `read` 或 `full` 密钥，每页最多返回 50 条投递元数据。
+将 `nextAfter` 作为 `after` 请求下一页，直至其为 null。
+工作流仍处于硬关闭状态。新增 `workflow.executed` 订阅时，CLI 退出码为 `1`，
+并在标准错误输出 `workflows_disabled`（对应 REST 404），创建时优先于 `webhooks_disabled`。
 
 ## Draft open-time email snippets
 

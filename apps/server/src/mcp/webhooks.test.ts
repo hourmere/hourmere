@@ -7,9 +7,11 @@ import type { WebhookView } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp } from '../app.ts'
-import { webhookRoutes } from '../routes/webhooks.ts'
+import { WebhookDeliveryPage, webhookRoutes } from '../routes/webhooks.ts'
 import { productTools } from '../server.ts'
 import { mcpEndpoint } from './endpoint.ts'
+import { prepareTools } from './tools.ts'
+import { webhookTools } from './webhooks.ts'
 
 const publicUrl = 'http://localhost:4185'
 const events = [
@@ -20,17 +22,76 @@ const events = [
   'booking.reschedule_requested',
   'booking.rescheduled',
 ]
+const workflowEvents = [...events, 'workflow.executed']
 const input = { url: 'https://hooks.example.com/bookings', events, isActive: false }
-const methods = { list: 'GET', create: 'POST', update: 'PATCH', delete: 'DELETE' } as const
+const methods = {
+  list: 'GET',
+  create: 'POST',
+  update: 'PATCH',
+  delete: 'DELETE',
+  'rotate-secret': 'POST',
+  deliveries: 'GET',
+} as const
 const tools = {
   list: 'list_webhooks',
   create: 'create_webhook',
   update: 'update_webhook',
   delete: 'delete_webhook',
+  'rotate-secret': 'rotate_webhook_secret',
+  deliveries: 'list_webhook_deliveries',
 } as const
 type Action = keyof typeof methods
 type Input = { id?: string } & Record<string, unknown>
 type Created = { webhook: WebhookView; secret: string }
+
+it('publishes webhook schemas and help for the workflow kind', () => {
+  const catalog = prepareTools(webhookTools({ db: {} as Db, enabled: false }))
+  const schemaOptions = { target: 'draft-2020-12' } as const
+  const knownKinds = expect.arrayContaining(workflowEvents)
+  for (const name of [tools.create, tools.update]) {
+    const entry = catalog.find(({ tool }) => tool.name === name)
+    expect(entry?.tool.description).toContain('workflow.executed while workflows are disabled')
+    expect(entry?.tool.description).toContain('workflows_disabled')
+    expect(entry?.inputSchema['~standard'].jsonSchema.input(schemaOptions)).toMatchObject({
+      properties: { events: { items: { type: 'string', enum: knownKinds } } },
+    })
+  }
+  const list = catalog.find(({ tool }) => tool.name === tools.list)
+  expect(list?.tool.description).toContain('Treat Webhook.events as an open enum')
+  expect(list?.outputSchema['~standard'].jsonSchema.output(schemaOptions)).toMatchObject({
+    properties: {
+      data: {
+        items: {
+          properties: {
+            events: {
+              description: expect.stringContaining('Open enum'),
+              items: { type: 'string', enum: knownKinds },
+            },
+          },
+        },
+      },
+    },
+  })
+  const deliveries = catalog.find(({ tool }) => tool.name === tools.deliveries)
+  expect(deliveries?.tool.description).toContain('Treat eventType as an open enum')
+  expect(deliveries?.outputSchema['~standard'].jsonSchema.output(schemaOptions)).toMatchObject({
+    properties: {
+      data: {
+        items: {
+          required: expect.arrayContaining(['bookingId']),
+          properties: {
+            eventType: {
+              description: expect.stringContaining('Open enum'),
+              type: 'string',
+              enum: knownKinds,
+            },
+            bookingId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+  })
+})
 
 describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', () => {
   let database: TestDatabase
@@ -58,8 +119,17 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
       },
       signup,
     })
-    const webhooks = { enabled: true, encryptionKey: randomBytes(32).toString('base64') }
-    app = createApp({
+    app = appWithWebhooks(true)
+  })
+
+  afterAll(async () => {
+    await authPool?.end()
+    await database?.drop()
+  })
+
+  function appWithWebhooks(enabled: boolean) {
+    const webhooks = { enabled, encryptionKey: randomBytes(32).toString('base64') }
+    return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
@@ -67,12 +137,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
       routes: [webhookRoutes({ db, ...webhooks })],
       mcp: mcpEndpoint({ tools: productTools({ db, webhooks }) }),
     })
-  })
-
-  afterAll(async () => {
-    await authPool?.end()
-    await database?.drop()
-  })
+  }
 
   async function credential(userId: string, organizationId: string, scope: ApiKeyScope = 'full') {
     const { key } = await auth.api.createApiKey({
@@ -81,12 +146,20 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     return key
   }
 
-  function rest(key: string, args?: Input, action: Action = args ? 'create' : 'list') {
-    const { id, ...changes } = args ?? {}
-    const path =
-      action === 'update' || action === 'delete' ? `/api/v1/webhooks/${id}` : '/api/v1/webhooks'
+  function rest(
+    key: string,
+    args?: Input,
+    action: Action = args ? 'create' : 'list',
+    target = app,
+  ) {
+    const { id, after, ...changes } = args ?? {}
+    let path = '/api/v1/webhooks'
+    if (action !== 'list' && action !== 'create') path += `/${id}`
+    if (action === 'rotate-secret' || action === 'deliveries') path += `/${action}`
+    if (action === 'deliveries' && typeof after === 'string')
+      path += `?${new URLSearchParams({ after })}`
     const body = action === 'update' ? changes : action === 'create' ? args : undefined
-    return app.request(path, {
+    return target.request(path, {
       method: methods[action],
       headers: {
         authorization: `Bearer ${key}`,
@@ -96,8 +169,13 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     })
   }
 
-  async function mcp(key: string, body?: Input, action: Action = body ? 'create' : 'list') {
-    const response = await app.request('/mcp', {
+  async function mcp(
+    key: string,
+    body?: Input,
+    action: Action = body ? 'create' : 'list',
+    target = app,
+  ) {
+    const response = await target.request('/mcp', {
       method: 'POST',
       headers: {
         authorization: `Bearer ${key}`,
@@ -118,7 +196,12 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     return JSON.parse(event ? event.slice(6) : text).result
   }
 
-  async function cli(key: string, body?: Input, action: Action = body ? 'create' : 'list') {
+  async function cli(
+    key: string,
+    body?: Input,
+    action: Action = body ? 'create' : 'list',
+    target = app,
+  ) {
     let stdout = ''
     let stderr = ''
     const code = await runCli({
@@ -140,7 +223,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
       stderr: (value) => {
         stderr += value
       },
-      fetch: async (request, init) => app.request(request, init),
+      fetch: async (request, init) => target.request(request, init),
     })
     expect((stdout + stderr).includes(key)).toBe(false)
     return { code, stdout, stderr }
@@ -152,16 +235,17 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     error: string,
     body?: Input,
     action?: Action,
+    target = app,
   ) {
-    const result = await mcp(key, body, action)
+    const result = await mcp(key, body, action, target)
     expect(result.isError).toBe(true)
     const mcpError = JSON.parse(result.content[0].text)
     expect(mcpError).toMatchObject({ error })
-    const command = await cli(key, body, action)
+    const command = await cli(key, body, action, target)
     expect(command.code).toBe(1)
     expect(command.stdout).toBe('')
     expect(JSON.parse(command.stderr)).toMatchObject({ error })
-    const response = await rest(key, body, action)
+    const response = await rest(key, body, action, target)
     expect(response.status).toBe(status)
     const restError = await response.json()
     expect(restError).toMatchObject({ error })
@@ -253,12 +337,53 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     expect(rows).toEqual([])
   })
 
-  it('preserves webhook validation codes and rejects workflow subscriptions', async () => {
+  it('preserves webhook validation codes and rejects new workflow subscriptions before the webhook opt-in check', async () => {
     const host = await fixtures.host()
     const key = await credential(host.userId, host.organizationId)
     await expectFailure(key, 400, 'invalid_webhook', { ...input, events: [] })
     await expectFailure(key, 400, 'invalid_request', { ...input, oneTimeToken: 'unused' })
-    await expectFailure(key, 400, 'invalid_request', { ...input, events: ['workflow.executed'] })
+    const workflow = { ...input, events: workflowEvents }
+    await expectFailure(key, 404, 'workflows_disabled', workflow)
+    const disabled = appWithWebhooks(false)
+    await expectFailure(key, 404, 'workflows_disabled', workflow, 'create', disabled)
+    await expectFailure(key, 409, 'webhooks_disabled', input, 'create', disabled)
+    expect((await mcp(key)).structuredContent).toEqual({ data: [] })
+  })
+
+  it('lists and preserves an existing workflow kind and lets its owner remove it', async () => {
+    const owner = await fixtures.host()
+    const other = await fixtures.host()
+    const full = await credential(owner.userId, owner.organizationId)
+    const read = await credential(owner.userId, owner.organizationId, 'read')
+    const foreign = await credential(other.userId, other.organizationId)
+    const response = await rest(full, input)
+    expect(response.status).toBe(201)
+    const { webhook } = (await response.json()) as Created
+    const { id } = webhook
+    const workflow = { id, events: workflowEvents }
+
+    await expectFailure(read, 403, 'insufficient_scope', workflow, 'update')
+    await expectFailure(foreign, 404, 'webhook_not_found', workflow, 'update')
+    await expectFailure(full, 404, 'workflows_disabled', workflow, 'update')
+    expect(await (await rest(read)).json()).toEqual([webhook])
+
+    // An endpoint saved by a build with workflows enabled can outlive that build.
+    await db.updateTable('webhooks').set({ events: workflowEvents }).where('id', '=', id).execute()
+    const expected = { data: [{ ...webhook, events: workflowEvents }] }
+    expect((await mcp(read)).structuredContent).toEqual(expected)
+    const listed = await cli(read)
+    expect(listed.code).toBe(0)
+    expect(listed.stderr).toBe('')
+    expect(JSON.parse(listed.stdout)).toEqual(expected)
+
+    const kept = await mcp(full, workflow, 'update')
+    expect(kept.isError).toBeFalsy()
+    expect(kept.structuredContent).toMatchObject(workflow)
+    const removed = await cli(full, { id, events }, 'update')
+    expect(removed.code).toBe(0)
+    expect(removed.stderr).toBe('')
+    expect(JSON.parse(removed.stdout)).toMatchObject({ id, events })
+    await expectFailure(full, 404, 'workflows_disabled', workflow, 'update')
   })
 
   it('updates subscriptions and pauses or resumes without changing the destination, then deletes', async () => {
@@ -270,7 +395,9 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     const ownerKey = await credential(owner.userId, teamId)
     const adminKey = await credential(admin.userId, teamId)
     const personalKey = await credential(owner.userId, owner.organizationId)
-    const created = (await (await rest(ownerKey, input)).json()) as Created
+    const created = (await (
+      await rest(ownerKey, { ...input, events: ['booking.created'] })
+    ).json()) as Created
     const personal = (await (await rest(personalKey, input)).json()) as Created
     const { id } = created.webhook
 
@@ -281,22 +408,14 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
       { id, url: 'https://replacement.example.test' },
       'update',
     )
-    await expectFailure(
-      ownerKey,
-      400,
-      'invalid_request',
-      { id, events: ['workflow.executed'] },
-      'update',
-    )
     await expectFailure(ownerKey, 400, 'invalid_webhook', { id }, 'update')
 
-    const newEvents = ['booking.created']
-    const edited = await mcp(adminKey, { id, events: newEvents }, 'update')
+    const edited = await mcp(adminKey, { id, events }, 'update')
     expect(edited.isError).toBeFalsy()
     expect(edited.structuredContent).toMatchObject({
       id,
       url: input.url,
-      events: newEvents,
+      events,
       isActive: false,
     })
     expect(JSON.stringify(edited).includes(created.secret)).toBe(false)
@@ -309,7 +428,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     expect(JSON.parse(resumed.stdout)).toMatchObject({
       id,
       url: input.url,
-      events: newEvents,
+      events,
       isActive: true,
     })
     const paused = await rest(adminKey, { id, isActive: false }, 'update')
@@ -317,7 +436,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     expect(await paused.json()).toMatchObject({
       id,
       url: input.url,
-      events: newEvents,
+      events,
       isActive: false,
     })
 
@@ -367,5 +486,202 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
       .where('id', '=', id)
       .executeTakeFirst()
     expect(row).toEqual({ is_active: false })
+  })
+
+  it('returns each rotated secret only from the successful rotation response', async () => {
+    const owner = await fixtures.host()
+    const admin = await fixtures.host()
+    const teamId = await fixtures.organization()
+    await fixtures.member(owner.userId, teamId, 'owner')
+    await fixtures.member(admin.userId, teamId, 'admin')
+    const ownerKey = await credential(owner.userId, teamId)
+    const adminKey = await credential(admin.userId, teamId)
+    const readKey = await credential(admin.userId, teamId, 'read')
+    const created = (await (await rest(ownerKey, input)).json()) as Created
+    const args = { id: created.webhook.id }
+
+    const response = await rest(ownerKey, args, 'rotate-secret')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const restRotation = (await response.json()) as { secret: string }
+    const mcpRotation = await mcp(adminKey, args, 'rotate-secret')
+    expect(mcpRotation.isError).toBeFalsy()
+    const cliRotation = await cli(adminKey, args, 'rotate-secret')
+    expect(cliRotation.code).toBe(0)
+    expect(cliRotation.stderr === '').toBe(true)
+
+    const rotations = [restRotation, mcpRotation.structuredContent, JSON.parse(cliRotation.stdout)]
+    const seen = new Set([created.secret])
+    for (const rotation of rotations) {
+      expect(Object.keys(rotation)).toEqual(['secret'])
+      expect(typeof rotation.secret === 'string' && rotation.secret.startsWith('whsec_')).toBe(true)
+      expect(seen.has(rotation.secret)).toBe(false)
+      seen.add(rotation.secret)
+    }
+    const reads = [
+      await (await rest(readKey)).text(),
+      JSON.stringify(await mcp(readKey)),
+      (await cli(readKey)).stdout,
+      await (await rest(readKey, args, 'deliveries')).text(),
+      JSON.stringify(await mcp(readKey, args, 'deliveries')),
+      (await cli(readKey, args, 'deliveries')).stdout,
+    ]
+    expect([...seen].every((secret) => reads.every((read) => !read.includes(secret)))).toBe(true)
+  })
+
+  it('enforces current authority and gives the same webhook error for missing and foreign ids', async () => {
+    const host = await fixtures.host()
+    const teamId = await fixtures.organization()
+    await fixtures.member(host.userId, teamId, 'admin')
+    const full = await credential(host.userId, teamId)
+    const read = await credential(host.userId, teamId, 'read')
+    const bookings = await credential(host.userId, teamId, 'bookings')
+    const foreign = await credential(host.userId, host.organizationId)
+    const created = (await (await rest(full, input)).json()) as Created
+    const { id } = created.webhook
+
+    for (const key of [read, bookings])
+      await expectFailure(key, 403, 'insufficient_scope', { id }, 'rotate-secret')
+    await expectFailure(bookings, 403, 'insufficient_scope', { id }, 'deliveries')
+    for (const target of [id, randomUUID(), 'malformed']) {
+      await expectFailure(foreign, 404, 'webhook_not_found', { id: target }, 'rotate-secret')
+      await expectFailure(
+        foreign,
+        404,
+        'webhook_not_found',
+        { id: target, after: 'bad-cursor' },
+        'deliveries',
+      )
+    }
+    await expectFailure(foreign, 404, 'webhook_not_found', { id }, 'deliveries')
+
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', teamId)
+      .where('userId', '=', host.userId)
+      .execute()
+    await expectFailure(full, 403, 'insufficient_role', { id }, 'rotate-secret')
+    for (const key of [full, read])
+      await expectFailure(key, 403, 'insufficient_role', { id }, 'deliveries')
+
+    const rotations = await db
+      .selectFrom('audit_events')
+      .select('id')
+      .where('target_id', '=', id)
+      .where('action', '=', 'webhook.secret_rotated')
+      .execute()
+    expect(rotations).toEqual([])
+  })
+
+  it('pages only retained delivery metadata and keeps cursor bounds inside the endpoint', async () => {
+    const host = await fixtures.host()
+    const other = await fixtures.host()
+    const full = await credential(host.userId, host.organizationId)
+    const read = await credential(host.userId, host.organizationId, 'read')
+    const foreign = await credential(other.userId, other.organizationId)
+    async function endpoint(key: string) {
+      return ((await (await rest(key, input)).json()) as Created).webhook.id
+    }
+    const id = await endpoint(full)
+    const siblingId = await endpoint(full)
+    const foreignId = await endpoint(foreign)
+    const bookingId = await fixtures.booking(
+      host.organizationId,
+      [host.userId],
+      '2026-11-21T09:00Z',
+      '2026-11-21T09:30Z',
+    )
+    const foreignBookingId = await fixtures.booking(
+      other.organizationId,
+      [other.userId],
+      '2026-11-21T09:00Z',
+      '2026-11-21T09:30Z',
+    )
+    const now = new Date()
+    function deliveryRow(webhookId: string, organizationId: string, booking: string) {
+      return {
+        id: randomUUID(),
+        webhook_id: webhookId,
+        organization_id: organizationId,
+        booking_id: booking,
+        request_id: randomUUID(),
+        event_id: randomUUID(),
+        event_type: 'booking.reschedule_requested',
+        status: 'failed',
+        attempts: 2,
+        http_status: 503,
+        last_error: 'http_error',
+        last_attempt_at: now,
+        created_at: now,
+        payload: JSON.stringify({ body: 'synthetic private payload', signature: 'synthetic' }),
+      }
+    }
+    const rows = Array.from({ length: 52 }, () => deliveryRow(id, host.organizationId, bookingId))
+    const foreignRow = deliveryRow(foreignId, other.organizationId, foreignBookingId)
+    await db
+      .insertInto('webhook_deliveries')
+      .values([
+        ...rows,
+        { ...deliveryRow(id, host.organizationId, bookingId), created_at: new Date(0) },
+        deliveryRow(siblingId, host.organizationId, bookingId),
+        foreignRow,
+      ])
+      .execute()
+    const expected = rows
+      .sort((left, right) => right.id.localeCompare(left.id))
+      .map((row) => ({
+        id: row.id,
+        eventId: row.event_id,
+        eventType: row.event_type,
+        bookingId,
+        status: row.status,
+        attempts: row.attempts,
+        httpStatus: row.http_status,
+        lastError: row.last_error,
+        createdAt: now.toISOString(),
+        lastAttemptAt: now.toISOString(),
+        deliveredAt: null,
+      }))
+
+    async function page(key: string, args: Input) {
+      const response = await rest(key, args, 'deliveries')
+      expect(response.status).toBe(200)
+      const result = await response.json()
+      const tool = await mcp(key, args, 'deliveries')
+      expect(tool.isError).toBeFalsy()
+      expect(tool.structuredContent).toEqual(result)
+      const command = await cli(key, args, 'deliveries')
+      expect(command.code).toBe(0)
+      expect(command.stderr).toBe('')
+      expect(JSON.parse(command.stdout)).toEqual(result)
+      return result
+    }
+
+    const first = await page(read, { id })
+    expect(first).toEqual({ data: expected.slice(0, 50), nextAfter: expected[49]?.id })
+    const { nextAfter } = WebhookDeliveryPage.parse(first)
+    expect(await page(full, { id, after: nextAfter })).toEqual({
+      data: expected.slice(50),
+      nextAfter: null,
+    })
+    const belowForeign = expected.filter((row) => row.id < foreignRow.id)
+    expect(await page(read, { id, after: foreignRow.id })).toEqual({
+      data: belowForeign.slice(0, 50),
+      nextAfter: belowForeign.length > 50 ? belowForeign[49]?.id : null,
+    })
+    await expectFailure(read, 400, 'invalid_cursor', { id, after: 'bad-cursor' }, 'deliveries')
+    const offset = { id, offset: 100_000 }
+    const tool = await mcp(read, offset, 'deliveries')
+    expect(tool.isError).toBe(true)
+    expect(JSON.parse(tool.content[0].text)).toMatchObject({ error: 'invalid_request' })
+    const command = await cli(read, offset, 'deliveries')
+    expect(command.code).toBe(1)
+    expect(JSON.parse(command.stderr)).toMatchObject({ error: 'invalid_request' })
+    const ignoredOffset = await app.request(`/api/v1/webhooks/${id}/deliveries?offset=100000`, {
+      headers: { authorization: `Bearer ${read}` },
+    })
+    expect(ignoredOffset.status).toBe(200)
+    expect(await ignoredOffset.json()).toEqual(first)
   })
 })

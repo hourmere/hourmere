@@ -41,14 +41,14 @@ function moduleUrl(source: string, location: URL, replacements: Record<string, s
 async function sourceCopy(mutation?: 'inviter' | 'organization'): Promise<typeof createAuth> {
   const location = new URL('../../../packages/auth/src/team-role-policy.ts', import.meta.url)
   let source = readFileSync(location, 'utf8')
-  const guard = '    if (!inviter) {'
+  const guard = 'if (!inviter) {'
   const lock = `.where('id', '=', target.organizationId)
       .forUpdate()`
   expect(source.includes(guard), 'mutation matches the original inviter membership guard').toBe(
     true,
   )
   expect(source.includes(lock), 'mutation matches the acceptance organization lock').toBe(true)
-  if (mutation === 'inviter') source = source.replace(guard, '    if (false) {')
+  if (mutation === 'inviter') source = source.replace(guard, 'if (false) {')
   if (mutation === 'organization')
     source = source.replace(lock, ".where('id', '=', target.organizationId)")
   const policyUrl = moduleUrl(source, location)

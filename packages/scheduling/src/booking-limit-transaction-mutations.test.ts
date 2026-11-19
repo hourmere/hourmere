@@ -19,10 +19,13 @@ import * as Errors from './errors.ts'
 import * as GroupSeatAdmission from './group-seat-admission.ts'
 import * as Hosts from './hosts.ts'
 import * as LocationOptions from './location-options.ts'
+import * as MeetingPollOutcomes from './meeting-poll-outcomes.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
 import * as Questions from './questions.ts'
+import * as RecurringCapabilities from './recurring-capabilities.ts'
+import * as RecurringMembers from './recurring-members.ts'
 import * as RoundRobin from './round-robin.ts'
 import * as SuccessRedirect from './success-redirect.ts'
 import { createFixtures, type EventTypeFixture, type Fixtures } from './testing.ts'
@@ -51,10 +54,13 @@ const dependencies: Record<string, object> = {
   './group-seat-admission.ts': GroupSeatAdmission,
   './hosts.ts': Hosts,
   './location-options.ts': LocationOptions,
+  './meeting-poll-outcomes.ts': MeetingPollOutcomes,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
   './payment-expiry.ts': PaymentExpiry,
   './questions.ts': Questions,
+  './recurring-capabilities.ts': RecurringCapabilities,
+  './recurring-members.ts': RecurringMembers,
   './round-robin.ts': RoundRobin,
   './success-redirect.ts': SuccessRedirect,
   './text.ts': Text,

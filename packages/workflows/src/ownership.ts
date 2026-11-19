@@ -1,8 +1,7 @@
 // Who owns a workflow and which event types, bookings and webhook endpoints it may select
 // (docs/workflows.md, "Definitions, ownership and limits" and "Triggers, conditions and
-// snapshots"). Everything here is pure: services load the facts by ID, without filtering by
-// owner, and these functions decide. A fact of another owner is treated exactly like a
-// missing one, so a cross-owner ID reveals nothing. Unknown values fail closed.
+// snapshots"). Services load facts by ID and these pure functions check ownership.
+// Cross-owner IDs receive the same response as missing IDs. Unknown values fail closed.
 
 import { z } from 'zod'
 
@@ -55,10 +54,12 @@ export interface WorkflowEventTypeFacts {
   questions: readonly WorkflowQuestionFacts[]
 }
 
-/** What a workflow reads about a webhook endpoint, loaded by ID without an owner filter. */
+/** What a workflow reads about a signed webhook endpoint. */
 export interface WorkflowWebhookFacts {
   id: string
   organizationId: string
+  isActive: boolean
+  events: readonly string[]
 }
 
 /**

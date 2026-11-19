@@ -33,6 +33,10 @@
     "exemption": "browser-session-only",
     "reason": "Testing a provider binds the current administrator and browser to a configuration revision."
   },
+  "linkSsoAccount": {
+    "exemption": "browser-session-only",
+    "reason": "Explicit self-linking requires independent local proof and a browser-bound IdP ceremony."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
   "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },
@@ -51,6 +55,8 @@
   "createWebhook": { "mcp": "create_webhook", "cli": "webhooks create" },
   "updateWebhook": { "mcp": "update_webhook", "cli": "webhooks update" },
   "deleteWebhook": { "mcp": "delete_webhook", "cli": "webhooks delete" },
+  "rotateWebhookSecret": { "mcp": "rotate_webhook_secret", "cli": "webhooks rotate-secret" },
+  "listWebhookDeliveries": { "mcp": "list_webhook_deliveries", "cli": "webhooks deliveries" },
   "generateOpenTimeSnippet": {
     "mcp": "generate_open_time_snippet",
     "cli": "open-time-snippet"

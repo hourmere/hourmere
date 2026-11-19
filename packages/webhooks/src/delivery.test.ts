@@ -41,6 +41,7 @@ const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 const key = Buffer.alloc(32, 9).toString('base64')
 const settings = { enabled: true, encryptionKey: key }
 const signal = () => new AbortController().signal
+const bookingEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')
 
 describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
   let testDb: TestDatabase
@@ -66,7 +67,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     const ctx = testContext(db, user.principal, () => NOW)
     const { webhook, secret } = await createWebhook(ctx, settings, {
       url: 'https://hooks.example.com/bookings?credential=synthetic',
-      events: [...WEBHOOK_EVENTS],
+      events: bookingEvents,
     })
     const f = createFixtures(db)
     const bookingId = await f.booking(
@@ -592,6 +593,46 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     },
   )
 
+  it('serializes concurrent rotations and signs queued deliveries with the last committed secret', async () => {
+    const { delivery, ctx, webhook, secret } = await captured()
+    const locked = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const first = rotateWebhookSecret(
+      {
+        ...ctx,
+        authorizeOrganizationWrite: async () => {
+          locked.resolve()
+          await release.promise
+        },
+      },
+      settings,
+      webhook.id,
+    )
+    await Promise.race([locked.promise, first])
+    const second = rotateWebhookSecret(ctx, settings, webhook.id)
+    try {
+      await waitForBlocked('%from "webhooks"%for update%')
+    } finally {
+      release.resolve()
+      await Promise.all([first, second])
+    }
+    const [earlier, latest] = await Promise.all([first, second])
+    expect(new Set([secret, earlier.secret, latest.secret]).size).toBe(3)
+
+    let signedWithLatest = false
+    await deliverWebhook(
+      deps(async ({ headers, body }) => {
+        signedWithLatest =
+          headers['webhook-signature'] ===
+          webhookSignature(latest.secret, headers['webhook-timestamp'] ?? '', body)
+        return 204
+      }),
+      delivery.id,
+      signal(),
+    )
+    expect(signedWithLatest).toBe(true)
+  })
+
   it('returns not-found to a concurrent update when deletion locks the endpoint first', async () => {
     const { ctx, webhook, delivery } = await captured()
     const deleting = Promise.withResolvers<void>()
@@ -635,7 +676,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
       return 204
     })
     await deliverWebhook(d, delivery.id, signal())
-    await updateWebhook(ctx, webhook.id, { events: [...WEBHOOK_EVENTS] })
+    await updateWebhook(ctx, webhook.id, { events: bookingEvents })
     await deliverWebhook(d, delivery.id, signal())
     expect(sends).toBe(0)
   })
