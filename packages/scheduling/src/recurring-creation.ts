@@ -76,6 +76,8 @@ export interface CreateBookingSeriesOptions extends RecurringBookingAdmissionDep
   notifyWebhook?: BookingNotifier | undefined
   /** The transaction-bound email notifier for each member's reminders and follow-ups. */
   notifyMemberEmail?: BookingNotifier | undefined
+  /** The existing transaction-bound provider calendar notifier for each member. */
+  notifyMemberCalendar?: BookingNotifier | undefined
 }
 
 interface SeriesBooking {
@@ -248,12 +250,12 @@ async function createBookingSeries(
         .returning(['id', 'revision'])
         .executeTakeFirstOrThrow()
 
-      // Roots use the explicitly supplied email and webhook hooks. The series
-      // outbox owns confirmation and provider calendar work has its own rollout.
+      // The series outbox owns confirmation. Calendar jobs still reconcile each root.
       const bookingContext = {
         requestId: ctx.requestId,
         notify: (async (trx, event, now) => {
           await options.notifyMemberEmail?.(trx, event, now)
+          await options.notifyMemberCalendar?.(trx, event, now)
           await options.notifyWebhook?.(trx, event, now)
         }) satisfies BookingNotifier,
         now: ctx.now,
