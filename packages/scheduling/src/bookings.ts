@@ -78,7 +78,11 @@ import {
   type SeriesMemberMutationSelector,
   type SeriesMemberSelector,
 } from './recurring-capabilities.ts'
-import { advanceBookingSeries, lockBookingSeries } from './recurring-members.ts'
+import {
+  advanceBookingSeries,
+  bookingSeriesOccurrence,
+  lockBookingSeries,
+} from './recurring-members.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
   type BookingSuccessRedirect,
@@ -1920,12 +1924,17 @@ export async function cancelManagedBooking(
       target &&
       (await trx
         .selectFrom('bookings')
-        .select('organization_id')
+        .select(['organization_id', 'series_occurrence_id'])
         .where('id', '=', target.id)
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
     await lockCancellationOrganization(trx, parent.organization_id)
-    const series = await lockBookingSeries(trx, target.id, parent.organization_id)
+    const series = await lockBookingSeries(
+      trx,
+      parent.series_occurrence_id,
+      target.id,
+      parent.organization_id,
+    )
     await lockGroupBooking(trx, target.id)
     const locked =
       selector &&
@@ -2008,12 +2017,17 @@ export async function rescheduleManagedBooking(
       target &&
       (await trx
         .selectFrom('bookings')
-        .select('organization_id')
+        .select(['organization_id', 'series_occurrence_id'])
         .where('id', '=', target.id)
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
     await lockOrganization(trx, parent.organization_id)
-    const series = await lockBookingSeries(trx, target.id, parent.organization_id)
+    const series = await lockBookingSeries(
+      trx,
+      parent.series_occurrence_id,
+      target.id,
+      parent.organization_id,
+    )
     await lockGroupBooking(trx, target.id, start, durationMinutes)
     const locked =
       selector &&
@@ -2619,9 +2633,11 @@ export async function rescheduleHostBooking(
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
+    // Series occurrence of a member, or null; read before any lock.
+    const member = await bookingSeriesOccurrence(trx, id, ctx.principal.organization.id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
-    await lockBookingSeries(trx, id, ctx.principal.organization.id, ctx.principal.user.id)
+    await lockBookingSeries(trx, member, id, ctx.principal.organization.id, ctx.principal.user.id)
     await lockGroupBooking(trx, id, start, durationMinutes, ctx.principal.organization.id)
     const old = await trx
       .selectFrom('bookings')
@@ -2691,9 +2707,11 @@ export async function cancelHostBooking(
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    // Series occurrence of a member, or null; read before any lock.
+    const member = await bookingSeriesOccurrence(trx, id, ctx.principal.organization.id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
-    await lockBookingSeries(trx, id, ctx.principal.organization.id, ctx.principal.user.id)
+    await lockBookingSeries(trx, member, id, ctx.principal.organization.id, ctx.principal.user.id)
     await lockGroupBooking(trx, id, undefined, undefined, ctx.principal.organization.id)
     const row = await trx
       .selectFrom('bookings as b')
@@ -2750,7 +2768,14 @@ export async function cancelTeamBookingInTransaction(
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
   if (!UUID.test(id)) throw bookingNotFound()
-  await lockBookingSeries(trx, id, actor.organizationId)
+  // The caller's transaction already holds the organization lock, so this read cannot
+  // move in front of it. It is an unlocked MVCC read.
+  await lockBookingSeries(
+    trx,
+    await bookingSeriesOccurrence(trx, id, actor.organizationId),
+    id,
+    actor.organizationId,
+  )
   await lockGroupBooking(trx, id, undefined, undefined, actor.organizationId)
   const row = await trx
     .selectFrom('bookings')
@@ -2960,9 +2985,11 @@ export async function requestReschedule(
           ],
         })?.followUps[0]?.hostNote ?? null)
   return ctx.db.transaction().execute(async (trx) => {
+    // Series occurrence of a member, or null; read before any lock.
+    const member = await bookingSeriesOccurrence(trx, id, ctx.principal.organization.id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
-    await lockBookingSeries(trx, id, ctx.principal.organization.id, ctx.principal.user.id)
+    await lockBookingSeries(trx, member, id, ctx.principal.organization.id, ctx.principal.user.id)
     const row = await trx
       .selectFrom('bookings')
       .selectAll()
