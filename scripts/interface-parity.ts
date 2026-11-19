@@ -14,10 +14,10 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   listSsoProviders: 'GET /api/v1/team/sso/providers',
   getGroupOccurrenceAttendees: 'GET /api/v1/group-occurrences/{id}/attendees',
   getSsoPolicy: 'GET /api/v1/team/sso/policy',
-  listWebhooks: 'GET /api/v1/webhooks',
-  listWebhookDeliveries: 'GET /api/v1/webhooks/{id}/deliveries',
   getPublicRoutingForm: 'GET /api/v1/public/-/routing/{handle}/{slug}',
   getPublicTeamRoutingForm: 'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
+  listWebhooks: 'GET /api/v1/webhooks',
+  listWebhookDeliveries: 'GET /api/v1/webhooks/{id}/deliveries',
 }
 
 const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'
