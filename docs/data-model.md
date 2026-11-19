@@ -76,7 +76,10 @@ already belongs to a member or another pending invitation holds it; it never set
 account or membership link. Claim completion, which only test harnesses wire into invitation
 acceptance, sets both links of the claim's entry when its invitation is accepted, together with
 the claim's `completed_at`; it reads live blockers, by account and by mailbox, and refuses
-admission while one exists, but never writes or clears them.
+admission while one exists, but never writes or clears them. User replacement, also available
+only in test harnesses, updates the mapped profile and its timestamp in the existing row.
+When the normalized work address changes, it sets the unfinished claim's `invalidated_at`
+in the same transaction. The claim's mailbox and invitation reference are retained.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
@@ -1702,6 +1705,10 @@ The phases within that organization boundary are:
   invitation. It locks no member row: the organization lock excludes membership changes while it
   reads the earliest owner who invites. When the address's pending invitation expires during
   one of those waits, it rolls back to the savepoint and runs the invitation service once more.
+- SCIM User replacement takes the organization update lock, the provisioning token key
+  share lock, and the live resource update lock. It holds the organization lock through
+  any claim invalidation and the audit write, so invitation acceptance cannot hold a claim
+  lock while competing with that replacement for the resource.
 - Invitation acceptance takes the recipient's `auth.user` share lock, the organization update
   lock, its session no-key-update lock and the invitation update lock. When SCIM claim
   completion is wired, it then locks the claim bound to that invitation and that claim's
