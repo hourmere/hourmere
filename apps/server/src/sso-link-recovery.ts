@@ -15,8 +15,6 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
-import { OidcAttemptRefused } from './sso-oidc-attempt.ts'
-import { lockOidcLinkActor } from './sso-oidc-link.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 const input = z.strictObject({ expectedLinkGeneration: z.int().min(1).max(2147483646) })
@@ -107,16 +105,20 @@ export async function retireSsoIdentityLink(
       .where('provider_id', '=', providerId)
       .where('id', '=', linkId)
       .$if(self, (qb) => qb.where('user_id', '=', actor.userId))
-  const checkAdmin = (db: Db, lock: boolean) =>
-    checkTeamManagementAccess(db, principal, organizationId, lock, {
-      expectedOrganizationId,
-      allowPersonal: false,
-    })
+  const checkAccess = (db: Db, lock: boolean) =>
+    checkTeamManagementAccess(
+      db,
+      principal,
+      organizationId,
+      lock,
+      { expectedOrganizationId, allowPersonal: false },
+      self,
+    )
 
   try {
     // Resolve the immutable target before taking parent locks, so the fresh-proof gate
     // can lock both accounts before the organization. Recheck the full scope under lock.
-    if (!self) await checkAdmin(deps.db, false)
+    if (!self) await checkAccess(deps.db, false)
     const affectedUserId = self
       ? actor.userId
       : (await findLink(deps.db).executeTakeFirst())?.user_id
@@ -136,8 +138,7 @@ export async function retireSsoIdentityLink(
       },
       {
         authorize: async (trx) => {
-          const admin = self ? undefined : await checkAdmin(trx, true)
-          if (self) await lockOidcLinkActor(trx, organizationId, actor)
+          const actorAccess = await checkAccess(trx, true)
           const provider = await trx
             .selectFrom('sso_providers')
             .select(['protocol', 'revision'])
@@ -149,7 +150,7 @@ export async function retireSsoIdentityLink(
           const link = await findLink(trx).forUpdate().executeTakeFirst()
           if (!provider || !link || link.retired_at || link.user_id !== affectedUserId)
             throw missing()
-          if (admin) {
+          if (!self) {
             if (link.user_id === actor.userId) throw denied()
             const member = await trx
               .selectFrom('auth.member')
@@ -162,7 +163,7 @@ export async function retireSsoIdentityLink(
             const roles = teamRoles(member.role)
             if (
               roles.includes('owner')
-                ? admin.role !== 'owner'
+                ? actorAccess.role !== 'owner'
                 : !roles.includes('member') && !roles.includes('admin')
             )
               throw denied()
@@ -223,11 +224,7 @@ export async function retireSsoIdentityLink(
         error.code === 'organization_context_changed' ? 'conflict' : 'forbidden',
         error.code,
       )
-    if (
-      error instanceof OidcAttemptRefused ||
-      (error instanceof HTTPException && error.status === 403)
-    )
-      throw denied()
+    if (error instanceof HTTPException && error.status === 403) throw denied()
     throw error
   }
 }
