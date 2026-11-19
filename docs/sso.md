@@ -831,6 +831,7 @@ The stable domain codes are exactly:
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), or the last recovery owner of an enforced team tries to leave, be removed or lose the owner role |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
+| `sso_invitation_required` | 409 | The proven OIDC subject needs explicit acceptance of a current team invitation |
 | `sso_email_collision` | 409 | The independently proven new mailbox belongs to another account. Only the browser completing its own attempt can receive this response after proof |
 | `sso_not_found` | 404 | Unknown, other-team or retired provider, domain, link, nomination or delegation ID, all with one identical response; a nomination addressed to another owner and another person's delegation answer the same way. Only an authorized repeat delete of the team's own retired provider succeeds idempotently |
 
@@ -864,6 +865,23 @@ entries in the parity guard. Require owner/admin plus `read`/`full` API key or a
 OAuth `mcp:tools`, subject to SSO enforcement. Ordinary members get their own required
 provider/proof summary through an additive session-only `/api/v1/me` projection,
 not administrator inventories. No first-release machine write changes SSO trust.
+
+With the internal OIDC capability enabled, `GET /api/v1/me` adds an optional `sso`
+object for a current member's active team session. It contains `requireSso`, enabled
+providers' IDs, display names and revisions, the caller's live links as opaque IDs
+with their provider IDs, and valid proofs for this session with their provider IDs
+and expiry times. The `attempts` array shows pending self-link attempts that belong
+to the session and its original browser. Each reports its ID, provider ID (null
+during fresh proof), phase, mailbox proof status and expiry. Personal sessions, API
+keys and OAuth clients use the existing response shape. With both protocols hard-off,
+the response body stays byte-for-byte identical.
+
+内部开启 OIDC 时，`GET /api/v1/me` 为当前团队成员的活动团队会话增加可选的 `sso`
+对象。它包含是否强制 SSO、已启用提供商的标识、显示名称与版本、本人有效关联的
+不透明标识及对应提供商，以及当前会话有效证明的提供商与到期时间。`attempts`
+仅列出原发起浏览器与会话中待处理的自助关联尝试，并提供尝试标识、提供商标识
+（新鲜证明阶段为 null）、阶段、邮箱证明状态与到期时间。个人空间会话、API 密钥
+与 OAuth 客户端沿用原响应结构。两种协议均在代码中关闭时，响应正文保持逐字节一致。
 
 The built draft reads use the current team context and freshly check verified owner/admin
 membership. `listSsoProviders` accepts `limit` (1–100, default 50) and `cursor`; it returns
@@ -958,13 +976,8 @@ OIDC 和 SAML 仍在代码中关闭，三个接口均返回 `404 sso_disabled`�
 退役保留声明 ID，域名验证不会创建账号、加入团队、移动个人空间或启用提供者。
 定期复查与运营者退役命令仍属于后续的域名生命周期工作。
 
-Test takes `{expectedRevision, proofAttemptId?}` and link takes `{proofAttemptId?}`.
-Test/link returns a bounded authorization URL and its own ceremony attempt ID;
-completion is via protocol
-callback and status is observed in provider inventory or the caller's `/me` projection.
-Tests do not provision members, link accounts or elevate a session automatically.
-
-The OIDC test applies to a disabled draft. A verified current team owner or administrator
+The OIDC test takes `{expectedRevision, proofAttemptId?}` and applies to a disabled draft.
+A verified current team owner or administrator
 submits the exact Origin and `X-Expected-Organization-Id`, completes fresh administration
 proof, and repeats the same revision and input with `proofAttemptId`. For a team without
 enforcement, the proof comes from the administrator's Hourmere mailbox. The successful
@@ -985,6 +998,34 @@ SSO 的团队使用管理员自己的 Hourmere 邮箱完成证明。重试成功
 的测试记录会保留其当时的角色。测试状态可在提供者列表查看。任何版本变更都会使之前的
 测试收据失效。测试不会创建账号、身份关联、团队成员或登录会话。两种协议仍在代码中保持
 关闭，接口返回 `404 sso_disabled`。
+
+The OIDC self-link operation takes `{proofAttemptId?}` and applies to an enabled provider
+in the caller's active team. A current member uses their existing browser session and
+submits the exact Origin and `X-Expected-Organization-Id`. The first POST requests
+independent Hourmere mailbox proof, including on a team with SSO enforcement. After
+completing that proof, the member repeats the request with its `proofAttemptId`.
+The retry returns `{url, attemptId}` for use in the same browser and session.
+
+The callback requires the signed IdP email to match the local mailbox proven for this
+ceremony. The IdP's `email_verified` claim has no bearing on the Hourmere proof.
+The callback redirects to `/app/settings#sso-link=<attemptId>` with a new, opaque completion
+attempt ID. The browser submits that ID via an explicit same-origin POST to
+`/api/auth/sso/oidc/complete`. Completion consumes the pending result once and checks the
+same browser, session, account mailbox, membership and provider revision. A conflicting
+link or expired result returns `400 sso_oidc_completion_invalid`. The provider's matching
+domain must have a live verification with a positive latest recheck. Link initiation and
+completion return `409 sso_domain_unverified` if that verification has failed. Successful
+completion records the link and returns to `/app/settings`. It creates no membership,
+session or SSO browser proof. Invitation-based admission is handled in the admission step.
+OIDC remains hard-off and the link operation returns `404 sso_disabled`.
+
+OIDC 自助绑定适用于当前团队中已启用的提供商。成员使用现有浏览器会话提交同源请求和预期
+团队，完成 Hourmere 邮箱证明后，携带 `proofAttemptId` 重试。启用强制 SSO 的团队也需要
+独立邮箱证明。成员须在原浏览器和会话中打开授权地址。回调校验 IdP 声明的邮箱与已证明的
+本地邮箱一致，无论 IdP 的 `email_verified` 为何值。回调会将新的不透明完成标识放入设置页
+地址片段，成员须明确提交同源 POST 才能完成绑定。完成时重新核对会话、成员资格、邮箱、
+提供商版本和域名验证状态。成功后仅记录绑定，不创建成员资格、会话或 SSO 浏览器证明。
+OIDC 仍在代码中关闭，绑定接口返回 `404 sso_disabled`。
 
 Policy takes `{expectedRevision, requireSso, admission, proofAttemptId?}` with
 `admission` restricted to `invitation_only` or `jit`. Recovery enrollment takes
@@ -1149,17 +1190,12 @@ commit together. The proof expires at the first applicable deadline in
 [Browser proof](#browser-proof), including a signed
 `session_expires_at` claim when present, even if Better Auth later refreshes the session.
 
-An unlinked subject receives the same `302` redirect to `/sign-in?error=unable_to_create_session`
-for every combination of `email_verified` and local account existence. The callback
-does not look up a local account by email. It creates no account, identity link,
-session or pending result for an unlinked subject. While OIDC is hard-off, sign-in,
-callback and completion return `404 sso_disabled` before checking their inputs or
-accessing the database.
+While OIDC is hard-off, sign-in, callback and completion return `404 sso_disabled`
+before checking their inputs or accessing the database.
 
-OIDC 登录仅为已关联的身份创建会话。发起登录时需校验 `Origin` 并将尝试绑定到浏览器；
+已关联身份的 OIDC 登录沿用现有会话流程。发起登录时需校验 `Origin` 并将尝试绑定到浏览器；
 回调仅使用一次授权码和状态，并在创建会话前重新检查提供商版本、域名声明、身份关联、
 已证明的邮箱和当前团队成员资格。浏览器证明取适用期限中的最早时间，会话续期不延长证明。
-未关联身份一律收到相同的通用登录错误，不会创建账号、身份关联、会话或待处理结果。
 OIDC 在生产代码中保持关闭，登录发起、回调和完成端点均返回 `404 sso_disabled`。
 
 When the OIDC callback sees a changed email for a linked identity, it stores a short-lived,
@@ -1191,6 +1227,48 @@ sign-in is unchanged.
 证明只能使用一次。只有验证邮箱后才会报告 `409 sso_email_collision` 并删除包含邮箱数据的待处理
 尝试。冲突不会更改关联身份的已验证邮箱，响应和审计记录均不会包含该地址。成功后会更新身份关联中
 的已验证邮箱，签发会话和浏览器证明，并跳转至原来的 `/app` 目标。账号用于独立登录的邮箱保持不变。
+
+An unlinked subject with a valid asserted mailbox receives a `302` to
+`/app/mailbox-proof#attempt=<attemptId>`. Complete mailbox verification. If you already
+have an account, sign in using your existing method to link it. The callback freezes the
+validated subject, provider revision and mailbox for the original browser. The redirect
+and the queued mailbox proof message are identical across local account existence and
+OIDC `email_verified` values. The first account lookup takes place after mailbox proof.
+
+The original browser submits its proved `attemptId` to the existing completion endpoint.
+An existing account receives `200 {"status":"link_required"}` and continues through
+independent sign-in and `linkSsoAccount`. For an eligible new account, a team configured
+for JIT admits a member subject to instance signup, live domain verification, team capacity
+and removal blocks. The new account, personal organization, membership, first identity link,
+session and audit events commit together. The completion redirects to the original safe
+`/app` destination. Each successful resolution spends the result once.
+
+An invitation-only team returns `409 sso_invitation_required`. To accept explicitly,
+the original browser sends the existing `{ "invitationId": "…" }` body and the pending
+attempt ID in `X-Hourmere-Sso-Attempt` to `POST /api/auth/organization/accept-invitation`.
+The SSO branch requires its matching admission cookie, exact same origin and current
+mailbox proof. It accepts a current `member` invitation matching the proven address and
+provider's team, with the same original-inviter membership and capacity checks as native
+acceptance. An eligible current invitation can satisfy the existing signup exception.
+A current invitation issued after a local removal can clear its mailbox block; a SCIM-issued
+invitation never clears a blocker, as in native acceptance. Accepting a SCIM-issued invitation
+completes its SCIM claim exactly as native acceptance does. A SCIM suspension requires its own
+reactivation. While OIDC is on, every removal or departure records its tombstone, even before
+the team configures a provider or JIT. The SSO invitation branch returns `404 sso_disabled`
+while OIDC is hard-off. Ordinary invitation acceptance uses the native session flow.
+
+未关联身份提交有效邮箱时，回调统一跳转至邮箱证明页面。请完成邮箱验证。已有账号的用户须先用
+原有方式登录，再显式关联身份。跳转和排队发送的证明邮件均不受本地账号是否存在或 IdP 的
+`email_verified` 值影响。服务器在邮箱证明之后才查找账号。符合实例注册策略的新用户可在启用
+JIT 的团队中以成员身份加入，前提是域名核验有效、团队仍有名额且邮箱未被移除记录阻拦。账号、
+个人空间、团队成员、身份关联、会话和审计同事务提交。完成结果只可在原浏览器使用一次。
+
+仅邀请团队要求在原浏览器显式接受有效邀请。向现有邀请接受端点提交 `invitationId`，并在
+`X-Hourmere-Sso-Attempt` 中传递已证明的尝试标识。被移除后发出的有效邀请可清除本地邮箱
+阻止记录；SCIM 发出的邀请与原生接受一样，从不清除阻止记录。接受 SCIM 发出的邀请时，与原生接受一样
+完成其 SCIM 认领。SCIM 暂停须单独恢复。OIDC 开启后，每次移除或离开都会记录移除记录，即使团队尚未配置
+身份提供方或 JIT。OIDC 仍在代码中关闭，带待处理 SSO 结果的邀请接受请求返回
+`404 sso_disabled`。普通邀请继续使用现有登录会话流程。
 
 Ownership (all auth-protocol exceptions, no MCP/CLI surface): OIDC sign-in owns
 initiation and callback for linked identities; OIDC completion owns

@@ -135,6 +135,7 @@ describe('published API key scope tables', () => {
         'PATCH /api/v1/team/sso/providers/{providerId}',
         'DELETE /api/v1/team/sso/providers/{providerId}',
         'POST /api/v1/team/sso/providers/{providerId}/test',
+        'POST /api/v1/team/sso/providers/{providerId}/link',
       ])
         expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
     }
@@ -143,6 +144,7 @@ describe('published API key scope tables', () => {
       'update_sso_provider',
       'delete_sso_provider',
       'test_sso_provider',
+      'link_sso_account',
       'create_sso_domain_challenge',
       'verify_sso_domain',
       'delete_sso_domain',
@@ -205,11 +207,23 @@ describe('published API key scope tables', () => {
     expect(document).toContain('| `create_webhook` | — | `webhooks create` | `full` |')
     expect(document).toContain('| `update_webhook` | — | `webhooks update` | `full` |')
     expect(document).toContain('| `delete_webhook` | — | `webhooks delete` | `full` |')
+    expect(document).toContain(
+      '| `rotate_webhook_secret` | — | `webhooks rotate-secret` | `full` |',
+    )
+    expect(document).toContain(
+      '| `list_webhook_deliveries` | — | `webhooks deliveries` | `full, read` |',
+    )
     if (section === 'all') {
       expect(document).toContain('| `GET /api/v1/webhooks` | Session or API key | `full, read` |')
       expect(document).toContain('| `POST /api/v1/webhooks` | Session or API key | `full` |')
       expect(document).toContain('| `PATCH /api/v1/webhooks/{id}` | Session or API key | `full` |')
       expect(document).toContain('| `DELETE /api/v1/webhooks/{id}` | Session or API key | `full` |')
+      expect(document).toContain(
+        '| `POST /api/v1/webhooks/{id}/rotate-secret` | Session or API key | `full` |',
+      )
+      expect(document).toContain(
+        '| `GET /api/v1/webhooks/{id}/deliveries` | Session or API key | `full, read` |',
+      )
     }
   })
 

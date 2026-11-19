@@ -14,6 +14,8 @@ import {
   updateSsoProvider,
 } from '../sso-drafts.ts'
 import {
+  LinkSsoAccountInput,
+  linkSsoAccount,
   type OidcProviderTestDeps,
   TestSsoProviderInput,
   testSsoProvider,
@@ -60,7 +62,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
       throw new DomainError('not_found', 'sso_disabled')
     await next()
   }
-  const oidcTestEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
+  const oidcEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
     requireSsoEnabled(deps.capabilities, 'oidc')
@@ -143,7 +145,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         description:
           'Verified team owner/admin browser session with fresh proof and expected revision. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.',
         security: [{ session: [] }],
-        middleware: [oidcTestEnabled, ...sessionMiddleware] as const,
+        middleware: [oidcEnabled, ...sessionMiddleware] as const,
         request: {
           headers: z.object({
             'X-Expected-Organization-Id': z.string().optional().openapi({
@@ -164,6 +166,56 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
       }),
       async (c) => {
         const result = await testSsoProvider(
+          deps,
+          c.var.principal,
+          c.req.raw.headers,
+          c.req.valid('param').providerId,
+          c.req.valid('json'),
+        )
+        if (result.status === 'proof_required') {
+          if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
+          return c.json(result.body, 403)
+        }
+        const { setCookie, ...body } = result.value
+        c.header('Set-Cookie', setCookie, { append: true })
+        return c.json(body, 200)
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/team/sso/providers/{providerId}/link',
+        operationId: 'linkSsoAccount',
+        tags: ['SSO'],
+        summary: 'Start explicit linking of the caller’s OIDC identity',
+        description:
+          'Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. SSO remains unavailable.',
+        security: [{ session: [] }],
+        middleware: [oidcEnabled, ...sessionMiddleware] as const,
+        request: {
+          headers: z.object({
+            'X-Expected-Organization-Id': z.string().optional().openapi({
+              description: 'Required for writes and must match the current team.',
+            }),
+          }),
+          params: z.object({ providerId: z.uuidv7() }),
+          body: { required: true, content: json(LinkSsoAccountInput) },
+        },
+        responses: {
+          ...errors,
+          200: {
+            description: 'Authorization URL and link attempt ID',
+            content: json(z.object({ url: z.url(), attemptId: z.uuid() })),
+          },
+          409: {
+            description:
+              'organization_context_changed, sso_configuration_changed or sso_domain_unverified',
+            content: json(ErrorBody),
+          },
+        },
+      }),
+      async (c) => {
+        const result = await linkSsoAccount(
           deps,
           c.var.principal,
           c.req.raw.headers,
