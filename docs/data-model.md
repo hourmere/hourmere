@@ -159,8 +159,11 @@ row. Its expectation file is
 protection assertion to fail.
 
 The cleanup schedule is hourly, at most 500 rows per transaction. It deletes expired
-public pending voters and their dependent personal data, and clears expired capability
-ciphertext. Persisting deadline closure belongs to the later reminder step.
+public pending voters and their dependent personal data, clears expired capability
+ciphertext, and records deadline closure with `closed_at = deadline_at` while preserving
+both revisions. The deadline closure transaction queues a host delivery for the poll's
+creator if they still manage the event. The mail worker rechecks current authority before
+sending.
 Capacity and voting expiry are synchronous database-clock decisions, never dependent on
 worker punctuality. Normal terminal poll history follows the installation's booking-data
 retention policy from its terminal transition (deadline for automatic closure); with no

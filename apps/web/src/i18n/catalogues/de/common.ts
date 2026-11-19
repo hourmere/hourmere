@@ -492,4 +492,14 @@ export const common = {
     'Öffnet die Website des Gastgebers auf der übergeordneten Seite.',
   'Opens the host’s website in a new tab.': 'Öffnet die Website des Gastgebers in einem neuen Tab.',
   'Opens the host’s website in this tab.': 'Öffnet die Website des Gastgebers in diesem Tab.',
+  // Meeting poll reminder opt-out
+  'Meeting poll reminders': 'Erinnerungen zur Terminumfrage',
+  'Confirm to stop receiving reminders for this meeting poll.':
+    'Bestätigen Sie, dass Sie keine Erinnerungen zu dieser Terminumfrage mehr erhalten möchten.',
+  'Stop reminders': 'Erinnerungen abbestellen',
+  'Meeting poll reminders turned off': 'Erinnerungen zur Terminumfrage abbestellt',
+  'Open the reminder opt-out link from your meeting poll email.':
+    'Öffnen Sie den Abmeldelink in der E-Mail zur Terminumfrage.',
+  'We couldn’t stop reminders. Try again.':
+    'Die Erinnerungen konnten nicht abbestellt werden. Versuchen Sie es erneut.',
 } as const

@@ -466,4 +466,12 @@ export const common = {
   'Opens the host’s website in the parent page.': '将在上层页面中打开主办者的网站。',
   'Opens the host’s website in a new tab.': '将在新标签页中打开主办者的网站。',
   'Opens the host’s website in this tab.': '将在当前标签页中打开主办者的网站。',
+  // Meeting poll reminder opt-out
+  'Meeting poll reminders': '会议投票提醒',
+  'Confirm to stop receiving reminders for this meeting poll.': '请确认停止接收此会议投票的提醒。',
+  'Stop reminders': '停止接收提醒',
+  'Meeting poll reminders turned off': '已关闭会议投票提醒',
+  'Open the reminder opt-out link from your meeting poll email.':
+    '请打开会议投票邮件中的提醒退订链接。',
+  'We couldn’t stop reminders. Try again.': '暂时无法关闭提醒，请重试。',
 } as const

@@ -230,6 +230,22 @@ describe('security headers', () => {
     }
   })
 
+  it('serves the reminder opt-out page without caching, referrers or indexing', async () => {
+    for (const path of ['/poll/reminder-opt-out', '/POLL/reminder-opt-out/?source=email']) {
+      const response = await app.request(path)
+      expect(response.status).toBe(200)
+      expect(securityHeadersOf(response)).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow')
+    }
+    for (const path of ['/poll/intro', '/poll/reminder-opt-out-other']) {
+      const response = await app.request(path)
+      expect(securityHeadersOf(response)).toEqual(APP_PAGE)
+      expect(response.headers.get('cache-control')).toBe('no-cache')
+      expect(response.headers.get('x-robots-tag')).toBeNull()
+    }
+  })
+
   it('keeps the default referrer policy for join and sign-in navigation', async () => {
     const invitationId = '00000000-0000-4000-8000-000000000071'
     const next = `/app/join?invitationId=${invitationId}`

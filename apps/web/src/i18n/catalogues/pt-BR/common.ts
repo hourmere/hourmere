@@ -487,4 +487,14 @@ export const common = {
   'Opens the host’s website in the parent page.': 'Abre o site do anfitrião na página principal.',
   'Opens the host’s website in a new tab.': 'Abre o site do anfitrião em uma nova aba.',
   'Opens the host’s website in this tab.': 'Abre o site do anfitrião nesta aba.',
+  // Meeting poll reminder opt-out
+  'Meeting poll reminders': 'Lembretes da enquete de reunião',
+  'Confirm to stop receiving reminders for this meeting poll.':
+    'Confirme que deseja parar de receber lembretes desta enquete de reunião.',
+  'Stop reminders': 'Desativar lembretes',
+  'Meeting poll reminders turned off': 'Lembretes da enquete de reunião desativados',
+  'Open the reminder opt-out link from your meeting poll email.':
+    'Abra o link para desativar lembretes no e-mail da enquete de reunião.',
+  'We couldn’t stop reminders. Try again.':
+    'Não foi possível desativar os lembretes. Tente novamente.',
 } as const

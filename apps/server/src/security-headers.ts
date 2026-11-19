@@ -60,6 +60,7 @@ export function strictTransportSecurity(publicUrl: string, maxAge: number): stri
  * that true if anything secret ever ends up in its path or query.
  */
 const NO_REFERRER_PAGES = /^\/booking(\/|$)/i
+const MEETING_POLL_REMINDER_OPT_OUT = /^\/poll\/reminder-opt-out\/*$/i
 
 const HTML = /^text\/html/i
 
@@ -100,6 +101,11 @@ export function securityHeaders({
     if (isOneTimeLinkPath(c.req.path)) {
       headers.set('Referrer-Policy', 'no-referrer')
       headers.set('Cache-Control', 'no-store')
+    }
+    if (MEETING_POLL_REMINDER_OPT_OUT.test(c.req.path)) {
+      headers.set('Cache-Control', 'no-store')
+      headers.set('Referrer-Policy', 'no-referrer')
+      headers.set('X-Robots-Tag', 'noindex, nofollow')
     }
     setDefault('X-Frame-Options', 'DENY')
     if (HTML.test(headers.get('content-type') ?? '')) {

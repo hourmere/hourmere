@@ -122,6 +122,10 @@ export const ManageBookingPage = page(
   () => import('./public/ManageBookingPage.tsx'),
   (m) => m.ManageBookingPage,
 )
+export const ReminderOptOutPage = page(
+  () => import('./public/ReminderOptOutPage.tsx'),
+  (m) => m.ReminderOptOutPage,
+)
 
 export const EmbeddedBookingPage = page(
   () => import('./public/Embed.tsx'),

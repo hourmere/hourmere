@@ -491,4 +491,13 @@ export const common = {
   'Opens the host’s website in the parent page.': 'Ouvre le site de l’hôte dans la page parente.',
   'Opens the host’s website in a new tab.': 'Ouvre le site de l’hôte dans un nouvel onglet.',
   'Opens the host’s website in this tab.': 'Ouvre le site de l’hôte dans cet onglet.',
+  // Meeting poll reminder opt-out
+  'Meeting poll reminders': 'Rappels du sondage de réunion',
+  'Confirm to stop receiving reminders for this meeting poll.':
+    'Confirmez que vous ne souhaitez plus recevoir de rappels pour ce sondage de réunion.',
+  'Stop reminders': 'Désactiver les rappels',
+  'Meeting poll reminders turned off': 'Rappels du sondage de réunion désactivés',
+  'Open the reminder opt-out link from your meeting poll email.':
+    'Ouvrez le lien de désinscription aux rappels dans l’e-mail du sondage de réunion.',
+  'We couldn’t stop reminders. Try again.': 'Impossible de désactiver les rappels. Réessayez.',
 } as const

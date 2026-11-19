@@ -36,6 +36,7 @@ import {
   ManageBookingPage,
   McpAuthorizePage,
   OneTimeBookingPage,
+  ReminderOptOutPage,
   RequireSession,
   ScheduleEditorPage,
   SessionLayout,
@@ -99,6 +100,7 @@ export const appRoutes = createRoutesFromElements(
     <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
     <Route path="/embed/:handle/:slug" element={<EmbeddedBookingPage />} />
     <Route path="/booking" element={<ManageBookingPage />} />
+    <Route path="/poll/reminder-opt-out" element={<ReminderOptOutPage />} />
     <Route
       path="/team/:teamSlug/:slug/waitlist/:waitlistToken/:suggestedStart/:previewExpiresAt"
       element={<TeamBookingPage />}
