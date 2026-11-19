@@ -44,6 +44,7 @@ import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
+import { isPublicRoutingFormPath, PUBLIC_ROUTING_FORM_API_PREFIX } from './routing-form-privacy.ts'
 import { mountScim, type ScimOptions } from './scim.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
@@ -52,6 +53,7 @@ import {
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 import type { MailboxProofModule } from './sso-mailbox-proof.ts'
+import type { OidcSignInModule } from './sso-oidc-sign-in.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 import {
   successRedirectErrorField,
@@ -102,6 +104,7 @@ export interface AppDeps {
    * Auth's /api/auth/* so that they answer `404 sso_disabled` themselves while hard-off.
    */
   ssoMailboxProof?: MailboxProofModule | undefined
+  ssoOidcSignIn?: OidcSignInModule | undefined
 }
 
 const Health = z
@@ -156,9 +159,12 @@ function isSlackDestinationPath(path: string): boolean {
   return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
 }
 
-/** SSO trust writes carry credentials and proof material, including arbitrary invalid input keys. */
+/** SSO protocol requests and trust writes carry credentials and proof material. */
 function isSsoTrustPath(path: string): boolean {
-  return /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path)
+  return (
+    /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path) ||
+    /^\/api\/auth\/(?:sign-in\/sso|sso\/callback)(?:\/|$)/i.test(path)
+  )
 }
 
 /** CalDAV credential input must never be reflected, including invalid property names. */
@@ -367,10 +373,10 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
     : requestLineLogger(c, next),
 )
 
-// A one-time capability is carried by the path. Do not hand that request to a
-// URL logger, including malformed tokens and refused embed attempts.
+// Keep one-time capabilities and public routing addresses out of URL logs.
 const requestLogger = createMiddleware(async (c, next) => {
   if (isOneTimeCapabilityPath(c.req.path)) return next()
+  if (isPublicRoutingFormPath(c.req.path)) return next()
   if (c.req.path.includes('/provisioning-tokens')) {
     await next()
     const managementRoute = routePath(c)
@@ -402,6 +408,7 @@ export function createApp({
   mcp,
   waitlist,
   ssoMailboxProof,
+  ssoOidcSignIn,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Generate correlation IDs locally; caller headers may contain private or forged values.
@@ -419,6 +426,13 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
+    if (isPublicRoutingFormPath(c.req.path)) {
+      const write = level === 'ERROR' ? console.error : console.warn
+      write(
+        `${new Date().toISOString()} ${level} ${c.req.method} ${PUBLIC_ROUTING_FORM_API_PREFIX}/[redacted]: private routing form request failed`,
+      )
+      return
+    }
     const text = c.req.path.toLowerCase().includes('/meeting-polls')
       ? 'private meeting poll request failed'
       : isCalDavConnectionPath(c.req.path)
@@ -553,6 +567,9 @@ export function createApp({
     '*',
     securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge), embedOrigins }),
   )
+  const resolveClientIp = clientIp(trustedProxies)
+  // Hard-off answers even precede the general auth credential and body checks.
+  ssoOidcSignIn?.mount({ app, publicUrl, requestLogger, clientIp: resolveClientIp })
   // Provisioning credentials never fall back to a browser cookie on another surface.
   app.use('*', async (c, next) => {
     if (
@@ -578,7 +595,7 @@ export function createApp({
     c.res.headers.set('Referrer-Policy', 'no-referrer')
   })
   app.use('/api/*', requestLogger)
-  app.use('/api/*', clientIp(trustedProxies))
+  app.use('/api/*', resolveClientIp)
   // First on /api/v1, so it also covers what the middleware below and onError answer.
   app.use('/api/v1/*', noStoreByDefault)
   // 64 KB unless the route declares more (routeBodyLimit). A Content-Length over the limit
@@ -594,8 +611,8 @@ export function createApp({
   app.use('/api/v1/*', unclassifiedScopeGuard)
   // The MCP endpoint (and anything under it) is logged, body-limited and never cached like
   // /api/v1, 413s included; it applies its own checks.
-  app.use('/mcp/*', noStoreByDefault, requestLogger, clientIp(trustedProxies), apiBodyLimit())
-  app.use('/.well-known/*', clientIp(trustedProxies))
+  app.use('/mcp/*', noStoreByDefault, requestLogger, resolveClientIp, apiBodyLimit())
+  app.use('/.well-known/*', resolveClientIp)
 
   app.post('/api/sms/twilio', (c) => (smsInbound ? smsInbound(c.req.raw) : c.notFound()))
 

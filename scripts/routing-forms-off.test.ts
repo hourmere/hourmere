@@ -1,6 +1,5 @@
-// Routing configuration interfaces are present by name, but production remains hard-off.
-// Allow only their six operations, schemas and CLI commands; preview, public routing,
-// continuation and UI surfaces belong to later steps. Runtime refusal is tested by the
+// Routing configuration and public metadata interfaces are present by name. Production
+// remains hard-off. Submission, continuation and UI surfaces are reserved. Runtime refusal is tested by the
 // routing adapter tests. This inventory still examines production assembly and all source
 // paths, without snapshots or a git baseline. The web keeps its separate Off inventory.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -66,25 +65,38 @@ const CLI_COMMANDS = [
   'slots',
 ].map((verb) => `routing-forms ${verb}`)
 
-const CONFIGURATION_OPERATIONS = [
+const SHIPPED_OPERATIONS = [
   { method: 'get', path: '/api/v1/routing-forms', operationId: 'listRoutingForms' },
   { method: 'get', path: '/api/v1/routing-forms/{id}', operationId: 'getRoutingForm' },
   { method: 'post', path: '/api/v1/routing-forms', operationId: 'createRoutingForm' },
   { method: 'patch', path: '/api/v1/routing-forms/{id}', operationId: 'updateRoutingForm' },
   { method: 'delete', path: '/api/v1/routing-forms/{id}', operationId: 'archiveRoutingForm' },
   { method: 'post', path: '/api/v1/routing-forms/{id}/publish', operationId: 'publishRoutingForm' },
+  { method: 'post', path: '/api/v1/routing-forms/{id}/preview', operationId: 'previewRoutingForm' },
+  {
+    method: 'get',
+    path: '/api/v1/public/-/routing/{handle}/{slug}',
+    operationId: 'getPublicRoutingForm',
+  },
+  {
+    method: 'get',
+    path: '/api/v1/public/-/routing/teams/{teamSlug}/{slug}',
+    operationId: 'getPublicTeamRoutingForm',
+  },
 ]
-const CONFIGURATION_PATHS = [...new Set(CONFIGURATION_OPERATIONS.map(({ path }) => path))]
-const CONFIGURATION_COMMANDS = {
+const SHIPPED_PATHS = [...new Set(SHIPPED_OPERATIONS.map(({ path }) => path))]
+const SHIPPED_COMMANDS = {
   'routing-forms list': 'list_routing_forms',
   'routing-forms get': 'get_routing_form',
   'routing-forms create': 'create_routing_form',
   'routing-forms update': 'update_routing_form',
   'routing-forms archive': 'archive_routing_form',
   'routing-forms publish': 'publish_routing_form',
+  'routing-forms preview': 'preview_routing_form',
+  'routing-forms public': 'get_public_routing_form',
 }
-// Explicit component names keep future preview and public schemas visible to this test.
-const CONFIGURATION_SCHEMAS = [
+// Explicit component names keep future public schemas visible to this test.
+const SHIPPED_SCHEMAS = [
   'CreateRoutingForm',
   'ArchiveRoutingForm',
   'UpdateRoutingForm',
@@ -93,8 +105,11 @@ const CONFIGURATION_SCHEMAS = [
   'PublishRoutingForm',
   'RoutingFormVersion',
   'RoutingFormPublication',
+  'PreviewRoutingForm',
+  'RoutingFormPreview',
+  'PublicRoutingForm',
 ]
-const CONFIGURATION_TAGS = ['Routing forms']
+const SHIPPED_TAGS = ['Routing forms']
 
 // The storage layer: the migration, the generated table types and the storage test support.
 const STORAGE_LAYER =
@@ -527,7 +542,7 @@ function expectExcludedUnreachable(patterns: readonly RegExp[], reached: Set<str
   expect(excluded.filter((file) => reached.has(file))).toEqual([])
 }
 
-describe('routing forms remain hard-off with configuration interfaces', () => {
+describe('routing forms remain hard-off with configuration and public metadata interfaces', () => {
   it('names each documented routing surface so an added one is recognised', () => {
     for (const name of [
       ...REST_PATHS,
@@ -596,16 +611,16 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
       expect(STORAGE_NAMES.test(source), source).toBe(false)
   })
 
-  it('documents exactly the configuration paths, operations, tags and schemas', async () => {
+  it('documents exactly the registered routing paths, operations, tags and schemas', async () => {
     const document = await openApiDocument()
     const names = openApiNames(document)
     expect(names.length).toBeGreaterThan(100)
     expect(names).toContain('/api/v1/bookings/{id}')
     const allowed = new Set([
-      ...CONFIGURATION_PATHS,
-      ...CONFIGURATION_OPERATIONS.map(({ operationId }) => operationId),
-      ...CONFIGURATION_SCHEMAS,
-      ...CONFIGURATION_TAGS,
+      ...SHIPPED_PATHS,
+      ...SHIPPED_OPERATIONS.map(({ operationId }) => operationId),
+      ...SHIPPED_SCHEMAS,
+      ...SHIPPED_TAGS,
     ])
     expect([...new Set(names.filter(isRoutingName))].sort()).toEqual([...allowed].sort())
     expect(
@@ -613,19 +628,17 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
         .filter(({ path }) => isRoutingName(path))
         .map(({ method, path, operationId }) => ({ method, path, operationId }))
         .sort((a, b) => String(a.operationId).localeCompare(String(b.operationId))),
-    ).toEqual(
-      [...CONFIGURATION_OPERATIONS].sort((a, b) => a.operationId.localeCompare(b.operationId)),
-    )
-    for (const path of REST_PATHS.filter((path) => !CONFIGURATION_PATHS.includes(path)))
+    ).toEqual([...SHIPPED_OPERATIONS].sort((a, b) => a.operationId.localeCompare(b.operationId)))
+    for (const path of REST_PATHS.filter((path) => !SHIPPED_PATHS.includes(path)))
       expect(names).not.toContain(path)
-    // Permit configuration schema owners, but still reject new routing-named properties.
+    // Permit the registered schema owners, but still reject new routing-named properties.
     const properties = schemaPropertyNames(document)
     expect(properties.length).toBeGreaterThan(500)
     expect(properties).toContain('Slot.start')
     expect(
       properties.filter((name) => {
         const [owner, property] = name.split('.')
-        return CONFIGURATION_SCHEMAS.includes(owner ?? '')
+        return SHIPPED_SCHEMAS.includes(owner ?? '')
           ? isRoutingName(property ?? '')
           : isRoutingName(name)
       }),
@@ -740,8 +753,8 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
           ),
         ].sort(),
       ).toEqual(
-        CONFIGURATION_OPERATIONS.map(
-          ({ method, path }) => `${method.toUpperCase()} ${path.replace('{id}', ':id')}`,
+        SHIPPED_OPERATIONS.map(
+          ({ method, path }) => `${method.toUpperCase()} ${path.replace(/\{(\w+)\}/g, ':$1')}`,
         ).sort(),
       )
       // a1b: the effective state the production assembly reports.
@@ -750,8 +763,8 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
       expect(await instance.json()).toHaveProperty('routingFormsEnabled', false)
       // This pool cannot connect. A guard wired after a lookup therefore fails, as does a
       // handler reached before input validation: every operation refuses even malformed input.
-      for (const { method, path } of CONFIGURATION_OPERATIONS) {
-        const response = await app.request(path.replace('{id}', 'not-a-uuid'), {
+      for (const { method, path } of SHIPPED_OPERATIONS) {
+        const response = await app.request(path.replace(/\{\w+\}/g, 'unavailable'), {
           method: method.toUpperCase(),
           headers: { authorization: 'Bearer hm_inventory', 'content-type': 'application/json' },
           ...(['post', 'patch', 'delete'].includes(method) ? { body: '{' } : {}),
@@ -764,7 +777,7 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
     }
   })
 
-  it('names only configuration paths in production literals, templates or concatenations', () => {
+  it('names only the registered routing paths and privacy prefix in production literals, templates or concatenations', () => {
     // Backstop for a route the inventory cannot see: one registered outside the shared
     // assembly (a `.get` on the app in startServer, say), one gated on something the test
     // does not configure, or a Better Auth endpoint behind /api/auth/*. Its path must be
@@ -784,7 +797,7 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
     expect(literals).toContain('/sign-in/confirm')
     expect(literals).toContain('/booking')
     expect([...new Set(literals.filter(isRoutingName))].sort()).toEqual(
-      [...CONFIGURATION_PATHS].sort(),
+      [...SHIPPED_PATHS, '/api/v1/public/-/routing'].sort(),
     )
     const built = sources.flatMap(([file, source]) => builtPaths(file, source))
     expect(built.length).toBeGreaterThan(50)
@@ -968,7 +981,7 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
     }
   })
 
-  it('offers exactly the six configuration CLI commands', () => {
+  it('offers exactly the registered routing CLI commands', () => {
     const names = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),
@@ -978,11 +991,11 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
     expect(names).toContain('book')
     expect(
       Object.fromEntries(Object.entries(COMMANDS).filter(([name]) => isRoutingName(name))),
-    ).toEqual(CONFIGURATION_COMMANDS)
+    ).toEqual(SHIPPED_COMMANDS)
     expect([...new Set(names.filter(isRoutingName))].sort()).toEqual(
-      [...Object.keys(CONFIGURATION_COMMANDS), ...Object.values(CONFIGURATION_COMMANDS)].sort(),
+      [...Object.keys(SHIPPED_COMMANDS), ...Object.values(SHIPPED_COMMANDS)].sort(),
     )
-    for (const command of CLI_COMMANDS.filter((name) => !(name in CONFIGURATION_COMMANDS)))
+    for (const command of CLI_COMMANDS.filter((name) => !(name in SHIPPED_COMMANDS)))
       expect(names).not.toContain(command)
   })
 

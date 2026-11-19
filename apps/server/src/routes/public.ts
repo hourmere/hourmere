@@ -31,6 +31,7 @@ import {
   Slot,
 } from './bookings.ts'
 import { PublicBranding } from './public-branding.ts'
+import { publicRoutingFormRoutes } from './public-routing-forms.ts'
 
 /** Only creation can offer a continuation; manage, cancel and reschedule never do. */
 export const PublicBookingResult = BookingWithToken.extend({
@@ -244,6 +245,7 @@ export interface PublicRoutesDeps {
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
+  routingFormsEnabled?: boolean
   /** Queues the booking emails in the booking's transaction; none are sent without it. */
   notify?: BookingNotifier | undefined
   /** Replaces PUBLIC_RATE_LIMITS.page (host and event pages), .slots and .book, e.g. in tests. */
@@ -265,6 +267,7 @@ export function publicRoutes({
   waitlistSecret,
   smtpConfigured,
   publicUrl = 'http://localhost:3000',
+  routingFormsEnabled = false,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
   const ctx: PublicContext = {
@@ -284,7 +287,9 @@ export function publicRoutes({
   const slotsLimit = limit('slots')
   const bookLimit = limit('book')
 
-  return ({ app }) => {
+  return (shared) => {
+    const { app } = shared
+    publicRoutingFormRoutes({ db, pageLimit, routingFormsEnabled })(shared)
     app.openapi(
       createRoute({
         method: 'get',

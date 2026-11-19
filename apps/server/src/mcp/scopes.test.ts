@@ -85,6 +85,8 @@ const all = [
   'update_routing_form',
   'archive_routing_form',
   'publish_routing_form',
+  'preview_routing_form',
+  'get_public_routing_form',
 ]
 // Hidden catalog entries never reach handlers. Workflows check scope first; SSO
 // answers sso_disabled before scope or arguments while both protocols are hard-off.
@@ -167,8 +169,8 @@ const otherReads = new Set([
   'list_sso_providers',
   'get_sso_policy',
 ])
-// Read-only diagnostics that can reveal busy timings: full keys only.
-const fullOnlyReads = new Set(['troubleshoot_availability'])
+// Read-only diagnostics that can reveal busy timings or private drafts: full keys only.
+const fullOnlyReads = new Set(['troubleshoot_availability', 'preview_routing_form'])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
     scope === 'full'
@@ -542,6 +544,8 @@ describe('CLI scope parity', () => {
     ['routing-forms update', 'update_routing_form'],
     ['routing-forms archive', 'archive_routing_form'],
     ['routing-forms publish', 'publish_routing_form'],
+    ['routing-forms preview', 'preview_routing_form'],
+    ['routing-forms public', 'get_public_routing_form'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',

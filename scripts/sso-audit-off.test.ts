@@ -1,12 +1,11 @@
-// SSO audit storage owns the action catalogue. The browser provider-draft service may emit
-// only its four transactional provider actions, behind the hard-off gate. Every later writer
-// must gain an explicit owner entry without allowing other routes or workers to emit events.
+// SSO audit storage owns the action catalogue. Each operation may emit only its own
+// actions. A new writer requires an explicit owner entry.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { auditDetails } from '../packages/db/src/audit.ts'
-import { ssoAuditDetails } from '../packages/db/src/sso-audit.ts'
+import { SSO_SECURITY_FAILURE_ACTIONS, ssoAuditDetails } from '../packages/db/src/sso-audit.ts'
 
 const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
@@ -32,6 +31,11 @@ const EMITTERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider.updated',
     'sso_provider.deleted',
     'sso_provider.secret_rotated',
+  ],
+  'apps/server/src/sso-oidc-session.ts': ['sso_authentication.succeeded'],
+  'apps/server/src/sso-oidc-sign-in.ts': [
+    'sso_authentication.failed',
+    'sso_authentication.replay_rejected',
   ],
 }
 // An SSO action name as a string literal, whether or not the catalogue lists it.
@@ -117,6 +121,7 @@ describe('SSO audit actions have explicit guarded emitters', () => {
         )
       })
     expect(referencing).toEqual([])
+    const securityFailures = new Set<string>(SSO_SECURITY_FAILURE_ACTIONS)
     for (const [file, actions] of Object.entries(EMITTERS)) {
       expect(sources).toContain(file)
       const source = readFileSync(new URL(file, root), 'utf8')
@@ -124,8 +129,13 @@ describe('SSO audit actions have explicit guarded emitters', () => {
         name.slice(1, -1),
       )
       expect([...new Set(named)].sort()).toEqual([...actions].sort())
-      expect(source).toContain('writeSsoAuditEvent')
-      expect(source).not.toMatch(/writeSsoSecurityFailure|redactSsoSecurityFailure/)
+      expect(/\bwriteSsoAuditEvent\b/.test(source), file).toBe(
+        actions.some((action) => !securityFailures.has(action)),
+      )
+      expect(/\bwriteSsoSecurityFailure\b/.test(source), file).toBe(
+        actions.some((action) => securityFailures.has(action)),
+      )
+      expect(source).not.toMatch(/\bredactSsoSecurityFailure\b/)
     }
   })
 

@@ -13,6 +13,7 @@ import { routePath } from 'hono/route'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { isOneTimeCapabilityPath, isOneTimeLinkPath } from './one-time-link-privacy.ts'
+import { isPublicRoutingFormPath } from './routing-form-privacy.ts'
 import { securityHeaders } from './security-headers.ts'
 
 const token = `00000000-0000-4000-8000-000000000091.${'w'.repeat(43)}`
@@ -151,7 +152,13 @@ describe('waitlist capability privacy source-copy controls', () => {
     ['Cache-Control', "headers.set('Cache-Control', 'no-store')", 'no-store'],
   ])('detects removal of %s from path booking responses', async (name, before, expected) => {
     await assertHeaders(securityHeaders, name, expected)
-    const bindings = { isIP, embedParent, createMiddleware, isOneTimeLinkPath }
+    const bindings = {
+      isIP,
+      embedParent,
+      createMiddleware,
+      isOneTimeLinkPath,
+      isPublicRoutingFormPath,
+    }
     const unchanged = copy<typeof securityHeaders>(
       'apps/server/src/security-headers.ts',
       'securityHeaders',
@@ -200,6 +207,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'createMiddleware',
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
+        'isPublicRoutingFormPath',
         'isSlackDestinationPath',
         'isSsoTrustPath',
         'isCalDavConnectionPath',
@@ -214,6 +222,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         createMiddleware,
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
+        isPublicRoutingFormPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),
@@ -255,6 +264,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'createMiddleware',
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
+        'isPublicRoutingFormPath',
         'isSlackDestinationPath',
         'isSsoTrustPath',
         'isCalDavConnectionPath',
@@ -269,6 +279,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         createMiddleware,
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
+        isPublicRoutingFormPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),

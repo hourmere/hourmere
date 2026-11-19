@@ -9,7 +9,7 @@ import {
   samlProviderValues,
   ssoFixture,
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
-import { consumeOidcAttempt, startOidcAttempt } from './sso-oidc-attempt.ts'
+import { consumeOidcAttempt, OidcStateReplay, startOidcAttempt } from './sso-oidc-attempt.ts'
 import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 
 const databaseUrl = process.env.DATABASE_URL
@@ -218,7 +218,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in attempts', () => {
     )
     expect(callbacks).toEqual(
       expect.arrayContaining([
-        { status: 'rejected', reason: new Error(refused) },
+        { status: 'rejected', reason: expect.any(OidcStateReplay) },
         { status: 'rejected', reason: new Error('synthetic exchange failure') },
       ]),
     )

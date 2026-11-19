@@ -1,8 +1,8 @@
-// The SSO transport profile is called by domain services for TXT proofs and by the uncalled
-// OIDC JWKS module for HTTP. Interactive writes and rechecks are hard-off; offline retirement only
-// removes trust. Only the configuration loader parses `SSO_PRIVATE_TARGETS`, so the allowlist routes
-// nothing. OIDC and SAML stay hard-off (apps/server/src/sso.test.ts starts the server with both
-// settings and a populated allowlist), so the JWKS module has no production caller.
+// The SSO transport profile serves domain TXT proofs, OIDC documents and OIDC token exchange.
+// Interactive writes, rechecks and sign-in are hard-off. Offline retirement removes trust.
+// The configuration loader parses `SSO_PRIVATE_TARGETS` and server composition passes it
+// to guarded OIDC sign-in, so it routes nothing while OIDC is off. The production route tests
+// in apps/server/src/sso-catalogues.test.ts assert both sign-in endpoints answer sso_disabled.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,12 +12,12 @@ const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 const PROFILE = 'packages/outbound/src/sso.ts'
 const TARGETS = 'packages/outbound/src/sso-private-targets.ts'
+const OIDC_ATTEMPT = 'apps/server/src/sso-oidc-attempt.ts'
 const OIDC_JWKS = 'apps/server/src/sso-oidc-jwks.ts'
-const OIDC_VERIFIER_MODULES = new Set([
-  OIDC_JWKS,
-  'apps/server/src/sso-oidc-attempt.ts',
-  'apps/server/src/sso-oidc-verifier.ts',
-])
+const OIDC_SESSION = 'apps/server/src/sso-oidc-session.ts'
+const OIDC_SIGN_IN = 'apps/server/src/sso-oidc-sign-in.ts'
+const OIDC_VERIFIER = 'apps/server/src/sso-oidc-verifier.ts'
+const OIDC_VERIFIER_MODULES = new Set([OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER])
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -64,7 +64,7 @@ const importsTargets = (file: string, source: string) =>
     (target) => target === TARGETS || target === '@hourmere/outbound/sso-private-targets',
   )
 
-describe('SSO transport permits only domain TXT callers and the uncalled OIDC JWKS module', () => {
+describe('SSO transport permits only domain TXT and guarded OIDC sign-in', () => {
   it('recognises every import form of the profile and nothing else', () => {
     const server = 'apps/server/src/example.ts'
     const outbound = 'packages/outbound/src/example.ts'
@@ -89,7 +89,7 @@ describe('SSO transport permits only domain TXT callers and the uncalled OIDC JW
       expect(importsProfile(file, source), source).toBe(false)
   })
 
-  it('imports the profile only for guarded domain TXT and OIDC document requests', () => {
+  it('imports the profile only for domain TXT, OIDC documents and code exchange', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     // The scan sees the profile, its package and the server, so a caller cannot hide.
@@ -107,34 +107,39 @@ describe('SSO transport permits only domain TXT callers and the uncalled OIDC JW
     const callers = sources.filter((file) =>
       importsProfile(file, readFileSync(new URL(file, root), 'utf8')),
     )
-    expect(callers).toEqual([
+    const domainCallers = [
       'apps/server/src/sso-domain-recheck.ts',
       'apps/server/src/sso-domain-retirement.ts',
       'apps/server/src/sso-domains.ts',
-      OIDC_JWKS,
-    ])
-    for (const caller of callers.filter((file) => file !== OIDC_JWKS)) {
+    ]
+    expect(callers).toEqual([...domainCallers, OIDC_JWKS, OIDC_SIGN_IN])
+    for (const caller of domainCallers) {
       const domainSource = readFileSync(new URL(caller, root), 'utf8')
       expect(domainSource).toContain('resolveSsoDomainTxt')
       expect(domainSource).not.toContain('sendSsoRequest')
     }
     expect(readFileSync(new URL(OIDC_JWKS, root), 'utf8')).toContain('sendSsoRequest')
+    expect(readFileSync(new URL(OIDC_SIGN_IN, root), 'utf8')).toContain('sendSsoRequest')
   })
 
-  it('has no production caller of the OIDC verifier, attempts or JWKS', () => {
+  it('restricts OIDC verification dependencies to the sign-in flow', () => {
     const sources = productionSources()
     expect(sources).toEqual(expect.arrayContaining([...OIDC_VERIFIER_MODULES]))
-    const callers = sources.filter(
-      (file) =>
-        !OIDC_VERIFIER_MODULES.has(file) &&
-        imports(file, readFileSync(new URL(file, root), 'utf8')).some((target) =>
-          OIDC_VERIFIER_MODULES.has(target),
-        ),
-    )
-    expect(callers).toEqual([])
+    const callers = sources
+      .filter((file) => !OIDC_VERIFIER_MODULES.has(file))
+      .flatMap((file) => {
+        const helpers = imports(file, readFileSync(new URL(file, root), 'utf8'))
+          .filter((target) => OIDC_VERIFIER_MODULES.has(target))
+          .sort()
+        return helpers.length ? [[file, helpers]] : []
+      })
+    expect(callers).toEqual([
+      [OIDC_SESSION, [OIDC_ATTEMPT, OIDC_VERIFIER]],
+      [OIDC_SIGN_IN, [OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER]],
+    ])
   })
 
-  it('reads SSO_PRIVATE_TARGETS only in the configuration loader, and routes nothing with it', () => {
+  it('parses SSO_PRIVATE_TARGETS in the loader and passes it only to guarded sign-in', () => {
     const sources = productionSources()
     const read = (file: string) => readFileSync(new URL(file, root), 'utf8')
     // Only the loader parses the setting; only the profile itself uses the matcher.
@@ -143,14 +148,15 @@ describe('SSO transport permits only domain TXT callers and the uncalled OIDC JW
       PROFILE,
     ])
     expect(read('apps/server/src/config.ts')).toMatch(/^ {4}SSO_PRIVATE_TARGETS: optional\(/m)
-    // No other production code names the setting at all (no property read, destructuring or
-    // parameter), so nothing receives the allowlist. The loader names it twice: its schema
-    // key and its error message.
+    // The loader names it twice: its schema key and its error message. The server
+    // passes it on once, and no other production module reads the setting.
     expect(sources.filter((file) => /\bSSO_PRIVATE_TARGETS\b/.test(read(file)))).toEqual([
       'apps/server/src/config.ts',
+      'apps/server/src/server.ts',
       TARGETS,
       PROFILE,
     ])
     expect(read('apps/server/src/config.ts').match(/\bSSO_PRIVATE_TARGETS\b/g)).toHaveLength(2)
+    expect(read('apps/server/src/server.ts').match(/\bSSO_PRIVATE_TARGETS\b/g)).toHaveLength(1)
   })
 })
