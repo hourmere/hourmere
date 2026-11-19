@@ -63,7 +63,7 @@ const sanitized = (error: unknown) =>
 
 /** Internal selection; session and personal ownership are rechecked under the owner lock. */
 export async function configureCalDavCalendar(
-  deps: CalDavSyncDeps,
+  deps: Pick<CalDavSyncDeps, 'db' | 'now' | 'enqueueSync'>,
   principal: Principal,
   id: string,
   checkConflicts: boolean,
@@ -114,6 +114,7 @@ export async function syncCalDavCalendar(
   deps: CalDavSyncDeps,
   calendarId: string,
   outerSignal?: AbortSignal,
+  principal?: Principal,
 ): Promise<void> {
   const signal = AbortSignal.any([
     ...(outerSignal ? [outerSignal] : []),
@@ -129,6 +130,8 @@ export async function syncCalDavCalendar(
       .executeTakeFirst()
     if (!owner) return
     const failure = await deps.db.transaction().execute(async (trx) => {
+      if (principal)
+        await lockUser(trx, requireCalendarSession(principal), deps.now ?? Date.now, 'key_share')
       await trx
         .selectFrom('auth.user')
         .select('id')

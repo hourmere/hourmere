@@ -33,7 +33,7 @@ async function rootOf(db: Db, id: string) {
   )
   return rows.rows[0]?.id
 }
-/** Internal opt-in callback only: application workers do not register CalDAV yet. */
+/** Queue CalDAV copies atomically with booking changes when configured. */
 export function calDavBookingNotifier(queue: Queue) {
   return async (
     trx: Db,

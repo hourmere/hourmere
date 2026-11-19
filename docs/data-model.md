@@ -15,7 +15,7 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
-CalDAV's internal write service reuses these targets and mappings: the root booking UUID
+CalDAV's write service reuses these targets and mappings: the root booking UUID
 is the stable UID, `external_event_id` is the resource href, and `etag` is the last
 acknowledged strong ETag (null after deletion). Group copies use
 `group_slot_calendar_events`. `calendars.sync_state.caldavWriteback` stores the last
@@ -364,8 +364,8 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
   The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
-  discovery and busy-sync foundation; CalDAV is not yet enabled in the product.
-  Its internal sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
+  discovery and busy sync; the Calendars page uses owner-session-only connection operations.
+  Its sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
   intervals, hashed instance IDs, resource href/etag mappings and an opaque sync token,
   never event bodies, titles or attendee lists.
 - **History survives edits.** Event types are soft-deleted; bookings keep their

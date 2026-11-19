@@ -144,6 +144,8 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/calendar-connections', 'other_read', 'key'),
   rest('DELETE', '/api/v1/calendar-connections/{id}', 'session_only', 'session_only'),
   rest('POST', '/api/v1/calendar-connections/{id}/refresh', 'other_write', 'key'),
+  rest('POST', '/api/v1/calendar-connections/caldav/discover', 'session_only', 'session_only'),
+  rest('POST', '/api/v1/calendar-connections/caldav', 'session_only', 'session_only'),
   rest('POST', '/api/v1/calendar-connections/google/authorize', 'session_only', 'session_only'),
   rest('POST', '/api/v1/calendar-connections/microsoft/authorize', 'session_only', 'session_only'),
   rest('PUT', '/api/v1/calendar-destination', 'other_write', 'key'),
