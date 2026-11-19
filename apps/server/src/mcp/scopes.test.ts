@@ -54,6 +54,10 @@ const all = [
   'update_slack_destination',
   'delete_slack_destination',
   'test_slack_destination',
+  'list_webhooks',
+  'create_webhook',
+  'update_webhook',
+  'delete_webhook',
   'generate_open_time_snippet',
   'troubleshoot_availability',
   'list_calendar_connections',
@@ -119,6 +123,9 @@ const configurationWrites = new Set([
   'update_slack_destination',
   'delete_slack_destination',
   'test_slack_destination',
+  'create_webhook',
+  'update_webhook',
+  'delete_webhook',
   'duplicate_event_type',
   'create_event_type',
   'update_event_type',
@@ -156,6 +163,7 @@ const otherReads = new Set([
   'export_bookings',
   'get_booking_activity',
   'list_slack_destinations',
+  'list_webhooks',
   'list_schedules',
   'get_schedule',
   'get_schedule_availability',
@@ -531,6 +539,10 @@ describe('CLI scope parity', () => {
     ['one-time-links create', 'create_one_time_link'],
     ['one-time-links list', 'list_one_time_links'],
     ['one-time-links revoke', 'revoke_one_time_link'],
+    ['webhooks list', 'list_webhooks'],
+    ['webhooks create', 'create_webhook'],
+    ['webhooks update', 'update_webhook'],
+    ['webhooks delete', 'delete_webhook'],
     ['workflows update', 'update_workflow'],
     ['workflows delete', 'delete_workflow'],
     ['workflows create', 'create_workflow'],
@@ -557,7 +569,13 @@ describe('CLI scope parity', () => {
         const fetcher = vi.fn<typeof fetch>(async (input, init) => target.request(input, init))
         const key = `hm_${scope}`
         const code = await runCli({
-          argv: [...command.split(' '), '--input', '-'],
+          argv: [
+            ...command.split(' '),
+            '--input',
+            '-',
+            ...(name === 'create_webhook' ? ['--json'] : []),
+            ...(name === 'delete_webhook' ? ['--yes'] : []),
+          ],
           env: { HOURMERE_URL: URL, HOURMERE_API_KEY: key },
           stdin: (async function* () {
             yield JSON.stringify({ idempotencyKey: 'scope-matrix-test' })
