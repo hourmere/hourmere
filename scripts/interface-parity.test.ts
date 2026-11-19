@@ -720,6 +720,7 @@ describe('REST, MCP and CLI write parity', () => {
       ['updateSsoProvider', 'patch', '/api/v1/team/sso/providers/{providerId}'],
       ['deleteSsoProvider', 'delete', '/api/v1/team/sso/providers/{providerId}'],
       ['testSsoProvider', 'post', '/api/v1/team/sso/providers/{providerId}/test'],
+      ['linkSsoAccount', 'post', '/api/v1/team/sso/providers/{providerId}/link'],
     ]) {
       expect(
         inventory.rest.find((operation) => operation.operationId === operationId),
@@ -738,6 +739,7 @@ describe('REST, MCP and CLI write parity', () => {
       'update_sso_provider',
       'delete_sso_provider',
       'test_sso_provider',
+      'link_sso_account',
       'create_sso_domain_challenge',
       'verify_sso_domain',
       'delete_sso_domain',

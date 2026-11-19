@@ -289,6 +289,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `DELETE /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `POST /api/v1/team/sso/providers/{providerId}/test` | Browser session only | — |
+| `POST /api/v1/team/sso/providers/{providerId}/link` | Browser session only | — |
 | `GET /api/v1/team/sso/providers` | Session or API key | `full, read` |
 | `GET /api/v1/team/sso/policy` | Session or API key | `full, read` |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |

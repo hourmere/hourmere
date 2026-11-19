@@ -23,6 +23,7 @@ import {
 } from './sso-mailbox-proof.ts'
 import {
   consumeOidcAttempt,
+  LINK_SSO_ACCOUNT,
   OidcAttemptRefused,
   OidcStateReplay,
   type OidcTestActor,
@@ -30,8 +31,20 @@ import {
   startOidcAttempt,
   TEST_SSO_PROVIDER,
 } from './sso-oidc-attempt.ts'
-import { completeOidcSignIn, stageOidcCompletion } from './sso-oidc-completion.ts'
+import {
+  completeOidcSignIn,
+  expiresDuringOidcWrite,
+  stageOidcCompletion,
+} from './sso-oidc-completion.ts'
 import { fetchOidcDiscovery, OidcJwksCache } from './sso-oidc-jwks.ts'
+import {
+  completeOidcLink,
+  lockOidcLinkActor,
+  lockOidcLinkDomain,
+  OidcLinkDomainUnverified,
+  oidcLinkReturnPath,
+  stageOidcLink,
+} from './sso-oidc-link.ts'
 import {
   findOidcLink,
   issueOidcSession,
@@ -91,9 +104,8 @@ function findProvider(db: Db, providerId: string, organizationId?: string) {
       'retired_at as retiredAt',
     ])
     .where('id', '=', providerId)
-  return (
-    organizationId ? query.where('organization_id', '=', organizationId).forShare() : query
-  ).executeTakeFirst()
+  const scoped = organizationId ? query.where('organization_id', '=', organizationId) : query
+  return (db.isTransaction ? scoped.forShare() : scoped).executeTakeFirst()
 }
 type Provider = NonNullable<Awaited<ReturnType<typeof findProvider>>>
 
@@ -172,6 +184,16 @@ function authorizationUrl(
   return authorization.href
 }
 
+function authorizationBindingCookie(publicUrl: string, browserBinding: string) {
+  // Top-level GET callbacks must receive the same binding as the fresh-proof request.
+  return serialize(bindingCookieName(publicUrl), browserBinding, {
+    httpOnly: true,
+    secure: new URL(publicUrl).protocol === 'https:',
+    path: '/',
+    sameSite: 'Lax',
+  })
+}
+
 const testInput = z.strictObject({ expectedRevision: z.number().int().min(1).max(2147483647) })
 export const TestSsoProviderInput = testInput.extend({ proofAttemptId: z.uuid().optional() })
 export interface OidcProviderTestDeps extends FreshProofDeps {
@@ -248,13 +270,7 @@ export async function testSsoProvider(
         return {
           url: authorizationUrl(publicUrl, provider.providerId, endpoints, parameters),
           attemptId: parameters.id,
-          // Retain the fresh-proof binding for the cross-site top-level callback.
-          setCookie: serialize(bindingCookieName(publicUrl), browserBinding, {
-            httpOnly: true,
-            secure: new URL(publicUrl).protocol === 'https:',
-            path: '/',
-            sameSite: 'Lax',
-          }),
+          setCookie: authorizationBindingCookie(publicUrl, browserBinding),
         }
       },
     },
@@ -263,6 +279,121 @@ export async function testSsoProvider(
     if (error instanceof OidcAttemptRefused) throw changed()
     throw error
   })
+}
+
+export const LinkSsoAccountInput = z.strictObject({ proofAttemptId: z.uuid().optional() })
+const linkInput = z.strictObject({ providerId: providerIdSchema, revision: z.int().positive() })
+
+export async function linkSsoAccount(
+  deps: OidcProviderTestDeps,
+  principal: Principal,
+  headers: Headers,
+  providerId: string,
+  input: z.infer<typeof LinkSsoAccountInput>,
+) {
+  requireSsoEnabled(deps.capabilities, 'oidc')
+  const denied = () => new DomainError('forbidden', 'team_management_access_denied')
+  const missing = () => new DomainError('not_found', 'sso_not_found')
+  const changed = () => new DomainError('conflict', 'sso_configuration_changed')
+  if (
+    principal.kind !== 'session' ||
+    principal.organization.personal ||
+    headers.has('authorization') ||
+    headers.get('origin') !== new URL(deps.publicUrl).origin
+  )
+    throw denied()
+  const organizationId = principal.organization.id
+  if (headers.get(EXPECTED_ORGANIZATION_HEADER)?.toLowerCase() !== organizationId)
+    throw new DomainError('conflict', 'organization_context_changed')
+  const actor = { userId: principal.user.id, id: principal.sessionId }
+  const { db, configurationKey, publicUrl } = deps
+  const snapshot = await findProvider(db, providerId, organizationId)
+  let authorized:
+    | {
+        context: Awaited<ReturnType<typeof lockOidcLinkActor>>
+        claim: Awaited<ReturnType<typeof lockOidcLinkDomain>>
+      }
+    | undefined
+  let endpoints: Awaited<ReturnType<typeof providerEndpoints>> | undefined
+  try {
+    return await runWithFreshProof(
+      deps,
+      {
+        headers,
+        userId: actor.userId,
+        sessionId: actor.id,
+        organizationId,
+        operation: LINK_SSO_ACCOUNT,
+        proofMode: 'mailbox',
+        input: { ...input, providerId, revision: snapshot?.revision ?? 1 },
+        schema: linkInput,
+      },
+      {
+        authorize: async (trx) => {
+          const context = await lockOidcLinkActor(trx, organizationId, actor).catch((error) => {
+            if (error instanceof OidcAttemptRefused) throw denied()
+            throw error
+          })
+          const current = await findProvider(trx, providerId, organizationId)
+          if (!current || current.retiredAt) throw missing()
+          if (current.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
+          if (!current.enabled) throw missing()
+          if (current.revision !== snapshot?.revision) throw changed()
+          const claim = await lockOidcLinkDomain(trx, current, context.mailbox)
+          authorized = { context, claim }
+        },
+        prepare: async () => {
+          if (!snapshot || !configurationKey) throw missing()
+          try {
+            endpoints = await providerEndpoints(snapshot, configurationKey, {
+              privateTargets: deps.privateTargets ?? [],
+              send: deps.send ?? sendSsoRequest,
+            })
+          } catch {
+            throw missing()
+          }
+        },
+        mutate: async (trx, _input, browserBinding, mailboxProof) => {
+          if (!snapshot || !configurationKey || !endpoints || !authorized || !mailboxProof)
+            throw new OidcAttemptRefused()
+          const { context, claim } = authorized
+          if (context.mailbox !== mailboxProof.mailbox) throw new OidcAttemptRefused()
+          const parameters = await startOidcAttempt(
+            { db: trx, configurationKey },
+            {
+              ...snapshot,
+              browserBinding,
+              returnPath: oidcLinkReturnPath,
+              endpointsDigest: endpoints.digest,
+            },
+            {
+              kind: 'link',
+              actor,
+              binding: {
+                memberId: context.member.id,
+                domainId: claim.id,
+                domainGeneration: claim.generation,
+                mailboxDigest: sha256(mailboxProof.mailbox),
+                provenAt: mailboxProof.provenAt,
+                proofExpiresAt: mailboxProof.expiresAt,
+              },
+            },
+          )
+          return {
+            url: authorizationUrl(publicUrl, snapshot.providerId, endpoints, parameters),
+            attemptId: parameters.id,
+            setCookie: authorizationBindingCookie(publicUrl, browserBinding),
+          }
+        },
+      },
+    )
+  } catch (error) {
+    if (error instanceof OidcLinkDomainUnverified)
+      throw new DomainError('conflict', 'sso_domain_unverified')
+    if (error instanceof HTTPException && error.status === 403) throw denied()
+    if (error instanceof OidcAttemptRefused || expiresDuringOidcWrite(error)) throw changed()
+    throw error
+  }
 }
 
 /** Mount the auth-protocol exceptions ahead of Better Auth's wildcard. */
@@ -400,6 +531,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
             { db, configurationKey },
             { ...provider, state: states[0] ?? null, browserBinding: getCookie(c, cookie) },
             testActor ? { kind: 'test', actor: testActor } : undefined,
+            () => deps.readSession(c.req.raw.headers),
           )
         } catch (error) {
           if (error instanceof OidcStateReplay) {
@@ -491,6 +623,21 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
         if (testActor) return finishTest(testActor)
         try {
+          if (attempt.link) {
+            const pending = await stageOidcLink(
+              { db, configurationKey },
+              provider,
+              attempt.link,
+              identity,
+              attempt.expiresAt,
+              getCookie(c, cookie),
+            )
+            setCookie(c, resultCookieName(pending.id), pending.envelope, {
+              ...resultCookieOptions,
+              expires: pending.expiresAt,
+            })
+            return c.redirect(`${oidcLinkReturnPath}#sso-link=${pending.id}`)
+          }
           const link = await findOidcLink(db, provider, identity)
           if (!link || identity.email === undefined) return fail('mailbox_unproven')
           const mailbox = normalizeOidcMailbox(identity.email)
@@ -523,6 +670,8 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           c.header('Set-Cookie', session.cookie, { append: true })
           return c.redirect(attempt.returnPath)
         } catch (error) {
+          if (error instanceof OidcLinkDomainUnverified) return fail('domain_unverified')
+          if (attempt.link && expiresDuringOidcWrite(error)) return fail('attempt_expired')
           if (error instanceof OidcAttemptRefused) return fail('configuration_changed')
           throw error
         }
@@ -542,9 +691,20 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         if (!configurationKey) return c.json(completionInvalid, 400)
         const id = parsed.data.attemptId
         const name = resultCookieName(id)
+        const pending = { id, browserBinding: getCookie(c, cookie), envelope: getCookie(c, name) }
+        const link = await completeOidcLink({ db, configurationKey }, pending, () =>
+          deps.readSession(c.req.raw.headers),
+        )
+        if (link?.status === 'invalid') return c.json(completionInvalid, 400)
+        if (link?.status === 'domain_unverified')
+          return c.json({ error: 'sso_domain_unverified' }, 409)
+        if (link?.status === 'linked') {
+          deleteCookie(c, name, resultCookieOptions)
+          return c.redirect(oidcLinkReturnPath)
+        }
         const result = await completeOidcSignIn(
           { db, configurationKey },
-          { id, browserBinding: getCookie(c, cookie), envelope: getCookie(c, name) },
+          pending,
           sessionOptions(c),
         )
         if (result.status === 'invalid') return c.json(completionInvalid, 400)

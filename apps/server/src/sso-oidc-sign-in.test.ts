@@ -42,6 +42,7 @@ const callbackPath = (providerId: string) => `/api/auth/sso/callback/${providerI
 const completePath = '/api/auth/sso/oidc/complete'
 const providersPath = '/api/v1/team/sso/providers'
 const providerTestPath = (providerId: string) => `${providersPath}/${providerId}/test`
+const linkPath = (providerId: string) => `${providersPath}/${providerId}/link`
 const providerTestLocation = '/app/settings'
 const refusedLocation = '/sign-in?error=unable_to_create_session'
 const bindingCookie = '__Host-hourmere.sso_binding'
@@ -163,7 +164,7 @@ function fakeIdp(signingKey: CryptoKey, jwks: SsoResponse, epoch: () => Promise<
   }
 }
 
-describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
+describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests and self-linking', () => {
   let owned: TestDatabase
   let db: Db
   let authPool: ReturnType<typeof createAuthPool>
@@ -315,7 +316,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     return { providerId, claim, email: `linked@${domain}` }
   }
 
-  async function linked(options?: Parameters<typeof provider>[0]) {
+  async function enrollment(options?: Parameters<typeof provider>[0]) {
     const configured = await provider(options)
     await db
       .updateTable('auth.user')
@@ -323,6 +324,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       .where('id', '=', fixture.member)
       .execute()
     const subject = 'Exact Subject'
+    return { ...configured, claims: { sub: subject, email: configured.email } }
+  }
+
+  async function linked(options?: Parameters<typeof provider>[0]) {
+    const configured = await enrollment(options)
     const link = await db
       .insertInto('sso_identity_links')
       .values({
@@ -330,13 +336,13 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
         provider_id: configured.providerId,
         user_id: fixture.member,
         issuer,
-        subject,
+        subject: configured.claims.sub,
         proven_email: configured.email,
         email_proven_at: at(-60),
       })
       .returningAll()
       .executeTakeFirstOrThrow()
-    return { ...configured, link, claims: { sub: subject, email: configured.email } }
+    return { ...configured, link }
   }
 
   function post(
@@ -608,6 +614,61 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     return data.find(({ id }) => id === providerId)
   }
 
+  function linkRequest(
+    providerId: string,
+    cookie: string,
+    body: Record<string, unknown> = {},
+    headers: Record<string, string> = {},
+  ) {
+    return post(
+      body,
+      app,
+      { cookie, 'X-Expected-Organization-Id': fixture.team, ...headers },
+      linkPath(providerId),
+    )
+  }
+
+  const requestLinkProof = async (providerId: string, cookie: string) =>
+    freshProofChallenge(await linkRequest(providerId, cookie), cookie)
+
+  async function startLink(providerId: string, challenge: MailboxAttempt): Promise<Attempt> {
+    const response = await linkRequest(providerId, challenge.cookie, {
+      proofAttemptId: challenge.id,
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const { url, attemptId } = (await response.json()) as { url: string; attemptId: string }
+    const authorization = new URL(url)
+    expect(authorization.origin + authorization.pathname).toBe(config.authorizationEndpoint)
+    expect(authorization.searchParams.get('state')?.split('.')[0]).toBe(attemptId)
+    expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+    return { id: attemptId, providerId, authorization, cookie: challenge.cookie }
+  }
+
+  async function pendingLink(attempt: Attempt, code: string): Promise<PendingAttempt> {
+    const response = await callback(attempt, code)
+    expect(response.status).toBe(302)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const location = response.headers.get('location') ?? ''
+    expect(location).toMatch(/^\/app\/settings#sso-link=[0-9a-f-]+$/)
+    const id = location.split('=').at(-1) as string
+    const cookies = response.headers.getSetCookie()
+    expect(cookies).toHaveLength(1)
+    const [completion] = cookies as [string]
+    expect(completion).toContain(`Path=${completePath}`)
+    expect(completion).toMatch(/; HttpOnly/i)
+    const completionCookie = completion.split(';')[0] as string
+    return { ...attempt, id, completionCookie }
+  }
+
+  async function prepareLink(f: Awaited<ReturnType<typeof enrollment>>) {
+    const session = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, session.cookie)
+    await proveMailbox(challenge)
+    const attempt = await startLink(f.providerId, challenge)
+    return pendingLink(attempt, idp.issue(attempt, f.claims))
+  }
+
   async function expectProviderTestRedirect(response: Response) {
     expect(response.status).toBe(302)
     expect(response.headers.get('location')).toBe(providerTestLocation)
@@ -643,6 +704,20 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       .selectAll()
       .where('provider_id', '=', providerId)
       .executeTakeFirstOrThrow()
+  }
+
+  async function waitForBlocked(pid: number | undefined) {
+    expect(pid).toEqual(expect.any(Number))
+    await vi.waitFor(
+      async () => {
+        const { rows } = await owned.pool.query<{ blocked: boolean }>(
+          'SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked',
+          [pid],
+        )
+        expect(rows[0]?.blocked).toBe(true)
+      },
+      { timeout: 2500, interval: 10 },
+    )
   }
 
   it('hard-disables OIDC auth-protocol endpoints before looking up the request', async () => {
@@ -1594,16 +1669,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
           await blocker.query('DELETE FROM auth.organization WHERE id = $1', [fixture.team])
         }
         completion = Promise.resolve(complete(pending))
-        await vi.waitFor(
-          async () => {
-            const { rows: waiting } = await owned.pool.query<{ blocked: boolean }>(
-              'SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked',
-              [rows[0]?.pid],
-            )
-            expect(waiting[0]?.blocked).toBe(true)
-          },
-          { timeout: 2500, interval: 10 },
-        )
+        await waitForBlocked(rows[0]?.pid)
         await blocker.query('COMMIT')
       } finally {
         await blocker.query('ROLLBACK')
@@ -1619,4 +1685,342 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       expect(idp.exchange).toHaveBeenCalledTimes(1)
     },
   )
+
+  it('self-links only after independent mailbox proof, the original session and explicit completion', async () => {
+    const f = await enrollment({ discovery: true })
+    const actor = await browserSession(fixture.member, fixture.team.toUpperCase())
+    const secondSession = await browserSession(fixture.member)
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: true })
+      .execute()
+    const before = await effects()
+
+    // A verified IdP email cannot substitute for the Hourmere mailbox challenge.
+    const linkedClaims = { ...f.claims, email: f.email.toUpperCase(), email_verified: true }
+    const ordinarySignIn = await start(f.providerId)
+    await refusal(await callback(ordinarySignIn, idp.issue(ordinarySignIn, linkedClaims)))
+    expect(await effects()).toEqual(before)
+    idp.send.mockClear()
+    idp.exchange.mockClear()
+
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    const retry = { proofAttemptId: challenge.id }
+    expect(
+      await freshProofChallenge(
+        await linkRequest(f.providerId, challenge.cookie, retry),
+        challenge.cookie,
+      ),
+    ).toEqual(challenge)
+    expect(idp.send).not.toHaveBeenCalled()
+    const { message, token } = await mailboxMessage(challenge)
+    expect(message.to).toBe(f.email)
+    const binding = challenge.cookie
+      .split('; ')
+      .find((part) => part.startsWith(`${bindingCookie}=`))
+    expect(binding).toBeDefined()
+    const wrongSessionCookie = `${secondSession.cookie}; ${binding}`
+    const wrongProof = await consumeMailbox({ ...challenge, cookie: wrongSessionCookie }, token)
+    expect(wrongProof.status).toBe(400)
+    expect(await wrongProof.json()).toEqual({ error: 'sso_mailbox_proof_invalid' })
+    expect((await consumeMailbox(challenge, token)).status).toBe(200)
+    const proofTime = (await attemptRow(challenge)).mailbox_proven_at
+    expect(proofTime).toBeInstanceOf(Date)
+    const wrongRetry = await linkRequest(f.providerId, wrongSessionCookie, retry)
+    expect((await freshProofChallenge(wrongRetry, wrongSessionCookie)).id).not.toBe(challenge.id)
+    expect((await attemptRow(challenge)).consumed_at).toBeNull()
+
+    const attempt = await startLink(f.providerId, challenge)
+    expect((await attemptRow(challenge)).consumed_at).toBeInstanceOf(Date)
+    expect(await attemptRow(attempt)).toMatchObject({
+      kind: 'link',
+      organization_id: fixture.team,
+      provider_id: f.providerId,
+      user_id: fixture.member,
+      session_id: actor.id,
+    })
+    const code = idp.issue(attempt, linkedClaims)
+    await refusal(await callback(attempt, code, { cookie: wrongSessionCookie }))
+    expect(idp.exchange).not.toHaveBeenCalled()
+    const pending = await pendingLink(attempt, code)
+    expect((await effects()).links).toBe(before.links)
+    await expectCompletionRefused(
+      await complete(pending, {}, app, {
+        cookie: `${wrongSessionCookie}; ${pending.completionCookie}`,
+      }),
+    )
+    const otherBrowser = `${bindingCookie}=${randomBytes(32).toString('base64url')}`
+    await expectCompletionRefused(
+      await complete(pending, {}, app, {
+        cookie: `${actor.cookie}; ${otherBrowser}; ${pending.completionCookie}`,
+      }),
+    )
+    expect((await effects()).links).toBe(before.links)
+
+    const responses = await Promise.all([complete(pending), complete(pending, {}, instance())])
+    expect(responses.map(({ status }) => status).sort()).toEqual([302, 400])
+    const accepted = responses.find(({ status }) => status === 302) as Response
+    const denied = responses.find(({ status }) => status === 400) as Response
+    await expectCompletionRefused(denied)
+    expect(accepted.headers.get('location')).toBe('/app/settings')
+    expect(
+      accepted.headers.getSetCookie().some((cookie) => cookie.includes('session_token=')),
+    ).toBe(false)
+    expect(idp.exchange).toHaveBeenCalledTimes(1)
+    const link = await db
+      .selectFrom('sso_identity_links')
+      .selectAll()
+      .where('provider_id', '=', f.providerId)
+      .executeTakeFirstOrThrow()
+    expect(link).toMatchObject({
+      organization_id: fixture.team,
+      user_id: fixture.member,
+      issuer,
+      subject: f.claims.sub,
+      proven_email: f.email,
+      email_proven_at: proofTime,
+    })
+    const { users, accounts, memberships, sessions, proofs, links } = await effects()
+    expect({ users, accounts, memberships, sessions, proofs, links }).toMatchObject({
+      users: before.users,
+      accounts: before.accounts,
+      memberships: before.memberships,
+      sessions: before.sessions,
+      proofs: before.proofs,
+      links: String(Number(before.links) + 1),
+    })
+    const linkEvents = (await audit()).filter(({ action }) => action === 'sso_link.linked')
+    expect(linkEvents).toMatchObject([{ actor_id: fixture.member, credential_id: actor.id }])
+    const journal = JSON.stringify(linkEvents)
+    expect(
+      [f.email, f.claims.sub, ...idp.issuedSecrets].every((value) => !journal.includes(value)),
+    ).toBe(true)
+  })
+
+  it('rejects cross-origin, bearer and unadmitted callers and accepts only strict self-link input', async () => {
+    const f = await enrollment()
+    const actor = await browserSession(fixture.member)
+    const outsiderEmail = `invited@${f.claim.name}`
+    await db
+      .updateTable('auth.user')
+      .set({ email: outsiderEmail })
+      .where('id', '=', fixture.otherOwner)
+      .execute()
+    const outsider = await browserSession(fixture.otherOwner)
+    await db
+      .insertInto('auth.invitation')
+      .values({
+        inviterId: fixture.owner,
+        organizationId: fixture.team,
+        role: 'member',
+        status: 'pending',
+        email: outsiderEmail,
+        expiresAt: at(300),
+      })
+      .execute()
+    const me = await app.request(new URL('/api/v1/me', publicUrl), {
+      headers: { cookie: outsider.cookie },
+    })
+    expect(me.status).toBe(200)
+    expect(await me.json()).toMatchObject({ organization: { personal: true } })
+    const before = await effects()
+    for (const response of [
+      await linkRequest(
+        f.providerId,
+        actor.cookie,
+        {},
+        { origin: 'https://different.example.test' },
+      ),
+      await linkRequest(f.providerId, actor.cookie, {}, { authorization: 'Bearer synthetic' }),
+      await linkRequest(f.providerId, outsider.cookie),
+    ]) {
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: 'team_management_access_denied' })
+    }
+    const missingContext = await post({}, app, { cookie: actor.cookie }, linkPath(f.providerId))
+    expect(missingContext.status).toBe(409)
+    expect(await missingContext.json()).toMatchObject({ error: 'organization_context_changed' })
+    const badInput = await linkRequest(f.providerId, actor.cookie, { userId: fixture.otherOwner })
+    expect(badInput.status).toBe(400)
+    expect(await badInput.json()).toMatchObject({ error: 'invalid_request' })
+    expect(await effects()).toEqual(before)
+    expect(idp.send).not.toHaveBeenCalled()
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .execute(),
+    ).toEqual([])
+  })
+
+  it('refuses link when the IdP asserts a different mailbox despite email_verified', async () => {
+    const f = await enrollment()
+    const actor = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    await proveMailbox(challenge)
+    const attempt = await startLink(f.providerId, challenge)
+    const before = await effects()
+    const code = idp.issue(attempt, {
+      ...f.claims,
+      email: `different@${f.claim.name}`,
+      email_verified: true,
+    })
+    await refusal(await callback(attempt, code))
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses link completion after the local account changes its frozen mailbox', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const before = await effects()
+    await db
+      .updateTable('auth.user')
+      .set({ email: `different@${f.claim.name}` })
+      .where('id', '=', fixture.member)
+      .execute()
+    await expectCompletionRefused(await complete(pending))
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses a subject bound to another user before completion and preserves their link', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const other = await db
+      .insertInto('sso_identity_links')
+      .values({
+        organization_id: fixture.team,
+        provider_id: f.providerId,
+        user_id: fixture.coOwner,
+        issuer,
+        subject: f.claims.sub,
+        proven_email: `other@${f.claim.name}`,
+        email_proven_at: at(-60),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    const before = await effects()
+    await expectCompletionRefused(await complete(pending))
+    expect(await effects()).toEqual(before)
+    expect(
+      await db
+        .selectFrom('sso_identity_links')
+        .selectAll()
+        .where('id', '=', other.id)
+        .executeTakeFirst(),
+    ).toEqual(other)
+  })
+
+  it('freezes new links when the current positive domain proof has a failed recheck', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const actor = await browserSession(fixture.member)
+    const before = await effects()
+    await db
+      .updateTable('sso_domains')
+      .set({ last_check_outcome: 'failed', last_checked_at: sql`clock_timestamp()` })
+      .where('id', '=', f.claim.id)
+      .execute()
+    for (const response of [
+      await linkRequest(f.providerId, actor.cookie),
+      await complete(pending),
+    ]) {
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'sso_domain_unverified' })
+    }
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses a link result after its IdP deadline', async () => {
+    const f = await enrollment()
+    const actor = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    await proveMailbox(challenge)
+    const attempt = await startLink(f.providerId, challenge)
+    const deadline = Math.floor(new Date(at(3)).getTime() / 1000)
+    const pending = await pendingLink(
+      attempt,
+      idp.issue(attempt, { ...f.claims, session_expires_at: deadline }),
+    )
+    const before = await effects()
+    await vi.waitFor(
+      async () => {
+        const row = await db
+          .selectFrom('sso_attempts')
+          .select(sql<boolean>`expires_at <= clock_timestamp()`.as('expired'))
+          .where('id', '=', pending.id)
+          .executeTakeFirstOrThrow()
+        expect(row.expired).toBe(true)
+      },
+      { timeout: 3500, interval: 50 },
+    )
+    await expectCompletionRefused(await complete(pending))
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses link completion when concurrent membership removal commits first', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const before = await effects()
+    const blocker = await owned.pool.connect()
+    let completion: Promise<Response> | undefined
+    try {
+      await blocker.query('BEGIN')
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+        fixture.team,
+      ])
+      await blocker.query('DELETE FROM auth.member WHERE id = $1', [fixture.memberMember])
+      completion = Promise.resolve(complete(pending))
+      await waitForBlocked(rows[0]?.pid)
+      await blocker.query('COMMIT')
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    await expectCompletionRefused(await completion)
+    expect(await effects()).toEqual({
+      ...before,
+      memberships: String(Number(before.memberships) - 1),
+    })
+  })
+
+  it('discovers before taking team locks and rechecks the provider revision before spending proof', async () => {
+    const f = await enrollment({ discovery: true })
+    const actor = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    await proveMailbox(challenge)
+    idp.discovery.mockImplementationOnce(async () => {
+      await db.transaction().execute(async (trx) => {
+        await sql`SET LOCAL lock_timeout = '500ms'`.execute(trx)
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', fixture.team)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
+        await trx
+          .updateTable('sso_providers')
+          .set({ revision: 2, configuration: configuration(f.providerId, 2, true) })
+          .where('id', '=', f.providerId)
+          .execute()
+      })
+      return json(metadata)
+    })
+    const response = await linkRequest(f.providerId, challenge.cookie, {
+      proofAttemptId: challenge.id,
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'sso_configuration_changed' })
+    expect(idp.discovery).toHaveBeenCalledTimes(1)
+    expect((await attemptRow(challenge)).consumed_at).toBeNull()
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .where('kind', '=', 'link')
+        .execute(),
+    ).toEqual([])
+  })
 })
