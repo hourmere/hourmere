@@ -537,6 +537,11 @@ These safe retries do not consume a second mail allowance or create a second rec
 A Message-ID assists diagnostics but is not an SMTP deduplication guarantee. Show unknown
 outcomes honestly; preserve existing reminder retry behavior.
 
+Workflow email retries wait 1, 2, 4, then 8 minutes, and at most 15 minutes thereafter.
+The stored retry time never falls after the saved expiry. At expiry, pending retries end as
+`expired`; an abandoned dispatch marker ends as `delivery_unknown` when its lease lapses.
+Wakes and repair reuse the saved run and recipient identities.
+
 Webhooks retain the existing at-least-once transport: retry after an ambiguous outcome can
 repeat a POST with the same delivery ID. Receivers must durably deduplicate that ID before
 side effects. An absolute no-double-POST claim would contradict the reused transport;

@@ -473,6 +473,11 @@ describe('workflow hard-off', () => {
     const dispatcherImports = new Set(['node:crypto', 'kysely', '@hourmere/jobs'])
     // The renderer reads static notification catalogues and text helpers without the mailer.
     const emailImports = new Set(['@hourmere/mail/catalogue', '@hourmere/mail/text'])
+    const emailAttemptImports = new Set([
+      '@hourmere/mail',
+      '@hourmere/notifications',
+      '@hourmere/notifications/workflow-mail',
+    ])
     const captureImports = new Set([
       'node:crypto',
       'kysely',
@@ -502,7 +507,11 @@ describe('workflow hard-off', () => {
               file === 'packages/workflows/src/dispatcher.ts' && dispatcherImports.has(specifier)
             ) &&
             !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)) &&
-            !(file === 'packages/workflows/src/email.ts' && emailImports.has(specifier)),
+            !(file === 'packages/workflows/src/email.ts' && emailImports.has(specifier)) &&
+            !(
+              file === 'packages/workflows/src/email-attempt.ts' &&
+              emailAttemptImports.has(specifier)
+            ),
         ),
         file,
       ).toEqual([])

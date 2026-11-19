@@ -16,6 +16,7 @@
     "@hourmere/auth": "*",
     "kysely": "0.29.7",
     "@hourmere/mail": "*",
-    "@hourmere/jobs": "*"
+    "@hourmere/jobs": "*",
+    "@hourmere/notifications": "*"
   }
 }
