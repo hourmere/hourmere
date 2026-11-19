@@ -63,6 +63,14 @@ const NO_REFERRER_PAGES = /^\/booking(\/|$)/i
 
 const HTML = /^text\/html/i
 
+function isPollPage(path: string): boolean {
+  try {
+    return /^\/poll(?:\/|$)/i.test(decodeURIComponent(path))
+  } catch {
+    return /^\/poll(?:\/|$)/i.test(path)
+  }
+}
+
 export interface SecurityHeadersOptions {
   /** The Strict-Transport-Security value (see strictTransportSecurity); none if undefined. */
   hsts?: string | undefined
@@ -118,6 +126,11 @@ export function securityHeaders({
     if (/\/waitlist(?:\/|$)/i.test(c.req.path)) {
       headers.set('Referrer-Policy', 'no-referrer')
       headers.set('Cache-Control', 'no-store')
+    }
+    if (isPollPage(c.req.path)) {
+      headers.set('Referrer-Policy', 'no-referrer')
+      headers.set('Cache-Control', 'no-store')
+      headers.set('X-Robots-Tag', 'noindex, nofollow')
     }
     setDefault('Referrer-Policy', 'strict-origin-when-cross-origin')
   })

@@ -162,8 +162,11 @@ row. Its expectation file is
 protection assertion to fail.
 
 The cleanup schedule is hourly, at most 500 rows per transaction. It deletes expired
-public pending voters and their dependent personal data, and clears expired capability
-ciphertext. Persisting deadline closure belongs to the later reminder step.
+public pending voters and their dependent personal data, clears expired capability
+ciphertext, and records deadline closure with `closed_at = deadline_at` while preserving
+both revisions. The deadline closure transaction queues a host delivery for the poll's
+creator if they still manage the event. The mail worker rechecks current authority before
+sending.
 Capacity and voting expiry are synchronous database-clock decisions, never dependent on
 worker punctuality. Normal terminal poll history follows the installation's booking-data
 retention policy from its terminal transition (deadline for automatic closure); with no
@@ -1046,6 +1049,23 @@ upgrade test preserves a populated predecessor down to row versions and compares
 upgraded schemas. The optional `SSO_ENCRYPTION_KEY` seals provider configuration; it must be backed up
 privately and kept stable. Configuring a key does not enable either protocol.
 
+## SSO domain retirement storage
+
+Migration 0117 adds `sso_domain_retirements` and
+`sso_domain_retirement_notifications` for offline operator maintenance. A ceremony binds
+one old claim ID and generation to a different requesting team, the instance-bound TXT
+digest and a deadline. Completion atomically preserves both team IDs, the old verification
+and expiry times, the new proof time and retirement time, alongside the system audit event.
+The completed ceremony is immutable; replay cannot transfer trust or retire a later
+claim generation. Pending ceremonies reserve no domains. Ordinary verification remains
+necessary for the requesting team.
+
+The notification outbox stores owner user IDs, never mailbox addresses. Delivery resolves
+a still-current verified owner of the old team; successful processing is recorded for
+retries. Delivery is at least once across an SMTP-success/database-commit crash. No
+notification goes to the requesting team or an arbitrary supplied address. See the
+[domain lifecycle runbook](sso.md#domain-lifecycle-operations).
+
 ## SSO identity storage
 
 Migration 0075 installs the identity storage of the [SSO design](sso.md) (Identity storage
@@ -1125,8 +1145,9 @@ reads of step 4 (`packages/workflows/src/reads.ts`), creation of step 5
 (`packages/workflows/src/creates.ts`), updates of step 6
 (`packages/workflows/src/updates.ts`) and deletion of step 7
 (`packages/workflows/src/deletes.ts`) and booking lifecycle capture
-(`packages/workflows/src/capture.ts`) access them behind the hard-off guard. Definition
-operations answer `workflows_disabled`, and capture does nothing, while workflows stay off behind
+(`packages/workflows/src/capture.ts`) and internal dispatch/repair
+(`packages/workflows/src/dispatcher.ts`) access them behind the hard-off guard. Definition
+operations answer `workflows_disabled`, and capture, dispatch and repair do nothing, while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
 with its retained creation key. Updates check the expected revision, append immutable content
 revisions and change the live enabled flag without touching execution snapshots; no worker
@@ -1189,8 +1210,13 @@ transaction after core notifications, sharing live definitions in ID order after
 lock. Reschedule retires predecessor work before carrying captured timer revisions to the
 successor; cancellation retires pending timer and delayed-created/rescheduled runs before
 capturing its own occurrence. Request, request-expiry and no-show events write no workflow
-rows. Timer skips also write minimal history. There is no dispatcher, retention worker or
-setting, and workflows stay hard-off behind
+rows. Timer and wake-time skips write minimal history. The internal dispatcher uses bounded
+due scans, token-fenced leases and live checks after lock waits; repair queues only existing
+run IDs and never recreates identities or intents. Eligible runs await the later delivery
+implementation. Internal mail admission writes reservations and shared ledger charges
+atomically, and retry admission restamps both under the same organization and mail-budget
+locks. Instance and owner sub-cap settings do not enable delivery. There is no production
+workflow worker or retention worker, and workflow capture, dispatch and repair stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 
@@ -2245,6 +2271,13 @@ is present, including paid bookings later cancelled. Unconfirmed terminal holds 
 Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
 unique index, so they cannot collide with ordinary booking idempotency keys.
 
+Migration `0124_payment_checkout_attempts.sql` adds one optional Checkout attempt per hold.
+It stores the amount and currency snapshot, account and mode, a random attempt ID and its
+creation key, and the operation start time and Session ID as they become known. Existing
+holds stay unchanged. The booking's deadline still governs capacity and payment acceptance.
+The attempt survives hold contact erasure. Its foreign key blocks booking deletion while
+the attempt is retained. Checkout URLs and provider credentials are kept out of storage.
+
 ## Private attendee no-show markers
 
 Migration 0070 adds nullable `booking_attendees.no_show_marked_at` and
@@ -2290,7 +2323,10 @@ location, buffers, calendar destination and notification policy. Each seat is a 
 `bookings` row with `group_slot_id`, one booker and private answers, management capability,
 idempotency scope and reschedule chain. Guests and multiple-seat purchases are unsupported.
 Group mode and capacity are configurable in the admin editor and REST/MCP/CLI.
-Occurrence attendee reads are authenticated and retain the existing host-only API-key/OAuth
+Occurrence attendee reads use a repeatable-read snapshot for membership authorization,
+occurrence counts and bounded status-filtered rows, without exclusive host or slot locks.
+They default to confirmed seats; cancelled history must be requested explicitly.
+They are authenticated and retain the existing host-only API-key/OAuth
 boundary; current team owners/admins may also read through a browser session. Public and
 invitee-managed projections never include sibling seats. See [group events](https://hourmere.com/docs/group-events).
 

@@ -35,7 +35,11 @@ import {
 
 const serverUrl = process.env.DATABASE_URL
 const OMITTED = SSO_STORAGE_DIAGNOSTIC_OMITTED
-const STORAGE_MIGRATIONS = ['0074_sso_configuration.sql', '0075_sso_identity.sql']
+const STORAGE_MIGRATIONS = [
+  '0074_sso_configuration.sql',
+  '0075_sso_identity.sql',
+  '0117_sso_domain_retirement.sql',
+]
 
 /** A distinctive value that is no UUID, so the general log redaction cannot hide it. */
 const marker = (label: string) => `private-${label}-${randomBytes(6).toString('hex')}`

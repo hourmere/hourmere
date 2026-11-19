@@ -1,0 +1,24 @@
+{
+  "migration": "0117_sso_domain_retirement.sql",
+  "objects": {
+    "constraint public.sso_domain_retirement_notifications.sso_domain_retirement_notifications_pkey": "PRIMARY KEY (retirement_id, user_id)",
+    "constraint public.sso_domain_retirement_notifications.sso_domain_retirement_notifications_retirement_id_fkey": "FOREIGN KEY (retirement_id) REFERENCES sso_domain_retirements(id) ON DELETE CASCADE",
+    "constraint public.sso_domain_retirement_notifications.sso_domain_retirement_notifications_user_id_fkey": "FOREIGN KEY (user_id) REFERENCES auth.\"user\"(id) ON DELETE CASCADE",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_challenge_digest_check": "CHECK ((challenge_digest ~ '^[0-9a-f]{64}$'::text))",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_completion": "CHECK ((((proved_at IS NULL) AND (retired_at IS NULL) AND (old_verified_at IS NULL) AND (old_expires_at IS NULL)) OR ((proved_at IS NOT NULL) AND (retired_at IS NOT NULL) AND (old_verified_at IS NOT NULL) AND (old_expires_at IS NOT NULL) AND (proved_at >= created_at) AND (proved_at < expires_at) AND (retired_at >= proved_at) AND (old_expires_at > old_verified_at) AND (old_expires_at <= proved_at))))",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_deadline": "CHECK ((expires_at > created_at))",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_domain": "FOREIGN KEY (old_organization_id, domain_id) REFERENCES sso_domains(organization_id, id) ON DELETE CASCADE",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_generation_check": "CHECK ((generation > 0))",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_pkey": "PRIMARY KEY (id)",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_requesting_organization_id_fkey": "FOREIGN KEY (requesting_organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE",
+    "constraint public.sso_domain_retirements.sso_domain_retirements_teams": "CHECK ((old_organization_id <> requesting_organization_id))",
+    "not_null public.sso_domain_retirements.challenge_digest": "NOT NULL",
+    "not_null public.sso_domain_retirements.created_at": "NOT NULL DEFAULT clock_timestamp()",
+    "not_null public.sso_domain_retirements.domain_id": "NOT NULL",
+    "not_null public.sso_domain_retirements.expires_at": "NOT NULL",
+    "not_null public.sso_domain_retirements.generation": "NOT NULL",
+    "not_null public.sso_domain_retirements.old_organization_id": "NOT NULL",
+    "not_null public.sso_domain_retirements.requesting_organization_id": "NOT NULL",
+    "trigger public.sso_domain_retirements.sso_domain_retirements_guard": "CREATE TRIGGER sso_domain_retirements_guard BEFORE UPDATE ON public.sso_domain_retirements FOR EACH ROW EXECUTE FUNCTION guard_sso_domain_retirement() -- function SET search_path=public, pg_temp md5 a7300aa33e2757fc2b5eb4ae92d4c5ce"
+  }
+}

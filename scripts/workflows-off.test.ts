@@ -102,6 +102,8 @@ const DATA_ACCESS = [
   'packages/workflows/src/updates.ts',
   'packages/workflows/src/deletes.ts',
   'packages/workflows/src/capture.ts',
+  'packages/workflows/src/dispatcher.ts',
+  'packages/notifications/src/workflow-mail.ts',
 ]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
 
@@ -617,7 +619,10 @@ describe('booking workflows are off and expose only definition reads, creation, 
             ![...DEFINITION_TABLES, 'workflow_runs', 'workflow_enrollments'].includes(table),
         )
         for (const table of forbidden) expect(source).not.toContain(table)
-      } else if (file === 'packages/workflows/src/capture.ts') {
+      } else if (
+        file === 'packages/workflows/src/capture.ts' ||
+        file === 'packages/workflows/src/dispatcher.ts'
+      ) {
         for (const table of [
           'workflow_enrollments',
           'workflow_runs',
@@ -627,12 +632,16 @@ describe('booking workflows are off and expose only definition reads, creation, 
           expect(source).toContain(table)
         for (const table of ['workflow_mail_reservations', 'workflow_creation_keys'])
           expect(source).not.toContain(table)
+      } else if (file === 'packages/notifications/src/workflow-mail.ts') {
+        expect(source).toContain('workflow_mail_reservations')
+        for (const table of STORAGE_TABLES.filter((name) => name !== 'workflow_mail_reservations'))
+          expect(source).not.toContain(table)
       } else expect(executionNames.test(source), file).toBe(false)
     }
     // Only the package entry and definition services load definition modules. Production
     // callers outside those modules receive only the guarded operations.
     const loaders = sources.filter((file) =>
-      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture))(?:\.ts)?['"`]/.test(
+      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture|dispatcher))(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
@@ -642,6 +651,18 @@ describe('booking workflows are off and expose only definition reads, creation, 
       'packages/workflows/src/index.ts',
       'packages/workflows/src/updates.ts',
     ])
+  })
+
+  it('keeps workflow mail admission internal with no production callers while hard-off', () => {
+    const admission = 'packages/notifications/src/workflow-mail.ts'
+    const callers = productionSources().filter((file) => {
+      if (file === admission) return false
+      const source = readFileSync(new URL(file, root), 'utf8')
+      return /\b(?:admitWorkflowEmail|readmitWorkflowEmail)\b|['"`][^'"`]*workflow-mail(?:\.ts)?['"`]/.test(
+        source,
+      )
+    })
+    expect(callers).toEqual([])
   })
 
   it('exposes no storage module through a package entry point', () => {
@@ -700,6 +721,22 @@ describe('booking workflows are off and expose only definition reads, creation, 
     expect(service).toContain(
       'export const captureWorkflowBooking = workflowCapture(captureBookingWorkflows)',
     )
+  })
+
+  it('keeps dispatcher and repair handlers guarded and absent from production registration', () => {
+    const service = readFileSync(new URL('packages/workflows/src/dispatcher.ts', root), 'utf8')
+    expect(service).toContain(
+      'export const dispatchWorkflowRuns = workflowExecution(dispatchDueWorkflowRuns)',
+    )
+    expect(service).toContain(
+      'export const repairWorkflowWakes = workflowExecution(repairWorkflowRunWakes)',
+    )
+    for (const file of productionSources().filter(
+      (file) => !file.startsWith('packages/workflows/src/'),
+    )) {
+      const source = readFileSync(new URL(file, root), 'utf8')
+      expect(source, file).not.toMatch(/\bworkflowJobs\b|workflow-dispatch-v1|workflow-repair-v1/)
+    }
   })
 
   it.each(['mock', 'doMock', 'importMock'])(

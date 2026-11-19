@@ -27,6 +27,7 @@ export const COMMANDS = {
   'routing-forms create': 'create_routing_form',
   'routing-forms update': 'update_routing_form',
   'routing-forms archive': 'archive_routing_form',
+  'routing-forms publish': 'publish_routing_form',
 
   'audit-log list': 'list_audit_events',
   'audit-log settings': 'get_audit_log_settings',
@@ -92,7 +93,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
-       hourmere routing-forms list|get|create|update|archive [--input FILE|-] [--url ORIGIN]
+       hourmere routing-forms list|get|create|update|archive|publish [--input FILE|-] [--url ORIGIN]
        hourmere workflows list|get|create|update|delete [--input FILE|-] [--url ORIGIN]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
@@ -119,6 +120,9 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
      with read/full scope. SSO is being built and is not available yet: sso_disabled.
+Pass id, expectedRevision and an optional requestId (UUID) as JSON to routing-forms publish.
+Publication requires full scope. Repeat the same input with the same requestId to recover its version.
+Routing form commands return routing_forms_disabled until routing forms are enabled on the instance.
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
            workflows update (id, expectedRevision, and changed definition fields).

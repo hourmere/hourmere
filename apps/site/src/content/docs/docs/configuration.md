@@ -492,10 +492,13 @@ for public apps; its private/development apps do not trigger those notifications
 
 ## Paid-booking foundation
 
-`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
-adapter. It has no runtime effect in this release: setting it to `true` does not permit
-hold creation or enable payment collection. Existing holds expire regardless of this
-setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout. It has no
+runtime effect in this release. Setting it to `true` does not permit hold creation or enable
+payment collection. Existing holds expire regardless of this setting. Leave the optional
+server-only Stripe settings empty while Checkout is internal. Compose forwards them unset
+by default. When using a `_FILE` setting, supply the path inside the container and mount the
+secret file read-only for each server role.
+See [the operator note and limitations](/docs/payments).
 
 ## SMS reminders
 

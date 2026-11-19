@@ -1,4 +1,67 @@
 export const common = {
+  'meetingPoll.title': 'Sondage de réunion',
+  'meetingPoll.unavailable': 'Ce sondage est indisponible.',
+  'meetingPoll.unavailableHelp':
+    'Ouvrez le lien d’origine de votre invitation ou contactez la personne qui organise la réunion.',
+  'meetingPoll.loading': 'Chargement du sondage…',
+  'meetingPoll.loadError': 'Impossible de charger ce sondage. Réessayez plus tard.',
+  'meetingPoll.retry': 'Réessayer',
+  'meetingPoll.name': 'Votre nom',
+  'meetingPoll.email': 'Adresse e-mail',
+  'meetingPoll.timeZone': 'Fuseau horaire',
+  'meetingPoll.enroll': 'Envoyer l’e-mail de vérification',
+  'meetingPoll.checkEmail': 'Consultez votre messagerie',
+  'meetingPoll.checkEmailHelp':
+    'Si vous remplissez les conditions, vous recevrez un lien pour continuer. Consultez votre boîte de réception et vos courriers indésirables.',
+  'meetingPoll.verify': 'Vérifier mon adresse e-mail',
+  'meetingPoll.verifyHelp':
+    'Confirmez votre adresse e-mail pour continuer. Ouvrir cette page ne soumet aucun vote.',
+  'meetingPoll.recover': 'Récupérer l’accès',
+  'meetingPoll.pollId': 'Identifiant du sondage',
+  'meetingPoll.recoverSubmit': 'Envoyer l’e-mail d’accès',
+  'meetingPoll.yes': 'Oui',
+  'meetingPoll.ifNeedBe': 'Si nécessaire',
+  'meetingPoll.no': 'Non',
+  'meetingPoll.consent':
+    'J’accepte de participer à la réunion si ma participation est retenue et de partager mes réponses avec la personne qui l’organise.',
+  'meetingPoll.selectionHelp':
+    'Seule une partie des personnes ayant voté peut être retenue. La personne désignée pour la réservation peut gérer toute la réunion, et l’invitation de calendrier peut révéler les participants les uns aux autres.',
+  'meetingPoll.save': 'Enregistrer mon vote',
+  'meetingPoll.saving': 'Enregistrement…',
+  'meetingPoll.saved': 'Votre vote est enregistré.',
+  'meetingPoll.changed': 'Vos modifications sont enregistrées.',
+  'meetingPoll.withdraw': 'Retirer mon vote',
+  'meetingPoll.withdrawn':
+    'Votre vote a été retiré. Vos réponses ont été supprimées et les e-mails de ce sondage ont été arrêtés.',
+  'meetingPoll.reactivate': 'Soumettre un nouveau vote',
+  'meetingPoll.private':
+    'Seuls la personne qui organise la réunion et les gestionnaires autorisés peuvent voir votre identité et vos réponses. Les autres votants ne voient pas votre vote.',
+  'meetingPoll.aggregate':
+    'Les votants vérifiés peuvent voir les totaux de chaque option. Dans un petit groupe, ces totaux peuvent révéler les choix d’une autre personne. Votre identité et vos réponses ne sont visibles que par la personne qui organise la réunion et les gestionnaires autorisés.',
+  'meetingPoll.deadline': 'Fin du vote : {date}',
+  'meetingPoll.closed': 'Le vote est clos. Vous pouvez consulter vos réponses précédentes.',
+  'meetingPoll.scheduled': 'Un horaire a été choisi. Le vote est clos.',
+  'meetingPoll.canceled': 'Ce sondage est terminé. Le vote est clos.',
+  'meetingPoll.chosen': 'Horaire choisi',
+  'meetingPoll.rateLimited': 'Trop de demandes. Veuillez patienter avant de réessayer.',
+  'meetingPoll.invalid': 'Vérifiez vos saisies et réessayez.',
+  'meetingPoll.full': 'Ce sondage est complet. Vous pouvez toujours récupérer un lien existant.',
+  'meetingPoll.stale':
+    'Votre vote a été modifié ailleurs. Rechargez-le et vérifiez-le avant de l’enregistrer à nouveau.',
+  'meetingPoll.uncertain':
+    'Impossible de confirmer cette modification. Rechargez votre vote avant de réessayer.',
+  'meetingPoll.reload': 'Recharger mon vote',
+  'meetingPoll.optOutTitle': 'Arrêter les rappels du sondage',
+  'meetingPoll.optOutHelp':
+    'Confirmez pour arrêter les rappels de ce sondage. Cela ne retire pas votre vote.',
+  'meetingPoll.optOut': 'Arrêter les rappels',
+  'meetingPoll.optedOut': 'Les rappels de ce sondage sont arrêtés.',
+  'meetingPoll.optionsOne': '{count} horaire proposé',
+  'meetingPoll.optionsOther': '{count} horaires proposés',
+  'meetingPoll.countYes': 'Oui : {count}',
+  'meetingPoll.countIfNeedBe': 'Si nécessaire : {count}',
+  'meetingPoll.countNo': 'Non : {count}',
+  'meetingPoll.required': 'Obligatoire',
   'No location has been specified. Contact the host for meeting details.':
     'Aucun lieu n’a été précisé. Contactez l’hôte pour connaître les détails de la réunion.',
   '{count} seat left': '{count} place restante',
@@ -491,4 +554,6 @@ export const common = {
   'Opens the host’s website in the parent page.': 'Ouvre le site de l’hôte dans la page parente.',
   'Opens the host’s website in a new tab.': 'Ouvre le site de l’hôte dans un nouvel onglet.',
   'Opens the host’s website in this tab.': 'Ouvre le site de l’hôte dans cet onglet.',
+  // Meeting poll reminder opt-out
+  'meetingPoll.optOutError': 'Impossible de désactiver les rappels. Réessayez.',
 } as const

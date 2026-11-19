@@ -60,9 +60,11 @@ It is not an ICS serialization promise.
 
 ### Proposed limits
 
-These are design values, not runtime constants yet. `scripts/recurring-bookings-docs.test.ts`
-pins them; the step that first enforces a value adds a shared constant and changes the test
-to compare it. Raising a limit requires design review and new performance evidence.
+Rule expansion enforces the occurrence counts and local calendar horizon below.
+`scripts/recurring-bookings-docs.test.ts` compares those values with the runtime constants
+and pins the remaining design values. As each remaining value is enforced, a shared
+constant replaces the literal in the test. Raising a limit requires design review and new
+performance evidence.
 
 | Proposed limit | Value | Reason |
 | --- | --- | --- |
@@ -977,7 +979,7 @@ No separate broad manual matrix or live provider-send test is added by this plan
 
 ## Out of scope and known limitations
 
-No implementation in this PR. No open-ended/yearly/daily/custom RRULE series, exceptions at
+No open-ended/yearly/daily/custom RRULE series, exceptions at
 creation, arbitrary per-date alternatives, partial commits, tail/all rescheduling, series
 waitlist, one-time-link redemption, group seats, payment/refund orchestration,
 imported-series management, per-occurrence round-robin rotation, provider recurring masters,
