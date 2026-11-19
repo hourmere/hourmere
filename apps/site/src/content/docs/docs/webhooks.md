@@ -190,7 +190,7 @@ actual transition has a new event ID; repeating the same state emits no event. T
 envelope, `v1` signature and headers as every other event, so one verifier handles all of them.
 See [no-shows](/docs/no-shows).
 
-The planned `workflow.executed` payload carries the bounded booking projection, including
+The `workflow.executed` payload carries the bounded booking projection, including
 `data.bookingId` (a required UUID), `data.start`, `data.end` and `data.status`. It adds
 `data.workflowId`, `data.workflowRevision`, `data.trigger` and `data.workflowRunId` (stable
 across delivery attempts). Team workflow deliveries omit `data.source` and

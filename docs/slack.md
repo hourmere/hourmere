@@ -63,9 +63,9 @@ again after the destination lock (a demotion during the wait wins). Browser sess
 the team context check and receive `team_management_access_denied`.
 
 A synthetic test delivery stores its own event ID in `webhook_deliveries.request_id`.
-Delivery identity is unique on `(webhook_id, booking_id, event_type, request_id)` with
-`NULLS NOT DISTINCT` (migration 0064). Samples have no booking, so the event ID lets a
-new sample follow a finished one. On rows with a null `booking_id`, `request_id` is that
+Delivery identity is unique on `(webhook_id, booking_id, event_type, request_id, workflow_run_id)`
+with `NULLS NOT DISTINCT` (migration 0147). Samples leave booking and workflow run IDs NULL,
+so the event ID lets a new sample follow a finished one. On rows with a null `booking_id`, `request_id` is that
 marker, never a reschedule-request ID.
 
 Times use the personal organization owner’s public profile time zone, including the UTC
