@@ -4,7 +4,7 @@ import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
 import { lockUser, requireCalendarSession } from './index.ts'
 
-/** Internal owner-session selection only; no application route or worker is enabled. */
+/** Owner-session selection preserves existing pinned booking targets. */
 export async function configureCalDavWriteCalendar(
   deps: { db: Db; now?: () => number },
   principal: Principal,

@@ -269,13 +269,21 @@ export {
   type OpenTimeSnippetOptions,
 } from './open-time-snippets.ts'
 export { expirePaymentHolds } from './payment-expiry.ts'
-export { FakePaymentProvider, type PaymentProvider } from './payment-provider.ts'
+export {
+  type CheckoutOperation,
+  type CheckoutSession,
+  FakePaymentProvider,
+  type PaymentMode,
+  type PaymentProvider,
+} from './payment-provider.ts'
 export {
   cancelPaymentHold,
   confirmPaymentHold,
+  createPaymentCheckout,
   createPaymentHold,
   PAYMENT_HOLD_MINUTES,
   type PaymentContext,
+  type PaymentPrice,
 } from './payments.ts'
 export {
   findLegacyHandleCollisions,
@@ -330,6 +338,11 @@ export {
   type RecurringBookingAdmissionDeps,
   recurringBookingAdmissionEnabled,
 } from './recurring-admission.ts'
+export {
+  checkRecurringAvailability,
+  type RecurringAvailabilityInput,
+  type RecurringAvailabilityResult,
+} from './recurring-availability.ts'
 export {
   expandRecurringRule,
   MAX_RECURRING_HORIZON_DAYS,

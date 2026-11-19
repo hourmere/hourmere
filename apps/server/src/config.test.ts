@@ -120,13 +120,15 @@ describe('loadConfig', () => {
     ['INVITATION_TEAM_MAX_PER_HOUR', 50, 1],
     ['INVITATION_TEAM_MAX_PER_DAY', 200, 1],
     ['MAIL_MAX_PER_HOUR', 100, 0],
+    ['WORKFLOW_MAIL_MAX_PER_HOUR', 20, 0],
+    ['WORKFLOW_OWNER_MAIL_MAX_PER_HOUR', 5, 0],
   ] as const)('%s', (name, fallback, minimum) => {
     it('enables the default even when Compose passes an empty variable', () => {
       expect(loadConfig(base)[name]).toBe(fallback)
       expect(loadConfig({ ...base, [name]: '' })[name]).toBe(fallback)
     })
 
-    it('accepts bounded whole numbers, with zero only for rescheduling or the global cap', () => {
+    it('accepts bounded whole numbers at or above the setting minimum', () => {
       for (const value of [minimum, 7, 2147483647])
         expect(loadConfig({ ...base, [name]: String(value) })[name]).toBe(value)
     })
@@ -686,4 +688,42 @@ describe('loadConfig', () => {
       )
     })
   })
+})
+
+describe('CalDAV operator outbound policy', () => {
+  it.each(['web', 'worker', 'all'])(
+    'uses separate bounded trust configuration for %s',
+    (HOURMERE_ROLE) => {
+      const defaults = loadConfig({ ...base, HOURMERE_ROLE })
+      expect(defaults.CALDAV_PRIVATE_TARGETS).toEqual([])
+      expect(defaults.CALDAV_ALLOWED_ORIGINS).toEqual([])
+      const configured = loadConfig({
+        ...base,
+        HOURMERE_ROLE,
+        CALDAV_ALLOWED_ORIGINS: 'https://p01-caldav.icloud.com,https://p01-caldav.icloud.com/',
+        CALDAV_PRIVATE_TARGETS: 'nextcloud.internal:443',
+      })
+      expect(configured.CALDAV_ALLOWED_ORIGINS).toEqual(['https://p01-caldav.icloud.com'])
+      expect(configured.CALDAV_PRIVATE_TARGETS).toEqual(
+        parseWebhookPrivateTargets('nextcloud.internal:443'),
+      )
+      expect(configured.WEBHOOK_PRIVATE_TARGETS).toEqual([])
+      for (const value of [
+        'http://example.com',
+        'https://*.icloud.com',
+        'https://example.com/path',
+        'https://user:password@example.com',
+        'https://example.com/?secret=value',
+        'https://example.com/#fragment',
+        Array(33).fill('https://example.com').join(','),
+      ]) {
+        expect(() => loadConfig({ ...base, HOURMERE_ROLE, CALDAV_ALLOWED_ORIGINS: value })).toThrow(
+          /CALDAV_ALLOWED_ORIGINS/,
+        )
+      }
+      expect(() => loadConfig({ ...base, CALDAV_PRIVATE_TARGETS: '169.254.169.254:443' })).toThrow(
+        /CALDAV_PRIVATE_TARGETS/,
+      )
+    },
+  )
 })

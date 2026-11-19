@@ -1,7 +1,6 @@
 // Bounded cleanup of meeting-poll storage (docs/meeting-polls.md, "Storage policy and cleanup
-// schedule"): expired public pending reservations, terminal polls past the installation's
-// retention, and the pseudonymous replay tombstones of deleted polls once their purge instant
-// passes. An internal service for the hourly worker job; no transport.
+// schedule"): expired public pending reservations, deadline closure, terminal retention,
+// and due pseudonymous replay tombstones. Internal service for the hourly worker job.
 //
 // Cleanup never waits for a lock. It takes the public voter order of the voter services (a
 // personal owner's user, then the organization, FOR SHARE; then the poll FOR UPDATE), each
@@ -54,6 +53,7 @@ export async function cleanupMeetingPolls(
   const limit = cleanupLimit(options.limit)
   const retentionDays = terminalRetention(options.terminalRetentionDays)
   const expired = await deleteExpiredReservations(db, limit)
+  const deadlines = await persistMeetingPollDeadlines(db, { limit })
   const terminal =
     retentionDays === null
       ? { deleted: 0, more: false }
@@ -63,8 +63,57 @@ export async function cleanupMeetingPolls(
     expiredReservations: expired.deleted,
     terminalPolls: terminal.deleted,
     receipts: receipts.deleted,
-    more: expired.more || terminal.more || receipts.more,
+    more: expired.more || deadlines.more || terminal.more || receipts.more,
   }
+}
+
+/** Persist one bounded page and enqueue creator notices in the same transaction. */
+export async function persistMeetingPollDeadlines(
+  db: Db,
+  options: { limit?: number; now?: () => Temporal.Instant } = {},
+): Promise<{ closed: number; more: boolean }> {
+  const limit = cleanupLimit(options.limit)
+  const clockExpression = () =>
+    options.now ? sql`${options.now().toString()}::timestamptz` : sql`clock_timestamp()`
+  return db.transaction().execute(async (trx) => {
+    const { rows: candidates } = await sql<{ id: string }>`
+      SELECT id FROM meeting_polls
+      WHERE status = 'open' AND deadline_at <= ${clockExpression()}
+      ORDER BY deadline_at, id LIMIT ${limit}`.execute(trx)
+    const polls = await lockPolls(
+      trx,
+      candidates.map((row) => row.id),
+      true,
+    )
+    if (polls.length === 0) return { closed: 0, more: false }
+    const { rows } = await sql<{ id: string }>`
+      WITH decision AS MATERIALIZED (SELECT ${clockExpression()} AS at),
+      closed AS (
+        UPDATE meeting_polls AS poll
+        SET status = 'closed', closed_at = deadline_at, updated_at = decision.at
+        FROM decision
+        WHERE poll.id = ANY(${polls}::uuid[]) AND poll.status = 'open'
+          AND poll.deadline_at <= decision.at
+        RETURNING poll.id, poll.organization_id, poll.event_type_id, poll.created_by_user_id
+      ), queued AS (
+        INSERT INTO meeting_poll_deliveries (organization_id, poll_id, host_user_id, kind, due_at)
+        SELECT poll.organization_id, poll.id, poll.created_by_user_id, 'deadline_closed', decision.at
+        FROM closed AS poll CROSS JOIN decision
+        JOIN auth."user" AS creator ON creator.id = poll.created_by_user_id AND creator."emailVerified"
+        JOIN auth.member AS member ON member."organizationId" = poll.organization_id
+          AND member."userId" = creator.id
+        JOIN event_types AS event ON event.id = poll.event_type_id
+          AND event.organization_id = poll.organization_id AND event.deleted_at IS NULL
+        LEFT JOIN personal_organizations AS personal ON personal.organization_id = poll.organization_id
+        WHERE (personal.user_id = creator.id AND event.owner_user_id = creator.id)
+          OR (personal.user_id IS NULL AND event.owner_user_id IS NULL
+            AND regexp_split_to_array(btrim(member.role), '\\s*,\\s*') && ARRAY['owner', 'admin'])
+        ON CONFLICT DO NOTHING
+      )
+      SELECT id FROM closed`.execute(trx)
+    const closed = rows.length
+    return { closed, more: closed > 0 && candidates.length === limit }
+  })
 }
 
 /**
@@ -149,15 +198,22 @@ async function purgeReceipts(db: Db, limit: number) {
 /**
  * Lock, without waiting, the polls among `ids` in the public voter order: personal owners'
  * users, then organizations, FOR SHARE; then the polls FOR UPDATE. Anything locked
- * elsewhere is skipped together with the polls behind it. Returns the locked poll IDs.
+ * elsewhere is skipped together with the polls behind it. Deadline notices also lock the
+ * creator's user before the poll, so inserting the host-recipient FK cannot wait on deletion.
  */
-async function lockPolls(trx: Db, ids: readonly string[]): Promise<string[]> {
+export async function lockPolls(
+  trx: Db,
+  ids: readonly string[],
+  lockCreators = false,
+): Promise<string[]> {
   if (ids.length === 0) return []
   const { rows: users } = await sql<{ id: string }>`
     SELECT u.id FROM auth."user" AS u
     WHERE u.id IN (SELECT personal.user_id FROM personal_organizations AS personal
       JOIN meeting_polls AS poll ON poll.organization_id = personal.organization_id
       WHERE poll.id = ANY(${ids}::uuid[]))
+      OR (${lockCreators} AND u.id IN (
+        SELECT created_by_user_id FROM meeting_polls WHERE id = ANY(${ids}::uuid[])))
     ORDER BY u.id FOR SHARE SKIP LOCKED`.execute(trx)
   const { rows: organizations } = await sql<{ id: string }>`
     SELECT o.id FROM auth.organization AS o
@@ -172,6 +228,8 @@ async function lockPolls(trx: Db, ids: readonly string[]): Promise<string[]> {
     SELECT id FROM meeting_polls
     WHERE id = ANY(${ids}::uuid[])
       AND organization_id = ANY(${organizations.map((row) => row.id)}::uuid[])
+      AND (NOT ${lockCreators} OR created_by_user_id IS NULL
+        OR created_by_user_id = ANY(${users.map((row) => row.id)}::uuid[]))
     ORDER BY id FOR UPDATE SKIP LOCKED`.execute(trx)
   return polls.map((row) => row.id)
 }

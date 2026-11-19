@@ -1484,6 +1484,21 @@ only after host/current-membership authorization; non-host team owners/admins re
 a browser session. Public and invitee-management reads never return the roster.
 See [group events](https://hourmere.com/docs/group-events) for operations and constraints.
 
+Occurrence attendee lists default to confirmed seats (`status=active`); request
+`status=cancelled` or `status=all` for retained cancellation history. Lists are bounded
+by `limit` (1–100, default 25) and `offset` (0–10000, default 0), returning
+`pagination: {limit, offset, hasMore}`. REST query parameters and MCP/CLI JSON inputs
+share these rules. Each page is a snapshot, ordered by creation time and booking ID;
+concurrent changes can move records between requests. Switching an event type back to
+individual mode requires both `bookingMode: "individual"` and `groupCapacity: null`
+in the same update because omitted fields retain their saved values.
+
+Attendee pagination stops at offset 10000; `hasMore` indicates another permitted page,
+not whether older retained history exists beyond that bound.
+
+中文：名单翻页最多到偏移量 10000；`hasMore` 表示还有可请求的下一页，
+不保证该范围之外没有保留的历史记录。
+
 ## Public meeting polls
 
 Meeting-poll public transports use POST bodies at `/api/v1/public/meeting-polls/`

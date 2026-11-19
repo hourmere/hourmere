@@ -1,10 +1,12 @@
-/** Internal foundation; no REST, MCP, CLI or application worker integration is enabled yet. */
+/** CalDAV services for browser connections and guarded background synchronization. */
 
 export {
   type CalDavConnectionDeps,
   connectCalDav,
   disconnectCalDav,
+  discoverCalDavConnection,
   listCalDavConnections,
+  saveCalDavConnection,
 } from './caldav-connection.ts'
 export {
   type CalDavCredentialRecord,
@@ -42,4 +44,8 @@ export {
   calDavBookingNotifier,
   writeCalDavBooking,
 } from './caldav-writeback.ts'
-export { calDavBookingJob, createCalDavBookingEnqueuer } from './caldav-writeback-jobs.ts'
+export {
+  calDavBookingJob,
+  calDavRecoveryJob,
+  createCalDavBookingEnqueuer,
+} from './caldav-writeback-jobs.ts'

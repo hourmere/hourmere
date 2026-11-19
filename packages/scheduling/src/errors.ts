@@ -1,5 +1,5 @@
 /** What kind of failure, independent of transport; the HTTP layer maps each to a status. */
-export type DomainErrorKind = 'invalid' | 'not_found' | 'forbidden' | 'conflict'
+export type DomainErrorKind = 'invalid' | 'not_found' | 'forbidden' | 'conflict' | 'unavailable'
 
 /** Generic API codes; services may use invalid_request only for invalid input. */
 export const RESERVED_ERROR_CODES: ReadonlySet<string> = new Set([

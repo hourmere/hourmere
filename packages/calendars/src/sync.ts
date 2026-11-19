@@ -3,10 +3,19 @@ import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import { configureCalDavCalendar, syncCalDavCalendar } from './caldav-sync.ts'
+import { CalDavError } from './caldav-transport.ts'
+import { configureCalDavWriteCalendar } from './caldav-write-selection.ts'
 import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import { type GoogleEvent, GoogleSyncReset } from './google-events.ts'
-import { type CalendarDeps, lockUser, readTokens, tokenAad } from './index.ts'
+import {
+  type CalendarDeps,
+  lockUser,
+  readTokens,
+  requireCalendarSession,
+  tokenAad,
+} from './index.ts'
 
 export const SYNC_MAX_AGE_MS = 10 * 60_000
 // v2 retains all-day dates. Never extend a v1 snapshot of calendar-zone instant ranges.
@@ -332,6 +341,21 @@ export async function configureCalendar(
   id: string,
   checkConflicts: boolean,
 ) {
+  if (await isOwnedCalDav(deps, principal, id)) {
+    if (!deps.caldav && checkConflicts)
+      throw new DomainError('conflict', 'caldav_calendar_disabled')
+    return configureCalDavCalendar(
+      {
+        db: deps.db,
+        ...deps.caldav,
+        ...(deps.now ? { now: deps.now } : {}),
+      },
+      principal,
+      id,
+      checkConflicts,
+    )
+  }
+
   if (!z.uuid().safeParse(id).success || typeof checkConflicts !== 'boolean')
     throw new DomainError('invalid', 'invalid_calendar_settings')
   await deps.db.transaction().execute(async (trx) => {
@@ -385,6 +409,40 @@ export async function configureCalendar(
 }
 
 export async function syncOwnedCalendar(deps: CalendarDeps, principal: Principal, id: string) {
+  if (await isOwnedCalDav(deps, principal, id)) {
+    requireCalendarSession(principal)
+    if (!deps.caldav) throw new DomainError('conflict', 'caldav_calendar_disabled')
+    await deps.db.transaction().execute((trx) => lockUser(trx, principal, deps.now ?? Date.now))
+    const calendar = await deps.db
+      .selectFrom('calendars')
+      .select('check_conflicts')
+      .where('id', '=', id)
+      .executeTakeFirst()
+    if (!calendar?.check_conflicts) throw new DomainError('conflict', 'calendar_sync_disabled')
+    try {
+      await syncCalDavCalendar(
+        {
+          db: deps.db,
+          ...deps.caldav,
+          client: deps.caldav.syncClient,
+          ...(deps.now ? { now: deps.now } : {}),
+        },
+        id,
+        undefined,
+        principal,
+      )
+    } catch (error) {
+      if (error instanceof DomainError) throw error
+      throw new DomainError(
+        'conflict',
+        error instanceof CalDavError && error.code === 'unauthorized'
+          ? 'caldav_needs_reauth'
+          : 'caldav_provider_unavailable',
+      )
+    }
+    return
+  }
+
   if (!z.uuid().safeParse(id).success) throw new DomainError('not_found', 'calendar_not_found')
   if (!deps.google) throw new DomainError('conflict', 'google_calendar_disabled')
   const calendar = await deps.db
@@ -416,10 +474,24 @@ export async function setCalendarDestination(
   principal: Principal,
   calendarId: string | null,
 ) {
+  if (calendarId !== null && (await isOwnedCalDav(deps, principal, calendarId))) {
+    if (!deps.caldav) throw new DomainError('conflict', 'caldav_calendar_disabled')
+    return configureCalDavWriteCalendar(deps, principal, calendarId)
+  }
+
   if (calendarId !== null && !z.uuid().safeParse(calendarId).success)
     throw new DomainError('invalid', 'invalid_calendar_settings')
   await deps.db.transaction().execute(async (trx) => {
     await lockUser(trx, principal, deps.now ?? Date.now)
+    const currentCalDav = await trx
+      .selectFrom('profiles as p')
+      .innerJoin('calendars as c', 'c.id', 'p.destination_calendar_id')
+      .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
+      .select('c.id')
+      .where('p.user_id', '=', principal.user.id)
+      .where('cc.provider', '=', 'caldav')
+      .executeTakeFirst()
+    if (currentCalDav) requireCalendarSession(principal)
     if (calendarId !== null) {
       const row = await trx
         .selectFrom('calendars as c')
@@ -454,4 +526,18 @@ export async function setCalendarDestination(
         'Create a profile before selecting a booking calendar.',
       )
   })
+}
+
+async function isOwnedCalDav(deps: CalendarDeps, principal: Principal, id: string) {
+  if (!z.uuid().safeParse(id).success) return false
+  return Boolean(
+    await deps.db
+      .selectFrom('calendars as c')
+      .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
+      .select('c.id')
+      .where('c.id', '=', id)
+      .where('cc.user_id', '=', principal.user.id)
+      .where('cc.provider', '=', 'caldav')
+      .executeTakeFirst(),
+  )
 }

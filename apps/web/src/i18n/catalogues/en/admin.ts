@@ -1,5 +1,38 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Connect CalDAV': 'Connect CalDAV',
+  'Reconnect CalDAV': 'Reconnect CalDAV',
+  'CalDAV provider': 'CalDAV provider',
+  'Other CalDAV server': 'Other CalDAV server',
+  'CalDAV server URL': 'CalDAV server URL',
+  'CalDAV username': 'CalDAV username',
+  'CalDAV app password': 'CalDAV app password',
+  'CalDAV booking destination': 'CalDAV booking destination',
+  'Do not write new bookings': 'Do not write new bookings',
+  'Edit CalDAV credentials': 'Edit CalDAV credentials',
+  'Connecting CalDAV…': 'Connecting CalDAV…',
+  'Save CalDAV connection': 'Save CalDAV connection',
+  'Discover calendars': 'Discover calendars',
+  'Check {0} for conflicts': 'Check {0} for conflicts',
+  'Needs attention': 'Needs attention',
+  'CalDAV connection saved. Selected calendars are synchronizing.':
+    'CalDAV connection saved. Selected calendars are synchronizing.',
+  'CalDAV stores encrypted credentials and calendar metadata. Busy-time synchronization stores times, not event titles or attendees. Booking copies contain meeting details but do not send calendar invitations.':
+    'CalDAV stores encrypted credentials and calendar metadata. Busy-time synchronization stores times, not event titles or attendees. Booking copies contain meeting details but do not send calendar invitations.',
+  'Disconnect stops synchronization and booking updates, deletes stored credentials and local calendar data, and leaves existing events on the server. Revoke the app password with your provider separately.':
+    'Disconnect stops synchronization and booking updates, deletes stored credentials and local calendar data, and leaves existing events on the server. Revoke the app password with your provider separately.',
+  'CalDAV could not complete this request. Check your server, app password and calendar permissions, then try again. Your saved connection has not been replaced by failed discovery.':
+    'CalDAV could not complete this request. Check your server, app password and calendar permissions, then try again. Your saved connection has not been replaced by failed discovery.',
+  'Use your Apple Account login and an app-specific password with two-factor authentication enabled. Never enter your primary Apple Account password. iCloud shard origins may need exact operator approval; real-account compatibility has not been verified.':
+    'Use your Apple Account login and an app-specific password with two-factor authentication enabled. Never enter your primary Apple Account password. iCloud shard origins may need exact operator approval; real-account compatibility has not been verified.',
+  'Use your Nextcloud DAV URL, including any installation prefix, ending in /remote.php/dav/. Use a dedicated app password. Private servers need operator configuration and verified HTTPS.':
+    'Use your Nextcloud DAV URL, including any installation prefix, ending in /remote.php/dav/. Use a dedicated app password. Private servers need operator configuration and verified HTTPS.',
+  'Use your full Fastmail username and an app password with calendar access. Basic plans do not support CalDAV.':
+    'Use your full Fastmail username and an app password with calendar access. Basic plans do not support CalDAV.',
+  'Choose calendars to check for conflicts and optionally one writable calendar for new bookings. Existing bookings keep their original destination.':
+    'Choose calendars to check for conflicts and optionally one writable calendar for new bookings. Existing bookings keep their original destination.',
+  'No event calendars were found. Check the account and server URL.':
+    'No event calendars were found. Check the account and server URL.',
   'Current value: {value} {unit}.': 'Current value: {value} {unit}.',
   minutes: 'minutes',
   hours: 'hours',
@@ -28,6 +61,13 @@ export const admin = {
     'Check the group settings: use one host, 2–100 seats, no additional guests and no invitee phone location.',
   'Booking mode cannot change while upcoming confirmed bookings exist.':
     'Booking mode cannot change while upcoming confirmed bookings exist.',
+  'Seat status': 'Seat status',
+  'Active seats': 'Active seats',
+  'Cancelled seats': 'Cancelled seats',
+  'All seats': 'All seats',
+  'No seats match this filter on this page.': 'No seats match this filter on this page.',
+  'Attendee list pages': 'Attendee list pages',
+  'Page {page}': 'Page {page}',
   'Session attendee list': 'Session attendee list',
   'Only the host and authorized team administrators can see this list. Invitees cannot see each other.':
     'Only the host and authorized team administrators can see this list. Invitees cannot see each other.',
