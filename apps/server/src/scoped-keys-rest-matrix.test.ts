@@ -18,7 +18,12 @@ import {
 } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createRoutingForm, getScheduleAvailability } from '@hourmere/scheduling'
+import {
+  createRoutingForm,
+  getScheduleAvailability,
+  publishRoutingForm,
+  updateRoutingForm,
+} from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { createSlackDestination, createWebhook } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -52,6 +57,8 @@ const classes = {
     'GET /api/v1/me',
     'GET /api/v1/profile',
     'GET /api/v1/public/{handle}',
+    'GET /api/v1/public/-/routing/{handle}/{slug}',
+    'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
     'GET /api/v1/public/{handle}/{slug}',
     'GET /api/v1/public/{handle}/{slug}/slots',
     'GET /api/v1/public/teams/{handle}/{slug}',
@@ -116,6 +123,7 @@ const classes = {
     'PATCH /api/v1/routing-forms/{id}',
     'DELETE /api/v1/routing-forms/{id}',
     'POST /api/v1/routing-forms/{id}/publish',
+    'POST /api/v1/routing-forms/{id}/preview',
     'POST /api/v1/workflows',
     'PATCH /api/v1/workflows/{id}',
     'DELETE /api/v1/workflows/{id}',
@@ -312,6 +320,21 @@ describe.skipIf(!process.env.DATABASE_URL)(
       )
       if (!resolved.ok) throw Error('Fixture key must authenticate')
       fullPrincipal = resolved.principal
+      for (const principal of [owner, fullPrincipal]) {
+        const context = { db, principal, now: () => Temporal.Now.instant() }
+        const form = await createRoutingForm(context, {
+          slug: 'scope-matrix',
+          title: 'Public routing scope matrix',
+          fallback: { kind: 'message', message: 'Thanks' },
+        })
+        const publication = await publishRoutingForm(context, form.id, {
+          expectedRevision: form.draftRevision,
+        })
+        await updateRoutingForm(context, form.id, {
+          expectedRevision: publication.form.draftRevision,
+          enabled: true,
+        })
+      }
       mainWebhook = (
         await createWebhook(
           { db, principal: fullPrincipal, now: () => Temporal.Now.instant() },
@@ -568,6 +591,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }
           expectedStatus = 201
         }
+      } else if (template.startsWith('/api/v1/public/-/routing/')) {
+        path = path
+          .replace('{handle}', 'rest-scoped-host')
+          .replace('{teamSlug}', 'rest-scoped-team')
+          .replace('{slug}', 'scope-matrix')
       } else if (
         template.startsWith('/api/v1/public/') &&
         !template.startsWith('/api/v1/public/meeting-polls/')
@@ -811,7 +839,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
               input,
             )
           ).id
-        if (method === 'POST') {
+        if (template.endsWith('/preview')) {
+          payload = { answers: {} }
+        } else if (method === 'POST') {
           payload = template.endsWith('/publish') ? { expectedRevision: 1 } : input
           expectedStatus = 201
         }
@@ -893,14 +923,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 155-operation contract and all 465 scope combinations', () => {
+    it('covers the exact 158-operation contract and all 474 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(155)
-      expect(new Set(ids).size).toBe(155)
+      expect(ids).toHaveLength(158)
+      expect(new Set(ids).size).toBe(158)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(465)
+      expect(cases).toHaveLength(474)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

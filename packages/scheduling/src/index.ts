@@ -344,6 +344,15 @@ export {
   type RecurringAvailabilityResult,
 } from './recurring-availability.ts'
 export {
+  BookingSeriesRateLimitError,
+  type CreateBookingSeriesInput,
+  type CreateBookingSeriesOptions,
+  type CreateBookingSeriesResult,
+  createPublicBookingSeries,
+  createPublicTeamBookingSeries,
+  type ExpectedBookingSeriesPreview,
+} from './recurring-creation.ts'
+export {
   expandRecurringRule,
   MAX_RECURRING_HORIZON_DAYS,
   MAX_RECURRING_OCCURRENCES,
@@ -356,11 +365,19 @@ export {
 export {
   archiveRoutingForm,
   createRoutingForm,
+  getPublicRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  previewRoutingForm,
   publishRoutingForm,
+  ROUTING_RECEIPT_LIMITS,
+  RoutingAdmissionError,
+  type RoutingSubmissionContext,
+  type RoutingSubmissionResult,
+  submitRoutingForm,
   updateRoutingForm,
 } from './routing-form-service.ts'
+export { routingRequestKey } from './routing-receipt-crypto.ts'
 export {
   confirmDefaultSchedule,
   createSchedule,
