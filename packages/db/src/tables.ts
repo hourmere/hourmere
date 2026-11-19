@@ -399,6 +399,7 @@ export interface BookingNotificationConferenceContext {
 
 export interface BookingNotifications {
   booking_id: string;
+  calendar_attached: boolean | null;
   created_at: Generated<Timestamp>;
   kind: string;
   manage_token_hash: Buffer | null;
@@ -532,6 +533,7 @@ export interface BookingSeriesAdmissions {
 
 export interface BookingSeriesNotifications {
   attempts: number | null;
+  calendar_ordinals: number[] | null;
   capability_scope: string | null;
   due_at: Timestamp | null;
   id: Generated<string>;

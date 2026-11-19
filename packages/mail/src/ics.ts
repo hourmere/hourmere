@@ -51,6 +51,11 @@ export interface IcsEvent {
   attendees: readonly IcsAttendee[]
 }
 
+/** An independent calendar entry in an importable snapshot. */
+export type IcsSnapshotEvent = Omit<IcsEvent, 'method'> & {
+  status: 'CONFIRMED' | 'CANCELLED'
+}
+
 // Control characters other than tab, which TEXT values may not contain (RFC 5545 3.3.11),
 // plus the Unicode line separators and bidi controls.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: finding control characters is the point
@@ -113,14 +118,8 @@ export function foldIcsLine(line: string): string {
   return parts.join('\r\n ')
 }
 
-/** An iCalendar object with one VEVENT, CRLF line endings, lines folded. */
-export function buildIcs(event: IcsEvent): string {
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Hourmere//Hourmere//EN',
-    'CALSCALE:GREGORIAN',
-    `METHOD:${event.method}`,
+function eventLines(event: IcsSnapshotEvent): string[] {
+  return [
     'BEGIN:VEVENT',
     `UID:${escapeIcsText(event.uid)}`,
     `SEQUENCE:${Math.max(0, Math.trunc(event.sequence))}`,
@@ -135,12 +134,31 @@ export function buildIcs(event: IcsEvent): string {
       (a) =>
         `ATTENDEE;CN=${quotedParam(a.name)};ROLE=${a.role ?? 'REQ-PARTICIPANT'};PARTSTAT=${a.partstat ?? 'ACCEPTED'};RSVP=${a.rsvp ? 'TRUE' : 'FALSE'}:${mailto(a.email)}`,
     ),
-    `STATUS:${event.method === 'CANCEL' ? 'CANCELLED' : 'CONFIRMED'}`,
+    `STATUS:${event.status}`,
     'TRANSP:OPAQUE',
     'END:VEVENT',
+  ]
+}
+
+function buildCalendar(events: readonly IcsSnapshotEvent[], method?: IcsEvent['method']): string {
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Hourmere//Hourmere//EN',
+    'CALSCALE:GREGORIAN',
+    ...(method ? [`METHOD:${method}`] : []),
+    ...events.flatMap(eventLines),
     'END:VCALENDAR',
   ]
   return `${lines.map(foldIcsLine).join('\r\n')}\r\n`
+}
+
+/** An iCalendar scheduling object with one VEVENT, CRLF line endings, lines folded. */
+export function buildIcs(event: IcsEvent): string {
+  return buildCalendar(
+    [{ ...event, status: event.method === 'CANCEL' ? 'CANCELLED' : 'CONFIRMED' }],
+    event.method,
+  )
 }
 
 /** The invitation as an email attachment. */
@@ -149,5 +167,14 @@ export function icsAttachment(event: IcsEvent): MailAttachment {
     filename: event.method === 'CANCEL' ? 'cancel.ics' : 'invite.ics',
     contentType: `text/calendar; method=${event.method}; charset=UTF-8`,
     content: buildIcs(event),
+  }
+}
+
+/** An importable calendar attachment with independent events and no scheduling method. */
+export function calendarSnapshotAttachment(events: readonly IcsSnapshotEvent[]): MailAttachment {
+  return {
+    filename: 'series.ics',
+    contentType: 'text/calendar; charset=UTF-8',
+    content: buildCalendar(events),
   }
 }
