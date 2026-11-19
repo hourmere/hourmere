@@ -59,14 +59,24 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider_domains',
     'sso_providers',
   ],
-  'apps/server/src/sso-fresh-proof.ts': ['sso_attempts', 'sso_policies'],
+  'apps/server/src/sso-fresh-proof.ts': [
+    'sso_attempts',
+    'sso_identity_links',
+    'sso_policies',
+    'sso_providers',
+  ],
   'apps/server/src/sso-oidc-admission-write.ts': [
     'sso_attempts',
     'sso_identity_links',
     'sso_policies',
   ],
   'apps/server/src/sso-oidc-admission.ts': ['sso_attempts', 'sso_providers'],
-  'apps/server/src/sso-oidc-attempt.ts': ['sso_attempts', 'sso_providers'],
+  'apps/server/src/sso-oidc-attempt.ts': [
+    'sso_attempts',
+    'sso_identity_links',
+    'sso_policies',
+    'sso_providers',
+  ],
   'apps/server/src/sso-oidc-completion.ts': ['sso_attempts', 'sso_identity_links'],
   'apps/server/src/sso-oidc-link.ts': [
     'sso_attempts',

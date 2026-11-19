@@ -500,12 +500,15 @@ An SSO step-up measures a verified authentication event, not session creation or
 ID-token `iat`. OIDC step-up sends `prompt=login` and `max_age=0` and requires a signed
 numeric `auth_time` no earlier than attempt creation minus `oidcClockSkew`, no later
 than now plus `oidcClockSkew`, and at most `freshAdministrationProof` before the
-callback. SAML step-up sends `ForceAuthn="true"` and requires a signed AuthnStatement `AuthnInstant`
-within the same bounds, using `clockSkew`. A missing or out-of-window value is the case
-where the IdP cannot prove freshness. The result must come from the attempt's own user
+callback. The lower bound uses the OIDC authorization attempt created at step-up initiation.
+SAML step-up sends `ForceAuthn="true"` and requires a signed AuthnStatement `AuthnInstant`
+within the same bounds, using `clockSkew`. An OIDC token with a missing `auth_time` proves
+only the linked identity and adds `mailbox`. A signed OIDC `auth_time` outside the allowed
+window is refused. The result must come from the attempt's own user
 and that user's existing link at that provider; it is recorded on the pending attempt
 and creates no session, browser proof or link. It expires at the earlier of attempt
-expiry and the authentication instant plus `freshAdministrationProof`. Silent IdP SSO,
+expiry and the authentication instant plus `freshAdministrationProof`. For the missing-claim
+fallback, receipt time caps the identity result until the mailbox is also proven. Silent IdP SSO,
 rolling sessions and refresh tokens never renew freshness.
 
 ### Browser proof
@@ -555,7 +558,7 @@ tokens after validation; never repurpose calendar or MCP OAuth credentials.
 
 The internal verifier is in place while both protocols stay hard-off. It accepts only
 signed RS256 ID tokens with a matching attempt nonce. It returns the exact issuer and
-subject and, when present, the signed `auth_time` for the future step-up flow.
+subject and, when present, the signed `auth_time` used by step-up.
 Sign-in attempts use a fresh S256 challenge and an authenticated state envelope. The
 attempt row binds that state to the initiating browser, provider revision and team, and
 only one callback can take the verifier and nonce. The OIDC sign-in adapter uses these
@@ -951,7 +954,7 @@ reference their IDs; the provider inventory includes safe domain status/generati
 The three domain writes are browser-session-only and remain `404 sso_disabled` while
 both protocols are hard-off; they have no MCP tools or CLI commands. With the internal
 test capability enabled, each requires a verified current team owner/admin, the exact
-Origin, expected organization header and operation-bound mailbox fresh proof. A new
+Origin, expected organization header and operation-bound fresh administration proof. A new
 challenge lasts 24 hours and rotates the generation; the TXT value is returned only once.
 Names are normalized to lowercase IDNA ASCII and one trailing DNS root dot is removed.
 Wildcards, IPs, special-use names, public suffixes (including private suffixes) and known
@@ -970,7 +973,7 @@ follow the [domain lifecycle runbook](#domain-lifecycle-operations) below.
 
 域名挑战、验证与退役只允许浏览器会话调用，没有 MCP 工具或 CLI 命令。
 OIDC 和 SAML 仍在代码中关闭，三个接口均返回 `404 sso_disabled`。内部测试开启后，
-当前团队中已验证的所有者或管理员须提供同源请求、预期团队和操作绑定的邮箱新鲜证明。
+当前团队中已验证的所有者或管理员须提供同源请求、预期团队和操作绑定的新鲜管理证明。
 域名转换为小写 IDNA ASCII，并移除一个末尾根点；拒绝通配符、IP、特殊用途名称、
 公共后缀（含私有后缀）以及已知公共邮箱域名及其子域名。父域名与子域名须分别证明。
 挑战有效期为 24 小时；重新创建会轮换代次，TXT 值只返回一次。DNS 故障显示 `unknown`，
@@ -1104,8 +1107,10 @@ must append that cookie and return the challenge as HTTP 403, after its attempt 
 Successful proof consumption and the protected mutation share one transaction; a failed
 mutation rolls back consumption. The database clock is read after the row locks, and an
 expired recorded mailbox proof requires a new attempt. Teams without enforcement need
-`mailbox`; seeded enforced teams need `sso`, which this gate deliberately cannot satisfy
-until a protocol step-up implementation exists. Both protocols remain hard-off in production.
+`mailbox`. `sso` is required for fresh administration only when OIDC is available and the
+team has both `requireSso` and an enabled OIDC provider. The gate rechecks the recorded
+result's deadline, provider, link and trust generation before consuming the attempt.
+Independent local proof still requires `mailbox`. Both protocols remain hard-off in production.
 
 Mailbox proof is an authentication protocol surface, outside `/api/v1` and the product
 interface-parity inventory, like sign-in/callback below; it has no MCP/CLI equivalent:
@@ -1211,6 +1216,20 @@ before checking their inputs or accessing the database.
 回调仅使用一次授权码和状态，并在创建会话前重新检查提供商版本、域名声明、身份关联、
 已证明的邮箱和当前团队成员资格。浏览器证明取适用期限中的最早时间，会话续期不延长证明。
 OIDC 在生产代码中保持关闭，登录发起、回调和完成端点均返回 `404 sso_disabled`。
+
+OIDC step-up uses the same initiation and callback. Its state binds the authorization
+response to the pending write attempt, existing session and browser, provider revision,
+linked identity and team trust generation. The callback checks those bindings both before
+code exchange and when recording the result. A successful callback returns to `returnTo`
+and the client retries the write with the same `proofAttemptId`. If the provider omitted
+`auth_time`, that retry returns the same attempt with `mailbox` still required. Provider
+discovery, code exchange and signing-key fetches run outside database transactions.
+
+OIDC 二次验证沿用登录发起和回调端点，并要求身份提供方重新认证。回调在兑换授权码前及记录
+结果时，都检查原写入尝试、浏览器、会话、提供方版本、身份关联和团队信任代数。完成后返回
+`returnTo`，客户端用原 `proofAttemptId` 重试写入。如果令牌缺少 `auth_time`，重试会要求在
+同一个尝试中补做邮箱证明。签名中的认证时间超出允许范围时，二次验证会被拒绝。只有 OIDC
+已启用且团队已强制 SSO 并有活动的 OIDC 提供方时，管理写入才要求此验证。
 
 When the OIDC callback sees a changed email for a linked identity, it stores a short-lived,
 frozen result for the original browser and hands off to `/app/mailbox-proof` with the opaque

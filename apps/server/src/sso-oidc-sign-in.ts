@@ -29,6 +29,7 @@ import {
   OidcStateReplay,
   type OidcTestActor,
   oidcReturnDestination,
+  recordOidcStepUp,
   startOidcAttempt,
   TEST_SSO_PROVIDER,
 } from './sso-oidc-attempt.ts'
@@ -70,11 +71,19 @@ declare module 'hono' {
 const errorPath = '/sign-in?error=unable_to_create_session'
 const testReturnPath = '/app/settings'
 const providerIdSchema = z.uuidv7()
-const startInput = z.strictObject({
-  providerId: providerIdSchema,
-  intent: z.literal('sign_in'),
-  returnTo: z.string().optional(),
-})
+const startInput = z.discriminatedUnion('intent', [
+  z.strictObject({
+    providerId: providerIdSchema,
+    intent: z.literal('sign_in'),
+    returnTo: z.string().optional(),
+  }),
+  z.strictObject({
+    providerId: providerIdSchema,
+    intent: z.literal('step_up'),
+    attemptId: z.uuid(),
+    returnTo: z.string().optional(),
+  }),
+])
 const completeInput = z.strictObject({ attemptId: z.uuidv7() })
 const invitationInput = z.strictObject({ invitationId: z.uuid() })
 const completionInvalid = { error: 'sso_oidc_completion_invalid' } as const
@@ -187,6 +196,7 @@ function authorizationUrl(
   providerId: string,
   endpoints: Awaited<ReturnType<typeof providerEndpoints>>,
   { id: _id, ...parameters }: Awaited<ReturnType<typeof startOidcAttempt>>,
+  stepUp = false,
 ) {
   const authorization = new URL(endpoints.authorizationEndpoint)
   authorization.search = new URLSearchParams({
@@ -195,6 +205,7 @@ function authorizationUrl(
     client_id: endpoints.clientId,
     redirect_uri: callbackUrl(publicUrl, providerId),
     scope: 'openid email profile',
+    ...(stepUp && { prompt: 'login', max_age: '0' }),
   }).toString()
   return authorization.href
 }
@@ -241,6 +252,8 @@ export async function testSsoProvider(
     if (provider.revision !== input.expectedRevision) throw changed()
     return provider
   }
+  let authorized: Provider | undefined
+  let endpoints: Awaited<ReturnType<typeof providerEndpoints>> | undefined
   return runWithFreshProof(
     deps,
     {
@@ -261,17 +274,19 @@ export async function testSsoProvider(
           true,
           true,
         )(db, organizationId)
-        await draft(db)
+        authorized = await draft(db)
       },
-      mutate: async (db, _input, browserBinding) => {
-        const provider = await draft(db)
-        if (!configurationKey) throw missing()
-        let endpoints: Awaited<ReturnType<typeof providerEndpoints>>
+      prepare: async () => {
+        if (!authorized || !configurationKey) throw missing()
         try {
-          endpoints = await providerEndpoints(provider, configurationKey, transport)
+          endpoints = await providerEndpoints(authorized, configurationKey, transport)
         } catch {
           throw missing()
         }
+      },
+      mutate: async (db, _input, browserBinding) => {
+        const provider = authorized
+        if (!provider || !configurationKey || !endpoints) throw missing()
         const parameters = await startOidcAttempt(
           { db, configurationKey },
           {
@@ -507,6 +522,14 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           c.header('Retry-After', String(wait))
           return c.json({ error: 'rate_limited' }, 429)
         }
+        const currentBinding = getCookie(c, cookie)
+        const reuse = currentBinding !== undefined && browserBindingDigest(currentBinding) !== null
+        let ceremony: { kind: 'step_up'; actor: OidcTestActor; attemptId: string } | undefined
+        if (parsed.data.intent === 'step_up') {
+          const actor = reuse && (await deps.readSession(c.req.raw.headers))
+          if (!actor) return c.json({ error: 'sso_not_found' }, 404)
+          ceremony = { kind: 'step_up', actor, attemptId: parsed.data.attemptId }
+        }
         const provider = await findProvider(db, parsed.data.providerId)
         if (
           provider?.protocol !== 'oidc' ||
@@ -522,13 +545,12 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           return c.json({ error: 'sso_not_found' }, 404)
         }
 
-        const currentBinding = getCookie(c, cookie)
-        const reuse = currentBinding !== undefined && browserBindingDigest(currentBinding) !== null
         const browserBinding = reuse ? currentBinding : randomBytes(32).toString('base64url')
         try {
           const parameters = await startOidcAttempt(
             { db, configurationKey },
             { ...provider, browserBinding, returnPath, endpointsDigest: endpoints.digest },
+            ceremony,
           )
           // A binding issued by fresh administration can still have SameSite=Strict.
           // Keep its value and allow the top-level GET back from the provider.
@@ -539,11 +561,18 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
             sameSite: 'Lax',
           })
           return c.json({
-            url: authorizationUrl(publicUrl, provider.providerId, endpoints, parameters),
+            url: authorizationUrl(
+              publicUrl,
+              provider.providerId,
+              endpoints,
+              parameters,
+              !!ceremony,
+            ),
             redirect: true,
           })
         } catch (error) {
-          if (error instanceof OidcAttemptRefused) return c.json({ error: 'sso_not_found' }, 404)
+          if (error instanceof OidcAttemptRefused || (ceremony && expiresDuringOidcWrite(error)))
+            return c.json({ error: 'sso_not_found' }, 404)
           throw error
         }
       })
@@ -679,6 +708,16 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
         if (testActor) return finishTest(testActor)
         try {
+          if (attempt.stepUp) {
+            const failure = await recordOidcStepUp(
+              db,
+              { ...provider, browserBinding: getCookie(c, cookie) },
+              attempt.stepUp,
+              attempt.createdAt,
+              identity,
+            )
+            return failure ? fail(failure) : c.redirect(attempt.returnPath)
+          }
           if (attempt.link) {
             const pending = await stageOidcLink(
               { db, configurationKey },
@@ -742,7 +781,8 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           return c.redirect(attempt.returnPath)
         } catch (error) {
           if (error instanceof OidcLinkDomainUnverified) return fail('domain_unverified')
-          if (attempt.link && expiresDuringOidcWrite(error)) return fail('attempt_expired')
+          if ((attempt.link || attempt.stepUp) && expiresDuringOidcWrite(error))
+            return fail('attempt_expired')
           if (error instanceof OidcAttemptRefused) return fail('configuration_changed')
           throw error
         }

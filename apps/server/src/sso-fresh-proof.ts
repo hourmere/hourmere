@@ -166,10 +166,19 @@ export async function runWithFreshProof<T>(
         AND s."expiresAt" > ${now}::timestamptz`.execute(trx)
       const mailbox = session.rows[0]?.mailbox
       if (!mailbox) throw new HTTPException(403, { message: 'forbidden' })
-      const policy = await sql<{ require_sso: boolean }>`SELECT require_sso FROM sso_policies
-      WHERE organization_id = ${request.organizationId}::uuid`.execute(trx)
       const independentMailbox = request.proofMode === 'mailbox'
-      const needsSso = !independentMailbox && policy.rows[0]?.require_sso === true
+      const policy =
+        deps.capabilities.ssoOidcEnabled && !independentMailbox
+          ? await sql<{ trust_generation: number }>`SELECT trust_generation FROM sso_policies
+          WHERE organization_id = ${request.organizationId}::uuid AND require_sso
+            AND EXISTS (
+              SELECT 1 FROM sso_providers
+              WHERE organization_id = ${request.organizationId}::uuid
+                AND protocol = 'oidc' AND enabled AND retired_at IS NULL
+            )`.execute(trx)
+          : undefined
+      const trustGeneration = policy?.rows[0]?.trust_generation ?? null
+      const needsSso = trustGeneration !== null
       const needsMailbox = !needsSso
       if (proofAttemptId) {
         const { rows } = await sql<{
@@ -178,11 +187,13 @@ export async function runWithFreshProof<T>(
           requires_mailbox: boolean
           requires_sso: boolean
           mailbox_live: boolean
+          sso_live: boolean
           proven_at: string | null
           proof_expires_at: string | null
         }>`SELECT id, expires_at::text, requires_mailbox, requires_sso,
           mailbox_proven_at::text AS proven_at,
           mailbox_proof_expires_at::text AS proof_expires_at,
+          step_up_link_id IS NOT NULL AS sso_live,
           (mailbox_proven_at IS NOT NULL AND mailbox_proof_expires_at > ${now}::timestamptz)
             AS mailbox_live
         FROM sso_attempts
@@ -195,13 +206,24 @@ export async function runWithFreshProof<T>(
           AND (mailbox_proven_at IS NULL OR mailbox_proof_expires_at > ${now}::timestamptz)
           AND requires_sso = ${needsSso}
           AND (NOT ${independentMailbox} OR mailbox = ${mailbox})
-          AND (requires_mailbox OR NOT ${needsMailbox})`.execute(trx)
+          AND (requires_mailbox OR NOT ${needsMailbox})
+          AND (step_up_link_id IS NULL OR (
+            step_up_proof_expires_at > ${now}::timestamptz
+            AND step_up_trust_generation = ${trustGeneration}::integer
+            AND (NOT requires_mailbox OR mailbox = ${mailbox})
+            AND EXISTS (
+              SELECT 1 FROM sso_identity_links l JOIN sso_providers p ON p.id = l.provider_id
+              WHERE l.id = step_up_link_id AND l.user_id = sso_attempts.user_id
+                AND l.organization_id = sso_attempts.organization_id
+                AND p.id = step_up_provider_id AND p.protocol = 'oidc'
+                AND l.retired_at IS NULL AND p.enabled AND p.retired_at IS NULL
+            )
+          ))`.execute(trx)
         const attempt = rows[0]
         if (attempt) {
           const remaining: string[] = []
           if (attempt.requires_mailbox && !attempt.mailbox_live) remaining.push('mailbox')
-          // SSO proof cannot be satisfied until the protocol's step-up implementation exists.
-          if (attempt.requires_sso) remaining.push('sso')
+          if (attempt.requires_sso && !attempt.sso_live) remaining.push('sso')
           if (remaining.length > 0)
             return {
               status: 'proof_required',

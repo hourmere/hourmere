@@ -27,6 +27,7 @@ import {
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { sealSsoProviderConfiguration, ssoProviderConfigurationAad } from './sso-configuration.ts'
@@ -48,6 +49,7 @@ const callbackPath = (providerId: string) => `/api/auth/sso/callback/${providerI
 const completePath = '/api/auth/sso/oidc/complete'
 const acceptInvitationPath = '/api/auth/organization/accept-invitation'
 const providersPath = '/api/v1/team/sso/providers'
+const domainsPath = '/api/v1/team/sso/domains'
 const providerTestPath = (providerId: string) => `${providersPath}/${providerId}/test`
 const linkPath = (providerId: string) => `${providersPath}/${providerId}/link`
 const removeLinkPath = (providerId: string, linkId: string) =>
@@ -259,6 +261,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       publicUrl,
       routes: [
         ssoRoutes({ db, capabilities }),
+        ssoDomainRoutes({ db, publicUrl, capabilities }),
         ssoIdentityRecoveryRoutes({
           db,
           publicUrl,
@@ -311,11 +314,16 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     })
   }
 
-  function configuration(providerId: string, revision: number, discovery = false) {
+  function configuration(
+    providerId: string,
+    revision: number,
+    discovery = false,
+    organizationId = fixture.team,
+  ) {
     const { issuer, clientId, clientSecret } = config
     return sealSsoProviderConfiguration(
       configurationKey,
-      { organizationId: fixture.team, providerId, revision },
+      { organizationId, providerId, revision },
       JSON.stringify(discovery ? { issuer, clientId, clientSecret } : config),
     )
   }
@@ -325,11 +333,13 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     domainExpiresIn,
     discovery = false,
     domain = `team-${randomUUID().slice(0, 8)}.example.com`,
+    organizationId = fixture.team,
   }: {
     enabled?: boolean
     domainExpiresIn?: number
     discovery?: boolean
     domain?: string
+    organizationId?: string
   } = {}) {
     const { id: providerId } = await db
       .selectNoFrom(sql<string>`uuidv7()`.as('id'))
@@ -338,17 +348,17 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       .insertInto('sso_providers')
       .values({
         id: providerId,
-        organization_id: fixture.team,
+        organization_id: organizationId,
         protocol: 'oidc',
         display_name: 'Synthetic OIDC',
         issuer,
         client_id: config.clientId,
-        configuration: configuration(providerId, 1, discovery),
+        configuration: configuration(providerId, 1, discovery, organizationId),
         enabled,
       })
       .execute()
     const domainValues = {
-      ...claimedDomainValues(fixture.team, domain),
+      ...claimedDomainValues(organizationId, domain),
       ...(domainExpiresIn !== undefined && { verification_expires_at: at(domainExpiresIn) }),
     }
     const claim = await db
@@ -359,7 +369,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     await db
       .insertInto('sso_provider_domains')
       .values({
-        organization_id: fixture.team,
+        organization_id: organizationId,
         provider_id: providerId,
         domain_id: claim.id,
       })
@@ -662,13 +672,17 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     )
   }
 
-  async function freshProofChallenge(response: Response, cookies: string): Promise<MailboxAttempt> {
+  async function freshProofChallenge(
+    response: Response,
+    cookies: string,
+    proofMethods = ['mailbox'],
+  ): Promise<MailboxAttempt> {
     expect(response.status).toBe(403)
     const challenge = (await response.json()) as { attemptId: string }
     expect(challenge).toMatchObject({
       error: 'sso_reauthentication_required',
       attemptId: expect.any(String),
-      proofMethods: ['mailbox'],
+      proofMethods,
     })
     const binding = response.headers
       .getSetCookie()
@@ -920,6 +934,73 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     )
   }
 
+  async function enforceSso() {
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: true })
+      .execute()
+  }
+
+  function domainChallenge(cookie: string, body: Record<string, unknown>) {
+    return post(body, app, { cookie, 'X-Expected-Organization-Id': fixture.team }, domainsPath)
+  }
+
+  async function stepUpFixture(options?: Parameters<typeof provider>[0]) {
+    const f = await provider(options)
+    const identity = await recoveryTarget(f, fixture.owner)
+    const owner = await browserSession(fixture.owner)
+    return { ...f, ...identity, owner }
+  }
+
+  function initiateStepUp(
+    providerId: string,
+    pending: MailboxAttempt,
+    extra: Record<string, unknown> = {},
+  ) {
+    return post({ providerId, intent: 'step_up', attemptId: pending.id, ...extra }, app, {
+      cookie: pending.cookie,
+    })
+  }
+
+  const stepUpReturnTo = '/app/settings?tab=sso#fresh-proof'
+
+  async function startStepUp(providerId: string, pending: MailboxAttempt): Promise<Attempt> {
+    const response = await initiateStepUp(providerId, pending, { returnTo: stepUpReturnTo })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const { url, redirect } = (await response.json()) as { url: string; redirect: boolean }
+    expect(redirect).toBe(true)
+    const authorization = new URL(url)
+    expect(authorization.origin + authorization.pathname).toBe(config.authorizationEndpoint)
+    expect(authorization.searchParams.getAll('prompt')).toEqual(['login'])
+    expect(authorization.searchParams.getAll('max_age')).toEqual(['0'])
+    expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+    const binding = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith(`${bindingCookie}=`))
+    expect(binding).toMatch(/; SameSite=Lax/i)
+    expect(pending.cookie).toContain(binding?.split(';')[0])
+    return {
+      id: authorization.searchParams.get('state')?.split('.')[0] as string,
+      providerId,
+      authorization,
+      cookie: pending.cookie,
+    }
+  }
+
+  function expectStepUpRedirect(response: Response) {
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(stepUpReturnTo)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.getSetCookie()).toEqual([])
+  }
+
+  async function stepUpDomainProof(cookie: string, body: Record<string, unknown>) {
+    return freshProofChallenge(await domainChallenge(cookie, body), cookie, ['sso'])
+  }
+
+  const authTime = async () => Math.floor(Date.parse(await databaseClock(db)) / 1000)
+
   it('hard-disables OIDC auth-protocol endpoints before looking up the request', async () => {
     const off = instance({ enabled: false })
     const { providerId, link } = await linked()
@@ -930,6 +1011,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     ] as const) {
       const responses = [
         await post({ providerId: provider, intent: 'sign_in' }, off),
+        await post({ providerId: provider, intent: 'step_up', attemptId: linkId }, off),
         await off.request(new URL(`${callbackPath(provider)}?code=ignored`, publicUrl)),
         await post({ attemptId: provider }, off, {}, completePath),
         await post(
@@ -957,6 +1039,276 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     ).toEqual([])
     expect(await audit()).toEqual([])
     expect(recoveryJobs).toEqual([])
+  })
+
+  it.each([
+    ['provider draft', 201],
+    ['domain challenge', 201],
+    ['provider test', 200],
+    ['admin link removal', 204],
+  ] as const)('requires OIDC step-up for an enforced team %s write', async (operation, status) => {
+    const f = await stepUpFixture()
+    const draft = await provider({ enabled: false, discovery: operation === 'provider test' })
+    const target = await recoveryTarget(f, fixture.member)
+    const requestWrite = (cookie: string, proofAttemptId?: string) => {
+      const proof = proofAttemptId ? { proofAttemptId } : {}
+      const writes = {
+        'provider draft': () =>
+          post(
+            {
+              protocol: 'oidc',
+              displayName: 'Step-up draft',
+              domainIds: [],
+              oidc: config,
+              ...proof,
+            },
+            app,
+            { cookie, 'X-Expected-Organization-Id': fixture.team },
+            providersPath,
+          ),
+        'domain challenge': () =>
+          domainChallenge(cookie, { domain: 'new-org.example.com', ...proof }),
+        'provider test': () =>
+          testRequest(draft.providerId, cookie, { expectedRevision: 1, ...proof }),
+        'admin link removal': () =>
+          recoveryRequest(removeLinkPath(f.providerId, target.link.id), cookie, proof),
+      }
+      return writes[operation]()
+    }
+
+    const mailbox = await freshProofChallenge(await requestWrite(f.owner.cookie), f.owner.cookie)
+    await proveMailbox(mailbox)
+    await enforceSso()
+    const pending = await freshProofChallenge(
+      await requestWrite(mailbox.cookie, mailbox.id),
+      mailbox.cookie,
+      ['sso'],
+    )
+    expect(pending.id).not.toBe(mailbox.id)
+    expect((await attemptRow(mailbox)).consumed_at).toBeNull()
+
+    const attempt = await startStepUp(f.providerId, pending)
+    const authenticatedAt = await authTime()
+    const before = await effects()
+    const code = idp.issue(attempt, { ...f.claims, auth_time: authenticatedAt })
+    expectStepUpRedirect(await callback(attempt, code))
+    expect(await effects()).toEqual(before)
+    expect(await attemptRow(pending)).toMatchObject({
+      consumed_at: null,
+      requires_mailbox: false,
+      step_up_provider_id: f.providerId,
+      step_up_link_id: f.link.id,
+      step_up_authenticated_at: new Date(authenticatedAt * 1000),
+      step_up_proof_expires_at: new Date((authenticatedAt + 300) * 1000),
+      step_up_trust_generation: 1,
+    })
+    expect((await audit()).some(({ action }) => action === signInAction)).toBe(false)
+
+    if (operation === 'provider test') {
+      idp.discovery.mockImplementation(async () => {
+        await assertStepUpRowsUnlocked(pending.id)
+        return json(metadata)
+      })
+    }
+    expect((await requestWrite(pending.cookie, pending.id)).status).toBe(status)
+    if (operation === 'provider test') expect(idp.discovery).toHaveBeenCalledOnce()
+    expect((await attemptRow(pending)).consumed_at).toBeInstanceOf(Date)
+    if (operation === 'admin link removal') {
+      expect((await storedLink(target.link.id))?.retired_at).toBeInstanceOf(Date)
+      expect(recoveryJobs).toHaveLength(1)
+    }
+  })
+
+  it('adds mailbox proof to an OIDC step-up without signed auth_time', async () => {
+    const f = await stepUpFixture()
+    await enforceSso()
+    const body = { domain: 'fallback-org.example.com' }
+    const pending = await stepUpDomainProof(f.owner.cookie, body)
+    const attempt = await startStepUp(f.providerId, pending)
+    const before = await effects()
+    // The fake signs a current iat even when the provider omits auth_time.
+    expectStepUpRedirect(await callback(attempt, idp.issue(attempt, f.claims)))
+    expect(await effects()).toEqual(before)
+    expect(await attemptRow(pending)).toMatchObject({
+      requires_sso: true,
+      requires_mailbox: true,
+      mailbox_proven_at: null,
+      step_up_link_id: f.link.id,
+      consumed_at: null,
+    })
+    const retry = { ...body, proofAttemptId: pending.id }
+    expect(
+      await freshProofChallenge(await domainChallenge(pending.cookie, retry), pending.cookie),
+    ).toEqual(pending)
+    const { message, token } = await mailboxMessage(pending)
+    expect(message.to).toBe(f.claims.email)
+    expect((await consumeMailbox(pending, token)).status).toBe(200)
+    expect((await domainChallenge(pending.cookie, retry)).status).toBe(201)
+    expect((await attemptRow(pending)).consumed_at).toBeInstanceOf(Date)
+  })
+
+  it.each([
+    ['stale', -45],
+    ['future', 60],
+    ['silent SSO', -3600],
+  ] as const)('refuses OIDC step-up with %s signed auth_time', async (_case, offset) => {
+    const f = await stepUpFixture()
+    await enforceSso()
+    const body = { domain: 'fresh-org.example.com' }
+    const pending = await stepUpDomainProof(f.owner.cookie, body)
+    const attempt = await startStepUp(f.providerId, pending)
+    const before = await effects()
+    const code = idp.issue(attempt, { ...f.claims, auth_time: (await authTime()) + offset })
+    await refusal(await callback(attempt, code))
+    expect(await effects()).toEqual(before)
+    expect(await attemptRow(pending)).toMatchObject({
+      requires_mailbox: false,
+      step_up_link_id: null,
+      consumed_at: null,
+    })
+    expect(
+      await stepUpDomainProof(pending.cookie, { ...body, proofAttemptId: pending.id }),
+    ).toEqual(pending)
+  })
+
+  it('binds OIDC step-up to the exact pending attempt, browser session and team', async () => {
+    const f = await stepUpFixture()
+    const differentProvider = await provider()
+    const otherTeamProvider = await provider({ organizationId: fixture.otherTeam })
+    const otherUser = await browserSession(fixture.admin)
+    const otherSession = await browserSession(fixture.owner)
+    await enforceSso()
+    const body = { domain: 'bound-org.example.com' }
+    const pending = await stepUpDomainProof(f.owner.cookie, body)
+    const otherPending = await stepUpDomainProof(pending.cookie, {
+      domain: 'other-org.example.com',
+    })
+    const binding = pending.cookie.split('; ').find((part) => part.startsWith(`${bindingCookie}=`))
+    expect(binding).toBeDefined()
+    const otherUserCookie = `${otherUser.cookie}; ${binding}`
+    const otherSessionCookie = `${otherSession.cookie}; ${binding}`
+    const otherBrowserCookie = `${f.owner.cookie}; ${bindingCookie}=${randomBytes(32).toString('base64url')}`
+    const { id: unknownId } = await db
+      .selectNoFrom(sql<string>`uuidv7()`.as('id'))
+      .executeTakeFirstOrThrow()
+    for (const response of [
+      await initiateStepUp(f.providerId, { ...pending, id: unknownId }),
+      await initiateStepUp(f.providerId, { ...pending, cookie: otherUserCookie }),
+      await initiateStepUp(f.providerId, { ...pending, cookie: otherSessionCookie }),
+      await initiateStepUp(f.providerId, { ...pending, cookie: otherBrowserCookie }),
+      await initiateStepUp(differentProvider.providerId, pending),
+      await initiateStepUp(otherTeamProvider.providerId, pending),
+    ]) {
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: 'sso_not_found' })
+      expect(response.headers.getSetCookie()).toEqual([])
+    }
+
+    const attempt = await startStepUp(f.providerId, pending)
+    const concurrent = await startStepUp(f.providerId, pending)
+    const before = await effects()
+    const claims = { ...f.claims, auth_time: await authTime() }
+    const code = idp.issue(attempt, claims)
+    for (const wrong of [
+      { cookie: otherUserCookie },
+      { cookie: otherSessionCookie },
+      { cookie: otherBrowserCookie },
+      { providerId: differentProvider.providerId },
+      { providerId: otherTeamProvider.providerId },
+    ])
+      await refusal(await callback(attempt, code, wrong))
+    expect(idp.exchange).not.toHaveBeenCalled()
+    expect((await attemptRow(pending)).step_up_link_id).toBeNull()
+
+    expectStepUpRedirect(await callback(attempt, code))
+    await refusal(await callback(attempt, code))
+    expect(idp.exchange).toHaveBeenCalledTimes(1)
+    expect(await effects()).toEqual(before)
+    expect((await attemptRow(otherPending)).step_up_link_id).toBeNull()
+
+    const changed = await stepUpDomainProof(pending.cookie, {
+      domain: 'changed-org.example.com',
+      proofAttemptId: pending.id,
+    })
+    expect(changed.id).not.toBe(pending.id)
+    expect((await attemptRow(pending)).consumed_at).toBeNull()
+    expect(
+      (await domainChallenge(pending.cookie, { ...body, proofAttemptId: pending.id })).status,
+    ).toBe(201)
+    expect((await attemptRow(pending)).consumed_at).toBeInstanceOf(Date)
+    await refusal(await callback(concurrent, idp.issue(concurrent, claims)))
+    expect(idp.exchange).toHaveBeenCalledTimes(1)
+    const consumed = await initiateStepUp(f.providerId, pending)
+    expect(consumed.status).toBe(404)
+    expect(await consumed.json()).toEqual({ error: 'sso_not_found' })
+  })
+
+  it('refuses OIDC step-up when the signed subject links to another person', async () => {
+    const f = await stepUpFixture()
+    const other = await recoveryTarget(f, fixture.admin)
+    await enforceSso()
+    const pending = await stepUpDomainProof(f.owner.cookie, { domain: 'subject-org.example.com' })
+    const attempt = await startStepUp(f.providerId, pending)
+    const before = await effects()
+    const code = idp.issue(attempt, { ...other.claims, auth_time: await authTime() })
+    await refusal(await callback(attempt, code))
+    expect(await effects()).toEqual(before)
+    expect((await attemptRow(pending)).step_up_link_id).toBeNull()
+    expect(await storedLink(other.link.id)).toEqual(other.link)
+  })
+
+  const assertStepUpRowsUnlocked = (id: string) =>
+    db.transaction().execute(async (trx) => {
+      await sql`SELECT id FROM auth.organization WHERE id = ${fixture.team} FOR UPDATE NOWAIT`.execute(
+        trx,
+      )
+      await sql`SELECT id FROM sso_attempts WHERE id = ${id} FOR UPDATE NOWAIT`.execute(trx)
+    })
+
+  it('keeps provider I/O outside database locks and refuses a pending attempt that expires during exchange', async () => {
+    const f = await stepUpFixture({ discovery: true })
+    await enforceSso()
+    const pending = await stepUpDomainProof(f.owner.cookie, { domain: 'expiry-org.example.com' })
+    const { id: _id, ...values } = await attemptRow(pending)
+    const { id } = await db
+      .insertInto('sso_attempts')
+      .values({ ...values, expires_at: sql`clock_timestamp() + interval '2 seconds'` })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const expiring = { ...pending, id }
+    const unlockedDiscovery = async () => {
+      await assertStepUpRowsUnlocked(id)
+      return json(metadata)
+    }
+    idp.discovery.mockImplementation(unlockedDiscovery)
+    const attempt = await startStepUp(f.providerId, expiring)
+    const before = await effects()
+    let exchangeUnlocked = false
+    const code = idp.issue(attempt, { ...f.claims, auth_time: await authTime() }, async () => {
+      await assertStepUpRowsUnlocked(id)
+      exchangeUnlocked = true
+      await vi.waitFor(
+        async () => {
+          const row = await db
+            .selectFrom('sso_attempts')
+            .select(sql<boolean>`expires_at <= clock_timestamp()`.as('expired'))
+            .where('id', '=', id)
+            .executeTakeFirstOrThrow()
+          expect(row.expired).toBe(true)
+        },
+        { timeout: 3000 },
+      )
+    })
+    await refusal(await callback(attempt, code))
+    expect(idp.discovery).toHaveBeenCalledTimes(2)
+    expect(idp.exchange).toHaveBeenCalledTimes(1)
+    expect(exchangeUnlocked).toBe(true)
+    expect(await effects()).toEqual(before)
+    expect((await attemptRow(expiring)).step_up_link_id).toBeNull()
+    expect((await attemptRow(pending)).step_up_link_id).toBeNull()
+    const expired = await initiateStepUp(f.providerId, expiring)
+    expect(expired.status).toBe(404)
+    expect(await expired.json()).toEqual({ error: 'sso_not_found' })
   })
 
   it('rejects provider tests without the expected team, exact origin and authorized browser role', async () => {
