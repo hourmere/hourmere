@@ -591,7 +591,7 @@ describe.skipIf(!databaseUrl)('SCIM User PATCH normalization', () => {
     expect(boundary.status).toBe(200)
     const filtered = (length: number) => ({
       op: 'replace',
-      path: workValue.replace('[', `[${' '.repeat(length - workValue.length)}`),
+      path: `emails[${' '.repeat(length - workValue.length)}type eq "work"].value`,
       value: oldEmail,
     })
     expect((await patch(id, document([filtered(512)]))).status).toBe(200)
