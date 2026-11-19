@@ -110,6 +110,7 @@ const LIMITER = Symbol('rate limiter')
 interface RouteRateLimit {
   limiter: RateLimiter
   refusalStatus: 429 | 503
+  beforeBodyLimit: boolean
 }
 /** The limiters routeRateLimits already counted each request against. */
 const counted = new WeakMap<Context, Set<RateLimiter>>()
@@ -132,9 +133,12 @@ function check(c: Context, { limiter, refusalStatus }: RouteRateLimit): Response
  */
 export function rateLimit(
   limiter: RateLimiter,
-  { refusalStatus = 429 }: { refusalStatus?: 429 | 503 } = {},
+  {
+    refusalStatus = 429,
+    beforeBodyLimit = false,
+  }: { refusalStatus?: 429 | 503; beforeBodyLimit?: boolean } = {},
 ): MiddlewareHandler {
-  const declaration = { limiter, refusalStatus }
+  const declaration = { limiter, refusalStatus, beforeBodyLimit }
   const middleware = createMiddleware(async (c, next) => {
     if (!counted.get(c)?.has(limiter)) {
       const refused = check(c, declaration)
@@ -152,20 +156,24 @@ export function isRouteRateLimit(handler: unknown): boolean {
 
 /**
  * Applies the rate limits of the matched route (its rateLimit middleware) up front, before
- * any app-wide middleware reads, parses or checks the body.
+ * the body is read or parsed. A first pass ahead of the declared-length check can count
+ * routes that opt in to charging even requests refused by that check.
  */
-export function routeRateLimits(): MiddlewareHandler {
+export function routeRateLimits({ beforeBodyLimit = false } = {}): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
+    const checked = counted.get(c) ?? new Set<RateLimiter>()
     const declarations = new Map<RateLimiter, RouteRateLimit>()
     for (const { handler } of matchedRoutes(c)) {
       const declaration = (handler as { [LIMITER]?: RouteRateLimit })[LIMITER]
-      if (declaration) declarations.set(declaration.limiter, declaration)
+      if (!declaration || (beforeBodyLimit && !declaration.beforeBodyLimit)) continue
+      if (!checked.has(declaration.limiter)) declarations.set(declaration.limiter, declaration)
     }
     for (const declaration of declarations.values()) {
       const refused = check(c, declaration)
       if (refused) return refused
+      checked.add(declaration.limiter)
     }
-    counted.set(c, new Set(declarations.keys()))
+    counted.set(c, checked)
     await next()
   })
 }

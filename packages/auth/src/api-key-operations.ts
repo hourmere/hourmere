@@ -208,6 +208,13 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/public/{handle}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/public/-/routing/{handle}/{slug}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/public/-/routing/teams/{teamSlug}/{slug}', 'booking_read', 'optional_key'),
+  rest('POST', '/api/v1/public/-/routing/{handle}/{slug}/route', 'booking_write', 'optional_key'),
+  rest(
+    'POST',
+    '/api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
+    'booking_write',
+    'optional_key',
+  ),
   rest('GET', '/api/v1/public/{handle}/{slug}', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/public/{handle}/{slug}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/public/{handle}/{slug}/slots', 'booking_read', 'optional_key'),
@@ -324,6 +331,10 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('get_public_routing_form', 'booking_read', [
     'GET /api/v1/public/-/routing/{handle}/{slug}',
     'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
+  ]),
+  mcp('route_lead', 'booking_write', [
+    'POST /api/v1/public/-/routing/{handle}/{slug}/route',
+    'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
   ]),
   mcp('list_audit_events', 'audit_read', ['GET /api/v1/audit-events']),
   mcp('get_audit_log_settings', 'audit_read', ['GET /api/v1/audit-log/settings']),
@@ -490,6 +501,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('routing-forms publish', 'publish_routing_form'),
   cli('routing-forms preview', 'preview_routing_form'),
   cli('routing-forms public', 'get_public_routing_form'),
+  cli('routing-forms route', 'route_lead'),
   cli('audit-log list', 'list_audit_events'),
   cli('audit-log settings', 'get_audit_log_settings'),
   cli('audit-log set-retention', 'set_audit_log_settings'),

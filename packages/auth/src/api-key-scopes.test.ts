@@ -69,6 +69,8 @@ const restContract = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/public/-/routing/{handle}/{slug}/route',
+    'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -413,6 +415,7 @@ describe('shared API-key scope policy', () => {
         'publish_routing_form',
         'preview_routing_form',
         'get_public_routing_form',
+        'route_lead',
         'update_workflow',
         'create_workflow',
         'list_audit_events',
@@ -515,6 +518,7 @@ describe('shared API-key scope policy', () => {
       ],
       bookings: [
         'get_public_routing_form',
+        'route_lead',
         'create_one_time_link',
         'revoke_one_time_link',
         'whoami',
