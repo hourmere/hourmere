@@ -14,8 +14,10 @@
 // the form row, then inserts the receipt in the same transaction.
 import { createHash } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
+import { isPublicTeamSlug } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
+import { servedHandle } from './availability.ts'
 import { canonicalJson } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -1294,6 +1296,74 @@ export async function previewRoutingForm(
     })
 }
 
+function selectLivePublishedForms(db: Db) {
+  return db
+    .selectFrom('routing_forms as f')
+    .innerJoin('routing_form_versions as v', (join) =>
+      join
+        .onRef('v.id', '=', 'f.published_version_id')
+        .onRef('v.form_id', '=', 'f.id')
+        .onRef('v.organization_id', '=', 'f.organization_id'),
+    )
+    .where('f.archived_at', 'is', null)
+    .where('f.enabled', '=', true)
+}
+
+type PublicRoutingFormAddress =
+  | { handle: string; slug: string }
+  | { teamSlug: string; slug: string }
+
+/** Resolves the public address and reads only form text and the current published questions. */
+export async function getPublicRoutingForm(db: Db, address: PublicRoutingFormAddress) {
+  const unavailable = () => new DomainError('not_found', 'routing_form_not_found')
+  const slug = address.slug.toLowerCase()
+  if (!SLUG_PATTERN.test(slug)) throw unavailable()
+  const team = 'teamSlug' in address
+  const ownerSlug = team ? address.teamSlug : servedHandle(address.handle)
+  if (ownerSlug === undefined || (team && !isPublicTeamSlug(ownerSlug))) throw unavailable()
+
+  const published = selectLivePublishedForms(db)
+    .select([
+      'v.id as versionId',
+      'v.questions',
+      sql<string>`f.draft->>'title'`.as('title'),
+      sql<string | null>`f.draft->>'description'`.as('description'),
+    ])
+    .where('f.slug', '=', slug)
+  const organizations = team
+    ? db
+        .selectFrom('auth.organization as o')
+        .select('o.id')
+        .where('o.slug', '=', ownerSlug)
+        .where('o.id', 'not in', db.selectFrom('personal_organizations').select('organization_id'))
+    : db
+        .selectFrom('profiles as p')
+        .innerJoin('personal_organizations as po', 'po.user_id', 'p.user_id')
+        .innerJoin('auth.member as m', (join) =>
+          join
+            .onRef('m.userId', '=', 'p.user_id')
+            .onRef('m.organizationId', '=', 'po.organization_id'),
+        )
+        .select('po.organization_id')
+        .where('p.handle', '=', ownerSlug)
+
+  const form = await published.where('f.organization_id', 'in', organizations).executeTakeFirst()
+  if (!form) throw unavailable()
+  const questions = (form.questions as unknown as RoutingQuestion[]).map((question) => {
+    const { id, type, label, required } = question
+    const fields = { id, label, required }
+    return type === 'select'
+      ? { ...fields, type, options: question.options.map(({ id, label }) => ({ id, label })) }
+      : { ...fields, type }
+  })
+  return {
+    versionId: form.versionId,
+    title: form.title,
+    ...(form.description === null ? {} : { description: form.description }),
+    questions,
+  }
+}
+
 export const ROUTING_RECEIPT_LIMITS = {
   perForm: 100,
   perInstance: 10_000,
@@ -1362,14 +1432,7 @@ export async function submitRoutingForm(
     .execute(async (trx) => {
       // A single snapshot reads the pointer and its immutable configuration. If publication
       // moves it after this read, the form lock below detects the change before we issue.
-      const published = await trx
-        .selectFrom('routing_forms as f')
-        .innerJoin('routing_form_versions as v', (join) =>
-          join
-            .onRef('v.id', '=', 'f.published_version_id')
-            .onRef('v.form_id', '=', 'f.id')
-            .onRef('v.organization_id', '=', 'f.organization_id'),
-        )
+      const published = await selectLivePublishedForms(trx)
         .select([
           'f.id as formId',
           'f.organization_id as organizationId',
@@ -1380,8 +1443,6 @@ export async function submitRoutingForm(
         ])
         .where('f.organization_id', '=', organizationId)
         .where('f.id', '=', formId)
-        .where('f.archived_at', 'is', null)
-        .where('f.enabled', '=', true)
         .executeTakeFirst()
       if (!published) throw formNotFound()
       if (published.id !== versionId) throw formChanged()

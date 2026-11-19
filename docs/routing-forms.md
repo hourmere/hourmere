@@ -576,6 +576,29 @@ UUID。未回答的选填题可省略或传 `null`。预览返回匹配规则、
 只在内存中处理答案。功能目前处于硬关闭状态，调用返回 `routing_forms_disabled`，MCP 工具
 列表不显示预览工具。
 
+The public metadata endpoints read an enabled form's current publication and return
+`versionId`, the form's current `title` and optional `description`, and the published
+`questions` in order. Each question includes its ID, type, label and required flag. Select
+questions include their option IDs and labels. Editing the form text takes effect on the
+next read. Question and option edits appear only after publication. Rules, predicates,
+mappings and destinations stay private. Unknown, unpublished, disabled and archived forms
+return the same `404 routing_form_not_found` response while routing is enabled.
+
+REST accepts anonymous requests. A supplied bearer must be a valid `read`, `bookings` or
+`full` API key and cannot fall back to a session. Both paths share the public `page`
+rate-limit bucket and return `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+For MCP `get_public_routing_form` and `hourmere routing-forms public`, supply JSON with
+`slug` and exactly one of `handle` or `teamSlug`. These use the usual authenticated MCP
+connection. While routing is hard-off, requests that pass transport checks return
+`routing_forms_disabled` and MCP discovery omits the tool.
+
+中文：公开元数据包含当前表单标题、可选说明、已发布版本的 `versionId` 和按顺序排列的问题及选项。
+标题和说明保存后生效，问题和选项须发布后才会更新。匹配规则、条件、映射和目标均为私有信息。
+REST 支持匿名访问，提供密钥时须为有效的 `read`、`bookings` 或 `full` 密钥。MCP 与 CLI
+须通过已认证的 MCP 连接，并传入 `slug` 以及 `handle` 或 `teamSlug` 中的一项。
+开启后，未知、未发布、停用或归档的表单统一返回 `routing_form_not_found`。功能目前硬关闭，
+调用返回 `routing_forms_disabled`，MCP 工具列表不显示该工具。
+
 Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or
 OAuth grant), so two credentials of one user never share a key. Publish/update/archive take

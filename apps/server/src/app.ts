@@ -44,6 +44,7 @@ import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
+import { isPublicRoutingFormPath, PUBLIC_ROUTING_FORM_API_PREFIX } from './routing-form-privacy.ts'
 import { mountScim, type ScimOptions } from './scim.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
@@ -360,10 +361,10 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
     : requestLineLogger(c, next),
 )
 
-// A one-time capability is carried by the path. Do not hand that request to a
-// URL logger, including malformed tokens and refused embed attempts.
+// Keep one-time capabilities and public routing addresses out of URL logs.
 const requestLogger = createMiddleware(async (c, next) => {
   if (isOneTimeCapabilityPath(c.req.path)) return next()
+  if (isPublicRoutingFormPath(c.req.path)) return next()
   if (c.req.path.includes('/provisioning-tokens')) {
     await next()
     const managementRoute = routePath(c)
@@ -412,6 +413,13 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
+    if (isPublicRoutingFormPath(c.req.path)) {
+      const write = level === 'ERROR' ? console.error : console.warn
+      write(
+        `${new Date().toISOString()} ${level} ${c.req.method} ${PUBLIC_ROUTING_FORM_API_PREFIX}/[redacted]: private routing form request failed`,
+      )
+      return
+    }
     const text = c.req.path.toLowerCase().includes('/meeting-polls')
       ? 'private meeting poll request failed'
       : isSsoTrustPath(c.req.path)

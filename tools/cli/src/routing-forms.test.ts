@@ -16,9 +16,20 @@ const commands = [
 
 const id = '019a0000-0000-7000-8000-000000000001'
 const previewInput = { id, answers: { '019a0000-0000-7000-8000-000000000002': 'Example answer' } }
+const publicInputs = [
+  { handle: 'ada', slug: 'intake' },
+  { teamSlug: 'TeamName', slug: 'intake' },
+]
 
-async function run(command: string, disabled = false, result?: object, inputPath = '-') {
-  const input = command === 'preview' ? previewInput : { id, expectedRevision: 1 }
+async function run(
+  command: string,
+  disabled = false,
+  result?: object,
+  inputPath = '-',
+  input: Record<string, unknown> = command === 'preview'
+    ? previewInput
+    : { id, expectedRevision: 1 },
+) {
   let stdout = ''
   let stderr = ''
   const fetcher = vi.fn<typeof fetch>(async () =>
@@ -30,7 +41,7 @@ async function run(command: string, disabled = false, result?: object, inputPath
             isError: true,
             content: [{ type: 'text', text: JSON.stringify({ error: 'routing_forms_disabled' }) }],
           }
-        : (result ?? { structuredContent: { id: input.id, revision: 2 } }),
+        : (result ?? { structuredContent: { id, revision: 2 } }),
     }),
   )
   const code = await runCli({
@@ -50,12 +61,12 @@ async function run(command: string, disabled = false, result?: object, inputPath
   return { code, stdout, stderr, fetcher, input }
 }
 
-describe('routing form CLI configuration commands', () => {
+describe('routing form CLI commands', () => {
   it.each(commands)('dispatches %s through the shared MCP adapter', async (command, tool) => {
     const result = await run(command)
     expect(result.code).toBe(0)
     expect(result.stderr).toBe('')
-    expect(JSON.parse(result.stdout)).toEqual({ id: result.input.id, revision: 2 })
+    expect(JSON.parse(result.stdout)).toEqual({ id, revision: 2 })
     expect(result.fetcher).toHaveBeenCalledTimes(1)
     expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
       name: tool,
@@ -115,10 +126,30 @@ describe('routing form CLI configuration commands', () => {
     expect(JSON.parse(other.stderr).error).toBe('response_too_large')
   })
 
-  it('advertises exactly the configuration commands', () => {
+  it.each(publicInputs)('reads public metadata for %o through the MCP adapter', async (input) => {
+    const metadata = { versionId: id, title: 'Intake', questions: [] }
+    const result = await run('public', false, { structuredContent: metadata }, '-', input)
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(JSON.parse(result.stdout)).toEqual(metadata)
+    expect(result.fetcher).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+      name: 'get_public_routing_form',
+      arguments: input,
+    })
+
+    const disabled = await run('public', true, undefined, '-', input)
+    expect(disabled.code).toBe(1)
+    expect(disabled.stdout).toBe('')
+    expect(JSON.parse(disabled.stderr)).toMatchObject({ error: 'routing_forms_disabled' })
+    expect(disabled.fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('advertises exactly the configuration and public metadata commands', () => {
     expect(Object.keys(COMMANDS).filter((command) => command.startsWith('routing-forms '))).toEqual(
-      commands.map(([command]) => `routing-forms ${command}`),
+      [...commands.map(([command]) => `routing-forms ${command}`), 'routing-forms public'],
     )
-    expect(HELP).toContain('routing-forms list|get|create|update|archive|publish|preview')
+    expect(HELP).toContain('routing-forms list|get|create|update|archive|publish|preview|public')
+    expect(HELP).toContain('Pass slug and exactly one of handle or teamSlug')
   })
 })

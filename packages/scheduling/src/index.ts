@@ -343,6 +343,7 @@ export {
 export {
   archiveRoutingForm,
   createRoutingForm,
+  getPublicRoutingForm,
   getRoutingForm,
   listRoutingForms,
   previewRoutingForm,

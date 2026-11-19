@@ -3,6 +3,7 @@ import type { Db } from '@hourmere/db'
 import {
   archiveRoutingForm,
   createRoutingForm,
+  getPublicRoutingForm,
   getRoutingForm,
   listRoutingForms,
   previewRoutingForm,
@@ -10,6 +11,11 @@ import {
   type ServiceContext,
   updateRoutingForm,
 } from '@hourmere/scheduling'
+import {
+  PersonalRoutingFormAddress,
+  PublicRoutingForm,
+  TeamRoutingFormAddress,
+} from '../routes/public-routing-forms.ts'
 import {
   ArchiveRoutingForm,
   CreateRoutingForm,
@@ -28,6 +34,16 @@ import {
 } from '../routes/routing-forms.ts'
 import { routingFormTools } from '../routing-forms.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
+
+const PublicRoutingFormInput = z
+  .strictObject({
+    handle: PersonalRoutingFormAddress.shape.handle.optional(),
+    teamSlug: TeamRoutingFormAddress.shape.teamSlug.optional(),
+    slug: PersonalRoutingFormAddress.shape.slug,
+  })
+  .refine((input) => (input.handle === undefined) !== (input.teamSlug === undefined), {
+    message: 'Give exactly one of handle or teamSlug',
+  })
 
 export function routingFormConfigurationTools({
   db,
@@ -116,6 +132,20 @@ export function routingFormConfigurationTools({
       annotations: read,
       privateDiagnostics: true,
       run: ({ id, ...args }, call) => previewRoutingForm(context(call.caller), id, args),
+    }),
+    defineTool({
+      name: 'get_public_routing_form',
+      title: 'Read a public routing form',
+      description: `${ROUTING_FORMS_DISABLED} Supply the form slug and exactly one of handle (personal) or teamSlug (team). Returns the current version ID, form text and published questions, with IDs and labels for answer choices. Accepts read, bookings or full keys, or an authorized MCP OAuth connection.`,
+      input: PublicRoutingFormInput,
+      output: PublicRoutingForm,
+      annotations: read,
+      privateDiagnostics: true,
+      run: ({ handle, teamSlug, slug }) =>
+        getPublicRoutingForm(
+          db,
+          teamSlug === undefined ? { handle: handle as string, slug } : { teamSlug, slug },
+        ),
     }),
   ])
 }

@@ -179,6 +179,22 @@ describe('published API key scope tables', () => {
   )
 
   it.each(documents)(
+    '$path lists optional-key public routing metadata',
+    ({ document, section }) => {
+      expect(document).toContain(
+        '| `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |',
+      )
+      if (section === 'all') {
+        for (const path of ['{handle}/{slug}', 'teams/{teamSlug}/{slug}']) {
+          expect(document).toContain(
+            `| \`GET /api/v1/public/-/routing/${path}\` | Public or manage token; check a supplied key | \`full, read, bookings\` |`,
+          )
+        }
+      }
+    },
+  )
+
+  it.each(documents)(
     '$path matches the live operation registry exactly',
     ({ document, section }) => {
       expect(scopeDocumentationMatches(document, section)).toBe(true)

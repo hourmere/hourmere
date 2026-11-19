@@ -2633,6 +2633,46 @@ export interface paths {
         patch: operations["updateDisplayName"];
         trace?: never;
     };
+    "/api/v1/public/-/routing/{handle}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a public personal routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         */
+        get: operations["getPublicRoutingForm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/-/routing/teams/{teamSlug}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a public team routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         */
+        get: operations["getPublicTeamRoutingForm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/{handle}": {
         parameters: {
             query?: never;
@@ -6953,6 +6993,32 @@ export interface components {
             title: string;
             /** @enum {string} */
             visibility: "private" | "aggregate";
+        };
+        PublicRoutingForm: {
+            description?: string;
+            questions: ({
+                /** Format: uuid */
+                id: string;
+                label: string;
+                required: boolean;
+                /** @enum {string} */
+                type: "short_text" | "email";
+            } | {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                options: {
+                    /** Format: uuid */
+                    id: string;
+                    label: string;
+                }[];
+                required: boolean;
+                /** @enum {string} */
+                type: "select";
+            })[];
+            title: string;
+            /** Format: uuid */
+            versionId: string;
         };
         PublishRoutingForm: {
             expectedRevision: number;
@@ -12694,6 +12760,124 @@ export interface operations {
                 };
             };
             /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public routing form metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRoutingForm"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled or routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicTeamRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                teamSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public routing form metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRoutingForm"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled or routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;

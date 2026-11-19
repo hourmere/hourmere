@@ -213,6 +213,14 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       })
       return { ok: !result.isError, body: JSON.parse(result.content[0].text) }
     }
+    return callCli(application, token, op, input)
+  }
+  async function callCli(
+    application: ReturnType<typeof app>,
+    token: string,
+    op: Operation | 'public',
+    input: Record<string, unknown>,
+  ) {
     let stdout = ''
     let stderr = ''
     const code = await runCli({
@@ -766,6 +774,123 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       expect(scoped.tools).not.toContainEqual(expect.objectContaining({ name: tools.preview }))
     }
   })
+
+  it.each(['personal', 'team'] as const)(
+    'reads only published %s metadata via MCP and CLI and refuses direct calls while off',
+    async (kind) => {
+      const organization =
+        kind === 'personal' ? owner.principal.organization : team.as(owner).organization
+      const token = await credential(owner, 'full', organization)
+      const handle = 'routing-public-owner'
+      if (kind === 'personal') {
+        await db
+          .insertInto('profiles')
+          .values({ user_id: owner.id, handle, time_zone: 'UTC' })
+          .execute()
+      }
+      const eventTypeId = await createFixtures(db).eventType(
+        organization.id,
+        kind === 'personal' ? owner.id : null,
+        { slug: 'private-target', hosts: [{ userId: owner.id }] },
+      )
+      await db
+        .updateTable('event_types')
+        .set({ is_hidden: true })
+        .where('id', '=', eventTypeId)
+        .execute()
+      const questionId = randomUUID()
+      const optionId = randomUUID()
+      const questions = [
+        {
+          id: questionId,
+          type: 'select',
+          label: 'Published question',
+          required: true,
+          options: [{ id: optionId, label: 'Published option' }],
+        },
+      ]
+      const created = await call('rest', token, 'create', {
+        ...draft(),
+        questions,
+        rules: [
+          {
+            id: randomUUID(),
+            conditions: [{ questionId, operator: 'equals', value: optionId }],
+            target: { kind: 'event', eventTypeId },
+          },
+        ],
+      })
+      expect(created.ok).toBe(true)
+      const { id, slug } = created.body as RoutingForm
+      const published = await call('rest', token, 'publish', { id, expectedRevision: 1 })
+      expect(published.ok).toBe(true)
+      expect(
+        (
+          await call('rest', token, 'update', {
+            id,
+            expectedRevision: 2,
+            enabled: true,
+            title: 'Current form title',
+            description: 'Public introduction',
+            questions: [{ ...questions[0], label: 'Unpublished edit' }],
+          })
+        ).ok,
+      ).toBe(true)
+
+      const input = kind === 'personal' ? { handle, slug } : { teamSlug: organization.slug, slug }
+      const unknown = { ...input, slug: 'missing-form' }
+      const expected = {
+        versionId: published.body.version.id,
+        title: 'Current form title',
+        description: 'Public introduction',
+        questions,
+      }
+      const name = 'get_public_routing_form'
+      const application = app()
+      const off = app(false)
+      const callTool = (instance: ReturnType<typeof app>, key: string, args: object) =>
+        rpc(instance, key, 'tools/call', { name, arguments: args })
+      const publicKey = await credential(outsider, 'read')
+      const allowed = await callTool(application, publicKey, input)
+      expect(allowed.isError).toBeFalsy()
+      expect(allowed.structuredContent).toEqual(expected)
+      expect(JSON.parse(allowed.content[0].text)).toEqual(expected)
+      expect(await callCli(application, publicKey, 'public', input)).toEqual({
+        ok: true,
+        body: expected,
+      })
+
+      for (const args of [
+        { slug },
+        { handle, teamSlug: organization.slug, slug },
+        { ...input, id },
+      ]) {
+        const invalid = await callTool(application, publicKey, args)
+        expect(invalid.isError).toBe(true)
+        expect(JSON.parse(invalid.content[0].text)).toHaveProperty('error', 'invalid_request')
+      }
+
+      const listed = await rpc(off, publicKey, 'tools/list')
+      expect(listed.tools).not.toContainEqual(expect.objectContaining({ name }))
+      for (const args of [input, unknown, { unexpected: true }]) {
+        const disabled = await callTool(off, publicKey, args)
+        expect(disabled.isError).toBe(true)
+        expect(disabled.structuredContent).toBeUndefined()
+        expect(JSON.parse(disabled.content[0].text)).toEqual({ error: 'routing_forms_disabled' })
+      }
+      expect(await callCli(off, publicKey, 'public', input)).toMatchObject({
+        ok: false,
+        body: { error: 'routing_forms_disabled' },
+      })
+
+      expect((await call('rest', token, 'archive', { id, expectedRevision: 3 })).ok).toBe(true)
+      const archived = await callTool(application, publicKey, input)
+      expect(archived.isError).toBe(true)
+      expect(archived.structuredContent).toBeUndefined()
+      expect(JSON.parse(archived.content[0].text)).toHaveProperty('error', 'routing_form_not_found')
+      expect(await callTool(application, publicKey, unknown)).toEqual(archived)
+    },
+  )
 
   it('accepts same-origin session preview and honors an expected organization', async () => {
     const created = await call('rest', await credential(owner), 'create', draft())
