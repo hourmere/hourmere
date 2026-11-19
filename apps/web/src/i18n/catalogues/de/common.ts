@@ -561,4 +561,26 @@ export const common = {
   // Meeting poll reminder opt-out
   'meetingPoll.optOutError':
     'Die Erinnerungen konnten nicht abbestellt werden. Versuchen Sie es erneut.',
+  // Public routing form
+  'Loading form…': 'Formular wird geladen…',
+  'This form is unavailable': 'Dieses Formular ist nicht verfügbar',
+  'Check the link you were given.': 'Überprüfen Sie den Link, den Sie erhalten haben.',
+  'We couldn’t load this form. Try again.':
+    'Das Formular konnte nicht geladen werden. Versuchen Sie es erneut.',
+  'This form has changed. Review your answers before continuing.':
+    'Dieses Formular wurde geändert. Überprüfen Sie Ihre Antworten, bevor Sie fortfahren.',
+  'Select an option': 'Wählen Sie eine Option',
+  'Enter an answer.': 'Geben Sie eine Antwort ein.',
+  'Enter a valid email address.': 'Geben Sie eine gültige E-Mail-Adresse ein.',
+  'Enter {count} characters or fewer.': 'Geben Sie höchstens {count} Zeichen ein.',
+  'Remove unsupported characters from your answer.':
+    'Entfernen Sie nicht unterstützte Zeichen aus Ihrer Antwort.',
+  'Choose one of the available options.': 'Wählen Sie eine der verfügbaren Optionen.',
+  'Review the highlighted answers.': 'Überprüfen Sie die markierten Antworten.',
+  'We couldn’t submit your answers. Try again.':
+    'Ihre Antworten konnten nicht gesendet werden. Versuchen Sie es erneut.',
+  'Submitting…': 'Wird gesendet…',
+  Continue: 'Weiter',
+  'Thank you': 'Vielen Dank',
+  Optional: 'Optional',
 } as const

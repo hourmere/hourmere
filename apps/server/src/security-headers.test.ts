@@ -272,6 +272,37 @@ describe('security headers', () => {
     )
   })
 
+  it('keeps public routing form HTML private only while the capability is enabled', async () => {
+    const enabled = createApp(deps({ webDist: dist, routingFormsEnabled: true }))
+    for (const path of [
+      '/route/ada/intro',
+      '/route/team/alpha/intro',
+      '/%72oute/ada/intro/',
+      '/route/acme%2Ffoo/intro',
+      '/route/team/acme%2Ffoo/intro',
+    ]) {
+      const on = await enabled.request(path)
+      expect(on.status).toBe(200)
+      expect(on.headers.get('cache-control'), path).toBe('no-store')
+      expect(securityHeadersOf(on)).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
+      const off = await app.request(path)
+      expect(off.headers.get('cache-control'), path).toBe('no-cache')
+      expect(securityHeadersOf(off)).toEqual(APP_PAGE)
+    }
+    for (const path of [
+      '/route',
+      '/route/continue',
+      '/route/legacy',
+      '/team/route/legacy',
+      '/route%2Fteam/alpha/intro',
+      '/%2572oute/ada/intro',
+    ]) {
+      const response = await enabled.request(path)
+      expect(response.headers.get('cache-control'), path).toBe('no-cache')
+      expect(securityHeadersOf(response)).toEqual(APP_PAGE)
+    }
+  })
+
   it('leave hashed bundles and other files their own type and long-lived cache', async () => {
     const bundle = await app.request('/assets/app-abc123.js')
     expect(bundle.status).toBe(200)
