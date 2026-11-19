@@ -5,6 +5,7 @@ import {
   createRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  previewRoutingForm,
   publishRoutingForm,
   updateRoutingForm,
 } from '@hourmere/scheduling'
@@ -13,6 +14,7 @@ import type { CallerEnv } from '../caller.ts'
 import {
   authenticated,
   type CallerMiddleware,
+  CROSS_ORIGIN_WRITE,
   callerWithBodyLimit,
   ErrorBody,
   errorResponses,
@@ -28,6 +30,8 @@ export const ROUTING_FORMS_DISABLED =
   'Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance.'
 export const ROUTING_FORM_PUBLICATION_BEHAVIOR =
   'Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.'
+export const ROUTING_FORM_PREVIEW_BEHAVIOR =
+  'Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications.'
 const identity = z.uuid()
 const label = z.string().min(1).max(200)
 const option = z.strictObject({ id: identity, label })
@@ -88,6 +92,24 @@ export const ArchiveRoutingForm = z
 export const PublishRoutingForm = z
   .strictObject({ ...ArchiveRoutingForm.shape, requestId: identity.optional() })
   .openapi('PublishRoutingForm')
+export const PreviewRoutingForm = z
+  .strictObject({
+    answers: z
+      .preprocess(
+        (answers, ctx) => {
+          // Zod strips this key when parsing a record. Reject it before it can be discarded.
+          if (answers != null && Object.hasOwn(answers, '__proto__'))
+            ctx.addIssue({ code: 'custom', message: 'Invalid answer key' })
+          return answers
+        },
+        z.record(z.string(), z.string().nullable()),
+      )
+      .openapi({
+        description:
+          'Map question UUIDs to text or select option UUIDs. Omit or use null for an unanswered optional question.',
+      }),
+  })
+  .openapi('PreviewRoutingForm')
 export const UpdateRoutingForm = z
   .strictObject(draft)
   .partial()
@@ -102,7 +124,9 @@ export const RoutingFormListInput = z.strictObject({
   cursor: z.string().max(512).optional(),
 })
 // Response objects remain open to additive fields within API v1.
-const responseQuestion = z.discriminatedUnion('type', [
+// Stored routing IDs can use any PostgreSQL UUID, regardless of version or variant.
+const storedIdentity = z.guid()
+export const RoutingFormQuestion = z.discriminatedUnion('type', [
   z.object({
     id: z.uuid(),
     label: z.string(),
@@ -120,10 +144,10 @@ const responseQuestion = z.discriminatedUnion('type', [
 const responseTarget = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('event'),
-    eventTypeId: z.uuid(),
+    eventTypeId: storedIdentity,
     mappings: z.array(
       z.object({
-        questionId: z.uuid(),
+        questionId: storedIdentity,
         destination: z.discriminatedUnion('kind', [
           z.object({ kind: z.literal('inviteeName') }),
           z.object({ kind: z.literal('inviteeEmail') }),
@@ -160,7 +184,7 @@ const summary = z.object({
 export const RoutingFormResponse = summary
   .extend({
     description: z.string().nullable(),
-    questions: z.array(responseQuestion),
+    questions: z.array(RoutingFormQuestion),
     rules: z.array(responseRule),
     fallback: responseTarget,
     health: z
@@ -187,7 +211,7 @@ const RoutingFormVersion = z
     id: identity,
     formId: identity,
     versionNumber: z.number().int(),
-    questions: z.array(responseQuestion),
+    questions: z.array(RoutingFormQuestion),
     rules: z.array(responseRule),
     fallback: responseTarget,
     publishedAt: z.iso.datetime(),
@@ -196,6 +220,27 @@ const RoutingFormVersion = z
 export const RoutingFormPublication = z
   .object({ form: RoutingFormResponse, version: RoutingFormVersion })
   .openapi('RoutingFormPublication')
+const previewRuleId = z.union([storedIdentity, z.literal('fallback')])
+export const RoutingFormPreview = z
+  .object({
+    draftRevision: z.number().int(),
+    matchedRuleId: previewRuleId.openapi({ description: 'First matching rule, or fallback' }),
+    resolvedRuleId: previewRuleId.nullable().openapi({
+      description: 'Rule or fallback whose target applies, or null when neither can be used',
+    }),
+    target: responseTarget.nullable(),
+    unavailableTargets: z.array(z.object({ ruleId: previewRuleId, reason: z.string() })),
+    rules: z
+      .array(
+        z.object({
+          ruleId: storedIdentity,
+          matched: z.boolean(),
+          conditions: z.array(z.object({ questionId: storedIdentity, matched: z.boolean() })),
+        }),
+      )
+      .openapi({ description: 'Rules evaluated in order, through the first matching rule' }),
+  })
+  .openapi('RoutingFormPreview')
 const headers = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
     description:
@@ -399,6 +444,53 @@ export function routingFormRoutes(
           ),
           201,
         ),
+    )
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'post',
+        path: '/api/v1/routing-forms/{id}/preview',
+        operationId: 'previewRoutingForm',
+        summary: 'Preview a routing form draft',
+        description: `${ROUTING_FORMS_DISABLED} ${ROUTING_FORM_PREVIEW_BEHAVIOR} Session requests require a same-origin Origin/Referer.`,
+        request: {
+          params: RoutingFormId,
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Optional for sessions. Pins the preview to the organization where it opened. Ignored for API keys.',
+            }),
+          }),
+          body: { required: true, content: json(PreviewRoutingForm) },
+        },
+        responses: {
+          200: {
+            description: 'Draft route and author diagnostics',
+            content: json(RoutingFormPreview),
+          },
+          ...errorResponses({
+            400: 'invalid_request, invalid_routing_answers, invalid_routing_form, invalid_routing_target',
+            403: `team_management_access_denied, insufficient_scope, ${CROSS_ORIGIN_WRITE}`,
+            404: 'routing_forms_disabled, routing_form_not_found',
+            409: 'organization_context_changed',
+          }),
+          413: { description: 'payload_too_large', content: json(ErrorBody) },
+        },
+      }),
+      async (c) => {
+        await organizationContextAccess(
+          c.var.principal,
+          c.req.header(EXPECTED_ORGANIZATION_HEADER),
+        )(deps.db, c.var.principal.organization.id)
+        return c.json(
+          await previewRoutingForm(
+            serviceContext(deps, c.var.principal),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        )
+      },
     )
   }
 }

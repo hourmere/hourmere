@@ -2,10 +2,10 @@
 
 Status: storage, internal services and hard-off configuration interfaces. Migration
 0072 adds the five storage tables and migration 0083 their idempotency records. The
-configuration list/get/create/update/archive operations are registered together in REST,
-MCP and CLI, but production always returns `routing_forms_disabled`; discovery omits
-these five MCP tools. There is no operator setting or public routing execution yet.
-The shared validator, evaluator, target checks and configuration/publication services
+configuration list/get/create/update/archive/publish/preview operations are registered
+together in REST, MCP and CLI. Production returns `routing_forms_disabled` for all seven
+operations and discovery omits their MCP tools. There is no operator setting or public
+routing execution yet. The shared validator, evaluator, target checks and draft services
 are implemented. Target invalidation and retention cleanup run inside existing mutations
 and in a background job; with no routing form they change nothing.
 The eventual feature is free on self-hosted and Cloud alike,
@@ -122,8 +122,7 @@ unarchiving require READ COMMITTED isolation; other isolation modes fail closed 
 40001, and must restart at READ COMMITTED. Concurrent writers cannot exceed these quotas.
 These limits apply equally to self-hosted and Cloud installations. Public
 submissions and continuations use the named rate-limit buckets and admission ceilings in
-[Ownership, permissions and public security](#ownership-permissions-and-public-security);
-step c1 pins their values before any public routing write exists.
+[Ownership, permissions and public security](#ownership-permissions-and-public-security).
 
 ## Rules and versions
 
@@ -435,24 +434,30 @@ everywhere in this document and in the implementation:
 | Name | Kind | Applies to |
 |---|---|---|
 | `page` | Existing public request bucket (`PUBLIC_RATE_LIMITS`) | `GET` public form metadata |
-| `routingSubmission` | New public request bucket | `POST …/route` submissions |
-| `routingContinuation` | New public request bucket | Continuation resolve and slots |
+| `routingSubmission` | 10 requests per client per 60 seconds, per server process | `POST …/route` submissions |
+| `routingContinuation` | 120 requests per client per 60 seconds, per server process | Continuation resolve and slots |
 | `book` | Existing public request bucket | Continuation booking |
-| Form admission ceiling | New durable ceiling shared by all server processes | Unexpired, unconsumed receipts of one form at once |
-| Instance admission ceiling | New durable ceiling shared by all server processes | Unexpired, unconsumed receipts of the instance at once |
+| Form admission ceiling | 100 live receipts shared by all server processes | Unexpired, unconsumed receipts of one form at once |
+| Instance admission ceiling | 10,000 live receipts shared by all server processes | Unexpired, unconsumed receipts of the instance at once |
 
 A submission over either ceiling is refused with `429 rate_limited` and mints nothing. Both
 ceilings are counts of live receipts, not time windows. The submission transaction counts
 them with the partial indexes on unconsumed receipts (organization, form and expiry for the
 form ceiling; expiry for the instance ceiling), the form ceiling under the form row lock and
 the instance ceiling under one transaction-scoped advisory lock, so concurrent processes
-cannot overshoot. Expired receipts stop counting at expiry, before cleanup. Key the two new
+cannot overshoot. Both counts use the database's clock after acquiring the respective lock.
+Expired receipts stop counting at expiry, before cleanup. Key the two new
 request buckets with a dedicated HMAC purpose over the client key and retain no raw IP or
 answer values in routing rate accounting; the admission ceilings count per form and per
 instance only, and the existing `page` and `book` buckets keep their current keys.
 Rate-limit refused and invalid requests too. Repeated route submissions may mint separate
 receipts within those limits; booking replays cannot consume a receipt twice. Do not send
-email on submission.
+email on submission. The receipt service and bucket definitions are in place while routing
+remains hard-off. The public adapters will connect these request buckets in later steps.
+
+中文：提交每个客户端每 60 秒最多 10 次，继续预约每 60 秒最多 120 次，按服务进程分别计数。
+所有进程共享数据库中的凭据上限：每个表单 100 份，每个实例 10,000 份。只有未过期且未使用的
+凭据占用额度，达到任一上限时拒绝签发新凭据。凭据自签发起 30 分钟后失效。路由功能仍处于硬关闭状态。
 Public preview is forbidden. Unknown/archived forms share a neutral unavailable response;
 unknown, expired and invalid continuation tokens are indistinguishable. Reject excess
 input depth and unknown keys. Render author content as text, and do not fetch remote URLs.
@@ -545,6 +550,54 @@ revision. `version` is the immutable snapshot created by the original request, e
 retry after a newer version has been published. Publication rechecks event targets and
 mappings against current data, returning `invalid_routing_target` for invalid mappings or
 unsupported targets such as group or payment-requiring events.
+
+Preview evaluates the current saved draft using the same rules and answer validation as
+routing. Personal owners and current team owners or admins can preview with a session,
+an MCP OAuth grant, or a `full` API key for the form's organization. Session REST calls
+require a same-origin `Origin` or `Referer` and can supply `X-Expected-Organization-Id`
+to pin the workspace. Send `{ answers }` to `POST /api/v1/routing-forms/{id}/preview`.
+Pass `{ id, answers }` to `preview_routing_form` or `hourmere routing-forms preview`,
+using `--input -` or `--input FILE` with the CLI. Key answers by question UUID and use
+option UUIDs for select answers. Use `null` or omit the key for an unanswered optional
+question.
+
+The result includes `draftRevision`, `matchedRuleId`, `resolvedRuleId`, `target`,
+`unavailableTargets` and the ordered `rules` trace with per-condition matches through the
+first matching rule. `matchedRuleId` is `fallback` if no rule matches. If the matched
+event is unavailable, preview tries the fallback directly. `resolvedRuleId` and `target`
+are `null` when neither target is usable. Preview evaluates answers in memory and
+returns diagnostics only. Routing is hard-off and the preview interfaces return
+`routing_forms_disabled`. MCP discovery omits the tool while off.
+
+中文：个人空间所有者及团队当前的所有者或管理员可预览已保存的草稿。API 密钥须属于表单所在
+空间并具有 `full` 权限。REST 接收 `{ answers }`，会话请求须同源。MCP 和 CLI 接收
+`{ id, answers }`，CLI 可从标准输入或文件读取 JSON。答案以问题 UUID 为键，单选题传选项
+UUID。未回答的选填题可省略或传 `null`。预览返回匹配规则、实际采用的目标及不可用原因，
+只在内存中处理答案。功能目前处于硬关闭状态，调用返回 `routing_forms_disabled`，MCP 工具
+列表不显示预览工具。
+
+The public metadata endpoints read an enabled form's current publication and return
+`versionId`, the form's current `title` and optional `description`, and the published
+`questions` in order. Each question includes its ID, type, label and required flag. Select
+questions include their option IDs and labels. Editing the form text takes effect on the
+next read. Question and option edits appear only after publication. Rules, predicates,
+mappings and destinations stay private. Unknown, unpublished, disabled and archived forms
+return the same `404 routing_form_not_found` response while routing is enabled.
+
+REST accepts anonymous requests. A supplied bearer must be a valid `read`, `bookings` or
+`full` API key and cannot fall back to a session. Both paths share the public `page`
+rate-limit bucket and return `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+For MCP `get_public_routing_form` and `hourmere routing-forms public`, supply JSON with
+`slug` and exactly one of `handle` or `teamSlug`. These use the usual authenticated MCP
+connection. While routing is hard-off, requests that pass transport checks return
+`routing_forms_disabled` and MCP discovery omits the tool.
+
+中文：公开元数据包含当前表单标题、可选说明、已发布版本的 `versionId` 和按顺序排列的问题及选项。
+标题和说明保存后生效，问题和选项须发布后才会更新。匹配规则、条件、映射和目标均为私有信息。
+REST 支持匿名访问，提供密钥时须为有效的 `read`、`bookings` 或 `full` 密钥。MCP 与 CLI
+须通过已认证的 MCP 连接，并传入 `slug` 以及 `handle` 或 `teamSlug` 中的一项。
+开启后，未知、未发布、停用或归档的表单统一返回 `routing_form_not_found`。功能目前硬关闭，
+调用返回 `routing_forms_disabled`，MCP 工具列表不显示该工具。
 
 Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or
