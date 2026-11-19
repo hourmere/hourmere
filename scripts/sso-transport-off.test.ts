@@ -12,6 +12,8 @@ const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 const PROFILE = 'packages/outbound/src/sso.ts'
 const TARGETS = 'packages/outbound/src/sso-private-targets.ts'
+const OIDC_ADMISSION_WRITE = 'apps/server/src/sso-oidc-admission-write.ts'
+const OIDC_ADMISSION = 'apps/server/src/sso-oidc-admission.ts'
 const OIDC_ATTEMPT = 'apps/server/src/sso-oidc-attempt.ts'
 const OIDC_COMPLETION = 'apps/server/src/sso-oidc-completion.ts'
 const OIDC_JWKS = 'apps/server/src/sso-oidc-jwks.ts'
@@ -137,6 +139,8 @@ describe('SSO transport permits only domain TXT and guarded OIDC ceremonies', ()
         return helpers.length ? [[file, helpers]] : []
       })
     expect(callers).toEqual([
+      [OIDC_ADMISSION_WRITE, [OIDC_ATTEMPT]],
+      [OIDC_ADMISSION, [OIDC_ATTEMPT]],
       [OIDC_COMPLETION, [OIDC_ATTEMPT]],
       [OIDC_LINK, [OIDC_ATTEMPT, OIDC_VERIFIER]],
       [OIDC_SESSION, [OIDC_ATTEMPT, OIDC_VERIFIER]],

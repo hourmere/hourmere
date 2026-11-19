@@ -32,6 +32,11 @@ const EMITTERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider.deleted',
     'sso_provider.secret_rotated',
   ],
+  'apps/server/src/sso-oidc-admission-write.ts': [
+    'sso_jit.admitted',
+    'sso_jit.refused',
+    'sso_link.linked',
+  ],
   'apps/server/src/sso-oidc-link.ts': ['sso_link.linked', 'sso_link.conflicted'],
   'apps/server/src/sso-oidc-session.ts': ['sso_authentication.succeeded'],
   'apps/server/src/sso-oidc-sign-in.ts': [

@@ -2,6 +2,7 @@ import { createRoute, z } from '@hono/zod-openapi'
 import {
   MemberDepartureOwnerRequiredError,
   removeTeamMember,
+  type SsoAdmissionRemoval,
   TeamManagementError,
 } from '@hourmere/auth'
 import {
@@ -68,7 +69,9 @@ const contextChanged = () =>
     'Your team context changed. Reload the page before trying again.',
   )
 
-export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
+export function memberRemovalRoutes(
+  deps: ServiceDeps & { recordAdmissionRemoval?: SsoAdmissionRemoval | undefined },
+): RouteModule {
   return ({ app, caller }) => {
     const access = teamManagementAccess(deps.db, caller)
     app.openapi(
@@ -131,6 +134,7 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
                 teamId: actor.organizationId,
                 memberUserId,
                 expectedOrganizationId,
+                recordAdmissionRemoval: deps.recordAdmissionRemoval,
               }),
             { expectedOrganizationId },
           )

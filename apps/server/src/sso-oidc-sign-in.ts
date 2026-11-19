@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { OpenAPIHono } from '@hono/zod-openapi'
-import type { Principal } from '@hourmere/auth'
+import type { Principal, SignupPolicy } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type SsoAuditReason, writeSsoSecurityFailure } from '@hourmere/db/audit'
 import { type SsoRequest, sendSsoRequest, ssoUrl } from '@hourmere/outbound/sso'
@@ -21,6 +21,7 @@ import {
   MAILBOX_PROOF_CONFIRM_PATH,
   sha256,
 } from './sso-mailbox-proof.ts'
+import { completeOidcAdmission, stageOidcAdmission } from './sso-oidc-admission.ts'
 import {
   consumeOidcAttempt,
   LINK_SSO_ACCOUNT,
@@ -59,6 +60,13 @@ import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
 export const OIDC_CALLBACK_PATH = '/api/auth/sso/callback/:providerId'
 export const OIDC_COMPLETE_PATH = '/api/auth/sso/oidc/complete'
+const ACCEPT_INVITATION_PATH = '/api/auth/organization/accept-invitation'
+const OIDC_ADMISSION_HEADER = 'X-Hourmere-Sso-Attempt'
+declare module 'hono' {
+  interface ContextVariableMap {
+    oidcInvitationAcceptance?: boolean
+  }
+}
 const errorPath = '/sign-in?error=unable_to_create_session'
 const testReturnPath = '/app/settings'
 const providerIdSchema = z.uuidv7()
@@ -68,6 +76,7 @@ const startInput = z.strictObject({
   returnTo: z.string().optional(),
 })
 const completeInput = z.strictObject({ attemptId: z.uuidv7() })
+const invitationInput = z.strictObject({ invitationId: z.uuid() })
 const completionInvalid = { error: 'sso_oidc_completion_invalid' } as const
 const sealedConfig = z.strictObject({
   issuer: z.string().min(1),
@@ -85,6 +94,7 @@ interface OidcSignInDeps {
   configurationKey?: Buffer | undefined
   privateTargets: SsoRequest['privateTargets']
   send?: typeof sendSsoRequest | undefined
+  signup: SignupPolicy
   session: OidcSessionOptions
   readSession: (headers: Headers) => Promise<OidcTestActor | null | undefined>
 }
@@ -404,14 +414,61 @@ export interface OidcSignInModule {
     requestLogger: MiddlewareHandler
     clientIp: MiddlewareHandler
   }): void
+  mountInvitationAcceptance(app: OpenAPIHono, publicUrl: string): void
+}
+
+function admissionCookieName(publicUrl: string, id: string) {
+  const secure = new URL(publicUrl).protocol === 'https:'
+  return `${secure ? '__Secure-' : ''}hourmere.oidc_admission.${id}`
+}
+
+function admissionCookieOptions(publicUrl: string) {
+  return {
+    httpOnly: true,
+    secure: new URL(publicUrl).protocol === 'https:',
+    sameSite: 'Strict',
+    path: '/api/auth',
+  } as const
+}
+
+function admissionRefused(
+  c: Context,
+  status: Exclude<
+    Awaited<ReturnType<typeof completeOidcAdmission>>['status'],
+    'completed' | 'link_required'
+  >,
+) {
+  switch (status) {
+    case 'domain_unverified':
+      return c.json({ error: 'sso_domain_unverified' }, 409)
+    case 'invitation_required':
+      return c.json({ error: 'sso_invitation_required' }, 409)
+    case 'signup_disabled':
+      return c.json({ error: 'signup_disabled' }, 403)
+    case 'membership_limit':
+      return c.json({ error: 'organization_membership_limit_reached' }, 403)
+    case 'blocked':
+      return c.json({ error: 'team_management_access_denied' }, 403)
+    case 'invitation_invalid':
+      return c.json({ error: 'team_management_access_denied' }, 403)
+    case 'subject_conflict':
+    case 'invalid':
+      return c.json(completionInvalid, 400)
+  }
 }
 
 export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
-  const { db, capabilities, configurationKey, privateTargets } = deps
+  const { db, capabilities, configurationKey, privateTargets, signup } = deps
   const transport = { send: deps.send ?? sendSsoRequest, privateTargets }
   const keys = new OidcJwksCache(transport)
   const starts = createRateLimiter({ limit: 30, windowSeconds: 60 })
   const completions = createRateLimiter({ limit: 30, windowSeconds: 60 })
+  const sessionOptions = (c: Context, publicUrl: string) => ({
+    ...deps.session,
+    publicUrl,
+    headers: c.req.raw.headers,
+    ip: c.var.clientIp,
+  })
   return {
     mount({ app, publicUrl, requestLogger, clientIp }) {
       const origin = new URL(publicUrl).origin
@@ -425,12 +482,6 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         sameSite: 'Strict',
         path: OIDC_COMPLETE_PATH,
       } as const
-      const sessionOptions = (c: Context) => ({
-        ...deps.session,
-        publicUrl,
-        headers: c.req.raw.headers,
-        ip: c.var.clientIp,
-      })
       const guard: MiddlewareHandler = async (c, next) => {
         c.header('Cache-Control', 'no-store')
         c.header('Referrer-Policy', 'no-referrer')
@@ -639,7 +690,22 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
             return c.redirect(`${oidcLinkReturnPath}#sso-link=${pending.id}`)
           }
           const link = await findOidcLink(db, provider, identity)
-          if (!link || identity.email === undefined) return fail('mailbox_unproven')
+          if (identity.email === undefined || link?.retired_at) return fail('mailbox_unproven')
+          if (!link) {
+            const pending = await stageOidcAdmission(
+              { db, configurationKey },
+              provider,
+              { ...identity, email: identity.email },
+              attempt,
+              getCookie(c, cookie),
+            )
+            if (pending.reason !== undefined) return fail(pending.reason)
+            setCookie(c, admissionCookieName(publicUrl, pending.id), pending.envelope, {
+              ...admissionCookieOptions(publicUrl),
+              expires: pending.expiresAt,
+            })
+            return c.redirect(`${MAILBOX_PROOF_CONFIRM_PATH}#attempt=${pending.id}`)
+          }
           const mailbox = normalizeOidcMailbox(identity.email)
           if (mailbox !== link.proven_email) {
             const pending = await stageOidcCompletion(
@@ -664,7 +730,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
             link,
             identity.sessionDeadline,
             attempt,
-            sessionOptions(c),
+            sessionOptions(c, publicUrl),
           )
           if ('reason' in session) return fail(session.reason)
           c.header('Set-Cookie', session.cookie, { append: true })
@@ -690,6 +756,22 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
         if (!configurationKey) return c.json(completionInvalid, 400)
         const id = parsed.data.attemptId
+        const admissionName = admissionCookieName(publicUrl, id)
+        const admissionEnvelope = getCookie(c, admissionName)
+        if (admissionEnvelope !== undefined) {
+          const admission = await completeOidcAdmission(
+            { db, configurationKey, signup },
+            { id, browserBinding: getCookie(c, cookie), envelope: admissionEnvelope },
+            sessionOptions(c, publicUrl),
+            { kind: 'jit' },
+          )
+          if (admission.status !== 'completed' && admission.status !== 'link_required')
+            return admissionRefused(c, admission.status)
+          deleteCookie(c, admissionName, admissionCookieOptions(publicUrl))
+          if (admission.status === 'link_required') return c.json({ status: 'link_required' })
+          c.header('Set-Cookie', admission.cookie, { append: true })
+          return c.redirect(admission.returnPath)
+        }
         const name = resultCookieName(id)
         const pending = { id, browserBinding: getCookie(c, cookie), envelope: getCookie(c, name) }
         const link = await completeOidcLink({ db, configurationKey }, pending, () =>
@@ -705,13 +787,52 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         const result = await completeOidcSignIn(
           { db, configurationKey },
           pending,
-          sessionOptions(c),
+          sessionOptions(c, publicUrl),
         )
         if (result.status === 'invalid') return c.json(completionInvalid, 400)
         deleteCookie(c, name, resultCookieOptions)
         if (result.status === 'collision') return c.json({ error: 'sso_email_collision' }, 409)
         c.header('Set-Cookie', result.cookie, { append: true })
         return c.redirect(result.returnPath)
+      })
+    },
+    mountInvitationAcceptance(app, publicUrl) {
+      const origin = new URL(publicUrl).origin
+      const cookie = bindingCookieName(publicUrl)
+      const cookieOptions = admissionCookieOptions(publicUrl)
+      app.post(ACCEPT_INVITATION_PATH, async (c, next) => {
+        const id = providerIdSchema.safeParse(c.req.header(OIDC_ADMISSION_HEADER))
+        if (!id.success) return next()
+        const name = admissionCookieName(publicUrl, id.data)
+        const envelope = getCookie(c, name)
+        if (envelope === undefined) return next()
+
+        c.set('oidcInvitationAcceptance', true)
+        c.header('Cache-Control', 'no-store')
+        c.header('Referrer-Policy', 'no-referrer')
+        requireSsoEnabled(capabilities, 'oidc')
+        if (c.req.header('origin') !== origin || c.req.header('authorization') !== undefined)
+          return c.json({ error: 'forbidden' }, 403)
+        const invitation = invitationInput.safeParse(await c.req.json().catch(() => null))
+        if (!invitation.success) return c.json({ error: 'invalid_request' }, 400)
+        const wait = completions.hit(rateLimitKey(c.var.clientIp))
+        if (wait !== undefined) {
+          c.header('Retry-After', String(wait))
+          return c.json({ error: 'rate_limited' }, 429)
+        }
+        if (!configurationKey) return c.json(completionInvalid, 400)
+        const result = await completeOidcAdmission(
+          { db, configurationKey, signup },
+          { id: id.data, browserBinding: getCookie(c, cookie), envelope },
+          sessionOptions(c, publicUrl),
+          { kind: 'invitation', invitationId: invitation.data.invitationId },
+        )
+        if (result.status !== 'completed' && result.status !== 'link_required')
+          return admissionRefused(c, result.status)
+        deleteCookie(c, name, cookieOptions)
+        if (result.status === 'link_required') return c.json({ status: 'link_required' })
+        c.header('Set-Cookie', result.cookie, { append: true })
+        return c.json({ invitation: result.invitation, member: result.member })
       })
     },
   }

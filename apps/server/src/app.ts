@@ -436,11 +436,12 @@ export function createApp({
       )
       return
     }
+    const ssoTrust = c.var.oidcInvitationAcceptance || isSsoTrustPath(c.req.path)
     const text = c.req.path.toLowerCase().includes('/meeting-polls')
       ? 'private meeting poll request failed'
       : isCalDavConnectionPath(c.req.path)
         ? '[private CalDAV diagnostic omitted]'
-        : isSsoTrustPath(c.req.path)
+        : ssoTrust
           ? '[private SSO diagnostic omitted]'
           : isSlackDestinationPath(c.req.path)
             ? '[private Slack diagnostic omitted]'
@@ -453,7 +454,7 @@ export function createApp({
         ? '/book/[redacted]'
         : isOneTimeLinkPath(c.req.path) ||
             isSlackDestinationPath(c.req.path) ||
-            isSsoTrustPath(c.req.path) ||
+            ssoTrust ||
             isCalDavConnectionPath(c.req.path)
           ? routePath(c)
           : c.req.path
@@ -663,6 +664,7 @@ export function createApp({
     }
   }
   ssoMailboxProof?.mount({ app, resolveCaller, publicUrl })
+  ssoOidcSignIn?.mountInvitationAcceptance(app, publicUrl)
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),
   )

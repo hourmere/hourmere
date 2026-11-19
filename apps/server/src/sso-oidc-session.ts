@@ -29,12 +29,13 @@ export function findOidcLink(
 ) {
   return db
     .selectFrom('sso_identity_links')
-    .select(['id', 'user_id', 'generation', 'proven_email'])
+    .select(['id', 'user_id', 'generation', 'proven_email', 'retired_at'])
     .where('organization_id', '=', organizationId)
     .where('provider_id', '=', providerId)
     .where('issuer', '=', issuer)
     .where('subject', '=', subject)
-    .where('retired_at', 'is', null)
+    .orderBy(sql`retired_at IS NULL`, 'desc')
+    .limit(1)
     .executeTakeFirst()
 }
 
@@ -177,7 +178,7 @@ export async function writeOidcSession(
     action: 'sso_authentication.succeeded',
     details: { method: 'oidc', providerId, revision, correlationId: attemptId },
   })
-  return { cookie: session.cookie }
+  return { cookie: session.cookie, sessionId: session.id }
 }
 
 export function issueOidcSession(

@@ -7,6 +7,8 @@
 // gate owns attempts and reads policies for browser draft writes. The OIDC attempt module
 // owns one-shot sign-in, draft test and self-link attempts and checks current providers.
 // Self-link completion creates the caller's link after checking the frozen team and mailbox.
+// Admission stages the signed identity, then checks proof, current trust and team admission.
+// Departures use guarded SSO team and link lookups to capture mailbox tombstones.
 // The OIDC adapter
 // reads providers and its session transaction rechecks the link, policy and domain
 // before writing browser proof. OIDC completion uses pending attempts and updates the
@@ -57,6 +59,12 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_providers',
   ],
   'apps/server/src/sso-fresh-proof.ts': ['sso_attempts', 'sso_policies'],
+  'apps/server/src/sso-oidc-admission-write.ts': [
+    'sso_attempts',
+    'sso_identity_links',
+    'sso_policies',
+  ],
+  'apps/server/src/sso-oidc-admission.ts': ['sso_attempts', 'sso_providers'],
   'apps/server/src/sso-oidc-attempt.ts': ['sso_attempts', 'sso_providers'],
   'apps/server/src/sso-oidc-completion.ts': ['sso_attempts', 'sso_identity_links'],
   'apps/server/src/sso-oidc-link.ts': [
@@ -80,6 +88,11 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider_domains',
     'sso_domains',
     'sso_policies',
+  ],
+  'packages/auth/src/sso-admission-blocks.ts': [
+    'sso_identity_links',
+    'sso_policies',
+    'sso_providers',
   ],
 }
 // A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
