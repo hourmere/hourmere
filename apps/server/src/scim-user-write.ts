@@ -19,7 +19,11 @@ export const refuse = (
   headers?: ScimReply['headers'],
 ) => new ScimWriteRefusal({ status, body: scimError(status, detail, scimType), headers })
 export const invalidSyntax = (detail: string) => refuse(400, detail, 'invalidSyntax')
-const invalidValue = (detail: string) => refuse(400, detail, 'invalidValue')
+export const invalidValue = (detail: string) => refuse(400, detail, 'invalidValue')
+export function assertScimActiveUnchanged(active: boolean | null | undefined, current: boolean) {
+  if (active !== undefined && active !== current)
+    throw refuse(403, 'Changing the active attribute is not supported yet.', 'mutability')
+}
 const unauthorized = () =>
   refuse(401, 'A valid provisioning token is required.', undefined, {
     'WWW-Authenticate': 'Bearer',
@@ -29,7 +33,7 @@ const unauthorized = () =>
 const identifierTaken = () =>
   refuse(409, 'A User of this connection already has this userName or externalId.', 'uniqueness')
 /** The writable profile stored by POST and PUT. Lifecycle and account links are separate. */
-interface Profile {
+export interface ScimUserProfile {
   user_name: string
   external_id: string | null
   formatted_name: string | null
@@ -52,7 +56,7 @@ interface Profile {
 
 // Attribute names are case-insensitive (RFC 7643 section 2.1); a name given twice in different
 // cases is ambiguous and refused.
-function attributes(value: unknown, what: string): Map<string, unknown> {
+export function scimAttributes(value: unknown, what: string): Map<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw invalidValue(`The ${what} attribute must be an object.`)
   const named = new Map<string, unknown>()
@@ -131,13 +135,15 @@ const enterprise = SCIM_URN.enterpriseUser.toLowerCase()
  * email, a primary email without `type`, or the only email when it has no `type` (RFC 7643
  * makes `type` optional). A list none of these selects is refused, never dropped silently.
  */
-function workEmail(value: unknown): string | null {
-  if (value === undefined) return null
+function workEmail(value: unknown, existing?: string | null): string | null {
+  if (value === undefined) return existing ?? null
   if (!Array.isArray(value) || value.length > 10)
     throw invalidValue('The emails attribute is not a valid value.')
   const emails = value.map((item) => {
-    const entry = attributes(item, 'emails')
+    const entry = scimAttributes(item, 'emails')
     only(entry, ['value', 'type', 'primary', 'display'])
+    if (existing !== undefined && !invitationEmailAccepted(entry.get('value')))
+      throw invalidValue('The email address is not a valid value.')
     const type = text(entry.get('type'), 'emails', 256)
     const primary = entry.get('primary')
     if (primary !== undefined && typeof primary !== 'boolean')
@@ -145,14 +151,18 @@ function workEmail(value: unknown): string | null {
     // An empty type is no type.
     return { entry, type: type?.trim().toLowerCase() || null, primary: primary === true }
   })
-  if (emails.length === 0) return null
+  if (emails.length === 0) return existing ?? null
   // RFC 7643 section 2.4: "primary" is true for at most one value.
   if (emails.filter((email) => email.primary).length > 1)
     throw invalidValue('The emails attribute marks more than one address as primary.')
   const work = emails.filter((email) => email.type === 'work')
   const untyped = emails.filter((email) => email.type === null)
+  const primaryWork = work.find((email) => email.primary)
+  // PATCH add appends to the one stored primary work address. A new explicit
+  // primary work address can take its place under the same selection rules.
+  if (existing != null && !primaryWork) return existing
   const chosen =
-    work.find((email) => email.primary) ??
+    primaryWork ??
     work[0] ??
     untyped.find((email) => email.primary) ??
     (emails.length === 1 ? untyped[0] : undefined)
@@ -182,10 +192,10 @@ function noPrivileges(value: unknown) {
 export function parseScimUserWrite(
   body: unknown,
   method: 'POST' | 'PUT',
-): { profile: Profile; active: boolean | undefined } {
+): { profile: ScimUserProfile; active: boolean | undefined } {
   if (typeof body !== 'object' || body === null || Array.isArray(body))
     throw invalidSyntax('The request body must be a User object.')
-  const user = attributes(body, 'User')
+  const user = scimAttributes(body, 'User')
   const schemas = user.get('schemas')
   if (
     !Array.isArray(schemas) ||
@@ -216,70 +226,101 @@ export function parseScimUserWrite(
     enterprise,
     ...ignoredCore,
   ])
-  const userName = text(user.get('username'), 'userName', 256)
-  if (userName === null || userName.trim() === '')
-    throw invalidValue('The userName attribute is required.')
-  const externalId = text(user.get('externalid'), 'externalId', 1024)
-  if (externalId === '') throw invalidValue('The externalId attribute is not a valid value.')
   const active = user.get('active')
   if (active !== undefined && typeof active !== 'boolean')
     throw invalidValue('The active attribute is not a valid value.')
   // A new entry is active and awaits its claim. PUT checks the current state under lock.
   if (method === 'POST' && active === false)
     throw invalidValue('Creating an inactive User is not supported yet.')
+  return { profile: parseScimUserProfile(user), active }
+}
+
+type AttributeGroup = Map<string, unknown> | null | undefined
+
+// Absent groups preserve their values on PATCH. Explicitly unassigned groups clear them.
+function group(parent: AttributeGroup, name: string, label = name): AttributeGroup {
+  if (parent === null) return null
+  if (!parent?.has(name)) return undefined
+  const value = parent.get(name)
+  return value === undefined ? null : scimAttributes(value, label)
+}
+
+/** Validates and maps one replacement or one ordered PATCH overlay onto a locked profile. */
+export function parseScimUserProfile(
+  user: Map<string, unknown>,
+  current?: ScimUserProfile,
+  appendEmails = false,
+): ScimUserProfile {
+  const pick = <T>(
+    named: AttributeGroup,
+    name: string,
+    previous: T | undefined,
+    parse: (value: unknown) => T,
+  ): T => {
+    if (previous !== undefined && named !== null && !named?.has(name)) return previous
+    return parse(named?.get(name))
+  }
+  const field = (named: AttributeGroup, label: string, previous?: string | null, max = 256) =>
+    pick(named, label.slice(label.lastIndexOf('.') + 1).toLowerCase(), previous, (value) =>
+      text(value, label, max),
+    )
+  const userName = field(user, 'userName', current?.user_name)
+  if (userName === null || userName.trim() === '')
+    throw invalidValue('The userName attribute is required.')
+  const externalId = field(user, 'externalId', current?.external_id, 1024)
+  if (externalId === '') throw invalidValue('The externalId attribute is not a valid value.')
   noPrivileges(user.get('roles'))
   noPrivileges(user.get('entitlements'))
-  const name = user.get('name') !== undefined ? attributes(user.get('name'), 'name') : new Map()
-  only(name, [
-    'formatted',
-    'familyname',
-    'givenname',
-    'middlename',
-    'honorificprefix',
-    'honorificsuffix',
-  ])
-  const extension =
-    user.get(enterprise) !== undefined ? attributes(user.get(enterprise), 'enterprise') : new Map()
-  only(extension, [
-    'employeenumber',
-    'costcenter',
-    'organization',
-    'division',
-    'department',
-    'manager',
-  ])
-  let managerId: string | null = null
-  if (extension.get('manager') !== undefined) {
-    const manager = attributes(extension.get('manager'), 'manager')
-    only(manager, ['value', 'displayname', '$ref'])
-    const value = manager.get('value')
-    if (value !== undefined) {
-      if (typeof value !== 'string' || !SCIM_USER_ID.test(value))
-        throw invalidValue('The manager attribute does not name a User of this connection.')
-      managerId = value
-    }
-  }
-  const profile: Profile = {
+  const name = group(user, 'name')
+  if (name)
+    only(name, [
+      'formatted',
+      'familyname',
+      'givenname',
+      'middlename',
+      'honorificprefix',
+      'honorificsuffix',
+    ])
+  const extension = group(user, enterprise, 'enterprise')
+  if (extension)
+    only(extension, [
+      'employeenumber',
+      'costcenter',
+      'organization',
+      'division',
+      'department',
+      'manager',
+    ])
+  const manager = group(extension, 'manager')
+  if (manager) only(manager, ['value', 'displayname', '$ref'])
+  const managerId = pick(manager, 'value', current?.manager_id, (value) => {
+    if (value === undefined) return null
+    if (typeof value !== 'string' || !SCIM_USER_ID.test(value))
+      throw invalidValue('The manager attribute does not name a User of this connection.')
+    return value
+  })
+  return {
     user_name: userName,
     external_id: externalId,
-    formatted_name: text(name.get('formatted'), 'name.formatted', 256),
-    family_name: text(name.get('familyname'), 'name.familyName', 256),
-    given_name: text(name.get('givenname'), 'name.givenName', 256),
-    display_name: text(user.get('displayname'), 'displayName', 256),
-    nick_name: text(user.get('nickname'), 'nickName', 256),
-    title: text(user.get('title'), 'title', 256),
-    user_type: text(user.get('usertype'), 'userType', 256),
-    locale: locale(user.get('locale')),
-    timezone: timezone(user.get('timezone')),
-    employee_number: text(extension.get('employeenumber'), 'employeeNumber', 256),
-    cost_center: text(extension.get('costcenter'), 'costCenter', 256),
-    enterprise_organization: text(extension.get('organization'), 'organization', 256),
-    division: text(extension.get('division'), 'division', 256),
-    department: text(extension.get('department'), 'department', 256),
-    work_email: workEmail(user.get('emails')),
+    formatted_name: field(name, 'name.formatted', current?.formatted_name),
+    family_name: field(name, 'name.familyName', current?.family_name),
+    given_name: field(name, 'name.givenName', current?.given_name),
+    display_name: field(user, 'displayName', current?.display_name),
+    nick_name: field(user, 'nickName', current?.nick_name),
+    title: field(user, 'title', current?.title),
+    user_type: field(user, 'userType', current?.user_type),
+    locale: pick(user, 'locale', current?.locale, locale),
+    timezone: pick(user, 'timezone', current?.timezone, timezone),
+    employee_number: field(extension, 'employeeNumber', current?.employee_number),
+    cost_center: field(extension, 'costCenter', current?.cost_center),
+    enterprise_organization: field(extension, 'organization', current?.enterprise_organization),
+    division: field(extension, 'division', current?.division),
+    department: field(extension, 'department', current?.department),
+    work_email: pick(user, 'emails', current?.work_email, (value) =>
+      workEmail(value, appendEmails ? (current?.work_email ?? null) : undefined),
+    ),
     manager_id: managerId,
   }
-  return { profile, active }
 }
 
 const LIVE_IDENTIFIERS = ['scim_users_live_username', 'scim_users_live_external_id']
@@ -329,16 +370,18 @@ export async function validateScimManager(
   trx: Db,
   organizationId: string,
   connectionId: string,
-  managerId: string | null,
+  ...managerIds: (string | null)[]
 ) {
-  if (managerId === null) return
-  const manager = await trx
+  const ids = [...new Set(managerIds.filter((id) => id !== null))]
+  if (ids.length === 0) return
+  const managers = await trx
     .selectFrom('scim_users')
     .select('id')
-    .where('id', '=', managerId)
+    .where('id', 'in', ids)
     .where('organization_id', '=', organizationId)
     .where('connection_id', '=', connectionId)
     .where('retired_at', 'is', null)
-    .executeTakeFirst()
-  if (!manager) throw invalidValue('The manager attribute does not name a User of this connection.')
+    .execute()
+  if (managers.length !== ids.length)
+    throw invalidValue('The manager attribute does not name a User of this connection.')
 }
