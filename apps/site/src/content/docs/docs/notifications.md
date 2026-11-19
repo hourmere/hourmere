@@ -147,8 +147,9 @@ ballot stays intact.
 The hourly cleanup records closure at the voting deadline and queues a notice for the
 creator if they still manage the event. The notice contains the deadline, response count
 and an authenticated results link. Closing a poll early does not send the notice.
-The workers and opt-out page are available without a feature flag. Poll creation has
-yet to be exposed.
+Hosts can create polls and invite voters through REST, MCP and CLI without a feature flag.
+An accepted invitation queues mail to the supplied mailbox. Delivery still depends on
+eligibility and the existing instance and recipient mail budgets.
 
 See the [meeting poll design](https://github.com/hourmere/hourmere/blob/main/docs/meeting-polls.md#notifications-abuse-and-time-zones)
 for eligibility, mail budgets and privacy rules.

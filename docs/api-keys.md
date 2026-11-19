@@ -123,8 +123,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | Operation group | `full` | `read` | `bookings` |
 | --- | --- | --- | --- |
-| Booking workflow reads | Allowed | Allowed | Allowed |
 | Booking actions and repairs | Allowed | — | Allowed |
+| Booking workflow reads | Allowed | Allowed | Allowed |
 | Other account reads | Allowed | Allowed | — |
 | Account settings and configuration writes | Allowed | — | — |
 | Browser session operations | — | — | — |
@@ -136,6 +136,12 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
+| `POST /api/v1/meeting-polls` | Session or API key | `full, bookings` |
+| `POST /api/v1/meeting-polls/{id}/invitations` | Session or API key | `full, bookings` |
+| `POST /api/v1/meeting-polls/{id}/invitations/{voterId}/resend` | Session or API key | `full, bookings` |
+| `DELETE /api/v1/meeting-polls/{id}/voters/{voterId}` | Session or API key | `full, bookings` |
+| `POST /api/v1/meeting-polls/{id}/remove-unverified` | Session or API key | `full, bookings` |
+| `POST /api/v1/meeting-polls/{id}/rotate-link` | Session or API key | `full, bookings` |
 | `GET /api/v1/meeting-polls` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/meeting-polls/{id}` | Session or API key | `full, read, bookings` |
 | `GET /api/v1/meeting-polls/{id}/results` | Session or API key | `full, read, bookings` |
@@ -312,6 +318,12 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `create_meeting_poll` | — | `polls create` | `full, bookings` |
+| `invite_meeting_poll_voters` | — | `polls invite` | `full, bookings` |
+| `resend_meeting_poll_invitation` | — | `polls resend-invitation` | `full, bookings` |
+| `remove_meeting_poll_voter` | — | `polls remove-voter` | `full, bookings` |
+| `remove_unverified_meeting_poll_voters` | — | `polls remove-unverified` | `full, bookings` |
+| `rotate_meeting_poll_link` | — | `polls rotate-link` | `full, bookings` |
 | `list_meeting_polls` | — | `polls list` | `full, read, bookings` |
 | `get_meeting_poll` | — | `polls get` | `full, read, bookings` |
 | `get_meeting_poll_results` | — | `polls results` | `full, read, bookings` |

@@ -185,6 +185,41 @@ describe.skipIf(!serverUrl)('public poll capability projection', () => {
     expect((await read(b.token)).counts?.[0]).toMatchObject({ yes: 0, ifNeedBe: 1, no: 0 })
   })
 
+  async function assertWithdrawnHasNoCounts(reader: typeof readMeetingPoll) {
+    const p = await fixture('aggregate')
+    const a = await invite(p, 'stays@example.com')
+    const b = await invite(p, 'leaves@example.com')
+    for (const voter of [a, b]) await verifyMeetingPollVoter(publicContext(), voter)
+    await vote(p, a.token)
+    await vote(p, b.token, 'no')
+    expect((await reader(publicContext(), { token: b.token })).counts?.[0]).toMatchObject({
+      yes: 1,
+      no: 1,
+    })
+    await withdrawMeetingPollVoter(publicContext(), { token: b.token, expectedBallotRevision: 1 })
+    const withdrawn = await reader(publicContext(), { token: b.token })
+    expect(withdrawn.ownBallot?.voter.status).toBe('withdrawn')
+    expect(withdrawn.counts).toBeNull()
+    return { p, a, b, withdrawn }
+  }
+  it('withholds aggregate counts from a withdrawn voter in the same shape as other non-voters', async () => {
+    const { p, a, withdrawn } = await assertWithdrawnHasNoCounts(readMeetingPoll)
+    expect(Object.keys(withdrawn).sort()).toEqual(
+      Object.keys(await read(p.publicToken as string)).sort(),
+    )
+    expect((await read(a.token)).counts?.[0]).toMatchObject({ yes: 1, ifNeedBe: 0, no: 0 })
+  })
+
+  it('withholds counts from a verified voter when the poll is not aggregate', async () => {
+    const p = await fixture('private')
+    const a = await invite(p, 'private-voter@example.com')
+    await verifyMeetingPollVoter(publicContext(), a)
+    await vote(p, a.token)
+    const result = await read(a.token)
+    expect(result.ownBallot?.voter.status).toBe('verified')
+    expect(result.counts).toBeNull()
+  })
+
   it('accepts pending verification only before consumption and expiry, and rejects opt-out and arbitrary tokens', async () => {
     const p = await fixture('aggregate')
     await enrollMeetingPollVoter(publicContext(), {
@@ -298,14 +333,11 @@ describe.skipIf(!serverUrl)('public poll capability projection', () => {
     }
   })
 
-  it('detects a source-copy mutation that exposes aggregates before verification', async () => {
+  async function mutatedReader(marker: string, replacement: string) {
     const location = new URL('./meeting-poll-public.ts', import.meta.url)
     const original = readFileSync(location, 'utf8')
-    const marker = "voter?.verified && voter.purpose === 'voting'"
     expect(original.split(marker)).toHaveLength(2)
-    const source = stripTypeScriptTypes(
-      original.replace(marker, "voter?.purpose === 'voting'"),
-    ).replace(
+    const source = stripTypeScriptTypes(original.replace(marker, replacement)).replace(
       /from '([^']+)'/g,
       (_, specifier: string) =>
         `from '${specifier.startsWith('node:') ? specifier : specifier.startsWith('.') ? new URL(specifier, location).href : pathToFileURL(createRequire(location).resolve(specifier)).href}'`,
@@ -313,6 +345,14 @@ describe.skipIf(!serverUrl)('public poll capability projection', () => {
     const mutated = await import(
       `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
     )
-    await expect(assertUnverifiedHasNoCounts(mutated.readMeetingPoll)).rejects.toThrow(/null/)
+    return mutated.readMeetingPoll as typeof readMeetingPoll
+  }
+  it('detects a source-copy mutation that exposes aggregates before verification', async () => {
+    const reader = await mutatedReader('voter?.verified &&', '')
+    await expect(assertUnverifiedHasNoCounts(reader)).rejects.toThrow(/null/)
+  })
+  it('detects a source-copy mutation that exposes aggregates after withdrawal', async () => {
+    const reader = await mutatedReader('&&\n        voter.active', '')
+    await expect(assertWithdrawnHasNoCounts(reader)).rejects.toThrow(/null/)
   })
 })

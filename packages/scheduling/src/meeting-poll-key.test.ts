@@ -857,7 +857,7 @@ describe('meeting poll key fence wiring', () => {
     )
   })
 
-  it('keeps public operations and limits host transports to reads and lifecycle', () => {
+  it('keeps public operations and limits host services to their transport adapters', () => {
     const routes = readFileSync(join(root, 'apps/server/src/routes/meeting-polls.ts'), 'utf8')
     expect([...routes.matchAll(/path: '([^']+)'/g)].map((match) => match[1]).sort()).toEqual(
       ['read', 'enroll', 'recover', 'verify', 'vote', 'withdraw', 'reminder-opt-out']
@@ -887,8 +887,9 @@ describe('meeting poll key fence wiring', () => {
     ])
     for (const file of productionSources().filter((file) => /^(apps|tools)\//.test(file))) {
       const source = readFileSync(join(root, file), 'utf8')
-      expect(hostLifecycleServices.test(source), file).toBe(hostAdapters.has(file))
-      expect(creationAndRosterServices.test(source), file).toBe(false)
+      const adapter = hostAdapters.has(file)
+      expect(hostLifecycleServices.test(source), file).toBe(adapter)
+      expect(creationAndRosterServices.test(source), file).toBe(adapter)
     }
   })
 })
