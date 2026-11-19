@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
@@ -8,11 +8,17 @@ import { canonicalJson, createPublicBooking, insertBooking } from './bookings.ts
 import { NO_CHANGE_CUTOFFS } from './change-deadlines.ts'
 import { notificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
-import { FakePaymentProvider } from './payment-provider.ts'
-import { cancelPaymentHold, confirmPaymentHold, createPaymentHold } from './payments.ts'
+import { type CheckoutSession, FakePaymentProvider } from './payment-provider.ts'
+import {
+  cancelPaymentHold,
+  confirmPaymentHold,
+  createPaymentCheckout,
+  createPaymentHold,
+} from './payments.ts'
 import { createFixtures } from './testing.ts'
 
 const url = process.env.DATABASE_URL
+const price = { amountMinor: 1250, currency: 'usd' }
 
 describe.skipIf(!url)('payment holds', () => {
   let testDb: TestDatabase
@@ -57,6 +63,146 @@ describe.skipIf(!url)('payment holds', () => {
     await expect(
       createPaymentHold({ ...ctx, paidBookingsEnabled: undefined }, input),
     ).rejects.toMatchObject({ code: 'paid_bookings_disabled' })
+  })
+  it('reuses the persisted Checkout Session and opaque idempotency key on identical retry', async () => {
+    const { ctx, input } = await setup()
+    const provider = new FakePaymentProvider()
+    const create = vi.spyOn(provider, 'createCheckout')
+    const retrieve = vi.spyOn(provider, 'retrieveCheckout')
+    const checkoutCtx = { ...ctx, paymentProvider: provider }
+    const hold = await createPaymentHold(checkoutCtx, input, price)
+    expect(await createPaymentHold(checkoutCtx, input, price)).toEqual(hold)
+    const attempt = await db
+      .selectFrom('payment_checkout_attempts')
+      .selectAll()
+      .where('booking_id', '=', hold.id)
+      .executeTakeFirstOrThrow()
+    expect(attempt).toMatchObject({
+      account_id: provider.accountId,
+      mode: provider.mode,
+      amount_minor: price.amountMinor,
+      currency: price.currency,
+      session_id: hold.checkout?.sessionId,
+      idempotency_key: `hourmere_checkout_${attempt.id}`,
+    })
+    expect(attempt.id).not.toBe(hold.id)
+    expect(attempt.idempotency_key).not.toContain(input.invitee.email)
+    expect(attempt.idempotency_key).not.toContain(input.idempotencyKey)
+    expect(create).toHaveBeenCalledExactlyOnceWith({
+      ...price,
+      attemptId: attempt.id,
+      bookingId: hold.id,
+      idempotencyKey: attempt.idempotency_key,
+      accountId: provider.accountId,
+      mode: provider.mode,
+      expiresAt: hold.expiresAt,
+      startedAt: attempt.started_at?.toISOString(),
+    })
+    expect(retrieve).toHaveBeenCalledOnce()
+    expect(ctx.notify).not.toHaveBeenCalled()
+  })
+
+  it('rejects changed input or price under a retained hold key', async () => {
+    const { ctx, input } = await setup()
+    const provider = new FakePaymentProvider()
+    const create = vi.spyOn(provider, 'createCheckout')
+    const checkoutCtx = { ...ctx, paymentProvider: provider }
+    await createPaymentHold(checkoutCtx, input, price)
+    await expect(
+      createPaymentHold(checkoutCtx, input, { ...price, amountMinor: price.amountMinor + 1 }),
+    ).rejects.toMatchObject({ code: 'idempotency_key_reused' })
+    await expect(
+      createPaymentHold(
+        checkoutCtx,
+        { ...input, invitee: { ...input.invitee, name: 'Another invitee' } },
+        price,
+      ),
+    ).rejects.toMatchObject({ code: 'idempotency_key_reused' })
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('reconciles a lost Checkout response before returning the original Session', async () => {
+    const { ctx, input } = await setup()
+    const provider = new FakePaymentProvider()
+    const original = provider.createCheckout.bind(provider)
+    let lostSession: CheckoutSession | undefined
+    const create = vi
+      .spyOn(provider, 'createCheckout')
+      .mockImplementationOnce(async (operation) => {
+        lostSession = await original(operation)
+        throw new Error('Lost provider response')
+      })
+    const reconcile = vi.spyOn(provider, 'findCheckout')
+    const checkoutCtx = { ...ctx, paymentProvider: provider }
+    await expect(createPaymentHold(checkoutCtx, input, price)).rejects.toMatchObject({
+      code: 'payment_checkout_unavailable',
+    })
+    const hold = await createPaymentHold(checkoutCtx, input, price)
+    expect(lostSession).toBeDefined()
+    expect(hold.checkout).toEqual(lostSession)
+    expect(reconcile).toHaveBeenCalledExactlyOnceWith(create.mock.calls[0]?.[0])
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an inconclusive Checkout operation unresolved instead of submitting again', async () => {
+    const { ctx, input } = await setup()
+    const provider = new FakePaymentProvider()
+    const create = vi.spyOn(provider, 'createCheckout').mockRejectedValueOnce(new Error('Timeout'))
+    const checkoutCtx = { ...ctx, paymentProvider: provider }
+    await expect(createPaymentHold(checkoutCtx, input, price)).rejects.toMatchObject({
+      code: 'payment_checkout_unavailable',
+    })
+    await expect(createPaymentHold(checkoutCtx, input, price)).rejects.toMatchObject({
+      code: 'payment_checkout_unresolved',
+    })
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('checks the retained mode and account before any provider call', async () => {
+    const { ctx, input } = await setup()
+    const provider = new FakePaymentProvider()
+    const { id } = await createPaymentHold({ ...ctx, paymentProvider: provider }, input, price)
+    for (const mismatch of [
+      new FakePaymentProvider(provider.accountId, 'live'),
+      new FakePaymentProvider('acct_other', provider.mode),
+    ]) {
+      const retrieve = vi.spyOn(mismatch, 'retrieveCheckout')
+      await expect(
+        createPaymentCheckout({ ...ctx, paymentProvider: mismatch }, id),
+      ).rejects.toMatchObject({
+        code: 'payment_provider_binding_mismatch',
+      })
+      expect(retrieve).not.toHaveBeenCalled()
+    }
+  })
+
+  it('keeps a Session binding and withholds its URL when cancellation wins during create', async () => {
+    const { ctx, input } = await setup()
+    const provider = new FakePaymentProvider()
+    const original = provider.createCheckout.bind(provider)
+    let createdSession: CheckoutSession | undefined
+    vi.spyOn(provider, 'createCheckout').mockImplementationOnce(async (operation) => {
+      await cancelPaymentHold(ctx, operation.bookingId)
+      createdSession = await original(operation)
+      return createdSession
+    })
+    const checkoutCtx = { ...ctx, paymentProvider: provider }
+    await expect(createPaymentHold(checkoutCtx, input, price)).rejects.toMatchObject({
+      code: 'payment_hold_inactive',
+    })
+    const hold = await createPaymentHold(checkoutCtx, input, price)
+    expect(hold).toMatchObject({ status: 'cancelled' })
+    expect(hold).not.toHaveProperty('checkout')
+    await expect(createPaymentCheckout(checkoutCtx, hold.id)).rejects.toMatchObject({
+      code: 'payment_hold_inactive',
+    })
+    const attempt = await db
+      .selectFrom('payment_checkout_attempts')
+      .select('session_id')
+      .where('booking_id', '=', hold.id)
+      .executeTakeFirstOrThrow()
+    expect(createdSession).toBeDefined()
+    expect(attempt.session_id).toBe(createdSession?.sessionId)
   })
   it('serializes two invitees, blocks discovery and ordinary booking, replays without side effects', async () => {
     const { ctx, input, host, eventTypeId, start } = await setup()
@@ -359,6 +505,30 @@ describe.skipIf(!url)('payment holds', () => {
       expiresAt: before.payment_hold_expires_at?.toISOString(),
     })
   })
+  it('rejects Checkout creation for an overdue hold even before the expiry worker runs', async () => {
+    const { id, ctx } = await expiredHold()
+    const provider = new FakePaymentProvider()
+    const create = vi.spyOn(provider, 'createCheckout')
+    const attemptId = randomUUID()
+    await db
+      .insertInto('payment_checkout_attempts')
+      .values({
+        id: attemptId,
+        booking_id: id,
+        account_id: provider.accountId,
+        mode: provider.mode,
+        amount_minor: price.amountMinor,
+        currency: price.currency,
+        idempotency_key: `hourmere_checkout_${attemptId}`,
+      })
+      .execute()
+    await expect(
+      createPaymentCheckout({ ...ctx, paymentProvider: provider }, id),
+    ).rejects.toMatchObject({
+      code: 'payment_hold_inactive',
+    })
+    expect(create).not.toHaveBeenCalled()
+  })
   it('deadline is exclusive; discovery and admission release overdue occupancy before cron', async () => {
     const { id, ctx, input, host, eventTypeId, start } = await expiredHold()
     expect(
@@ -409,11 +579,15 @@ describe.skipIf(!url)('payment holds', () => {
 it('fake provider replays checkout/refund and rejects invalid signatures and changed keys', async () => {
   const fake = new FakePaymentProvider()
   const checkout = {
+    attemptId: 'attempt',
     bookingId: 'fake',
+    accountId: fake.accountId,
+    mode: fake.mode,
     amountMinor: 100,
     currency: 'usd',
     expiresAt: 'future',
     idempotencyKey: 'checkout',
+    startedAt: 'now',
   }
   expect(await fake.createCheckout(checkout)).toEqual(await fake.createCheckout(checkout))
   await expect(fake.createCheckout({ ...checkout, amountMinor: 200 })).rejects.toThrow(

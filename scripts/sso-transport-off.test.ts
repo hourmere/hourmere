@@ -1,8 +1,8 @@
-// The SSO transport profile is called only by domain services for TXT proofs.
-// Interactive writes and rechecks are hard-off; offline retirement only removes trust.
-// Only the configuration loader parses `SSO_PRIVATE_TARGETS`, so the allowlist routes nothing.
-// OIDC and SAML stay hard-off (apps/server/src/sso.test.ts starts the server with both settings and a
-// populated allowlist). HTTP federation transport still has no caller.
+// The SSO transport profile is called by domain services for TXT proofs and by the uncalled
+// OIDC JWKS module for HTTP. Interactive writes and rechecks are hard-off; offline retirement only
+// removes trust. Only the configuration loader parses `SSO_PRIVATE_TARGETS`, so the allowlist routes
+// nothing. OIDC and SAML stay hard-off (apps/server/src/sso.test.ts starts the server with both
+// settings and a populated allowlist), so the JWKS module has no production caller.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,12 @@ const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 const PROFILE = 'packages/outbound/src/sso.ts'
 const TARGETS = 'packages/outbound/src/sso-private-targets.ts'
+const OIDC_JWKS = 'apps/server/src/sso-oidc-jwks.ts'
+const OIDC_VERIFIER_MODULES = new Set([
+  OIDC_JWKS,
+  'apps/server/src/sso-oidc-attempt.ts',
+  'apps/server/src/sso-oidc-verifier.ts',
+])
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -58,7 +64,7 @@ const importsTargets = (file: string, source: string) =>
     (target) => target === TARGETS || target === '@hourmere/outbound/sso-private-targets',
   )
 
-describe('SSO transport permits only domain TXT callers', () => {
+describe('SSO transport permits only domain TXT callers and the uncalled OIDC JWKS module', () => {
   it('recognises every import form of the profile and nothing else', () => {
     const server = 'apps/server/src/example.ts'
     const outbound = 'packages/outbound/src/example.ts'
@@ -83,7 +89,7 @@ describe('SSO transport permits only domain TXT callers', () => {
       expect(importsProfile(file, source), source).toBe(false)
   })
 
-  it('imports the profile only for guarded domain TXT verification', () => {
+  it('imports the profile only for guarded domain TXT and OIDC document requests', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     // The scan sees the profile, its package and the server, so a caller cannot hide.
@@ -105,12 +111,27 @@ describe('SSO transport permits only domain TXT callers', () => {
       'apps/server/src/sso-domain-recheck.ts',
       'apps/server/src/sso-domain-retirement.ts',
       'apps/server/src/sso-domains.ts',
+      OIDC_JWKS,
     ])
-    for (const caller of callers) {
+    for (const caller of callers.filter((file) => file !== OIDC_JWKS)) {
       const domainSource = readFileSync(new URL(caller, root), 'utf8')
       expect(domainSource).toContain('resolveSsoDomainTxt')
       expect(domainSource).not.toContain('sendSsoRequest')
     }
+    expect(readFileSync(new URL(OIDC_JWKS, root), 'utf8')).toContain('sendSsoRequest')
+  })
+
+  it('has no production caller of the OIDC verifier, attempts or JWKS', () => {
+    const sources = productionSources()
+    expect(sources).toEqual(expect.arrayContaining([...OIDC_VERIFIER_MODULES]))
+    const callers = sources.filter(
+      (file) =>
+        !OIDC_VERIFIER_MODULES.has(file) &&
+        imports(file, readFileSync(new URL(file, root), 'utf8')).some((target) =>
+          OIDC_VERIFIER_MODULES.has(target),
+        ),
+    )
+    expect(callers).toEqual([])
   })
 
   it('reads SSO_PRIVATE_TARGETS only in the configuration loader, and routes nothing with it', () => {

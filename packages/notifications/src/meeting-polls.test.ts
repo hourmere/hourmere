@@ -6,12 +6,16 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type MailMessage, MailRejectedError } from '@hourmere/mail'
 import { createFixtures, createTestUser, testContext, weekdays } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { sql } from 'kysely'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import * as ballots from '../../scheduling/src/meeting-poll-ballots.ts'
+import { readMeetingPoll } from '../../scheduling/src/meeting-poll-public.ts'
 import * as results from '../../scheduling/src/meeting-poll-results.ts'
 import * as voters from '../../scheduling/src/meeting-poll-voters.ts'
 import * as polls from '../../scheduling/src/meeting-polls.ts'
 import * as Delivery from './meeting-polls.ts'
+import { headerValues, rawMailCapture } from './testing/raw-mime.ts'
+import { alignSmtpDateNowWithDatabase } from './testing-clock.ts'
 
 const scheduling = { ...voters, ...polls, ...ballots, ...results }
 const serverUrl = process.env.DATABASE_URL
@@ -53,7 +57,7 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
     await owned?.drop()
   })
 
-  async function setup() {
+  async function setup(deadlineLeadHours = 24) {
     const owner = await createTestUser(db)
     await db
       .insertInto('profiles')
@@ -75,8 +79,14 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
       },
     })
     const eventTypeId = await fixtures.eventType(principal.organization.id, owner.id)
-    const now = Temporal.Now.instant().round({ smallestUnit: 'millisecond', roundingMode: 'floor' })
-    const deadline = now.round({ smallestUnit: 'hour', roundingMode: 'ceil' }).add({ hours: 24 })
+    const started = performance.now()
+    const wall = await db
+      .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
+      .executeTakeFirstOrThrow()
+    const now = Temporal.Instant.fromEpochMilliseconds(wall.now.getTime())
+    const deadline = now
+      .round({ smallestUnit: 'hour', roundingMode: 'ceil' })
+      .add({ hours: deadlineLeadHours })
     const created = await scheduling.createMeetingPoll(ctx, {
       eventTypeId,
       candidateStarts: [
@@ -91,14 +101,17 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
     const pollId = created.poll.id
     const messages: MailMessage[] = []
     const logs: string[] = []
-    let current = now.add({ seconds: 1 })
+    // Keep up with intents written by the live database until a test advances the worker.
+    let current: Temporal.Instant | undefined
+    const workerNow = () =>
+      current ?? now.add({ milliseconds: Math.ceil(performance.now() - started) })
     const deps: Delivery.MeetingPollEmailDeps = {
       db,
       meetingPollSecret: SECRET,
       secret: SECRET,
       publicUrl: 'https://poll.example.test',
       smtpConfigured: true,
-      now: () => current,
+      now: workerNow,
       mailMaxPerHour: 0,
       mailRecipientMaxPerHour: 1000,
       mailRecipientMaxPerDay: 1000,
@@ -158,11 +171,11 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
           timeZone: 'UTC',
         })
         .then(() => credential(email))
-    const invite = (email = `${randomUUID()}@example.test`) =>
+    const invite = (email = `${randomUUID()}@example.test`, locale?: string) =>
       scheduling
         .inviteMeetingPollVoters(ctx, {
           id: pollId,
-          invitees: [{ name: 'Voter', email }],
+          invitees: [{ name: 'Voter', email, locale }],
           idempotencyKey: randomUUID(),
         })
         .then(() => credential(email))
@@ -170,7 +183,10 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
     return {
       deps,
       advance: (milliseconds: number) => {
-        current = current.add({ milliseconds })
+        current = workerNow().add({ milliseconds })
+      },
+      advanceTo: (at: Temporal.Instant) => {
+        current = at
       },
       ctx,
       pub,
@@ -287,7 +303,7 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
     const s = await setup()
     const a = await s.invite()
     await s.recover(a.voter.email)
-    s.advance(s.deadline.epochMilliseconds - s.now.epochMilliseconds)
+    s.advanceTo(s.deadline)
     for (const row of await s.rows()) await send(s.deps, row)
     expect(s.messages).toHaveLength(0)
     expect(
@@ -561,5 +577,56 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
       attempts: 2,
       capability_ciphertext: null,
     })
+  })
+
+  it('sends a private localized reminder MIME message with usable voting and opt-out fragments', async () => {
+    const s = await setup(72)
+    const invitee = await s.invite('reminder-recipient@example.test', 'de')
+    const other = await s.enroll('another-voter@example.test')
+    const invitation = required((await s.rows()).find((row) => row.kind === 'invitation'))
+    await send(s.deps, invitation)
+    expect(s.messages).toHaveLength(1)
+    const { queueDueMeetingPollReminders } = await import(
+      '@hourmere/scheduling/meeting-poll-delivery'
+    )
+    s.advanceTo(s.deadline.subtract({ hours: 24 }))
+    await queueDueMeetingPollReminders(db, SECRET, { now: s.deps.now })
+    const reminder = required((await s.rows()).find((row) => row.kind === 'reminder'))
+    const capture = await rawMailCapture('Hourmere <notifications@example.test>')
+    try {
+      await alignSmtpDateNowWithDatabase(db)
+      await send({ ...s.deps, mailer: capture.mailer }, reminder)
+      expect(capture.sent).toHaveLength(1)
+      const message = required(capture.sent[0])
+      expect(message.envelope).toEqual([invitee.voter.email])
+      expect(headerValues(message, 'Cc')).toEqual([])
+      expect(headerValues(message, 'Bcc')).toEqual([])
+      expect(message.ics).toBeUndefined()
+      expect(message.decoded.includes('Die Abstimmung endet in Kürze.')).toBe(true)
+      expect(message.decoded.includes(other.voter.email)).toBe(false)
+      const token = required(message.decoded.match(/\/poll\/voter#([A-Za-z0-9_-]{43})/)?.[1])
+      const optOut = required(
+        message.decoded.match(/\/poll\/reminder-opt-out#([A-Za-z0-9_-]{43})/)?.[1],
+      )
+      expect(token === invitee.token).toBe(true)
+      expect(message.decoded.includes(`href="${s.deps.publicUrl}/poll/voter#${token}"`)).toBe(true)
+      expect(
+        message.decoded.includes(`href="${s.deps.publicUrl}/poll/reminder-opt-out#${optOut}"`),
+      ).toBe(true)
+      await expect(readMeetingPoll(s.pub, { token })).resolves.toMatchObject({
+        ownBallot: { voter: { status: 'invited', voterId: invitee.voter.id } },
+      })
+      await expect(readMeetingPoll(s.pub, { token: optOut })).rejects.toMatchObject({
+        code: 'poll_not_found',
+      })
+      await expect(
+        scheduling.optOutOfMeetingPollReminders(s.pub, { token: optOut }),
+      ).resolves.toMatchObject({
+        pollId: s.pollId,
+      })
+    } finally {
+      vi.restoreAllMocks()
+      await capture.close()
+    }
   })
 })

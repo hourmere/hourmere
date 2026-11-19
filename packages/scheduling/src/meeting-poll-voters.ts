@@ -1034,7 +1034,7 @@ async function retireCredentials(
     .where('poll_id', '=', poll.id)
     .where('voter_id', '=', voterId)
     .where('state', '=', 'pending')
-    .where('kind', 'in', CREDENTIAL_MAIL)
+    .where('kind', 'in', [...CREDENTIAL_MAIL, 'reminder'])
     .where(
       'generation',
       'in',
