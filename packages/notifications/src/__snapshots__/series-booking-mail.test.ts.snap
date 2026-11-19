@@ -1,0 +1,257 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`recurring booking mail content > renders all 12 occurrences in the cancelled snapshot 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Booking series cancellation: Studio hours</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">5 occurrences in this series were cancelled.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Studio hours</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Mira</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">The studio is closed for maintenance.</td></tr>
+</table>
+<p style="margin: 24px 0 8px; font-weight: 600;">Cancelled dates</p>
+<ul style="margin: 0; padding-left: 24px;">
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 10, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Cancelled</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 17, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Cancelled</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 24, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Cancelled</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 31, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Cancelled</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, January 7, 2027, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Cancelled</li>
+</ul>
+<p style="margin: 24px 0 8px; font-weight: 600;">Unchanged dates</p>
+<ul style="margin: 0; padding-left: 24px;">
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, October 22, 2026, 5:00 PM – 5:45 PM (Europe/Berlin, GMT+02:00)</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, October 29, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Meeting link pending</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 5, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>No automatic meeting link</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 12, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Updated separately</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 19, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Started</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 26, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Cancelled</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 3, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)</li>
+</ul>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://hourmere.example.test/series/manage#guest-fixture-capability" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">View series</a></td></tr></table></td></tr></table>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Booking series cancellation: Studio hours",
+  "text": "Hourmere
+
+5 occurrences in this series were cancelled.
+
+What: Studio hours
+Host: Mira
+Reason: The studio is closed for maintenance.
+
+Cancelled dates
+- Thursday, December 10, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Cancelled
+- Thursday, December 17, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Cancelled
+- Thursday, December 24, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Cancelled
+- Thursday, December 31, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Cancelled
+- Thursday, January 7, 2027, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Cancelled
+
+Unchanged dates
+- Thursday, October 22, 2026, 5:00 PM – 5:45 PM (Europe/Berlin, GMT+02:00)
+- Thursday, October 29, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Meeting link pending
+- Thursday, November 5, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  No automatic meeting link
+- Thursday, November 12, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Updated separately
+- Thursday, November 19, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Started
+- Thursday, November 26, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Cancelled
+- Thursday, December 3, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+
+View series: https://hourmere.example.test/series/manage#guest-fixture-capability
+",
+}
+`;
+
+exports[`recurring booking mail content > renders all 12 occurrences in the confirmed snapshot 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Booking series confirmed: Studio hours</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your series of meetings with Mira is booked.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Studio hours</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Mira</td></tr>
+</table>
+<p style="margin: 24px 0 8px; font-weight: 600;">Occurrences</p>
+<ul style="margin: 0; padding-left: 24px;">
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, October 22, 2026, 5:00 PM – 5:45 PM (Europe/Berlin, GMT+02:00)<br><a href="https://meet.example.test/occurrence-01" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, October 29, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Meeting link pending</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 5, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>No automatic meeting link</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 12, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Updated separately</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 19, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Started</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 26, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br>Cancelled</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 3, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)</li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 10, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br><a href="https://meet.example.test/occurrence-08" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 17, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br><a href="https://meet.example.test/occurrence-09" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 24, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br><a href="https://meet.example.test/occurrence-10" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 31, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br><a href="https://meet.example.test/occurrence-11" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, January 7, 2027, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)<br><a href="https://meet.example.test/occurrence-12" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+</ul>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://hourmere.example.test/series/manage#booker-fixture-capability" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Manage series</a></td></tr></table></td></tr></table>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Booking series confirmed: Studio hours",
+  "text": "Hourmere
+
+Your series of meetings with Mira is booked.
+
+What: Studio hours
+Host: Mira
+
+Occurrences
+- Thursday, October 22, 2026, 5:00 PM – 5:45 PM (Europe/Berlin, GMT+02:00)
+  Join meeting: https://meet.example.test/occurrence-01
+- Thursday, October 29, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Meeting link pending
+- Thursday, November 5, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  No automatic meeting link
+- Thursday, November 12, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Updated separately
+- Thursday, November 19, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Started
+- Thursday, November 26, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Cancelled
+- Thursday, December 3, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+- Thursday, December 10, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Join meeting: https://meet.example.test/occurrence-08
+- Thursday, December 17, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Join meeting: https://meet.example.test/occurrence-09
+- Thursday, December 24, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Join meeting: https://meet.example.test/occurrence-10
+- Thursday, December 31, 2026, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Join meeting: https://meet.example.test/occurrence-11
+- Thursday, January 7, 2027, 4:00 PM – 4:45 PM (Europe/Berlin, GMT+01:00)
+  Join meeting: https://meet.example.test/occurrence-12
+
+Manage series: https://hourmere.example.test/series/manage#booker-fixture-capability
+",
+}
+`;
+
+exports[`recurring booking mail content > renders all 12 occurrences in the link_update snapshot 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Meeting link update: Studio hours</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">The meeting link status changed for 12 occurrences.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Studio hours</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada</td></tr>
+</table>
+<p style="margin: 24px 0 8px; font-weight: 600;">Occurrences</p>
+<ul style="margin: 0; padding-left: 24px;">
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, October 22, 2026, 11:00 AM – 11:45 AM (America/New York, GMT-04:00)<br><a href="https://meet.example.test/occurrence-01" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, October 29, 2026, 11:00 AM – 11:45 AM (America/New York, GMT-04:00)<br><a href="https://meet.example.test/occurrence-02" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 5, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-03" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 12, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-04" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 19, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-05" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, November 26, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-06" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 3, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-07" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 10, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-08" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 17, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-09" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 24, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-10" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, December 31, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br><a href="https://meet.example.test/occurrence-11" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">Join meeting</a></li>
+<li style="margin: 0 0 8px; overflow-wrap: anywhere; word-break: break-word;">Thursday, January 7, 2027, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)<br>No automatic meeting link</li>
+</ul>
+<p style="margin: 24px 0 0; overflow-wrap: anywhere; word-break: break-word;">To retry a meeting link, open the affected booking in Hourmere.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://hourmere.example.test/app/booking-series/fixture" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Open in Hourmere</a></td></tr></table></td></tr></table>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Meeting link update: Studio hours",
+  "text": "Hourmere
+
+The meeting link status changed for 12 occurrences.
+
+What: Studio hours
+Invitee: Ada
+
+Occurrences
+- Thursday, October 22, 2026, 11:00 AM – 11:45 AM (America/New York, GMT-04:00)
+  Join meeting: https://meet.example.test/occurrence-01
+- Thursday, October 29, 2026, 11:00 AM – 11:45 AM (America/New York, GMT-04:00)
+  Join meeting: https://meet.example.test/occurrence-02
+- Thursday, November 5, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-03
+- Thursday, November 12, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-04
+- Thursday, November 19, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-05
+- Thursday, November 26, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-06
+- Thursday, December 3, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-07
+- Thursday, December 10, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-08
+- Thursday, December 17, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-09
+- Thursday, December 24, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-10
+- Thursday, December 31, 2026, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  Join meeting: https://meet.example.test/occurrence-11
+- Thursday, January 7, 2027, 10:00 AM – 10:45 AM (America/New York, GMT-05:00)
+  No automatic meeting link
+
+To retry a meeting link, open the affected booking in Hourmere.
+
+Open in Hourmere: https://hourmere.example.test/app/booking-series/fixture
+",
+}
+`;

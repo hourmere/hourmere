@@ -131,5 +131,27 @@
   "workflow.beforeStart.subject": "预约即将开始：{event}",
   "workflow.beforeStart.body": "{recipient}，您好：\n您的“{event}”预约即将开始。\n{start} – {end}（{zone}）",
   "workflow.afterEnd.subject": "预约后续：{event}",
-  "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）"
+  "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）",
+
+  "series.confirmed.subject": "系列预约已确认：{event}",
+  "series.confirmed.booker": "你与{host}的系列会议已预约。",
+  "series.confirmed.guest": "{invitee}邀请你参加与{host}的系列会议。",
+  "series.confirmed.host": "{invitee}预约了与你的系列会议。",
+  "series.cancelled.subject": "系列预约取消通知：{event}",
+  "series.cancelled.bodyOne": "此系列中有{count}场会议已取消。",
+  "series.cancelled.bodyOther": "此系列中有{count}场会议已取消。",
+  "series.linkUpdate.subject": "会议链接更新：{event}",
+  "series.linkUpdate.bodyOne": "有{count}场会议的链接状态已更新。",
+  "series.linkUpdate.bodyOther": "有{count}场会议的链接状态已更新。",
+  "series.occurrences": "会议场次",
+  "series.affected": "已取消的场次",
+  "series.unchanged": "未变更的场次",
+  "series.pending": "会议链接准备中",
+  "series.failed": "没有自动生成的会议链接",
+  "series.updatedSeparately": "已单独更新",
+  "series.started": "已开始",
+  "series.cancelled.member": "已取消",
+  "series.manage": "管理系列预约",
+  "series.view": "查看系列预约",
+  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。"
 }
