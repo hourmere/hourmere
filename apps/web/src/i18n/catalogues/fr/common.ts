@@ -554,4 +554,6 @@ export const common = {
   'Opens the host’s website in the parent page.': 'Ouvre le site de l’hôte dans la page parente.',
   'Opens the host’s website in a new tab.': 'Ouvre le site de l’hôte dans un nouvel onglet.',
   'Opens the host’s website in this tab.': 'Ouvre le site de l’hôte dans cet onglet.',
+  // Meeting poll reminder opt-out
+  'meetingPoll.optOutError': 'Impossible de désactiver les rappels. Réessayez.',
 } as const

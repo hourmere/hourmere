@@ -1,10 +1,9 @@
 # Paid bookings: design and foundation
 
-Status: design plus internal foundation, checked against Stripe's official documentation
-on 2026-11-06. This change does **not** enable taking payments. Checkout UI, price settings,
-Stripe credentials, the Stripe adapter, incoming webhooks and payment reconciliation are
-later work. The foundation has a disabled-by-default feature flag and a fake provider;
-it makes no Stripe network calls. See the [operator note](https://hourmere.com/docs/payments).
+Status: design plus internal holds and Stripe Checkout Session creation. Paid booking
+admission stays off in deployed servers. Checkout UI, price settings, incoming webhooks,
+automatic Session expiry and refunds, and background reconciliation remain later work.
+See the [operator note](https://hourmere.com/docs/payments).
 
 ## Shipped foundation boundary
 
@@ -12,17 +11,17 @@ Internal creation supports personal, individual event types with one host only. 
 team, collective, round-robin and group events, guests, waitlist conversion and automatic
 conference or phone locations. The location rule applies to the invitee's chosen location
 option, or the default when the choice is omitted; a hold stores that option's snapshot and
-resolved location exactly as a confirmed booking would. One-time-link checkout is not exposed. The server reads
-`PAID_BOOKINGS_ENABLED` (default false); a future trusted adapter must pass that setting to
-`createPaymentHold`. This environment setting is reserved and has no runtime effect in
-this release; setting it to true does not permit hold creation. Internal tests opt in
-through the service context. No public route or payment provider is configured by enabling it.
+resolved location exactly as a confirmed booking would. `PAID_BOOKINGS_ENABLED` defaults
+to false. The deployed server leaves paid hold admission disabled even when the variable
+is true and Stripe configuration is present. Internal tests opt in through the service
+context. The internal hold service can snapshot a trusted price and create a hosted Session
+after committing the hold. There is no public Checkout UI, route, MCP tool or CLI command.
 
 `pending_payment` can transition to `confirmed`, `expired` or `cancelled`. The immutable
 `payment_hold_expires_at` deadline and host exclusion protect capacity. Confirmation records
 a unique `payment_reference` and an immutable `payment_confirmed_at` marker; late success records `payment_refund_required=true` without
-reoccupying the slot. Confirmation invokes the injected notifier at most once; the complete
-checkout confirmation delivery contract below still needs the later adapter. Ordinary
+reoccupying the slot. Confirmation invokes the injected notifier at most once. It has no
+verified Stripe event caller yet. Ordinary
 booking cancel/reschedule paths reject paid rows because refund-aware lifecycle handling
 has not shipped. Internal confirmation, cancellation and expiry continue draining old holds
 when new admission is disabled.
@@ -52,15 +51,17 @@ must use separate instances for this version. Per-organization Stripe Connect ac
 transfers and onboarding are out of scope: those introduce a different merchant and
 liability model, not merely another key field.
 
-Future configuration accepts a server-only API credential and separate webhook signing
-secret through environment injection or a mounted read-only secret file. Prefer a restricted
-API key with only the operations the adapter needs. The file and environment forms are
-mutually exclusive; conflicting settings fail startup. Never store plaintext credentials
-in the database, frontend bundle, settings response, logs or checked-in files. No key
-loader is shipped by this foundation. Bind configuration to one Stripe account and test/live
-mode, reject mismatches, and require an explicit production-mode selection. Rotate secrets
-using coordinated web/worker restarts; retain the old webhook signing secret only for the
-bounded Stripe rotation overlap. See [Stripe API keys](https://docs.stripe.com/keys).
+The server accepts `STRIPE_API_KEY` and `STRIPE_WEBHOOK_SIGNING_SECRET` through environment
+injection or their respective `_FILE` settings pointing to mounted read-only secret files.
+Choose one source per secret. Startup rejects conflicting sources, missing secrets in a
+partial configuration and an API credential prefix that disagrees with the selected mode.
+Set `STRIPE_ACCOUNT_ID` to the single operator account. `STRIPE_MODE` defaults to `test`
+outside production and requires an explicit `test` or `live` value in production whenever
+Stripe is configured. The adapter verifies the key's own Stripe account before operating
+on Sessions. A restricted key needs account read and Checkout Sessions write access,
+including Session reads. The webhook signing secret is loaded privately for future use.
+Credentials stay in server memory. Rotate them with coordinated web and worker restarts.
+See [Stripe API keys](https://docs.stripe.com/keys).
 
 ## Prices and scope
 
@@ -70,7 +71,8 @@ currencies and Stripe's supported amount bounds; never use binary floating-point
 A missing price is a configuration error for a paid duration, not permission to book free.
 An event is either free or paid; enabling payment requires prices for every offered duration.
 
-Snapshot duration, amount, currency and cancellation-policy version at hold creation.
+The internal service snapshots amount and currency alongside the booked duration. Future
+event settings must also snapshot the cancellation-policy version at hold creation.
 Validate the eventual payment against that immutable snapshot and the configured account
 and mode. Later event edits cannot change an in-progress checkout. Clients cannot submit
 a price override. The future schema and public APIs for these settings are not part of
@@ -91,22 +93,24 @@ event permits shorter notice for free bookings. The stored deadline cannot excee
 meeting start, so payment confirmation cannot create a meeting that has already begun.
 Future paid availability must apply this same minimum lead time before offering a slot.
 
-The database deadline begins when the reservation is admitted, not when the browser opens
-Checkout. Creating the Stripe Session later means its minimum expiration may extend slightly
-past that deadline. Therefore the database remains authoritative: do not extend the hold
-to accommodate Stripe, explicitly expire any still-open Session at release, and apply the
-late-payment refund rule below to races. The future adapter should bound Session creation
-latency and abandon setup if too little time remains. Stripe also provides an explicit
+The database deadline begins when the reservation is admitted. Stripe requires at least
+30 minutes from its Session creation time. The adapter uses the database deadline rounded
+up to a second plus 15 seconds for the provider deadline and declines to submit more than
+five seconds after local hold admission. The database deadline remains authoritative for
+capacity and confirmation. A later release worker must explicitly expire still-open
+Sessions and handle late-payment races under the refund rule below. See Stripe's
 [Session expiry operation](https://docs.stripe.com/api/checkout/sessions/expire).
 
 1. Under the ordinary booking permission, availability, host and exclusion-constraint
    rules, reserve the slot as `pending_payment`, with immutable expiry and request identity.
    The reservation counts as busy, including buffers and booking limits, without sending
    confirmations or creating calendar events/conferences.
-2. Commit the hold before provider I/O. The future checkout worker creates one Session with
-   an idempotency key derived from the retained attempt ID. No transaction or pool connection
-   remains held during network calls. The browser receives only the checkout capability it
-   needs; returning to a success URL never proves payment.
+2. Commit the hold and priced attempt before provider I/O. The internal service records
+   submission before it calls the adapter with an idempotency key derived from the retained
+   attempt ID. It holds no database transaction or pool connection during provider calls.
+   Stripe creates a hosted one-time payment Session limited to immediate card methods.
+   Both return URLs use the instance's public origin without booking or payment data. Only
+   an internal caller can get the Checkout URL, and only while the hold and Session are open.
 3. A verified payment observation can confirm only while database time is strictly before
    the deadline. The transaction locks and compares the reservation state. Confirmation
    preserves the same reservation, price and hosts, and the later integration queues normal
@@ -154,8 +158,12 @@ Hold request keys use a dedicated `payment_idempotency_key` column and organizat
 unique index, separate from ordinary booking keys; equal strings cannot collide.
 Use distinct persisted keys for Session creation and each refund purpose, derived from opaque
 random local identities, never email addresses. Retain local deduplication longer than
-Stripe's key cache: Stripe may prune API v1 idempotency keys after at least 24 hours. An
-ambiguous old create must reconcile the stored operation before creating anything anew.
+Stripe's key cache. Stripe may prune API v1 idempotency keys after at least 24 hours.
+The internal checkout adapter uses the persisted Session ID on replay when known. A retry
+of an ambiguous create reconciles via a bounded Session lookup by attempt metadata. If it
+cannot establish a single match, the same hold stays unresolved until a later retry or
+normal hold expiry. It never issues a second create for that attempt, even if Stripe has
+pruned its key or the first request never arrived.
 See [Stripe idempotent requests](https://docs.stripe.com/api/idempotent_requests).
 
 The later endpoint verifies `Stripe-Signature` with the official SDK over the exact raw
@@ -236,6 +244,12 @@ trusted internal confirmation caller (synthetic in tests), alongside
 receiver, amount/currency validation or complete payment ledger yet; never wire an untrusted
 request directly to this internal function.
 
+Migration 0124 retains one local Checkout attempt per priced hold. It stores the local ID,
+hold ID, account, mode, amount, currency, provider idempotency key, submission timestamp
+and optional Session ID. The hosted URL is returned from Stripe to the internal caller
+and is never stored. Current hold contact-data erasure preserves this dedupe record, and
+there is no automatic Checkout attempt purge yet.
+
 The later ledger retains unresolved payment/refund operations until resolution, including
 a minimal tombstone if booking contact data is erased. Resolved references default to
 180 days after the later of meeting end or payment/refund resolution, then are purged;
@@ -271,13 +285,14 @@ operation, refund backlog and terminal failures without contact or credential lo
 
 ## Self-hoster testing and rollout
 
-Today, run the real-Postgres hold tests with the fake provider and a throwaway database.
-Do not configure production Stripe keys: this release has no Stripe adapter or endpoint.
-`PAID_BOOKINGS_ENABLED=false` remains the default. This reserved setting has no runtime
-effect yet. Internal tests explicitly opt in through the service context; disabling that
-context prevents new holds. Existing holds continue to expire regardless of either setting.
+Today, run the real-Postgres hold and Session tests with the fake provider and a throwaway
+database. The Stripe adapter has stubbed HTTP tests. These tests require no Stripe account
+or real credentials. Leave the optional Stripe settings empty for a deployed instance at
+this stage. `PAID_BOOKINGS_ENABLED=false` remains the default and the environment variable
+cannot enable admission. Internal tests explicitly opt in through the service context.
+Existing holds continue to expire regardless of either setting.
 
-Once the adapter and endpoint are implemented, an operator can test with their own Stripe
+Once the receive and confirm path is implemented, an operator can test with their own Stripe
 sandbox/test-mode account, isolated database and synthetic attendees. Use matching test keys
 and endpoint signing secret in private secret storage. Use Stripe's published
 [test payment methods](https://docs.stripe.com/testing), never real card details or copied

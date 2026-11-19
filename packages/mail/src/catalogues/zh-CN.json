@@ -115,5 +115,11 @@
   "poll.vote.body": "使用您的私人链接参与 {poll}。",
   "poll.expiry": "此链接有效期至 {expiry}。",
   "poll.confirm": "打开链接不会确认邮箱或提交投票。",
-  "poll.optout": "停止接收此投票的提醒邮件。"
+  "poll.optout": "停止接收此投票的提醒邮件。",
+  "poll.reminder.subject": "{poll} 投票提醒",
+  "poll.reminder.body": "投票即将截止。请使用您的私人链接参与 {poll} 投票。",
+  "poll.deadline.subject": "{poll} 投票已截止",
+  "poll.deadline.body": "{poll} 投票已于 {deadline} 截止。",
+  "poll.deadline.responses": "共收到 {count} 份答复。",
+  "poll.deadline.results": "登录后查看投票结果。"
 }
