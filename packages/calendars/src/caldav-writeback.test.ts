@@ -9,7 +9,7 @@ import { createCalDavCredentialRecord } from './caldav-credentials.ts'
 import type { CalDavRequest, CalDavResponse } from './caldav-transport.ts'
 import { createCalDavWriteClient } from './caldav-write-client.ts'
 import { calDavBookingNotifier, writeCalDavBooking } from './caldav-writeback.ts'
-import { calDavBookingJob } from './caldav-writeback-jobs.ts'
+import { calDavBookingJob, calDavRecoveryJob } from './caldav-writeback-jobs.ts'
 import { TEST_CALENDAR_KEY } from './testing.ts'
 
 const now = () => Date.parse('2026-11-01T12:00:00Z')
@@ -145,6 +145,57 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await s.notify(next)
       return next
     }
+    it('recovers a cancelled pinned copy after rejected credentials without touching another owner', async () => {
+      const s = await setup()
+      const foreign = await setup()
+      const root = await s.booking()
+      const other = await foreign.booking()
+      await s.notify(root)
+      await foreign.notify(other)
+      await writeCalDavBooking(s.deps, { bookingId: root })
+      expect(s.provider.resources.size).toBe(1)
+      await cancel(root)
+      await db
+        .updateTable('calendar_connections')
+        .set({ status: 'needs_reauth' })
+        .where('id', '=', s.connectionId)
+        .execute()
+      const run = { signal: new AbortController().signal, id: randomUUID(), attempt: 1 }
+      await calDavBookingJob(s.deps).handler({ bookingId: root }, run)
+      expect(s.provider.resources.size).toBe(1)
+      await db
+        .updateTable('calendar_connections')
+        .set({ status: 'active' })
+        .where('id', '=', s.connectionId)
+        .execute()
+      const queued: Array<{ bookingId: string } | { groupSlotId: string }> = []
+      const continuation = vi.fn(
+        async (
+          _payload: { connectionId: string; kind: 'booking' | 'group'; after?: string },
+          _trx: Db,
+        ) => {},
+      )
+      const recovery = calDavRecoveryJob(
+        db,
+        async (payload, trx) => {
+          expect(trx.isTransaction).toBe(true)
+          queued.push(payload)
+        },
+        continuation,
+      )
+      await recovery.handler({ connectionId: s.connectionId, kind: 'booking' }, run)
+      expect(queued).toEqual([{ bookingId: root }])
+      expect(continuation.mock.calls[0]?.[0]).toEqual({
+        connectionId: s.connectionId,
+        kind: 'group',
+      })
+      for (const payload of queued) await writeCalDavBooking(s.deps, payload)
+      expect(s.provider.resources.size).toBe(0)
+      queued.length = 0
+      await db.deleteFrom('calendar_connections').where('id', '=', s.connectionId).execute()
+      await recovery.handler({ connectionId: s.connectionId, kind: 'booking' }, run)
+      expect(queued).toEqual([])
+    })
     it.each(['nextcloud', 'icloud'])(
       'creates, updates and deletes one stable resource with idempotent jobs (%s)',
       async (style) => {

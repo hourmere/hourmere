@@ -507,6 +507,7 @@ describe('SCIM discovery representations', () => {
       'scim-users',
       'scim-user-create',
       'scim-user-replace',
+      'scim-user-patch',
       'scim-user-write',
     ]
     expect(files.some((file) => file.endsWith('server.ts'))).toBe(true)

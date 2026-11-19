@@ -14,6 +14,7 @@ existing invitation service; production registers none of them either. The claim
 step completes a claim when its invitation is accepted, through a dependency that only test
 harnesses pass to `createAuth`; production acceptance completes none.
 The User profile replacement step adds `PUT /Users/{id}` under the resource test flag.
+The User PATCH normalization step adds `PATCH /Users/{id}` under that same flag.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -242,6 +243,25 @@ Hourmere's `/api/v1` error envelope on this surface. Errors must not echo bearer
 raw requests, SQL, mailbox existence outside the connection or sensitive attribute values.
 
 ### PATCH compatibility
+
+User PATCH applies one to 100 operations in order to the locked connection-local profile
+and commits the result through the same replacement transaction as PUT. The request body
+limit is 64 KiB and each path can contain up to 512 characters. PATCH uses the same
+conditional-write refusal, claim invalidation and response projection as PUT. If a successful
+PATCH leaves the mapped profile unchanged, it preserves `meta.lastModified` and adds no audit
+event.
+
+The User allowlist covers the mapped profile, including `externalId`, complex `name` and
+enterprise `manager` updates, whole `emails` arrays and the work-email value filter below.
+Complex add and replace preserve unspecified subattributes. For an add to `emails`, the
+existing primary work address remains selected unless the new values designate a different
+primary work address. A filtered replace or remove without a work
+address returns `noTarget`. A filtered add can supply the missing address. Read-only
+attributes and removal of required `userName` return 400 `mutability`.
+
+Until the lifecycle step, a boolean or string boolean `active` echo is accepted. Removing
+`active`, assigning null or setting a different value returns 403 `mutability`, even when a later
+operation would restore the original value. User PATCH has no Group operations.
 
 Implement RFC ordered, atomic `Operations` with add, replace and remove. Validate the
 whole document before committing and roll back all operations on any failure. Support
@@ -553,8 +573,9 @@ new resource ID, with the provisioning token as actor (`scim_token`, credential 
 empty details; the invitation it issues records `membership.invited` the same way. Claim
 completion records `scim_user.claimed` on the resource ID with empty details, attributed to the
 accepting person's session like the `membership.accepted` event beside it, in the acceptance
-transaction. Profile replacement records `scim_user.updated` on the resource ID, with the
-same token attribution and empty details as creation, in the profile transaction.
+transaction. Profile replacement records `scim_user.updated` on the resource ID with the
+same token attribution as creation, in the profile transaction. PUT leaves details empty.
+PATCH records only the ordered operation types, normalized to lowercase.
 Token foundation must never claim full audit coverage. SCIM action names follow the journal's
 one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
 check allows exactly one dot. Required future actions:

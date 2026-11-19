@@ -122,10 +122,10 @@ source imports `@better-auth/sso`.
   `/sso/callback`), and the SAML ACS and SP metadata (plugin
   `/sso/saml2/sp/acs/:providerId`, `/sso/saml2/sp/metadata`). The OIDC verifier step
   builds the OIDC adapter on jose, which the plugin uses too: `jwtVerify` takes
-  `algorithms`, `maxTokenAge`, `requiredClaims` and `clockTolerance`, and
-  `createRemoteJWKSet` takes `cacheMaxAge`, `cooldownDuration`, `timeoutDuration` and a
-  `[customFetch]` hook for Hourmere's pinned transport (`jose/dist/webapi/jwks/remote.js`
-  39–80). Nonce and state live in Hourmere's pending attempts. The SAML verifier step builds
+  `algorithms`, `maxTokenAge`, `requiredClaims` and `clockTolerance`. Hourmere fetches
+  JWKS through its pinned transport, caches the imported public keys and uses JOSE for
+  signature and JWT claim verification. State consumption uses Hourmere's pending
+  attempts. The SAML verifier step builds
   the SAML adapter on samlify 2.15.1 with xml-crypto and @xmldom/xmldom. samlify's response
   flow (`samlify/build/src/flow.js` 703–825) verifies the signature, issuer, audience,
   recipient and a present Destination, that the signed and outer InResponseTo agree, and
@@ -532,7 +532,8 @@ Authorization code flow only, PKCE S256 required with a new verifier per attempt
 and unpredictable state and nonce bound to the initiating browser, provider,
 organization, configuration revision and allowed return path. Consume state atomically
 before exchanging a code; retries never exchange it twice. Require an ID token and
-validate its signature, exact `iss`, `aud` (including `azp` for multiple audiences),
+validate its signature, exact `iss`, `aud` (including `azp` for multiple audiences
+and explicit trust for each additional audience),
 `exp`, `iat`, optional `nbf`, nonce and nonempty stable `sub`. Reject future `iat`
 beyond skew and tokens older than the transaction acceptance window. When present,
 `auth_time` must be a signed number not later than now plus skew; only step-up relies
@@ -551,6 +552,14 @@ cache validity; never fetch a token-supplied `jku`/`x5u`. Rotation tests must co
 replacement and outage, unknown/duplicate key IDs and an algorithm/key-type mismatch.
 Request only `openid email profile`, no offline access. Discard ID/access/refresh
 tokens after validation; never repurpose calendar or MCP OAuth credentials.
+
+The internal verifier is in place while both protocols stay hard-off. It accepts only
+signed RS256 ID tokens with a matching attempt nonce. It returns the exact issuer and
+subject and, when present, the signed `auth_time` for the future step-up flow.
+Sign-in attempts use a fresh S256 challenge and an authenticated state envelope. The
+attempt row binds that state to the initiating browser, provider revision and team, and
+only one callback can take the verifier and nonce. No callback or sign-in route uses
+these helpers yet.
 
 ### SAML
 
@@ -703,8 +712,8 @@ bound.
 
 ## Pinned operational limits
 
-These are initial design commitments, not current runtime settings. The doc-fact test
-pins this table; implementation must import its eventual constants into that test.
+These are initial design commitments. The doc-fact test binds implemented limits to
+their runtime constants and pins the remaining values until their implementations land.
 The SSO transport and audit limits are runtime constants already and have their own
 tables below. Other resource limits must be selected with fixtures before their release.
 

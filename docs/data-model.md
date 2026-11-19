@@ -1,7 +1,12 @@
 # Data model
 
-[Recurring bookings design](recurring-bookings.md) proposes bounded series with ordinary
-booking rows per occurrence. It is not implemented and does not change the schema below.
+[Recurring bookings](recurring-bookings.md) have internal storage for bounded series with
+ordinary booking rows per occurrence. Admission remains hard-off. Replay receipts scope
+the request-key digest to the organization, authority digest and operation. Series
+notification receipts store the outcome and any capability digest, and the same table
+stores durable delivery intents. The hourly email cleanup deletes admission rows older
+than 48 hours in batches of up to 500. Admissions store an actor digest, including a
+server-keyed HMAC for a client's rate-limit address.
 
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
@@ -10,7 +15,7 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
-CalDAV's internal write service reuses these targets and mappings: the root booking UUID
+CalDAV's write service reuses these targets and mappings: the root booking UUID
 is the stable UID, `external_event_id` is the resource href, and `etag` is the last
 acknowledged strong ETag (null after deletion). Group copies use
 `group_slot_calendar_events`. `calendars.sync_state.caldavWriteback` stores the last
@@ -359,8 +364,8 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
   The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
-  discovery and busy-sync foundation; CalDAV is not yet enabled in the product.
-  Its internal sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
+  discovery and busy sync; the Calendars page uses owner-session-only connection operations.
+  Its sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
   intervals, hashed instance IDs, resource href/etag mappings and an opaque sync token,
   never event bodies, titles or attendee lists.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
@@ -1108,6 +1113,10 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   what it relied on is unchanged: its provider still at the frozen revision and not retired
   (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
   trust generation current. Logging out deletes the session's attempts.
+  The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
+  the state digest and browser-binding digest. The authenticated state envelope carries the
+  nonce, PKCE verifier and return path, bound to the attempt and its provider revision.
+  Consumption commits before these values are returned to a future code-exchange caller.
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
@@ -1732,7 +1741,7 @@ The phases within that organization boundary are:
   invitation. It locks no member row: the organization lock excludes membership changes while it
   reads the earliest owner who invites. When the address's pending invitation expires during
   one of those waits, it rolls back to the savepoint and runs the invitation service once more.
-- SCIM User replacement takes the organization update lock, the provisioning token key
+- SCIM User replacement and PATCH take the organization update lock, the provisioning token key
   share lock, and the live resource update lock. It holds the organization lock through
   any claim invalidation and the audit write, so invitation acceptance cannot hold a claim
   lock while competing with that replacement for the resource.

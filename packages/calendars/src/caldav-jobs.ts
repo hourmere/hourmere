@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { type CalDavSyncDeps, syncCalDavCalendar } from './caldav-sync.ts'
 import { CalDavError } from './caldav-transport.ts'
 
-/** Internal factories only. No application worker registers these while CalDAV is hard-off. */
+/** Registered by configured web/all/worker processes; only all/worker execute jobs. */
 export function calDavSyncJob(deps: CalDavSyncDeps) {
   return defineJob({
     name: 'caldav-sync',

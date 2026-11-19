@@ -1,5 +1,38 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Connect CalDAV': '连接 CalDAV',
+  'Reconnect CalDAV': '重新连接 CalDAV',
+  'CalDAV provider': 'CalDAV 服务商',
+  'Other CalDAV server': '其他 CalDAV 服务器',
+  'CalDAV server URL': 'CalDAV 服务器网址',
+  'CalDAV username': 'CalDAV 用户名',
+  'CalDAV app password': 'CalDAV 应用专用密码',
+  'CalDAV booking destination': 'CalDAV 预约写入日历',
+  'Do not write new bookings': '不写入新预约',
+  'Edit CalDAV credentials': '修改 CalDAV 凭证',
+  'Connecting CalDAV…': '正在连接 CalDAV…',
+  'Save CalDAV connection': '保存 CalDAV 连接',
+  'Discover calendars': '发现日历',
+  'Check {0} for conflicts': '使用{0}检查冲突',
+  'Needs attention': '需要处理',
+  'CalDAV connection saved. Selected calendars are synchronizing.':
+    'CalDAV 连接已保存，正在同步所选日历。',
+  'CalDAV stores encrypted credentials and calendar metadata. Busy-time synchronization stores times, not event titles or attendees. Booking copies contain meeting details but do not send calendar invitations.':
+    'CalDAV 会存储加密凭证和日历元数据。忙碌时段同步只保存时间，不保存事件标题或参会者。预约副本包含会议详情，但不会发送日历邀请。',
+  'Disconnect stops synchronization and booking updates, deletes stored credentials and local calendar data, and leaves existing events on the server. Revoke the app password with your provider separately.':
+    '断开连接会停止同步及预约更新，删除已保存的凭证和本地日历数据，但保留服务器上的现有事件。请另行在服务商处撤销应用专用密码。',
+  'CalDAV could not complete this request. Check your server, app password and calendar permissions, then try again. Your saved connection has not been replaced by failed discovery.':
+    'CalDAV 无法完成此请求。请检查服务器、应用专用密码和日历权限后重试。发现失败不会替换已保存的连接。',
+  'Use your Apple Account login and an app-specific password with two-factor authentication enabled. Never enter your primary Apple Account password. iCloud shard origins may need exact operator approval; real-account compatibility has not been verified.':
+    '请使用 Apple 账号登录名，并在启用双重认证后使用应用专用密码。请勿输入 Apple 账号主密码。iCloud 分片来源可能需要管理员逐个授权；尚未验证真实账号兼容性。',
+  'Use your Nextcloud DAV URL, including any installation prefix, ending in /remote.php/dav/. Use a dedicated app password. Private servers need operator configuration and verified HTTPS.':
+    '请使用 Nextcloud DAV 网址，保留安装路径前缀，并以 /remote.php/dav/ 结尾。请使用专用应用密码。私有服务器需要管理员配置及有效的 HTTPS 验证。',
+  'Use your full Fastmail username and an app password with calendar access. Basic plans do not support CalDAV.':
+    '请使用完整的 Fastmail 用户名和具有日历权限的应用专用密码。Basic 套餐不支持 CalDAV。',
+  'Choose calendars to check for conflicts and optionally one writable calendar for new bookings. Existing bookings keep their original destination.':
+    '请选择用于检查冲突的日历，也可选择一个可写日历接收新预约。现有预约保留原写入目标。',
+  'No event calendars were found. Check the account and server URL.':
+    '未发现事件日历，请检查账号和服务器网址。',
   'Current value: {value} {unit}.': '当前值：{value} {unit}。',
   minutes: '分钟',
   hours: '小时',

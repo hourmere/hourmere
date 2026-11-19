@@ -1175,7 +1175,7 @@ async function buildAvailabilityInputForMode(
   // Wide enough for anything that can affect a slot in the range: the engine visits one
   // extra local day on each side (UTC offsets stay within ±14 hours), and a booking's
   // buffers plus the new slot's reach at most 2 × 1440 minutes.
-  const window = { start: rangeStart.subtract({ hours: 72 }), end: rangeEnd.add({ hours: 72 }) }
+  const window = availabilityFactWindow({ start: rangeStart, end: rangeEnd })
   // Limit counts must see starts anywhere in the target local period, even for a
   // single-slot transaction check. Keep calendar synchronization and other-event busy
   // time on the original short window; only this event type needs complete periods.
@@ -1212,73 +1212,24 @@ async function buildAvailabilityInputForMode(
     }),
     window,
   )
-  const syncedCalendars = await db
-    .selectFrom('calendars as c')
-    .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-    .select(['cc.status', 'c.last_synced_at', 'c.sync_state', 'c.sync_error', 'c.time_zone'])
+  const syncedCalendars = await cachedConflictCalendars(db)
     .where('cc.user_id', '=', hostUserId)
-    .where('cc.provider', 'in', ['google', 'caldav'])
-    .where('c.check_conflicts', '=', true)
     .execute()
   assertCachedCalendarSync(syncedCalendars, now, window)
-  const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
-    eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
+  const windowRange = factWindowRange(window)
   const windowDates = {
     start: boundedDate(window.start, timeZone),
     end: boundedDate(window.end, timeZone),
   }
-  // Postgres keeps microseconds, node-postgres Dates milliseconds: blocked time is widened to
-  // whole milliseconds in SQL (start down, end up), so converting it never shrinks or empties
-  // it (e.g. a range clipped to [10:00:00, 10:00:00.0005)).
-  const floorMs = <DB, TB extends keyof DB>(
-    eb: ExpressionBuilder<DB, TB>,
-    instant: Expression<unknown>,
-  ) => eb.fn<Date>('date_trunc', [eb.val('milliseconds'), instant])
-  const ceilMs = <DB, TB extends keyof DB>(
-    eb: ExpressionBuilder<DB, TB>,
-    instant: Expression<unknown>,
-  ) =>
-    eb.fn<Date>('date_trunc', [
-      eb.val('milliseconds'),
-      sql`${instant} + interval '999 microseconds'`,
-    ])
-
-  const hostBookings = db
-    .selectFrom('booking_hosts as bh')
-    .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
-    .leftJoin('event_types as bet', 'bet.id', 'b.event_type_id')
-    .select((eb) => [
-      floorMs(eb, eb.ref('b.start_at')).as('start_at'),
-      ceilMs(eb, eb.ref('b.end_at')).as('end_at'),
-      'b.event_type_id',
-      'bet.buffer_before_minutes',
-      'bet.buffer_after_minutes',
-    ])
+  const hostBookings = activeHostBookings(db)
     .where('bh.user_id', '=', hostUserId)
-    .where('bh.active', '=', true)
-    .where((eb) =>
-      eb.or([
-        eb('b.status', '!=', 'pending_payment'),
-        eb('b.payment_hold_expires_at', '>', sql<Date>`clock_timestamp()`),
-      ]),
-    )
     .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
 
   // A slot owns one occupancy regardless of the number of seats. Its immutable buffers
   // survive event edits, and complete local periods use the same window as normal rows.
-  const groupBookings = (eb: ExpressionBuilder<Database, never>) =>
-    eb
-      .selectFrom('booking_hosts as gh')
-      .innerJoin('group_slots as gs', 'gs.id', 'gh.group_slot_id')
-      .select((eb) => [
-        floorMs(eb, eb.ref('gs.start_at')).as('start_at'),
-        ceilMs(eb, eb.ref('gs.end_at')).as('end_at'),
-        'gs.event_type_id',
-        'gs.buffer_before_minutes',
-        'gs.buffer_after_minutes',
-      ])
+  const groupBookings = (expression: ExpressionBuilder<Database, never>) =>
+    activeGroupBookings(expression)
       .where('gh.user_id', '=', hostUserId)
-      .where('gh.active', '=', true)
       .$if(!!query.excludeGroupSlotIds?.length, (q) =>
         q.where('gs.id', 'not in', query.excludeGroupSlotIds as readonly string[]),
       )
@@ -1308,23 +1259,8 @@ async function buildAvailabilityInputForMode(
           .orderBy('date')
           .execute()
       : Promise.resolve([]),
-    db
-      .selectFrom('calendar_busy as cb')
-      .innerJoin('calendars as c', 'c.id', 'cb.calendar_id')
-      .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-      // Clipped to the window in SQL: a period may be unbounded or reach ±infinity, which
-      // node-postgres would return as null or a number instead of a Date.
-      .select((eb) => {
-        const clipped = eb('cb.period', '*', windowRange(eb))
-        return [
-          floorMs(eb, eb.fn('lower', [clipped])).as('start'),
-          ceilMs(eb, eb.fn('upper', [clipped])).as('end'),
-          'cb.all_day_start',
-          'cb.all_day_end',
-        ]
-      })
+    calendarBusyFacts(db, window)
       .where('cc.user_id', '=', hostUserId)
-      .where('c.check_conflicts', '=', true)
       .where((eb) =>
         eb.or([
           eb('cb.period', '&&', windowRange(eb)),
@@ -1407,65 +1343,27 @@ async function buildAvailabilityInputForMode(
       .execute(),
   ])
 
-  const busyIntervals: InstantInterval[] = busy
-    .map((row) => {
-      if (row.all_day_start !== null && row.all_day_end !== null) {
-        // Resolve both dates separately: a local day can span 23 or 25 hours across DST.
-        const start = Temporal.PlainDate.from(row.all_day_start)
-          .toZonedDateTime(timeZone)
-          .toInstant()
-        const end = Temporal.PlainDate.from(row.all_day_end).toZonedDateTime(timeZone).toInstant()
-        return { start: later(start, window.start), end: earlier(end, window.end) }
-      }
-      return { start: toInstant(row.start), end: toInstant(row.end) }
-    })
-    // The engine refuses empty intervals, including a local date skipped by a zone change.
-    .filter((i) => Temporal.Instant.compare(i.end, i.start) > 0)
+  const busyIntervals = calendarBusyIntervals(busy, timeZone, window)
   const ownBookings: ExistingBooking[] = []
   const blockingBookings: ExistingBooking[] | undefined = explain ? [] : undefined
   for (const row of bookings) {
-    const booking = {
-      start: toInstant(row.start_at),
-      end: toInstant(row.end_at),
-      bufferBeforeMinutes: row.buffer_before_minutes ?? 0,
-      bufferAfterMinutes: row.buffer_after_minutes ?? 0,
-    }
+    const booking = bookingFact(row)
     if (row.event_type_id === eventTypeId) {
       ownBookings.push(booking)
     } else if (blockingBookings) {
       blockingBookings.push(booking)
     } else {
-      busyIntervals.push({
-        start: booking.start.subtract({ minutes: booking.bufferBeforeMinutes }),
-        end: booking.end.add({ minutes: booking.bufferAfterMinutes }),
-      })
+      busyIntervals.push(bufferedBookingInterval(booking))
     }
   }
 
   return {
-    schedule: {
-      timeZone,
-      // Validated by the owner-side API when stored, and again by the engine.
-      weeklyHours: (schedule?.weekly_hours ?? {}) as WeeklyHours,
-      dateOverrides: overrides.map(
-        (o): DateOverride => ({
-          date: o.date,
-          intervals: o.intervals as unknown as DateOverride['intervals'],
-        }),
-      ),
-    },
-    eventType: {
-      durationMinutes: explain ? eventType.duration_minutes : durationMinutes,
-      ...(explain && { allowedDurationsMinutes: eventType.allowed_durations_minutes }),
-      slotStepMinutes: eventType.slot_step_minutes ?? undefined,
-      bufferBeforeMinutes: eventType.buffer_before_minutes,
-      bufferAfterMinutes: eventType.buffer_after_minutes,
-      minimumNoticeMinutes: eventType.minimum_notice_minutes,
-      maxBookingsPerDay: eventType.max_bookings_per_day ?? undefined,
-      maxBookingsPerWeek: eventType.max_bookings_per_week ?? undefined,
-      maxBookingsPerMonth: eventType.max_bookings_per_month ?? undefined,
-      bookingWindowDays: eventType.booking_window_days ?? undefined,
-    },
+    schedule: availabilitySchedule(timeZone, schedule?.weekly_hours ?? {}, overrides),
+    eventType: availabilityRules(
+      eventType,
+      explain ? eventType.duration_minutes : durationMinutes,
+      explain,
+    ),
     ...(explain && { durationMinutes, blockingBookings }),
     busy: busyIntervals,
     bookings: ownBookings,
@@ -1475,8 +1373,211 @@ async function buildAvailabilityInputForMode(
   }
 }
 
+export function availabilityFactWindow({ start, end }: InstantInterval): InstantInterval {
+  return { start: start.subtract({ hours: 72 }), end: end.add({ hours: 72 }) }
+}
+
+export function factWindowRange(window: InstantInterval) {
+  return <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
+    eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
+}
+
+export function cachedConflictCalendars(db: Db) {
+  return db
+    .selectFrom('calendars as c')
+    .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
+    .select(['cc.status', 'c.last_synced_at', 'c.sync_state', 'c.sync_error', 'c.time_zone'])
+    .where('cc.provider', 'in', ['google', 'caldav'])
+    .where('c.check_conflicts', '=', true)
+}
+
+// Postgres keeps microseconds, node-postgres Dates milliseconds: round blocked time out.
+function floorMs<DB, TB extends keyof DB>(
+  eb: ExpressionBuilder<DB, TB>,
+  instant: Expression<unknown>,
+) {
+  return eb.fn<Date>('date_trunc', [eb.val('milliseconds'), instant])
+}
+
+function ceilMs<DB, TB extends keyof DB>(
+  eb: ExpressionBuilder<DB, TB>,
+  instant: Expression<unknown>,
+) {
+  return eb.fn<Date>('date_trunc', [
+    eb.val('milliseconds'),
+    sql`${instant} + interval '999 microseconds'`,
+  ])
+}
+
+export function calendarBusyFacts(db: Db, window: InstantInterval) {
+  const range = factWindowRange(window)
+  return (
+    db
+      .selectFrom('calendar_busy as cb')
+      .innerJoin('calendars as c', 'c.id', 'cb.calendar_id')
+      .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
+      // PostgreSQL clips unbounded/infinite endpoints before they become JavaScript Dates.
+      .select((eb) => {
+        const clipped = eb('cb.period', '*', range(eb))
+        return [
+          floorMs(eb, eb.fn('lower', [clipped])).as('start'),
+          ceilMs(eb, eb.fn('upper', [clipped])).as('end'),
+          'cb.all_day_start',
+          'cb.all_day_end',
+        ]
+      })
+      .where('c.check_conflicts', '=', true)
+  )
+}
+
+export function occupyingHostBookings(db: Db) {
+  return db
+    .selectFrom('booking_hosts as bh')
+    .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
+    .where('bh.active', '=', true)
+    .where((eb) =>
+      eb.or([
+        eb('b.status', '!=', 'pending_payment'),
+        eb('b.payment_hold_expires_at', '>', sql<Date>`clock_timestamp()`),
+      ]),
+    )
+}
+
+export function activeHostBookings(db: Db) {
+  return occupyingHostBookings(db)
+    .leftJoin('event_types as bet', 'bet.id', 'b.event_type_id')
+    .select((eb) => [
+      floorMs(eb, eb.ref('b.start_at')).as('start_at'),
+      ceilMs(eb, eb.ref('b.end_at')).as('end_at'),
+      'b.event_type_id',
+      'bet.buffer_before_minutes',
+      'bet.buffer_after_minutes',
+    ])
+}
+
+type GroupBookingSource = Pick<ExpressionBuilder<Database, never>, 'selectFrom'>
+
+export function occupyingGroupBookings(db: GroupBookingSource) {
+  return db
+    .selectFrom('booking_hosts as gh')
+    .innerJoin('group_slots as gs', 'gs.id', 'gh.group_slot_id')
+    .where('gh.active', '=', true)
+}
+
+export function activeGroupBookings(db: GroupBookingSource) {
+  return occupyingGroupBookings(db).select((eb) => [
+    floorMs(eb, eb.ref('gs.start_at')).as('start_at'),
+    ceilMs(eb, eb.ref('gs.end_at')).as('end_at'),
+    'gs.event_type_id',
+    'gs.buffer_before_minutes',
+    'gs.buffer_after_minutes',
+  ])
+}
+
+type CalendarBusyFact = {
+  start: Date
+  end: Date
+  all_day_start: string | null
+  all_day_end: string | null
+}
+
+export function calendarBusyIntervals(
+  busy: readonly CalendarBusyFact[],
+  timeZone: string,
+  window: InstantInterval,
+): InstantInterval[] {
+  return (
+    busy
+      .map((row) => {
+        if (row.all_day_start !== null && row.all_day_end !== null) {
+          // A local day can span 23 or 25 hours across DST.
+          const start = Temporal.PlainDate.from(row.all_day_start)
+            .toZonedDateTime(timeZone)
+            .toInstant()
+          const end = Temporal.PlainDate.from(row.all_day_end).toZonedDateTime(timeZone).toInstant()
+          return { start: later(start, window.start), end: earlier(end, window.end) }
+        }
+        return { start: toInstant(row.start), end: toInstant(row.end) }
+      })
+      // The engine refuses empty intervals, including a local date skipped by a zone change.
+      .filter((i) => Temporal.Instant.compare(i.end, i.start) > 0)
+  )
+}
+
+type BookingFact = {
+  start_at: Date
+  end_at: Date
+  buffer_before_minutes: number | null
+  buffer_after_minutes: number | null
+}
+
+export function bookingFact(row: BookingFact): Required<ExistingBooking> {
+  return {
+    start: toInstant(row.start_at),
+    end: toInstant(row.end_at),
+    bufferBeforeMinutes: row.buffer_before_minutes ?? 0,
+    bufferAfterMinutes: row.buffer_after_minutes ?? 0,
+  }
+}
+
+function bufferedBookingInterval(booking: Required<ExistingBooking>): InstantInterval {
+  return {
+    start: booking.start.subtract({ minutes: booking.bufferBeforeMinutes }),
+    end: booking.end.add({ minutes: booking.bufferAfterMinutes }),
+  }
+}
+
+export function availabilitySchedule(
+  timeZone: string,
+  weeklyHours: Json,
+  overrides: readonly { date: string; intervals: Json }[],
+): AvailabilityInput['schedule'] {
+  return {
+    timeZone,
+    // Validated by the owner-side API when stored, and again by the engine.
+    weeklyHours: weeklyHours as WeeklyHours,
+    dateOverrides: overrides.map(
+      (o): DateOverride => ({
+        date: o.date,
+        intervals: o.intervals as unknown as DateOverride['intervals'],
+      }),
+    ),
+  }
+}
+
+type AvailabilityRulesFact = {
+  allowed_durations_minutes: number[]
+  slot_step_minutes: number | null
+  buffer_before_minutes: number
+  buffer_after_minutes: number
+  minimum_notice_minutes: number
+  max_bookings_per_day: number | null
+  max_bookings_per_week: number | null
+  max_bookings_per_month: number | null
+  booking_window_days: number | null
+}
+
+export function availabilityRules(
+  eventType: AvailabilityRulesFact,
+  durationMinutes: number,
+  explain = false,
+): AvailabilityInput['eventType'] {
+  return {
+    durationMinutes,
+    ...(explain && { allowedDurationsMinutes: eventType.allowed_durations_minutes }),
+    slotStepMinutes: eventType.slot_step_minutes ?? undefined,
+    bufferBeforeMinutes: eventType.buffer_before_minutes,
+    bufferAfterMinutes: eventType.buffer_after_minutes,
+    minimumNoticeMinutes: eventType.minimum_notice_minutes,
+    maxBookingsPerDay: eventType.max_bookings_per_day ?? undefined,
+    maxBookingsPerWeek: eventType.max_bookings_per_week ?? undefined,
+    maxBookingsPerMonth: eventType.max_bookings_per_month ?? undefined,
+    bookingWindowDays: eventType.booking_window_days ?? undefined,
+  }
+}
+
 /** A window's date, kept inside the years Postgres and the engine accept. */
-function boundedDate(instant: Temporal.Instant, timeZone = 'UTC'): string {
+export function boundedDate(instant: Temporal.Instant, timeZone = 'UTC'): string {
   const date = instant.toZonedDateTimeISO(timeZone).toPlainDate()
   if (date.year < 1) return '0001-01-01'
   if (date.year > 9999) return '9999-12-31'

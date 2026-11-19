@@ -1,5 +1,10 @@
 export { explainAvailability } from './explain-availability.ts'
-export { getAvailableSlots } from './get-available-slots.ts'
+export {
+  checkExplicitStarts,
+  type ExplicitStartAvailability,
+  type ExplicitStartCounts,
+  getAvailableSlots,
+} from './get-available-slots.ts'
 export type {
   AvailabilityInput,
   AvailabilityReason,

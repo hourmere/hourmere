@@ -16,6 +16,7 @@ const calendar: Schemas['CalendarConnection']['calendars'][number] = {
   isPrimary: false,
   checkConflicts: true,
   accessRole: 'owner',
+  available: true,
   lastSyncedAt: '2026-10-16T12:00:00Z',
   syncError: null,
 }

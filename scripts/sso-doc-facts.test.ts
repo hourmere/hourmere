@@ -1,21 +1,26 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { SSO_DOMAIN_LIMITS } from '../apps/server/src/sso-domains.ts'
+import {
+  authenticationAttemptLifetime,
+  jwksCacheMaximum,
+  oidcClockSkew,
+} from '../apps/server/src/sso-oidc-limits.ts'
 import { SSO_AUDIT_LIMITS } from '../packages/db/src/sso-audit.ts'
 import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
 
 const source = readFileSync(new URL('../docs/sso.md', import.meta.url), 'utf8')
 const limits = {
   clockSkew: 60,
-  oidcClockSkew: 30,
-  authenticationAttemptLifetime: 600,
+  oidcClockSkew,
+  authenticationAttemptLifetime,
   maximumSamlAssertionLifetime: 600,
   ssoProofLifetime: 28800,
   ssoDelegationLifetime: 2592000,
   freshAdministrationProof: 300,
   ssoRecoveryNominationLifetime: 259200,
   ...SSO_DOMAIN_LIMITS,
-  jwksCacheMaximum: 3600,
+  jwksCacheMaximum,
 } as const
 
 function assertLimits(document: string) {

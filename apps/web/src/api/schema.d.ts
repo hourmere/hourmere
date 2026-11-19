@@ -1174,6 +1174,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
+                            caldavEnabled: boolean;
                             data: components["schemas"]["CalendarConnection"][];
                             /** Format: uuid */
                             destinationCalendarId: string | null;
@@ -1253,6 +1254,46 @@ export interface paths {
          * @description Requires ownership of the connection. Refreshes an expired access token internally when necessary without granting new access or exposing credentials. Does not fetch events or busy intervals.
          */
         post: operations["refreshCalendarList"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar-connections/caldav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save or reconnect CalDAV credentials and calendar selections
+         * @description Requires a live same-origin browser session. Rediscovery validates opaque selections, then saves encrypted credentials, conflict checks and destination atomically. Reconnect preserves identities and pinned booking targets. A null destination clears only this connection’s existing default.
+         */
+        post: operations["saveCalDavConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar-connections/caldav/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discover CalDAV calendars without saving credentials
+         * @description Requires a live same-origin browser session. Returns opaque selection keys and sanitized metadata, never usernames, passwords or provider URLs. Reconnect discovery requires ownership of connectionId.
+         */
+        post: operations["discoverCalDavConnection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5245,6 +5286,7 @@ export interface components {
             accountEmail: string | null;
             calendars: {
                 accessRole: string;
+                available: boolean;
                 checkConflicts: boolean;
                 /** Format: uuid */
                 id: string;
@@ -5262,7 +5304,7 @@ export interface components {
             /** @enum {string|null} */
             lastError?: "provider_unavailable" | "needs_reauth" | "permissions_missing" | null;
             /** @enum {string} */
-            provider: "google" | "microsoft";
+            provider: "google" | "microsoft" | "caldav";
             /** @enum {string} */
             status: "active" | "needs_reauth" | "revoked";
             syncAuthorized: boolean;
@@ -9750,6 +9792,189 @@ export interface operations {
                 };
             };
             /** @description The provider calendar integration is disabled, needs reauthorization, lacks permissions or is unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    saveCalDavConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    calendarKeys: string[];
+                    conflictCalendarKeys: string[];
+                    /** Format: uuid */
+                    connectionId?: string;
+                    destinationCalendarKey: string | null;
+                    /** Format: password */
+                    password: string;
+                    serverUrl: string;
+                    username: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Saved connection identity only */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                    };
+                };
+            };
+            /** @description invalid_request or caldav_calendar_selection_invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or a cross-origin write */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_connection_not_found or profile_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description caldav_calendar_disabled, caldav_needs_reauth, caldav_provider_unavailable, caldav_connection_identity_changed or calendar_selection_limit */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    discoverCalDavConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    connectionId?: string;
+                    /** Format: password */
+                    password: string;
+                    serverUrl: string;
+                    username: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Discovered event calendars */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        calendars: {
+                            canWrite: boolean;
+                            color: string | null;
+                            displayName: string;
+                            key: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description session_required or a cross-origin write */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description calendar_connection_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description caldav_calendar_disabled, caldav_needs_reauth or caldav_provider_unavailable */
             409: {
                 headers: {
                     [name: string]: unknown;

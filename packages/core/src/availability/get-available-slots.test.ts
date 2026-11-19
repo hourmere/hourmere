@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   type AvailabilityInput,
   AvailabilityInputError,
+  checkExplicitStarts,
   type DateOverride,
   type EventTypeRules,
   type ExistingBooking,
@@ -82,6 +83,43 @@ const weekdays = (...intervals: { start: string; end: string }[]): WeeklyHours =
 
 const MONDAY: [string, string] = ['2026-10-19T00:00-04:00', '2026-10-20T00:00-04:00']
 const LAST_SUNDAY = '2026-10-18T12:00-04:00'
+
+describe('checkExplicitStarts', () => {
+  it.each([
+    {
+      name: 'an interval ending inside a spring-forward gap',
+      range: ['2026-03-08T00:00-05:00', '2026-03-09T00:00-04:00'] as [string, string],
+      workingHours: hours('01:00', '02:30'),
+      starts: ['2026-03-08T03:00-04:00', '2026-03-08T03:15-04:00'],
+    },
+    {
+      name: 'both folds of a repeated start',
+      range: ['2026-11-01T00:00-04:00', '2026-11-02T00:00-05:00'] as [string, string],
+      workingHours: hours('00:00', '03:00'),
+      starts: ['2026-11-01T01:00-04:00', '2026-11-01T01:00-05:00'],
+    },
+  ])('matches the ordinary slot grid for $name', ({ range, workingHours, starts }) => {
+    const input = toInput({
+      range,
+      weeklyHours: { sunday: [workingHours] },
+      eventType: { durationMinutes: 30 },
+      now: '2026-01-01T00:00Z',
+    })
+    const offered = getAvailableSlots(input)
+    const slots = starts.map((value) => {
+      const start = Temporal.Instant.from(value)
+      return { start, end: start.add({ minutes: 30 }) }
+    })
+    expect(slots.map(({ start }) => offered.some((slot) => slot.start.equals(start)))).toEqual([
+      true,
+      false,
+    ])
+    for (const [index, slot] of slots.entries()) {
+      // Evaluate an explicit start on its own so the two candidate intervals cannot conflict.
+      expect(checkExplicitStarts(input, [slot], [{}])).toEqual([{ available: index === 0 }])
+    }
+  })
+})
 
 describe('getAvailableSlots', () => {
   describe('weekly hours', () => {

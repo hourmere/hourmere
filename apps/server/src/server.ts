@@ -27,6 +27,18 @@ import {
   createGoogleCalendarClient,
   createMicrosoftCalendarClient,
 } from '@hourmere/calendars'
+import {
+  type CalDavSyncDeps,
+  calDavBookingJob,
+  calDavBookingNotifier,
+  calDavDispatchJob,
+  calDavRecoveryJob,
+  calDavSyncJob,
+  createCalDavDiscovery,
+  createCalDavSyncClient,
+  createCalDavSyncEnqueuer,
+  createCalDavWriteClient,
+} from '@hourmere/calendars/caldav'
 import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createZoomConferenceWork } from '@hourmere/conferences/worker'
 import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
@@ -130,6 +142,7 @@ import { auditLogRoutes } from './routes/audit-log.ts'
 import { availabilityTroubleshootingRoutes } from './routes/availability-troubleshooting.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { brandingRoutes } from './routes/branding.ts'
+import { caldavRoutes } from './routes/caldav.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -188,6 +201,7 @@ export function productRoutes({
   notifyAttendeeNoShow,
   googleCalendar,
   microsoftCalendar,
+  caldavCalendar,
   zoomConference,
   zoomWebhookSecretToken,
   zoomWebhookClientId,
@@ -261,6 +275,7 @@ export function productRoutes({
   notify?: BookingNotifier | undefined
   googleCalendar?: CalendarDeps['google']
   microsoftCalendar?: CalendarDeps['microsoft']
+  caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
   zoomWebhookSecretToken?: string | undefined
   zoomWebhookClientId?: string | undefined
@@ -290,9 +305,11 @@ export function productRoutes({
       db,
       google: googleCalendar,
       microsoft: microsoftCalendar,
+      caldav: caldavCalendar,
       enqueueSync: enqueueCalendarSync,
       enqueueWritebackRecovery: enqueueCalendarWritebackRecovery,
     }),
+    caldavRoutes({ db, caldav: caldavCalendar }),
     conferenceRoutes({ db, zoom: zoomConference }),
     zoomEventRoutes({
       db,
@@ -393,6 +410,7 @@ export function productTools({
   automaticZoom,
   bookingMaxInviteeReschedules,
   googleCalendar,
+  caldavCalendar,
   zoomConference,
   auditLogRetentionDays = null,
 }: {
@@ -416,6 +434,7 @@ export function productTools({
   automaticZoom?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   googleCalendar?: CalendarDeps['google']
+  caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
 }): Tool[] {
   return [
@@ -449,7 +468,7 @@ export function productTools({
       : []),
     ...availabilityTroubleshootingTools({ db, automaticMeet, automaticZoom }),
     ...integrationTools({
-      calendar: { db, google: googleCalendar },
+      calendar: { db, google: googleCalendar, caldav: caldavCalendar },
       conference: { db, zoom: zoomConference },
     }),
     ...meetingPollTools({ db, meetingPollSecret }),
@@ -481,6 +500,7 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   notifyAttendeeNoShow: AttendeeNoShowNotifier
   googleCalendar: CalendarDeps['google']
   microsoftCalendar: CalendarDeps['microsoft']
+  caldavCalendar?: CalendarDeps['caldav']
   zoomConference: ConferenceDeps['zoom']
   enqueueCalendarSync: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery: CalendarDeps['enqueueWritebackRecovery']
@@ -509,6 +529,7 @@ export function productionAppOptions({
   notifyAttendeeNoShow,
   googleCalendar,
   microsoftCalendar,
+  caldavCalendar,
   zoomConference,
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
@@ -572,6 +593,7 @@ export function productionAppOptions({
       notifyAttendeeNoShow,
       googleCalendar,
       microsoftCalendar,
+      caldavCalendar,
       zoomConference,
       zoomWebhookSecretToken: config.ZOOM_WEBHOOK_SECRET_TOKEN,
       zoomWebhookClientId: config.ZOOM_CLIENT_ID,
@@ -604,6 +626,7 @@ export function productionAppOptions({
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
         googleCalendar,
+        caldavCalendar,
         zoomConference,
         webhooks: webhookSettings,
         webhookQueue,
@@ -784,6 +807,40 @@ async function start(
           encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
         }
       : undefined
+  const caldavPolicy = {
+    privateTargets: config.CALDAV_PRIVATE_TARGETS,
+    allowedOrigins: config.CALDAV_ALLOWED_ORIGINS,
+  }
+  const caldavCalendar = config.CALENDAR_ENCRYPTION_KEY
+    ? {
+        discoveryClient: createCalDavDiscovery(undefined, caldavPolicy),
+        enqueueWritebackRecovery: (connectionId: string, transaction: Db): Promise<unknown> =>
+          jobs.enqueue(
+            'caldav-booking-recover',
+            { connectionId, kind: 'booking' },
+            { singletonKey: connectionId, transaction },
+          ),
+        syncClient: createCalDavSyncClient(undefined, caldavPolicy),
+        encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
+        enqueueSync: (calendarId: string, transaction: Db): Promise<unknown> =>
+          enqueueCalDavSync(calendarId, transaction),
+      }
+    : undefined
+  const caldavSyncDeps: CalDavSyncDeps | undefined = caldavCalendar
+    ? {
+        db,
+        client: caldavCalendar.syncClient,
+        encryptionKey: caldavCalendar.encryptionKey,
+      }
+    : undefined
+  const caldavWriteDeps = caldavCalendar
+    ? {
+        db,
+        client: createCalDavWriteClient(undefined, caldavPolicy),
+        encryptionKey: caldavCalendar.encryptionKey,
+      }
+    : undefined
+  let enqueueCalDavSync: (calendarId: string, transaction?: Db) => Promise<unknown> = async () => {}
   const zoomConference =
     config.ZOOM_CLIENT_ID && config.ZOOM_CLIENT_SECRET && config.CONFERENCE_ENCRYPTION_KEY
       ? {
@@ -963,6 +1020,27 @@ async function start(
       conferenceMirrorDispatchJob(calendarDeps, (id) => enqueueBookingCalendar(id)),
       webhookDeliveryJob({ db, ...webhookSettings }),
       webhookCleanupJob(db),
+      ...(caldavSyncDeps && caldavWriteDeps
+        ? [
+            calDavSyncJob(caldavSyncDeps),
+            calDavDispatchJob(caldavSyncDeps, (id) => enqueueCalDavSync(id)),
+            calDavBookingJob(caldavWriteDeps),
+            calDavRecoveryJob(
+              db,
+              (payload, transaction): Promise<unknown> =>
+                jobs.enqueue('caldav-booking', payload, {
+                  transaction,
+                  singletonKey:
+                    'bookingId' in payload ? payload.bookingId : `group:${payload.groupSlotId}`,
+                }),
+              (payload, transaction): Promise<unknown> =>
+                jobs.enqueue('caldav-booking-recover', payload, {
+                  transaction,
+                  singletonKey: payload.connectionId,
+                }),
+            ),
+          ]
+        : []),
       calendarSyncJob(calendarDeps),
       bookingCalendarJob(calendarDeps),
       bookingCalendarRecoveryJob(
@@ -983,6 +1061,7 @@ async function start(
     migrate: config.AUTO_MIGRATE,
     instanceName: role,
   })
+  enqueueCalDavSync = createCalDavSyncEnqueuer(jobs)
   enqueueBookingCalendar = (id) =>
     jobs.enqueue('booking-calendar', { bookingId: id }, { singletonKey: id })
   enqueueWritebackRecovery = (connectionId, after) =>
@@ -1039,6 +1118,7 @@ async function start(
     // Booking changes over REST and MCP queue their emails in their own transactions.
     const emailNotifier = bookingNotifier(jobs)
     const calendarNotifier = calendarBookingNotifier(jobs)
+    const caldavNotifier = calDavBookingNotifier(jobs)
     const conferenceNotifier = conferenceBookingNotifier(jobs)
     const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
     const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
@@ -1046,6 +1126,7 @@ async function start(
       if (!('requestId' in event)) await conferenceNotifier(trx, event)
       await emailNotifier(trx, event, now)
       if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
+      if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
       await webhookNotifier(trx, event, now)
       // Core notification intents precede workflow capture in the booking's transaction.
       await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET)
@@ -1082,6 +1163,7 @@ async function start(
         notifyAttendeeNoShow,
         googleCalendar,
         microsoftCalendar,
+        caldavCalendar,
         zoomConference,
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),

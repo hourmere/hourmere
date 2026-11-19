@@ -110,6 +110,48 @@ const schema = z
     ZOOM_MEETINGS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     GOOGLE_MEET_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOKS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
+    CALDAV_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
+      try {
+        return parseWebhookPrivateTargets(value)
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'CALDAV_PRIVATE_TARGETS requires exact private host:port or IP/CIDR:port entries; metadata and link-local targets are forbidden',
+        })
+        return z.NEVER
+      }
+    }),
+    CALDAV_ALLOWED_ORIGINS: optional(z.string().max(16384)).transform((value, ctx) => {
+      const origins = value ? value.split(',').map((v) => v.trim()) : []
+      if (
+        origins.length > 32 ||
+        origins.some((origin) => {
+          try {
+            const url = new URL(origin)
+            return (
+              url.protocol !== 'https:' ||
+              !!url.username ||
+              !!url.password ||
+              url.pathname !== '/' ||
+              !!url.search ||
+              !!url.hash ||
+              origin.includes('*')
+            )
+          } catch {
+            return true
+          }
+        })
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'CALDAV_ALLOWED_ORIGINS requires at most 32 exact HTTPS origins without credentials, paths, queries or wildcards',
+        })
+        return z.NEVER
+      }
+      return [...new Set(origins.map((origin) => new URL(origin).origin))]
+    }),
     WEBHOOK_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
       try {
         return parseWebhookPrivateTargets(value)

@@ -607,7 +607,7 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     ],
     [
       'round-robin selected duration forwarding',
-      ['now,\n              durationMinutes: input.durationMinutes,', 'now,'],
+      ['now,\n          durationMinutes: input.durationMinutes,', 'now,'],
       (copy) => verifyTeam(copy, 'round_robin'),
     ],
   ]
