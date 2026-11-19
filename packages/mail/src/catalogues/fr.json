@@ -132,6 +132,12 @@
   "workflow.beforeStart.body": "Bonjour {recipient},\nVotre réunion « {event} » commence bientôt.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Suivi de votre réunion : {event}",
   "workflow.afterEnd.body": "Bonjour {recipient},\nLe créneau prévu pour votre réunion « {event} » est terminé.\n{start} – {end} ({zone})",
+  "poll.outcome.selected.subject": "Créneau choisi pour {poll}",
+  "poll.outcome.selected.body": "L’hôte a choisi le créneau ci-dessous. Vous ne figurez pas sur la liste des participants.",
+  "poll.outcome.rescheduled.subject": "Réunion reportée : {poll}",
+  "poll.outcome.rescheduled.body": "La réunion a été déplacée au créneau ci-dessous. Vous ne figurez pas sur la liste des participants.",
+  "poll.outcome.cancelled.subject": "Réunion annulée : {poll}",
+  "poll.outcome.cancelled.body": "La réunion a été annulée. Le dernier créneau prévu est indiqué ci-dessous.",
 
   "series.confirmed.subject": "Série de réunions confirmée : {event}",
   "series.confirmed.booker": "Votre série de réunions avec {host} est réservée.",

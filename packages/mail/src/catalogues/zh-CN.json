@@ -132,6 +132,12 @@
   "workflow.beforeStart.body": "{recipient}，您好：\n您的“{event}”预约即将开始。\n{start} – {end}（{zone}）",
   "workflow.afterEnd.subject": "预约后续：{event}",
   "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）",
+  "poll.outcome.selected.subject": "已选定会议时间：{poll}",
+  "poll.outcome.selected.body": "主持人已选定下方的会议时间。您未被选为参会者。",
+  "poll.outcome.rescheduled.subject": "会议已改期：{poll}",
+  "poll.outcome.rescheduled.body": "会议已改至下方的时间。您不在参会名单中。",
+  "poll.outcome.cancelled.subject": "会议已取消：{poll}",
+  "poll.outcome.cancelled.body": "会议已取消。下方是取消前安排的时间。",
 
   "series.confirmed.subject": "系列预约已确认：{event}",
   "series.confirmed.booker": "你与{host}的系列会议已预约。",

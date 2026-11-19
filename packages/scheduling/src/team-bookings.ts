@@ -34,6 +34,10 @@ export async function cancelTeamAdminBooking(
     sessionId?: string | undefined
     notify: BookingNotifier
     reason?: string | undefined
+    /** bookingMeetingPollLinked, read before access.write takes its locks. */
+    meetingPollLinked?: boolean | undefined
+    /** Series occurrence from the same pre-lock read (bookingPreLockLinks). */
+    seriesOccurrenceId?: string | null | undefined
   },
 ): Promise<void> {
   if (

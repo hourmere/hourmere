@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
+import { meetingPollChainLinked } from './meeting-poll-outcomes.ts'
 
 /**
  * Reads a booking's series link before the caller takes any lock. The link never changes
@@ -17,6 +18,28 @@ export async function bookingSeriesOccurrence(
     .where('organization_id', '=', organizationId)
     .executeTakeFirst()
   return row?.series_occurrence_id ?? null
+}
+
+/**
+ * bookingSeriesOccurrence and bookingMeetingPollLinked as one unlocked statement, for
+ * cancel and reschedule entry points that need both before their first lock. A booking
+ * this statement cannot see yet reports a possible poll link (rechecked under the lock)
+ * and no series, like bookingSeriesOccurrence: series links are fixed at insert.
+ */
+export async function bookingPreLockLinks(
+  db: Db,
+  bookingId: string,
+  organizationId: string,
+): Promise<{ seriesOccurrenceId: string | null; meetingPollLinked: boolean }> {
+  const row = await db
+    .selectFrom('bookings')
+    .select(['series_occurrence_id', meetingPollChainLinked(bookingId).as('linked')])
+    .where('id', '=', bookingId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  return row
+    ? { seriesOccurrenceId: row.series_occurrence_id, meetingPollLinked: row.linked }
+    : { seriesOccurrenceId: null, meetingPollLinked: true }
 }
 
 /**

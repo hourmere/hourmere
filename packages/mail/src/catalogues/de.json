@@ -132,6 +132,12 @@
   "workflow.beforeStart.body": "Hallo {recipient},\nIhr Termin „{event}“ beginnt bald.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Nachricht zu Ihrem Termin: {event}",
   "workflow.afterEnd.body": "Hallo {recipient},\nder für Ihren Termin „{event}“ vorgesehene Zeitraum ist abgelaufen.\n{start} – {end} ({zone})",
+  "poll.outcome.selected.subject": "Termin für {poll} ausgewählt",
+  "poll.outcome.selected.body": "Die gastgebende Person hat den unten stehenden Termin ausgewählt. Sie wurden nicht zur Teilnahme ausgewählt.",
+  "poll.outcome.rescheduled.subject": "Termin verschoben: {poll}",
+  "poll.outcome.rescheduled.body": "Das Treffen wurde auf den unten stehenden Termin verschoben. Sie stehen nicht auf der Teilnahmeliste.",
+  "poll.outcome.cancelled.subject": "Treffen abgesagt: {poll}",
+  "poll.outcome.cancelled.body": "Das Treffen wurde abgesagt. Unten steht der zuletzt geplante Termin.",
 
   "series.confirmed.subject": "Terminserie bestätigt: {event}",
   "series.confirmed.booker": "Ihre Terminserie mit {host} ist gebucht.",

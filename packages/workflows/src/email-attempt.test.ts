@@ -23,7 +23,7 @@ import {
   WORKFLOW_CLAIM_SECONDS,
   type WorkflowRunClaim,
 } from './dispatcher.ts'
-import { renderWorkflowEmail, type WorkflowEmailAction } from './email.ts'
+import type { WorkflowEmailAction } from './email.ts'
 import {
   attemptWorkflowEmail,
   finishWorkflowEmailAttempt,
@@ -171,24 +171,11 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       intent_kind: 'before_start',
       intent_offset_minutes: 90,
     })
-    const rendered = renderWorkflowEmail({
-      action,
-      trigger: 'before_start',
-      context: { owner: 'team', eventType: undefined },
-      recipient: { name: attendee.name, locale: 'en', timeZone: 'UTC' },
-      eventType: { title },
-      booking: { start: START, end: END },
-    })
-    const message = {
-      to: attendee.email,
-      subject: rendered.subject,
-      text: rendered.text,
-      html: rendered.html,
-    }
     const execution = (transport = mailer, database = worker) => ({
       db: database,
       now: context.now,
       mailer: transport,
+      followUpHostNotesEnabled: () => true,
       budget: { secret: SECRET, workflowMailMaxPerHour: 1, workflowOwnerMailMaxPerHour: 1 },
     })
     const claimDue = (database = worker) =>
@@ -201,7 +188,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       return taken
     }
     const attempt = (current: WorkflowRunClaim, transport = mailer) =>
-      attemptWorkflowEmail(execution(transport), current, firstRecipient.id, message)
+      attemptWorkflowEmail(execution(transport), current, firstRecipient.id)
     clock.now = DUE
     return {
       attempt,
@@ -210,7 +197,8 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       clock,
       execution,
       firstRecipient,
-      message,
+      attendee,
+      bookingId,
       recipient,
       run,
       savedHistory,
@@ -332,7 +320,6 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
         { ...s.execution(), budget: limits },
         await s.claim(),
         s.firstRecipient.id,
-        s.message,
       ),
     ).toBe('retry_scheduled')
     const original = await oneCharge()
@@ -352,7 +339,6 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
         { ...s.execution(), budget: limits },
         await s.claim(),
         s.firstRecipient.id,
-        s.message,
       ),
     ).toBe('budget_suppressed')
     expect(smtp.received.connections).toBe(1)
@@ -364,17 +350,24 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
     })
   })
 
-  it('cannot use a valid run token to send to an address outside the captured recipient', async () => {
+  it('does not send when the live attendee address no longer matches the captured recipient', async () => {
     const s = await fixture()
-    expect(
-      await attemptWorkflowEmail(s.execution(), await s.claim(), s.firstRecipient.id, {
-        ...s.message,
-        to: 'foreign@example.test',
-      }),
-    ).toBe('stale')
+    const taken = await s.claim()
+    await db
+      .updateTable('booking_attendees')
+      .set({ email: 'changed-after-capture@example.test' })
+      .where('booking_id', '=', s.bookingId)
+      .execute()
+    expect(await s.attempt(taken)).toBe('stale')
     expect(smtp.received.connections).toBe(0)
     expect(await db.selectFrom('notification_email_sends').selectAll().execute()).toEqual([])
-    expect(await s.recipient()).toMatchObject({ state: 'pending', attempts: 0 })
+    expect(await s.recipient()).toMatchObject({
+      state: 'pending',
+      attempts: 0,
+      next_attempt_at: s.run.expires_at,
+    })
+    expect(await s.savedRun()).toMatchObject({ state: 'pending', claim_token: null })
+    expect(await s.claimDue()).toEqual([])
   })
 
   it('cannot reverse a newer marker using the claim token of an earlier SMTP attempt', async () => {
@@ -385,8 +378,8 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
     s.clock.now = await retryAt(s)
     const second = await s.claim()
     expect(
-      await markWorkflowEmailAttempt(s.execution(), second, s.firstRecipient.id, s.message.to),
-    ).toBe('marked')
+      await markWorkflowEmailAttempt(s.execution(), second, s.firstRecipient.id),
+    ).toMatchObject({ message: { to: s.attendee.email } })
     const marker = await s.recipient()
     expect(marker).toMatchObject({ state: 'dispatching', claim_token: second.token, attempts: 2 })
     expect(
@@ -403,7 +396,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       const s = await fixture()
       const response = '550 5.7.1 message refused'
       if (phase === 'MAIL') smtp.received.mailReply = response
-      if (phase === 'RCPT') smtp.received.rcptReplies.set(s.message.to, response)
+      if (phase === 'RCPT') smtp.received.rcptReplies.set(s.attendee.email, response)
       if (phase === 'DATA') smtp.received.dataStartReply = response
       if (phase === 'after DATA') smtp.received.dataReply = response
       const taken = await s.claim()
@@ -448,9 +441,9 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
   it('repairs a worker lost after marker commit and before SMTP as delivery unknown', async () => {
     const s = await fixture()
     const taken = await s.claim()
-    expect(
-      await markWorkflowEmailAttempt(s.execution(), taken, s.firstRecipient.id, s.message.to),
-    ).toBe('marked')
+    expect(await markWorkflowEmailAttempt(s.execution(), taken, s.firstRecipient.id)).toMatchObject(
+      { message: { to: s.attendee.email } },
+    )
     expect(await s.recipient()).toMatchObject({ state: 'dispatching', claim_token: taken.token })
     const charged = await oneCharge()
     s.clock.now = DUE.add({ seconds: WORKFLOW_CLAIM_SECONDS })
@@ -570,7 +563,6 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       )
     })
     const competitorPid = await locked.promise
-    const admittedAddress = s.message.to
     const pending = s.attempt(taken)
     try {
       // Use the database's wait graph to place the two transactions without a timer.
@@ -583,14 +575,13 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       }
       expect(waiting).toBe(true)
       expect(smtp.received.connections).toBe(1)
-      s.message.to = 'changed-while-waiting@example.test'
     } finally {
       proceed.resolve()
     }
     expect(await invitation).toBe(true)
     expect(await pending).toBe('sent')
     expect(smtp.received.messages).toHaveLength(1)
-    expect(smtp.received.to).toEqual([expect.stringContaining(`<${admittedAddress}>`)])
+    expect(smtp.received.to).toEqual([expect.stringContaining(`<${s.attendee.email}>`)])
     expect(await oneCharge()).toMatchObject({ reserved_at: atDate(s.clock.now) })
   })
 })

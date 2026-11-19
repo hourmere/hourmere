@@ -54,9 +54,9 @@ stored organization. See [browser organization context](/docs/api-conventions#br
 | `POST /webhooks` | `create_webhook` | `webhooks create` | Create from `{ url, events, isActive? }` and receive `{ webhook, secret }` once |
 | `GET /webhooks` | `list_webhooks` | `webhooks list` | List up to ten endpoints with metadata only |
 | `PATCH /webhooks/{id}` | `update_webhook` | `webhooks update` | Change `events` and/or `isActive` and return endpoint metadata |
-| `POST /webhooks/{id}/rotate-secret` | — | — | Replace the signing secret and receive `{ secret }` once |
+| `POST /webhooks/{id}/rotate-secret` | `rotate_webhook_secret` | `webhooks rotate-secret` | Replace the signing secret and receive `{ secret }` once |
 | `DELETE /webhooks/{id}` | `delete_webhook` | `webhooks delete` | Delete the endpoint and all retained deliveries |
-| `GET /webhooks/{id}/deliveries?after=…` | — | — | At most fifty delivery metadata rows, newest first |
+| `GET /webhooks/{id}/deliveries?after=…` | `list_webhook_deliveries` | `webhooks deliveries` | At most fifty delivery metadata rows, newest first |
 
 MCP listing takes `{}`. MCP and CLI return the same metadata as the REST list in
 `{ data: [...] }`. For CLI creation, supply the JSON arguments via `--input FILE` or
@@ -65,13 +65,15 @@ MCP listing takes `{}`. MCP and CLI return the same metadata as the REST list in
 
 MCP and CLI update take the endpoint `id` and at least one of `events` or `isActive`.
 Deletion takes `{ id }` and returns `{ "deleted": true }`; REST returns `204 No Content`.
-The CLI requires `--yes` to delete. Both operations return `webhook_not_found` for a
-missing endpoint or one outside the credential's organization. See
+The CLI requires `--yes` to delete. Rotation takes `{ id }` in MCP and CLI. The CLI
+requires the same private output options as creation and saves only `{ secret }` on
+rotation. Update, delete, rotation and history return `webhook_not_found` for a missing
+endpoint or one outside the credential's organization. See
 [CLI webhook examples](/docs/cli#manage-booking-webhooks).
 
-中文：Webhook 列表支持 `read` 或 `full` 密钥，创建、更新和删除需要 `full` 密钥。操作仅针对凭证所属的
+中文：Webhook 列表和投递历史支持 `read` 或 `full` 密钥，创建、更新、删除和轮换签名密钥需要 `full` 密钥。操作仅针对凭证所属的
 个人或团队组织，调用者须为个人所有者或当前团队所有者／管理员。创建仅返回一次签名密钥，
-列表仅返回元数据。CLI 可用 `--output` 将创建结果写入新建的私有文件。
+轮换也只在本次响应中返回签名密钥。CLI 可用 `--output` 将创建或轮换结果写入新建的私有文件。
 更新可修改订阅事件和启用状态，目标 URL 固定。移除目标白名单条目后，仍可仅传
 `isActive: false` 暂停。删除会一并清除保留的投递记录，CLI 需加 `--yes` 确认；
 不存在或属于其他组织的端点均返回 `webhook_not_found`。
@@ -289,10 +291,18 @@ same retry budget and retry with backoff (about seven hours total for the full b
 Previously started requests may already have reached the receiver signed with the old
 secret; retain old verification temporarily for those in-flight requests, then remove it.
 There is no zero-interruption guarantee. Grace-period dual signing is a follow-up.
+Coordinate one rotation at a time. If calls overlap, the last committed rotation
+determines the signing secret. A lost response requires another rotation to obtain a usable secret.
 
-`GET /webhooks/{id}/deliveries` reports IDs, event type, booking ID, status, attempts, HTTP
-status, safe error code and timestamps. It exposes no payloads, signatures or secrets and
-hides records older than thirty days. A worker cleanup runs every fifteen minutes and
+Delivery history returns `{ data, nextAfter }`. Each page contains up to fifty rows
+from the last thirty days, newest first. Start without `after`, then pass `nextAfter`
+as `after` until it is null. REST takes `after` in the query, and MCP/CLI take `{ id, after? }`
+as JSON input. The metadata includes IDs, event type, booking ID, status, attempts, HTTP
+status, a safe error code and timestamps. Payloads, headers, signatures and secrets are omitted.
+中文：投递历史每页最多 50 条，仅包含最近 30 天的元数据。将 `nextAfter` 作为 `after`
+请求下一页，直至其为 null。正文、请求头、签名及密钥均不返回。
+
+A worker cleanup runs every fifteen minutes and
 removes up to 1000 expired snapshots/metadata records per pass; a backlog needs more passes.
 Delivery also skips snapshots older than thirty days. Existing ID-only pg-boss records
 expire separately. Deleting a booking, organization or endpoint cascades its snapshots.
