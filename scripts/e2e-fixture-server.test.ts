@@ -32,9 +32,10 @@ function sourceCopy(replacement: [string, string]): Start {
 async function exercise(start: Start = startFixtureServer, leaveBackendOpen = false) {
   const listener = await listenOwned(createTcpServer({ allowHalfOpen: true }))
   let backend: HttpServer | undefined
-  const startup: typeof startServer = async (env = {}) => {
+  const startup: typeof startServer = async (env = {}, options) => {
     expect(env.PORT, 'Only the production listener chooses its backend port').toBe('0')
     expect(env.PUBLIC_URL, 'Public origin is already bound').toBe(listener.url)
+    expect(options).toEqual({ recurringBookingsEnabled: true })
     // Overlap startups so diagnostics from another fixture must be ignored.
     await new Promise((resolve) => setTimeout(resolve, 5))
     const server = createServer((incoming, response) => {
