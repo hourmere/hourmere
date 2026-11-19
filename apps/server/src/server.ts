@@ -12,6 +12,7 @@ import {
   createAuthPool,
   createCallerResolver,
   createMcpOAuthResolver,
+  recordSsoAdmissionRemoval,
 } from '@hourmere/auth'
 import {
   bookingCalendarJob,
@@ -387,8 +388,14 @@ export function productRoutes({
     teamBookingRoutes({ db, notify }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
-    memberRemovalRoutes({ db }),
-    memberLeaveRoutes({ db }),
+    memberRemovalRoutes({
+      db,
+      recordAdmissionRemoval: oidcEnabled ? recordSsoAdmissionRemoval : undefined,
+    }),
+    memberLeaveRoutes({
+      db,
+      recordAdmissionRemoval: oidcEnabled ? recordSsoAdmissionRemoval : undefined,
+    }),
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
     // Registered while hard-off: every operation answers 404 workflows_disabled.
@@ -564,6 +571,7 @@ export function productionAppOptions({
     trustedProxies: config.trustedProxies,
     webDist: config.WEB_DIST,
     waitlist,
+    ssoMe: { capabilities: { ssoOidcEnabled, ssoSamlEnabled }, db },
     // Mounted in every state: while hard-off both endpoints answer 404 sso_disabled.
     ssoMailboxProof: mailboxProofRoutes({
       capabilities: { ssoOidcEnabled, ssoSamlEnabled },
@@ -575,6 +583,7 @@ export function productionAppOptions({
       db,
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
+      signup: config.signup,
       session: { secret: config.BETTER_AUTH_SECRET },
       readSession: async (headers) =>
         (
@@ -687,10 +696,12 @@ export function productionAuthOptions({
   invitationMailLimits,
   jobs,
 }: ProductionAuthDeps): AuthConfig {
+  const recordAdmissionRemoval = ssoOidcEnabled ? recordSsoAdmissionRemoval : undefined
   return {
     pool,
     db,
-    leaveTeamMember: nativeTeamLeave(db),
+    leaveTeamMember: nativeTeamLeave(db, recordAdmissionRemoval),
+    recordAdmissionRemoval,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,

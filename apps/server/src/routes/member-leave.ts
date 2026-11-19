@@ -1,5 +1,9 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { MemberDepartureBlockedError, MemberDepartureOwnerRequiredError } from '@hourmere/auth'
+import {
+  MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
+  type SsoAdmissionRemoval,
+} from '@hourmere/auth'
 import { DomainError, leaveTeamMember, MemberDepartureImpactSchema } from '@hourmere/scheduling'
 import { ErrorBody, json, type RouteModule, type ServiceDeps, serviceContext } from '../openapi.ts'
 import {
@@ -17,7 +21,9 @@ const Handling = z.object({
   nextStep: z.literal('add_another_owner_first').optional(),
 })
 
-export function memberLeaveRoutes(deps: ServiceDeps): RouteModule {
+export function memberLeaveRoutes(
+  deps: ServiceDeps & { recordAdmissionRemoval?: SsoAdmissionRemoval | undefined },
+): RouteModule {
   return ({ app, caller }) => {
     app.openapi(
       createRoute({
@@ -75,6 +81,7 @@ export function memberLeaveRoutes(deps: ServiceDeps): RouteModule {
               teamId: c.req.valid('param').teamId,
               expectedOrganizationId: expectedOrganizationId ?? '',
             },
+            deps.recordAdmissionRemoval,
           )
           return c.json(result, 200)
         } catch (error) {

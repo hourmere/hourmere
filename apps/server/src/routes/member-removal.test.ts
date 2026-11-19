@@ -4,10 +4,12 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   type Auth,
+  checkSsoAdmissionBlocks,
   createAuth,
   createAuthPool,
   createCallerResolver,
   MemberDepartureOwnerRequiredError,
+  recordSsoAdmissionRemoval,
   removeTeamMember,
   TeamManagementError,
 } from '@hourmere/auth'
@@ -27,6 +29,7 @@ import {
   createTestUser,
   type TestUser,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
 import { ErrorBody, errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
@@ -86,11 +89,12 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
   function application(
     routes: RouteModule[] = [memberRemovalRoutes({ db, now })],
     observeResolution = () => {},
+    authentication = auth,
   ) {
     return createApp({
       publicUrl: origin,
       checkDb: async () => {},
-      authHandler: auth.handler,
+      authHandler: authentication.handler,
       resolveCaller: (headers) => {
         observeResolution()
         return resolveCaller(headers)
@@ -173,8 +177,8 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     )
   }
 
-  function nativeRemove(f: Fixture, memberIdOrEmail = f.memberId) {
-    return application().request('/api/auth/organization/remove-member', {
+  function nativeRemove(f: Fixture, memberIdOrEmail = f.memberId, app = application()) {
+    return app.request('/api/auth/organization/remove-member', {
       method: 'POST',
       headers: {
         cookie: f.login.cookie,
@@ -852,6 +856,140 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     expect(result.bookings.data.map((row) => row.id)).toEqual([future])
     expect((await handling(f, result.id)).status).toBe(200)
   })
+
+  it.each(['REST', 'native'] as const)(
+    'retains the SSO admission block made by %s removal and only clears it with a newer invitation',
+    async (entry) => {
+      const f = await fixture()
+      const organizationId = f.team.id
+      const mailbox = f.target.email
+      await db
+        .insertInto('sso_policies')
+        .values({ organization_id: organizationId, admission: 'jit' })
+        .execute()
+      const invite = (createdAt: ReturnType<typeof sql<Date>>) =>
+        db
+          .insertInto('auth.invitation')
+          .values({
+            organizationId,
+            inviterId: f.actor.id,
+            email: mailbox,
+            role: 'member',
+            status: 'pending',
+            createdAt,
+            expiresAt: sql<Date>`clock_timestamp() + interval '1 day'`,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      const stale = await invite(sql<Date>`clock_timestamp() - interval '1 hour'`)
+      const authentication = createAuth({
+        pool: authPool,
+        db,
+        baseURL: origin,
+        secret,
+        signup: { mode: 'open', allowedDomains: [] },
+        mailer: { send: async () => {} },
+        recordAdmissionRemoval: recordSsoAdmissionRemoval,
+      })
+      const app = application(
+        [memberRemovalRoutes({ db, now, recordAdmissionRemoval: recordSsoAdmissionRemoval })],
+        () => {},
+        authentication,
+      )
+      const response =
+        entry === 'REST' ? await remove(f, { app }) : await nativeRemove(f, f.memberId, app)
+      expect(response.status).toBe(200)
+      expect(await membership(f)).toBeUndefined()
+
+      const localBlock = db
+        .selectFrom('scim_membership_blocks')
+        .select(['identity_email', 'cleared_at'])
+        .where('organization_id', '=', organizationId)
+        .where('source', '=', 'local')
+        .where('kind', '=', 'removal')
+        .orderBy('created_at')
+      expect(await localBlock.execute()).toEqual([{ identity_email: mailbox, cleared_at: null }])
+      const check = (invitationId?: string) =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .selectFrom('auth.organization')
+            .select('id')
+            .where('id', '=', organizationId)
+            .forUpdate()
+            .executeTakeFirstOrThrow()
+          return checkSsoAdmissionBlocks(trx, {
+            organizationId,
+            userId: f.target.id,
+            mailbox,
+            ...(invitationId && { invitationId }),
+          })
+        })
+      expect(await check()).toBe(false)
+      expect(await check(stale.id)).toBe(false)
+      const intervening = await invite(sql<Date>`clock_timestamp()`)
+      const ordinary = await invite(sql<Date>`clock_timestamp()`)
+      const rejoined = await app.request('/api/auth/organization/accept-invitation', {
+        method: 'POST',
+        headers: {
+          cookie: f.targetLogin.cookie,
+          origin,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ invitationId: ordinary.id }),
+      })
+      expect(rejoined.status).toBe(200)
+      const joined = await membership(f)
+      expect(joined?.id).toEqual(expect.any(String))
+      const removedAgain =
+        entry === 'REST' ? await remove(f, { app }) : await nativeRemove(f, joined?.id, app)
+      expect(removedAgain.status).toBe(200)
+      expect(await check(intervening.id)).toBe(false)
+      const updatedBlocks = [
+        { identity_email: mailbox, cleared_at: expect.any(Date) },
+        { identity_email: mailbox, cleared_at: null },
+      ]
+      expect(await localBlock.execute()).toEqual(updatedBlocks)
+      const connection = await db
+        .insertInto('scim_connections')
+        .values({ organization_id: organizationId })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const resource = await db
+        .insertInto('scim_users')
+        .values({
+          organization_id: organizationId,
+          connection_id: connection.id,
+          user_name: mailbox,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const suspension = await db
+        .insertInto('scim_membership_blocks')
+        .values({
+          organization_id: organizationId,
+          connection_id: connection.id,
+          scim_user_id: resource.id,
+          identity_email: mailbox,
+          source: 'scim',
+          kind: 'suspension',
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const fresh = await invite(sql<Date>`clock_timestamp()`)
+      expect(await check(fresh.id)).toBe(false)
+      expect(await localBlock.execute()).toEqual(updatedBlocks)
+      await db
+        .updateTable('scim_membership_blocks')
+        .set({ cleared_at: sql<Date>`clock_timestamp()` })
+        .where('id', '=', suspension.id)
+        .execute()
+      expect(await check(fresh.id)).toBe(true)
+      expect(await localBlock.execute()).toEqual([
+        { identity_email: mailbox, cleared_at: expect.any(Date) },
+        { identity_email: mailbox, cleared_at: expect.any(Date) },
+      ])
+    },
+  )
 
   it.each(['owner', 'admin'])(
     'lets a current %s discover and page native removal handling by the removed member identity',

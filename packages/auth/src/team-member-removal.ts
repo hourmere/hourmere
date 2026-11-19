@@ -3,6 +3,7 @@ import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
 import { isUuid } from './organizations.ts'
+import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import {
   checkTeamManagementAccess,
   type TeamManager,
@@ -15,6 +16,7 @@ export interface TeamMemberRemovalInput {
   teamId: string
   memberUserId: string
   expectedOrganizationId: string
+  recordAdmissionRemoval?: SsoAdmissionRemoval | undefined
 }
 
 export interface TeamMemberRemoval {
@@ -58,7 +60,7 @@ export async function teamMemberRemovalTarget(
 async function removeTeamMemberInTransaction(
   trx: Transaction<Database>,
   actor: TeamManager,
-  input: { memberUserId: string },
+  input: Pick<TeamMemberRemovalInput, 'memberUserId' | 'recordAdmissionRemoval'>,
 ): Promise<TeamMemberRemoval> {
   const member = await teamMemberRemovalTarget(trx, actor, input.memberUserId, true)
   if (teamRoles(member.role).includes('owner')) {
@@ -113,6 +115,12 @@ async function removeTeamMemberInTransaction(
     new Date(),
   )
 
+  if (input.recordAdmissionRemoval) {
+    await input.recordAdmissionRemoval(trx, {
+      organizationId: actor.organizationId,
+      userId: member.userId,
+    })
+  }
   await trx
     .deleteFrom('auth.member')
     .where('id', '=', member.id)
