@@ -116,6 +116,7 @@ function runner(change?: Change) {
       DomainError: scheduling.DomainError,
       WaitlistRateLimitError: scheduling.WaitlistRateLimitError,
       MeetingPollRateLimitError: scheduling.MeetingPollRateLimitError,
+      RoutingAdmissionError: scheduling.RoutingAdmissionError,
       MeetingPollKeyMismatchError: scheduling.MeetingPollKeyMismatchError,
       hasUnsafeJsonText,
       inspect,

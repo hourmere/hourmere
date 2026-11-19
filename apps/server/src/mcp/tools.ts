@@ -15,6 +15,7 @@ import {
   type DomainErrorKind,
   MeetingPollKeyMismatchError,
   MeetingPollRateLimitError,
+  RoutingAdmissionError,
   WaitlistRateLimitError,
 } from '@hourmere/scheduling'
 import {
@@ -301,6 +302,7 @@ export async function runTool(
       return errorResult({ error: 'rate_limited', retryAfterSeconds: err.retryAfterSeconds })
     if (err instanceof MeetingPollRateLimitError)
       return errorResult({ error: 'rate_limited', retryAfterSeconds: err.retryAfterSeconds })
+    if (err instanceof RoutingAdmissionError) return errorResult({ error: 'rate_limited' })
     if (err instanceof MeetingPollKeyMismatchError)
       return errorResult({ error: 'meeting_poll_key_mismatch' })
     // An unknown kind (only possible by bypassing the type) is a bug, as in the REST API.

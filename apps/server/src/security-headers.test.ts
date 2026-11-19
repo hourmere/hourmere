@@ -355,7 +355,7 @@ describe('security headers', () => {
     })
   })
 
-  it('cover the MCP endpoint, refused or answered', async () => {
+  it('keeps refused and answered MCP requests private', async () => {
     const initialize = {
       jsonrpc: '2.0',
       id: 1,
@@ -378,10 +378,11 @@ describe('security headers', () => {
       })
     const refused = await post({})
     expect(refused.status).toBe(401)
-    expect(securityHeadersOf(refused)).toEqual(NOT_HTML)
+    expect(securityHeadersOf(refused)).toEqual({ ...NOT_HTML, referrer: 'no-referrer' })
+    expect(refused.headers.get('cache-control')).toBe('no-store')
     const answered = await post({ authorization: 'Bearer hm_good' })
     expect(answered.status).toBe(200)
-    expect(securityHeadersOf(answered)).toEqual(NOT_HTML)
+    expect(securityHeadersOf(answered)).toEqual({ ...NOT_HTML, referrer: 'no-referrer' })
     expect(answered.headers.get('cache-control')).toBe('no-store')
     await answered.body?.cancel()
   })

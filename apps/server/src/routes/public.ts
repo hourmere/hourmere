@@ -246,9 +246,11 @@ export interface PublicRoutesDeps {
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
   routingFormsEnabled?: boolean
+  /** BETTER_AUTH_SECRET. Fixtures may omit it while routing forms are off. */
+  routingSecret?: string | undefined
   /** Queues the booking emails in the booking's transaction; none are sent without it. */
   notify?: BookingNotifier | undefined
-  /** Replaces PUBLIC_RATE_LIMITS.page (host and event pages), .slots and .book, e.g. in tests. */
+  /** Overrides an endpoint group's default rate limit in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
 }
 
@@ -268,6 +270,7 @@ export function publicRoutes({
   smtpConfigured,
   publicUrl = 'http://localhost:3000',
   routingFormsEnabled = false,
+  routingSecret,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
   const ctx: PublicContext = {
@@ -286,10 +289,16 @@ export function publicRoutes({
   const pageLimit = limit('page')
   const slotsLimit = limit('slots')
   const bookLimit = limit('book')
-
   return (shared) => {
     const { app } = shared
-    publicRoutingFormRoutes({ db, pageLimit, routingFormsEnabled })(shared)
+    publicRoutingFormRoutes({
+      db,
+      pageLimit,
+      submissionRateLimit: rateLimits.routingSubmission,
+      routingFormsEnabled,
+      routingSecret,
+      publicUrl,
+    })(shared)
     app.openapi(
       createRoute({
         method: 'get',
