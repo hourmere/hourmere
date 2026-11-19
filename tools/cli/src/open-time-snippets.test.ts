@@ -66,8 +66,8 @@ it('checks unchanged source and kills changed dispatch and lost output', async (
       "'open-time-snippet': 'find_available_slots'",
     ],
     [
-      'options.stdout(printable(result, [...secrets, token]))',
-      'options.stdout(printable({}, [...secrets, token]))',
+      'options.stdout(printable(result, [...secrets, token], idempotencyKey))',
+      'options.stdout(printable({}, [...secrets, token], idempotencyKey))',
     ],
   ] as [string, string][]) {
     await expect(verify(copy(change))).rejects.toMatchObject({ name: 'AssertionError' })

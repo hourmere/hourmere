@@ -71,9 +71,9 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `polls list` | `list_meeting_polls` | optional `limit`, `after`. See [poll input rules](#manage-meeting-polls). |
 | `polls get` | `get_meeting_poll` | `id` |
 | `polls results` | `get_meeting_poll_results` | `id` |
-| `polls close` | `close_meeting_poll` | `id`, `expectedHostRevision` |
-| `polls cancel` | `cancel_meeting_poll` | `id`, `expectedHostRevision` |
-| `polls delete` | `delete_meeting_poll` | `id`, `expectedHostRevision` |
+| `polls close` | `close_meeting_poll` | [See inputs](#manage-meeting-polls) |
+| `polls cancel` | `cancel_meeting_poll` | [See inputs](#manage-meeting-polls) |
+| `polls delete` | `delete_meeting_poll` | [See inputs](#manage-meeting-polls) |
 | `polls finalize` | `finalize_meeting_poll` | `id`, `slotId`, `bookerVoterId`, `attendeeVoterIds`, `expectedResultsRevision`, `expectedBallotRevisions`, `acknowledgeConditional`, `idempotencyKey` and optional `locationOptionId` |
 | `whoami` | `whoami` | `{}` |
 | `profile` | `get_profile` | `{}` |
@@ -526,8 +526,9 @@ can manage polls. Reads allow `full`, `read` or `bookings`. Writes require `full
 out of shell history and process arguments.
 
 `list` takes `{}` or a `limit` from 1 to 100 and an `after` cursor from `nextAfter`.
-`results` returns the current results and ballot revisions. Its availability guidance
-is advisory, and finalization checks availability again. Include the booker in
+`get` and `results` take `id`. `close`, `cancel` and `delete` take `id` and
+`expectedHostRevision`. `results` returns the current results and ballot revisions.
+Availability is advisory, and finalization checks it again. Include the booker in
 `attendeeVoterIds` and provide the ballot revision for every selected voter. Set
 `acknowledgeConditional` to `true` when selecting a voter who answered `if_need_be`.
 If the finalization response is lost, replay the exact input with the original key.
