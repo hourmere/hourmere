@@ -131,5 +131,7 @@
   "workflow.beforeStart.subject": "Recordatorio: {event}",
   "workflow.beforeStart.body": "Hola, {recipient}:\nSu reunión «{event}» se celebrará pronto.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Seguimiento de su reunión: {event}",
-  "workflow.afterEnd.body": "Hola, {recipient}:\nEl horario programado para su reunión «{event}» ha finalizado.\n{start} – {end} ({zone})"
+  "workflow.afterEnd.body": "Hola, {recipient}:\nEl horario programado para su reunión «{event}» ha finalizado.\n{start} – {end} ({zone})",
+  "ssoLinkRemoval.subject": "Se ha eliminado una vinculación de inicio de sesión único",
+  "ssoLinkRemoval.message": "Se ha eliminado una vinculación de inicio de sesión único de tu cuenta de Hourmere. Puedes seguir iniciando sesión por correo electrónico. Si no esperabas este cambio, contacta con la persona que administra tu equipo."
 }

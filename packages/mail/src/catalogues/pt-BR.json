@@ -131,5 +131,7 @@
   "workflow.beforeStart.subject": "Lembrete: {event}",
   "workflow.beforeStart.body": "Olá, {recipient}!\nSua reunião “{event}” começa em breve.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Acompanhamento da sua reunião: {event}",
-  "workflow.afterEnd.body": "Olá, {recipient}!\nO horário agendado para sua reunião “{event}” terminou.\n{start} – {end} ({zone})"
+  "workflow.afterEnd.body": "Olá, {recipient}!\nO horário agendado para sua reunião “{event}” terminou.\n{start} – {end} ({zone})",
+  "ssoLinkRemoval.subject": "Um vínculo de login único foi removido",
+  "ssoLinkRemoval.message": "Um vínculo de login único da sua conta do Hourmere foi removido. Você ainda pode entrar por e-mail. Se não esperava essa alteração, entre em contato com quem administra sua equipe."
 }

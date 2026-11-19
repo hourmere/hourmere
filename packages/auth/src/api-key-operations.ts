@@ -282,6 +282,13 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('DELETE', '/api/v1/team/sso/providers/{providerId}', 'session_only', 'session_only'),
   rest('POST', '/api/v1/team/sso/providers/{providerId}/test', 'session_only', 'session_only'),
   rest('POST', '/api/v1/team/sso/providers/{providerId}/link', 'session_only', 'session_only'),
+  rest('DELETE', '/api/v1/team/sso/providers/{providerId}/link', 'session_only', 'session_only'),
+  rest(
+    'DELETE',
+    '/api/v1/team/sso/providers/{providerId}/links/{linkId}',
+    'session_only',
+    'session_only',
+  ),
   rest('GET', '/api/v1/team/sso/providers', 'other_read', 'key'),
   rest('GET', '/api/v1/team/sso/policy', 'other_read', 'key'),
   rest('GET', '/api/v1/openapi.json', 'public_metadata', 'public_metadata'),

@@ -6,12 +6,11 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
-  claimedDomainValues,
-  insert,
-  oidcProviderValues,
-  type SsoFixture,
-  ssoFixture,
-} from '../../../packages/db/src/sso-storage-fixtures.ts'
+  type IdentityFixture,
+  identityFixture,
+  link,
+} from '../../../packages/db/src/sso-identity-fixtures.ts'
+import { insert, oidcProviderValues } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
@@ -25,7 +24,7 @@ const ON = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const OFF = { ssoOidcEnabled: false, ssoSamlEnabled: false }
 let owned: TestDatabase
 let db: Db
-let f: SsoFixture
+let f: IdentityFixture
 let ownIds: string[]
 const sentinel = 'synthetic-secret-raw-metadata-subject'
 function principal(user = f.owner, team = f.team): Principal {
@@ -47,8 +46,11 @@ function app(p = principal(), capabilities = ON) {
     routes: [ssoRoutes({ db, capabilities })],
   })
 }
-const get = (a: ReturnType<typeof app>, path: string) =>
-  a.request(`/api/v1/team/sso/${path}`, { headers: { authorization: 'Bearer hm_synthetic' } })
+const get = (
+  a: ReturnType<typeof app>,
+  path: string,
+  headers: Record<string, string> = { authorization: 'Bearer hm_synthetic' },
+) => a.request(`/api/v1/team/sso/${path}`, { headers })
 async function copy(change?: [string, string]): Promise<typeof real> {
   let source = readFileSync(new URL('./sso-reads.ts', import.meta.url), 'utf8')
   if (change) {
@@ -71,9 +73,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft reads', () => {
     const client = await owned.pool.connect()
     try {
       await client.query('BEGIN')
-      f = await ssoFixture(client)
-      ownIds = []
-      for (let i = 0; i < 103; i++) {
+      f = await identityFixture(client)
+      await client.query('UPDATE auth.session SET "activeOrganizationId"=$1 WHERE id=$2', [
+        f.team,
+        f.sessions[f.owner],
+      ])
+      ownIds = [f.provider.id as string]
+      for (let i = 1; i < 103; i++) {
         const row = await insert(client, 'sso_providers', {
           ...oidcProviderValues(f.team),
           configuration: Buffer.concat([Buffer.from([1]), Buffer.alloc(29), Buffer.from(sentinel)]),
@@ -85,13 +91,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft reads', () => {
         retired_at: new Date(),
       })
       expect(ownIds).not.toContain(retired.id)
-      await insert(client, 'sso_providers', oidcProviderValues(f.otherTeam))
-      const domain = await insert(client, 'sso_domains', claimedDomainValues(f.team))
-      await insert(client, 'sso_provider_domains', {
-        organization_id: f.team,
-        provider_id: ownIds[0],
-        domain_id: domain.id,
-      })
+      const retiredLink = await link(f, f.admin)
+      await client.query(
+        'UPDATE sso_identity_links SET retired_at=clock_timestamp(), generation=generation+1 WHERE id=$1',
+        [retiredLink.id],
+      )
+      await link(f, f.otherOwner)
+      await link(f, f.otherOwner, f.otherProvider)
       await client.query('COMMIT')
     } finally {
       client.release()
@@ -189,6 +195,48 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft reads', () => {
     const response = await get(app(principal(f.member)), 'policy')
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+  })
+  it('gives active administration sessions only live opaque links for each current team provider', async () => {
+    type ProviderPage = { data: { id: string; links?: unknown[] }[] }
+    const browser: Principal = {
+      ...principal(),
+      kind: 'session',
+      sessionId: f.sessions[f.owner] as string,
+    }
+    const page = await get(app(browser), 'providers?limit=100', {})
+    expect(page.status).toBe(200)
+    const providers = ((await page.json()) as ProviderPage).data
+    expect(providers.map(({ id, links }) => ({ id, links }))).toEqual(
+      ownIds
+        .toSorted()
+        .slice(0, 100)
+        .map((id) => ({
+          id,
+          links:
+            id === f.provider.id
+              ? [{ id: f.memberLink.id, generation: f.memberLink.generation }]
+              : [],
+        })),
+    )
+    expect(JSON.stringify(providers)).not.toContain(String(f.memberLink.subject))
+    expect(JSON.stringify(providers)).not.toContain(String(f.memberLink.proven_email))
+
+    const unselected: Principal = {
+      ...principal(f.admin),
+      kind: 'session',
+      sessionId: f.sessions[f.admin] as string,
+    }
+    const staleSession = await get(app(unselected), 'providers', {})
+    expect(staleSession.status).toBe(200)
+    const stalePage = (await staleSession.json()) as ProviderPage
+    expect(stalePage.data.every((row) => row.links?.length === 0)).toBe(true)
+
+    for (const caller of [browser, principal()]) {
+      const response = await get(app(caller), 'providers')
+      expect(response.status).toBe(200)
+      const machinePage = (await response.json()) as ProviderPage
+      expect(machinePage.data.every((row) => !('links' in row))).toBe(true)
+    }
   })
   it('refuses personal spaces, unverified administrators and bookings keys on both REST reads', async () => {
     await db
@@ -310,7 +358,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft reads', () => {
     for (const path of ['providers?cursor=bad&limit=bad', 'policy']) {
       const response = await get(app(principal(f.member), OFF), path)
       expect(response.status).toBe(404)
-      expect(await response.json()).toEqual({ error: 'sso_disabled' })
+      expect(await response.text()).toBe('{"error":"sso_disabled"}')
     }
   })
   it('source-copy controls kill removed role, tenant and Off protections', async () => {

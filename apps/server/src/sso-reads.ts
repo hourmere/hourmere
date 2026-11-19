@@ -1,6 +1,7 @@
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling'
+import { sql } from 'kysely'
 import { z } from 'zod'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
@@ -53,10 +54,54 @@ export async function getSsoPolicy(deps: SsoReadDeps, principal: Principal) {
 }
 
 const Cursor = z.strictObject({ organizationId: z.uuid(), id: z.uuid() })
+
+async function listRecoveryLinks(
+  db: Db,
+  principal: Extract<Principal, { kind: 'session' }>,
+  providerIds: string[],
+) {
+  // Scope the link projection and recheck the viewer's browser session and role in its snapshot.
+  return db
+    .selectFrom('sso_identity_links as l')
+    .innerJoin('sso_providers as p', (join) =>
+      join.onRef('p.id', '=', 'l.provider_id').onRef('p.organization_id', '=', 'l.organization_id'),
+    )
+    .select(['l.id', 'l.provider_id', 'l.generation'])
+    .where('l.organization_id', '=', principal.organization.id)
+    .where('l.provider_id', 'in', providerIds)
+    .where('l.retired_at', 'is', null)
+    .where('p.retired_at', 'is', null)
+    .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom('auth.member as target')
+          .select('target.id')
+          .whereRef('target.organizationId', '=', 'l.organization_id')
+          .whereRef('target.userId', '=', 'l.user_id'),
+      ),
+    )
+    .where(sql<boolean>`EXISTS (
+      SELECT 1 FROM auth.session s
+      JOIN auth."user" u ON u.id = s."userId"
+      JOIN auth.member m ON m."userId" = s."userId" AND m."organizationId" = l.organization_id
+      WHERE s.id = ${principal.sessionId}::uuid AND u.id = ${principal.user.id}::uuid
+        AND lower(s."activeOrganizationId") = l.organization_id::text
+        AND s."expiresAt" > statement_timestamp() AND u."emailVerified"
+        AND EXISTS (SELECT 1 FROM unnest(string_to_array(m.role, ',')) AS token
+          WHERE btrim(token) IN ('owner', 'admin'))
+    )`)
+    .orderBy('l.id')
+    .execute()
+}
+
 export async function listSsoProviders(
   deps: SsoReadDeps,
   principal: Principal,
-  query: { cursor?: string | undefined; limit?: number | undefined } = {},
+  query: {
+    cursor?: string | undefined
+    limit?: number | undefined
+    includeRecoveryLinks?: boolean
+  } = {},
 ) {
   await authorizeSsoRead(deps, principal)
   const limit = query.limit ?? 50
@@ -75,7 +120,7 @@ export async function listSsoProviders(
       throw new DomainError('invalid', 'invalid_cursor')
     }
   }
-  // Deliberate column allow-list: sealed configuration and identity tables are never read.
+  // Deliberate column allow-list: sealed configuration is never read.
   const rows = await deps.db
     .selectFrom('sso_providers')
     .select([
@@ -96,6 +141,16 @@ export async function listSsoProviders(
     .limit(limit + 1)
     .execute()
   const page = rows.slice(0, limit)
+  const recoveryProviderIds =
+    query.includeRecoveryLinks && deps.capabilities.ssoOidcEnabled && principal.kind === 'session'
+      ? new Set(
+          page.filter((provider) => provider.protocol === 'oidc').map((provider) => provider.id),
+        )
+      : new Set<string>()
+  const links =
+    recoveryProviderIds.size > 0 && principal.kind === 'session'
+      ? await listRecoveryLinks(deps.db, principal, [...recoveryProviderIds])
+      : []
   const domains =
     page.length === 0
       ? []
@@ -157,6 +212,11 @@ export async function listSsoProviders(
                   ? 'failed'
                   : 'unknown',
         })),
+      ...(recoveryProviderIds.has(row.id) && {
+        links: links
+          .filter((link) => link.provider_id === row.id)
+          .map(({ id, generation }) => ({ id, generation })),
+      }),
     })),
     nextCursor:
       rows.length > limit

@@ -38,6 +38,7 @@ const EMITTERS: Readonly<Record<string, readonly string[]>> = {
     'sso_link.linked',
   ],
   'apps/server/src/sso-oidc-link.ts': ['sso_link.linked', 'sso_link.conflicted'],
+  'apps/server/src/sso-link-recovery.ts': ['sso_link.unlinked'],
   'apps/server/src/sso-oidc-session.ts': ['sso_authentication.succeeded'],
   'apps/server/src/sso-oidc-sign-in.ts': [
     'sso_authentication.failed',

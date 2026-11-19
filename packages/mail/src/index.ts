@@ -467,6 +467,13 @@ ${emailButton(words.button, url, false, language)}
   }
 }
 
+/** Notice to the affected account's verified login mailbox after an SSO link is retired. */
+export function ssoLinkRemovalEmail(to: string, language: InterfaceLanguage): MailMessage {
+  const subject = mailMessage(language, 'ssoLinkRemoval.subject')
+  const message = mailMessage(language, 'ssoLinkRemoval.message')
+  return { to, subject, text: `Hourmere\n\n${message}\n`, sensitive: true }
+}
+
 export function magicLinkEmail({
   to,
   url,

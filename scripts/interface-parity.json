@@ -37,6 +37,14 @@
     "exemption": "browser-session-only",
     "reason": "Explicit self-linking requires independent local proof and a browser-bound IdP ceremony."
   },
+  "unlinkSsoAccount": {
+    "exemption": "browser-session-only",
+    "reason": "Removing the caller’s identity binding requires independent local proof."
+  },
+  "removeSsoIdentityLink": {
+    "exemption": "browser-session-only",
+    "reason": "Retiring a conflicting member identity requires fresh administrator proof."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
   "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },

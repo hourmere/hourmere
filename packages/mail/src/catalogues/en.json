@@ -131,5 +131,7 @@
   "workflow.beforeStart.subject": "Upcoming booking: {event}",
   "workflow.beforeStart.body": "Hello {recipient},\nYour booking for {event} starts soon.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Booking follow-up: {event}",
-  "workflow.afterEnd.body": "Hello {recipient},\nThe scheduled time for “{event}” has ended.\n{start} – {end} ({zone})"
+  "workflow.afterEnd.body": "Hello {recipient},\nThe scheduled time for “{event}” has ended.\n{start} – {end} ({zone})",
+  "ssoLinkRemoval.subject": "A single sign-on link was removed",
+  "ssoLinkRemoval.message": "A single sign-on link on your Hourmere account was removed. You can still sign in using your email. If you didn’t expect this change, contact your team administrator."
 }

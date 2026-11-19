@@ -131,5 +131,7 @@
   "workflow.beforeStart.subject": "Erinnerung an Ihren Termin: {event}",
   "workflow.beforeStart.body": "Hallo {recipient},\nIhr Termin „{event}“ beginnt bald.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Nachricht zu Ihrem Termin: {event}",
-  "workflow.afterEnd.body": "Hallo {recipient},\nder für Ihren Termin „{event}“ vorgesehene Zeitraum ist abgelaufen.\n{start} – {end} ({zone})"
+  "workflow.afterEnd.body": "Hallo {recipient},\nder für Ihren Termin „{event}“ vorgesehene Zeitraum ist abgelaufen.\n{start} – {end} ({zone})",
+  "ssoLinkRemoval.subject": "Eine Single-Sign-on-Verknüpfung wurde entfernt",
+  "ssoLinkRemoval.message": "Eine Single-Sign-on-Verknüpfung Ihres Hourmere-Kontos wurde entfernt. Sie können sich weiterhin per E-Mail anmelden. Wenn Sie diese Änderung nicht erwartet haben, wenden Sie sich an Ihre Teamadministration."
 }

@@ -131,5 +131,7 @@
   "workflow.beforeStart.subject": "预约即将开始：{event}",
   "workflow.beforeStart.body": "{recipient}，您好：\n您的“{event}”预约即将开始。\n{start} – {end}（{zone}）",
   "workflow.afterEnd.subject": "预约后续：{event}",
-  "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）"
+  "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）",
+  "ssoLinkRemoval.subject": "单点登录关联已解除",
+  "ssoLinkRemoval.message": "您的 Hourmere 账户有一项单点登录关联已解除。您仍可使用邮箱登录。如果您没有预期此变更，请联系团队管理员。"
 }
