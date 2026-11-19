@@ -345,6 +345,7 @@ export {
   createRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  publishRoutingForm,
   updateRoutingForm,
 } from './routing-form-service.ts'
 export {

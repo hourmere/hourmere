@@ -84,6 +84,7 @@ const all = [
   'create_routing_form',
   'update_routing_form',
   'archive_routing_form',
+  'publish_routing_form',
 ]
 // Hidden catalog entries never reach handlers. Workflows check scope first; SSO
 // answers sso_disabled before scope or arguments while both protocols are hard-off.
@@ -105,6 +106,7 @@ const configurationWrites = new Set([
   'create_routing_form',
   'update_routing_form',
   'archive_routing_form',
+  'publish_routing_form',
   'create_workflow',
   'update_workflow',
   'delete_workflow',
@@ -539,6 +541,7 @@ describe('CLI scope parity', () => {
     ['routing-forms create', 'create_routing_form'],
     ['routing-forms update', 'update_routing_form'],
     ['routing-forms archive', 'archive_routing_form'],
+    ['routing-forms publish', 'publish_routing_form'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',
