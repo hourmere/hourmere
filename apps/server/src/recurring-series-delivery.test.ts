@@ -678,6 +678,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     for (const [occurrence, state] of [
       [meetReady, 'ready'],
       [meetFailed, 'failed'],
+      [required(fourth), 'pending'],
     ] as const) {
       await db
         .updateTable('bookings')
@@ -701,7 +702,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
           connection_id: meetCalendar.connectionId,
           state,
           applied_revision: state === 'ready' ? 0 : null,
-          external_event_id: state === 'ready' ? 'synthetic-event' : null,
+          external_event_id: state === 'failed' ? null : `synthetic-${state}-event`,
           error_code: state === 'failed' ? 'provider_unavailable' : null,
         })
         .execute()
@@ -717,14 +718,24 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       expectSeriesCalendar(message, f.occurrences.slice(1), now(), 'CONFIRMED')
     const meetEvents = expectSeriesCalendar(
       mailTo(meetHost.email),
-      [initialPin, meetFailed, required(fourth)],
+      [initialPin, meetFailed],
       now(),
       'CONFIRMED',
     )
     expect(required(meetEvents[1]).getFirstPropertyValue('description')).toContain(
       mailMessage('en', 'series.failed'),
     )
-    expectSeriesCalendar(mailTo(booker.email), f.occurrences, now(), 'CONFIRMED')
+    const bookerEvents = expectSeriesCalendar(
+      mailTo(booker.email),
+      f.occurrences,
+      now(),
+      'CONFIRMED',
+    )
+    const pendingEntry = required(bookerEvents[3])
+    expect(pendingEntry.getFirstPropertyValue('description')).toBe(
+      mailMessage('en', 'series.pending'),
+    )
+    expect(pendingEntry.hasProperty('location')).toBe(false)
 
     // Removing a calendar cannot make a never-delivered entry eligible for cancellation.
     // A newly pinned copy must also be excluded, even if that entry was delivered by mail.
@@ -749,12 +760,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     expect(partialHostMails()).toHaveLength(2)
     for (const message of partialHostMails())
       expectSeriesCalendar(message, f.occurrences.slice(2), now(), 'CANCELLED')
-    expectSeriesCalendar(
-      mailTo(meetHost.email),
-      [initialPin, meetFailed, required(fourth)],
-      now(),
-      'CANCELLED',
-    )
+    expectSeriesCalendar(mailTo(meetHost.email), [initialPin, meetFailed], now(), 'CANCELLED')
     expectSeriesCalendar(mailTo(booker.email), f.occurrences, now(), 'CANCELLED')
   })
 

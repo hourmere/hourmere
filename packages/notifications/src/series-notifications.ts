@@ -116,8 +116,10 @@ function currentSeriesMembers(db: Db, action: Action, hostId?: string) {
       sql<boolean>`coalesce(
         c.provider = 'google_meet' AND c.calendar_id IS NOT NULL
           AND c.organizer_user_id = ${hostId ?? null}
-          AND CASE WHEN b.status = 'cancelled' THEN c.external_event_id IS NOT NULL
-                   ELSE c.state = 'ready' AND c.applied_revision = c.revision END,
+          AND CASE
+            WHEN b.status = 'cancelled' OR c.state = 'pending' THEN c.external_event_id IS NOT NULL
+            ELSE c.state = 'ready' AND c.applied_revision = c.revision
+          END,
         false
       ) OR EXISTS (
         SELECT FROM booking_calendar_targets t
