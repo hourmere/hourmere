@@ -670,11 +670,11 @@ export async function lockHostPoll(trx: Db, ctx: ServiceContext, id: string) {
       'event_type_id',
       'status',
       'admission_mode',
-      'host_revision',
-      'display_time_zone',
       'results_revision',
       'duration_minutes',
       'settings_fingerprint',
+      'host_revision',
+      'display_time_zone',
     ])
     .where('id', '=', id)
     .where('organization_id', '=', ctx.principal.organization.id)
