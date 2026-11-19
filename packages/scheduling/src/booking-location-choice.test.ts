@@ -326,8 +326,8 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
   it('keeps the provider code when conference intent creation fails for a single option', async () => {
     await verifySingleConferenceIntent(Bookings)
     const copy = await sourceCopy(
-      '        isPreservedSingleton(current.locations, input.locationOptionId),\n',
-      "        current.locations?.[0]?.id === 'legacy' && input.locationOptionId === undefined,\n",
+      'isPreservedSingleton(current.locations, input.locationOptionId),\n',
+      "current.locations?.[0]?.id === 'legacy' && input.locationOptionId === undefined,\n",
     )
     await expect(verifySingleConferenceIntent(copy)).rejects.toMatchObject({
       name: 'AssertionError',

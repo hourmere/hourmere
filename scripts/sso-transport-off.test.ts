@@ -1,8 +1,8 @@
 // The SSO transport profile serves domain TXT proofs, OIDC documents and OIDC token exchange.
 // Interactive writes, rechecks and sign-in are hard-off. Offline retirement removes trust.
 // The configuration loader parses `SSO_PRIVATE_TARGETS` and server composition passes it
-// to guarded OIDC sign-in and provider tests, so it routes nothing while OIDC is off. The production route tests
-// in apps/server/src/sso-catalogues.test.ts assert sign-in and completion answer sso_disabled.
+// to guarded OIDC sign-in, provider tests and self-link, so it routes nothing while OIDC
+// is off. Production route tests assert those operations answer sso_disabled.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +15,7 @@ const TARGETS = 'packages/outbound/src/sso-private-targets.ts'
 const OIDC_ATTEMPT = 'apps/server/src/sso-oidc-attempt.ts'
 const OIDC_COMPLETION = 'apps/server/src/sso-oidc-completion.ts'
 const OIDC_JWKS = 'apps/server/src/sso-oidc-jwks.ts'
+const OIDC_LINK = 'apps/server/src/sso-oidc-link.ts'
 const OIDC_SESSION = 'apps/server/src/sso-oidc-session.ts'
 const OIDC_SIGN_IN = 'apps/server/src/sso-oidc-sign-in.ts'
 const OIDC_TEST_RECEIPTS = 'apps/server/src/sso-oidc-test-receipts.ts'
@@ -66,7 +67,7 @@ const importsTargets = (file: string, source: string) =>
     (target) => target === TARGETS || target === '@hourmere/outbound/sso-private-targets',
   )
 
-describe('SSO transport permits only domain TXT and guarded OIDC sign-in', () => {
+describe('SSO transport permits only domain TXT and guarded OIDC ceremonies', () => {
   it('recognises every import form of the profile and nothing else', () => {
     const server = 'apps/server/src/example.ts'
     const outbound = 'packages/outbound/src/example.ts'
@@ -124,7 +125,7 @@ describe('SSO transport permits only domain TXT and guarded OIDC sign-in', () =>
     expect(readFileSync(new URL(OIDC_SIGN_IN, root), 'utf8')).toContain('sendSsoRequest')
   })
 
-  it('restricts OIDC verification dependencies to the sign-in flow', () => {
+  it('restricts OIDC verification dependencies to guarded ceremonies', () => {
     const sources = productionSources()
     expect(sources).toEqual(expect.arrayContaining([...OIDC_VERIFIER_MODULES]))
     const callers = sources
@@ -137,6 +138,7 @@ describe('SSO transport permits only domain TXT and guarded OIDC sign-in', () =>
       })
     expect(callers).toEqual([
       [OIDC_COMPLETION, [OIDC_ATTEMPT]],
+      [OIDC_LINK, [OIDC_ATTEMPT, OIDC_VERIFIER]],
       [OIDC_SESSION, [OIDC_ATTEMPT, OIDC_VERIFIER]],
       [OIDC_SIGN_IN, [OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER]],
       [OIDC_TEST_RECEIPTS, [OIDC_ATTEMPT]],

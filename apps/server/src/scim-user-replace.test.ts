@@ -35,6 +35,13 @@ function profile(userName: string, values: Json = {}): Json {
   return { schemas: [core], userName, ...values }
 }
 
+function patchProfile(value: Json): Json {
+  return {
+    schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+    Operations: [{ op: 'replace', value }],
+  }
+}
+
 async function expectError(response: Response, status: number, scimType?: string) {
   expect(response.status).toBe(status)
   expect(response.headers.get('content-type')).toBe('application/scim+json')
@@ -48,7 +55,7 @@ async function expectError(response: Response, status: number, scimType?: string
   return body
 }
 
-describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
+describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
   let owned: TestDatabase
   let db: Db
   let authPool: pg.Pool
@@ -136,7 +143,7 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
   function send(
     organization: Organization,
     resource: string,
-    method: 'GET' | 'POST' | 'PUT',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
     body?: Json | string,
     headers: Record<string, string> = {},
     application = app,
@@ -155,6 +162,8 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
   }
   const put = (organization: Organization, id: string, body: Json | string) =>
     send(organization, `Users/${id}`, 'PUT', body)
+  const patch = (organization: Organization, id: string, value: Json) =>
+    send(organization, `Users/${id}`, 'PATCH', patchProfile(value))
 
   const stored = (id: string) =>
     db.selectFrom('scim_users').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
@@ -525,9 +534,45 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
     expect(await updates(id)).toHaveLength(2)
   }, 15_000)
 
-  it.each(['replacement', 'claim'] as const)(
-    'preserves admission and personal identity when %s commits first',
+  it.each(['PUT', 'PATCH'] as const)(
+    'normalizes a concurrent PATCH against the locked profile when %s commits first',
     async (first) => {
+      const organization = await team()
+      const id = await entry(organization, 'before-race', 'Before')
+      const replace = () => put(organization, id, profile('after-put', { title: 'PUT title' }))
+      const update = () => patch(organization, id, { displayName: 'PATCH display' })
+      const [one, two] =
+        first === 'PUT' ? await ordered(id, replace, update) : await ordered(id, update, replace)
+      expect([one.status, two.status]).toEqual([200, 200])
+      const replacement = await (first === 'PUT' ? one : two).json()
+      const patched = await (first === 'PUT' ? two : one).json()
+      expect(replacement).toMatchObject({ userName: 'after-put', title: 'PUT title' })
+      expect(replacement).not.toHaveProperty('displayName')
+      expect(patched).toMatchObject({ displayName: 'PATCH display' })
+      if (first === 'PUT') {
+        expect(patched).toMatchObject({ userName: 'after-put', title: 'PUT title' })
+      } else {
+        expect(patched).toMatchObject({ userName: 'before-race' })
+        expect(patched).not.toHaveProperty('title')
+      }
+      expect(await stored(id)).toMatchObject({
+        user_name: 'after-put',
+        title: 'PUT title',
+        display_name: first === 'PUT' ? 'PATCH display' : null,
+      })
+      expect(await updates(id)).toHaveLength(2)
+    },
+    15_000,
+  )
+
+  it.each([
+    ['PUT', 'profile write'],
+    ['PUT', 'claim'],
+    ['PATCH', 'profile write'],
+    ['PATCH', 'claim'],
+  ] as const)(
+    'preserves admission and personal identity in a %s race when %s commits first',
+    async (method, first) => {
       const organization = await team()
       const oldOwner = await createTestUser(db, 'Personal name')
       const otherOwner = await createTestUser(db, 'Different personal name')
@@ -541,30 +586,30 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
           .orderBy('id')
           .execute()
       const before = await users()
+      const values = {
+        displayName: 'Updated managed display',
+        emails: [{ value: otherOwner.email, type: 'work', primary: true }],
+      }
       const replaceProfile = () =>
-        put(
-          organization,
-          id,
-          profile('provider-login', {
-            displayName: 'Updated managed display',
-            emails: [{ value: otherOwner.email, type: 'work', primary: true }],
-          }),
-        )
+        method === 'PUT'
+          ? put(organization, id, profile('provider-login', values))
+          : patch(organization, id, { userName: 'provider-login', ...values })
       const acceptClaim = () => accept(cookie, invitationId)
       const [one, two] =
-        first === 'replacement'
+        first === 'profile write'
           ? await ordered(id, replaceProfile, acceptClaim)
           : await ordered(id, acceptClaim, replaceProfile)
       expect([one.status, two.status]).toEqual([200, 200])
       expect(await users()).toEqual(before)
 
-      const member = await db
+      const members = await db
         .selectFrom('auth.member')
-        .select(['id', 'role'])
+        .select(['id', 'role', 'userId'])
         .where('organizationId', '=', organization.id)
-        .where('userId', '=', oldOwner.id)
-        .executeTakeFirstOrThrow()
-      expect(member.role).toBe('member')
+        .where('userId', 'in', [oldOwner.id, otherOwner.id])
+        .execute()
+      const [member] = members
+      expect(members).toEqual([{ id: expect.any(String), role: 'member', userId: oldOwner.id }])
       const invitations = await db
         .selectFrom('auth.invitation')
         .select(['id', 'status', 'email'])
@@ -577,7 +622,7 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
         display_name: 'Updated managed display',
         work_email: otherOwner.email,
         linked_user_id: linked ? oldOwner.id : null,
-        linked_member_id: linked ? member.id : null,
+        linked_member_id: linked ? member?.id : null,
       })
       expect(await claimById(claim.id)).toEqual({
         ...claim,
@@ -596,30 +641,36 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
     15_000,
   )
 
-  it('rolls back the profile and pending claim when the audit writer fails', async () => {
-    const organization = await team()
-    const { id, claim } = await provision(organization, 'pending@directory.example')
-    const before = await stored(id)
-    await sql`CREATE FUNCTION test_refuse_scim_replace_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+  it.each(['PUT', 'PATCH'] as const)(
+    'rolls back the %s profile and pending claim when the audit writer fails',
+    async (method) => {
+      const organization = await team()
+      const { id, claim } = await provision(organization, 'pending@directory.example')
+      const before = await stored(id)
+      await sql`CREATE FUNCTION test_refuse_scim_replace_audit() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.action = 'scim_user.updated' THEN RAISE EXCEPTION 'injected audit failure'; END IF;
         RETURN NEW;
       END $$`.execute(db)
-    await sql`CREATE TRIGGER test_refuse_scim_replace_audit BEFORE INSERT ON audit_events
+      await sql`CREATE TRIGGER test_refuse_scim_replace_audit BEFORE INSERT ON audit_events
       FOR EACH ROW EXECUTE FUNCTION test_refuse_scim_replace_audit()`.execute(db)
-    try {
-      const answer = await put(organization, id, profile('would-change'))
-      expect(await expectError(answer, 500)).toMatchObject({
-        detail: 'SCIM request could not be processed.',
-      })
-      expect(await stored(id)).toEqual(before)
-      expect(await claimById(claim.id)).toEqual(claim)
-      expect(await updates(id)).toEqual([])
-    } finally {
-      await sql`DROP TRIGGER test_refuse_scim_replace_audit ON audit_events`.execute(db)
-      await sql`DROP FUNCTION test_refuse_scim_replace_audit()`.execute(db)
-    }
-  })
+      try {
+        const answer =
+          method === 'PUT'
+            ? await put(organization, id, profile('would-change'))
+            : await patch(organization, id, { userName: 'would-change', emails: [] })
+        expect(await expectError(answer, 500)).toMatchObject({
+          detail: 'SCIM request could not be processed.',
+        })
+        expect(await stored(id)).toEqual(before)
+        expect(await claimById(claim.id)).toEqual(claim)
+        expect(await updates(id)).toEqual([])
+      } finally {
+        await sql`DROP TRIGGER test_refuse_scim_replace_audit ON audit_events`.execute(db)
+        await sql`DROP FUNCTION test_refuse_scim_replace_audit()`.execute(db)
+      }
+    },
+  )
 
   it('leaves production Users, Groups and discovery unregistered with token provisioning on', async () => {
     const organization = await team()
@@ -659,6 +710,19 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement', () => {
       404,
     )
     expect(unavailable.detail).toBe('SCIM resources are not available yet.')
+    expect(
+      await expectError(
+        await send(
+          organization,
+          `Users/${id}`,
+          'PATCH',
+          patchProfile({ userName: 'would-change' }),
+          {},
+          application,
+        ),
+        404,
+      ),
+    ).toEqual(unavailable)
     for (const resource of [
       'Users',
       `Users/${id}`,

@@ -6,6 +6,7 @@ import type { SsoProviderRevision } from './sso-configuration.ts'
 import { normalizeSsoDomain } from './sso-domains.ts'
 import { browserBindingDigest, databaseClock, sha256 } from './sso-mailbox-proof.ts'
 import {
+  LINK_SSO_ACCOUNT,
   lockOidcProvider,
   OidcAttemptRefused,
   type OidcTestActor,
@@ -20,7 +21,7 @@ import {
 import { normalizeOidcMailbox } from './sso-oidc-session.ts'
 import type { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 
-export { LINK_SSO_ACCOUNT } from './sso-oidc-attempt.ts'
+export { LINK_SSO_ACCOUNT }
 export const OIDC_COMPLETE_LINK = 'oidcCompleteLink'
 export const oidcLinkReturnPath = '/app/settings'
 export class OidcLinkDomainUnverified extends OidcAttemptRefused {}
