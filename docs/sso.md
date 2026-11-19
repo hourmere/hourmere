@@ -392,6 +392,24 @@ effects. If the team has no stored policy, the committing transaction is unchang
 中文：`/api/v1` 和 MCP 的团队写入会先检查目标团队的策略。团队已保存策略时，提交事务会重新检查
 SSO 凭证。凭证在提交检查前过期或被撤销，写入及事务内的副作用一并回滚。没有团队策略时，写入事务照常执行。
 
+Native Better Auth team operations use the same proof check for browser requests and
+trusted `auth.api` calls. Scoped requests without proof receive `403 SSO_REQUIRED`
+with message `sso_required` once the team target is authorized. Lists omit enforced
+teams and invitations the caller cannot read. Clearing active organization remains
+available. Team mutations recheck proof on their committing connection.
+
+Team invitation mail, host-initiated poll invitation mail and Slack sample deliveries
+recheck their initiating browser session before delivery. Queued requests without that
+session cannot act for an enforced team. Booking reminders, mail, webhooks, workflow
+dispatch, calendar reconciliation and public waitlist work use their existing lifecycle
+authority.
+
+中文：Better Auth 的团队操作和受信服务调用会检查同一份 SSO 凭证。已经确认团队访问范围的请求
+缺少凭证时，返回 `403 SSO_REQUIRED`。团队列表和邀请列表会省略无权读取的项目。用户仍可清除
+当前团队。团队写入提交前会在同一事务中复查凭证。团队邀请邮件、主持人发起的投票邀请邮件和
+Slack 测试投递会在发送前复查发起者的会话。预约提醒、邮件、Webhook、工作流、日历同步及公开
+候补名单继续按各自的生命周期规则处理。
+
 Enabling enforcement requires a verified domain, an enabled tested provider of a protocol
 that is currently on, a successful owner SSO test against the exact current revision, and
 at least one usable recovery owner: a current owner with accepted recovery status. A

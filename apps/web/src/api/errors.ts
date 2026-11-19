@@ -161,6 +161,7 @@ export function errorMessage(err: unknown): UiText {
     insufficient_scope: 'This API key does not allow this operation.',
     API_KEY_SCOPE_IMMUTABLE: 'API key scope cannot be changed; create a replacement key.',
     SESSION_REQUIRED: 'Use a browser session without an Authorization header.',
+    SSO_REQUIRED: 'Sign in with this team’s SSO to continue.',
     INVALID_METADATA: 'Check the API key organization and scope.',
     invalid_request: 'Check the form and try again.',
     organization_context_changed: 'Your team context changed. Reload before making changes.',

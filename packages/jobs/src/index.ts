@@ -119,6 +119,12 @@ export interface InvitationEmailJobIdentity {
   generation: number
 }
 
+/** Opaque database identities for rechecking the initiating session. Never carry a token. */
+export interface QueuedSessionActor {
+  userId: string
+  sessionId: string
+}
+
 export interface Jobs<Defs extends readonly AnyJobDefinition[]> {
   /**
    * Validates the payload and queues a job. Resolves to the job id, or null when the job's
@@ -347,7 +353,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
         `SELECT 1 FROM pgboss.job
          WHERE id = $1::uuid AND name = 'invitation-email-v1'
            AND singleton_key = $2
-           AND data = $3::jsonb
+           AND data - 'actor' = $3::jsonb
            AND (
              (state IN ('created', 'retry') AND keep_until > pgboss.job_now())
              OR (state = 'active' AND started_on IS NOT NULL
@@ -371,7 +377,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       await fromKysely(transaction).executeSql(
         `UPDATE pgboss.job SET state = 'cancelled', completed_on = pgboss.job_now()
          WHERE name = 'invitation-email-v1'
-           AND singleton_key = $1 AND data = $2::jsonb AND policy = 'exclusive'
+           AND singleton_key = $1 AND data - 'actor' = $2::jsonb AND policy = 'exclusive'
            AND (
              (state IN ('created', 'retry') AND keep_until <= pgboss.job_now())
              OR (state = 'active' AND started_on IS NOT NULL

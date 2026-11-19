@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { TeamSsoCapabilities } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
@@ -39,6 +40,7 @@ export interface WebhookSettings {
   publicUrl?: string | undefined
   encryptionKey?: string | undefined
   privateTargets?: readonly WebhookPrivateTarget[] | undefined
+  ssoCapabilities?: TeamSsoCapabilities | undefined
 }
 export interface WebhookView {
   id: string

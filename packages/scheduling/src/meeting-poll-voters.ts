@@ -20,6 +20,7 @@ import {
   hkdfSync,
   randomBytes,
 } from 'node:crypto'
+import type { TeamSsoSession } from '@hourmere/auth'
 import { interfaceLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
@@ -227,12 +228,13 @@ function sealCredential(
   binding: MeetingPollCredentialBinding,
   purpose: CredentialPurpose,
   token: string,
+  actor?: TeamSsoSession,
 ): Buffer {
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', meetingPollDerivedKey(secret, 'capability/v1'), iv)
   cipher.setAAD(credentialAad(binding))
   const body = Buffer.concat([
-    cipher.update(JSON.stringify({ purpose, token }), 'utf8'),
+    cipher.update(JSON.stringify({ purpose, token, ...(actor && { actor }) }), 'utf8'),
     cipher.final(),
   ])
   return Buffer.concat([Buffer.from([1]), iv, cipher.getAuthTag(), body])
@@ -246,7 +248,7 @@ export function openMeetingPollCredential(
   secret: string,
   binding: MeetingPollCredentialBinding,
   ciphertext: Buffer | null,
-): { purpose: CredentialPurpose; token: string } | undefined {
+): { purpose: CredentialPurpose; token: string; actor?: TeamSsoSession } | undefined {
   try {
     if (!ciphertext || ciphertext.length < 30 || ciphertext.length > 1024 || ciphertext[0] !== 1)
       return undefined
@@ -261,10 +263,16 @@ export function openMeetingPollCredential(
       Buffer.concat([decipher.update(ciphertext.subarray(29)), decipher.final()]).toString('utf8'),
     )
     if (typeof parsed !== 'object' || parsed === null) return undefined
-    const { purpose, token } = parsed as { purpose?: unknown; token?: unknown }
+    const { purpose, token, actor } = parsed as {
+      purpose?: unknown
+      token?: unknown
+      actor?: { userId?: unknown; sessionId?: unknown }
+    }
     if ((purpose !== 'verification' && purpose !== 'voting') || typeof token !== 'string')
       return undefined
     if (!TOKEN.test(token)) return undefined
+    if (actor && isUuid(actor.userId) && isUuid(actor.sessionId))
+      return { purpose, token, actor: { userId: actor.userId, sessionId: actor.sessionId } }
     return { purpose, token }
   } catch {
     return undefined
@@ -646,7 +654,7 @@ export async function inviteMeetingPollVoters(
         voterId = row.id
       }
       const credential = await issueCredential(trx, poll, voterId, 'voting', poll.deadline, secret)
-      await queueCredentialMail(trx, poll, voterId, 'invitation', credential, 'first')
+      await queueHostInvitationMail(trx, ctx, poll, voterId, credential)
       // A host's explicit invitation also clears a removal tombstone; re-inviting a removed
       // mailbox spends one of its resends.
       await newCurrentCredential(trx, poll, key, {
@@ -715,7 +723,7 @@ export async function resendMeetingPollInvitation(
       throw new MeetingPollRateLimitError(counter.resendRetryAfter)
     await retireCredentials(trx, poll, voter.id, 'voting', 'revoked')
     const credential = await issueCredential(trx, poll, voter.id, 'voting', poll.deadline, secret)
-    await queueCredentialMail(trx, poll, voter.id, 'invitation', credential, 'first')
+    await queueHostInvitationMail(trx, ctx, poll, voter.id, credential)
     await trx
       .updateTable('meeting_poll_mailbox_counters')
       .set({
@@ -1079,6 +1087,37 @@ async function queueCredentialMail(
       updated_at: poll.at,
     })
     .execute()
+}
+
+function queueHostInvitationMail(
+  trx: Db,
+  { principal, meetingPollSecret }: MeetingPollHostContext,
+  poll: VoterPoll,
+  voterId: string,
+  credential: IssuedCredential,
+) {
+  // Bind the initiating browser only to the outbox copy. The recipient's retained
+  // capability, recovery mail and reminders remain independent of the host session.
+  const { organization, user } = principal
+  const copy =
+    principal.kind === 'session' && !organization.personal
+      ? {
+          generation: credential.generation,
+          ciphertext: sealCredential(
+            meetingPollSecret,
+            {
+              organizationId: poll.organizationId,
+              pollId: poll.id,
+              voterId,
+              generation: credential.generation,
+            },
+            'voting',
+            credential.token,
+            { userId: user.id, sessionId: principal.sessionId },
+          ),
+        }
+      : credential
+  return queueCredentialMail(trx, poll, voterId, 'invitation', copy, 'first')
 }
 
 /**

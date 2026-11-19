@@ -23,6 +23,8 @@ import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
 import { ensurePersonalOrganization, isUuid, personalOwner } from './organizations.ts'
 import { fixedTeamRole, teamRoleDenied } from './team-role-policy.ts'
+import { ssoHardOff } from './team-sso.ts'
+import { nativeTeamSso, trustedAddMember } from './team-sso-native.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:43830'
@@ -419,6 +421,9 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
       personalOwner,
       fixedTeamRole,
       teamRoleDenied,
+      nativeTeamSso,
+      trustedAddMember,
+      ssoHardOff,
     }
     return new Function(...Object.keys(bindings), `${source}; return beforeHook`)(
       ...Object.values(bindings),

@@ -1,5 +1,12 @@
 // Durable poll mail outbox. SMTP never holds a database transaction or a poll lock.
 import { createHmac, randomUUID } from 'node:crypto'
+import {
+  memoizeTeamSsoAccess,
+  ssoHardOff,
+  type TeamSsoCapabilities,
+  type TeamSsoSession,
+  teamSsoAccess,
+} from '@hourmere/auth'
 import type { Db, MeetingPollDeliveryRow, MeetingPollRow } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import {
@@ -35,10 +42,17 @@ export interface MeetingPollEmailDeps extends NotificationMailLimits {
   now?: (() => Temporal.Instant) | undefined
   defaultLanguage?: unknown
   log?: ((line: string) => void) | undefined
+  ssoCapabilities?: TeamSsoCapabilities | undefined
 }
 export interface MeetingPollEmailRequest {
   id: string
 }
+
+type CheckPollInvitation = (
+  db: Db,
+  organizationId: string,
+  actor?: TeamSsoSession,
+) => Promise<boolean>
 const KINDS = [
   'verification',
   'invitation',
@@ -308,7 +322,11 @@ async function prepareCreator(
 
 // Scheduling constructs Zod schemas; load it only when work runs, after the HTTP
 // composition has installed its OpenAPI extension (including the policy subpath).
-async function prepare(deps: MeetingPollEmailDeps, request: MeetingPollEmailRequest) {
+async function prepare(
+  deps: MeetingPollEmailDeps,
+  request: MeetingPollEmailRequest,
+  checkInvitation: CheckPollInvitation,
+) {
   const { ensureMeetingPollKey, MEETING_POLL_RETENTION } = await import(
     '@hourmere/scheduling/meeting-poll-delivery'
   )
@@ -339,6 +357,12 @@ async function prepare(deps: MeetingPollEmailDeps, request: MeetingPollEmailRequ
           : await prepareCredential(db, deps, poll, row, ready)
     if (!recipient) return finish(db, row, ready, 'skipped', 'recipient_unavailable')
     if (typeof recipient === 'string') return finish(db, row, ready, 'skipped', recipient)
+    if (
+      row.kind === 'invitation' &&
+      'opened' in recipient &&
+      !(await checkInvitation(db, row.organization_id, recipient.opened.actor))
+    )
+      return finish(db, row, ready, 'skipped', 'sso_required')
     const inviteeFacing = row.kind !== 'deadline_closed'
     const hash = notificationRecipientHash(recipient.email, deps.secret)
     const suppressed = await notificationEmailBudget(db, deps, hash, inviteeFacing, ready)
@@ -427,10 +451,31 @@ export async function deliverMeetingPollEmail(
   request: MeetingPollEmailRequest,
   shutdown?: AbortSignal,
 ) {
+  return deliver(
+    deps,
+    request,
+    async (db, organizationId, actor) =>
+      (
+        await teamSsoAccess(
+          { db, capabilities: deps.ssoCapabilities ?? ssoHardOff },
+          actor ?? null,
+          organizationId,
+        )
+      ).allowed,
+    shutdown,
+  )
+}
+
+async function deliver(
+  deps: MeetingPollEmailDeps,
+  request: MeetingPollEmailRequest,
+  checkInvitation: CheckPollInvitation,
+  shutdown?: AbortSignal,
+) {
   try {
     shutdown?.throwIfAborted()
     const anchor = performance.now()
-    const claim = await prepare(deps, request)
+    const claim = await prepare(deps, request, checkInvitation)
     if (!claim) return
     let failure: ReturnType<typeof failureCode> | undefined
     try {
@@ -513,12 +558,20 @@ export function createMeetingPollEmailWorker(deps: MeetingPollEmailDeps) {
       cursor = undefined
       rows = await due()
     }
+    const capabilities = deps.ssoCapabilities ?? ssoHardOff
+    const policy = memoizeTeamSsoAccess({ db: deps.db, capabilities }, null)
+    const checkInvitation: CheckPollInvitation = async (db, organizationId, actor) => {
+      // The no-policy decision is shared by the batch. An enforced invitation always
+      // uses a fresh check of the exact originating browser.
+      if ((await policy(organizationId, db)).allowed) return true
+      return !!actor && (await teamSsoAccess({ db, capabilities }, actor, organizationId)).allowed
+    }
     const started = performance.now()
     for (const row of rows) {
       if (signal?.aborted || performance.now() - started > 45_000) break
       cursor = row.id
       try {
-        await deliverMeetingPollEmail(deps, row, signal)
+        await deliver(deps, row, checkInvitation, signal)
       } catch {
         deps.log?.('meeting_poll_email_delivery_unavailable')
       }

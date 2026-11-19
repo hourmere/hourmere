@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { lockSharedTeamSsoProof, ssoHardOff } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
-import { teamWriteTransaction } from '@hourmere/db/team-write'
+import { checkTeamWriteDeadline, teamWriteTransaction } from '@hourmere/db/team-write'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
@@ -36,6 +37,9 @@ export interface SlackDestinationView extends WebhookView {
 const invalid = () =>
   new DomainError('invalid', 'invalid_slack_destination', 'Invalid Slack destination configuration')
 const missing = () => new DomainError('not_found', 'slack_destination_not_found')
+const ssoRequired = (): never => {
+  throw new DomainError('forbidden', 'sso_required')
+}
 const columns = [
   'id',
   'organization_id',
@@ -282,6 +286,17 @@ export async function testSlackDestination(
     throw new DomainError('conflict', 'slack_unavailable', 'Slack delivery is unavailable')
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await locked(trx, ctx, id)
+    const actor =
+      ctx.principal.kind === 'session'
+        ? { userId: ctx.principal.user.id, sessionId: ctx.principal.sessionId }
+        : null
+    const deadline = await lockSharedTeamSsoProof(
+      trx,
+      settings.ssoCapabilities ?? ssoHardOff,
+      actor,
+      row.organization_id,
+      ssoRequired,
+    )
     admit?.()
     if (!row.is_active)
       throw new DomainError(
@@ -325,10 +340,14 @@ export async function testSlackDestination(
       .executeTakeFirstOrThrow()
     await queue.enqueue(
       WEBHOOK_DELIVERY_JOB,
-      { deliveryId: delivery.id },
+      {
+        deliveryId: delivery.id,
+        ...(deadline && actor && { actor }),
+      },
       { transaction: trx, singletonKey: delivery.id },
     )
     await auditSlack(trx, ctx, 'slack_destination.tested', row)
+    await checkTeamWriteDeadline(trx, deadline, ssoRequired)
     return { deliveryId: delivery.id }
   })
 }

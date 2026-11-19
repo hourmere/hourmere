@@ -2185,4 +2185,7 @@ export const admin = {
   'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
     '未列出团队活动类型：只有团队所有者和管理员才能查看这些时间无法预约的原因。',
   'Another scheduling rule applies.': '受其他排期规则限制。',
+
+  // Native team SSO
+  'Sign in with this team’s SSO to continue.': '请使用此团队的单点登录继续。',
 } as const

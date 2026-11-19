@@ -1,15 +1,22 @@
 import {
   checkTeamManagementAccess,
   ensurePersonalOrganization,
+  lockSharedTeamSsoProof,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
   type SsoAdmissionRemoval,
+  ssoHardOff,
   TeamManagementError,
   teamRoles,
 } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
-import { checkTeamWriteBeforeAuthorityChange, teamWriteTransaction } from '@hourmere/db/team-write'
+import {
+  checkTeamWriteBeforeAuthorityChange,
+  checkTeamWriteDeadline,
+  teamWriteCheckFor,
+  teamWriteTransaction,
+} from '@hourmere/db/team-write'
 import type { Transaction } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -20,6 +27,7 @@ export async function leaveTeamMember(
   ctx: ServiceContext,
   input: { teamId: string; expectedOrganizationId: string },
   recordAdmissionRemoval?: SsoAdmissionRemoval,
+  ssoCapabilities = ssoHardOff,
 ): Promise<{ organizationId: string }> {
   if (ctx.principal.kind !== 'session') {
     throw new DomainError('forbidden', 'team_management_access_denied')
@@ -77,7 +85,14 @@ export async function leaveTeamMember(
         throw new MemberDepartureBlockedError(impact)
       }
       // The write itself removes the membership and proof that authorized it.
-      await checkTeamWriteBeforeAuthorityChange(trx)
+      const identity = { userId: principal.user.id, sessionId: principal.sessionId }
+      const check = teamWriteCheckFor(actor.organizationId, identity)
+      const denied = () => {
+        throw new DomainError('forbidden', 'sso_required')
+      }
+      const deadline = check
+        ? await checkTeamWriteBeforeAuthorityChange(trx)
+        : await lockSharedTeamSsoProof(trx, ssoCapabilities, identity, actor.organizationId, denied)
       if (recordAdmissionRemoval) {
         await recordAdmissionRemoval(trx, {
           organizationId: actor.organizationId,
@@ -117,6 +132,7 @@ export async function leaveTeamMember(
         targetId: actor.userId,
         requestId: ctx.requestId,
       })
+      await checkTeamWriteDeadline(trx, deadline, denied)
       return { organizationId: personalId }
     })
     .catch((error: unknown) => {

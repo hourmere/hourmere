@@ -12,10 +12,11 @@ import { deliverInvitationEmail, type InvitationEmailSenderDeps } from './invita
 export const INVITATION_EMAIL_JOB = 'invitation-email-v1'
 export const INVITATION_EMAIL_REPAIR_JOB = 'invitation-email-repair-v1'
 
-/** Queue storage contains only this identity, never the address or invitation link. */
+/** Queue storage contains opaque row identities, never an address, link or session token. */
 export const InvitationEmailPayload = z.strictObject({
   invitationId: z.uuid(),
   generation: z.number().int().min(1).max(32),
+  actor: z.strictObject({ userId: z.uuid(), sessionId: z.uuid() }).optional(),
 })
 export type InvitationEmailRequest = z.output<typeof InvitationEmailPayload>
 

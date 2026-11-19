@@ -9,12 +9,15 @@ import {
   type TeamManager,
 } from './team-management.ts'
 import { teamRoleDenied } from './team-role-policy.ts'
+import { lockSharedTeamSsoProof, ssoHardOff } from './team-sso.ts'
+import { nativeSsoRequired } from './team-sso-native.ts'
 
 /** The caller holds the shared actor/team locks in the same transaction. */
 export async function cancelTeamInvitation(
   db: Db,
   actor: TeamManager & { sessionId?: string },
   invitationId: string,
+  ssoCapabilities = ssoHardOff,
 ) {
   const invitation = await db
     .selectFrom('auth.invitation')
@@ -24,9 +27,20 @@ export async function cancelTeamInvitation(
     .forUpdate()
     .executeTakeFirst()
   if (!invitation) throw new TeamManagementError('team_management_access_denied')
+  const check = () =>
+    lockSharedTeamSsoProof(
+      db,
+      ssoCapabilities,
+      actor.sessionId ? { userId: actor.userId, sessionId: actor.sessionId } : null,
+      actor.organizationId,
+      nativeSsoRequired,
+    )
   // Acceptance owns the same team/invitation locks. A completed acceptance wins;
   // cancelling its old invitation never changes the joined membership.
-  if (invitation.status !== 'pending') return invitation
+  if (invitation.status !== 'pending') {
+    await check()
+    return invitation
+  }
   const cancelled = await db
     .updateTable('auth.invitation')
     .set({ status: 'canceled' })
@@ -42,11 +56,16 @@ export async function cancelTeamInvitation(
     targetType: 'invitation',
     targetId: invitation.id,
   })
+  await check()
   return cancelled
 }
 
 /** Protect native HTTP and trusted auth.api cancellation with the same locked write. */
-export async function invitationCancellationRules(ctx: AuthMiddlewareContext, db: Db) {
+export async function invitationCancellationRules(
+  ctx: AuthMiddlewareContext,
+  db: Db,
+  ssoCapabilities = ssoHardOff,
+) {
   if (ctx.path !== '/organization/cancel-invitation') return
   if (ctx.request && ctx.request.headers.get('origin') !== new URL(ctx.context.baseURL).origin)
     throw teamRoleDenied()
@@ -91,6 +110,7 @@ export async function invitationCancellationRules(ctx: AuthMiddlewareContext, db
           trx,
           { ...facts, role: facts.role, sessionId: session.session.id },
           invitationId,
+          ssoCapabilities,
         )
       })
     return ctx.json(invitation)
