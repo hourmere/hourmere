@@ -135,6 +135,7 @@ const domainStatus = {
   forbidden: 403,
   not_found: 404,
   conflict: 409,
+  unavailable: 503,
 } as const satisfies Record<DomainErrorKind, number>
 
 // Codes for errors raised by the framework itself (e.g. malformed JSON), so every error
