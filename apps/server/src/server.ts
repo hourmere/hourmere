@@ -132,6 +132,7 @@ import { slackDestinationTools } from './mcp/slack-destinations.ts'
 import { ssoReadTools } from './mcp/sso.ts'
 import type { Tool } from './mcp/tools.ts'
 import { waitlistTools } from './mcp/waitlist.ts'
+import { webhookTools } from './mcp/webhooks.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { workflowTools } from './mcp/workflows.ts'
 import { nativeTeamLeave } from './native-team-leave.ts'
@@ -465,6 +466,7 @@ export function productTools({
     }),
     ...oneTimeLinkTools({ db, publicUrl }),
     ...slackDestinationTools({ db, ...webhooks, queue: webhookQueue }),
+    ...webhookTools({ db, ...webhooks }),
     ...(slotSnippetsEnabled
       ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
       : []),

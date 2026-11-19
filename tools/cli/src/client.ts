@@ -59,7 +59,12 @@ export function endpoint(value: string | undefined): URL {
 }
 
 function safeCode(value: unknown, fallback: string): string {
-  return typeof value === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(value) ? value : fallback
+  // A signing secret can resemble a stable error code if it contains only lowercase characters.
+  return typeof value === 'string' &&
+    /^[a-z][a-z0-9_]{0,79}$/.test(value) &&
+    !/whsec_[a-z0-9_]{43}/.test(value)
+    ? value
+    : fallback
 }
 
 // The CLI never prints arbitrary server text. Only these value-free notification

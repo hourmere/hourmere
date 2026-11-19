@@ -28,7 +28,7 @@ import {
   organizationContextWriteLock,
 } from '../team-management.ts'
 
-const Webhook = z
+export const Webhook = z
   .object({
     id: z.uuid(),
     organizationId: z.uuid(),
@@ -44,6 +44,7 @@ const Secret = z.object({
     .string()
     .openapi({ description: 'Shown only once; store securely. Never returned by lists.' }),
 })
+export const WebhookCreated = Secret.extend({ webhook: Webhook })
 const Delivery = z
   .object({
     id: z.uuid(),
@@ -149,7 +150,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         responses: {
           201: {
             description: 'Endpoint and one-time secret',
-            content: json(Secret.extend({ webhook: Webhook })),
+            content: json(WebhookCreated),
           },
           ...errors,
         },

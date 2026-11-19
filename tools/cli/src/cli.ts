@@ -70,6 +70,10 @@ export const COMMANDS = {
   'booking-activity': 'get_booking_activity',
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
+  'webhooks list': 'list_webhooks',
+  'webhooks create': 'create_webhook',
+  'webhooks update': 'update_webhook',
+  'webhooks delete': 'delete_webhook',
   'slack list': 'list_slack_destinations',
   'slack create': 'create_slack_destination',
   'slack update': 'update_slack_destination',
@@ -97,9 +101,20 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
        hourmere workflows list|get|create|update|delete [--input FILE|-] [--url ORIGIN]
+       hourmere webhooks list [--json]
+       hourmere webhooks create --input FILE|- (--json | --output FILE)
+       hourmere webhooks update --input FILE|- [--json]
+       hourmere webhooks delete --input FILE|- --yes [--json]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
+Webhooks: list requires read/full scope; writes require full. Personal owners and team owners/admins only.
+Create takes JSON {url, events, isActive?} and requires --output FILE (new private file) or --json
+(stdout). The signing secret is returned once. Use a private file when stdout is logged.
+Update takes JSON {id, events?, isActive?}. The URL is immutable.
+Delete takes JSON {id} and requires --yes to confirm deletion of the endpoint and retained deliveries.
+Events: booking.created, booking.rescheduled, booking.cancelled, booking.reschedule_requested,
+        booking.reschedule_request_expired, booking.attendee_no_show_changed.
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
 Supply incoming-webhook URLs only through private JSON input; responses are masked.
 Slack events: booking.created, booking.rescheduled, booking.cancelled,
@@ -200,6 +215,7 @@ function parse(argv: readonly string[]): Options {
       : first === 'polls' ||
           first === 'one-time-links' ||
           first === 'branding' ||
+          first === 'webhooks' ||
           first === 'slack' ||
           first === 'workflows' ||
           first === 'routing-forms' ||
@@ -222,6 +238,7 @@ function parse(argv: readonly string[]): Options {
         '--input',
         '--output',
         '--url',
+        '--yes',
         '--duration-minutes',
         '--success-redirect-url',
         '--success-redirect-parameters',
@@ -234,6 +251,10 @@ function parse(argv: readonly string[]): Options {
       throw new CliError('invalid_options')
     seen.add(flag)
     if (flag === '--json') continue
+    if (flag === '--yes') {
+      if (command !== 'webhooks delete') throw new CliError('invalid_options')
+      continue
+    }
     const redirectFlag =
       flag.startsWith('--success-redirect-') || flag === '--clear-success-redirect'
     if (redirectFlag && !['create-event', 'update-event'].includes(command))
@@ -289,6 +310,10 @@ function parse(argv: readonly string[]): Options {
     throw new CliError('invalid_success_redirect_options')
   if (command === 'one-time-links create' && options.output)
     throw new CliError('one_time_link_output_forbidden')
+  if (command === 'webhooks create' && !seen.has('--json') && !options.output)
+    throw new CliError('webhook_secret_output_required')
+  if (command === 'webhooks delete' && !seen.has('--yes'))
+    throw new CliError('webhook_delete_confirmation_required')
   if (
     command === 'branding upload' &&
     (!options.file ||
@@ -413,7 +438,9 @@ export async function runCli(options: {
       }
       input.successRedirect = redirect
     }
-    if (Object.hasOwn(input, 'oneTimeToken')) {
+    // Webhook arguments go to the shared strict schema after the server scope check.
+    const checkBookingTokens = !args.command.startsWith('webhooks ')
+    if (checkBookingTokens && Object.hasOwn(input, 'oneTimeToken')) {
       if (
         args.command !== 'book' ||
         typeof input.oneTimeToken !== 'string' ||
@@ -424,12 +451,12 @@ export async function runCli(options: {
       if (['handle', 'teamSlug', 'slug'].some((field) => Object.hasOwn(input, field)))
         throw new CliError('invalid_request')
     }
-    if (Object.hasOwn(input, 'manageToken')) {
+    if (checkBookingTokens && Object.hasOwn(input, 'manageToken')) {
       if (typeof input.manageToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(input.manageToken))
         throw new CliError('invalid_manage_token')
       secrets.push(input.manageToken)
     }
-    if (Object.hasOwn(input, 'waitlistToken')) {
+    if (checkBookingTokens && Object.hasOwn(input, 'waitlistToken')) {
       if (typeof input.waitlistToken !== 'string' || input.waitlistToken.length > 256)
         throw new CliError('invalid_waitlist_token')
       secrets.push(input.waitlistToken)
@@ -445,7 +472,7 @@ export async function runCli(options: {
       !/^[\x21-\x7e]{1,255}$/.test(input.idempotencyKey as string)
     )
       throw new CliError('idempotency_key_required')
-    // Reserve the private output before making a booking: a path error must not lose its token.
+    // Reserve private output before calling the server, so path errors cannot lose a one-time value.
     if (args.command === 'export') exportOutputPath = args.output
     if (args.output) output = await open(args.output, 'wx', 0o600)
     called = args.command !== 'branding upload'
@@ -490,10 +517,10 @@ export async function runCli(options: {
     if (output) {
       await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken, slackUrl]))
       await output.sync()
-      options.stdout('{"outputWritten":true}\n')
+      await options.stdout('{"outputWritten":true}\n')
     } else {
       const token = typeof result.manageToken === 'string' ? result.manageToken : ''
-      options.stdout(printable(result, [...secrets, token]))
+      await options.stdout(printable(result, [...secrets, token]))
     }
     return 0
   } catch (error) {
