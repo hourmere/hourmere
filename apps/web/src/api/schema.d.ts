@@ -8243,7 +8243,8 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
-            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+            /** @description Subscription event kinds. Open enum. Ignore unknown event kinds. */
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
             /** Format: uuid */
             id: string;
             isActive: boolean;
@@ -8263,8 +8264,11 @@ export interface components {
             deliveredAt: string | null;
             /** Format: uuid */
             eventId: string;
-            /** @enum {string} */
-            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed";
+            /**
+             * @description Delivery event kind. Open enum. Ignore unknown event kinds.
+             * @enum {string}
+             */
+            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed";
             httpStatus: number | null;
             /** Format: uuid */
             id: string;
@@ -17446,7 +17450,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
                     isActive?: boolean;
                     url: string;
                 };
@@ -17493,7 +17497,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhook_not_found */
+            /** @description webhook_not_found or workflows_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -17614,7 +17618,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
                     isActive?: boolean;
                 };
             };
@@ -17656,7 +17660,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhook_not_found */
+            /** @description webhook_not_found or workflows_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;

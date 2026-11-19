@@ -13,7 +13,14 @@ const key = 'hm_webhooks_cli_fixture'
 const secret = `whsec_${'a'.repeat(43)}`
 const input = {
   url: 'https://hooks.example.test/bookings',
-  events: ['booking.created', 'booking.attendee_no_show_changed'],
+  events: [
+    'booking.attendee_no_show_changed',
+    'booking.cancelled',
+    'booking.created',
+    'booking.reschedule_request_expired',
+    'booking.reschedule_requested',
+    'booking.rescheduled',
+  ],
   isActive: false,
 }
 const webhook = {
@@ -111,18 +118,35 @@ describe('webhook CLI', () => {
       'webhooks rotate-secret --input FILE|- (--json | --output FILE)',
     )
     expect(result.stdout).toContain('webhooks deliveries --input FILE|- [--json]')
-    expect(result.stdout).toContain('booking.attendee_no_show_changed')
+    const eventList = result.stdout.slice(
+      result.stdout.indexOf('\nEvents: '),
+      result.stdout.indexOf('\nAdding workflow.executed'),
+    )
+    for (const event of [...input.events, 'workflow.executed']) expect(eventList).toContain(event)
+    expect(result.stdout).toContain(
+      'Adding workflow.executed on create or update is disabled (workflows_disabled, REST 404).',
+    )
+    expect(result.stdout).toContain(
+      'On create this takes precedence over webhooks_disabled (REST 409).',
+    )
+    expect(result.stdout).toContain(
+      'Endpoint events and delivery eventType are open enums. Ignore unknown event kinds.',
+    )
     expect(result.fetcher).not.toHaveBeenCalled()
   })
 
-  it('lists webhook metadata as JSON without signing secrets', async () => {
+  it('lists known and future webhook kinds in JSON without signing secrets', async () => {
+    const endpoint = {
+      ...webhook,
+      events: [...webhook.events, 'workflow.executed', 'workflow.future'],
+    }
     const result = await run(['webhooks', 'list', '--json'], {
-      response: reply({ structuredContent: { data: [webhook] } }),
+      response: reply({ structuredContent: { data: [endpoint] } }),
     })
     expect(result.code).toBe(0)
     expect(result.stderr).toBe('')
     expect(result.stdout.includes(secret)).toBe(false)
-    expect(JSON.parse(result.stdout)).toEqual({ data: [webhook] })
+    expect(JSON.parse(result.stdout)).toEqual({ data: [endpoint] })
     expect(result.fetcher).toHaveBeenCalledTimes(1)
     expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
       name: 'list_webhooks',
@@ -159,7 +183,7 @@ describe('webhook CLI', () => {
     })
   })
 
-  it('forwards the delivery cursor and prints only the returned page of metadata', async () => {
+  it('forwards the delivery cursor and preserves event types and booking UUIDs', async () => {
     const args = {
       id: webhook.id,
       after: '019a0000-0000-7000-8000-000000000003',
@@ -177,7 +201,14 @@ describe('webhook CLI', () => {
       lastAttemptAt: webhook.createdAt,
       deliveredAt: webhook.createdAt,
     }
-    const page = { data: [delivery], nextAfter: null }
+    const page = {
+      data: [
+        delivery,
+        { ...delivery, id: '019a0000-0000-7000-8000-000000000007', eventType: 'workflow.executed' },
+        { ...delivery, id: '019a0000-0000-7000-8000-000000000008', eventType: 'workflow.future' },
+      ],
+      nextAfter: null,
+    }
     const result = await run(['webhooks', 'deliveries', '--input', '-', '--json'], {
       input: args,
       response: reply({ structuredContent: page }),
@@ -194,7 +225,7 @@ describe('webhook CLI', () => {
   })
 
   it('updates a webhook through the MCP tool and prints endpoint metadata', async () => {
-    const patch = { id: webhook.id, isActive: true }
+    const patch = { id: webhook.id, events: input.events, isActive: true }
     const updated = { ...webhook, isActive: true }
     const result = await run(['webhooks', 'update', '--input', '-', '--json'], {
       input: patch,

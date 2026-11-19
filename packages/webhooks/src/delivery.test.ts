@@ -41,6 +41,7 @@ const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 const key = Buffer.alloc(32, 9).toString('base64')
 const settings = { enabled: true, encryptionKey: key }
 const signal = () => new AbortController().signal
+const bookingEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')
 
 describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
   let testDb: TestDatabase
@@ -66,7 +67,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     const ctx = testContext(db, user.principal, () => NOW)
     const { webhook, secret } = await createWebhook(ctx, settings, {
       url: 'https://hooks.example.com/bookings?credential=synthetic',
-      events: [...WEBHOOK_EVENTS],
+      events: bookingEvents,
     })
     const f = createFixtures(db)
     const bookingId = await f.booking(
@@ -675,7 +676,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
       return 204
     })
     await deliverWebhook(d, delivery.id, signal())
-    await updateWebhook(ctx, webhook.id, { events: [...WEBHOOK_EVENTS] })
+    await updateWebhook(ctx, webhook.id, { events: bookingEvents })
     await deliverWebhook(d, delivery.id, signal())
     expect(sends).toBe(0)
   })

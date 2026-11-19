@@ -12,6 +12,7 @@ import {
 } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createWorkflow, createWorkflowDefinition, type WorkflowCreateContext } from './creates.ts'
+import { insertWorkflowWebhook } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const input = (user: TestUser, overrides: Record<string, unknown> = {}) => ({
@@ -170,14 +171,10 @@ describe.skipIf(!serverUrl)('workflow creation', () => {
     ).rejects.toMatchObject({ code: 'idempotency_key_reused' })
   })
 
-  it('rejects IDs, unknown fields, webhook actions and non-full scopes', async () => {
+  it('rejects IDs, unknown fields and non-full scopes', async () => {
     const user = await createTestUser(db),
       ctx = context(user)
-    for (const extra of [
-      { id: randomUUID() },
-      { extra: true },
-      { actions: [{ type: 'webhook', webhookId: randomUUID() }] },
-    ])
+    for (const extra of [{ id: randomUUID() }, { extra: true }])
       await expect(createWorkflowDefinition(ctx, input(user, extra))).rejects.toMatchObject({
         code: 'invalid_workflow',
       })
@@ -191,6 +188,41 @@ describe.skipIf(!serverUrl)('workflow creation', () => {
           input(user),
         ),
       ).rejects.toMatchObject({ error: 'insufficient_scope' })
+  })
+
+  it('creates webhook actions only for active workflow subscriptions of the selected owner', async () => {
+    const user = await createTestUser(db)
+    const ctx = context(user)
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const organizationId = user.principal.organization.id
+    const foreign = await insertWorkflowWebhook(db, team.id)
+    const inactive = await insertWorkflowWebhook(db, organizationId, { isActive: false })
+    const unsubscribed = await insertWorkflowWebhook(db, organizationId, {
+      events: ['booking.created'],
+    })
+    const local = await insertWorkflowWebhook(db, organizationId)
+    const request = (webhookId: string) =>
+      input(user, { actions: [{ type: 'webhook', webhookId }] })
+
+    for (const webhookId of [randomUUID(), foreign])
+      await expect(createWorkflowDefinition(ctx, request(webhookId))).rejects.toMatchObject({
+        code: 'invalid_workflow',
+        message: 'actions[0].webhookId: names a webhook that was not found',
+      })
+    for (const webhookId of [inactive, unsubscribed])
+      await expect(createWorkflowDefinition(ctx, request(webhookId))).rejects.toMatchObject({
+        code: 'invalid_workflow',
+        message: 'actions[0].webhookId: requires an active workflow.executed subscription',
+      })
+    const personalRequest = request(local)
+    await expect(createWorkflowDefinition(ctx, personalRequest)).resolves.toMatchObject({
+      revision: 1,
+      actions: personalRequest.actions,
+    })
+    const teamRequest = { ...request(foreign), owner: { kind: 'team', id: team.id } }
+    await expect(
+      createWorkflowDefinition({ db, principal: team.as(user) }, teamRequest),
+    ).resolves.toMatchObject({ actions: teamRequest.actions })
   })
 
   it('accepts only current team owners/admins and conceals foreign/context mismatches', async () => {

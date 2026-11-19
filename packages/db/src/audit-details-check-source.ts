@@ -42,10 +42,11 @@ export function detailsCheckBranches(file: string): {
   }
 }
 
-/** The newest migration that (re)creates the details check: the one every install ends with. */
-export function latestDetailsCheckMigration(): string {
+/** The latest details check migration, optionally from before a given migration. */
+export function latestDetailsCheckMigration(before?: string): string {
   const file = readdirSync(migrationsDir)
     .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name))
+    .filter((name) => before === undefined || name < before)
     .sort()
     .filter((name) =>
       readFileSync(join(migrationsDir, name), 'utf8').includes(

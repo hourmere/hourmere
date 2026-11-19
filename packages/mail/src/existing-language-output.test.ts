@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { InterfaceLanguage } from '@hourmere/core/language'
 import { describe, expect, it } from 'vitest'
 import { type BookingEmailKind, type BookingEmailRecipient, bookingEmail } from './booking.ts'
 import { calendarBookingDescription, calendarResponseDescription, calendarSummary } from './ics.ts'
@@ -48,46 +49,56 @@ const kinds: BookingEmailKind[] = [
 
 const existingLanguages = ['en', 'zh-CN', 'de', 'fr', 'es'] as const
 
+function renderFingerprint(locale: InterfaceLanguage) {
+  const messages = kinds.flatMap((kind) =>
+    recipients.map((recipient) =>
+      bookingEmail(
+        kind,
+        meeting,
+        { ...recipient, locale },
+        {
+          bookingUrl: 'https://example.test/app/bookings/fixture',
+        },
+      ),
+    ),
+  )
+  const output = [
+    ...messages,
+    teamInvitationEmail({
+      to: meeting.inviteeEmail,
+      publicUrl: 'https://example.test',
+      invitationId: '019a278e-3ff2-7a91-8fe0-1846a52d0b22',
+      teamName: 'Orbital {inviter} & <research>',
+      inviterName: meeting.hostName,
+      expiresAt: '2026-10-29T17:30:00Z',
+      language: locale,
+    }),
+    magicLinkEmail({
+      to: meeting.inviteeEmail,
+      url: 'https://example.test/sign-in#token=fixture',
+      expiresInMinutes: 7,
+      language: locale,
+    }),
+    calendarSummary(meeting.eventName, meeting.hostName, locale),
+    calendarBookingDescription(meeting.hostName, locale),
+    ...(['invitee', 'host', 'guest'] as const).map((role) =>
+      calendarResponseDescription(role, locale),
+    ),
+  ]
+  return createHash('sha256').update(JSON.stringify(output)).digest('hex')
+}
+
 describe('existing language output before Brazilian Portuguese registration', () => {
   // The digest covers complete subject/text/HTML messages, including inline styles.
   // Invitation expiry dates intentionally changed to readable minute precision. Other output
   // remains as captured before Brazilian Portuguese, with Spanish captured from immutable main.
   it.each(existingLanguages)('preserves every rendered %s message byte', (locale) => {
-    const messages = kinds.flatMap((kind) =>
-      recipients.map((recipient) =>
-        bookingEmail(
-          kind,
-          meeting,
-          { ...recipient, locale },
-          {
-            bookingUrl: 'https://example.test/app/bookings/fixture',
-          },
-        ),
-      ),
-    )
-    const output = [
-      ...messages,
-      teamInvitationEmail({
-        to: meeting.inviteeEmail,
-        publicUrl: 'https://example.test',
-        invitationId: '019a278e-3ff2-7a91-8fe0-1846a52d0b22',
-        teamName: 'Orbital {inviter} & <research>',
-        inviterName: meeting.hostName,
-        expiresAt: '2026-10-29T17:30:00Z',
-        language: locale,
-      }),
-      magicLinkEmail({
-        to: meeting.inviteeEmail,
-        url: 'https://example.test/sign-in#token=fixture',
-        expiresInMinutes: 7,
-        language: locale,
-      }),
-      calendarSummary(meeting.eventName, meeting.hostName, locale),
-      calendarBookingDescription(meeting.hostName, locale),
-      ...(['invitee', 'host', 'guest'] as const).map((role) =>
-        calendarResponseDescription(role, locale),
-      ),
-    ]
-    expect(createHash('sha256').update(JSON.stringify(output)).digest('hex')).toMatchSnapshot()
+    expect(renderFingerprint(locale)).toMatchSnapshot()
   })
+})
+
+it('preserves every rendered pt-BR message byte from before series mail', () => {
+  expect(renderFingerprint('pt-BR')).toBe(
+    '44daa806296d8418a230c4c795fb87fd5ff975f1d16c656fe1e5aa0a8c95730b',
+  )
 })
