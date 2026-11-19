@@ -722,15 +722,10 @@ function fencedServices(source: string) {
   ]
   return services.map((match, index) => {
     const body = source.slice(match.index, services[index + 1]?.index ?? source.length)
-    const opening = '.transaction().execute(async (trx) => {\n'
-    const at = body.indexOf(opening)
-    const first =
-      at < 0
-        ? ''
-        : (body
-            .slice(at + opening.length)
-            .split('\n')[0]
-            ?.trim() ?? '')
+    const opening = body.match(
+      /(?:\.transaction\(\)\.execute\(|teamWriteTransaction\(ctx\.db\.transaction\(\), )async \(trx\) => \{\n([^\n]*)/,
+    )
+    const first = opening?.[1]?.trim() ?? ''
     return { service: match[1], fenced: /^await ensureMeetingPollKey\(trx, \S/.test(first) }
   })
 }

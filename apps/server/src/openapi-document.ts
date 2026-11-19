@@ -2,6 +2,7 @@ import { createDb, createPool } from '@hourmere/db'
 import { createApp } from './app.ts'
 import { productRoutes } from './server.ts'
 import { isTeamReadMiddleware } from './sso-read-routes.ts'
+import { isTeamWriteMiddleware } from './sso-write-middleware.ts'
 
 /**
  * The OpenAPI document as the server publishes it, made without a database: the app with
@@ -36,6 +37,9 @@ export async function openApiRouteInventory() {
       routes: app.routes.map(({ method, path }) => ({ method, path })),
       teamReadRoutes: app.routes
         .filter(({ handler }) => isTeamReadMiddleware(handler))
+        .map(({ method, path }) => `${method} ${path}`),
+      teamWriteRoutes: app.routes
+        .filter(({ handler }) => isTeamWriteMiddleware(handler))
         .map(({ method, path }) => `${method} ${path}`),
     }
   } finally {

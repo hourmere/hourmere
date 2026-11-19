@@ -1,4 +1,4 @@
-import type { OpenAPIHono } from '@hono/zod-openapi'
+import { type OpenAPIHono, z } from '@hono/zod-openapi'
 import {
   API_KEY_NATIVE_REST_BOUNDARIES,
   API_KEY_REST_OPERATIONS,
@@ -17,6 +17,8 @@ import { ErrorBody, json } from './openapi.ts'
 import { isRouteRateLimit } from './rate-limit.ts'
 import { teamReadMiddleware, teamReadRoute } from './sso-read-routes.ts'
 import type { SsoTeamReadDeps } from './sso-team-reads.ts'
+import { teamWriteMiddleware } from './sso-write-middleware.ts'
+import { teamWriteRoute } from './sso-write-routes.ts'
 
 // Bound from the declared route at registration, never from a caller-controlled URL.
 const operations = new WeakMap<Context, string>()
@@ -183,6 +185,16 @@ export function installRestApiKeyScopes(
     const protectedByScope =
       policy?.authentication === 'key' || policy?.authentication === 'optional_key'
     const protectedRead = teamReadRoute(operationId)
+    const protectedWrite = teamWriteRoute(operationId)
+    const forbiddenJson =
+      forbiddenResponse && 'content' in forbiddenResponse
+        ? forbiddenResponse.content?.['application/json']
+        : undefined
+    const forbiddenSchema = forbiddenJson && 'schema' in forbiddenJson && forbiddenJson.schema
+    const forbiddenContent =
+      protectedWrite && forbiddenSchema instanceof z.ZodType && forbiddenSchema !== ErrorBody
+        ? json(z.union([forbiddenSchema, ErrorBody]))
+        : json(ErrorBody)
     return register(
       {
         ...route,
@@ -192,18 +204,21 @@ export function installRestApiKeyScopes(
           ...(ssoTeamReads && protectedRead
             ? [teamReadMiddleware(ssoTeamReads, protectedRead)]
             : []),
+          ...(ssoTeamReads && protectedWrite ? [teamWriteMiddleware(ssoTeamReads)] : []),
         ],
         responses: {
           ...route.responses,
-          ...((protectedByScope || protectedRead) && {
+          ...((protectedByScope || protectedRead || protectedWrite) && {
             403: {
               description:
                 forbiddenDescription +
                 (protectedByScope
                   ? '. insufficient_scope: This API key does not allow this operation.'
                   : '') +
-                (protectedRead ? ' sso_required: This team requires a current SSO proof.' : ''),
-              content: json(ErrorBody),
+                (protectedRead || protectedWrite
+                  ? ' sso_required: This team requires a current SSO proof.'
+                  : ''),
+              content: forbiddenContent,
             },
           }),
           ...(policy?.authentication === 'optional_key' && {
@@ -227,8 +242,13 @@ export function installRestApiKeyScopes(
     if (first && boundHandlers.has(first.handler)) return next()
     const id = first ? `${first.method} ${first.path}` : ''
     if (restPolicies.get(id)?.authentication === 'public_metadata') return next()
-    if (ssoTeamReads && first && teamReadRoute(`${c.req.method} ${first.path}`))
-      throw new Error('Team read must be registered with app.openapi')
+    const matchedOperation = first && `${c.req.method} ${first.path}`
+    if (
+      ssoTeamReads &&
+      matchedOperation &&
+      (teamReadRoute(matchedOperation) || teamWriteRoute(matchedOperation))
+    )
+      throw new Error('Team operation must be registered with app.openapi')
     if (c.req.raw.headers.has('authorization')) {
       const refused = await checkBearer(c, resolveCaller, '')
       if (refused) return refused

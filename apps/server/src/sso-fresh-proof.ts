@@ -1,6 +1,7 @@
 /** Shared, session-only SSO write gate. No route enables this while protocols are off. */
 import { randomBytes } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { checkTeamWriteBeforeAuthorityChange, teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
@@ -96,6 +97,8 @@ export async function runWithFreshProof<T>(
   request: FreshProofRequest,
   callbacks: {
     authorize: (trx: Db) => Promise<void>
+    /** The operation can revoke the acting session's team proof in this transaction. */
+    changesAuthority?: boolean
     /** Optional I/O after preflight, outside the transaction. Authority is checked again. */
     prepare?: () => Promise<void>
     mutate: (
@@ -138,8 +141,8 @@ export async function runWithFreshProof<T>(
   const cookie = setCookie === undefined ? {} : { setCookie }
   const clock = deps.now ?? databaseClock
   const prepare = Symbol('prepare')
-  const run = (prepared: boolean) =>
-    deps.db.transaction().execute(async (trx): Promise<FreshProofResult<T> | typeof prepare> => {
+  const run = (prepared: boolean): Promise<FreshProofResult<T> | typeof prepare> =>
+    teamWriteTransaction(deps.db.transaction(), async (trx) => {
       // Follow the shared team-write lock order: person, organization, then session/attempt.
       await sql`SELECT id FROM auth."user"
       WHERE id IN (${request.userId}::uuid, ${request.affectedUserId ?? request.userId}::uuid)
@@ -236,6 +239,7 @@ export async function runWithFreshProof<T>(
               ...cookie,
             }
           if (!prepared) return prepare
+          if (callbacks.changesAuthority) await checkTeamWriteBeforeAuthorityChange(trx)
           await sql`UPDATE sso_attempts SET consumed_at = ${now}::timestamptz
           WHERE id = ${attempt.id}::uuid`.execute(trx)
           return {

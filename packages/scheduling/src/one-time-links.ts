@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { type Selectable, sql, type Transaction } from 'kysely'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -95,7 +96,7 @@ export async function createOneTimeBookingLink(
   const expiresAt = validExpiry(input.expiresAt)
   const prefill = validPrefill(input.prefill)
   const retry = creationRetry(ctx, input.idempotencyKey)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, input.eventTypeId)
     await lockWriteOwner(trx, ctx)
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.one-time-links:${ctx.principal.organization.id}`}, 0))`.execute(
@@ -228,7 +229,7 @@ export async function revokeManagedOneTimeBookingLink(
   input: { eventTypeId: string; id: string },
 ): Promise<OneTimeBookingLink | null> {
   requireWriteScope(ctx)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, input.eventTypeId)
     await authorizeAdminRead(trx, ctx, input.eventTypeId)
     const row = await metadataQuery(trx, ctx, input.eventTypeId)

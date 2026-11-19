@@ -384,6 +384,14 @@ alone does not protect trusted calls, transactions or queued operations. A store
 `requireSso` policy is enforced whatever the rollout constants or settings say (see
 Rollout gating); no deployment toggle bypasses it.
 
+Team writes through `/api/v1` and MCP check the bound team's policy at admission and
+recheck live proof inside the committing transaction when a policy exists. Revocation
+or expiry before the commit check rolls back the write and its transactional side
+effects. If the team has no stored policy, the committing transaction is unchanged.
+
+中文：`/api/v1` 和 MCP 的团队写入会先检查目标团队的策略。团队已保存策略时，提交事务会重新检查
+SSO 凭证。凭证在提交检查前过期或被撤销，写入及事务内的副作用一并回滚。没有团队策略时，写入事务照常执行。
+
 Enabling enforcement requires a verified domain, an enabled tested provider of a protocol
 that is currently on, a successful owner SSO test against the exact current revision, and
 at least one usable recovery owner: a current owner with accepted recovery status. A

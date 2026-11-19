@@ -48,6 +48,9 @@ export type McpCaller = Extract<Principal, { kind: 'api_key' | 'oauth' }>
 export interface ToolCall {
   caller: McpCaller
   checkTeamRead?: ((toolName: string) => Promise<TeamReadAccess | undefined>) | undefined
+  runTeamWrite?:
+    | (<T>(tool: string, mode: string | undefined, run: () => Promise<T>) => Promise<T>)
+    | undefined
   /** Trusted socket/proxy address resolved by the HTTP transport, never tool input. */
   trustedIp?: string | undefined
   /**
@@ -255,8 +258,8 @@ export async function runTool(
         : detail
   try {
     requireApiKeyOperation(call.caller, `mcp:${tool.name}`)
-    if (tool.scopeMode)
-      requireApiKeyOperation(call.caller, `mcp:${tool.name}:${tool.scopeMode(args)}`)
+    const mode = tool.scopeMode?.(args)
+    if (mode !== undefined) requireApiKeyOperation(call.caller, `mcp:${tool.name}:${mode}`)
     // A feature that is not available answers its DomainError code here, after the scope
     // check and before the argument checks.
     checkAvailable(tool)
@@ -282,7 +285,9 @@ export async function runTool(
           : describeIssues(parsed.error.issues),
       })
     }
-    const result = tool.output.safeParse(await tool.run(parsed.data, call))
+    const run = () => tool.run(parsed.data, call)
+    const value = call.runTeamWrite ? await call.runTeamWrite(tool.name, mode, run) : await run()
+    const result = tool.output.safeParse(value)
     if (!result.success) {
       logError(
         `${tool.name} returned a result outside its output schema: `,
@@ -427,10 +432,12 @@ export function registerTools(
   logError: ToolErrorLog,
   trustedIp?: string | undefined,
   checkTeamRead?: ToolCall['checkTeamRead'],
+  runTeamWrite?: ToolCall['runTeamWrite'],
 ): void {
   const call: ToolCall = {
     caller,
     checkTeamRead,
+    runTeamWrite,
     trustedIp,
     rateLimit(limiter) {
       const retryAfter = limiter.hit(`user:${caller.user.id}`)

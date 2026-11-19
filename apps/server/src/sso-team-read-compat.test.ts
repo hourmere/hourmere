@@ -45,7 +45,12 @@ async function capture(response: Response) {
   }
 }
 
-function mcpRead(app: App, headers: CredentialHeaders) {
+function mcpCall(
+  app: App,
+  headers: CredentialHeaders,
+  name = 'list_bookings',
+  args: Record<string, unknown> = {},
+) {
   return app.request('/mcp', {
     method: 'POST',
     headers: {
@@ -57,7 +62,7 @@ function mcpRead(app: App, headers: CredentialHeaders) {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      params: { name: 'list_bookings', arguments: {} },
+      params: { name, arguments: args },
     }),
   })
 }
@@ -322,12 +327,12 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         },
         {
           name: 'MCP API key',
-          request: (app: App) => mcpRead(app, teamKey),
+          request: (app: App) => mcpCall(app, teamKey),
           example: bookingId,
         },
         {
           name: 'MCP OAuth',
-          request: (app: App) => mcpRead(app, oauth),
+          request: (app: App) => mcpCall(app, oauth),
           example: bookingId,
         },
       ]
@@ -419,7 +424,7 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
 
     for (const headers of [teamKey, oauth]) {
       statements.length = 0
-      const response = await mcpRead(app, headers)
+      const response = await mcpCall(app, headers)
       expect(response.status).toBe(200)
       expect(response.headers.get('location')).toBeNull()
       expect(mcpResult(await response.text())).toEqual({
@@ -436,11 +441,64 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
     expect(policyStatements()).toHaveLength(0)
 
     statements.length = 0
-    const personalMcp = await mcpRead(app, personalKey)
+    const personalMcp = await mcpCall(app, personalKey)
     expect(personalMcp.status).toBe(200)
     expect(mcpResult(await personalMcp.text())).toMatchObject({
       structuredContent: { data: [] },
     })
     expect(policyStatements()).toHaveLength(0)
+  })
+
+  it('refuses host and configuration MCP writes from unbound credentials', async () => {
+    const { teamId, teamKey, oauth, bookingId, eventTypeId, webhookId } = await seedTeam()
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: teamId, require_sso: true })
+      .execute()
+
+    const start = '2030-04-11T14:00:00Z'
+    const writes = [
+      ['cancel_booking', { bookingId }],
+      ['reschedule_booking', { bookingId, start }],
+      ['retry_conference', { bookingId }],
+      ['retry_calendar_copy', { bookingId }],
+      ['close_meeting_poll', { id: eventTypeId, expectedHostRevision: 1 }],
+      ['update_event_type', { id: eventTypeId, title: 'Changed' }],
+      ['set_event_type_waitlist', { id: eventTypeId, enabled: true }],
+      ['revoke_one_time_link', { eventTypeId, id: eventTypeId }],
+      ['set_branding', { brandPrimaryColor: '#aa0000' }],
+      ['set_audit_log_settings', { retention: 'days', retentionDays: 60 }],
+      ['delete_webhook', { id: webhookId }],
+      ['test_slack_destination', { id: webhookId }],
+    ] as const
+    for (const headers of [teamKey, oauth]) {
+      for (const [tool, args] of writes) {
+        statements.length = 0
+        const response = await mcpCall(app, headers, tool, args)
+        expect(response.status, tool).toBe(200)
+        expect(response.headers.get('location'), tool).toBeNull()
+        expect(mcpResult(await response.text()), tool).toEqual({
+          isError: true,
+          content: [{ type: 'text', text: '{"error":"sso_required"}' }],
+        })
+        expect(policyStatements(), tool).toHaveLength(1)
+      }
+
+      // These same tools still take the established capability path as the invitee.
+      const manageToken = 'missing-manage-token'
+      for (const [tool, args] of [
+        ['cancel_booking', { manageToken }],
+        ['reschedule_booking', { manageToken, start }],
+      ] as const) {
+        statements.length = 0
+        const response = await mcpCall(app, headers, tool, args)
+        expect(response.status, tool).toBe(200)
+        expect(mcpResult(await response.text()), tool).toMatchObject({
+          isError: true,
+          content: [{ type: 'text', text: expect.stringContaining('"booking_not_found"') }],
+        })
+        expect(policyStatements(), tool).toHaveLength(0)
+      }
+    }
   })
 })

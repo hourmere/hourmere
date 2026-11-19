@@ -1,4 +1,5 @@
 import { ApiKeyScopeError } from '@hourmere/auth'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -26,7 +27,7 @@ export async function deleteWorkflowDefinition(
   if (!parsed.success)
     throw new DomainError('invalid', 'invalid_workflow', 'Invalid workflow definition')
   if (!uuidSchema.safeParse(id).success) throw notFound()
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     const identity = await trx
       .selectFrom('workflow_definitions')

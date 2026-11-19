@@ -661,6 +661,14 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     return { id: session.id, cookie: session.cookie.split(';')[0] as string }
   }
 
+  function sessionCookie(response: Response) {
+    const session = response.headers
+      .getSetCookie()
+      .find((cookie) => cookie.includes('session_token='))
+    if (!session) expect.unreachable('SSO issued a session')
+    return (session as string).split(';')[0] as string
+  }
+
   function readEvents(cookie: string) {
     return app.request(new URL('/api/v1/event-types', publicUrl), { headers: { cookie } })
   }
@@ -892,9 +900,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     return { ...attempt, id, completionCookie }
   }
 
-  async function prepareLink(f: Awaited<ReturnType<typeof enrollment>>) {
-    const session = await browserSession(fixture.member)
-    const challenge = await requestLinkProof(f.providerId, session.cookie)
+  async function prepareLink(f: Awaited<ReturnType<typeof enrollment>>, sessionCookie?: string) {
+    const cookie = sessionCookie ?? (await browserSession(fixture.member)).cookie
+    const challenge = await requestLinkProof(f.providerId, cookie)
     await proveMailbox(challenge)
     const attempt = await startLink(f.providerId, challenge)
     return pendingLink(attempt, idp.issue(attempt, f.claims))
@@ -966,6 +974,24 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     const f = await provider(options)
     const identity = await recoveryTarget(f, fixture.owner)
     const owner = await browserSession(fixture.owner)
+    // Existing session proof authorizes access to the team's write entry point. The
+    // fresh-proof ceremony must still independently prove the exact operation.
+    await db
+      .insertInto('sso_browser_proofs')
+      .values({
+        organization_id: fixture.team,
+        user_id: fixture.owner,
+        member_id: fixture.ownerMember,
+        session_id: owner.id,
+        provider_id: f.providerId,
+        link_id: identity.link.id,
+        link_generation: identity.link.generation,
+        trust_generation: 1,
+        domain_id: f.claim.id,
+        domain_generation: f.claim.generation,
+        expires_at: at(300),
+      })
+      .execute()
     return { ...f, ...identity, owner }
   }
 
@@ -2334,13 +2360,6 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     const signIn = await start(f.providerId)
     const signedIn = await callback(signIn, idp.issue(signIn, f.claims))
     expect(signedIn.status).toBe(302)
-    const sessionCookie = (response: Response) => {
-      const session = response.headers
-        .getSetCookie()
-        .find((cookie) => cookie.includes('session_token='))
-      if (!session) expect.unreachable('SSO issued a session')
-      return (session as string).split(';')[0] as string
-    }
     const survivor = sessionCookie(signedIn)
     const assertReadable = async () => {
       const response = await readEvents(survivor)
@@ -3533,14 +3552,39 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(idp.send).not.toHaveBeenCalled()
   })
 
-  it('retires a conflicting identity before another member can explicitly re-link it', async () => {
+  it('retires a conflicting identity before another member can explicitly re-link it under enforcement', async () => {
     const f = await enrollment()
     const old = await recoveryTarget(f, fixture.admin, f.claims.sub)
-    await expectCompletionRefused(await complete(await prepareLink(f)))
+    const ownerIdentity = await recoveryTarget(f, fixture.owner)
+    const member = await browserSession(fixture.member)
+    await enforceSso()
+    await expectSsoRequired(member.cookie)
+    await expectCompletionRefused(await complete(await prepareLink(f, member.cookie)))
     expect(await storedLink(old.link.id)).toEqual(old.link)
-    const admin = await browserSession(fixture.owner)
+
     const path = removeLinkPath(f.providerId, old.link.id)
-    const challenge = await recoveryProof(path, admin.cookie)
+    const localOwner = await browserSession(fixture.owner)
+    const refused = await recoveryRequest(path, localOwner.cookie, {})
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toEqual({ error: 'sso_required' })
+    expect(await storedLink(old.link.id)).toEqual(old.link)
+
+    const ownerSignIn = await start(f.providerId)
+    const ownerSignedIn = await callback(ownerSignIn, idp.issue(ownerSignIn, ownerIdentity.claims))
+    expect(ownerSignedIn.status).toBe(302)
+    const ownerCookie = sessionCookie(ownerSignedIn)
+    const challenge = await freshProofChallenge(
+      await recoveryRequest(path, ownerCookie, {}),
+      ownerCookie,
+      ['sso'],
+    )
+    const stepUp = await startStepUp(f.providerId, challenge)
+    expectStepUpRedirect(
+      await callback(
+        stepUp,
+        idp.issue(stepUp, { ...ownerIdentity.claims, auth_time: await authTime() }),
+      ),
+    )
     expect(
       (await recoveryRequest(path, challenge.cookie, { proofAttemptId: challenge.id })).status,
     ).toBe(204)
@@ -3552,13 +3596,14 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         .select(['id', 'user_id', 'subject', 'generation'])
         .where('provider_id', '=', f.providerId)
         .where('retired_at', 'is', null)
+        .where('id', '!=', ownerIdentity.link.id)
         .execute()
     expect(await liveLinks()).toEqual([])
     const signIn = await start(f.providerId)
     await refusal(await callback(signIn, idp.issue(signIn, f.claims)))
     expect(await liveLinks()).toEqual([])
     const before = await effects()
-    const result = await complete(await prepareLink(f))
+    const result = await complete(await prepareLink(f, member.cookie))
     expect(result.status).toBe(302)
     expect(result.headers.get('location')).toBe('/app/settings')
     expect(await liveLinks()).toEqual([
@@ -3569,6 +3614,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       accounts: before.accounts,
       memberships: before.memberships,
     })
+    await expectSsoRequired(member.cookie)
+    const memberSignIn = await start(f.providerId)
+    const memberSignedIn = await callback(memberSignIn, idp.issue(memberSignIn, f.claims))
+    expect(memberSignedIn.status).toBe(302)
+    expect((await readEvents(sessionCookie(memberSignedIn))).status).toBe(200)
   })
 
   it('freezes new links when the current positive domain proof has a failed recheck', async () => {

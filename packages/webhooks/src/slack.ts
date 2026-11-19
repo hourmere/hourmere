@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
@@ -159,7 +160,7 @@ export async function createSlackDestination(
   const url = slackUrl(parsed.data.url)
   if (!url) throw invalid()
   const encryptionKey = key(settings)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await authorize(trx, ctx)
     await filter(trx, ctx, parsed.data.eventTypeId)
     if (
@@ -212,7 +213,7 @@ export async function updateSlackDestination(
   const data = parsed.data
   const url = data.url === undefined ? undefined : slackUrl(data.url)
   if (data.url !== undefined && !url) throw invalid()
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await locked(trx, ctx, id)
     await filter(trx, ctx, data.eventTypeId)
     const updated = await trx
@@ -258,7 +259,7 @@ export async function updateSlackDestination(
   })
 }
 export async function deleteSlackDestination(ctx: WebhookServiceContext, id: unknown) {
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await locked(trx, ctx, id)
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()
     await auditSlack(trx, ctx, 'slack_destination.deleted', row)
@@ -279,7 +280,7 @@ export async function testSlackDestination(
   key(settings)
   if (!settings.enabled || !queue)
     throw new DomainError('conflict', 'slack_unavailable', 'Slack delivery is unavailable')
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await locked(trx, ctx, id)
     admit?.()
     if (!row.is_active)

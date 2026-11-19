@@ -53,6 +53,10 @@ export function liveBrowserProofs(
   `
 }
 
+function missingProof(): never {
+  throw new DomainError('forbidden', 'sso_required')
+}
+
 async function readAccess(
   { db, capabilities }: SsoTeamReadDeps,
   principal: Principal,
@@ -88,5 +92,35 @@ export function teamReadAccess(deps: SsoTeamReadDeps, principal: Principal) {
 export type TeamReadCheck = ReturnType<typeof teamReadAccess>
 
 export function requireTeamRead(access: TeamReadAccess): void {
-  if (!access.allowed) throw new DomainError('forbidden', 'sso_required')
+  if (!access.allowed) missingProof()
+}
+
+/** Reuse the read predicate on the committing connection, with locks held through commit. */
+export function teamWriteCheck({ capabilities }: SsoTeamReadDeps, principal: Principal) {
+  return {
+    expired: missingProof,
+    async lockProof(db: Db) {
+      const policy = await db
+        .selectFrom('sso_policies')
+        .select(['require_sso', 'trust_generation'])
+        .where('organization_id', '=', principal.organization.id)
+        .forShare()
+        .executeTakeFirst()
+      if (!policy?.require_sso) return
+      if (principal.kind !== 'session') missingProof()
+      // Management can remove a membership before updating the session. Follow its
+      // member-before-session lock order, and lock proof after the rows it depends on.
+      const { rows } = await sql<{ deadline: string | null }>`
+        WITH locked AS MATERIALIZED (
+          ${liveBrowserProofs(principal, principal.organization.id, policy.trust_generation, capabilities)}
+          FOR SHARE OF m, s, p, l, d, pd, b
+        )
+        SELECT max(expires_at)::text AS deadline FROM locked
+        HAVING max(expires_at) > clock_timestamp()
+      `.execute(db)
+      const deadline = rows[0]?.deadline
+      if (!deadline) missingProof()
+      return deadline
+    },
+  }
 }

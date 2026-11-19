@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { type Db, importedBookingCondition, isImportedBooking } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { conferenceJoinUrl, zoomMeetingId } from '@hourmere/scheduling/conference-url'
@@ -710,7 +711,7 @@ export async function writeBookingConference(
 }
 
 export async function retryBookingConference(ctx: ServiceContext, bookingId: string) {
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     // Match the service's parent protection before booking -> intent, and retain current
     // membership through the retry commit. These share locks are compatible with a

@@ -17,6 +17,8 @@ import { createRateLimiter } from '../rate-limit.ts'
 import { BOOKING_BODY_LIMIT } from '../routes/public.ts'
 import { teamReadRoute } from '../sso-read-routes.ts'
 import { requireTeamRead, type SsoTeamReadDeps, teamReadAccess } from '../sso-team-reads.ts'
+import { withTeamWriteAccess } from '../sso-write-middleware.ts'
+import { teamWriteTool } from '../sso-write-routes.ts'
 import { VERSION } from '../version.ts'
 import {
   clip,
@@ -120,11 +122,16 @@ function toAuthInfo(
       requireTeamRead(access)
       return access
     })
+  const runTeamWrite: ToolCall['runTeamWrite'] =
+    ssoTeamReads &&
+    check &&
+    ((tool, mode, run) =>
+      teamWriteTool(tool, mode) ? withTeamWriteAccess(ssoTeamReads, caller, check, run) : run())
   return {
     token: '',
     clientId: caller.kind === 'api_key' ? caller.apiKeyId : caller.clientId,
     scopes: caller.kind === 'oauth' ? [...caller.scopes] : [],
-    extra: { caller, trustedIp, checkTeamRead },
+    extra: { caller, trustedIp, checkTeamRead, runTeamWrite },
   }
 }
 
@@ -291,6 +298,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
         (what, detail) => logLine('ERROR', `POST ${MCP_PATH} tools/call ${what}`, detail),
         typeof authInfo?.extra?.trustedIp === 'string' ? authInfo.extra.trustedIp : undefined,
         authInfo?.extra?.checkTeamRead as ToolCall['checkTeamRead'],
+        authInfo?.extra?.runTeamWrite as ToolCall['runTeamWrite'],
       )
       return server
     },

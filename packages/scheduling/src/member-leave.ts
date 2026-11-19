@@ -9,6 +9,7 @@ import {
 } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { checkTeamWriteBeforeAuthorityChange, teamWriteTransaction } from '@hourmere/db/team-write'
 import type { Transaction } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -36,7 +37,10 @@ export async function leaveTeamMember(
         execute: <T>(work: (trx: Transaction<Database>) => Promise<T>) =>
           work(ctx.db as Transaction<Database>),
       }
-    : ctx.db.transaction().setIsolationLevel('read committed')
+    : {
+        execute: <T>(work: (trx: Transaction<Database>) => Promise<T>) =>
+          teamWriteTransaction(ctx.db.transaction().setIsolationLevel('read committed'), work),
+      }
   return departure
     .execute(async (trx) => {
       // Web callers join the native switch ordering before taking any row locks.
@@ -72,6 +76,8 @@ export async function leaveTeamMember(
       if (impact.eventTypes.totalCount > 0 || impact.bookings.totalCount > 0) {
         throw new MemberDepartureBlockedError(impact)
       }
+      // The write itself removes the membership and proof that authorized it.
+      await checkTeamWriteBeforeAuthorityChange(trx)
       if (recordAdmissionRemoval) {
         await recordAdmissionRemoval(trx, {
           organizationId: actor.organizationId,
