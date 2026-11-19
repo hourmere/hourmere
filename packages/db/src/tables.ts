@@ -469,6 +469,7 @@ export interface Bookings {
   reschedule_cutoff_minutes: number | null;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
+  series_occurrence_id: string | null;
   sms_reminders_enabled: Generated<boolean>;
   source: string;
   start_at: Timestamp;
@@ -498,6 +499,38 @@ export interface BookingScheduledMessages {
   skip_reason: string | null;
   state: Generated<string>;
   updated_at: Generated<Timestamp>;
+}
+
+export interface BookingSeries {
+  created_at: Generated<Timestamp>;
+  duration_minutes: number;
+  event_type_id: string | null;
+  first_local_start: Timestamp;
+  host_policy_snapshot: Json;
+  id: Generated<string>;
+  manage_token_hash: Buffer | null;
+  notification_snapshot: Json;
+  organization_id: string;
+  original_event_type_id: string;
+  requested_count: number;
+  revision: Generated<Int8>;
+  rule_ordinal: number | null;
+  rule_pattern: string;
+  rule_version: Generated<number>;
+  rule_weekday: number | null;
+  time_zone: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface BookingSeriesOccurrences {
+  end_at: Timestamp;
+  id: Generated<string>;
+  ordinal: number;
+  organization_id: string;
+  original_local_start: Timestamp;
+  root_booking_id: string;
+  series_id: string;
+  start_at: Timestamp;
 }
 
 export interface CalendarBusy {
@@ -623,6 +656,8 @@ export interface EventTypes {
   owner_user_id: string | null;
   position: Generated<number>;
   questions: Generated<Json>;
+  recurrence: Json | null;
+  recurrence_revision: Generated<Int8>;
   reschedule_cutoff_minutes: number | null;
   scheduling_type: Generated<string>;
   slot_step_minutes: number | null;
@@ -1701,6 +1736,8 @@ export interface DB {
   booking_reschedule_requests: BookingRescheduleRequests;
   booking_routing: BookingRouting;
   booking_scheduled_messages: BookingScheduledMessages;
+  booking_series: BookingSeries;
+  booking_series_occurrences: BookingSeriesOccurrences;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
   calendar_connections: CalendarConnections;
