@@ -24,6 +24,7 @@
     "@hourmere/workflows": "*",
     "@modelcontextprotocol/server": "2.4.0",
     "hono": "4.13.13",
+    "jose": "6.2.12",
     "kysely": "0.29.7",
     "stripe": "23.1.0",
     "tldts": "7.4.18",
