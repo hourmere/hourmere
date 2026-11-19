@@ -347,32 +347,29 @@ The installed webhook subscription CHECK and the delivery event CHECK are define
   `booking.attendee_no_show_changed` and `workflow.executed`.
 - Service `eventsOf()` validates `.max(WEBHOOK_EVENTS.length)`.
 - 0143's `webhooks_events_check` is `cardinality(events) BETWEEN 1 AND 7` over those kinds.
-  The 0070 `webhook_deliveries_event_type_check` allows the 6 booking kinds. 0017 created
-  both constraints, and 0064 and 0070 widened both as booking kinds were added.
-- Deliveries are unique by
-  `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id)`, which 0064
-  added. `request_id` is a plain `uuid` without a foreign key, and
-  it has two uses. Request-origin rows carry the reschedule request's ID. Attendance rows
-  carry a fresh per-change receipt ID, so every mark or unmark gets its own delivery; that
-  value never appears as `data.requestId`. Booking-origin rows leave it NULL.
+  Migration 0147's `webhook_deliveries_event_type_check` allows the same 7 kinds. 0017
+  created both constraints, and 0064 and 0070 widened both as booking kinds were added.
+- Migration 0147 installs
+  `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id, workflow_run_id)`.
+  It extends `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id)`,
+  which 0064 added. `request_id` is a plain `uuid` without a foreign key. Request-origin
+  rows carry the reschedule request's ID. Attendance rows carry a fresh per-change receipt
+  ID, so every mark or unmark gets its own delivery. That value is private to the outbox.
+  Booking-origin rows leave it NULL.
 
-That key cannot represent several workflow executions for one booking and endpoint. Step
-14a's new outbox migration follows 0064's `request_id` pattern. It adds a nullable
-`workflow_run_id uuid` with no foreign key, like `request_id`, and replaces the key with
-`UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id, workflow_run_id)`.
-Workflow rows get their own column instead of reusing `request_id` as attendance rows do,
-so each column keeps a meaning the schema can check. A CHECK requires `workflow_run_id`
-exactly on `workflow.executed` rows, and another forbids a row carrying both `request_id`
-and `workflow_run_id`. No existing row is rewritten or
-backfilled: booking-origin rows (both columns NULL), request-origin rows and attendance
-rows (`request_id` set) keep their uniqueness, payloads, signatures and receipts. The same
-migration replaces 0070's `webhook_deliveries.event_type` CHECK, extending it from the
-6 current kinds to 7, before any workflow delivery can be inserted. Postgres infers an
-`ON CONFLICT` arbiter only from the exact column set, so step 14a also moves the existing
-capture's conflict target in `packages/webhooks/src/delivery.ts` from the four columns to
-the five. Booking and request duplicate capture must still coalesce, and each attendance
-change must still get its own delivery. Verify a populated predecessor that includes
-request-origin and attendance rows, fresh installation and a no-op rerun.
+Migration 0147 follows 0064's `request_id` pattern and adds a nullable `workflow_run_id uuid`
+without a foreign key. Separate run identities let several workflow executions for one
+booking target the same endpoint. A CHECK requires `workflow_run_id` exactly on
+`workflow.executed` rows, and another forbids a row carrying both `request_id` and
+`workflow_run_id`. No existing row is rewritten or backfilled. Booking-origin rows (both
+columns NULL), request-origin rows and attendance rows (`request_id` set) keep their
+uniqueness, payloads, signatures and receipts. The same migration replaces 0070's
+`webhook_deliveries.event_type` CHECK, extending it from the 6 current kinds to 7.
+Postgres infers an `ON CONFLICT` arbiter only from the exact column set. Capture in
+`packages/webhooks/src/delivery.ts` uses the five-column key for every kind. Booking and
+request duplicate capture coalesces, and each attendance change gets its own delivery.
+The upgrade test covers a populated predecessor with booking-origin, request-origin and
+attendance rows, fresh installation and a no-op rerun.
 
 The endpoint must explicitly subscribe to this new event kind and remain active; removal,
 rotation, pause, global webhook disablement and private-target policy retain their existing
@@ -452,9 +449,7 @@ The workflow payload has the existing bounded booking ID/time/status projection 
 `workflowId`, `workflowRevision`, `trigger` and stable `workflowRunId`, never `requestId`;
 existing booking, request and attendance payloads stay unchanged.
 `WebhookDelivery.bookingId` remains a required UUID, never null or omitted, including team
-workflow deliveries. Internal
-subscription tests may use the enabled context after 13d but insert no workflow deliveries
-before 14a. Workflow create/update validate that a referenced signed webhook belongs to
+workflow deliveries. Workflow create/update validate that a referenced signed webhook belongs to
 the workflow's organization, is active, and subscribes to `workflow.executed`. Production
 workflow operations remain hard-off until step 19b.
 
@@ -505,6 +500,15 @@ reminders retain their current expiry/retry behavior; the new bound is for workf
 For webhook deliveries it bounds the first network attempt only; a delivery first attempted
 in time retains the existing roughly seven-hour retry schedule, even beyond due + 60 minutes.
 Each retry still checks cancellation, disablement, authority and endpoint policy.
+
+The shared webhook worker checks the booking, workflow and subscribed endpoint on every attempt.
+It records admission to the first guarded transport attempt durably before calling the transport.
+If the worker stops between admission and recording the result, the next attempt uses the same
+delivery ID. Pending deliveries use the existing bounded repair job. Workflow sends stay hard-off.
+
+中文：共享 webhook worker 每次尝试前都会检查预约、工作流和已订阅的端点。首次尝试通过检查后，
+worker 先持久化准入时间，再调用受保护的传输层。如果在记录结果之前中断，重试沿用同一个投递 ID。
+待处理投递沿用现有的有界修复任务。工作流发送仍处于硬关闭状态。
 
 Use durable definition revisions, booking associations, occurrences, per-action executions
 and per-recipient intents with database uniqueness; pg-boss jobs carry only opaque row IDs.
@@ -711,9 +715,8 @@ recipient intents, minimal run history and workflow mail reservations, plus the 
 step 5) adds the creation keys: each created definition's retained client idempotency key,
 scoped to its organization, actor and credential, with a fingerprint of the create input; it
 is never changed and goes only with its definition row; see
-[workflow creation key storage](data-model.md#workflow-creation-key-storage). The remaining proposed
-column on an existing table is `webhook_deliveries.workflow_run_id` (step 14a), nullable and
-without a foreign key.
+[workflow creation key storage](data-model.md#workflow-creation-key-storage). Migration 0147
+adds `webhook_deliveries.workflow_run_id` (step 14a), nullable and without a foreign key.
 Use organization-scoped FKs and unique occurrence/
 revision/action/recipient identities, with bounded indexes for pending due work and
 retention. Deleting a workflow tombstones its identity and disables pending work while

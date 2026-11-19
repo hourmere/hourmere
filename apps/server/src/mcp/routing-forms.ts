@@ -32,25 +32,43 @@ import {
   RoutingFormResponse,
   UpdateRoutingForm,
 } from '../routes/routing-forms.ts'
-import { routingFormTools } from '../routing-forms.ts'
+import {
+  RoutingSubmission,
+  RoutingSubmissionResponse,
+  routingFormTools,
+  submitPublicRoutingForm,
+} from '../routing-forms.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
 
-const PublicRoutingFormInput = z
-  .strictObject({
-    handle: PersonalRoutingFormAddress.shape.handle.optional(),
-    teamSlug: TeamRoutingFormAddress.shape.teamSlug.optional(),
-    slug: PersonalRoutingFormAddress.shape.slug,
-  })
-  .refine((input) => (input.handle === undefined) !== (input.teamSlug === undefined), {
-    message: 'Give exactly one of handle or teamSlug',
-  })
+const publicAddress = {
+  handle: PersonalRoutingFormAddress.shape.handle.optional(),
+  teamSlug: TeamRoutingFormAddress.shape.teamSlug.optional(),
+  slug: PersonalRoutingFormAddress.shape.slug,
+}
+const hasOneOwner = (input: z.infer<typeof PublicAddress>) =>
+  (input.handle === undefined) !== (input.teamSlug === undefined)
+const ownerRequirement = { message: 'Give exactly one of handle or teamSlug' }
+const PublicAddress = z.strictObject(publicAddress)
+const PublicRoutingFormInput = PublicAddress.refine(hasOneOwner, ownerRequirement)
+const RouteLeadInput = PublicAddress.extend(RoutingSubmission.shape).refine(
+  hasOneOwner,
+  ownerRequirement,
+)
+
+function routingFormAddress({ handle, teamSlug, slug }: z.infer<typeof PublicAddress>) {
+  return teamSlug === undefined ? { handle: handle as string, slug } : { teamSlug, slug }
+}
 
 export function routingFormConfigurationTools({
   db,
   routingFormsEnabled = false,
+  routingSecret,
+  publicUrl = 'http://localhost:3000',
 }: {
   db: Db
   routingFormsEnabled?: boolean | undefined
+  routingSecret?: string | undefined
+  publicUrl?: string | undefined
 }): Tool[] {
   const context = (principal: McpCaller): ServiceContext => ({
     db,
@@ -141,10 +159,24 @@ export function routingFormConfigurationTools({
       output: PublicRoutingForm,
       annotations: read,
       privateDiagnostics: true,
-      run: ({ handle, teamSlug, slug }) =>
-        getPublicRoutingForm(
-          db,
-          teamSlug === undefined ? { handle: handle as string, slug } : { teamSlug, slug },
+      run: (args) => getPublicRoutingForm(db, routingFormAddress(args)),
+    }),
+    defineTool({
+      name: 'route_lead',
+      title: 'Submit answers to a public routing form',
+      description: `${ROUTING_FORMS_DISABLED} Supply the form slug, exactly one of handle (personal) or teamSlug (team), the current versionId and answers keyed by question UUID. On routing_form_changed, reload the form and review the answers. Returns a plain-text message or a private, expiring routeToken and a server-built continuationUrl to share only with the invitee. Accepts bookings or full keys, or an authorized MCP OAuth connection.`,
+      input: RouteLeadInput,
+      // Keep structuredContent identical on both MCP protocol eras.
+      output: RoutingSubmissionResponse.meta({ type: 'object' }),
+      annotations: write,
+      privateInput: () => true,
+      privateValidationMessage: 'Invalid routing submission',
+      privateDiagnostics: true,
+      run: ({ handle, teamSlug, slug, ...input }) =>
+        submitPublicRoutingForm(
+          { db, routingFormsEnabled, routingSecret, publicUrl },
+          routingFormAddress({ handle, teamSlug, slug }),
+          input,
         ),
     }),
   ])

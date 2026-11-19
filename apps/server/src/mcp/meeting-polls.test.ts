@@ -288,6 +288,9 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP and CLI poll services on Postgre
       votes: [],
       voter: { status: 'withdrawn' },
     })
+    expect(
+      (await call('read_meeting_poll', { token: voterToken })).structuredContent,
+    ).toMatchObject({ ownBallot: { voter: { status: 'withdrawn' } }, counts: null })
     const recovery = await call('recover_meeting_poll_voter', {
       pollId: p.poll.id,
       email: join.email,

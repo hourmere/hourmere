@@ -1,4 +1,11 @@
-import { DomainError } from '@hourmere/scheduling'
+import { z } from '@hono/zod-openapi'
+import type { Db } from '@hourmere/db'
+import {
+  DomainError,
+  type PublicRoutingFormAddress,
+  resolvePublicRoutingForm,
+  submitRoutingForm,
+} from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { Tool } from './mcp/tools.ts'
 import { featureGate } from './rest-scopes.ts'
@@ -32,4 +39,63 @@ export function routingFormsGuard(routingFormsEnabled: boolean): MiddlewareHandl
 export function routingFormTools(routingFormsEnabled: boolean, tools: readonly Tool[]): Tool[] {
   const requireEnabled = () => requireRoutingFormsEnabled(routingFormsEnabled)
   return tools.map((tool) => ({ ...tool, requireEnabled }))
+}
+
+export const RoutingAnswersInput = z
+  .preprocess(
+    (answers, ctx) => {
+      // Zod's record parser otherwise strips this key before the service can reject it.
+      if (answers != null && Object.hasOwn(answers, '__proto__'))
+        ctx.addIssue({ code: 'custom', message: 'Invalid answer key' })
+      return answers
+    },
+    z.record(z.string(), z.string().nullable()),
+  )
+  .openapi({
+    description:
+      'Map question UUIDs to text or select option UUIDs. Omit or use null for an unanswered optional question.',
+  })
+
+export const RoutingSubmission = z
+  .strictObject({
+    versionId: z.guid().openapi({ description: 'Current published version from public metadata' }),
+    answers: RoutingAnswersInput,
+  })
+  .openapi('RoutingSubmission')
+
+export const RoutingSubmissionResponse = z
+  .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('message'), message: z.string() }),
+    z.object({
+      kind: z.literal('continuation'),
+      routeToken: z.string().openapi({ description: 'Private bearer capability' }),
+      expiresAt: z.iso.datetime(),
+      continuationUrl: z.url().openapi({ description: 'Private continuation link' }),
+    }),
+  ])
+  .openapi('RoutingSubmissionResponse')
+
+export async function submitPublicRoutingForm(
+  {
+    db,
+    routingFormsEnabled,
+    routingSecret,
+    publicUrl,
+  }: {
+    db: Db
+    routingFormsEnabled: boolean
+    routingSecret?: string | undefined
+    publicUrl: string
+  },
+  address: PublicRoutingFormAddress,
+  input: z.infer<typeof RoutingSubmission>,
+): Promise<z.infer<typeof RoutingSubmissionResponse>> {
+  requireRoutingFormsEnabled(routingFormsEnabled)
+  if (!routingSecret) throw new Error('Routing submission requires the server secret')
+  const continuation = new URL('/route/continue', publicUrl)
+  const locator = await resolvePublicRoutingForm(db, address)
+  const result = await submitRoutingForm({ db, routingFormsEnabled, routingSecret }, locator, input)
+  if (result.kind === 'message') return result
+  continuation.hash = `token=${encodeURIComponent(result.routeToken)}`
+  return { ...result, continuationUrl: continuation.href }
 }

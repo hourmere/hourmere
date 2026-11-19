@@ -452,8 +452,9 @@ answer values in routing rate accounting; the admission ceilings count per form 
 instance only, and the existing `page` and `book` buckets keep their current keys.
 Rate-limit refused and invalid requests too. Repeated route submissions may mint separate
 receipts within those limits; booking replays cannot consume a receipt twice. Do not send
-email on submission. The receipt service and bucket definitions are in place while routing
-remains hard-off. The public adapters will connect these request buckets in later steps.
+email on submission. Both public POST paths share the `routingSubmission` bucket, including
+requests refused by the body limit, authentication, scope, or input validation. Routing
+remains hard-off.
 
 中文：提交每个客户端每 60 秒最多 10 次，继续预约每 60 秒最多 120 次，按服务进程分别计数。
 所有进程共享数据库中的凭据上限：每个表单 100 份，每个实例 10,000 份。只有未过期且未使用的
@@ -598,6 +599,39 @@ REST 支持匿名访问，提供密钥时须为有效的 `read`、`bookings` 或
 须通过已认证的 MCP 连接，并传入 `slug` 以及 `handle` 或 `teamSlug` 中的一项。
 开启后，未知、未发布、停用或归档的表单统一返回 `routing_form_not_found`。功能目前硬关闭，
 调用返回 `routing_forms_disabled`，MCP 工具列表不显示该工具。
+
+Submit `{ versionId, answers }` to the public form's `/route` endpoint. Anonymous REST
+requests are allowed. A supplied bearer must be a valid `bookings` or `full` API key.
+When the server returns `409 routing_form_changed`, fetch metadata again and review answers
+against the new questions before resubmitting. Success returns either
+`{ kind: "message", message }` or `{ kind: "continuation", routeToken, continuationUrl, expiresAt }`.
+MCP `route_lead` and `hourmere routing-forms route` use the same input plus `slug` and
+exactly one of `handle` or `teamSlug`. They require an authenticated MCP connection with a
+`bookings` or `full` key or authorized OAuth. While routing is hard-off, calls that pass
+transport checks return `routing_forms_disabled` and MCP discovery omits `route_lead`.
+
+中文：向公开表单的 `/route` 端点提交 `{ versionId, answers }`。REST 支持匿名提交，提供密钥时
+须为有效的 `bookings` 或 `full` 密钥。收到 `409 routing_form_changed` 时，重新读取表单，
+按新版问题检查答案后再提交。成功时返回纯文本消息，或返回 `routeToken`、服务器生成的
+`continuationUrl` 和失效时间 `expiresAt`。MCP `route_lead` 和 CLI `routing-forms route`
+还须提供 `slug` 以及 `handle` 或 `teamSlug` 中的一项，并使用已认证的 MCP 连接。CLI 标准输出
+隐藏凭据和链接，`--output FILE` 可将完整响应写入新建的 0600 文件。功能目前硬关闭，通过传输
+检查的调用返回 `routing_forms_disabled`，MCP 工具列表不显示 `route_lead`。
+
+When routing is enabled, invitees open a personal form at `/route/{handle}/{slug}` or
+a team form at `/route/team/{teamSlug}/{slug}`. The page marks optional questions and
+explains validation errors alongside the affected fields. If the host publishes a new
+version during a visit, the page reloads the questions. It keeps answers for matching
+question IDs and types in memory, and keeps a select answer only if its option is still
+available. Invitees review the updated form and submit again. A successful submission
+displays the host's message or opens the server's continuation link. If the form becomes
+unavailable, the page asks the invitee to check the link. Routing is currently hard-off.
+
+中文：启用后，受邀人可通过 `/route/{handle}/{slug}` 打开个人表单，或通过
+`/route/team/{teamSlug}/{slug}` 打开团队表单。页面会标出选填题，并在相应问题旁说明填写错误。
+如果填写期间主持人发布了新版本，页面会重新读取问题。编号和类型均未变化的答案仅保留在页面内存中，
+单选题还须保留原选项。受邀人检查新版表单后可再次提交。提交成功后，页面会显示主持人设定的留言，
+或打开服务器返回的后续链接。表单不可用时，页面会请受邀人检查链接。功能目前处于硬关闭状态。
 
 Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or

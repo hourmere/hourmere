@@ -12,6 +12,7 @@ import { auditActor } from '@hourmere/db/audit'
 import * as scheduling from '@hourmere/scheduling'
 import { describe, expect, it, vi } from 'vitest'
 import { hasUnsafeJsonText } from '../app.ts'
+import { MeetingPollHostOutput } from '../meeting-poll-host-schemas.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import * as limits from '../rate-limit.ts'
 import * as analyticsSchemas from '../routes/analytics.ts'
@@ -114,8 +115,13 @@ function runner(change?: Change) {
       z,
       ...auth,
       DomainError: scheduling.DomainError,
+      MeetingPollAlreadyCreatedError: scheduling.MeetingPollAlreadyCreatedError,
+      MeetingPollAlreadyScheduledError: scheduling.MeetingPollAlreadyScheduledError,
+      MeetingPollSlotUnavailableError: scheduling.MeetingPollSlotUnavailableError,
+      MeetingPollHostOutput,
       WaitlistRateLimitError: scheduling.WaitlistRateLimitError,
       MeetingPollRateLimitError: scheduling.MeetingPollRateLimitError,
+      RoutingAdmissionError: scheduling.RoutingAdmissionError,
       MeetingPollKeyMismatchError: scheduling.MeetingPollKeyMismatchError,
       hasUnsafeJsonText,
       inspect,

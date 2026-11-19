@@ -143,3 +143,8 @@ export const ConnectedAppsPage = page(
 export const MeetingPollPage = lazy(() =>
   import('./public/MeetingPollPage.tsx').then((module) => ({ default: module.MeetingPollPage })),
 )
+
+export const RoutingFormPage = page(
+  () => import('./public/RoutingFormPage.tsx'),
+  (m) => m.RoutingFormPage,
+)

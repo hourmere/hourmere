@@ -524,4 +524,23 @@ export const common = {
   'Opens the host’s website in this tab.': '将在当前标签页中打开主办者的网站。',
   // Meeting poll reminder opt-out
   'meetingPoll.optOutError': '暂时无法关闭提醒，请重试。',
+  // Public routing form
+  'Loading form…': '正在加载表单…',
+  'This form is unavailable': '此表单暂不可用',
+  'Check the link you were given.': '请检查收到的链接。',
+  'We couldn’t load this form. Try again.': '暂时无法加载此表单，请重试。',
+  'This form has changed. Review your answers before continuing.':
+    '此表单已更新。请检查你的答案，然后再继续。',
+  'Select an option': '请选择一项',
+  'Enter an answer.': '请填写答案。',
+  'Enter a valid email address.': '请输入有效的邮箱地址。',
+  'Enter {count} characters or fewer.': '答案不能超过{count}个字符。',
+  'Remove unsupported characters from your answer.': '请从答案中删除不受支持的字符。',
+  'Choose one of the available options.': '请从可用选项中选择一项。',
+  'Review the highlighted answers.': '请检查标有错误提示的答案。',
+  'We couldn’t submit your answers. Try again.': '暂时无法提交答案，请重试。',
+  'Submitting…': '正在提交…',
+  Continue: '继续',
+  'Thank you': '谢谢',
+  Optional: '选填',
 } as const
