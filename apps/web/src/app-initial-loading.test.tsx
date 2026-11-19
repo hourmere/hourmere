@@ -30,6 +30,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'ManageBookingPage',
     'McpAuthorizePage',
     'OneTimeBookingPage',
+    'ReminderOptOutPage',
     'RequireSession',
     'ScheduleEditorPage',
     'SessionLayout',
@@ -57,7 +58,7 @@ describe('before route chunks are available', () => {
     },
   )
 
-  it.each(['/ada', '/book/pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB'])(
+  it.each(['/ada', '/book/pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB', '/poll/reminder-opt-out'])(
     'keeps public loading independent of the admin shell at %s',
     (path) => {
       render(
