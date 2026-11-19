@@ -43,6 +43,7 @@ import {
 } from './audit-data.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
+import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
 
 export interface FixtureApp {
@@ -61,6 +62,7 @@ export interface FixtureApp {
   openWaitlistVerification: (page: Page) => Promise<void>
   waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
+  auditPollState: (state: PollAuditState) => ReturnType<typeof seedPollAuditData>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
   auditOAuthQuery: () => Promise<string>
@@ -520,6 +522,14 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        auditPollState: async (state) => {
+          // Poll backing events must not change the existing host/list audit states.
+          const pollHost = await f.host()
+          const eventTypeId = await f.eventType(pollHost.organizationId, pollHost.userId, {
+            title: AUDIT_TITLE,
+          })
+          return seedPollAuditData(db, pollHost, eventTypeId, authSecret, state)
+        },
         setEmbedSnippet: (snippet) => {
           embedSnippet = snippet
         },

@@ -230,22 +230,6 @@ describe('security headers', () => {
     }
   })
 
-  it('serves the reminder opt-out page without caching, referrers or indexing', async () => {
-    for (const path of ['/poll/reminder-opt-out', '/POLL/reminder-opt-out/?source=email']) {
-      const response = await app.request(path)
-      expect(response.status).toBe(200)
-      expect(securityHeadersOf(response)).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
-      expect(response.headers.get('cache-control')).toBe('no-store')
-      expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow')
-    }
-    for (const path of ['/poll/intro', '/poll/reminder-opt-out-other']) {
-      const response = await app.request(path)
-      expect(securityHeadersOf(response)).toEqual(APP_PAGE)
-      expect(response.headers.get('cache-control')).toBe('no-cache')
-      expect(response.headers.get('x-robots-tag')).toBeNull()
-    }
-  })
-
   it('keeps the default referrer policy for join and sign-in navigation', async () => {
     const invitationId = '00000000-0000-4000-8000-000000000071'
     const next = `/app/join?invitationId=${invitationId}`
@@ -260,6 +244,32 @@ describe('security headers', () => {
         'strict-origin-when-cross-origin',
       )
     }
+  })
+
+  it('keeps every poll entry private, uncacheable, unindexed and unembeddable', async () => {
+    for (const path of [
+      '/poll',
+      '/poll/voter',
+      '/poll/recover',
+      '/poll/reminder-opt-out',
+      '/POLL/reminder-opt-out/?source=email',
+      '/POLL/',
+      '/%70oll/voter',
+      '/poll/%76oter/',
+    ]) {
+      const response = await app.request(path)
+      expect(response.status).toBe(200)
+      expect(securityHeadersOf(response)).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow')
+      const missing = await createApp(deps()).request(path)
+      expect(missing.headers.get('cache-control')).toBe('no-store')
+      expect(missing.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(missing.headers.get('x-robots-tag')).toBe('noindex, nofollow')
+    }
+    expect((await app.request('/polls')).headers.get('referrer-policy')).toBe(
+      'strict-origin-when-cross-origin',
+    )
   })
 
   it('leave hashed bundles and other files their own type and long-lived cache', async () => {

@@ -6,6 +6,8 @@ import { errorMessage, RequestError } from '../api/errors.ts'
 import { ErrorSummary, Field } from '../components/forms.tsx'
 import { browserLocale } from '../test/browser-locale.ts'
 import { admin } from './admin.ts'
+import { admin as englishAdmin } from './catalogues/en/admin.ts'
+import { common as englishCommon } from './catalogues/en/common.ts'
 import { common } from './common.ts'
 import { AccountLanguage, InterfaceScope, LanguageSwitcher, useI18n } from './runtime.tsx'
 import { chooseLanguage, resetLanguagePreference } from './store.ts'
@@ -89,11 +91,14 @@ describe('typed interface messages and language state', () => {
   )
 
   it('keeps interpolation placeholders in both complete catalogs', () => {
+    const english: Record<string, string> = { ...englishCommon, ...englishAdmin }
     const placeholders = (text: string) =>
       [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort()
     for (const [key, chinese] of Object.entries({ ...common, ...admin })) {
       expect(chinese.length > 0, key).toBe(true)
-      expect(placeholders(chinese), key).toEqual(placeholders(key))
+      // Semantic keys need comparison with their English template, not the identifier.
+      expect(english[key], key).toBeTypeOf('string')
+      expect(placeholders(chinese), key).toEqual(placeholders(english[key] ?? ''))
     }
   })
   it('rerenders visible validation and preserves the same draft DOM node', async () => {

@@ -82,22 +82,6 @@ export function failureMessage(err: unknown): UiText {
 
 export const codeOf = (err: unknown) => (err instanceof RequestError ? err.code : undefined)
 
-export async function optOutOfMeetingPollReminders(token: string, signal: AbortSignal) {
-  await call(
-    () =>
-      api.POST('/api/v1/public/meeting-polls/reminder-opt-out', {
-        body: { token },
-        cache: 'no-store',
-        credentials: 'omit',
-        redirect: 'error',
-        referrerPolicy: 'no-referrer',
-        signal,
-      }),
-    signal,
-    true,
-  )
-}
-
 export async function getHost(handle: string, signal: AbortSignal): Promise<PublicHost> {
   const { data } = await call(
     () => api.GET('/api/v1/public/{handle}', { params: { path: { handle } }, signal }),

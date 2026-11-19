@@ -1,4 +1,67 @@
 export const common = {
+  'meetingPoll.title': 'Enquete de reunião',
+  'meetingPoll.unavailable': 'Esta enquete está indisponível.',
+  'meetingPoll.unavailableHelp':
+    'Abra o link original do convite ou entre em contato com quem organiza a reunião.',
+  'meetingPoll.loading': 'Carregando enquete…',
+  'meetingPoll.loadError': 'Não foi possível carregar esta enquete. Tente novamente mais tarde.',
+  'meetingPoll.retry': 'Tentar novamente',
+  'meetingPoll.name': 'Seu nome',
+  'meetingPoll.email': 'Endereço de e-mail',
+  'meetingPoll.timeZone': 'Fuso horário',
+  'meetingPoll.enroll': 'Enviar e-mail de verificação',
+  'meetingPoll.checkEmail': 'Confira seu e-mail',
+  'meetingPoll.checkEmailHelp':
+    'Se você atender aos requisitos, receberá um link para continuar. Confira a caixa de entrada e a pasta de spam.',
+  'meetingPoll.verify': 'Verificar meu e-mail',
+  'meetingPoll.verifyHelp':
+    'Confirme seu e-mail para continuar. Abrir esta página não registra nenhum voto.',
+  'meetingPoll.recover': 'Recuperar acesso',
+  'meetingPoll.pollId': 'ID da enquete',
+  'meetingPoll.recoverSubmit': 'Enviar e-mail de acesso',
+  'meetingPoll.yes': 'Sim',
+  'meetingPoll.ifNeedBe': 'Se necessário',
+  'meetingPoll.no': 'Não',
+  'meetingPoll.consent':
+    'Concordo em participar da reunião se minha participação for selecionada e em compartilhar minhas respostas com quem a organiza.',
+  'meetingPoll.selectionHelp':
+    'Quem organiza pode selecionar apenas algumas pessoas. A pessoa responsável pela reserva poderá gerenciar toda a reunião, e o convite de calendário poderá revelar os participantes uns aos outros.',
+  'meetingPoll.save': 'Salvar voto',
+  'meetingPoll.saving': 'Salvando…',
+  'meetingPoll.saved': 'Seu voto foi salvo.',
+  'meetingPoll.changed': 'Suas alterações foram salvas.',
+  'meetingPoll.withdraw': 'Retirar meu voto',
+  'meetingPoll.withdrawn':
+    'Seu voto foi retirado. Suas respostas foram removidas e os e-mails da enquete foram interrompidos.',
+  'meetingPoll.reactivate': 'Enviar um novo voto',
+  'meetingPoll.private':
+    'Somente quem organiza e os gestores autorizados podem ver sua identidade e suas respostas. Outros votantes não podem ver seu voto.',
+  'meetingPoll.aggregate':
+    'Votantes verificados podem ver os totais de cada opção. Em grupos pequenos, os totais podem revelar as escolhas de outra pessoa. Sua identidade e suas respostas são exibidas apenas a quem organiza e aos gestores autorizados.',
+  'meetingPoll.deadline': 'A votação termina em {date}',
+  'meetingPoll.closed': 'A votação está encerrada. Você pode ver suas respostas anteriores.',
+  'meetingPoll.scheduled': 'Um horário foi escolhido. A votação está encerrada.',
+  'meetingPoll.canceled': 'Esta enquete terminou. A votação está encerrada.',
+  'meetingPoll.chosen': 'Horário escolhido',
+  'meetingPoll.rateLimited': 'Muitas solicitações. Aguarde antes de tentar novamente.',
+  'meetingPoll.invalid': 'Confira os dados preenchidos e tente novamente.',
+  'meetingPoll.full': 'Esta enquete está lotada. Você ainda pode recuperar um link existente.',
+  'meetingPoll.stale':
+    'Seu voto foi alterado em outro lugar. Recarregue e confira antes de salvar novamente.',
+  'meetingPoll.uncertain':
+    'Não foi possível confirmar esta alteração. Recarregue seu voto antes de tentar novamente.',
+  'meetingPoll.reload': 'Recarregar voto',
+  'meetingPoll.optOutTitle': 'Parar lembretes da enquete',
+  'meetingPoll.optOutHelp':
+    'Confirme para parar os lembretes desta enquete. Isso não retira seu voto.',
+  'meetingPoll.optOut': 'Parar lembretes',
+  'meetingPoll.optedOut': 'Os lembretes desta enquete foram interrompidos.',
+  'meetingPoll.optionsOne': '{count} opção de horário',
+  'meetingPoll.optionsOther': '{count} opções de horário',
+  'meetingPoll.countYes': 'Sim: {count}',
+  'meetingPoll.countIfNeedBe': 'Se necessário: {count}',
+  'meetingPoll.countNo': 'Não: {count}',
+  'meetingPoll.required': 'Obrigatório',
   'No location has been specified. Contact the host for meeting details.':
     'Nenhum local foi especificado. Entre em contato com o anfitrião para saber os detalhes da reunião.',
   '{count} seat left': 'Resta {count} vaga',
@@ -488,13 +551,5 @@ export const common = {
   'Opens the host’s website in a new tab.': 'Abre o site do anfitrião em uma nova aba.',
   'Opens the host’s website in this tab.': 'Abre o site do anfitrião nesta aba.',
   // Meeting poll reminder opt-out
-  'Meeting poll reminders': 'Lembretes da enquete de reunião',
-  'Confirm to stop receiving reminders for this meeting poll.':
-    'Confirme que deseja parar de receber lembretes desta enquete de reunião.',
-  'Stop reminders': 'Desativar lembretes',
-  'Meeting poll reminders turned off': 'Lembretes da enquete de reunião desativados',
-  'Open the reminder opt-out link from your meeting poll email.':
-    'Abra o link para desativar lembretes no e-mail da enquete de reunião.',
-  'We couldn’t stop reminders. Try again.':
-    'Não foi possível desativar os lembretes. Tente novamente.',
+  'meetingPoll.optOutError': 'Não foi possível desativar os lembretes. Tente novamente.',
 } as const

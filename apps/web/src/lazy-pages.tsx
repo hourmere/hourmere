@@ -122,10 +122,6 @@ export const ManageBookingPage = page(
   () => import('./public/ManageBookingPage.tsx'),
   (m) => m.ManageBookingPage,
 )
-export const ReminderOptOutPage = page(
-  () => import('./public/ReminderOptOutPage.tsx'),
-  (m) => m.ReminderOptOutPage,
-)
 
 export const EmbeddedBookingPage = page(
   () => import('./public/Embed.tsx'),
@@ -142,4 +138,8 @@ export const McpAuthorizePage = page(
 export const ConnectedAppsPage = page(
   () => import('./pages/McpOAuth.tsx'),
   (m) => m.ConnectedAppsPage,
+)
+
+export const MeetingPollPage = lazy(() =>
+  import('./public/MeetingPollPage.tsx').then((module) => ({ default: module.MeetingPollPage })),
 )

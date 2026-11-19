@@ -6,9 +6,9 @@ import { BrowserRouter } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
 import { catalogTemplate } from '../i18n/catalogues.ts'
-import { chooseLanguage } from '../i18n/store.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
 
+// Reminder mails link here (packages/mail meeting-polls): the poll page's opt-out entry.
 const PAGE = '/poll/reminder-opt-out'
 const ENDPOINT = '/api/v1/public/meeting-polls/reminder-opt-out'
 const POST = `POST ${ENDPOINT}`
@@ -60,33 +60,30 @@ it('removes the fragment, then sends an anonymous opt-out only on confirmation',
     redirect: 'error',
   })
   pending.resolve(json(200, SUCCESS))
-  const done = await screen.findByRole('heading', { name: 'Meeting poll reminders turned off' })
-  await waitFor(() => expect(document.activeElement).toBe(done))
+  expect(await screen.findByText('Reminders for this poll are stopped.')).toBeDefined()
+  const heading = screen.getByRole('heading', { name: 'Stop poll reminders' })
+  await waitFor(() => expect(document.activeElement).toBe(heading))
   expect(screen.queryByRole('button', { name: 'Stop reminders' })).toBeNull()
 })
 
-it.each([PAGE, `${PAGE}#malformed`, `${PAGE}?token=${TOKEN}`])(
-  'asks for the email link when a fragment is missing or malformed (%s)',
+it.each([PAGE, `${PAGE}?token=${TOKEN}`])(
+  'asks for the email link when the fragment is missing (%s)',
   async (path) => {
     const net = fakeApi({})
     open(path)
-    expect(
-      await screen.findByText('Open the reminder opt-out link from your meeting poll email.'),
-    ).toBeDefined()
-    expect(window.location.pathname + window.location.search + window.location.hash).toBe(PAGE)
+    expect(await screen.findByText('This poll is unavailable.')).toBeDefined()
+    expect(window.location.hash).toBe('')
     expect(net.to(POST)).toHaveLength(0)
     expect(screen.queryByRole('button', { name: 'Stop reminders' })).toBeNull()
   },
 )
 
-it('shows the same link prompt for a rejected capability without reflecting server details', async () => {
+it('shows the unavailable state for a rejected capability without reflecting server details', async () => {
   const user = userEvent.setup()
   fakeApi({ [POST]: () => json(404, { error: 'poll_not_found', message: TOKEN }) })
   const { container } = open(`${PAGE}#${TOKEN}`)
   await user.click(await screen.findByRole('button', { name: 'Stop reminders' }))
-  expect(
-    await screen.findByText('Open the reminder opt-out link from your meeting poll email.'),
-  ).toBeDefined()
+  expect(await screen.findByText('This poll is unavailable.')).toBeDefined()
   expect(container.innerHTML).not.toContain(TOKEN)
 })
 
@@ -98,36 +95,17 @@ it('keeps a neutral error on a refused request and retries only on another expli
     .mockReturnValueOnce(json(200, SUCCESS))
   fakeApi({ [POST]: send })
   const { container } = open(`${PAGE}#${TOKEN}`)
-  const confirm = await screen.findByRole('button', { name: 'Stop reminders' })
-  await user.click(confirm)
+  await user.click(await screen.findByRole('button', { name: 'Stop reminders' }))
   expect((await screen.findByRole('alert')).textContent).toBe(
     'We couldn’t stop reminders. Try again.',
   )
   expect(container.innerHTML).not.toContain(TOKEN)
   expect(send).toHaveBeenCalledTimes(1)
-  await user.click(confirm)
-  await screen.findByRole('heading', { name: 'Meeting poll reminders turned off' })
+  await user.click(screen.getByRole('button', { name: 'Stop reminders' }))
+  await screen.findByText('Reminders for this poll are stopped.')
   expect(send).toHaveBeenCalledTimes(2)
 })
 
-it.each(interfaceLanguages('public'))(
-  'offers translated confirmation and feedback in %s',
-  async (locale) => {
-    chooseLanguage(locale)
-    fakeApi({})
-    open(`${PAGE}#${TOKEN}`)
-    for (const message of [
-      'Meeting poll reminders',
-      'Confirm to stop receiving reminders for this meeting poll.',
-      'Stop reminders',
-      'Meeting poll reminders turned off',
-      'Open the reminder opt-out link from your meeting poll email.',
-      'We couldn’t stop reminders. Try again.',
-    ])
-      expect(catalogTemplate(locale, message), message).toBeTruthy()
-    expect(
-      await screen.findByRole('button', { name: catalogTemplate(locale, 'Stop reminders') ?? '' }),
-    ).toBeDefined()
-    expect(document.documentElement.lang).toBe(locale)
-  },
-)
+it.each(interfaceLanguages('public'))('translates the opt-out failure in %s', (locale) => {
+  expect(catalogTemplate(locale, 'meetingPoll.optOutError')).toBeTruthy()
+})

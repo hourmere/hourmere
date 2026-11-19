@@ -1,4 +1,70 @@
 export const common = {
+  'meetingPoll.title': 'Terminabstimmung',
+  'meetingPoll.unavailable': 'Diese Abstimmung ist nicht verfügbar.',
+  'meetingPoll.unavailableHelp':
+    'Öffnen Sie den ursprünglichen Link aus Ihrer Einladung oder kontaktieren Sie die organisierende Person.',
+  'meetingPoll.loading': 'Abstimmung wird geladen…',
+  'meetingPoll.loadError':
+    'Die Abstimmung konnte nicht geladen werden. Versuchen Sie es später erneut.',
+  'meetingPoll.retry': 'Erneut versuchen',
+  'meetingPoll.name': 'Ihr Name',
+  'meetingPoll.email': 'E-Mail-Adresse',
+  'meetingPoll.timeZone': 'Zeitzone',
+  'meetingPoll.enroll': 'Bestätigungs-E-Mail senden',
+  'meetingPoll.checkEmail': 'Prüfen Sie Ihr E-Mail-Postfach',
+  'meetingPoll.checkEmailHelp':
+    'Wenn Sie berechtigt sind, erhalten Sie einen Link zum Fortfahren. Prüfen Sie auch Ihren Spam-Ordner.',
+  'meetingPoll.verify': 'Meine E-Mail-Adresse bestätigen',
+  'meetingPoll.verifyHelp':
+    'Bestätigen Sie Ihre E-Mail-Adresse, um fortzufahren. Das Öffnen dieser Seite gibt keine Stimme ab.',
+  'meetingPoll.recover': 'Zugang wiederherstellen',
+  'meetingPoll.pollId': 'Abstimmungs-ID',
+  'meetingPoll.recoverSubmit': 'Zugangs-E-Mail senden',
+  'meetingPoll.yes': 'Ja',
+  'meetingPoll.ifNeedBe': 'Wenn nötig',
+  'meetingPoll.no': 'Nein',
+  'meetingPoll.consent':
+    'Ich stimme zu, bei Auswahl an der Besprechung teilzunehmen und meine Antworten mit der organisierenden Person zu teilen.',
+  'meetingPoll.selectionHelp':
+    'Es werden möglicherweise nur einige Abstimmende ausgewählt. Die als buchend bestimmte Person kann die gesamte Besprechung verwalten. Die Kalendereinladung kann die Teilnehmenden füreinander sichtbar machen.',
+  'meetingPoll.save': 'Stimmzettel speichern',
+  'meetingPoll.saving': 'Wird gespeichert…',
+  'meetingPoll.saved': 'Ihr Stimmzettel wurde gespeichert.',
+  'meetingPoll.changed': 'Ihre Änderungen wurden gespeichert.',
+  'meetingPoll.withdraw': 'Meinen Stimmzettel zurückziehen',
+  'meetingPoll.withdrawn':
+    'Ihr Stimmzettel wurde zurückgezogen. Ihre Antworten wurden entfernt und E-Mails zu dieser Abstimmung eingestellt.',
+  'meetingPoll.reactivate': 'Neuen Stimmzettel abgeben',
+  'meetingPoll.private':
+    'Nur die organisierende Person und berechtigte Verwaltungsmitglieder können Ihre Identität und Antworten sehen. Andere Abstimmende sehen Ihren Stimmzettel nicht.',
+  'meetingPoll.aggregate':
+    'Bestätigte Abstimmende sehen die Gesamtzahlen jeder Option. In kleinen Gruppen können diese die Entscheidungen anderer verraten. Ihre Identität und Antworten sehen nur die organisierende Person und berechtigte Verwaltungsmitglieder.',
+  'meetingPoll.deadline': 'Abstimmung endet am {date}',
+  'meetingPoll.closed':
+    'Die Abstimmung ist geschlossen. Sie können Ihre bisherigen Antworten ansehen.',
+  'meetingPoll.scheduled': 'Ein Termin wurde ausgewählt. Die Abstimmung ist geschlossen.',
+  'meetingPoll.canceled': 'Diese Abstimmung ist beendet. Es kann nicht mehr abgestimmt werden.',
+  'meetingPoll.chosen': 'Ausgewählter Termin',
+  'meetingPoll.rateLimited': 'Zu viele Anfragen. Bitte warten Sie, bevor Sie es erneut versuchen.',
+  'meetingPoll.invalid': 'Prüfen Sie Ihre Eingaben und versuchen Sie es erneut.',
+  'meetingPoll.full':
+    'Diese Abstimmung ist voll. Einen bestehenden Link können Sie weiterhin wiederherstellen.',
+  'meetingPoll.stale':
+    'Ihr Stimmzettel wurde an anderer Stelle geändert. Laden und prüfen Sie ihn vor dem erneuten Speichern.',
+  'meetingPoll.uncertain':
+    'Diese Änderung konnte nicht bestätigt werden. Laden Sie Ihren Stimmzettel vor einem weiteren Versuch neu.',
+  'meetingPoll.reload': 'Stimmzettel neu laden',
+  'meetingPoll.optOutTitle': 'Abstimmungserinnerungen abbestellen',
+  'meetingPoll.optOutHelp':
+    'Bestätigen Sie, um Erinnerungen für diese Abstimmung abzubestellen. Ihr Stimmzettel wird dadurch nicht zurückgezogen.',
+  'meetingPoll.optOut': 'Erinnerungen abbestellen',
+  'meetingPoll.optedOut': 'Erinnerungen für diese Abstimmung wurden abbestellt.',
+  'meetingPoll.optionsOne': '{count} Terminoption',
+  'meetingPoll.optionsOther': '{count} Terminoptionen',
+  'meetingPoll.countYes': 'Ja: {count}',
+  'meetingPoll.countIfNeedBe': 'Wenn nötig: {count}',
+  'meetingPoll.countNo': 'Nein: {count}',
+  'meetingPoll.required': 'Erforderlich',
   'No location has been specified. Contact the host for meeting details.':
     'Es wurde kein Ort angegeben. Wenden Sie sich für die Besprechungsdetails an die gastgebende Person.',
   '{count} seat left': 'Noch {count} Platz',
@@ -493,13 +559,6 @@ export const common = {
   'Opens the host’s website in a new tab.': 'Öffnet die Website des Gastgebers in einem neuen Tab.',
   'Opens the host’s website in this tab.': 'Öffnet die Website des Gastgebers in diesem Tab.',
   // Meeting poll reminder opt-out
-  'Meeting poll reminders': 'Erinnerungen zur Terminumfrage',
-  'Confirm to stop receiving reminders for this meeting poll.':
-    'Bestätigen Sie, dass Sie keine Erinnerungen zu dieser Terminumfrage mehr erhalten möchten.',
-  'Stop reminders': 'Erinnerungen abbestellen',
-  'Meeting poll reminders turned off': 'Erinnerungen zur Terminumfrage abbestellt',
-  'Open the reminder opt-out link from your meeting poll email.':
-    'Öffnen Sie den Abmeldelink in der E-Mail zur Terminumfrage.',
-  'We couldn’t stop reminders. Try again.':
+  'meetingPoll.optOutError':
     'Die Erinnerungen konnten nicht abbestellt werden. Versuchen Sie es erneut.',
 } as const
