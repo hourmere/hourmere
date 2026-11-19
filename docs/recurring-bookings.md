@@ -748,14 +748,18 @@ to per-occurrence confirmation or failure fan-out and require the real count and
 zero-suppression assertions to fail. These are future implementation tests; this PR only
 pins the design contract, not runtime delivery behavior.
 
-Provider writes are also one event per occurrence per existing pinned destination, with
-ordinary idempotent identities, retries and cancellations. Google writeback uses the same
-UID contract as today. Microsoft series writeback must follow this per-occurrence model
-when that provider's writeback is supported; this design does not assert it exists today.
-Never create both a provider recurring master and independent occurrence events. No shared
-Zoom/Meet recurring meeting is introduced. Partial provider failure cannot roll back a
-committed local series; show occurrence-specific repair/readiness state and use existing
-repair authorization without rebooking the successful occurrences.
+Google and CalDAV use the ordinary per-booking jobs for each occurrence. With write-back
+configured, the series transaction pins each member's eligible destinations and queues its
+jobs. Each worker reconciles the occurrence's booking chain using its existing UID and
+retry policy. Google uses `<root_booking_id>@hourmere` and CalDAV uses the root booking ID.
+Tail cancellation queues reconciliation for the affected occurrences. Provider copies are
+independent events with no recurring master. Microsoft Calendar continues to list calendars
+only. If Microsoft write-back is added, it follows the same per-occurrence model.
+No shared Zoom/Meet recurring meeting is introduced.
+
+If a provider write fails after commit, the series stays booked. The existing job and
+destination records track repair by occurrence root, so one member can retry while the
+others retain their provider copies. The same repair authorization applies to each member.
 
 #### Synthetic calendar-client fixtures
 
