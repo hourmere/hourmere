@@ -137,5 +137,27 @@
   "poll.outcome.rescheduled.subject": "Termin verschoben: {poll}",
   "poll.outcome.rescheduled.body": "Das Treffen wurde auf den unten stehenden Termin verschoben. Sie stehen nicht auf der Teilnahmeliste.",
   "poll.outcome.cancelled.subject": "Treffen abgesagt: {poll}",
-  "poll.outcome.cancelled.body": "Das Treffen wurde abgesagt. Unten steht der zuletzt geplante Termin."
+  "poll.outcome.cancelled.body": "Das Treffen wurde abgesagt. Unten steht der zuletzt geplante Termin.",
+
+  "series.confirmed.subject": "Terminserie bestätigt: {event}",
+  "series.confirmed.booker": "Ihre Terminserie mit {host} ist gebucht.",
+  "series.confirmed.guest": "{invitee} hat Sie zu einer Terminserie mit {host} eingeladen.",
+  "series.confirmed.host": "{invitee} hat eine Terminserie mit Ihnen gebucht.",
+  "series.cancelled.subject": "Stornierung in der Terminserie: {event}",
+  "series.cancelled.bodyOne": "{count} Termin in dieser Serie wurde storniert.",
+  "series.cancelled.bodyOther": "{count} Termine in dieser Serie wurden storniert.",
+  "series.linkUpdate.subject": "Aktualisierung der Meetinglinks: {event}",
+  "series.linkUpdate.bodyOne": "Bei {count} Termin hat sich der Status des Meetinglinks geändert.",
+  "series.linkUpdate.bodyOther": "Bei {count} Terminen hat sich der Status des Meetinglinks geändert.",
+  "series.occurrences": "Termine",
+  "series.affected": "Stornierte Termine",
+  "series.unchanged": "Unveränderte Termine",
+  "series.pending": "Meetinglink ausstehend",
+  "series.failed": "Kein automatischer Meetinglink",
+  "series.updatedSeparately": "Separat aktualisiert",
+  "series.started": "Bereits begonnen",
+  "series.cancelled.member": "Storniert",
+  "series.manage": "Terminserie verwalten",
+  "series.view": "Terminserie ansehen",
+  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen."
 }

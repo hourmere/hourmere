@@ -100,6 +100,25 @@ authenticated HTTP(S) booking URL. Every follow-up is marked `sensitive: true`, 
 development log mailer redacts its private content. Pre-meeting reminder rendering is
 unchanged.
 
+## Series booking mail
+
+`seriesBookingEmail(kind, series, recipient)` renders confirmations, cancellations and
+meeting-link updates in the existing booking mail layout. Booker and guest copies use the
+booking language. Host copies use each host's own language. Each copy shows times in its
+recipient's time zone.
+
+Confirmations list every date. Cancellations group affected dates separately from unchanged
+dates. Link updates show newly ready links from the supplied changes, and report newly failed
+links to the booker and hosts. Only hosts see the retry instructions. A booker uses the
+series management link, a guest uses their read-only series link, and a host opens the
+authenticated series detail. The caller supplies the role-scoped capability for each
+booker or guest. The development mailer redacts all series copies.
+
+`seriesMemberDescription(member, locale)` returns the same localized state wording or ready
+join URL as plain text for a VEVENT description. Use the copy's language and apply calendar
+escaping when writing the VEVENT. These helpers render content only. Delivery, capability
+issuance and aggregate calendar attachment generation are subsequent steps.
+
 ## Waitlist messages
 
 `waitlistVerificationEmail` and `waitlistNotificationEmail` render complete plain-text and

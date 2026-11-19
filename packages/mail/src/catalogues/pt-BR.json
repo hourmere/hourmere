@@ -137,5 +137,27 @@
   "poll.outcome.rescheduled.subject": "Reunião reagendada: {poll}",
   "poll.outcome.rescheduled.body": "A reunião foi reagendada para o horário abaixo. Você não está na lista de participantes.",
   "poll.outcome.cancelled.subject": "Reunião cancelada: {poll}",
-  "poll.outcome.cancelled.body": "A reunião foi cancelada. O horário abaixo é o último que estava agendado."
+  "poll.outcome.cancelled.body": "A reunião foi cancelada. O horário abaixo é o último que estava agendado.",
+
+  "series.confirmed.subject": "Série de reuniões confirmada: {event}",
+  "series.confirmed.booker": "Sua série de reuniões com {host} está agendada.",
+  "series.confirmed.guest": "{invitee} convidou você para uma série de reuniões com {host}.",
+  "series.confirmed.host": "{invitee} agendou uma série de reuniões com você.",
+  "series.cancelled.subject": "Cancelamento na série de reuniões: {event}",
+  "series.cancelled.bodyOne": "{count} reunião desta série foi cancelada.",
+  "series.cancelled.bodyOther": "{count} reuniões desta série foram canceladas.",
+  "series.linkUpdate.subject": "Atualização dos links de reunião: {event}",
+  "series.linkUpdate.bodyOne": "O status do link mudou em {count} reunião.",
+  "series.linkUpdate.bodyOther": "O status do link mudou em {count} reuniões.",
+  "series.occurrences": "Reuniões da série",
+  "series.affected": "Reuniões canceladas",
+  "series.unchanged": "Reuniões sem alterações",
+  "series.pending": "Link da reunião pendente",
+  "series.failed": "Sem link automático para a reunião",
+  "series.updatedSeparately": "Atualizada separadamente",
+  "series.started": "Já iniciada",
+  "series.cancelled.member": "Cancelada",
+  "series.manage": "Gerenciar série",
+  "series.view": "Ver série",
+  "series.repair": "Para tentar gerar o link da reunião novamente, abra o agendamento correspondente no Hourmere."
 }

@@ -24,6 +24,8 @@ import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
 import * as Questions from './questions.ts'
+import * as RecurringCapabilities from './recurring-capabilities.ts'
+import * as RecurringMembers from './recurring-members.ts'
 import * as RoundRobin from './round-robin.ts'
 import * as SuccessRedirect from './success-redirect.ts'
 import { createFixtures, type EventTypeFixture, type Fixtures } from './testing.ts'
@@ -57,6 +59,8 @@ const dependencies: Record<string, object> = {
   './one-time-links.ts': OneTimeLinks,
   './payment-expiry.ts': PaymentExpiry,
   './questions.ts': Questions,
+  './recurring-capabilities.ts': RecurringCapabilities,
+  './recurring-members.ts': RecurringMembers,
   './round-robin.ts': RoundRobin,
   './success-redirect.ts': SuccessRedirect,
   './text.ts': Text,
