@@ -105,6 +105,8 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     for (const row of rows) {
       const payload = JSON.parse(row.payload)
       expect(ids).toContain(payload.data.requestId)
+      expect(row.request_id).toBe(payload.data.requestId)
+      expect(row.workflow_run_id).toBeNull()
       expect(payload.data.status).toBe('confirmed')
       expect(payload.data).not.toHaveProperty('note')
       expect(payload.data).not.toHaveProperty('manageToken')

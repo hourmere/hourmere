@@ -63,8 +63,11 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
     const deliveries = await rows(webhook.id)
     expect(deliveries).toHaveLength(3)
     expect(new Set(deliveries.map((row) => row.event_id)).size).toBe(3)
-    // Each change's event ID is its receipt identity under 0064's unchanged unique key.
-    for (const row of deliveries) expect(row.request_id).toBe(row.event_id)
+    // Each change's event ID remains its receipt identity in the extended key.
+    for (const row of deliveries) {
+      expect(row.request_id).toBe(row.event_id)
+      expect(row.workflow_run_id).toBeNull()
+    }
     expect(queue.enqueue).toHaveBeenCalledTimes(3)
     expect(
       deliveries.filter((row) => JSON.parse(row.payload).data.noShowMarkedAt === null),
@@ -138,6 +141,7 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
     const lifecycle = deliveries.filter((row) => row.event_type === `booking.${type}`)
     expect(lifecycle).toHaveLength(1)
     expect(lifecycle[0]?.request_id).toBeNull()
+    expect(lifecycle[0]?.workflow_run_id).toBeNull()
     expect(JSON.parse(lifecycle[0]?.payload ?? '{}').data).not.toHaveProperty('requestId')
   }
 

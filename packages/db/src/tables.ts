@@ -1665,6 +1665,7 @@ export interface WebhookDeliveries {
   request_id: string | null;
   status: Generated<string>;
   webhook_id: string;
+  workflow_run_id: string | null;
 }
 
 export interface Webhooks {

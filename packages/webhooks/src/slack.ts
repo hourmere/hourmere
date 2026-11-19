@@ -312,8 +312,7 @@ export async function testSlackDestination(
         organization_id: row.organization_id,
         booking_id: null,
         event_id: eventId,
-        // Deliveries are unique on (webhook_id, booking_id, event_type, request_id) with
-        // NULLS NOT DISTINCT (migration 0064). A sample has no booking, so its own event ID
+        // The delivery key treats NULLs as equal. A sample has no booking, so its own event ID
         // is the discriminator that lets a new test follow a finished one. On rows with a
         // null booking_id, request_id is this sample marker, never a reschedule-request ID.
         request_id: eventId,
