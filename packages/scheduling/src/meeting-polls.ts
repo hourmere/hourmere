@@ -1,7 +1,7 @@
 // Host lifecycle for meeting polls: create, read, close, cancel, delete and public-link
 // rotation. This is an internal service with no transport; voter admission lives in
 // meeting-poll-voters.ts, ballots in meeting-poll-ballots.ts and results and voter removal in
-// meeting-poll-results.ts, while finalization lands in a later step (docs/meeting-polls.md).
+// meeting-poll-results.ts. Finalization composes the booking core in meeting-poll-finalize.ts.
 //
 // Every host write takes the shared order: the transport's organization-write hook, actor
 // user SHARE, organization SHARE, actor membership SHARE, then the poll row FOR UPDATE and
@@ -633,25 +633,7 @@ export async function lockManagedPoll(
   ctx: ServiceContext,
   id: string,
 ): Promise<LockedPoll> {
-  await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
-  const authority = await lockAuthority(trx, ctx)
-  if (!isUuid(id)) throw pollNotFound()
-  const poll = await trx
-    .selectFrom('meeting_polls')
-    .select([
-      'id',
-      'organization_id',
-      'event_type_id',
-      'status',
-      'admission_mode',
-      'host_revision',
-      'display_time_zone',
-    ])
-    .where('id', '=', id)
-    .where('organization_id', '=', ctx.principal.organization.id)
-    .forUpdate()
-    .executeTakeFirst()
-  if (!poll) throw pollNotFound()
+  const { authority, poll } = await lockHostPoll(trx, ctx, id)
   const event = await trx
     .selectFrom('event_types')
     .select(['owner_user_id', 'deleted_at'])
@@ -682,6 +664,33 @@ export async function lockManagedPoll(
     deadline,
     at,
   }
+}
+
+/** The shared host prefix. Finalization takes the booking host locks before the event lock. */
+export async function lockHostPoll(trx: Db, ctx: ServiceContext, id: string) {
+  await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
+  const authority = await lockAuthority(trx, ctx)
+  if (!isUuid(id)) throw pollNotFound()
+  const poll = await trx
+    .selectFrom('meeting_polls')
+    .select([
+      'id',
+      'organization_id',
+      'event_type_id',
+      'status',
+      'admission_mode',
+      'results_revision',
+      'duration_minutes',
+      'settings_fingerprint',
+      'host_revision',
+      'display_time_zone',
+    ])
+    .where('id', '=', id)
+    .where('organization_id', '=', ctx.principal.organization.id)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!poll) throw pollNotFound()
+  return { authority, poll }
 }
 
 export function requireHostRevision(poll: LockedPoll, expected: number) {
@@ -733,7 +742,7 @@ function pollSource(ctx: ServiceContext, requested: 'api' | 'mcp' | undefined) {
 
 export interface ReceiptIdentity {
   organizationId: string
-  operation: 'create' | 'invite' | 'resend' | 'rotate_link'
+  operation: 'create' | 'invite' | 'resend' | 'rotate_link' | 'finalize'
   actor: Buffer
   key: Buffer
   fingerprint: Buffer
@@ -768,7 +777,7 @@ export async function lockedReceipt(trx: Db, receipt: ReceiptIdentity) {
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${scope}, 0))`.execute(trx)
   return trx
     .selectFrom('meeting_poll_operations')
-    .select(['poll_id', 'request_fingerprint'])
+    .select(['poll_id', 'request_fingerprint', 'booking_id'])
     .where('organization_id', '=', receipt.organizationId)
     .where('operation', '=', receipt.operation)
     .where('actor_scope_digest', '=', receipt.actor)
@@ -776,12 +785,19 @@ export async function lockedReceipt(trx: Db, receipt: ReceiptIdentity) {
     .executeTakeFirst()
 }
 
-export async function insertReceipt(trx: Db, receipt: ReceiptIdentity, pollId: string, at: string) {
+export async function insertReceipt(
+  trx: Db,
+  receipt: ReceiptIdentity,
+  pollId: string,
+  at: string,
+  bookingId?: string,
+) {
   await trx
     .insertInto('meeting_poll_operations')
     .values({
       organization_id: receipt.organizationId,
       poll_id: pollId,
+      booking_id: bookingId ?? null,
       operation: receipt.operation,
       actor_scope_digest: receipt.actor,
       idempotency_key_digest: receipt.key,
@@ -1127,3 +1143,5 @@ async function loadPolls(trx: Db, ctx: ServiceContext, ids: string[]): Promise<M
 }
 
 const optional = (value: string | null) => (value === null ? null : rfc3339(value))
+
+export { clock as meetingPollClock, pollSource as meetingPollSource, utc as meetingPollUtc }

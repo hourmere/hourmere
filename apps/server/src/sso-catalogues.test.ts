@@ -17,7 +17,7 @@ import { type Config, loadConfig } from './config.ts'
 import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productionAppOptions, productionAuthOptions, productRoutes } from './server.ts'
 import { MAILBOX_PROOF_CONSUME_PATH, MAILBOX_PROOF_SEND_PATH } from './sso-mailbox-proof.ts'
-import { OIDC_CALLBACK_PATH, OIDC_SIGN_IN_PATH } from './sso-oidc-sign-in.ts'
+import { OIDC_CALLBACK_PATH, OIDC_COMPLETE_PATH, OIDC_SIGN_IN_PATH } from './sso-oidc-sign-in.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
@@ -79,7 +79,7 @@ function expectNoSsoRoutes(paths: string[]) {
 
 // The SSO auth-protocol endpoints that are built and mounted while hard-off, because each must
 // answer `404 sso_disabled` itself (docs/sso.md, Hard-off behaviour). The Mailbox proof and
-// OIDC sign-in paths are exempt by exact path from the production route inventory and the source
+// OIDC sign-in and completion paths are exempt by exact path from the route inventory and source
 // literals only, and only because the suite below proves that each answers
 // `404 {"error":"sso_disabled"}` in the app production assembles, before any other check.
 const GUARDED_SSO_AUTH_PATHS = [
@@ -87,6 +87,7 @@ const GUARDED_SSO_AUTH_PATHS = [
   '/api/auth/sso/mailbox-proof/consume',
   '/api/auth/sign-in/sso',
   '/api/auth/sso/callback/:providerId',
+  '/api/auth/sso/oidc/complete',
 ] as const
 
 const GUARDED_SSO_READS = [
@@ -104,8 +105,8 @@ const GUARDED_SSO_READS = [
   },
 ] as const
 
-// Session-only draft mutations are mounted but proved disabled below; no machine write exemption.
-const GUARDED_SSO_DRAFT_WRITES = [
+// Session-only writes are registered and tested below for the hard-off response.
+const GUARDED_SSO_WRITES = [
   {
     method: 'post',
     path: '/api/v1/team/sso/domains',
@@ -142,6 +143,18 @@ const GUARDED_SSO_DRAFT_WRITES = [
     runtimePath: '/api/v1/team/sso/providers/:providerId',
     operationId: 'deleteSsoProvider',
   },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/providers/{providerId}/test',
+    runtimePath: '/api/v1/team/sso/providers/:providerId/test',
+    operationId: 'testSsoProvider',
+  },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/providers/{providerId}/link',
+    runtimePath: '/api/v1/team/sso/providers/:providerId/link',
+    operationId: 'linkSsoAccount',
+  },
 ] as const
 
 function expectNoUnguardedSsoRoutes(paths: string[]) {
@@ -150,9 +163,7 @@ function expectNoUnguardedSsoRoutes(paths: string[]) {
       (path) =>
         !(GUARDED_SSO_AUTH_PATHS as readonly string[]).includes(path) &&
         !GUARDED_SSO_READS.some((read) => read.path === path) &&
-        !GUARDED_SSO_DRAFT_WRITES.some(
-          (write) => write.path === path || write.runtimePath === path,
-        ),
+        !GUARDED_SSO_WRITES.some((write) => write.path === path || write.runtimePath === path),
     ),
   )
 }
@@ -452,7 +463,7 @@ function expectNoSsoOperations(document: Document) {
           (read) =>
             read.path === path && method === 'get' && read.operationId === operation.operationId,
         ) ||
-        GUARDED_SSO_DRAFT_WRITES.some(
+        GUARDED_SSO_WRITES.some(
           (write) =>
             write.path === path &&
             write.method === method &&
@@ -505,11 +516,11 @@ function webRouteNames(app: string, paths: string) {
 }
 
 describe('SSO hard-off excludes only SSO from the published catalogues', () => {
-  it('publishes exactly the guarded SSO draft reads and session writes in OpenAPI', async () => {
+  it('publishes exactly the guarded SSO reads and session writes in OpenAPI', async () => {
     const document = (await openApiDocument()) as Document
     for (const read of GUARDED_SSO_READS)
       expect(document.paths[read.path]?.get?.operationId).toBe(read.operationId)
-    for (const write of GUARDED_SSO_DRAFT_WRITES)
+    for (const write of GUARDED_SSO_WRITES)
       expect(document.paths[write.path]?.[write.method]?.operationId).toBe(write.operationId)
     expectNoSsoOperations(document)
   })
@@ -549,6 +560,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       MAILBOX_PROOF_CONSUME_PATH,
       OIDC_SIGN_IN_PATH,
       OIDC_CALLBACK_PATH,
+      OIDC_COMPLETE_PATH,
     ]).toEqual([...GUARDED_SSO_AUTH_PATHS])
     expectNoUnguardedSsoRoutes([...GUARDED_SSO_AUTH_PATHS])
     // The ordinary rule is unchanged: the same paths fail every other check.
@@ -569,7 +581,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       '/api/auth/sso/callback',
       '/api/auth/sso/callback/*',
       '/api/auth/sso/callback/:providerId/complete',
-      '/api/auth/sso/oidc/complete',
+      `${OIDC_COMPLETE_PATH}/`,
+      '/api/auth/sso/oidc/*',
+      '/api/auth/sso/oidc/complete/other',
       '/api/auth/sso/*',
       '/api/v1/sso/mailbox-proof/send',
       '/sso/mailbox-proof/consume',
@@ -604,7 +618,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
               const body =
                 path === OIDC_SIGN_IN_PATH
                   ? { providerId: id, intent: 'sign_in' }
-                  : { attemptId: id, token: 'synthetic' }
+                  : path === OIDC_COMPLETE_PATH
+                    ? { attemptId: id }
+                    : { attemptId: id, token: 'synthetic' }
               const response = await app.request(requestPath, {
                 method,
                 headers,
@@ -624,11 +640,11 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     }
   })
 
-  it('answers disabled for each exact draft write before caller, input or database access', async () => {
+  it('answers disabled for each SSO write before caller, input or database access', async () => {
     const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
     try {
       const app = createApp(productionOptions(db))
-      for (const write of GUARDED_SSO_DRAFT_WRITES)
+      for (const write of GUARDED_SSO_WRITES)
         for (const providerId of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id'])
           for (const headers of [
             {},
@@ -650,8 +666,8 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     }
   })
 
-  it('exempts draft writes only at their exact method, path and operation id', () => {
-    for (const write of GUARDED_SSO_DRAFT_WRITES) {
+  it('exempts SSO writes only at their exact method, path and operation id', () => {
+    for (const write of GUARDED_SSO_WRITES) {
       const check = (path: string, method: string, operationId: string) =>
         expectNoSsoOperations({ paths: { [path]: { [method]: { operationId } } } })
       check(write.path, write.method, write.operationId)

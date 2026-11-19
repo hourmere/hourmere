@@ -40,6 +40,34 @@ interface Recipient {
   kind: WorkflowRecipientClass
 }
 
+export function coreWorkflowIntents(
+  snapshot: NotificationSnapshot | null,
+  recipients: readonly Pick<Recipient, 'email' | 'kind'>[],
+  secret: string,
+) {
+  const notifications = snapshot?.notifications ?? DEFAULT_NOTIFICATIONS
+  const intents = new Set<string>()
+  for (const [kind, rules] of [
+    ['before_start', notifications.reminders],
+    ['after_end', notifications.followUps],
+  ] as const) {
+    for (const rule of rules)
+      for (const recipient of recipients) {
+        const selected =
+          recipient.kind === 'booker'
+            ? rule.recipients.invitee
+            : recipient.kind === 'guests'
+              ? rule.recipients.guests
+              : rule.recipients.host
+        if (selected)
+          intents.add(
+            `${kind}:${rule.offsetMinutes}:${workflowRecipientHash(recipient.email, secret).toString('hex')}`,
+          )
+      }
+  }
+  return intents
+}
+
 /** Internal service, directly exercised by fixtures; production uses the guarded export. */
 export async function captureBookingWorkflows(
   trx: Db,
@@ -196,26 +224,7 @@ export async function captureBookingWorkflows(
     guestCount: attendees.filter((a) => !a.is_booker).length,
   }
   const snapshot = booking.notification_snapshot as unknown as NotificationSnapshot | null
-  const notifications = snapshot?.notifications ?? DEFAULT_NOTIFICATIONS
-  const coreIntents = new Set<string>()
-  for (const [kind, rules] of [
-    ['before_start', notifications.reminders],
-    ['after_end', notifications.followUps],
-  ] as const) {
-    for (const rule of rules)
-      for (const recipient of recipients) {
-        const selected =
-          recipient.kind === 'booker'
-            ? rule.recipients.invitee
-            : recipient.kind === 'guests'
-              ? rule.recipients.guests
-              : rule.recipients.host
-        if (selected)
-          coreIntents.add(
-            `${kind}:${rule.offsetMinutes}:${workflowRecipientHash(recipient.email, secret).toString('hex')}`,
-          )
-      }
-  }
+  const coreIntents = coreWorkflowIntents(snapshot, recipients, secret)
   const captures = definitions.flatMap((row) => {
     const retained = carried.find((enrollment) => enrollment.workflow_id === row.id)
     return [

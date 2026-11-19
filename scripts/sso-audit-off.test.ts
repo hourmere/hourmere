@@ -32,11 +32,18 @@ const EMITTERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider.deleted',
     'sso_provider.secret_rotated',
   ],
+  'apps/server/src/sso-oidc-admission-write.ts': [
+    'sso_jit.admitted',
+    'sso_jit.refused',
+    'sso_link.linked',
+  ],
+  'apps/server/src/sso-oidc-link.ts': ['sso_link.linked', 'sso_link.conflicted'],
   'apps/server/src/sso-oidc-session.ts': ['sso_authentication.succeeded'],
   'apps/server/src/sso-oidc-sign-in.ts': [
     'sso_authentication.failed',
     'sso_authentication.replay_rejected',
   ],
+  'apps/server/src/sso-oidc-test-receipts.ts': ['sso_provider.tested'],
 }
 // An SSO action name as a string literal, whether or not the catalogue lists it.
 const SSO_ACTION = /['"`]sso_[a-z_]+\.[a-z_]+['"`]/

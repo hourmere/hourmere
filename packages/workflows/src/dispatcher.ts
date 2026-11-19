@@ -40,7 +40,7 @@ function page(value = WORKFLOW_DISPATCH_PAGE) {
 export async function lockedWorkflowRun(
   trx: Db,
   runId: string,
-  afterOrganization?: (trx: Db) => Promise<void>,
+  options?: { recipientClaimId: string; afterOrganization: (trx: Db) => Promise<void> },
 ) {
   const identity = await trx
     .selectFrom('workflow_runs as r')
@@ -54,13 +54,25 @@ export async function lockedWorkflowRun(
     .select('user_id')
     .where('organization_id', '=', identity.organization_id)
     .executeTakeFirst()
-  if (personal)
+  const recipient = options
+    ? await trx
+        .selectFrom('workflow_recipient_claims')
+        .select('recipient')
+        .where('run_id', '=', runId)
+        .where('id', '=', options.recipientClaimId)
+        .where('state', '=', 'pending')
+        .executeTakeFirst()
+    : undefined
+  const identityUsers = personal ? [personal.user_id] : []
+  if (recipient?.recipient.startsWith('host:')) identityUsers.push(recipient.recipient.slice(5))
+  if (identityUsers.length)
     await trx
       .selectFrom('auth.user')
       .select('id')
-      .where('id', '=', personal.user_id)
+      .where('id', 'in', identityUsers)
+      .orderBy('id')
       .forShare()
-      .executeTakeFirst()
+      .execute()
   const organization = await trx
     .selectFrom('auth.organization')
     .select('id')
@@ -68,7 +80,7 @@ export async function lockedWorkflowRun(
     .forKeyShare()
     .executeTakeFirst()
   if (!organization) return
-  await afterOrganization?.(trx)
+  await options?.afterOrganization(trx)
   const booking = await trx
     .selectFrom('bookings')
     .selectAll()
@@ -98,7 +110,6 @@ export async function lockedWorkflowRun(
   return { run, enrollment, definition, booking }
 }
 type LockedRun = NonNullable<Awaited<ReturnType<typeof lockedWorkflowRun>>>
-type Terminal = 'workflow_disabled' | 'expired' | 'retired'
 export function workflowRunWindow(run: LockedRun['run'], now: Temporal.Instant) {
   return workflowDispatchWindow(
     { dueAt: instant(run.due_at), expiresAt: instant(run.expires_at) },
@@ -183,7 +194,7 @@ export async function completeWorkflowEmailRun(
   trx: Db,
   locked: LockedRun,
   now: Temporal.Instant,
-  skipReason?: 'budget_suppressed' | 'expired',
+  skipReason?: 'budget_suppressed' | 'expired' | 'existing_notification' | 'render_limit',
 ) {
   const recipients = await trx
     .selectFrom('workflow_recipient_claims')
@@ -210,14 +221,11 @@ async function recoverWorkflowEmailMarker(trx: Db, locked: LockedRun, now: Tempo
   return abandoned.numUpdatedRows > 0n
 }
 
-export async function workflowRunIneligibility(
-  trx: Db,
-  locked: LockedRun,
-  webhookId?: string,
-): Promise<Terminal | undefined> {
+export async function workflowRunEligibility(trx: Db, locked: LockedRun) {
   const { booking, definition, enrollment, run } = locked
-  if (!definition || definition.deleted_at !== null || !booking) return 'retired'
-  if (!definition.enabled) return 'workflow_disabled'
+  const retired = { reason: 'retired' } as const
+  if (!definition || definition.deleted_at !== null || !booking) return retired
+  if (!definition.enabled) return { reason: 'workflow_disabled' } as const
   if (
     booking.status !== (enrollment.trigger === 'booking.cancelled' ? 'cancelled' : 'confirmed') ||
     booking.group_slot_id !== null ||
@@ -225,7 +233,7 @@ export async function workflowRunIneligibility(
     !['web', 'embed', 'api', 'mcp'].includes(booking.source) ||
     (await isImportedBooking(trx, booking.id))
   )
-    return 'retired'
+    return retired
   const eventType = await trx
     .selectFrom('event_types')
     .selectAll()
@@ -239,13 +247,13 @@ export async function workflowRunIneligibility(
     eventType.organization_id !== run.organization_id ||
     eventType.owner_user_id !== definition.owner_user_id
   )
-    return 'retired'
+    return retired
   const successor = await trx
     .selectFrom('bookings')
     .select('id')
     .where('rescheduled_from_id', '=', booking.id)
     .executeTakeFirst()
-  if (successor) return 'retired'
+  if (successor) return retired
   const revision = await trx
     .selectFrom('workflow_revisions')
     .select('definition')
@@ -254,15 +262,13 @@ export async function workflowRunIneligibility(
     .where('revision', '=', enrollment.revision)
     .executeTakeFirst()
   const captured = WorkflowDefinitionSchema.safeParse(revision?.definition)
-  if (!captured.success) return 'retired'
-  if (
-    webhookId !== undefined &&
-    !captured.data.actions.some(
-      (action) => action.type === 'webhook' && action.webhookId === webhookId,
-    )
-  )
-    return 'retired'
+  if (!captured.success) return retired
   const trigger = captured.data.trigger
+  if (
+    trigger.type !== enrollment.trigger ||
+    (captured.data.scope.type === 'event_type' && captured.data.scope.eventTypeId !== eventType.id)
+  )
+    return retired
   if (trigger.type === 'before_start' || trigger.type === 'after_end') {
     const due = workflowTimerDueAt(
       {
@@ -272,8 +278,9 @@ export async function workflowRunIneligibility(
       },
       { start: instant(booking.start_at), end: instant(booking.end_at) },
     )
-    if (due.epochMilliseconds !== run.due_at.getTime()) return 'retired'
+    if (due.epochMilliseconds !== run.due_at.getTime()) return retired
   }
+  return { reason: undefined, booking, eventType, captured: captured.data }
 }
 
 /** Take the same parent locks as dispatch, before the sender locks the endpoint. */
@@ -287,12 +294,19 @@ export async function lockWorkflowWebhookRun(
     locked.run.organization_id !== delivery.organizationId ||
     locked.run.booking_id !== delivery.bookingId ||
     locked.run.state === 'retired' ||
-    locked.run.state === 'skipped' ||
-    (await workflowRunIneligibility(trx, locked, delivery.webhookId))
+    locked.run.state === 'skipped'
+  )
+    return
+  const eligibility = await workflowRunEligibility(trx, locked)
+  if (
+    eligibility.reason ||
+    !eligibility.captured.actions.some(
+      (action) => action.type === 'webhook' && action.webhookId === delivery.webhookId,
+    )
   )
     return
   return {
-    eventTypeId: locked.booking?.event_type_id,
+    eventTypeId: eligibility.eventType.id,
     expiresAt: Math.min(
       locked.run.expires_at.getTime(),
       instant(locked.run.due_at).add({ minutes: WORKFLOW_MAX_LATE_MINUTES }).epochMilliseconds,
@@ -380,7 +394,7 @@ export async function claimDueWorkflowRuns(
       const recovered =
         run.state === 'claimed' && (await recoverWorkflowEmailMarker(trx, locked, now))
       if (recovered && (await completeWorkflowEmailRun(trx, locked, now))) return
-      const reason = await workflowRunIneligibility(trx, locked)
+      const { reason } = await workflowRunEligibility(trx, locked)
       const afterWait = ctx.now()
       if (reason || workflowRunWindow(run, afterWait) === 'expired') {
         await finishWorkflowRun(trx, locked, reason ?? 'expired', afterWait)
@@ -423,7 +437,7 @@ export async function dispatchClaimedWorkflowRun(
       run.lease_until.getTime() <= ctx.now().epochMilliseconds
     )
       return 'stale'
-    const reason = await workflowRunIneligibility(trx, locked)
+    const { reason } = await workflowRunEligibility(trx, locked)
     const now = ctx.now()
     // Eligibility itself may wait on live parent rows, so fence and deadline are read again.
     if (run.lease_until.getTime() <= now.epochMilliseconds) return 'stale'

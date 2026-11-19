@@ -13,6 +13,13 @@ import {
   UpdateSsoProviderInput,
   updateSsoProvider,
 } from '../sso-drafts.ts'
+import {
+  LinkSsoAccountInput,
+  linkSsoAccount,
+  type OidcProviderTestDeps,
+  TestSsoProviderInput,
+  testSsoProvider,
+} from '../sso-oidc-sign-in.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
 
 export const SsoProviderDraft = z
@@ -37,7 +44,7 @@ const FreshProofChallenge = ErrorBody.extend({
 }).openapi('SsoFreshProofChallenge')
 
 /** Browser-only trust changes; no corresponding machine tools or commands exist. */
-export function ssoDraftRoutes(deps: SsoDraftDeps): RouteModule {
+export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): RouteModule {
   const enabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
     requireSsoEnabled(deps.capabilities)
     let input: unknown
@@ -53,6 +60,12 @@ export function ssoDraftRoutes(deps: SsoDraftDeps): RouteModule {
       (('protocol' in input && input.protocol === 'saml') || 'saml' in input)
     )
       throw new DomainError('not_found', 'sso_disabled')
+    await next()
+  }
+  const oidcEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
+    c.header('Cache-Control', 'no-store')
+    c.header('Referrer-Policy', 'no-referrer')
+    requireSsoEnabled(deps.capabilities, 'oidc')
     await next()
   }
   const exactOrigin: MiddlewareHandler<CallerEnv> = async (c, next) => {
@@ -79,12 +92,12 @@ export function ssoDraftRoutes(deps: SsoDraftDeps): RouteModule {
     },
   }
   return ({ app, caller }) => {
-    const middleware = [
-      enabled,
+    const sessionMiddleware = [
       exactOrigin,
       teamManagementSessionCaller(caller),
       sessionOnly,
     ] as const
+    const middleware = [enabled, ...sessionMiddleware] as const
     app.openapi(
       createRoute({
         method: 'post',
@@ -120,6 +133,102 @@ export function ssoDraftRoutes(deps: SsoDraftDeps): RouteModule {
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)
         return c.json(result.value, 201)
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/team/sso/providers/{providerId}/test',
+        operationId: 'testSsoProvider',
+        tags: ['SSO'],
+        summary: 'Start a browser-bound OIDC test of a disabled SSO provider',
+        description:
+          'Verified team owner/admin browser session with fresh proof and expected revision. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.',
+        security: [{ session: [] }],
+        middleware: [oidcEnabled, ...sessionMiddleware] as const,
+        request: {
+          headers: z.object({
+            'X-Expected-Organization-Id': z.string().optional().openapi({
+              description:
+                'Required for writes; must match the current team. Missing or stale context returns 409.',
+            }),
+          }),
+          params: z.object({ providerId: z.uuidv7() }),
+          body: { required: true, content: json(TestSsoProviderInput) },
+        },
+        responses: {
+          200: {
+            description: 'Authorization URL and test attempt ID',
+            content: json(z.object({ url: z.url(), attemptId: z.uuid() })),
+          },
+          ...errors,
+        },
+      }),
+      async (c) => {
+        const result = await testSsoProvider(
+          deps,
+          c.var.principal,
+          c.req.raw.headers,
+          c.req.valid('param').providerId,
+          c.req.valid('json'),
+        )
+        if (result.status === 'proof_required') {
+          if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
+          return c.json(result.body, 403)
+        }
+        const { setCookie, ...body } = result.value
+        c.header('Set-Cookie', setCookie, { append: true })
+        return c.json(body, 200)
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/team/sso/providers/{providerId}/link',
+        operationId: 'linkSsoAccount',
+        tags: ['SSO'],
+        summary: 'Start explicit linking of the caller’s OIDC identity',
+        description:
+          'Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. SSO remains unavailable.',
+        security: [{ session: [] }],
+        middleware: [oidcEnabled, ...sessionMiddleware] as const,
+        request: {
+          headers: z.object({
+            'X-Expected-Organization-Id': z.string().optional().openapi({
+              description: 'Required for writes and must match the current team.',
+            }),
+          }),
+          params: z.object({ providerId: z.uuidv7() }),
+          body: { required: true, content: json(LinkSsoAccountInput) },
+        },
+        responses: {
+          ...errors,
+          200: {
+            description: 'Authorization URL and link attempt ID',
+            content: json(z.object({ url: z.url(), attemptId: z.uuid() })),
+          },
+          409: {
+            description:
+              'organization_context_changed, sso_configuration_changed or sso_domain_unverified',
+            content: json(ErrorBody),
+          },
+        },
+      }),
+      async (c) => {
+        const result = await linkSsoAccount(
+          deps,
+          c.var.principal,
+          c.req.raw.headers,
+          c.req.valid('param').providerId,
+          c.req.valid('json'),
+        )
+        if (result.status === 'proof_required') {
+          if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
+          return c.json(result.body, 403)
+        }
+        const { setCookie, ...body } = result.value
+        c.header('Set-Cookie', setCookie, { append: true })
+        return c.json(body, 200)
       },
     )
     app.openapi(

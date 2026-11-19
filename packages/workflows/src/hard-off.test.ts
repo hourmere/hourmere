@@ -477,6 +477,7 @@ describe('workflow hard-off', () => {
       '@hourmere/mail',
       '@hourmere/notifications',
       '@hourmere/notifications/workflow-mail',
+      '@hourmere/scheduling/notification-settings',
     ])
     const captureImports = new Set([
       'node:crypto',

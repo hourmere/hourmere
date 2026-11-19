@@ -4,13 +4,13 @@ import {
   interfaceLanguage,
 } from '@hourmere/core/language'
 import { mailMessage } from './catalogue.ts'
+import { formatMailDateTime } from './date-time.ts'
 import type { MailMessage } from './index.ts'
 import { emailLayout, emailLinkStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
 
 interface MeetingPollEmailOptions {
   to: string
-  publicUrl: string
   pollTitle: string
   timeZone: string
   language?: unknown
@@ -18,6 +18,7 @@ interface MeetingPollEmailOptions {
 }
 
 interface MeetingPollVotingLinkOptions extends MeetingPollEmailOptions {
+  publicUrl: string
   token: string
   expiresAt: Date
 }
@@ -32,6 +33,7 @@ export interface MeetingPollReminderEmailOptions extends MeetingPollVotingLinkOp
 }
 
 export interface MeetingPollDeadlineEmailOptions extends MeetingPollEmailOptions {
+  publicUrl: string
   pollId: string
   deadlineAt: Date
   responseCount: number
@@ -75,7 +77,7 @@ function pollMail(
   parts: { text: string; url?: string }[],
 ): MailMessage {
   if (!to || singleLine(to) !== to) throw new Error('Invalid meeting poll recipient')
-  const subject = subjectLine(subjectText)
+  const subject = subjectLine(subjectText).toWellFormed()
   return {
     sensitive: true,
     to,
@@ -158,4 +160,49 @@ export function meetingPollDeadlineEmail(options: MeetingPollDeadlineEmailOption
       url: `${origin}/api/v1/meeting-polls/${options.pollId}/results`,
     },
   ])
+}
+
+export interface MeetingPollOutcomeEmailOptions extends MeetingPollEmailOptions {
+  kind: 'selected' | 'rescheduled' | 'cancelled'
+  startAt: Date
+  endAt: Date
+}
+
+function outcomeTime(date: Date, timeZone: string, language: InterfaceLanguage): string {
+  try {
+    const time = Temporal.Instant.fromEpochMilliseconds(date.getTime()).toZonedDateTimeISO(timeZone)
+    const formatted = formatMailDateTime(
+      time,
+      {
+        dateStyle: 'full',
+        timeStyle: 'short',
+        ...(language === 'zh-CN' ? { hourCycle: 'h23' } : {}),
+      },
+      language,
+    )
+    return (
+      formatted +
+      mailMessage(language, 'format.zone', {
+        name: timeZone.replaceAll('_', ' '),
+        offset: `GMT${time.offset}`,
+      })
+    )
+  } catch {
+    throw new Error('Invalid meeting poll display time')
+  }
+}
+
+/** Informational poll outcome for a voter outside the booking's attendee list. */
+export function meetingPollOutcomeEmail(options: MeetingPollOutcomeEmailOptions): MailMessage {
+  const language = mailLanguage(options)
+  const subject = mailMessage(language, `poll.outcome.${options.kind}.subject`, {
+    poll: singleLine(options.pollTitle),
+  })
+  const body = mailMessage(language, `poll.outcome.${options.kind}.body`)
+  const when = mailMessage(language, 'format.timeRange', {
+    start: outcomeTime(options.startAt, options.timeZone, language),
+    end: outcomeTime(options.endAt, options.timeZone, language),
+    zone: '',
+  })
+  return pollMail(options.to, language, subject, [{ text: body }, { text: when }])
 }
