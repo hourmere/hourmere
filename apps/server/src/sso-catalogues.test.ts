@@ -17,7 +17,7 @@ import { type Config, loadConfig } from './config.ts'
 import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productionAppOptions, productionAuthOptions, productRoutes } from './server.ts'
 import { MAILBOX_PROOF_CONSUME_PATH, MAILBOX_PROOF_SEND_PATH } from './sso-mailbox-proof.ts'
-import { OIDC_CALLBACK_PATH, OIDC_SIGN_IN_PATH } from './sso-oidc-sign-in.ts'
+import { OIDC_CALLBACK_PATH, OIDC_COMPLETE_PATH, OIDC_SIGN_IN_PATH } from './sso-oidc-sign-in.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
@@ -79,7 +79,7 @@ function expectNoSsoRoutes(paths: string[]) {
 
 // The SSO auth-protocol endpoints that are built and mounted while hard-off, because each must
 // answer `404 sso_disabled` itself (docs/sso.md, Hard-off behaviour). The Mailbox proof and
-// OIDC sign-in paths are exempt by exact path from the production route inventory and the source
+// OIDC sign-in and completion paths are exempt by exact path from the route inventory and source
 // literals only, and only because the suite below proves that each answers
 // `404 {"error":"sso_disabled"}` in the app production assembles, before any other check.
 const GUARDED_SSO_AUTH_PATHS = [
@@ -87,6 +87,7 @@ const GUARDED_SSO_AUTH_PATHS = [
   '/api/auth/sso/mailbox-proof/consume',
   '/api/auth/sign-in/sso',
   '/api/auth/sso/callback/:providerId',
+  '/api/auth/sso/oidc/complete',
 ] as const
 
 const GUARDED_SSO_READS = [
@@ -141,6 +142,12 @@ const GUARDED_SSO_DRAFT_WRITES = [
     path: '/api/v1/team/sso/providers/{providerId}',
     runtimePath: '/api/v1/team/sso/providers/:providerId',
     operationId: 'deleteSsoProvider',
+  },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/providers/{providerId}/test',
+    runtimePath: '/api/v1/team/sso/providers/:providerId/test',
+    operationId: 'testSsoProvider',
   },
 ] as const
 
@@ -549,6 +556,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       MAILBOX_PROOF_CONSUME_PATH,
       OIDC_SIGN_IN_PATH,
       OIDC_CALLBACK_PATH,
+      OIDC_COMPLETE_PATH,
     ]).toEqual([...GUARDED_SSO_AUTH_PATHS])
     expectNoUnguardedSsoRoutes([...GUARDED_SSO_AUTH_PATHS])
     // The ordinary rule is unchanged: the same paths fail every other check.
@@ -569,7 +577,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       '/api/auth/sso/callback',
       '/api/auth/sso/callback/*',
       '/api/auth/sso/callback/:providerId/complete',
-      '/api/auth/sso/oidc/complete',
+      `${OIDC_COMPLETE_PATH}/`,
+      '/api/auth/sso/oidc/*',
+      '/api/auth/sso/oidc/complete/other',
       '/api/auth/sso/*',
       '/api/v1/sso/mailbox-proof/send',
       '/sso/mailbox-proof/consume',
@@ -604,7 +614,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
               const body =
                 path === OIDC_SIGN_IN_PATH
                   ? { providerId: id, intent: 'sign_in' }
-                  : { attemptId: id, token: 'synthetic' }
+                  : path === OIDC_COMPLETE_PATH
+                    ? { attemptId: id }
+                    : { attemptId: id, token: 'synthetic' }
               const response = await app.request(requestPath, {
                 method,
                 headers,

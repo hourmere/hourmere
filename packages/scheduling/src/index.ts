@@ -38,6 +38,7 @@ export {
   buildAvailabilityInput,
   type ExplainEventAvailabilityQuery,
   explainEventAvailability,
+  findPublicBookingPath,
   findSlots,
   getOneTimeBookingPage,
   getPublicEventType,
