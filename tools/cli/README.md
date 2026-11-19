@@ -375,12 +375,14 @@ ownership and team permissions still apply. See the
 
 `webhooks list` returns `{ data: [...] }` with endpoint metadata for the key's organization
 and requires `read` or `full`. `webhooks create` requires `full` and accepts JSON with
-`url`, `events` and optional `isActive` (default `true`). Both commands require the
+`url`, `events` and optional `isActive` (default `true`). All webhook commands require the
 verified personal owner or a current team owner/admin and use REST's error codes.
 
 ```sh
 hourmere webhooks list --json
 hourmere webhooks create --input webhook.json --output webhook-result.json
+printf '%s\n' '{"id":"WEBHOOK_UUID","isActive":false}' | hourmere webhooks update --input - --json
+printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks delete --input - --yes --json
 hourmere --help
 ```
 
@@ -390,6 +392,13 @@ Use `--output` when stdout is logged. It prints only `{"outputWritten":true}` on
 Copy the signing secret into the receiver's secret store and keep the response out of
 shell history and logs. See [Booking webhooks](https://hourmere.com/docs/webhooks) for the
 supported event kinds, destination policy and configuration.
+
+`webhooks update` and `webhooks delete` require `full`. Update takes `id` and at
+least one of `events` and `isActive`, and returns the updated metadata. The URL is
+immutable. To pause after a destination's allowlist entry is removed, pass only `id`
+and `isActive: false`. Delete takes `{ id }`, requires `--yes` and returns
+`{ "deleted": true }` after removing the endpoint and its retained deliveries.
+Both commands return `webhook_not_found` for a missing or out-of-organization endpoint.
 
 `workflows list` (JSON `owner` as `{"kind":"personal","id":USER_ID}` or
 `{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)

@@ -31,7 +31,7 @@ current verified membership and role before granting access.
 
 API keys need `read` or `full` scope to inspect webhook metadata and deliveries, and `full`
 to configure webhooks or rotate a signing secret. Disallowed scopes get `insufficient_scope`
-(HTTP 403 in REST). An authorized `mcp:tools` OAuth grant can call both MCP tools with
+(HTTP 403 in REST). An authorized `mcp:tools` OAuth grant can call the webhook MCP tools with
 the same organization and role checks. See [API key scopes](/docs/api-keys) for the generated
 operation table.
 
@@ -53,20 +53,28 @@ stored organization. See [browser organization context](/docs/api-conventions#br
 |---|---|---|---|
 | `POST /webhooks` | `create_webhook` | `webhooks create` | Create from `{ url, events, isActive? }` and receive `{ webhook, secret }` once |
 | `GET /webhooks` | `list_webhooks` | `webhooks list` | List up to ten endpoints with metadata only |
-| `PATCH /webhooks/{id}` | — | — | Change `events` and/or `isActive` |
+| `PATCH /webhooks/{id}` | `update_webhook` | `webhooks update` | Change `events` and/or `isActive` and return endpoint metadata |
 | `POST /webhooks/{id}/rotate-secret` | — | — | Replace the signing secret and receive `{ secret }` once |
-| `DELETE /webhooks/{id}` | — | — | Delete the endpoint and all retained deliveries |
+| `DELETE /webhooks/{id}` | `delete_webhook` | `webhooks delete` | Delete the endpoint and all retained deliveries |
 | `GET /webhooks/{id}/deliveries?after=…` | — | — | At most fifty delivery metadata rows, newest first |
 
 MCP listing takes `{}`. MCP and CLI return the same metadata as the REST list in
 `{ data: [...] }`. For CLI creation, supply the JSON arguments via `--input FILE` or
 `--input -`. Use `--output FILE` to save the response to a new private file or explicit
 `--json` to send it to standard output. Route the signing secret directly to private storage.
-See [CLI webhook examples](/docs/cli#list-and-create-webhooks).
 
-中文：Webhook 列表支持 `read` 或 `full` 密钥，创建需要 `full` 密钥。操作仅针对凭证所属的
+MCP and CLI update take the endpoint `id` and at least one of `events` or `isActive`.
+Deletion takes `{ id }` and returns `{ "deleted": true }`; REST returns `204 No Content`.
+The CLI requires `--yes` to delete. Both operations return `webhook_not_found` for a
+missing endpoint or one outside the credential's organization. See
+[CLI webhook examples](/docs/cli#manage-booking-webhooks).
+
+中文：Webhook 列表支持 `read` 或 `full` 密钥，创建、更新和删除需要 `full` 密钥。操作仅针对凭证所属的
 个人或团队组织，调用者须为个人所有者或当前团队所有者／管理员。创建仅返回一次签名密钥，
 列表仅返回元数据。CLI 可用 `--output` 将创建结果写入新建的私有文件。
+更新可修改订阅事件和启用状态，目标 URL 固定。移除目标白名单条目后，仍可仅传
+`isActive: false` 暂停。删除会一并清除保留的投递记录，CLI 需加 `--yes` 确认；
+不存在或属于其他组织的端点均返回 `webhook_not_found`。
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
@@ -78,9 +86,11 @@ URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user i
 or fragment, and at most 2048 characters. Private, loopback and special-purpose destinations
 are refused unless the operator explicitly allows an eligible private destination below.
 Syntax and the current operator policy are checked when creating an endpoint and updating
-its subscription/active settings. A PATCH containing only `isActive: false` can always pause
-an endpoint, including after its allowlist entry is removed; all other updates recheck the
-policy. DNS is checked on every actual delivery. Registration does no DNS
+its subscription/active settings. An update containing only `isActive: false` (plus the ID
+for MCP and CLI) can always pause an endpoint, including after its allowlist entry is removed.
+All other updates recheck the policy. An attempt to a destination that policy now forbids
+is blocked before sending.
+DNS is checked on every actual delivery. Registration does no DNS
 lookup or verification request: accepted configuration does not prove availability, and
 rejected creation/update errors do not disclose whether an internal hostname exists.
 Treat any credential in your destination's query as sensitive, even though Hourmere never

@@ -939,6 +939,24 @@ describe('workflow design numeric contracts', () => {
     expect(step('13a')).toContain('"Webhook management is REST-only" sentence')
   }, 30_000) // Reads every test and Markdown file it scans; a cold file cache can be slow.
 
+  it('documents webhook updates and deletion in the webhook, MCP and CLI guides', () => {
+    for (const guide of [
+      'apps/site/src/content/docs/docs/webhooks.md',
+      'apps/site/src/content/docs/docs/mcp.md',
+      'apps/site/src/content/docs/docs/cli.md',
+    ]) {
+      for (const name of [
+        'update_webhook',
+        'delete_webhook',
+        'webhooks update',
+        'webhooks delete',
+      ]) {
+        expect(read(guide), guide).toContain(`\`${name}\``)
+      }
+    }
+    expect(read('apps/site/src/content/docs/docs/cli.md')).toContain('--input - --yes --json')
+  })
+
   it('decides every BookingNotifier event kind on main for workflow capture', () => {
     const context = read('packages/scheduling/src/context.ts')
     const union = context.split('export type BookingEvent =')[1]?.split('\n\n')[0] ?? ''

@@ -171,12 +171,16 @@ describe('published API key scope tables', () => {
       )
   })
 
-  it.each(documents)('$path publishes webhook list and create scopes', ({ document, section }) => {
+  it.each(documents)('$path publishes webhook management scopes', ({ document, section }) => {
     expect(document).toContain('| `list_webhooks` | — | `webhooks list` | `full, read` |')
     expect(document).toContain('| `create_webhook` | — | `webhooks create` | `full` |')
+    expect(document).toContain('| `update_webhook` | — | `webhooks update` | `full` |')
+    expect(document).toContain('| `delete_webhook` | — | `webhooks delete` | `full` |')
     if (section === 'all') {
       expect(document).toContain('| `GET /api/v1/webhooks` | Session or API key | `full, read` |')
       expect(document).toContain('| `POST /api/v1/webhooks` | Session or API key | `full` |')
+      expect(document).toContain('| `PATCH /api/v1/webhooks/{id}` | Session or API key | `full` |')
+      expect(document).toContain('| `DELETE /api/v1/webhooks/{id}` | Session or API key | `full` |')
     }
   })
 

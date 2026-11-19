@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { type ApiKeyScope, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -21,6 +21,15 @@ const events = [
   'booking.rescheduled',
 ]
 const input = { url: 'https://hooks.example.com/bookings', events, isActive: false }
+const methods = { list: 'GET', create: 'POST', update: 'PATCH', delete: 'DELETE' } as const
+const tools = {
+  list: 'list_webhooks',
+  create: 'create_webhook',
+  update: 'update_webhook',
+  delete: 'delete_webhook',
+} as const
+type Action = keyof typeof methods
+type Input = { id?: string } & Record<string, unknown>
 type Created = { webhook: WebhookView; secret: string }
 
 describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', () => {
@@ -72,9 +81,13 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     return key
   }
 
-  function rest(key: string, body?: object) {
-    return app.request('/api/v1/webhooks', {
-      method: body ? 'POST' : 'GET',
+  function rest(key: string, args?: Input, action: Action = args ? 'create' : 'list') {
+    const { id, ...changes } = args ?? {}
+    const path =
+      action === 'update' || action === 'delete' ? `/api/v1/webhooks/${id}` : '/api/v1/webhooks'
+    const body = action === 'update' ? changes : action === 'create' ? args : undefined
+    return app.request(path, {
+      method: methods[action],
       headers: {
         authorization: `Bearer ${key}`,
         ...(body && { 'content-type': 'application/json' }),
@@ -83,7 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     })
   }
 
-  async function mcp(key: string, body?: object) {
+  async function mcp(key: string, body?: Input, action: Action = body ? 'create' : 'list') {
     const response = await app.request('/mcp', {
       method: 'POST',
       headers: {
@@ -95,7 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
-        params: { name: body ? 'create_webhook' : 'list_webhooks', arguments: body ?? {} },
+        params: { name: tools[action], arguments: body ?? {} },
       }),
     })
     expect(response.status).toBe(200)
@@ -105,11 +118,18 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     return JSON.parse(event ? event.slice(6) : text).result
   }
 
-  async function cli(key: string, body?: object) {
+  async function cli(key: string, body?: Input, action: Action = body ? 'create' : 'list') {
     let stdout = ''
     let stderr = ''
     const code = await runCli({
-      argv: ['webhooks', body ? 'create' : 'list', '--json', '--input', '-'],
+      argv: [
+        'webhooks',
+        action,
+        '--json',
+        '--input',
+        '-',
+        ...(action === 'delete' ? ['--yes'] : []),
+      ],
       env: { HOURMERE_URL: publicUrl, HOURMERE_API_KEY: key },
       stdin: (async function* () {
         yield JSON.stringify(body ?? {})
@@ -126,20 +146,27 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     return { code, stdout, stderr }
   }
 
-  async function expectFailure(key: string, status: number, error: string, body?: object) {
-    const result = await mcp(key, body)
+  async function expectFailure(
+    key: string,
+    status: number,
+    error: string,
+    body?: Input,
+    action?: Action,
+  ) {
+    const result = await mcp(key, body, action)
     expect(result.isError).toBe(true)
     const mcpError = JSON.parse(result.content[0].text)
     expect(mcpError).toMatchObject({ error })
-    const command = await cli(key, body)
+    const command = await cli(key, body, action)
     expect(command.code).toBe(1)
     expect(command.stdout).toBe('')
     expect(JSON.parse(command.stderr)).toMatchObject({ error })
-    const response = await rest(key, body)
+    const response = await rest(key, body, action)
     expect(response.status).toBe(status)
     const restError = await response.json()
     expect(restError).toMatchObject({ error })
-    if (status === 403) expect(mcpError).toEqual(restError)
+    if (status === 403 || status === 404) expect(mcpError).toEqual(restError)
+    if (status === 404) expect(restError).toEqual({ error })
   }
 
   it('creates and lists only within the credential organization, revealing each secret once', async () => {
@@ -232,5 +259,113 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     await expectFailure(key, 400, 'invalid_webhook', { ...input, events: [] })
     await expectFailure(key, 400, 'invalid_request', { ...input, oneTimeToken: 'unused' })
     await expectFailure(key, 400, 'invalid_request', { ...input, events: ['workflow.executed'] })
+  })
+
+  it('updates subscriptions and pauses or resumes without changing the destination, then deletes', async () => {
+    const owner = await fixtures.host()
+    const admin = await fixtures.host()
+    const teamId = await fixtures.organization()
+    await fixtures.member(owner.userId, teamId, 'owner')
+    await fixtures.member(admin.userId, teamId, 'admin')
+    const ownerKey = await credential(owner.userId, teamId)
+    const adminKey = await credential(admin.userId, teamId)
+    const personalKey = await credential(owner.userId, owner.organizationId)
+    const created = (await (await rest(ownerKey, input)).json()) as Created
+    const personal = (await (await rest(personalKey, input)).json()) as Created
+    const { id } = created.webhook
+
+    await expectFailure(
+      ownerKey,
+      400,
+      'invalid_request',
+      { id, url: 'https://replacement.example.test' },
+      'update',
+    )
+    await expectFailure(
+      ownerKey,
+      400,
+      'invalid_request',
+      { id, events: ['workflow.executed'] },
+      'update',
+    )
+    await expectFailure(ownerKey, 400, 'invalid_webhook', { id }, 'update')
+
+    const newEvents = ['booking.created']
+    const edited = await mcp(adminKey, { id, events: newEvents }, 'update')
+    expect(edited.isError).toBeFalsy()
+    expect(edited.structuredContent).toMatchObject({
+      id,
+      url: input.url,
+      events: newEvents,
+      isActive: false,
+    })
+    expect(JSON.stringify(edited).includes(created.secret)).toBe(false)
+    expect(await (await rest(ownerKey)).json()).toEqual([edited.structuredContent])
+
+    const resumed = await cli(ownerKey, { id, isActive: true }, 'update')
+    expect(resumed.code).toBe(0)
+    expect(resumed.stderr).toBe('')
+    expect(resumed.stdout.includes(created.secret)).toBe(false)
+    expect(JSON.parse(resumed.stdout)).toMatchObject({
+      id,
+      url: input.url,
+      events: newEvents,
+      isActive: true,
+    })
+    const paused = await rest(adminKey, { id, isActive: false }, 'update')
+    expect(paused.status).toBe(200)
+    expect(await paused.json()).toMatchObject({
+      id,
+      url: input.url,
+      events: newEvents,
+      isActive: false,
+    })
+
+    expect((await mcp(adminKey, { id }, 'delete')).structuredContent).toEqual({ deleted: true })
+    expect(await (await rest(ownerKey)).json()).toEqual([])
+    await expectFailure(ownerKey, 404, 'webhook_not_found', { id }, 'delete')
+    const deleted = await cli(personalKey, { id: personal.webhook.id }, 'delete')
+    expect(deleted.code).toBe(0)
+    expect(deleted.stderr).toBe('')
+    expect(JSON.parse(deleted.stdout)).toEqual({ deleted: true })
+    expect(await (await rest(personalKey)).json()).toEqual([])
+  })
+
+  it('requires full scope and current admin authority for writes, with uniform organization isolation', async () => {
+    const host = await fixtures.host()
+    const teamId = await fixtures.organization()
+    await fixtures.member(host.userId, teamId, 'admin')
+    const full = await credential(host.userId, teamId)
+    const read = await credential(host.userId, teamId, 'read')
+    const bookings = await credential(host.userId, teamId, 'bookings')
+    const personal = await credential(host.userId, host.organizationId)
+    const created = (await (await rest(full, input)).json()) as Created
+    const { id } = created.webhook
+
+    for (const action of ['update', 'delete'] as const) {
+      const args = (target: string) => ({
+        id: target,
+        ...(action === 'update' && { isActive: true }),
+      })
+      for (const key of [read, bookings])
+        await expectFailure(key, 403, 'insufficient_scope', args(id), action)
+      for (const target of [id, randomUUID(), 'malformed'])
+        await expectFailure(personal, 404, 'webhook_not_found', args(target), action)
+    }
+
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', teamId)
+      .where('userId', '=', host.userId)
+      .execute()
+    await expectFailure(full, 403, 'insufficient_role', { id, isActive: true }, 'update')
+    await expectFailure(full, 403, 'insufficient_role', { id }, 'delete')
+    const row = await db
+      .selectFrom('webhooks')
+      .select('is_active')
+      .where('id', '=', id)
+      .executeTakeFirst()
+    expect(row).toEqual({ is_active: false })
   })
 })

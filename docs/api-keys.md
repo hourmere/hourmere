@@ -321,6 +321,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `test_slack_destination` | — | `slack test` | `full` |
 | `list_webhooks` | — | `webhooks list` | `full, read` |
 | `create_webhook` | — | `webhooks create` | `full` |
+| `update_webhook` | — | `webhooks update` | `full` |
+| `delete_webhook` | — | `webhooks delete` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |

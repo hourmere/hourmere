@@ -329,6 +329,8 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('test_slack_destination', 'other_write', ['POST /api/v1/slack-destinations/{id}/test']),
   mcp('list_webhooks', 'other_read', ['GET /api/v1/webhooks']),
   mcp('create_webhook', 'other_write', ['POST /api/v1/webhooks']),
+  mcp('update_webhook', 'other_write', ['PATCH /api/v1/webhooks/{id}']),
+  mcp('delete_webhook', 'other_write', ['DELETE /api/v1/webhooks/{id}']),
   mcp('whoami', 'booking_read', ['GET /api/v1/me']),
   mcp('find_available_slots', 'booking_read', [
     'GET /api/v1/public/{handle}/{slug}/slots',
@@ -523,6 +525,8 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('slack test', 'test_slack_destination'),
   cli('webhooks list', 'list_webhooks'),
   cli('webhooks create', 'create_webhook'),
+  cli('webhooks update', 'update_webhook'),
+  cli('webhooks delete', 'delete_webhook'),
   cli('one-time-links create', 'create_one_time_link'),
   cli('one-time-links list', 'list_one_time_links'),
   cli('one-time-links revoke', 'revoke_one_time_link'),

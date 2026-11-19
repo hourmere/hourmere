@@ -424,6 +424,8 @@ describe('shared API-key scope policy', () => {
         'test_slack_destination',
         'list_webhooks',
         'create_webhook',
+        'update_webhook',
+        'delete_webhook',
         'whoami',
         'find_available_slots',
         'generate_open_time_snippet',

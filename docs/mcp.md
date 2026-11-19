@@ -81,6 +81,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `test_slack_destination` | — | `slack test` | `full` |
 | `list_webhooks` | — | `webhooks list` | `full, read` |
 | `create_webhook` | — | `webhooks create` | `full` |
+| `update_webhook` | — | `webhooks update` | `full` |
+| `delete_webhook` | — | `webhooks delete` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -196,7 +198,7 @@ apply migrations and restart every role with the new code before allowing scoped
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
 
-## List and create booking webhooks
+## Manage booking webhooks
 
 `list_webhooks` takes `{}` and returns `{ data: [...] }` with up to ten endpoint records
 in the acting organization, with metadata only. Use a `read` or `full` API key.
@@ -204,14 +206,23 @@ in the acting organization, with metadata only. Use a `read` or `full` API key.
 `isActive` (default `true`). It returns `{ webhook, secret }` once. Save `secret` directly
 to the receiver's secret store and keep the tool result out of logs.
 
-An authorized `mcp:tools` OAuth grant can use both tools. Both take the organization from
+`update_webhook` (CLI `webhooks update`) takes `id` and at least one of `events` or
+`isActive`, then returns the updated metadata. The URL is immutable. To pause after
+a destination's allowlist entry is removed, pass only `id` and `isActive: false`.
+`delete_webhook` (CLI `webhooks delete`) takes `{ id }` and returns `{ "deleted": true }`
+after removing the endpoint and its retained deliveries. Both writes require a `full`
+API key. IDs that are missing or belong to another organization return `webhook_not_found`.
+
+An authorized `mcp:tools` OAuth grant can use these tools. They take the organization from
 the credential and require a verified personal owner or current team owner/admin.
 Disallowed API key scopes return `insufficient_scope`, and callers without the required
 role get `insufficient_role`, matching REST. See [Booking webhooks](https://hourmere.com/docs/webhooks)
 for supported events, URL policy and configuration.
 
 中文：`list_webhooks` 接受 `read` 或 `full` 密钥，`create_webhook` 需要 `full` 密钥。
-两者均检查凭证所属组织及当前角色。创建仅返回一次签名密钥，请保存到接收端的密钥存储。
+所有操作均检查凭证所属组织及当前角色。创建仅返回一次签名密钥，请保存到接收端的密钥存储。
+`update_webhook` 和 `delete_webhook` 均需要 `full` 密钥。更新可修改订阅事件和启用状态，
+目标 URL 固定。删除会清除保留的投递记录。不存在或属于其他组织的端点均返回 `webhook_not_found`。
 
 ## Manage hosted bookings
 

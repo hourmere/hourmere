@@ -103,6 +103,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `test_slack_destination` | — | `slack test` | `full` |
 | `list_webhooks` | — | `webhooks list` | `full, read` |
 | `create_webhook` | — | `webhooks create` | `full` |
+| `update_webhook` | — | `webhooks update` | `full` |
+| `delete_webhook` | — | `webhooks delete` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -307,7 +309,7 @@ OAuth authorization, code exchange and disconnect require a live browser session
 explicit Zoom credential refresh remains session-only. Calendar settings mutations use REST
 with a `full` API key; MCP OAuth grants do not authenticate REST requests.
 
-## List and create booking webhooks
+## Manage booking webhooks
 
 `list_webhooks` takes `{}` and returns `{ data: [...] }` with up to ten endpoints in the
 credential's organization. The result contains endpoint metadata only. Use a `read` or
@@ -315,14 +317,23 @@ credential's organization. The result contains endpoint metadata only. Use a `re
 `{ url, events, isActive? }`. It returns `{ webhook, secret }` once. Store the signing secret
 directly in the receiver's secret store and keep the tool result out of logs.
 
-An authorized `mcp:tools` OAuth grant can call both tools. Both use REST's checks for the
+`update_webhook` (CLI `webhooks update`) takes `id` and at least one of `events` or
+`isActive`, then returns the updated metadata. The URL is immutable. To pause after
+a destination's allowlist entry is removed, pass only `id` and `isActive: false`.
+`delete_webhook` (CLI `webhooks delete`) takes `{ id }` and returns `{ "deleted": true }`
+after removing the endpoint and its retained deliveries. Both writes require a `full`
+API key. IDs that are missing or belong to another organization return `webhook_not_found`.
+
+An authorized `mcp:tools` OAuth grant can call these tools. They use REST's checks for the
 verified personal owner or current team owner/admin in the acting organization.
 Disallowed API key scopes get `insufficient_scope`, and callers without the required
 role get `insufficient_role`. See [Booking webhooks](/docs/webhooks) for supported events,
 URL policy and configuration.
 
 中文：`list_webhooks` 接受 `read` 或 `full` 密钥，`create_webhook` 需要 `full` 密钥。
-两者均检查凭证所属组织及当前角色。创建仅返回一次签名密钥，请保存到接收端的密钥存储。
+所有操作均检查凭证所属组织及当前角色。创建仅返回一次签名密钥，请保存到接收端的密钥存储。
+`update_webhook` 和 `delete_webhook` 均需要 `full` 密钥。更新可修改订阅事件和启用状态，
+目标 URL 固定。删除会清除保留的投递记录。不存在或属于其他组织的端点均返回 `webhook_not_found`。
 
 ## Create and manage event types
 
@@ -656,6 +667,8 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
 | `list_webhooks` | Booking webhook metadata for the acting organization | read-only |
 | `create_webhook` | Registers a booking webhook and returns the signing secret once | — |
+| `update_webhook` | Changes webhook subscriptions or pauses/resumes delivery | destructive |
+| `delete_webhook` | Deletes a webhook and its retained deliveries | destructive, idempotent |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
 | `troubleshoot_availability` | Every possible start time of one local day with bookable status and plain reason codes; owner/admin and `full` keys only, no calendar or booking details | read-only |
 | `generate_open_time_snippet` | Earliest open alternatives with direct booking links and localized text/HTML for an email draft; owner/admin only, no reservation | read-only |
