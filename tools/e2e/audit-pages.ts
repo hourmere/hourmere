@@ -11,7 +11,27 @@ import {
 } from './audit-data.ts'
 import type { FixtureApp } from './fixtures.ts'
 
+const pollAuditPages = [
+  { id: 'poll-unavailable', title: 'Unavailable meeting poll' },
+  { id: 'poll-enroll', title: 'Meeting poll enrollment' },
+  { id: 'poll-check-email', title: 'Meeting poll check email' },
+  { id: 'poll-verify', title: 'Meeting poll verification' },
+  { id: 'poll-ballot', title: 'Meeting poll ballot' },
+  { id: 'poll-saved', title: 'Meeting poll saved ballot' },
+  { id: 'poll-withdrawn', title: 'Meeting poll withdrawn ballot' },
+  { id: 'poll-closed', title: 'Meeting poll read-only closure' },
+  { id: 'poll-recover', title: 'Meeting poll access recovery' },
+  { id: 'poll-opt-out', title: 'Meeting poll reminder opt-out' },
+  { id: 'poll-opted-out', title: 'Meeting poll reminder opt-out confirmation' },
+] as const
+
+type PollAuditPageId = (typeof pollAuditPages)[number]['id']
+function isPollAuditPage(id: string): id is PollAuditPageId {
+  return pollAuditPages.some((entry) => entry.id === id)
+}
+
 export const auditPages = [
+  ...pollAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -185,6 +205,14 @@ export async function openAuditPage(
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
+    if (isPollAuditPage(id)) {
+      await app.auditSignIn(false, locale)
+      await page.addInitScript(prepareAuditLocale, locale)
+      await openPollAuditPage(page, app, id)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
     const fixture = await app.auditState()
     await app.auditSignIn(
       !publicPages.has(id),
@@ -192,7 +220,7 @@ export async function openAuditPage(
       id === 'team-bookings' || id === 'team-booking-detail' ? 'team' : undefined,
     )
     await page.addInitScript(prepareAuditLocale, locale)
-    const paths: Record<AuditPageId, string> = {
+    const paths: Record<Exclude<AuditPageId, PollAuditPageId>, string> = {
       host: '/fixture-host',
       booking: fixture.bookingPath,
       'booking-form': fixture.bookingPath,
@@ -334,6 +362,66 @@ export async function openAuditPage(
     // This intentionally drops their message/cause while retaining a useful state id.
     throw new Error(`Could not prepare synthetic audit state: ${id}`)
   }
+}
+
+/** Populate synthetic rows and hand capabilities to the page only through its fragment. */
+async function openPollAuditPage(page: Page, app: FixtureApp, id: PollAuditPageId) {
+  const state =
+    id === 'poll-verify'
+      ? 'verify'
+      : id === 'poll-saved'
+        ? 'saved'
+        : id === 'poll-withdrawn'
+          ? 'withdrawn'
+          : id === 'poll-closed'
+            ? 'closed'
+            : id === 'poll-enroll' || id === 'poll-check-email'
+              ? 'enroll'
+              : 'vote'
+  const fixture = await app.auditPollState(state)
+  const optOut = id === 'poll-opt-out' || id === 'poll-opted-out'
+  const path = optOut
+    ? '/poll/reminder-opt-out'
+    : id === 'poll-recover'
+      ? '/poll/recover'
+      : id === 'poll-enroll' || id === 'poll-check-email' || id === 'poll-unavailable'
+        ? '/poll'
+        : '/poll/voter'
+  await page.goto(app.url + path)
+  await page.locator('h1').waitFor()
+  if (id !== 'poll-unavailable' && id !== 'poll-recover') {
+    await page.evaluate(
+      (token) => {
+        window.location.hash = token
+      },
+      optOut ? fixture.optOutToken : state === 'enroll' ? fixture.publicToken : fixture.voterToken,
+    )
+    await page.waitForFunction(() => window.location.hash === '')
+  }
+  if (id === 'poll-check-email') {
+    await page.getByLabel(/^(Your name|你的姓名)$/).fill('Synthetic voter')
+    await page.locator('input[type="email"]').fill('synthetic-check-email@hourmere.invalid')
+    await page
+      .getByRole('button', { name: /^(Send verification email|发送验证邮件)$/ })
+      .press('Enter')
+  }
+  if (id === 'poll-opted-out')
+    await page.getByRole('button', { name: /^(Stop reminders|停止提醒)$/ }).press('Enter')
+  const ready = {
+    'poll-unavailable': 'unavailable',
+    'poll-enroll': 'enroll',
+    'poll-check-email': 'check-email',
+    'poll-verify': 'verify',
+    'poll-ballot': 'ballot',
+    'poll-saved': 'saved',
+    'poll-withdrawn': 'withdrawn',
+    'poll-closed': 'closed',
+    'poll-recover': 'recover',
+    'poll-opt-out': 'opt-out',
+    'poll-opted-out': 'opted-out',
+  }[id]
+  await page.locator(`[data-poll-state="${ready}"]`).waitFor()
+  verifyAuditPath(page.url(), path)
 }
 
 /** Expand every settings disclosure before layout and axe inspect this separate state. */

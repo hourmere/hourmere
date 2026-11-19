@@ -61,6 +61,13 @@ export const admin = {
     'Check the group settings: use one host, 2–100 seats, no additional guests and no invitee phone location.',
   'Booking mode cannot change while upcoming confirmed bookings exist.':
     'Booking mode cannot change while upcoming confirmed bookings exist.',
+  'Seat status': 'Seat status',
+  'Active seats': 'Active seats',
+  'Cancelled seats': 'Cancelled seats',
+  'All seats': 'All seats',
+  'No seats match this filter on this page.': 'No seats match this filter on this page.',
+  'Attendee list pages': 'Attendee list pages',
+  'Page {page}': 'Page {page}',
   'Session attendee list': 'Session attendee list',
   'Only the host and authorized team administrators can see this list. Invitees cannot see each other.':
     'Only the host and authorized team administrators can see this list. Invitees cannot see each other.',

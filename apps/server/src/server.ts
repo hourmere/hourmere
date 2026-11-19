@@ -96,6 +96,8 @@ import {
   expireMeetingPollCapabilities,
   expirePaymentHolds,
   purgeAuditEvents,
+  type RecurringBookingAdmissionDeps,
+  recurringBookingAdmissionEnabled,
   removeWaitlist,
   scanWaitlists,
   verifyWaitlist,
@@ -169,6 +171,7 @@ import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
+import { SSO_DOMAIN_RECHECK_JOB, ssoDomainRecheckJob } from './sso-domain-recheck.ts'
 import {
   type MailboxProofQueue,
   mailboxProofJobs,
@@ -230,6 +233,7 @@ export function productRoutes({
   waitlistSecret,
   meetingPollSecret,
   smtpConfigured,
+  recurringBookingsEnabled,
   auditLogRetentionDays = null,
 }: {
   db: Db
@@ -277,7 +281,7 @@ export function productRoutes({
   zoomWebhookClientId?: string | undefined
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
-}): RouteModule[] {
+} & RecurringBookingAdmissionDeps): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
     instanceRoutes({
@@ -338,6 +342,7 @@ export function productRoutes({
       automaticMeet,
       automaticZoom,
       successRedirectPolicy,
+      recurringBookingsEnabled,
     }),
     meetingPollRoutes({ db, meetingPollSecret }),
     publicRoutes({
@@ -476,7 +481,7 @@ export function productTools({
 }
 
 /** What the running server's app options need beyond the configuration. */
-export interface ProductionAppDeps {
+export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   config: Config
   db: Db
   /** Better Auth: its request handler, and the MCP authorization provider when enabled. */
@@ -529,6 +534,7 @@ export function productionAppOptions({
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
   mailboxProofQueue,
+  recurringBookingsEnabled,
 }: ProductionAppDeps): AppDeps {
   // All configuration transports and public booking routes share the instance policy.
   const successRedirectPolicy = {
@@ -571,6 +577,7 @@ export function productionAppOptions({
       automaticZoom: config.ZOOM_MEETINGS_ENABLED,
       followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
       smsRemindersAvailable: config.SMS_PROVIDER === 'twilio',
+      recurringBookingsEnabled,
       embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
       slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
       successRedirectPolicy,
@@ -686,19 +693,26 @@ export interface RunningServer {
   close(): Promise<void>
 }
 
-/** Starts Hourmere from environment variables (see .env.example). */
-export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise<RunningServer> {
+/** Starts Hourmere from environment variables (see .env.example) and optional test dependencies. */
+export async function startServer(
+  env: NodeJS.ProcessEnv = process.env,
+  options: RecurringBookingAdmissionDeps = {},
+): Promise<RunningServer> {
   // First, before anything can log: one line per console call, control characters escaped.
   const restoreConsole = installOneLineConsole()
   try {
-    return await start(env, restoreConsole)
+    return await start(env, options, restoreConsole)
   } catch (err) {
     restoreConsole()
     throw err
   }
 }
 
-async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promise<RunningServer> {
+async function start(
+  env: NodeJS.ProcessEnv,
+  options: RecurringBookingAdmissionDeps,
+  restoreConsole: () => void,
+): Promise<RunningServer> {
   const config = loadConfig(env)
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
@@ -918,7 +932,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   })
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
+    disabledSchedules: ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB],
     definitions: [
+      ssoDomainRecheckJob({
+        db,
+        publicUrl: config.PUBLIC_URL,
+        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+      }),
       ...waitlistMaintenanceJobs({
         scan: () => scanWaitlists(waitlistDeps),
         cleanup: () => cleanupWaitlist(waitlistDeps, { limit: 1000 }),
@@ -1126,6 +1146,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     fetch = createApp(
       productionAppOptions({
         config,
+        recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
         db,
         auth,
         resolveCaller: createCallerResolver({ auth, db }),

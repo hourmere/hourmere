@@ -29,38 +29,15 @@
     "exemption": "browser-session-only",
     "reason": "Retiring authentication authority requires interactive administrator proof."
   },
-  "deleteWorkflow": {
-    "mcp": "delete_workflow",
-    "cli": "workflows delete"
-  },
-  "listSsoProviders": {
-    "mcp": "list_sso_providers",
-    "cli": "sso providers list"
-  },
-  "getSsoPolicy": {
-    "mcp": "get_sso_policy",
-    "cli": "sso policy"
-  },
-  "createRoutingForm": {
-    "mcp": "create_routing_form",
-    "cli": "routing-forms create"
-  },
-  "updateRoutingForm": {
-    "mcp": "update_routing_form",
-    "cli": "routing-forms update"
-  },
-  "archiveRoutingForm": {
-    "mcp": "archive_routing_form",
-    "cli": "routing-forms archive"
-  },
-  "updateWorkflow": {
-    "mcp": "update_workflow",
-    "cli": "workflows update"
-  },
-  "createWorkflow": {
-    "mcp": "create_workflow",
-    "cli": "workflows create"
-  },
+  "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
+  "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
+  "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },
+  "createRoutingForm": { "mcp": "create_routing_form", "cli": "routing-forms create" },
+  "updateRoutingForm": { "mcp": "update_routing_form", "cli": "routing-forms update" },
+  "archiveRoutingForm": { "mcp": "archive_routing_form", "cli": "routing-forms archive" },
+  "publishRoutingForm": { "mcp": "publish_routing_form", "cli": "routing-forms publish" },
+  "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
+  "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {
     "mcp": "generate_open_time_snippet",
     "cli": "open-time-snippet"

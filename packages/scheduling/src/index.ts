@@ -326,10 +326,26 @@ export {
   TeamReadinessPageSchema,
 } from './readiness.ts'
 export {
+  RECURRING_BOOKINGS_ENABLED,
+  type RecurringBookingAdmissionDeps,
+  recurringBookingAdmissionEnabled,
+} from './recurring-admission.ts'
+export {
+  expandRecurringRule,
+  MAX_RECURRING_HORIZON_DAYS,
+  MAX_RECURRING_OCCURRENCES,
+  MIN_RECURRING_OCCURRENCES,
+  normalizeRecurringRule,
+  type RecurringExpansionInput,
+  type RecurringOccurrence,
+  type RecurringRule,
+} from './recurring-rules.ts'
+export {
   archiveRoutingForm,
   createRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  publishRoutingForm,
   updateRoutingForm,
 } from './routing-form-service.ts'
 export {

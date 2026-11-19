@@ -11,7 +11,7 @@ import {
   testContext,
 } from '@hourmere/scheduling/testing'
 import createClient from 'openapi-fetch'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   publishRoutingForm,
   type RoutingForm,
@@ -22,8 +22,26 @@ import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { productRoutes, productTools } from './server.ts'
 
+const paymentRequired = vi.hoisted(() => new Set<string>())
+
+// Event types do not store pricing yet. The normal loader still reads the real event;
+// the fixture supplies the future payment projection only for the event under test.
+vi.mock(import('../../../packages/scheduling/src/routing-form-targets.ts'), async (original) => {
+  const actual = await original()
+  return {
+    ...actual,
+    async loadRoutingTargetEvents(db: Db, ids: readonly string[]) {
+      const events = await actual.loadRoutingTargetEvents(db, ids)
+      for (const [id, event] of events) {
+        if (paymentRequired.has(id)) event.payment = 'required'
+      }
+      return events
+    },
+  }
+})
+
 const publicUrl = 'http://localhost:4189'
-const operations = ['list', 'get', 'create', 'update', 'archive'] as const
+const operations = ['list', 'get', 'create', 'update', 'archive', 'publish'] as const
 type Operation = (typeof operations)[number]
 const tools = {
   list: 'list_routing_forms',
@@ -31,8 +49,16 @@ const tools = {
   create: 'create_routing_form',
   update: 'update_routing_form',
   archive: 'archive_routing_form',
+  publish: 'publish_routing_form',
 }
-const methods = { list: 'GET', get: 'GET', create: 'POST', update: 'PATCH', archive: 'DELETE' }
+const methods = {
+  list: 'GET',
+  get: 'GET',
+  create: 'POST',
+  update: 'PATCH',
+  archive: 'DELETE',
+  publish: 'POST',
+}
 const draft = () => ({
   slug: `form-${randomUUID()}`,
   title: 'Routing form',
@@ -150,14 +176,20 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
     const application = app(enabled)
     if (surface === 'rest') {
       const { id, ...body } = input
-      const path = `/api/v1/routing-forms${op === 'get' || op === 'update' || op === 'archive' ? `/${id}` : ''}${op === 'list' ? `?${new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v)]))}` : ''}`
+      const item = op === 'list' || op === 'create' ? '' : `/${id}`
+      const query = new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v)]))
+      const path = `/api/v1/routing-forms${item}${op === 'publish' ? '/publish' : ''}${op === 'list' ? `?${query}` : ''}`
       const response = await application.request(path, {
         method: methods[op],
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         ...(methods[op] === 'GET' ? {} : { body: JSON.stringify(body) }),
       })
       expect(response.headers.get('cache-control')).toBe('no-store')
-      return { ok: response.ok, body: response.status === 204 ? {} : await response.json() }
+      return {
+        ok: response.ok,
+        body: response.status === 204 ? {} : await response.json(),
+        status: response.status,
+      }
     }
     if (surface === 'mcp') {
       const result = await rpc(application, token, 'tools/call', {
@@ -202,6 +234,9 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
   afterAll(async () => {
     await owned?.drop()
   })
+
+  const versions = (id: string) =>
+    db.selectFrom('routing_form_versions').select('id').where('form_id', '=', id).execute()
 
   for (const surface of ['rest', 'mcp', 'cli'] as const) {
     it(`${surface}: creates, replays, lists, updates and archives with revision conflicts`, async () => {
@@ -256,7 +291,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       )
     })
 
-    it(`${surface}: uses live team roles, organization isolation and key scopes for all five operations`, async () => {
+    it(`${surface}: uses live team roles, organization isolation and key scopes`, async () => {
       const ownerKey = await credential(owner, 'full', team.as(owner).organization)
       const form = (await call(surface, ownerKey, 'create', draft())).body as RoutingForm
       for (const user of [owner, admin, member, outsider]) {
@@ -277,7 +312,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
             if (!allowedScope) expect(result.body.error).toBe('insufficient_scope')
             else if (user === member || user === outsider)
               expect(result.body.error).toBe('team_management_access_denied')
-            else if (op === 'update' || op === 'archive')
+            else if (op === 'update' || op === 'archive' || op === 'publish')
               expect(result.body.error).toBe('routing_revision_conflict')
             else expect(result.ok).toBe(true)
           }
@@ -285,7 +320,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       }
       const foreign = await credential(outsider)
       for (const id of [form.id, randomUUID()])
-        for (const op of ['get', 'update', 'archive'] as const)
+        for (const op of ['get', 'update', 'archive', 'publish'] as const)
           expect(
             (await call(surface, foreign, op, op === 'get' ? { id } : { id, expectedRevision: 1 }))
               .body.error,
@@ -353,8 +388,122 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       )
     })
 
+    it(`${surface}: publishes once and returns the original version on a same-input retry`, async () => {
+      const token = await credential(owner)
+      const { body: form } = await call(surface, token, 'create', draft())
+      const input = { id: form.id, expectedRevision: 1, requestId: randomUUID() }
+      for (const invalid of [
+        { id: form.id, requestId: input.requestId },
+        { ...input, requestId: 'invalid' },
+        { ...input, enabled: true },
+      ]) {
+        expect(await call(surface, token, 'publish', invalid)).toMatchObject({
+          ok: false,
+          body: { error: 'invalid_request' },
+        })
+      }
+      const published = await call(surface, token, 'publish', input)
+      expect(published.ok).toBe(true)
+      if (surface === 'rest') expect(published.status).toBe(201)
+      expect(published.body).toMatchObject({
+        form: { id: form.id, draftRevision: 2, enabled: false, publishedVersionNumber: 1 },
+        version: { formId: form.id, versionNumber: 1, fallback: form.fallback },
+      })
+      expect(published.body.form.publishedVersionId).toBe(published.body.version.id)
+      expect(await call(surface, token, 'publish', input)).toEqual(published)
+      expect(
+        await call(surface, token, 'publish', { ...input, expectedRevision: 2 }),
+      ).toMatchObject({
+        ok: false,
+        body: { error: 'idempotency_key_reused' },
+      })
+      expect(
+        await call(surface, token, 'publish', { id: form.id, expectedRevision: 1 }),
+      ).toMatchObject({
+        ok: false,
+        body: { error: 'routing_revision_conflict' },
+      })
+      expect(await versions(form.id)).toEqual([{ id: published.body.version.id }])
+    })
+
+    it(`${surface}: reauthorizes a publication retry against current membership`, async () => {
+      const space = await createTestTeam(db, [
+        { user: owner, role: 'owner' },
+        { user: admin, role: 'admin' },
+      ])
+      const token = await credential(admin, 'full', space.as(admin).organization)
+      const { body: form } = await call(surface, token, 'create', draft())
+      const input = { id: form.id, expectedRevision: 1, requestId: randomUUID() }
+      const published = await call(surface, token, 'publish', input)
+      expect(published.ok).toBe(true)
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('organizationId', '=', space.id)
+        .where('userId', '=', admin.id)
+        .execute()
+      expect(await call(surface, token, 'publish', input)).toMatchObject({
+        ok: false,
+        body: { error: 'team_management_access_denied' },
+      })
+      expect(await versions(form.id)).toEqual([{ id: published.body.version.id }])
+    })
+
+    it.each(['mapping', 'disabled', 'group', 'paid'] as const)(
+      `${surface}: refuses a %s target changed after saving the draft`,
+      async (problem) => {
+        const token = await credential(owner)
+        const event = await createFixtures(db).eventType(
+          owner.principal.organization.id,
+          owner.id,
+          {
+            questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
+          },
+        )
+        const questionId = randomUUID()
+        const saved = await call(surface, token, 'create', {
+          ...draft(),
+          questions: [{ id: questionId, type: 'short_text', label: 'Company' }],
+          fallback: {
+            kind: 'event',
+            eventTypeId: event,
+            mappings: [{ questionId, destination: { kind: 'question', questionId: 'company' } }],
+          },
+        })
+        expect(saved.ok).toBe(true)
+        const changes = {
+          mapping: { questions: '[]' },
+          disabled: { is_active: false },
+          group: { booking_mode: 'group', group_capacity: 4 },
+        }
+        if (problem === 'paid') paymentRequired.add(event)
+        else
+          await db
+            .updateTable('event_types')
+            .set(changes[problem])
+            .where('id', '=', event)
+            .execute()
+        try {
+          const result = await call(surface, token, 'publish', {
+            id: saved.body.id,
+            expectedRevision: 1,
+          })
+          expect(result).toMatchObject({ ok: false, body: { error: 'invalid_routing_target' } })
+          if (surface === 'rest') expect(result.status).toBe(400)
+          expect(await versions(saved.body.id)).toEqual([])
+        } finally {
+          paymentRequired.delete(event)
+        }
+      },
+    )
+
     it(`${surface}: off precedes validation, scopes and lookups and writes no rows`, async () => {
+      const full = await credential(owner)
+      const { body: form } = await call(surface, full, 'create', draft())
       const before = await db.selectFrom('routing_forms').select('id').execute()
+      const off = await call(surface, full, 'publish', { id: form.id, expectedRevision: 1 }, false)
+      expect(off).toMatchObject({ ok: false, body: { error: 'routing_forms_disabled' } })
+      if (surface === 'rest') expect(off.status).toBe(404)
       for (const scope of ['full', 'read', 'bookings'] as const) {
         const token = await credential(owner, scope)
         for (const op of operations)
@@ -376,10 +525,11 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
         for (const tool of listed.tools) expect(Object.values(tools)).not.toContain(tool.name)
       }
       expect(await db.selectFrom('routing_forms').select('id').execute()).toEqual(before)
+      expect(await versions(form.id)).toEqual([])
     })
   }
 
-  it('supports all five operations through the generated web client contract', async () => {
+  it('supports all configuration operations through the generated web client contract', async () => {
     const token = await credential(owner)
     const application = app()
     const client = createClient<paths>({
@@ -405,9 +555,16 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       body: { expectedRevision: 1, title: 'Client update' },
     })
     expect(updated.data?.draftRevision).toBe(2)
+    const published = await client.POST('/api/v1/routing-forms/{id}/publish', {
+      params: { path: { id } },
+      body: { expectedRevision: 2, requestId: randomUUID() },
+    })
+    expect(published.response.status).toBe(201)
+    expect(published.data?.version.formId).toBe(id)
+    expect(published.data?.form.publishedVersionId).toBe(published.data?.version.id)
     const archived = await client.DELETE('/api/v1/routing-forms/{id}', {
       params: { path: { id } },
-      body: { expectedRevision: 2 },
+      body: { expectedRevision: 3 },
     })
     expect(archived.response.status).toBe(204)
   })
@@ -415,29 +572,43 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
   it('fences session writes by Origin/Referer and the expected organization', async () => {
     const cookie = await session(owner)
     const application = app()
-    const send = (headers: Record<string, string>) =>
-      application.request('/api/v1/routing-forms', {
-        method: 'POST',
-        headers: { cookie, 'content-type': 'application/json', ...headers },
-        body: JSON.stringify(draft()),
-      })
+    const send = (headers: Record<string, string>, formId?: string) =>
+      application.request(
+        formId ? `/api/v1/routing-forms/${formId}/publish` : '/api/v1/routing-forms',
+        {
+          method: 'POST',
+          headers: { cookie, 'content-type': 'application/json', ...headers },
+          body: JSON.stringify(formId ? { expectedRevision: 1 } : draft()),
+        },
+      )
     const expected = { 'x-expected-organization-id': owner.principal.organization.id }
-    expect((await send({ ...expected, origin: 'https://untrusted.example' })).status).toBe(403)
-    expect((await send({ ...expected, referer: 'https://untrusted.example/page' })).status).toBe(
-      403,
-    )
-    expect(await (await send({ origin: publicUrl })).json()).toMatchObject({
-      error: 'organization_context_changed',
-    })
-    expect(
-      await (
-        await send({
-          origin: publicUrl,
-          'x-expected-organization-id': outsider.principal.organization.id,
-        })
-      ).json(),
-    ).toMatchObject({ error: 'team_management_access_denied' })
     expect((await send({ ...expected, origin: publicUrl })).status).toBe(201)
-    expect((await send({ ...expected, referer: `${publicUrl}/app` })).status).toBe(201)
+    const created = await send({ ...expected, referer: `${publicUrl}/app` })
+    expect(created.status).toBe(201)
+    const { id } = (await created.json()) as { id: string }
+    for (const formId of [undefined, id]) {
+      expect(
+        (await send({ ...expected, origin: 'https://untrusted.example' }, formId)).status,
+      ).toBe(403)
+      expect(
+        (await send({ ...expected, referer: 'https://untrusted.example/page' }, formId)).status,
+      ).toBe(403)
+      expect(await (await send({ origin: publicUrl }, formId)).json()).toMatchObject({
+        error: 'organization_context_changed',
+      })
+      expect(
+        await (
+          await send(
+            {
+              origin: publicUrl,
+              'x-expected-organization-id': outsider.principal.organization.id,
+            },
+            formId,
+          )
+        ).json(),
+      ).toMatchObject({ error: 'team_management_access_denied' })
+    }
+    expect(await versions(id)).toEqual([])
+    expect((await send({ ...expected, origin: publicUrl }, id)).status).toBe(201)
   })
 })

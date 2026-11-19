@@ -35,6 +35,7 @@ import {
   HostPage,
   ManageBookingPage,
   McpAuthorizePage,
+  MeetingPollPage,
   OneTimeBookingPage,
   RequireSession,
   ScheduleEditorPage,
@@ -98,6 +99,10 @@ export const appRoutes = createRoutesFromElements(
     <Route path="/embed/book/:token" element={<OneTimeBookingPage />} />
     <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
     <Route path="/embed/:handle/:slug" element={<EmbeddedBookingPage />} />
+    <Route path="/poll" element={<MeetingPollPage entry="public" />} />
+    <Route path="/poll/voter" element={<MeetingPollPage entry="voter" />} />
+    <Route path="/poll/recover" element={<MeetingPollPage entry="recover" />} />
+    <Route path="/poll/reminder-opt-out" element={<MeetingPollPage entry="optOut" />} />
     <Route path="/booking" element={<ManageBookingPage />} />
     <Route
       path="/team/:teamSlug/:slug/waitlist/:waitlistToken/:suggestedStart/:previewExpiresAt"

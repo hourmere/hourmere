@@ -25,22 +25,27 @@ export function GroupOccurrenceAttendees({
   const { t, locale } = useI18n()
   const heading = useId()
   const [conflict, setConflict] = useState<unknown>(null)
+  const [status, setStatus] = useState<'active' | 'cancelled' | 'all'>('active')
+  const [offset, setOffset] = useState(0)
+  const limit = 25
+  const selection = `${expectedOrganizationId}:${occurrenceId}:${status}:${offset}`
   const load = useCallback(
     async (signal: AbortSignal) => {
       try {
-        return await unwrap(
+        const result = await unwrap(
           api.GET('/api/v1/group-occurrences/{id}/attendees', {
-            params: { path: { id: occurrenceId } },
+            params: { path: { id: occurrenceId }, query: { status, limit, offset } },
             headers: { 'X-Expected-Organization-Id': expectedOrganizationId },
             signal,
           }),
         )
+        return { ...result, selection }
       } catch (error) {
         if (!signal.aborted && isOrganizationContextChanged(error)) setConflict(error)
         throw error
       }
     },
-    [occurrenceId, expectedOrganizationId],
+    [occurrenceId, expectedOrganizationId, status, offset, selection],
   )
   const [state, reload] = useLoad(load)
   async function cancelOccurrence() {
@@ -72,7 +77,8 @@ export function GroupOccurrenceAttendees({
           <p role="status">{t('Your team context changed. Reload before making changes.')}</p>
           <OrganizationContextConflict error={conflict} />
         </>
-      ) : state.status === 'loading' ? (
+      ) : state.status === 'loading' ||
+        (state.status === 'ready' && state.data.selection !== selection) ? (
         <p role="status">{t('Loading attendees…')}</p>
       ) : state.status === 'error' ? (
         <div role="alert">
@@ -89,6 +95,20 @@ export function GroupOccurrenceAttendees({
               capacity: state.data.capacity,
             })}
           </p>
+          <label className="field">
+            <span>{t('Seat status')}</span>
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as typeof status)
+                setOffset(0)
+              }}
+            >
+              <option value="active">{t('Active seats')}</option>
+              <option value="cancelled">{t('Cancelled seats')}</option>
+              <option value="all">{t('All seats')}</option>
+            </select>
+          </label>
           <ul className="plain-list stack">
             {state.data.attendees.map((person) => (
               <li key={person.bookingId} className="user-content">
@@ -120,7 +140,28 @@ export function GroupOccurrenceAttendees({
               </li>
             ))}
           </ul>
-          {state.data.attendees.length === 0 && <p>{t('No attendees in this session.')}</p>}
+          {state.data.attendees.length === 0 && (
+            <p>{t('No seats match this filter on this page.')}</p>
+          )}
+          <nav className="actions" aria-label={t('Attendee list pages')}>
+            <button
+              type="button"
+              className="button"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - limit))}
+            >
+              {t('Previous page')}
+            </button>
+            <span>{t('Page {page}', { page: offset / limit + 1 })}</span>
+            <button
+              type="button"
+              className="button"
+              disabled={!state.data.pagination.hasMore || offset + limit > 10000}
+              onClick={() => setOffset(offset + limit)}
+            >
+              {t('Next page')}
+            </button>
+          </nav>
           <button type="button" className="button" onClick={reload}>
             {t('Refresh')}
           </button>

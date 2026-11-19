@@ -71,7 +71,8 @@ describe('booking waitlist documentation facts', () => {
   for (const phrase of [
     'Everyone eligible is notified, nothing is reserved, and the first successful ordinary booking wins.',
     'Leaving, host removal and disabling immediately clear contact details and revoke pending work.',
-    'Only one-on-one event types with a single host are eligible.',
+    'Single-host event types with individual scheduling are eligible, including',
+    'An available group seat counts as an open time; notifications do not reserve it.',
     'Re-enabling does not restore removed entries.',
     'SMTP acceptance, not inbox delivery',
   ]) {
