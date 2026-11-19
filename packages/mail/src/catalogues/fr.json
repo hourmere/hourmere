@@ -67,6 +67,8 @@
   "mailboxProof.expiry": "Ce lien expire dans {minutes} min et ne fonctionne qu’une seule fois, dans le navigateur où la confirmation a été demandée. Si vous n’en êtes pas à l’origine, vous pouvez ignorer cet e-mail.",
   "mailboxProof.fallback": "Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :",
   "mailboxProof.footer": "Vous recevez cet e-mail parce que quelqu’un a demandé à Hourmere de confirmer cette adresse e-mail.",
+  "ssoLinkRemoval.subject": "Une association de connexion unique a été supprimée",
+  "ssoLinkRemoval.message": "Une association de connexion unique de votre compte Hourmere a été supprimée. Vous pouvez toujours vous connecter par e-mail. Si vous ne vous attendiez pas à ce changement, contactez la personne qui administre votre équipe.",
   "teamInvitation.defaultTeam": "Votre équipe",
   "teamInvitation.defaultInviter": "Un membre de l’équipe",
   "teamInvitation.subject": "Invitation à rejoindre {team}",
@@ -159,7 +161,5 @@
   "series.cancelled.member": "Annulée",
   "series.manage": "Gérer la série",
   "series.view": "Voir la série",
-  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
-  "ssoLinkRemoval.subject": "Une association de connexion unique a été supprimée",
-  "ssoLinkRemoval.message": "Une association de connexion unique de votre compte Hourmere a été supprimée. Vous pouvez toujours vous connecter par e-mail. Si vous ne vous attendiez pas à ce changement, contactez la personne qui administre votre équipe."
+  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere."
 }

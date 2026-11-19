@@ -67,6 +67,8 @@
   "mailboxProof.expiry": "El enlace caduca en {minutes} min y solo se puede utilizar una vez, en el navegador donde se solicitó la confirmación. Si no lo ha solicitado, puede ignorar este correo electrónico.",
   "mailboxProof.fallback": "Si el botón no funciona, copie este enlace en su navegador:",
   "mailboxProof.footer": "Ha recibido este correo electrónico porque alguien pidió a Hourmere que confirmara esta dirección de correo electrónico.",
+  "ssoLinkRemoval.subject": "Se ha eliminado una vinculación de inicio de sesión único",
+  "ssoLinkRemoval.message": "Se ha eliminado una vinculación de inicio de sesión único de tu cuenta de Hourmere. Puedes seguir iniciando sesión por correo electrónico. Si no esperabas este cambio, contacta con la persona que administra tu equipo.",
   "teamInvitation.defaultTeam": "Su equipo",
   "teamInvitation.defaultInviter": "Un miembro del equipo",
   "teamInvitation.subject": "Invitación para unirse a {team}",
@@ -159,7 +161,5 @@
   "series.cancelled.member": "Cancelada",
   "series.manage": "Gestionar la serie",
   "series.view": "Ver la serie",
-  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere.",
-  "ssoLinkRemoval.subject": "Se ha eliminado una vinculación de inicio de sesión único",
-  "ssoLinkRemoval.message": "Se ha eliminado una vinculación de inicio de sesión único de tu cuenta de Hourmere. Puedes seguir iniciando sesión por correo electrónico. Si no esperabas este cambio, contacta con la persona que administra tu equipo."
+  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere."
 }
