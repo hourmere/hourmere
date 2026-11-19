@@ -9,7 +9,10 @@ import {
   conferenceRoot,
 } from '@hourmere/scheduling/conferences'
 import { DomainError } from '@hourmere/scheduling/errors'
-import { recordSeriesConferenceDeadline } from '@hourmere/scheduling/series-confirmation'
+import {
+  queueSeriesLinkUpdates,
+  recordSeriesConferenceDeadline,
+} from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { GoogleCalendarError } from './google.ts'
@@ -712,8 +715,10 @@ export async function writeBookingConference(
         .onConflict((oc) => oc.doNothing())
         .execute()
     }
-    if (seriesOccurrenceId && state !== 'pending' && booking.status === 'confirmed')
+    if (seriesOccurrenceId && state !== 'pending' && booking.status === 'confirmed') {
       await recordSeriesConferenceDeadline(trx, seriesOccurrenceId, now)
+      if (!expired) await queueSeriesLinkUpdates(trx, seriesOccurrenceId, now)
+    }
   })
 }
 

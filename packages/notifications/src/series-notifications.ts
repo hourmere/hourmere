@@ -30,6 +30,11 @@ import {
   notificationRecipientHash,
 } from './mail-limits.ts'
 import { type SeriesCalendarMember, seriesCalendarSnapshot } from './series-calendar.ts'
+import {
+  dispatchSeriesLinkUpdates,
+  type RenderSeriesLinkUpdate,
+  wakeSeriesLinkUpdates,
+} from './series-link-notifications.ts'
 
 const MAX_ATTEMPTS = 13
 const LEASE_MS = 600_000
@@ -45,7 +50,8 @@ interface Action {
   kind: 'confirmation' | 'cancellation'
   sequence: string
   attempts: number
-  lease_id: string | null
+  lease_id: string
+  expired: boolean
 }
 
 function claimSeriesNotification(db: Db, now: Date, leaseId: string) {
@@ -59,7 +65,7 @@ function claimSeriesNotification(db: Db, now: Date, leaseId: string) {
   )
   return sql<Action>`
     WITH next AS (
-      SELECT intent.id FROM booking_series_notifications intent
+      SELECT intent.id, intent.attempts FROM booking_series_notifications intent
       JOIN booking_series s ON (s.organization_id, s.id) = (intent.organization_id, intent.series_id)
       WHERE intent.row_type = 'outbox' AND intent.kind IN ('confirmation', 'cancellation')
         AND intent.outbox_state = 'pending'
@@ -74,14 +80,13 @@ function claimSeriesNotification(db: Db, now: Date, leaseId: string) {
       ORDER BY intent.due_at, intent.id LIMIT 1 FOR UPDATE OF intent SKIP LOCKED
     )
     UPDATE booking_series_notifications n SET
-      outbox_state = CASE WHEN n.attempts >= ${MAX_ATTEMPTS} THEN 'exhausted' ELSE 'pending' END,
       attempts = LEAST(n.attempts + 1, ${MAX_ATTEMPTS}),
-      lease_id = CASE WHEN n.attempts < ${MAX_ATTEMPTS} THEN ${leaseId}::uuid END,
-      lease_until = CASE WHEN n.attempts < ${MAX_ATTEMPTS}
-        THEN ${new Date(now.getTime() + LEASE_MS)}::timestamptz END,
+      lease_id = ${leaseId}::uuid,
+      lease_until = ${new Date(now.getTime() + LEASE_MS)}::timestamptz,
       due_at = ${now}
     FROM next WHERE n.id = next.id
-    RETURNING n.id, n.organization_id, n.series_id, n.kind, n.sequence, n.attempts, n.lease_id
+    RETURNING n.id, n.organization_id, n.series_id, n.kind, n.sequence, n.attempts, n.lease_id,
+      next.attempts >= ${MAX_ATTEMPTS} AS expired
   `.execute(db)
 }
 
@@ -343,7 +348,7 @@ async function sendSeriesRecipient(
         sequence: action.sequence,
         recipient_role: recipient.role,
         recipient_id: recipient.id,
-        // A provisional receipt claims the identity. Only delivery or suppression commits.
+        // A provisional receipt claims the identity. Temporary failures roll it back.
         outcome: 'rejected',
       })
       .onConflict((oc) => oc.constraint('booking_series_notifications_identity_key').doNothing())
@@ -355,6 +360,7 @@ async function sendSeriesRecipient(
     const reason = await notificationEmailBudget(trx, deps, recipientHash, inviteeFacing, now)
     if (reason) {
       await updateReceipt().set({ outcome: 'suppressed', suppression_reason: reason }).execute()
+      await wakeSeriesLinkUpdates(trx, action, clock(), recipient)
       return { state: 'done', reason } as const
     }
 
@@ -400,18 +406,26 @@ async function sendSeriesRecipient(
       details.inviteeName,
       now,
     )
-    const sentAt = await sendAndRecordBookingEmail(
-      trx,
-      deps.mailer,
-      action.organization_id,
-      inviteeFacing ? recipientHash : null,
-      () => ({
-        ...seriesBookingEmail(kind, { ...details, members }, mailRecipient),
-        ...(attachment && { attachments: [attachment] }),
-      }),
-      clock,
-      signal,
-    )
+    let sentAt: Date
+    try {
+      sentAt = await sendAndRecordBookingEmail(
+        trx,
+        deps.mailer,
+        action.organization_id,
+        inviteeFacing ? recipientHash : null,
+        () => ({
+          ...seriesBookingEmail(kind, { ...details, members }, mailRecipient),
+          ...(attachment && { attachments: [attachment] }),
+        }),
+        clock,
+        signal,
+      )
+    } catch (error) {
+      if (!(error instanceof MailRejectedError && error.permanent)) throw error
+      // A permanent recipient refusal commits the provisional rejected receipt.
+      await wakeSeriesLinkUpdates(trx, action, clock(), recipient)
+      return { state: 'done' } as const
+    }
     await updateReceipt()
       .set({
         outcome: 'delivered',
@@ -429,6 +443,7 @@ async function sendSeriesRecipient(
         capability_scope: token ? (recipient.role === 'booker' ? 'manage' : 'read') : null,
       })
       .execute()
+    await wakeSeriesLinkUpdates(trx, action, clock(), recipient)
     return { state: 'done' } as const
   })
   if (outcome.reason) {
@@ -522,8 +537,11 @@ async function deliverSeriesNotification(
   return retry ? 'pending' : 'done'
 }
 
-async function dispatchSeriesNotifications(deps: NotificationDeps, signal: AbortSignal) {
-  const clock = () => new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+async function dispatchSeriesActions(
+  deps: NotificationDeps,
+  clock: () => Date,
+  signal: AbortSignal,
+) {
   const exhausted = (action: Action) =>
     (deps.log ?? console.warn)(
       JSON.stringify({
@@ -538,43 +556,51 @@ async function dispatchSeriesNotifications(deps: NotificationDeps, signal: Abort
       rows: [action],
     } = await claimSeriesNotification(deps.db, clock(), randomUUID())
     if (!action) return
-    if (!action.lease_id) {
-      exhausted(action)
-      continue
-    }
-    const timeout = AbortSignal.timeout(SEND_MS)
-    let state: 'pending' | 'done' | 'skipped' | 'exhausted' = 'pending'
-    try {
-      state = await deliverSeriesNotification(
-        deps,
-        action,
-        clock,
-        AbortSignal.any([signal, timeout]),
-      )
-    } catch {
-      // SMTP and rendering errors can contain the message or capability.
+    let state: 'pending' | 'done' | 'skipped' | 'exhausted' = action.expired
+      ? 'exhausted'
+      : 'pending'
+    if (!action.expired) {
+      const timeout = AbortSignal.timeout(SEND_MS)
+      try {
+        state = await deliverSeriesNotification(
+          deps,
+          action,
+          clock,
+          AbortSignal.any([signal, timeout]),
+        )
+      } catch {
+        // SMTP and rendering errors can contain the message or capability.
+      }
     }
     if (state === 'pending' && action.attempts >= MAX_ATTEMPTS) state = 'exhausted'
-    const now = clock()
-    const finished = await deps.db
-      .updateTable('booking_series_notifications')
-      .set({
-        outbox_state: state,
-        due_at: state === 'pending' ? new Date(now.getTime() + retryDelay(action.attempts)) : now,
-        lease_id: null,
-        lease_until: null,
-      })
-      .where('id', '=', action.id)
-      .where('lease_id', '=', action.lease_id)
-      .where('lease_until', '>', now)
-      .returning('id')
-      .executeTakeFirst()
+    const finished = await deps.db.transaction().execute(async (trx) => {
+      if (state !== 'pending') await lockNotificationEmailBudget(trx)
+      const now = clock()
+      const updated = await trx
+        .updateTable('booking_series_notifications')
+        .set({
+          outbox_state: state,
+          due_at: state === 'pending' ? new Date(now.getTime() + retryDelay(action.attempts)) : now,
+          lease_id: null,
+          lease_until: null,
+        })
+        .where('id', '=', action.id)
+        .where('lease_id', '=', action.lease_id)
+        .where('lease_until', '>', now)
+        .returning('id')
+        .executeTakeFirst()
+      if (updated && state !== 'pending') await wakeSeriesLinkUpdates(trx, action, now)
+      return updated
+    })
     if (finished && state === 'exhausted') exhausted(action)
   }
 }
 
 /** Series retries have their own schedule so they cannot occupy the ordinary booking queue. */
-export function seriesNotificationDispatchJob(deps: NotificationDeps) {
+export function seriesNotificationDispatchJob(
+  deps: NotificationDeps,
+  renderLinkUpdate?: RenderSeriesLinkUpdate,
+) {
   return defineJob({
     name: 'series-notification-dispatch',
     payload: z.strictObject({}),
@@ -583,6 +609,22 @@ export function seriesNotificationDispatchJob(deps: NotificationDeps) {
     schedule: { cron: '* * * * *', payload: {} },
     expireInSeconds: 300,
     retry: { limit: 12, delaySeconds: 30, backoff: true, maxDelaySeconds: 3600 },
-    handler: (_payload, { signal }) => dispatchSeriesNotifications(deps, signal),
+    handler: async (_payload, { signal }) => {
+      const clock = () => new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+      await dispatchSeriesActions(deps, clock, signal)
+      await dispatchSeriesLinkUpdates(
+        deps,
+        clock,
+        signal,
+        {
+          batchSize: BATCH_SIZE,
+          leaseMs: LEASE_MS,
+          sendMs: SEND_MS,
+          maxAttempts: MAX_ATTEMPTS,
+          retryDelay,
+        },
+        renderLinkUpdate,
+      )
+    },
   })
 }
