@@ -3,6 +3,7 @@
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
 import { parsePersistedApiKeyMetadata } from '@hourmere/auth'
+import { MAX_GUESTS } from '@hourmere/core/booking-limits'
 import {
   type Database,
   type Db,
@@ -167,7 +168,8 @@ export interface BookingWithToken {
   manageToken: string | null
 }
 
-export const MAX_GUESTS = 10
+export { MAX_GUESTS } from '@hourmere/core/booking-limits'
+
 const MAX_NAME = 200
 const MAX_LOCALE = 35
 const MAX_REASON = 1000
