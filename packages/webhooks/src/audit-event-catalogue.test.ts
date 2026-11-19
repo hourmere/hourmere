@@ -11,7 +11,7 @@ import {
   slackAuditActions,
   slackAuditEvents,
   webhookAuditActions,
-  webhookAuditEvents,
+  workflowWebhookAuditEvents,
 } from '../../db/src/audit-event-details-protections.ts'
 import { WEBHOOK_EVENTS } from './service.ts'
 import { SLACK_EVENTS } from './slack-format.ts'
@@ -25,7 +25,7 @@ const destinations = [
     firstAction: 'webhook.created',
     catalogue: WEBHOOK_EVENTS,
     actions: webhookAuditActions,
-    suite: webhookAuditEvents,
+    suite: workflowWebhookAuditEvents,
     // The application's own limits, as written in the validation code.
     source: ['./service.ts', 'z.array(z.enum(WEBHOOK_EVENTS)).min(1).max(WEBHOOK_EVENTS.length)'],
   },

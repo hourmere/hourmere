@@ -12,6 +12,7 @@ import { SLACK_EVENTS, slackPayload } from './slack-format.ts'
 
 const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 9).toString('base64') }
 const now = Temporal.Instant.from('2030-11-03T12:00Z')
+const bookingEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')
 
 describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', () => {
   let owned: TestDatabase
@@ -28,7 +29,7 @@ describe.skipIf(!process.env.DATABASE_URL)('private attendee no-show webhooks', 
     const user = await createTestUser(db)
     const { webhook } = await createWebhook(testContext(db, user.principal), settings, {
       url: 'https://hooks.example.com/attendance',
-      events: [...WEBHOOK_EVENTS],
+      events: bookingEvents,
     })
     const bookingId = await createFixtures(db).booking(
       user.principal.organization.id,

@@ -340,19 +340,18 @@ in a workflow or a template. Extend the existing signed transactional webhook ou
 a distinct `workflow.executed` event kind and stable event/delivery IDs; do not manufacture
 another `booking.created` subscription event. Only the selected endpoint gets this event.
 
-The webhook baseline on main comes from migration 0070 (attendee no-shows), which last
-redefined both event CHECKs; the delivery key is still the one 0064 added:
+The installed webhook subscription CHECK and the delivery event CHECK are defined separately.
 
-- `WEBHOOK_EVENTS` has 6 kinds: `booking.created`, `booking.rescheduled`,
-  `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`
-  and `booking.attendee_no_show_changed`.
-- Service `eventsOf()` already validates `.max(WEBHOOK_EVENTS.length)`.
-- 0070's `webhooks_events_check` is `cardinality(events) BETWEEN 1 AND 6` over those kinds,
-  and its `webhook_deliveries_event_type_check` allows the same set. 0070 only widened both
-  constraints; 0017 created them and 0064 replaced them before.
+- `WEBHOOK_EVENTS` has 7 kinds: `booking.created`, `booking.rescheduled`,
+  `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
+  `booking.attendee_no_show_changed` and `workflow.executed`.
+- Service `eventsOf()` validates `.max(WEBHOOK_EVENTS.length)`.
+- 0143's `webhooks_events_check` is `cardinality(events) BETWEEN 1 AND 7` over those kinds.
+  The 0070 `webhook_deliveries_event_type_check` allows the 6 booking kinds. 0017 created
+  both constraints, and 0064 and 0070 widened both as booking kinds were added.
 - Deliveries are unique by
   `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id)`, which 0064
-  added and 0070 left unchanged. `request_id` is a plain `uuid` without a foreign key, and
+  added. `request_id` is a plain `uuid` without a foreign key, and
   it has two uses. Request-origin rows carry the reschedule request's ID. Attendance rows
   carry a fresh per-change receipt ID, so every mark or unmark gets its own delivery; that
   value never appears as `data.requestId`. Booking-origin rows leave it NULL.
@@ -401,7 +400,7 @@ subscription expansion:
 Existing subscriptions that include `booking.attendee_no_show_changed` keep working
 unchanged. No stored `events` array is rewritten or expanded: as with the attendance kind,
 an endpoint receives `workflow.executed` only after it subscribes explicitly. The bound of 7
-lets an endpoint already subscribed to all 6 current kinds add the workflow kind. The
+lets an endpoint already subscribed to all 6 booking kinds add the workflow kind. The
 `workflows_disabled` check below concerns only adding `workflow.executed`, so keeping,
 adding or removing the attendance kind behaves as today. An attendance change never emits
 `workflow.executed`, and a workflow never emits the attendance kind.
@@ -455,9 +454,9 @@ existing booking, request and attendance payloads stay unchanged.
 `WebhookDelivery.bookingId` remains a required UUID, never null or omitted, including team
 workflow deliveries. Internal
 subscription tests may use the enabled context after 13d but insert no workflow deliveries
-before 14a. Before step 13d, steps 5–6 validate endpoint existence and ownership but
-reject webhook action definitions as `invalid_workflow`; 13d enables their subscription
-validation in internal tests. Production workflow operations remain hard-off until step 19b.
+before 14a. Workflow create/update validate that a referenced signed webhook belongs to
+the workflow's organization, is active, and subscribes to `workflow.executed`. Production
+workflow operations remain hard-off until step 19b.
 
 Use the current bounded identifier/time/status payload projection; no custom JSON templates,
 answers, names, addresses or location fields. Team workflow payloads also omit source and

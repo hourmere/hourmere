@@ -26,6 +26,7 @@ import * as validator from './make-template-validation.ts'
 const directory = new URL('../tools/make-templates/', import.meta.url)
 const names = readdirSync(directory)
 const source = readFileSync(new URL('./make-template-validation.ts', import.meta.url), 'utf8')
+const makeWebhookEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')
 // The documented timestamp tolerance is the one the n8n trigger's verifier enforces. The
 // n8n package keeps its dependency graph out of root installs, so its module is loaded by path
 // rather than through a typed import that would need n8n's types.
@@ -428,7 +429,7 @@ function eventRow(event: string, overrides: { recipe?: string; fields?: string }
 }
 const eventTable = (rows: string[]) =>
   `| Event | Make recipe | Additional payload fields |\n| --- | --- | --- |\n${rows.join('\n')}\n`
-const allRows = WEBHOOK_EVENTS.map((event) => eventRow(event))
+const allRows = makeWebhookEvents.map((event) => eventRow(event))
 // Signature tables, timestamp conditions and credential tables in the documents' formats.
 const formula = 'sha256(message; "hex"; signingSecret; "text")'
 const signatureTable = (message: string, expected: string) =>
@@ -840,9 +841,8 @@ const markdownDocuments = () => [
 ]
 
 describe('Make manual recipe artifacts', () => {
-  it('derives every accepted webhook event from the real notifiers', () => {
-    // Any event added to WEBHOOK_EVENTS needs a capture above, or this fails.
-    expect(Object.keys(webhooks.events).sort()).toEqual([...WEBHOOK_EVENTS].sort())
+  it('derives every Make webhook event from the real notifiers', () => {
+    expect(Object.keys(webhooks.events).sort()).toEqual([...makeWebhookEvents].sort())
     for (const [event, fields] of Object.entries(webhooks.events))
       expect(fields, event).toEqual(expect.arrayContaining(['id', 'type', 'data.bookingId']))
     expect(Object.keys(recipes).sort()).toEqual(['booking.cancelled', 'booking.created'])
@@ -1120,7 +1120,7 @@ describe('Make manual recipe artifacts', () => {
       ).toContain(error)
     }
   })
-  it('lists every accepted event in the README and site page, and fails when one is dropped', async () => {
+  it('lists every Make webhook event in the README and site page, and fails when one is dropped', async () => {
     const generated = (await openApiDocument()) as Parameters<
       typeof validator.validateMakeRecipe
     >[1]
@@ -1128,19 +1128,19 @@ describe('Make manual recipe artifacts', () => {
       readFileSync(new URL('README.md', directory), 'utf8'),
       readFileSync(sitePage, 'utf8'),
     ]
-    for (const raw of shared) expect(raw).toMatch(tableHeader)
-    for (const event of WEBHOOK_EVENTS) {
-      const reduced = {
-        ...webhooks,
-        events: Object.fromEntries(
-          Object.entries(webhooks.events).filter(([key]) => key !== event),
-        ),
-      }
-      for (const raw of shared)
+    for (const raw of shared) {
+      expect(raw).toMatch(tableHeader)
+      for (const event of makeWebhookEvents) {
+        const withoutEvent = raw
+          .split('\n')
+          .filter((line) => !line.startsWith(`| \`${event}\` |`))
+          .join('\n')
+        expect(withoutEvent, event).not.toBe(raw)
         expect(
-          validator.validateMakeReferences(raw, generated, reduced, recipes),
+          validator.validateMakeReferences(withoutEvent, generated, webhooks, recipes),
           event,
-        ).not.toEqual([])
+        ).toContain('incomplete webhook event table')
+      }
     }
   })
   it('rejects bad credentials, methods, parameters and nested fields in JSON and Markdown', () =>
