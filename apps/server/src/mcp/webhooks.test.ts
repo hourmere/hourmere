@@ -270,7 +270,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     const key = await credential(host.userId, host.organizationId)
     await expectFailure(key, 400, 'invalid_webhook', { ...input, events: [] })
     await expectFailure(key, 400, 'invalid_request', { ...input, oneTimeToken: 'unused' })
-    await expectFailure(key, 400, 'invalid_request', { ...input, events: ['workflow.executed'] })
+    await expectFailure(key, 404, 'workflows_disabled', { ...input, events: ['workflow.executed'] })
   })
 
   it('updates subscriptions and pauses or resumes without changing the destination, then deletes', async () => {
@@ -295,8 +295,8 @@ describe.skipIf(!process.env.DATABASE_URL)('Webhook REST, MCP and CLI parity', (
     )
     await expectFailure(
       ownerKey,
-      400,
-      'invalid_request',
+      404,
+      'workflows_disabled',
       { id, events: ['workflow.executed'] },
       'update',
     )

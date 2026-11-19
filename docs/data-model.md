@@ -2046,6 +2046,12 @@ with a null `booking_id`, `request_id` is this sample marker, not a reschedule-r
 `WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
 processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
 
+Migration 0143 permits up to seven signed webhook subscription kinds and admits
+`workflow.executed` in webhook audit details. Existing subscription arrays and audit rows
+are preserved. The runner holds `ACCESS EXCLUSIVE` locks on `webhooks` and `audit_events`
+while it replaces both checks and validates the existing rows. Adding the new kind
+requires workflows to be enabled. Slack and delivery capture still use their existing catalogues.
+
 ## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and

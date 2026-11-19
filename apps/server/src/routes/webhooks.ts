@@ -83,6 +83,10 @@ const errors = errorResponses({
   404: 'webhook_not_found',
   409: 'webhooks_disabled, webhook_limit_reached or organization_context_changed',
 })
+const subscriptionErrors = {
+  ...errors,
+  ...errorResponses({ 404: 'webhook_not_found or workflows_disabled' }),
+}
 
 /** Organization-wide outbound booking events; ordinary hosts have no administrative access. */
 export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule {
@@ -156,7 +160,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
             description: 'Endpoint and one-time secret',
             content: json(WebhookCreated),
           },
-          ...errors,
+          ...subscriptionErrors,
         },
       }),
       async (c) =>
@@ -184,7 +188,10 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
           headers: ExpectedWriteHeaders,
           body: { required: true, content: json(WebhookUpdateInput) },
         },
-        responses: { 200: { description: 'Updated endpoint', content: json(Webhook) }, ...errors },
+        responses: {
+          200: { description: 'Updated endpoint', content: json(Webhook) },
+          ...subscriptionErrors,
+        },
       }),
       async (c) =>
         c.json(

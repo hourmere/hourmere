@@ -43,6 +43,7 @@ const migrations = fileURLToPath(new URL('../../db/migrations/', import.meta.url
 const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 5).toString('base64') }
 const now = Temporal.Instant.from('2026-11-01T12:00Z')
 const queue = { enqueue: async () => null }
+const bookingEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')
 const slackUrl = (team: string) =>
   `https://hooks.slack.com/services/T${team}/BUPGRADE/private-upgrade-secret`
 
@@ -61,7 +62,7 @@ async function writeJournal(db: Db) {
   }
   const all = await createWebhook(ctx, settings, {
     url: 'https://hooks.example.com/all-events?token=private-query',
-    events: [...WEBHOOK_EVENTS].reverse(),
+    events: bookingEvents.toReversed(),
   })
   const one = await createWebhook(session, settings, {
     url: 'https://hooks.example.com/one-event',

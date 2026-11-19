@@ -119,6 +119,49 @@ describe.skipIf(!serverUrl)('webhook REST API', () => {
     ).toBe(400)
     expect((await request('/webhooks/not-an-id/deliveries')).status).toBe(404)
   })
+  it.each([true, false])(
+    'refuses workflow subscriptions with webhooks enabled=%s',
+    async (enabled) => {
+      const { request } = await client(enabled)
+      for (const url of ['https://hooks.example.com/', 'http://127.0.0.1/']) {
+        const response = await request('/webhooks', 'POST', { url, events: ['workflow.executed'] })
+        expect(response.status).toBe(404)
+        expect(await response.json()).toEqual({ error: 'workflows_disabled' })
+      }
+      expect(await (await request('/webhooks')).json()).toEqual([])
+    },
+  )
+  it('lets an owner keep or remove a workflow subscription while workflows are disabled', async () => {
+    const { request } = await client()
+    const bookingEvents = ['booking.reschedule_requested', 'booking.attendee_no_show_changed']
+    const events = [...bookingEvents, 'workflow.executed'].sort()
+    const created = await request('/webhooks', 'POST', {
+      url: 'https://hooks.example.com/',
+      events: bookingEvents,
+    })
+    expect(created.status).toBe(201)
+    const { webhook } = (await created.json()) as { webhook: { id: string } }
+    const path = `/webhooks/${webhook.id}`
+    const addition = await request(path, 'PATCH', { events })
+    expect(addition.status).toBe(404)
+    expect(await addition.json()).toEqual({ error: 'workflows_disabled' })
+    expect(await (await request('/webhooks')).json()).toMatchObject([
+      { events: bookingEvents.sort() },
+    ])
+
+    // A subscription saved by an enabled build can outlive that build.
+    await db.updateTable('webhooks').set({ events }).where('id', '=', webhook.id).execute()
+    const outsider = await client()
+    const foreign = await outsider.request(path, 'PATCH', { events })
+    expect(foreign.status).toBe(404)
+    expect(await foreign.json()).toEqual({ error: 'webhook_not_found' })
+    const keep = await request(path, 'PATCH', { events })
+    expect(keep.status).toBe(200)
+    expect(await keep.json()).toMatchObject({ events })
+    const remove = await request(path, 'PATCH', { events: bookingEvents })
+    expect(remove.status).toBe(200)
+    expect(await remove.json()).toMatchObject({ events: bookingEvents })
+  })
   it('enforces same-origin session writes before side effects', async () => {
     const { request } = await client(true, true)
     const body = { url: 'https://hooks.example.com/', events: ['booking.created'] }
