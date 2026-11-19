@@ -246,6 +246,31 @@ describe('security headers', () => {
     }
   })
 
+  it('keeps every poll entry private, uncacheable, unindexed and unembeddable', async () => {
+    for (const path of [
+      '/poll',
+      '/poll/voter',
+      '/poll/recover',
+      '/poll/reminder-opt-out',
+      '/POLL/',
+      '/%70oll/voter',
+      '/poll/%76oter/',
+    ]) {
+      const response = await app.request(path)
+      expect(response.status).toBe(200)
+      expect(securityHeadersOf(response)).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow')
+      const missing = await createApp(deps()).request(path)
+      expect(missing.headers.get('cache-control')).toBe('no-store')
+      expect(missing.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(missing.headers.get('x-robots-tag')).toBe('noindex, nofollow')
+    }
+    expect((await app.request('/polls')).headers.get('referrer-policy')).toBe(
+      'strict-origin-when-cross-origin',
+    )
+  })
+
   it('leave hashed bundles and other files their own type and long-lived cache', async () => {
     const bundle = await app.request('/assets/app-abc123.js')
     expect(bundle.status).toBe(200)

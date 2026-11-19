@@ -6,7 +6,7 @@ import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { NAV_ITEMS } from '../components/AppShell.tsx'
 import { fakeApi, json, organizations, profile, renderApp, signedIn } from '../test/fake-api.tsx'
-import { EVENT, eventRoutes } from '../test/public-fixtures.ts'
+import { EVENT, eventRoutes, slotsAnswer } from '../test/public-fixtures.ts'
 
 describe('routing between the app and the public pages', () => {
   it.each(NAV_ITEMS)('keeps the app page $to', async ({ to: path, label }) => {
@@ -97,3 +97,28 @@ describe('routing between the app and the public pages', () => {
     },
   )
 })
+
+it.each(['/poll/legacy-event', '/team/poll/legacy-event'])(
+  'preserves existing booking page %s beside the explicit poll routes',
+  async (path) => {
+    const team = path.startsWith('/team/')
+    const endpoint = team
+      ? '/api/v1/public/teams/poll/legacy-event'
+      : '/api/v1/public/poll/legacy-event'
+    const event = {
+      ...EVENT,
+      handle: 'poll',
+      slug: 'legacy-event',
+      ...(team && { team: { name: 'Poll team', slug: 'poll' } }),
+    }
+    const api = fakeApi({
+      [`GET ${endpoint}`]: () => json(200, event),
+      [`GET ${endpoint}/slots`]: slotsAnswer([]),
+    })
+    renderApp(path)
+    expect(await screen.findByRole('heading', { level: 1, name: 'Intro call' })).toBeDefined()
+    expect(screen.getByTestId('location').textContent).toBe(path)
+    expect(api.calls.some((call) => call.path.includes('/meeting-polls/'))).toBe(false)
+    expect(api.calls.some((call) => /\/me$|\/api\/auth/.test(call.path))).toBe(false)
+  },
+)

@@ -514,7 +514,10 @@ Withdraw takes the token and revision. On `poll_changed`, read and reconcile bef
 submission; never automatically retry a lost response. Reminder opt-out takes the separate
 mail opt-out token and cannot access ballots. Admission requests share 10 per minute per
 trusted IP across REST/MCP/processes; reads use 120 and vote/withdraw/opt-out share 30.
-Host creation and lifecycle transports and the browser voting page are not available yet.
+The [browser voting page](https://hourmere.com/docs/meeting-poll-voting) is available without
+a flag; host creation and lifecycle transports are not available yet. Polls cannot yet be
+created through the product. The page hides aggregate counts for withdrawn voters; the
+public read API retains its verified-credential behavior.
 
 中文：公开投票工具已提供，无功能开关。读取需要 `read`、`bookings` 或 `full` 密钥，
 写入需要 `bookings` 或 `full`；MCP 连接仍需认证，公开 REST 不要求登录或密钥。
@@ -525,7 +528,8 @@ Host creation and lifecycle transports and the browser voting page are not avail
 原令牌，不轮换或延长有效期。验证需明确提交，首次返回的新 `votingToken` 须保密。
 投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
 `poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
-管理端创建/生命周期接口和浏览器投票页面尚未提供。
+浏览器投票页面已提供，无功能开关；管理端创建/生命周期接口尚未提供，产品仍无法创建投票。
+页面对已撤回者隐藏汇总，公开读取 API 的已验证凭证行为保持不变。
 
 ## Duplicate an event type
 
