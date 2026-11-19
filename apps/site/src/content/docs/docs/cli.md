@@ -604,6 +604,7 @@ team-admin status alone grants no extra MCP/CLI or API-key access.
 ## Manage meeting polls
 
 Use `hourmere polls <command> --input -` with an API key for the poll's organization.
+`hourmere --help` separates host management from public voting commands.
 Personal event owners and current team owners or admins can manage polls. Reads allow
 `full`, `read` or `bookings`. Writes require `full` or `bookings`. All poll commands
 read JSON only from stdin and reject `--output`. Keep idempotency keys and invitation
@@ -643,6 +644,7 @@ status and host revision. `delete` returns
 `{ "deleted": true }` and preserves any linked booking.
 
 中文：管理端命令使用投票所在组织的密钥，权限限个人活动所有者及团队当前所有者或管理员。
+`hourmere --help` 分别列出主持人管理命令和公开投票命令。
 读取允许 `full`、`read` 或 `bookings`，写入需要 `full` 或 `bookings`。所有参数通过
 `--input -` 从标准输入读取，不支持 `--output`。创建公开投票和轮换链接时只在成功写入后返回一次
 `publicLink`。轮换立即使旧链接失效。仅限邀请的投票无法轮换。创建重试可取得 `pollId`，邀请重试

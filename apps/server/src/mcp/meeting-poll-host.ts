@@ -85,7 +85,7 @@ export function meetingPollHostTools({
       name: 'list_meeting_polls',
       title: 'List managed meeting polls',
       description:
-        'List polls in the acting organization that you manage as a personal event owner or current team owner/admin. Newest first. When nextAfter is present, pass it as after. Requires full, read or bookings key scope.',
+        'List managed polls as a personal event owner or current team owner/admin, newest first. Pass nextAfter as after. Omits voter rosters and voting links. API keys need read, bookings or full scope.',
       input: ListMeetingPollsInput,
       output: MeetingPollListOutput,
       annotations: read,
@@ -98,7 +98,7 @@ export function meetingPollHostTools({
       name: 'get_meeting_poll',
       title: 'Read a managed meeting poll',
       description:
-        'Read managed poll metadata including candidates, current state and hostRevision. Requires full, read or bookings key scope.',
+        'Read a managed poll’s candidates, status and hostRevision. Omits ballots and voting links. Use get_meeting_poll_results for the roster and votes. API keys need read, bookings or full scope.',
       input: MeetingPollHostId,
       output: MeetingPollHostOutput,
       annotations: read,
@@ -111,7 +111,7 @@ export function meetingPollHostTools({
       name: 'get_meeting_poll_results',
       title: 'Read managed meeting poll results',
       description:
-        'Read private roster and ballots, separate vote counts, hostRevision, resultsRevision and ballot revisions. Candidate availability is advisory and finalization rechecks it. Requires full, read or bookings key scope.',
+        'Read a managed poll’s private roster, ballots, vote counts and current revisions. Availability is advisory and reserves no time. Use these revisions to finalize. API keys need read, bookings or full scope.',
       input: MeetingPollHostId,
       output: MeetingPollResultsOutput,
       annotations: read,
@@ -124,7 +124,7 @@ export function meetingPollHostTools({
       name: 'close_meeting_poll',
       title: 'Close meeting poll voting',
       description:
-        'Stop voting using expectedHostRevision. The poll stays available for finalization. A repeat for an already closed poll returns its current state. Requires full or bookings key scope.',
+        'Stop voting using expectedHostRevision. Closing creates no booking and leaves the poll eligible for finalization. An already closed poll returns its current state. API keys need bookings or full scope.',
       input: revisionInput,
       output: MeetingPollHostOutput,
       annotations: write,
@@ -137,7 +137,7 @@ export function meetingPollHostTools({
       name: 'cancel_meeting_poll',
       title: 'Cancel a meeting poll',
       description:
-        'Cancel an open or closed poll using expectedHostRevision. A repeat for an already canceled poll returns its current state. Requires full or bookings key scope.',
+        'Cancel an unscheduled poll using expectedHostRevision. Cannot cancel a linked booking. An already canceled poll returns its current state. API keys need bookings or full scope.',
       input: revisionInput,
       output: MeetingPollHostOutput,
       annotations: { ...write, openWorldHint: true },
@@ -150,7 +150,7 @@ export function meetingPollHostTools({
       name: 'delete_meeting_poll',
       title: 'Delete a meeting poll',
       description:
-        'Permanently delete a poll and its voter data using expectedHostRevision. Any linked booking is preserved. Requires full or bookings key scope.',
+        'Permanently delete a managed poll and its voter data using expectedHostRevision. Preserves any linked booking. API keys need bookings or full scope.',
       input: revisionInput,
       output: z.object({ deleted: z.literal(true) }),
       annotations: write,
@@ -164,7 +164,7 @@ export function meetingPollHostTools({
       name: 'finalize_meeting_poll',
       title: 'Finalize a meeting poll',
       description:
-        'Book the chosen slot using the results revision and the selected voters’ ballot revisions. Include the booker in attendeeVoterIds and explicitly acknowledge conditional votes when selecting those voters. Keep the idempotencyKey for exact replay. Returns poll and safe booking metadata. Requires full or bookings key scope.',
+        'Book the chosen slot using current results and selected voters’ ballot revisions. Include the booker in attendeeVoterIds and acknowledge selected if_need_be votes. If the response is lost, replay the exact input with the original idempotencyKey. Omits booking management links and tokens. API keys need bookings or full scope.',
       input: z.strictObject({
         ...MeetingPollHostId.shape,
         ...FinalizeMeetingPollBody.shape,
@@ -181,7 +181,7 @@ export function meetingPollHostTools({
       name: 'create_meeting_poll',
       title: 'Create a meeting poll',
       description:
-        'Create an open poll for an event type you manage, with candidate starts and a voting deadline. Retain the random idempotencyKey. A public_link poll returns its voting link once. Invited mode returns publicLink: null. An exact retry returns poll_already_created with the authorized poll ID. Requires full or bookings key scope.',
+        'Create an open poll for an event type you manage, using offered starts and a voting deadline. Sends no invitations and reserves no time. Returns a publicLink once in public_link mode. Exact retries return poll_already_created. API keys need bookings or full scope.',
       input: z.strictObject({
         ...CreateMeetingPollBody.shape,
         idempotencyKey: MeetingPollIdempotencyKey,
@@ -200,7 +200,7 @@ export function meetingPollHostTools({
       name: 'invite_meeting_poll_voters',
       title: 'Invite meeting poll voters',
       description:
-        'Queue invitations for up to 40 supplied mailboxes while voting is open. Retain the random idempotencyKey. Returns an outcome for each supplied address. An exact retry reports current roster state and queues no mail. Requires full or bookings key scope.',
+        'Queue invitations for up to 40 supplied addresses while voting is open. Returns outcomes for those addresses without voter credentials. Replay with the original idempotencyKey to read current outcomes without sending again. API keys need bookings or full scope.',
       input: z.strictObject({
         ...MeetingPollHostId.shape,
         ...InviteMeetingPollVotersBody.shape,
@@ -217,7 +217,7 @@ export function meetingPollHostTools({
       name: 'resend_meeting_poll_invitation',
       title: 'Resend a meeting poll invitation',
       description:
-        'Queue a fresh invitation for a retained invitee, revoking their previous voting credential. Use expectedHostRevision and retain a random idempotencyKey. Exact retries queue no mail. Cooldowns and send budgets apply. Requires full or bookings key scope.',
+        'Queue a replacement invitation for a current invitee while voting is open, using expectedHostRevision. Revokes the previous credential and returns no replacement credential. Exact retries with the original idempotencyKey queue no mail. API keys need bookings or full scope.',
       input: z.strictObject({
         ...voterRevisionInput.shape,
         idempotencyKey: MeetingPollIdempotencyKey,
@@ -233,7 +233,7 @@ export function meetingPollHostTools({
       name: 'remove_meeting_poll_voter',
       title: 'Remove a meeting poll voter',
       description:
-        'Remove a voter, their ballot and credentials using expectedHostRevision. Returns removed voter IDs and current revisions. Requires full or bookings key scope.',
+        'Remove the specified voter, their ballot and credentials using expectedHostRevision. Returns removed voter IDs and current revisions. Does not remove a booked attendee from a linked booking. API keys need bookings or full scope.',
       input: voterRevisionInput,
       output: MeetingPollRemovalOutput,
       annotations: write,
@@ -246,7 +246,7 @@ export function meetingPollHostTools({
       name: 'remove_unverified_meeting_poll_voters',
       title: 'Remove unverified public poll voters',
       description:
-        'Remove unverified public-link enrollments using expectedHostRevision. Host invitations and abuse counters are preserved. Requires full or bookings key scope.',
+        'Remove unverified public-link enrollments using expectedHostRevision. Preserves host invitations and abuse counters. API keys need bookings or full scope.',
       input: revisionInput,
       output: MeetingPollRemovalOutput,
       annotations: write,
@@ -259,7 +259,7 @@ export function meetingPollHostTools({
       name: 'rotate_meeting_poll_link',
       title: 'Rotate a meeting poll link',
       description:
-        'Replace a public-link poll’s link using expectedHostRevision and a retained random idempotencyKey. The old link stops working immediately. Save the replacement link from this response. An exact retry returns poll_link_already_rotated. Invited polls return poll_link_unavailable. Requires full or bookings key scope.',
+        'Replace a public-link poll’s link using expectedHostRevision and idempotencyKey. Revokes the old link and returns its replacement once. An exact retry returns poll_link_already_rotated without a link. Unavailable for invited polls. API keys need bookings or full scope.',
       input: z.strictObject({
         ...revisionInput.shape,
         idempotencyKey: MeetingPollIdempotencyKey,
