@@ -26,7 +26,9 @@ import {
 } from './scheduled.ts'
 import { alignSmtpDateNowWithDatabase } from './testing-clock.ts'
 
-const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
+// pg-boss compares job retention against the database's real clock, so a fixture date that falls
+// into the past makes repaired jobs look expired. Keep it far in the future.
+const NOW = Temporal.Instant.from('2036-11-01T12:00:00Z')
 const START = NOW.add({ hours: 72 })
 const END = START.add({ minutes: 30 })
 const roles = { host: true, invitee: true, guests: true }
