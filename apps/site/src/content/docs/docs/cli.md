@@ -68,15 +68,15 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `branding get` | `get_branding` | `{}`; requires `read` or `full` |
 | `branding set` | `set_branding` | optional `brandPrimaryColor` (`#RRGGBB`), `brandLogo` (uploaded hash); `null` clears; requires `full` |
 | `branding upload` | REST `POST /api/v1/branding/logo` | `--file FILE --content-type image/png` (also `image/jpeg`, `image/webp`); requires `full` |
-| `polls create` | `create_meeting_poll` | `eventTypeId`, `candidateStarts`, `deadlineAt`, `displayTimeZone`, `admissionMode`, `idempotencyKey`; optional `durationMinutes`, `visibility` |
+| `polls create` | `create_meeting_poll` | [See inputs](#manage-meeting-polls) |
 | `polls list` | `list_meeting_polls` | optional `limit`, `after`. See [poll input rules](#manage-meeting-polls). |
 | `polls get` | `get_meeting_poll` | `id` |
 | `polls results` | `get_meeting_poll_results` | `id` |
-| `polls invite` | `invite_meeting_poll_voters` | `id`, `invitees`, `idempotencyKey` |
-| `polls resend-invitation` | `resend_meeting_poll_invitation` | `id`, `voterId`, `expectedHostRevision`, `idempotencyKey` |
-| `polls remove-voter` | `remove_meeting_poll_voter` | `id`, `voterId`, `expectedHostRevision` |
-| `polls remove-unverified` | `remove_unverified_meeting_poll_voters` | `id`, `expectedHostRevision` |
-| `polls rotate-link` | `rotate_meeting_poll_link` | `id`, `expectedHostRevision`, `idempotencyKey` |
+| `polls invite` | `invite_meeting_poll_voters` | [See inputs](#manage-meeting-polls) |
+| `polls resend-invitation` | `resend_meeting_poll_invitation` | [See inputs](#manage-meeting-polls) |
+| `polls remove-voter` | `remove_meeting_poll_voter` | [See inputs](#manage-meeting-polls) |
+| `polls remove-unverified` | `remove_unverified_meeting_poll_voters` | [See inputs](#manage-meeting-polls) |
+| `polls rotate-link` | `rotate_meeting_poll_link` | [See inputs](#manage-meeting-polls) |
 | `polls close` | `close_meeting_poll` | [See inputs](#manage-meeting-polls) |
 | `polls cancel` | `cancel_meeting_poll` | [See inputs](#manage-meeting-polls) |
 | `polls delete` | `delete_meeting_poll` | [See inputs](#manage-meeting-polls) |
@@ -584,7 +584,7 @@ Personal event owners and current team owners or admins can manage polls. Reads 
 read JSON only from stdin and reject `--output`. Keep idempotency keys and invitation
 addresses out of shell history and process arguments.
 
-`create` takes offset-bearing `candidateStarts` and `deadlineAt`, an IANA
+`create` takes `eventTypeId`, offset-bearing `candidateStarts` and `deadlineAt`, an IANA
 `displayTimeZone`, and `admissionMode` of `public_link` or `invited`. The `visibility`
 default is `private`; use `aggregate` to show totals to voters. `durationMinutes`
 defaults to the event's duration. A `slot_unavailable` error lists `unavailableStarts`
@@ -595,11 +595,13 @@ with `poll_link_unavailable`. An exact create retry returns `poll_already_create
 rotate with a fresh key. Rotation invalidates the previous link immediately. An exact
 rotation retry returns `poll_link_already_rotated`.
 
-`invite` takes up to 40 `invitees` with `name`, `email`, optional `locale` and optional
+All roster and rotation commands take the poll's `id`. `invite` takes up to 40
+`invitees` with `name`, `email`, optional `locale` and optional
 `timeZone`. It queues email only to supplied addresses, within mail and admission limits.
 An exact retry reports current roster outcomes without sending again. Use the current
 `expectedHostRevision` for `resend-invitation`, `remove-voter`, `remove-unverified` and
-`rotate-link`. `remove-unverified` removes only unverified public enrollments and keeps
+`rotate-link`. `resend-invitation` and `remove-voter` also take `voterId`.
+`remove-unverified` removes only unverified public enrollments and keeps
 host invitations. Keep the original payload and random `idempotencyKey` for retries of
 create, invite, resend or rotation.
 
