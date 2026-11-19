@@ -12,8 +12,9 @@ receiver and automatic refunds are future work. See the
 ## Operator note
 
 `PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout.
-A deployed server leaves paid holds disabled regardless of its value. Internal tests explicitly opt in through
-the service context. Existing holds expire regardless of this environment setting.
+It has no runtime effect in this release. Setting it to `true` does not permit hold creation
+or enable payment collection. Internal tests explicitly opt in through the service context.
+Existing holds expire regardless of this environment setting.
 The planned rollout safeguard will be available to every self-hosted instance, with no
 subscription or license requirement.
 
