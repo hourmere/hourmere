@@ -5,6 +5,8 @@ import {
   deleteWorkflow,
   getWorkflow,
   listWorkflows,
+  PreviewWorkflowInputSchema,
+  previewWorkflow,
   updateWorkflow,
   type WorkflowAuditPort,
 } from '@hourmere/workflows'
@@ -13,9 +15,11 @@ import {
   DeleteWorkflowInput,
   ListWorkflowsInput,
   UpdateWorkflowInput,
+  WORKFLOW_PREVIEW_DESCRIPTION,
   WORKFLOWS_NOT_AVAILABLE,
   Workflow,
   WorkflowPage,
+  WorkflowPreview,
 } from '../routes/workflows.ts'
 import { workflowFeatureTools } from '../workflows.ts'
 import { defineTool, type Tool } from './tools.ts'
@@ -77,6 +81,17 @@ export function workflowTools({
       async run({ id, ...args }, call) {
         await deleteWorkflow({ db, audit, principal: call.caller }, id, args)
         return { deleted: true as const }
+      },
+    }),
+    defineTool({
+      name: 'preview_workflow',
+      title: 'Preview a booking workflow with synthetic data',
+      description: WORKFLOW_PREVIEW_DESCRIPTION,
+      input: PreviewWorkflowInputSchema,
+      output: WorkflowPreview,
+      annotations,
+      run(args, call) {
+        return previewWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, args)
       },
     }),
     defineTool({
