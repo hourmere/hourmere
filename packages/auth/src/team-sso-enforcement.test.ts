@@ -554,6 +554,26 @@ describe.skipIf(!databaseUrl)('native and trusted team SSO enforcement', () => {
     expect(await effects(f)).toEqual(before)
   })
 
+  it('keeps unauthenticated slug checks uniform when a policy exists', async () => {
+    const f = await fixture()
+    const operation: Operation = {
+      api: 'checkOrganizationSlug',
+      path: 'check-slug',
+      body: { slug: f.slug },
+    }
+    const baseline = await http(off, f, operation, '')
+    expect(baseline.status).toBe(401)
+    await policy(f)
+    const response = await http(off, f, operation, '')
+    expect(response.status).toBe(baseline.status)
+    expect([...response.headers]).toEqual([...baseline.headers])
+    expect(await response.text()).toBe(await baseline.text())
+    await trustedRefused(
+      trusted(off, f, operation, true, false),
+      'trusted slug lookup without headers',
+    )
+  })
+
   it('filters enforced teams and invitations from lists, including the trusted email query', async () => {
     const f = await fixture()
     await policy(f)

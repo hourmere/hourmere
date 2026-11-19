@@ -95,7 +95,7 @@ export function nativeTeamSso(db: Db, capabilities: TeamSsoCapabilities) {
       // Trusted add-member accepts an explicit team even without headers. Slug
       // availability is also callable without a session by trusted code.
       const session = await getSessionFromCtx(ctx)
-      if (!session && !addMember && !checkSlug) return
+      if (!session && !addMember && (!checkSlug || ctx.request || ctx.headers)) return
       const activeId = session?.session.activeOrganizationId
       let organizationId: string | undefined
       if (checkSlug) {
