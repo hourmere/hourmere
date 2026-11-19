@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import * as React from 'react'
 import {
   MemoryRouter,
+  matchRoutes,
   UNSAFE_DataRouterContext,
   useLocation,
   useNavigate,
@@ -72,10 +73,16 @@ function appCopy(source: string) {
       useLocation,
       useNavigate,
       useRoutes,
+      matchRoutes,
       appRoutes: [
         { path: '/app/bookings', element: <List /> },
         { path: '/app/bookings/:id', element: <p>Detail</p> },
       ],
+      routingFormRoutes: [
+        { path: '/route/:handle/:slug' },
+        { path: '/route/team/:teamSlug/:slug' },
+      ],
+      RoutingFormGate: Empty,
       BookingPanelContext,
       bookingPath: (id: string) => `/app/bookings/${id}`,
       useI18n: () => ({ t: (text: string) => text }),

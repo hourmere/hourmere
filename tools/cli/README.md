@@ -597,6 +597,62 @@ exits `1` with `workflows_disabled` on stderr.
 结果包含匹配状态、邮件预览以及根据公开限制计算的估算值。预览使用合成预约数据，
 不会发起投递。工作流硬关闭时，命令退出码为 `1`，并在标准错误输出 `workflows_disabled`。
 
+## Manage meeting polls
+
+Use `hourmere polls <command> --input -` with a key for the poll's organization.
+Personal event owners and current team owners or admins can manage polls. Reads allow
+`full`, `read` or `bookings`. Writes require `full` or `bookings`. Each command takes
+its JSON from stdin and rejects `--output`. Keep idempotency keys and invitation
+addresses out of command-line arguments and shell history.
+
+| Command | JSON input |
+|---|---|
+| `create` | `eventTypeId`, `candidateStarts`, `deadlineAt`, `displayTimeZone`, `admissionMode`, `idempotencyKey`; optional `durationMinutes`, `visibility` |
+| `invite` | `id`, `idempotencyKey`, up to 40 `invitees` with `name`, `email`, optional `locale` and `timeZone` |
+| `resend-invitation` | `id`, `voterId`, `expectedHostRevision`, `idempotencyKey` |
+| `remove-voter` | `id`, `voterId`, `expectedHostRevision` |
+| `remove-unverified` | `id`, `expectedHostRevision` |
+| `rotate-link` | `id`, `expectedHostRevision`, `idempotencyKey` |
+
+Use offset-bearing instants for `candidateStarts` and `deadlineAt`. Create and rotate-link
+print the `publicLink` only on the successful write; keep stdout private. Invited polls
+have `publicLink: null` and reject rotation with `poll_link_unavailable`. An exact create
+retry reports `poll_already_created` with `pollId` (null if deleted). Rotate with the current
+`hostRevision` and a new key to replace a lost link and immediately invalidate the previous
+one. An exact rotation retry returns `poll_link_already_rotated`.
+
+Invitation queues email only to supplied addresses, subject to mail and admission limits.
+An exact invite retry returns current outcomes without sending again. Bulk removal removes
+unverified public enrollments and preserves host invitations.
+
+`list` accepts `{}` or a `limit` from 1 to 100 and an `after` cursor from `nextAfter`.
+`get` and `results` take `id`. Results include the current revisions and advisory
+candidate availability. `close`, `cancel` and `delete` take `id` and
+`expectedHostRevision`. Deletion returns `{ "deleted": true }` and preserves any
+linked booking.
+
+`finalize` takes `id`, `slotId`, `bookerVoterId`, `attendeeVoterIds` (including the
+booker), `expectedResultsRevision`, `expectedBallotRevisions` keyed by selected voter
+ID, `acknowledgeConditional`, a retained random `idempotencyKey`, and optionally
+`locationOptionId`. Acknowledge conditional votes when selecting a voter who answered
+`if_need_be` for that slot.
+After a lost response, resubmit the exact input with the original key to recover the
+current booking status. Finalization returns safe booking metadata and `replayed`.
+When a different key returns `poll_already_scheduled`, the JSON error includes the
+poll ID, booking ID, chosen slot ID, status and host revision.
+
+中文：使用 `hourmere polls <command> --input -` 管理会议投票。
+需要投票所在组织的密钥，权限限个人活动所有者及团队当前所有者或管理员。读取允许 `full`、`read`
+或 `bookings`，写入需要 `full` 或 `bookings`。JSON 从标准输入读取，幂等键请勿放入命令参数或历史。
+公开投票创建或轮换仅在成功写入时返回一次 `publicLink`。轮换会立即使旧链接失效。仅限邀请的投票不支持
+轮换。创建重试可取得 `pollId`，邀请重试返回名单状态且不会重发邮件。邀请只发给提交的地址。批量移除
+仅清理未验证的公开报名，保留主持人发出的邀请。
+`list` 可传 `limit` 和 `after`（使用上一页 `nextAfter`）；`get` 和 `results` 使用 `id`。
+候选时间的可用性仅供参考。关闭、取消和删除使用 `id` 和 `expectedHostRevision`，删除保留关联预约。
+最终确认需提供结果版本和所选投票者的选票版本，对有条件参与者须明确确认。响应丢失后，用原幂等键
+及完全相同的输入重试，可查询当前预约状态。响应仅含安全的预约元数据和 `replayed`。
+换用新键时，`poll_already_scheduled` 错误包含投票 ID、预约 ID、所选时间 ID、状态及管理版本。
+
 ## Public meeting polls
 
 Use `hourmere polls view|join|recover|verify|vote|withdraw|reminder-opt-out --input -`.
@@ -613,8 +669,7 @@ the voting token, complete `votes` with `slotId`/`value`, `consent: true`, optio
 `reminder-opt-out` uses the separate token from the email. `verify` prints a newly minted
 `votingToken` once to stdout; keep it private (it is also emailed). Input tokens and error
 diagnostics are redacted. Calls never retry automatically; read and reconcile after
-`poll_changed`. These public operations are available without a feature flag; host
-creation/lifecycle commands and the browser ballot page are not available yet.
+`poll_changed`. These public operations are available without a feature flag.
 
 中文：公开会议投票命令为 `hourmere polls view|join|recover|verify|vote|withdraw|reminder-opt-out --input -`。
 所有 JSON 参数只能从标准输入读取，拒绝文件输入、令牌命令行参数和 `--output`。
@@ -622,7 +677,7 @@ creation/lifecycle commands and the browser ballot page are not available yet.
 写入需要 `bookings` 或 `full`。CLI 使用已认证的 MCP；公开 REST 也支持免登录。
 找回只需投票 ID 与邮箱，无需有效令牌；验证首次返回的新投票令牌须保密，邮件也会发送。
 只提交投票者明确同意的完整选择和当前选票版本，遇到 `poll_changed` 应重新读取核对，
-不要自动重试。目前无功能开关，管理端命令和浏览器投票页面尚未提供。
+不要自动重试。目前无功能开关。
 
 ## Duplicate an event type
 

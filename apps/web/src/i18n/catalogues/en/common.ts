@@ -546,4 +546,24 @@ export const common = {
   'Opens the host’s website in this tab.': 'Opens the host’s website in this tab.',
   // Meeting poll reminder opt-out
   'meetingPoll.optOutError': 'We couldn’t stop reminders. Try again.',
+  // Public routing form
+  'Loading form…': 'Loading form…',
+  'This form is unavailable': 'This form is unavailable',
+  'Check the link you were given.': 'Check the link you were given.',
+  'We couldn’t load this form. Try again.': 'We couldn’t load this form. Try again.',
+  'This form has changed. Review your answers before continuing.':
+    'This form has changed. Review your answers before continuing.',
+  'Select an option': 'Select an option',
+  'Enter an answer.': 'Enter an answer.',
+  'Enter a valid email address.': 'Enter a valid email address.',
+  'Enter {count} characters or fewer.': 'Enter {count} characters or fewer.',
+  'Remove unsupported characters from your answer.':
+    'Remove unsupported characters from your answer.',
+  'Choose one of the available options.': 'Choose one of the available options.',
+  'Review the highlighted answers.': 'Review the highlighted answers.',
+  'We couldn’t submit your answers. Try again.': 'We couldn’t submit your answers. Try again.',
+  'Submitting…': 'Submitting…',
+  Continue: 'Continue',
+  'Thank you': 'Thank you',
+  Optional: 'Optional',
 } as const

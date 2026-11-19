@@ -297,6 +297,10 @@ export function smtpTransportOptions(url: string) {
 export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
   const senderEmail = senderMailbox(from)
   const transport = nodemailer.createTransport(smtpTransportOptions(url), { from })
+  const privateUrl = new URL(url)
+  const logsEnabled = privateUrl.searchParams.has('logger')
+  for (const key of ['logger', 'debug', 'transactionLog']) privateUrl.searchParams.delete(key)
+  let privateTransport: typeof transport | undefined
   let workflowTransport: typeof transport | undefined
   function sendSmtp(
     smtp: typeof transport,
@@ -349,8 +353,17 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
     senderEmail,
     async send(message, { signal } = {}) {
       signal?.throwIfAborted()
+      // SMTP debugging can print the full MIME body. Sensitive mail shares the same
+      // sender and transport settings with protocol logging disabled.
+      let smtp = transport
+      if (logsEnabled && message.sensitive) {
+        privateTransport ??= nodemailer.createTransport(smtpTransportOptions(privateUrl.href), {
+          from,
+        })
+        smtp = privateTransport
+      }
       await abortable(
-        sendSmtp(transport, message).catch((err: unknown) => {
+        sendSmtp(smtp, message).catch((err: unknown) => {
           throw refusal(err) ?? err
         }),
         signal,
@@ -361,9 +374,8 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
         if (!workflowTransport) {
           // SMTP_URL can request a pool that automatically requeues a disconnected send.
           // Pick the single-exchange transport explicitly and keep protocol logs private.
-          const workflowUrl = new URL(url)
-          for (const key of ['logger', 'debug', 'transactionLog', 'lmtp'])
-            workflowUrl.searchParams.delete(key)
+          const workflowUrl = new URL(privateUrl)
+          workflowUrl.searchParams.delete('lmtp')
           workflowTransport = nodemailer.createTransport(
             new SMTPTransport(smtpTransportOptions(workflowUrl.toString())),
             { from },

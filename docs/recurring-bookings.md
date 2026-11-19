@@ -384,12 +384,15 @@ a path, query string or JSON body, and both headers share one redaction rule. MC
 it as the `seriesManageToken` argument, as `reschedule_booking` and `cancel_booking` take
 `manageToken` today; the CLI passes it in JSON input, never as a flag.
 
-Each booker/guest series mail contains one `/series/manage#<token>` link. The page keeps the
-fragment token in memory, strips it from the address bar, sends it only in that header and
+Each booker/guest series mail contains one `/series/manage#<token>` link at the configured
+public origin. The fragment is the entire 43-character base64url capability, without a
+parameter name. The page keeps the fragment token in memory, strips it from the address
+bar, sends it only in that header and
 lists every occurrence with its current successor and meeting-link state. Booker
 capabilities can read the series and cancel all/following; guest mail capabilities expose
 only that recipient's permitted read-only details, never sibling attendee data or mutation
-authority. Host mail links to authenticated series detail instead. The series page invokes
+authority. Host mail links to authenticated series detail at `/app/booking-series/<series-id>`.
+The series page invokes
 the existing manage-booking read/slots/reschedule/cancel operations in series mode: the
 `X-Series-Manage-Token` header plus the stable `ordinal` (a GET query field or a POST body
 field, never the token), mutually exclusive with `X-Manage-Token`. The service resolves the
@@ -440,6 +443,12 @@ sends one email for that occurrence. Do not also queue the ordinary per-occurren
 messages for a series action. Reminders and follow-ups remain per occurrence with ordinary
 budgets and snapshotted due times. Refresh lifecycle/revision before send so an overtaken
 series mail cannot revive cancelled or moved events.
+
+The booking transaction records the series mail intent with the action receipt. The
+notification worker polls the series outbox on its own schedule and uses the shared
+booking-mail budget and SMTP transport. Each committed recipient receipt stops replays of that copy,
+including budget-suppressed copies. An SMTP retry reads the current member dates and
+skips recipients whose receipts already committed.
 
 Every series mail picks its language as existing booking mail does: the booking language
 for the booker and guests, each host's own language for host copies. Templates exist in
@@ -747,6 +756,21 @@ Never create both a provider recurring master and independent occurrence events.
 Zoom/Meet recurring meeting is introduced. Partial provider failure cannot roll back a
 committed local series; show occurrence-specific repair/readiness state and use existing
 repair authorization without rebooking the successful occurrences.
+
+#### Synthetic calendar-client fixtures
+
+From the repository root after installing dependencies, run
+`node scripts/generate-series-calendar-fixtures.ts`. It prints the temporary directory
+containing the files. All addresses and links use a reserved `.invalid` domain.
+
+- In an empty test calendar, open `confirmation.ics`, `link-update.ics` and `single-move.ics`
+  in order. The confirmation contains 12 Mondays from January 7 through March 25, 2030,
+  from 10:00 to 10:30 UTC. January 14 and February 4 start with pending links. The update
+  adds those two links. The move shifts February 11 to 12:00–12:30 UTC.
+- In a second empty test calendar, open `tail-confirmation.ics`, then `tail-cancel.ics`.
+  The earlier snapshot has the first 11 Mondays. The cancellation affects March 11 and
+  March 18 in the calendar. The mail body in `tail-cancel.txt` also lists March 25 as
+  cancelled. March 25 should stay absent, and the first nine dates should stay unchanged.
 
 ## REST, MCP and CLI proposal
 

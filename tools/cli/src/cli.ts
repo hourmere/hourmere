@@ -12,6 +12,19 @@ import {
 } from './client.ts'
 
 export const COMMANDS = {
+  'polls create': 'create_meeting_poll',
+  'polls list': 'list_meeting_polls',
+  'polls get': 'get_meeting_poll',
+  'polls results': 'get_meeting_poll_results',
+  'polls invite': 'invite_meeting_poll_voters',
+  'polls resend-invitation': 'resend_meeting_poll_invitation',
+  'polls remove-voter': 'remove_meeting_poll_voter',
+  'polls remove-unverified': 'remove_unverified_meeting_poll_voters',
+  'polls rotate-link': 'rotate_meeting_poll_link',
+  'polls close': 'close_meeting_poll',
+  'polls cancel': 'cancel_meeting_poll',
+  'polls delete': 'delete_meeting_poll',
+  'polls finalize': 'finalize_meeting_poll',
   'polls view': 'read_meeting_poll',
   'polls join': 'enroll_meeting_poll_voter',
   'polls recover': 'recover_meeting_poll_voter',
@@ -97,6 +110,8 @@ export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' }
 
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
        hourmere slots|book|reschedule [--duration-minutes MINUTES] [other options]
+       hourmere polls list|get|results|close|cancel|delete|finalize --input -
+       hourmere polls create|invite|resend-invitation|remove-voter|remove-unverified|rotate-link --input -
        hourmere polls view|join|recover|verify|vote|withdraw|reminder-opt-out --input -
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
@@ -139,7 +154,17 @@ Commands: whoami, profile, catalog, event, create-event, duplicate-event, update
           book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
           booking-activity, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
-Polls: JSON input must come from stdin (--input -); files, capability flags and --output are refused.
+Polls: Supply JSON through stdin (--input -).
+       Host list accepts limit and after. Get and results take id. Reads allow read, bookings or full.
+       close, cancel and delete take id and expectedHostRevision. Host writes allow bookings or full.
+       create takes eventTypeId, candidateStarts, deadlineAt, displayTimeZone, admissionMode,
+       idempotencyKey and optional durationMinutes and visibility. invite takes id, invitees and idempotencyKey.
+       resend-invitation and remove-voter take id, voterId and expectedHostRevision; resend also takes idempotencyKey.
+       remove-unverified and rotate-link take id and expectedHostRevision; rotate also takes idempotencyKey.
+       create and rotate-link print a newly issued publicLink once in public_link mode. Keep stdout private.
+       finalize takes id, slotId, bookerVoterId, attendeeVoterIds, expectedResultsRevision,
+       expectedBallotRevisions, acknowledgeConditional, idempotencyKey and optional locationOptionId.
+       Retain the idempotency key and exact input for a finalize replay with booking metadata.
        Relay only the voter’s explicit choices using their token; a host key cannot impersonate them.
        view accepts token; join uses publicToken, name, email, timeZone; recover uses pollId, email.
        verify accepts token; vote uses token, votes, consent, responses, expectedBallotRevision;
@@ -392,8 +417,14 @@ async function readInput(path: string | undefined, stdin: AsyncIterable<Uint8Arr
 }
 
 // Redact exact secrets everywhere (including nested text), rather than trusting field names.
-function printable(result: unknown, secrets: readonly string[]): string {
-  let json = JSON.stringify(result, null, 2)
+function printable(result: unknown, secrets: readonly string[], idempotencyKey?: string): string {
+  // Idempotency keys can be a single punctuation character. Redact an echoed value before
+  // serializing so it cannot alter JSON syntax or unrelated strings such as timestamps.
+  let json = JSON.stringify(
+    result,
+    (_name, value) => (idempotencyKey && value === idempotencyKey ? '[redacted]' : value),
+    2,
+  )
   for (const secret of secrets) {
     if (secret) json = json.replaceAll(JSON.stringify(secret).slice(1, -1), '[redacted]')
   }
@@ -420,6 +451,7 @@ export async function runCli(options: {
   let exportOutputPath: string | undefined
   let called = false
   let command: string | undefined
+  let idempotencyKey: string | undefined
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
     const args = parse(options.argv)
@@ -433,6 +465,7 @@ export async function runCli(options: {
         const value = input[field]
         if (typeof value === 'string') secrets.push(value)
       }
+      if (typeof input.idempotencyKey === 'string') idempotencyKey = input.idempotencyKey
     }
     const slackUrl =
       args.command.startsWith('slack ') && typeof input.url === 'string' ? input.url : ''
@@ -550,7 +583,21 @@ export async function runCli(options: {
       await options.stdout('{"outputWritten":true}\n')
     } else {
       const token = typeof result.manageToken === 'string' ? result.manageToken : ''
-      await options.stdout(printable(result, [...secrets, token]))
+      if (args.command.startsWith('polls ')) {
+        delete result.manageToken
+        delete result.manageUrl
+        if (args.command !== 'polls create' && args.command !== 'polls rotate-link') {
+          if (typeof result.publicLink === 'string') secrets.push(result.publicLink)
+          delete result.publicLink
+        }
+        if (args.command === 'polls finalize' && isObject(result.booking)) {
+          if (typeof result.booking.manageToken === 'string')
+            secrets.push(result.booking.manageToken)
+          delete result.booking.manageToken
+          delete result.booking.manageUrl
+        }
+      }
+      await options.stdout(printable(result, [...secrets, token], idempotencyKey))
     }
     return 0
   } catch (error) {
@@ -565,6 +612,7 @@ export async function runCli(options: {
           error: code,
           ...(error instanceof CliError && error.detail !== undefined && { message: error.detail }),
           ...(error instanceof CliError && error.field !== undefined && { field: error.field }),
+          ...(error instanceof CliError && error.meetingPoll),
           ...(error instanceof CliError && error.status !== undefined && { status: error.status }),
           ...(error instanceof CliError &&
             error.retryAfterSeconds !== undefined && {
@@ -576,6 +624,7 @@ export async function runCli(options: {
             }),
         },
         secrets,
+        idempotencyKey,
       ),
     )
     return error instanceof CliError && ['http_error', 'request_failed'].includes(error.code)

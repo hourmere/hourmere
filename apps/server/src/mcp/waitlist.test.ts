@@ -13,6 +13,7 @@ import { createFixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp, hasUnsafeJsonText } from '../app.ts'
+import { MeetingPollHostOutput } from '../meeting-poll-host-schemas.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import * as rateLimits from '../rate-limit.ts'
 import * as analyticsSchemas from '../routes/analytics.ts'
@@ -87,6 +88,7 @@ function frameworkCopy(change?: Change) {
     ...auth,
     ...scheduling,
     hasUnsafeJsonText,
+    MeetingPollHostOutput,
     redactOneTimeLogDetails,
   }
   return new Function(...Object.keys(bindings), `${source}; return {runTool,registerTools}`)(
