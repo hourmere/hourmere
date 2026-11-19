@@ -1085,6 +1085,10 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   what it relied on is unchanged: its provider still at the frozen revision and not retired
   (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
   trust generation current. Logging out deletes the session's attempts.
+  The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
+  the state digest and browser-binding digest. The authenticated state envelope carries the
+  nonce, PKCE verifier and return path, bound to the attempt and its provider revision.
+  Consumption commits before these values are returned to a future code-exchange caller.
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
