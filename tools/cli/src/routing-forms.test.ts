@@ -1,4 +1,4 @@
-import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,6 +20,15 @@ const publicInputs = [
   { handle: 'ada', slug: 'intake' },
   { teamSlug: 'TeamName', slug: 'intake' },
 ]
+const routeInput = { ...publicInputs[0], versionId: id, answers: previewInput.answers }
+const routeToken = 'r'.repeat(43)
+const continuationUrl = `https://public.example/route/continue#token=${routeToken}`
+const receipt = {
+  kind: 'continuation',
+  routeToken,
+  continuationUrl,
+  expiresAt: '2026-11-19T10:30:00Z',
+}
 
 async function run(
   command: string,
@@ -29,11 +38,13 @@ async function run(
   input: Record<string, unknown> = command === 'preview'
     ? previewInput
     : { id, expectedRevision: 1 },
+  extraArgs: string[] = [],
 ) {
   let stdout = ''
   let stderr = ''
-  const fetcher = vi.fn<typeof fetch>(async () =>
-    Response.json({
+  const fetcher = vi.fn<typeof fetch>(async () => {
+    if (result instanceof Response) return result
+    return Response.json({
       jsonrpc: '2.0',
       id: 1,
       result: disabled
@@ -42,10 +53,10 @@ async function run(
             content: [{ type: 'text', text: JSON.stringify({ error: 'routing_forms_disabled' }) }],
           }
         : (result ?? { structuredContent: { id, revision: 2 } }),
-    }),
-  )
+    })
+  })
   const code = await runCli({
-    argv: ['routing-forms', command, '--input', inputPath],
+    argv: ['routing-forms', command, '--input', inputPath, ...extraArgs],
     env: { HOURMERE_URL: 'https://hourmere.example', HOURMERE_API_KEY: 'hm_routing_cli_test' },
     stdin: (async function* () {
       if (inputPath === '-') yield JSON.stringify(input)
@@ -145,11 +156,125 @@ describe('routing form CLI commands', () => {
     expect(disabled.fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('advertises exactly the configuration and public metadata commands', () => {
+  it.each(publicInputs)(
+    'routes %o with a pinned version and redacts the receipt on stdout',
+    async (selector) => {
+      const input = { ...selector, versionId: id, answers: previewInput.answers }
+      const reply = { structuredContent: receipt }
+      const result = await run('route', false, reply, '-', input, ['--json'])
+      expect(result.code).toBe(0)
+      expect(result.stderr).toBe('')
+      expect(JSON.parse(result.stdout)).toEqual({
+        ...receipt,
+        routeToken: '[redacted]',
+        continuationUrl: '[redacted]',
+      })
+      expect(result.fetcher).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+        name: 'route_lead',
+        arguments: input,
+      })
+    },
+  )
+
+  it('writes a complete receipt to a new private file and refuses files and symlinks before calling MCP', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hourmere-cli-route-'))
+    const inputPath = join(dir, 'answers.json')
+    const outputPath = join(dir, 'receipt.json')
+    const symlinkPath = join(dir, 'receipt-link.json')
+    const reply = { structuredContent: receipt }
+    try {
+      await writeFile(inputPath, JSON.stringify(routeInput), { mode: 0o600 })
+      // Even a dangling symlink must be refused.
+      await symlink(outputPath, symlinkPath)
+      const dangling = await run('route', false, reply, inputPath, routeInput, [
+        '--output',
+        symlinkPath,
+      ])
+      expect(dangling.code).toBe(1)
+      expect(JSON.parse(dangling.stderr).error).toBe('file_error')
+      expect(dangling.fetcher).not.toHaveBeenCalled()
+
+      const result = await run('route', false, reply, inputPath, routeInput, [
+        '--output',
+        outputPath,
+      ])
+      expect(result.code).toBe(0)
+      expect(result.stderr).toBe('')
+      expect(JSON.parse(result.stdout)).toEqual({ outputWritten: true })
+      expect(result.fetcher).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+        name: 'route_lead',
+        arguments: routeInput,
+      })
+      expect((await stat(outputPath)).mode & 0o777).toBe(0o600)
+      expect(JSON.parse(await readFile(outputPath, 'utf8'))).toEqual(receipt)
+
+      const existing = await run('route', false, reply, inputPath, routeInput, [
+        '--output',
+        outputPath,
+      ])
+      expect(existing.code).toBe(1)
+      expect(JSON.parse(existing.stderr).error).toBe('file_error')
+      expect(existing.fetcher).not.toHaveBeenCalled()
+      expect(JSON.parse(await readFile(outputPath, 'utf8'))).toEqual(receipt)
+    } finally {
+      await Promise.all(
+        [symlinkPath, outputPath, inputPath].map((path) => unlink(path).catch(() => {})),
+      )
+      await rmdir(dir)
+    }
+  })
+
+  it('prints a routing message outcome unchanged', async () => {
+    const message = { kind: 'message', message: 'Thank you for your interest' }
+    const result = await run('route', false, { structuredContent: message }, '-', routeInput)
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(JSON.parse(result.stdout)).toEqual(message)
+  })
+
+  it.each([
+    ['stale versions', 'routing_form_changed', 'routing_form_changed'],
+    ['disabled routing', 'routing_forms_disabled', 'routing_forms_disabled'],
+    ['an unsafe error', routeToken, 'tool_error'],
+  ])('reports a safe tool error for %s without retrying', async (_scenario, error, safeError) => {
+    const reply = {
+      isError: true,
+      content: [{ type: 'text', text: JSON.stringify({ error, message: continuationUrl }) }],
+    }
+    const result = await run('route', false, reply, '-', routeInput)
+    expect(result.code).toBe(1)
+    expect(result.stdout).toBe('')
+    expect(JSON.parse(result.stderr)).toEqual({ error: safeError, outcomeMayBeUnknown: true })
+    expect(result.fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('suppresses a capability in an HTTP error', async () => {
+    const reply = Response.json({ error: routeToken, message: continuationUrl }, { status: 503 })
+    const result = await run('route', false, reply, '-', routeInput)
+    expect(result.code).toBe(3)
+    expect(result.stdout).toBe('')
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: 'http_error',
+      status: 503,
+      outcomeMayBeUnknown: true,
+    })
+    expect(result.fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('advertises the configuration, metadata and submission commands', () => {
     expect(Object.keys(COMMANDS).filter((command) => command.startsWith('routing-forms '))).toEqual(
-      [...commands.map(([command]) => `routing-forms ${command}`), 'routing-forms public'],
+      [
+        ...commands.map(([command]) => `routing-forms ${command}`),
+        'routing-forms public',
+        'routing-forms route',
+      ],
     )
     expect(HELP).toContain('routing-forms list|get|create|update|archive|publish|preview|public')
     expect(HELP).toContain('Pass slug and exactly one of handle or teamSlug')
+    expect(HELP).toContain('routing-forms route --input FILE|- [--output FILE]')
+    expect(HELP).toContain('Stdout redacts routeToken and continuationUrl')
+    expect(HELP).toContain('new 0600 JSON file')
   })
 })

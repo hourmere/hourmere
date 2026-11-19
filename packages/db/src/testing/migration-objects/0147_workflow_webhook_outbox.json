@@ -1,0 +1,9 @@
+{
+  "migration": "0147_workflow_webhook_outbox.sql",
+  "objects": {
+    "constraint public.webhook_deliveries.webhook_deliveries_event_type_check": "CHECK ((event_type = ANY (ARRAY['booking.created'::text, 'booking.rescheduled'::text, 'booking.cancelled'::text, 'booking.reschedule_requested'::text, 'booking.reschedule_request_expired'::text, 'booking.attendee_no_show_changed'::text, 'workflow.executed'::text])))",
+    "constraint public.webhook_deliveries.webhook_deliveries_identity_key": "UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id, workflow_run_id)",
+    "constraint public.webhook_deliveries.webhook_deliveries_workflow_run_kind": "CHECK (((event_type = 'workflow.executed'::text) = (workflow_run_id IS NOT NULL)))",
+    "constraint public.webhook_deliveries.webhook_deliveries_workflow_run_request_exclusive": "CHECK (((workflow_run_id IS NULL) OR (request_id IS NULL)))"
+  }
+}

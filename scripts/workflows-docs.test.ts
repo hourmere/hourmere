@@ -80,8 +80,8 @@ describe('workflow webhook guides', () => {
     )
   })
 
-  it('documents the planned workflow delivery fields', () => {
-    const guide = read(`${site}/webhooks.md`).split('The planned `workflow.executed` payload')[1]
+  it('documents the workflow delivery fields', () => {
+    const guide = read(`${site}/webhooks.md`).split('The `workflow.executed` payload')[1]
     for (const field of [
       'bookingId',
       'workflowId',
@@ -666,10 +666,8 @@ describe('workflow design numeric contracts', () => {
     const definers = subscriptions.map(({ number }) => number)
     expect(definers.at(-1)).toBe(subscription.number)
     const bookingDefiners = definers.slice(0, -1)
-    expect(deliveries.map(({ number }) => number)).toEqual(bookingDefiners)
-    expect(deliveries.map(({ kinds }) => kinds)).toEqual(
-      subscriptions.slice(0, -1).map(({ kinds }) => kinds),
-    )
+    expect(deliveries.slice(0, -1).map(({ number }) => number)).toEqual(bookingDefiners)
+    expect(deliveries.map(({ kinds }) => kinds)).toEqual(subscriptions.map(({ kinds }) => kinds))
     // Each definition keeps the earlier kinds in order and only appends ("only widened").
     for (const defined of [subscriptions, deliveries])
       for (const [index, { kinds }] of defined.entries()) {
@@ -713,33 +711,42 @@ describe('workflow design numeric contracts', () => {
 
     // Delivery kinds and the delivery uniqueness key as main installs and uses them.
     const deliveryKinds = latest(deliveryCheck)
-    expect(quoted(deliveryKinds.match[1])).toEqual(bookingEvents)
-    expect(deliveryKinds.number).toBe(predecessor)
+    expect(quoted(deliveryKinds.match[1])).toEqual([...WEBHOOK_EVENTS])
     expect(text).toContain(
-      `The ${deliveryKinds.number} \`webhook_deliveries_event_type_check\` allows the ${current} booking kinds`,
+      `Migration ${deliveryKinds.number}'s \`webhook_deliveries_event_type_check\` allows the same ${extended} kinds`,
     )
-    expect(text).toContain(
-      `replaces ${deliveryKinds.number}'s \`webhook_deliveries.event_type\` CHECK`,
+    expect(text).toContain(`replaces ${predecessor}'s \`webhook_deliveries.event_type\` CHECK`)
+    const oldKey = latest(
+      /ALTER TABLE webhook_deliveries ADD UNIQUE NULLS NOT DISTINCT \(([^)]*)\)/g,
     )
-    const key = latest(/ALTER TABLE webhook_deliveries ADD UNIQUE NULLS NOT DISTINCT \(([^)]*)\)/g)
+    const key = latest(
+      /CREATE UNIQUE INDEX \w+ ON webhook_deliveries\s*\(([^)]*)\) NULLS NOT DISTINCT/g,
+    )
+    expect(key.number).toBe(deliveryKinds.number)
     const columns = key.match[1] as string
-    expect(columns).toBe('webhook_id, booking_id, event_type, request_id')
+    expect(columns).toBe('webhook_id, booking_id, event_type, request_id, workflow_run_id')
+    expect(columns).toBe(`${oldKey.match[1]}, workflow_run_id`)
     const delivery = read('packages/webhooks/src/delivery.ts')
-    expect(delivery).toContain(
-      `oc.columns([${columns
+    expect(delivery.replace(/\s*\n\s*(?=\.)/g, '')).toContain(
+      `.columns([${columns
         .split(', ')
         .map((column) => `'${column}'`)
         .join(', ')}]).doNothing()`,
     )
-    expect(key.number).not.toBe(subscription.number)
-    expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns})\`, which ${key.number} added`)
+    expect(text).toContain(
+      `Migration ${key.number} installs \`UNIQUE NULLS NOT DISTINCT (${columns})\``,
+    )
+    expect(text).toContain(
+      `\`UNIQUE NULLS NOT DISTINCT (${oldKey.match[1]})\`, which ${oldKey.number} added`,
+    )
     const requestColumn = latest(/ALTER TABLE webhook_deliveries ADD COLUMN (request_id) uuid;/g)
-    expect(text).toContain(`follows ${requestColumn.number}'s \`request_id\` pattern`)
-    for (const [phrase, keyNumber, addedNumber] of text.matchAll(
-      /\b(\d{4})(?:'s)? (?:NULLS NOT DISTINCT|delivery key)|\bdelivery key is still the one (\d{4}) added/g,
-    ))
-      expect(keyNumber ?? addedNumber, phrase).toBe(key.number)
-    expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns}, workflow_run_id)\``)
+    expect(text).toContain(
+      `Migration ${key.number} follows ${requestColumn.number}'s \`request_id\` pattern`,
+    )
+    const workflowColumn = latest(
+      /ALTER TABLE webhook_deliveries ADD COLUMN workflow_run_id uuid;/g,
+    )
+    expect(workflowColumn.number).toBe(key.number)
     expect(text).toContain('No existing row is rewritten or backfilled')
     // Attendance rows store a fresh per-change receipt in request_id, as the baseline says.
     expect(delivery).toContain(
@@ -774,15 +781,16 @@ describe('workflow design numeric contracts', () => {
     expect(text).toContain('verifies an additive OpenAPI diff')
     expect(text).toContain('so `workflows_disabled` wins when both apply')
     expect(text).toContain('compares the requested set with the row locked by `lockedWebhook()`')
-    // Postgres needs the exact arbiter columns once 14a re-keys the delivery uniqueness.
-    expect(text).toContain("moves the existing capture's conflict target")
+    expect(text).toContain(
+      '`packages/webhooks/src/delivery.ts` uses the five-column key for every kind',
+    )
     const step = (id: string) => planRows().find((row) => row[1] === id)?.[4] ?? ''
     expect(step('13d')).toContain(`replaces the ${predecessor} webhooks.events CHECK`)
     expect(step('13d')).toContain(`BETWEEN 1 AND ${extended}`)
     expect(step('13d')).toContain(`${current} to ${extended} kinds`)
     expect(step('14a')).toContain('webhook_deliveries.workflow_run_id')
-    expect(step('14a')).toContain(`re-keys the ${key.number} NULLS NOT DISTINCT uniqueness`)
-    expect(step('14a')).toContain(`replaces the ${deliveryKinds.number} event_type CHECK`)
+    expect(step('14a')).toContain(`re-keys the ${oldKey.number} NULLS NOT DISTINCT uniqueness`)
+    expect(step('14a')).toContain(`replaces the ${predecessor} event_type CHECK`)
   })
 
   it('keeps plan rows and prose agreeing on precedence, lazy disable, the ledger and availability', () => {

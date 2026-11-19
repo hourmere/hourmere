@@ -23,7 +23,7 @@ import {
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
-import { routingFormsGuard } from '../routing-forms.ts'
+import { RoutingAnswersInput, routingFormsGuard } from '../routing-forms.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from '../team-management.ts'
 
 export const ROUTING_FORMS_DISABLED =
@@ -93,22 +93,7 @@ export const PublishRoutingForm = z
   .strictObject({ ...ArchiveRoutingForm.shape, requestId: identity.optional() })
   .openapi('PublishRoutingForm')
 export const PreviewRoutingForm = z
-  .strictObject({
-    answers: z
-      .preprocess(
-        (answers, ctx) => {
-          // Zod strips this key when parsing a record. Reject it before it can be discarded.
-          if (answers != null && Object.hasOwn(answers, '__proto__'))
-            ctx.addIssue({ code: 'custom', message: 'Invalid answer key' })
-          return answers
-        },
-        z.record(z.string(), z.string().nullable()),
-      )
-      .openapi({
-        description:
-          'Map question UUIDs to text or select option UUIDs. Omit or use null for an unanswered optional question.',
-      }),
-  })
+  .strictObject({ answers: RoutingAnswersInput })
   .openapi('PreviewRoutingForm')
 export const UpdateRoutingForm = z
   .strictObject(draft)

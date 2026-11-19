@@ -73,6 +73,14 @@ function rest(
 
 /** Explicit accepted scope contract. New routes, tools, modes and aliases need a row. */
 export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.freeze([
+  rest('GET', '/api/v1/meeting-polls', 'booking_read', 'key'),
+  rest('GET', '/api/v1/meeting-polls/{id}', 'booking_read', 'key'),
+  rest('GET', '/api/v1/meeting-polls/{id}/results', 'booking_read', 'key'),
+  rest('POST', '/api/v1/meeting-polls/{id}/close', 'booking_write', 'key'),
+  rest('POST', '/api/v1/meeting-polls/{id}/cancel', 'booking_write', 'key'),
+  rest('DELETE', '/api/v1/meeting-polls/{id}', 'booking_write', 'key'),
+  rest('POST', '/api/v1/meeting-polls/{id}/finalize', 'booking_write', 'key'),
+
   rest('POST', '/api/v1/public/meeting-polls/read', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/public/meeting-polls/enroll', 'booking_write', 'optional_key'),
   rest('POST', '/api/v1/public/meeting-polls/recover', 'booking_write', 'optional_key'),
@@ -208,6 +216,13 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/public/{handle}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/public/-/routing/{handle}/{slug}', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/public/-/routing/teams/{teamSlug}/{slug}', 'booking_read', 'optional_key'),
+  rest('POST', '/api/v1/public/-/routing/{handle}/{slug}/route', 'booking_write', 'optional_key'),
+  rest(
+    'POST',
+    '/api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
+    'booking_write',
+    'optional_key',
+  ),
   rest('GET', '/api/v1/public/{handle}/{slug}', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/public/{handle}/{slug}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/public/{handle}/{slug}/slots', 'booking_read', 'optional_key'),
@@ -304,6 +319,14 @@ function mcp(
 }
 
 export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.freeze([
+  mcp('list_meeting_polls', 'booking_read', ['GET /api/v1/meeting-polls']),
+  mcp('get_meeting_poll', 'booking_read', ['GET /api/v1/meeting-polls/{id}']),
+  mcp('get_meeting_poll_results', 'booking_read', ['GET /api/v1/meeting-polls/{id}/results']),
+  mcp('close_meeting_poll', 'booking_write', ['POST /api/v1/meeting-polls/{id}/close']),
+  mcp('cancel_meeting_poll', 'booking_write', ['POST /api/v1/meeting-polls/{id}/cancel']),
+  mcp('delete_meeting_poll', 'booking_write', ['DELETE /api/v1/meeting-polls/{id}']),
+  mcp('finalize_meeting_poll', 'booking_write', ['POST /api/v1/meeting-polls/{id}/finalize']),
+
   mcp('read_meeting_poll', 'booking_read', ['POST /api/v1/public/meeting-polls/read']),
   mcp('enroll_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/enroll']),
   mcp('recover_meeting_poll_voter', 'booking_write', ['POST /api/v1/public/meeting-polls/recover']),
@@ -326,6 +349,10 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('get_public_routing_form', 'booking_read', [
     'GET /api/v1/public/-/routing/{handle}/{slug}',
     'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
+  ]),
+  mcp('route_lead', 'booking_write', [
+    'POST /api/v1/public/-/routing/{handle}/{slug}/route',
+    'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
   ]),
   mcp('list_audit_events', 'audit_read', ['GET /api/v1/audit-events']),
   mcp('get_audit_log_settings', 'audit_read', ['GET /api/v1/audit-log/settings']),
@@ -477,6 +504,14 @@ function cli(command: string, tool: string): ApiKeyCliOperation {
 }
 
 export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.freeze([
+  cli('polls list', 'list_meeting_polls'),
+  cli('polls get', 'get_meeting_poll'),
+  cli('polls results', 'get_meeting_poll_results'),
+  cli('polls close', 'close_meeting_poll'),
+  cli('polls cancel', 'cancel_meeting_poll'),
+  cli('polls delete', 'delete_meeting_poll'),
+  cli('polls finalize', 'finalize_meeting_poll'),
+
   cli('polls view', 'read_meeting_poll'),
   cli('polls join', 'enroll_meeting_poll_voter'),
   cli('polls recover', 'recover_meeting_poll_voter'),
@@ -494,6 +529,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('routing-forms publish', 'publish_routing_form'),
   cli('routing-forms preview', 'preview_routing_form'),
   cli('routing-forms public', 'get_public_routing_form'),
+  cli('routing-forms route', 'route_lead'),
   cli('audit-log list', 'list_audit_events'),
   cli('audit-log settings', 'get_audit_log_settings'),
   cli('audit-log set-retention', 'set_audit_log_settings'),

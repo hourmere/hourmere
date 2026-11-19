@@ -12,6 +12,7 @@ import { type McpServer, ProtocolError, ProtocolErrorCode } from '@modelcontextp
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp, hasUnsafeJsonText } from '../app.ts'
+import { MeetingPollHostOutput } from '../meeting-poll-host-schemas.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import * as schemas from '../routes/one-time-links.ts'
 import { mcpEndpoint } from './endpoint.ts'
@@ -130,8 +131,11 @@ function framework<T>(name: string, change?: Change): T {
       z,
       ...auth,
       DomainError: scheduling.DomainError,
+      MeetingPollAlreadyScheduledError: scheduling.MeetingPollAlreadyScheduledError,
+      MeetingPollHostOutput,
       WaitlistRateLimitError: scheduling.WaitlistRateLimitError,
       MeetingPollRateLimitError: scheduling.MeetingPollRateLimitError,
+      RoutingAdmissionError: scheduling.RoutingAdmissionError,
       MeetingPollKeyMismatchError: scheduling.MeetingPollKeyMismatchError,
       inspect,
       hasUnsafeJsonText,

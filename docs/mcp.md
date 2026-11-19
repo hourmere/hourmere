@@ -56,6 +56,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_meeting_polls` | — | `polls list` | `full, read, bookings` |
+| `get_meeting_poll` | — | `polls get` | `full, read, bookings` |
+| `get_meeting_poll_results` | — | `polls results` | `full, read, bookings` |
+| `close_meeting_poll` | — | `polls close` | `full, bookings` |
+| `cancel_meeting_poll` | — | `polls cancel` | `full, bookings` |
+| `delete_meeting_poll` | — | `polls delete` | `full, bookings` |
+| `finalize_meeting_poll` | — | `polls finalize` | `full, bookings` |
 | `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
 | `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
 | `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |
@@ -71,6 +78,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
@@ -603,10 +611,9 @@ Withdraw takes the token and revision. On `poll_changed`, read and reconcile bef
 submission; never automatically retry a lost response. Reminder opt-out takes the separate
 mail opt-out token and cannot access ballots. Admission requests share 10 per minute per
 trusted IP across REST/MCP/processes; reads use 120 and vote/withdraw/opt-out share 30.
-The [browser voting page](https://hourmere.com/docs/meeting-poll-voting) is available without
-a flag; host creation and lifecycle transports are not available yet. Polls cannot yet be
-created through the product. The page hides aggregate counts for withdrawn voters; the
-public read API retains its verified-credential behavior.
+The [browser voting page](https://hourmere.com/docs/meeting-poll-voting) and host lifecycle tools
+are available without a flag. Poll creation through the product is pending. The page hides
+aggregate counts for withdrawn voters. The public read API retains its verified-credential behavior.
 
 中文：公开投票工具已提供，无功能开关。读取需要 `read`、`bookings` 或 `full` 密钥，
 写入需要 `bookings` 或 `full`；MCP 连接仍需认证，公开 REST 不要求登录或密钥。
@@ -617,7 +624,7 @@ public read API retains its verified-credential behavior.
 原令牌，不轮换或延长有效期。验证需明确提交，首次返回的新 `votingToken` 须保密。
 投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
 `poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
-浏览器投票页面已提供，无功能开关；管理端创建/生命周期接口尚未提供，产品仍无法创建投票。
+浏览器投票页面和主持人生命周期工具已提供，无功能开关。产品内创建投票仍待开放。
 页面对已撤回者隐藏汇总，公开读取 API 的已验证凭证行为保持不变。
 
 ## Duplicate an event type

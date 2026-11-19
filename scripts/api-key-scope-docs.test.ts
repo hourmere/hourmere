@@ -105,6 +105,36 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
 }
 
 describe('published API key scope tables', () => {
+  it.each(documents)('$path publishes the meeting poll host scopes', ({ document, section }) => {
+    for (const [method, path, tool, command, scopes] of [
+      ['GET', '/meeting-polls', 'list_meeting_polls', 'list', 'full, read, bookings'],
+      ['GET', '/meeting-polls/{id}', 'get_meeting_poll', 'get', 'full, read, bookings'],
+      [
+        'GET',
+        '/meeting-polls/{id}/results',
+        'get_meeting_poll_results',
+        'results',
+        'full, read, bookings',
+      ],
+      ['POST', '/meeting-polls/{id}/close', 'close_meeting_poll', 'close', 'full, bookings'],
+      ['POST', '/meeting-polls/{id}/cancel', 'cancel_meeting_poll', 'cancel', 'full, bookings'],
+      ['DELETE', '/meeting-polls/{id}', 'delete_meeting_poll', 'delete', 'full, bookings'],
+      [
+        'POST',
+        '/meeting-polls/{id}/finalize',
+        'finalize_meeting_poll',
+        'finalize',
+        'full, bookings',
+      ],
+    ]) {
+      expect(document).toContain(`| \`${tool}\` | — | \`polls ${command}\` | \`${scopes}\` |`)
+      if (section === 'all')
+        expect(document).toContain(
+          `| \`${method} /api/v1${path}\` | Session or API key | \`${scopes}\` |`,
+        )
+    }
+  })
+
   it.each(documents)(
     '$path labels the published SSO reads unavailable outside generated tables',
     ({ document }) => {
@@ -183,15 +213,19 @@ describe('published API key scope tables', () => {
   )
 
   it.each(documents)(
-    '$path lists optional-key public routing metadata',
+    '$path lists optional-key public routing metadata and submission',
     ({ document, section }) => {
       expect(document).toContain(
         '| `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |',
       )
+      expect(document).toContain('| `route_lead` | — | `routing-forms route` | `full, bookings` |')
       if (section === 'all') {
         for (const path of ['{handle}/{slug}', 'teams/{teamSlug}/{slug}']) {
           expect(document).toContain(
             `| \`GET /api/v1/public/-/routing/${path}\` | Public or manage token; check a supplied key | \`full, read, bookings\` |`,
+          )
+          expect(document).toContain(
+            `| \`POST /api/v1/public/-/routing/${path}/route\` | Public or manage token; check a supplied key | \`full, bookings\` |`,
           )
         }
       }

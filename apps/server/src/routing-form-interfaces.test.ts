@@ -51,6 +51,8 @@ vi.mock(import('../../../packages/scheduling/src/routing-form-targets.ts'), asyn
 })
 
 const publicUrl = 'http://localhost:4189'
+const routingSecret = 'synthetic-routing-interface-secret'
+const routingOwnerHandle = 'routing-public-owner'
 const operations = ['list', 'get', 'create', 'update', 'archive', 'publish', 'preview'] as const
 type Operation = (typeof operations)[number]
 const tools = {
@@ -104,11 +106,15 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       routes: productRoutes({
         db,
         notify,
+        publicUrl,
         socialProviders: {},
-        invitationMailLimits: { secret: 'synthetic-routing-interface-secret' },
+        invitationMailLimits: { secret: routingSecret },
         routingFormsEnabled: enabled,
+        routingSecret,
       }),
-      mcp: mcpEndpoint({ tools: productTools({ db, notify, routingFormsEnabled: enabled }) }),
+      mcp: mcpEndpoint({
+        tools: productTools({ db, notify, publicUrl, routingFormsEnabled: enabled, routingSecret }),
+      }),
     })
   }
   async function credential(
@@ -176,6 +182,10 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     })
+    if ('name' in params && params.name === 'route_lead') {
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+    }
     const text = await response.text()
     const event = text.split('\n').find((line) => line.startsWith('data: '))
     return JSON.parse(event ? event.slice(6) : text).result
@@ -218,7 +228,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
   async function callCli(
     application: ReturnType<typeof app>,
     token: string,
-    op: Operation | 'public',
+    op: Operation | 'public' | 'route',
     input: Record<string, unknown>,
   ) {
     let stdout = ''
@@ -245,6 +255,10 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
     })
     db = createDb(owned.pool)
     owner = await createTestUser(db, 'Owner')
+    await db
+      .insertInto('profiles')
+      .values({ user_id: owner.id, handle: routingOwnerHandle, time_zone: 'UTC' })
+      .execute()
     admin = await createTestUser(db, 'Admin')
     member = await createTestUser(db, 'Member')
     outsider = await createTestUser(db, 'Outsider')
@@ -781,13 +795,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       const organization =
         kind === 'personal' ? owner.principal.organization : team.as(owner).organization
       const token = await credential(owner, 'full', organization)
-      const handle = 'routing-public-owner'
-      if (kind === 'personal') {
-        await db
-          .insertInto('profiles')
-          .values({ user_id: owner.id, handle, time_zone: 'UTC' })
-          .execute()
-      }
+      const handle = routingOwnerHandle
       const eventTypeId = await createFixtures(db).eventType(
         organization.id,
         kind === 'personal' ? owner.id : null,
@@ -889,6 +897,122 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       expect(archived.structuredContent).toBeUndefined()
       expect(JSON.parse(archived.content[0].text)).toHaveProperty('error', 'routing_form_not_found')
       expect(await callTool(application, publicKey, unknown)).toEqual(archived)
+    },
+  )
+
+  it.each(['personal', 'team'] as const)(
+    'submits version-pinned %s answers over MCP and redacts the CLI receipt',
+    async (kind) => {
+      const principal = kind === 'personal' ? owner.principal : team.as(owner)
+      const organization = principal.organization
+      const adminKey = await credential(owner, 'full', organization)
+      const handle = routingOwnerHandle
+      const questionId = randomUUID()
+      const answer = 'Synthetic routing answer'
+      const eventTypeId = await createFixtures(db).eventType(
+        organization.id,
+        kind === 'personal' ? owner.id : null,
+        { slug: `submission-${randomUUID()}`, hosts: [{ userId: owner.id }] },
+      )
+      const { body: form, ok: created } = await call('rest', adminKey, 'create', {
+        ...draft(),
+        questions: [{ id: questionId, type: 'short_text', required: false, label: 'Reason' }],
+        rules: [
+          {
+            id: randomUUID(),
+            conditions: [{ questionId, operator: 'equals', value: answer }],
+            target: { kind: 'event', eventTypeId },
+          },
+        ],
+      })
+      expect(created).toBe(true)
+      const { id, slug } = form as RoutingForm
+      const published = await call('rest', adminKey, 'publish', { id, expectedRevision: 1 })
+      expect(published.ok).toBe(true)
+      expect(
+        (await call('rest', adminKey, 'update', { id, expectedRevision: 2, enabled: true })).ok,
+      ).toBe(true)
+
+      const name = 'route_lead'
+      const address = kind === 'personal' ? { handle, slug } : { teamSlug: organization.slug, slug }
+      const args = {
+        ...address,
+        versionId: published.body.version.id,
+        answers: { [questionId]: answer },
+      }
+      const application = app()
+      const off = app(false)
+      const route = (instance: ReturnType<typeof app>, key: string, input: object) =>
+        rpc(instance, key, 'tools/call', { name, arguments: input })
+      const keys = {
+        bookings: await credential(outsider, 'bookings'),
+        read: await credential(outsider, 'read'),
+        full: await credential(outsider),
+      }
+      const error = (result: { isError: boolean; content: { text: string }[] }) => {
+        expect(result.isError).toBe(true)
+        return JSON.parse(result.content[0]?.text ?? '')
+      }
+      const receipts = () =>
+        db.selectFrom('routing_receipts').select('version_id').where('form_id', '=', id).execute()
+
+      expect((await rpc(off, keys.full, 'tools/list')).tools).not.toContainEqual(
+        expect.objectContaining({ name }),
+      )
+      expect(error(await route(off, keys.bookings, args))).toEqual({
+        error: 'routing_forms_disabled',
+      })
+      expect(error(await route(off, keys.read, { unexpected: true }))).toEqual({
+        error: 'routing_forms_disabled',
+      })
+      expect(await receipts()).toEqual([])
+
+      expect(error(await route(application, keys.read, args))).toHaveProperty(
+        'error',
+        'insufficient_scope',
+      )
+      for (const input of [
+        { slug, versionId: args.versionId, answers: args.answers },
+        { ...args, handle, teamSlug: organization.slug },
+        { ...args, [answer]: true },
+      ]) {
+        expect(error(await route(application, keys.bookings, input))).toEqual({
+          error: 'invalid_request',
+          message: 'Invalid routing submission',
+        })
+      }
+      const message = await route(application, keys.full, { ...args, answers: {} })
+      expect(message.structuredContent).toEqual({ kind: 'message', message: 'Thank you' })
+      expect(await receipts()).toEqual([])
+
+      const receipt = await route(application, keys.bookings, args)
+      expect(receipt.isError).toBeFalsy()
+      const { routeToken } = receipt.structuredContent
+      expect(receipt.structuredContent).toEqual({
+        kind: 'continuation',
+        routeToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+        continuationUrl: `${publicUrl}/route/continue#token=${encodeURIComponent(routeToken)}`,
+        expiresAt: expect.any(String),
+      })
+      expect(JSON.parse(receipt.content[0].text)).toEqual(receipt.structuredContent)
+      expect(await callCli(application, keys.bookings, 'route', args)).toEqual({
+        ok: true,
+        body: {
+          kind: 'continuation',
+          routeToken: '[redacted]',
+          continuationUrl: '[redacted]',
+          expiresAt: expect.any(String),
+        },
+      })
+      const issued = [{ version_id: args.versionId }, { version_id: args.versionId }]
+      expect(await receipts()).toEqual(issued)
+
+      const republished = await call('rest', adminKey, 'publish', { id, expectedRevision: 3 })
+      expect(republished.ok).toBe(true)
+      expect(error(await route(application, keys.bookings, args))).toEqual({
+        error: 'routing_form_changed',
+      })
+      expect(await receipts()).toEqual(issued)
     },
   )
 

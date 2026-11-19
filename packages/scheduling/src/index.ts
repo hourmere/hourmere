@@ -210,13 +210,21 @@ export {
   type MeetingPollCleanupOptions,
   type MeetingPollCleanupResult,
 } from './meeting-poll-cleanup.ts'
+export {
+  type FinalizeMeetingPollInput,
+  type FinalizeMeetingPollResult,
+  finalizeMeetingPoll,
+  MeetingPollAlreadyScheduledError,
+} from './meeting-poll-finalize.ts'
 export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
 export { bookingMeetingPollLinked } from './meeting-poll-outcomes.ts'
 export { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
+export { getMeetingPollResults, type MeetingPollResults } from './meeting-poll-results.ts'
 export {
   type EnrollMeetingPollVoterInput,
   enrollMeetingPollVoter,
+  type MeetingPollHostContext,
   type MeetingPollPublicContext,
   MeetingPollRateLimitError,
   type MeetingPollVoterState,
@@ -225,6 +233,16 @@ export {
   type VerifyMeetingPollVoterResult,
   verifyMeetingPollVoter,
 } from './meeting-poll-voters.ts'
+export {
+  cancelMeetingPoll,
+  closeMeetingPoll,
+  deleteMeetingPoll,
+  getMeetingPoll,
+  listMeetingPolls,
+  MEETING_POLL_PAGE_DEFAULT,
+  MEETING_POLL_PAGE_MAX,
+  type MeetingPoll,
+} from './meeting-polls.ts'
 export {
   getTeamMemberDepartureImpact,
   MemberDepartureBookingSchema,
@@ -385,12 +403,14 @@ export {
   getPublicRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  type PublicRoutingFormAddress,
   previewRoutingForm,
   publishRoutingForm,
   ROUTING_RECEIPT_LIMITS,
   RoutingAdmissionError,
   type RoutingSubmissionContext,
   type RoutingSubmissionResult,
+  resolvePublicRoutingForm,
   submitRoutingForm,
   updateRoutingForm,
 } from './routing-form-service.ts'

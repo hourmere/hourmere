@@ -2765,8 +2765,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       'round-robin intersects its pool instead of uniting it',
       verifyRoundRobin,
       [
-        '? await unionRoundRobinSlots(\n            trx,\n            event.id,\n            event.eligibleHostUserIds,\n            from,\n            to,\n            now,\n            durationMinutes,\n          )',
-        '? await intersectSlots(trx, event.id, event.eligibleHostUserIds, from, to, now, undefined, true, durationMinutes)',
+        '? await unionRoundRobinSlots(\n          db,\n          event.id,\n          event.eligibleHostUserIds,\n          from,\n          to,\n          now,\n          durationMinutes,\n        )',
+        '? await intersectSlots(db, event.id, event.eligibleHostUserIds, from, to, now, undefined, true, durationMinutes)',
       ],
     ],
     [
@@ -2805,7 +2805,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     [
       'collective hosts use their per-event schedules',
       verifyCollectiveDefaultSchedule,
-      ["            event.schedulingType === 'collective',\n", '            false,\n'],
+      ["          event.schedulingType === 'collective',\n", '          false,\n'],
     ],
   ]
 

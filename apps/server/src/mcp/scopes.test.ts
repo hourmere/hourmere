@@ -71,7 +71,13 @@ const all = [
   'submit_meeting_poll_vote',
   'withdraw_meeting_poll_vote',
   'opt_out_meeting_poll_reminder',
-
+  'list_meeting_polls',
+  'get_meeting_poll',
+  'get_meeting_poll_results',
+  'close_meeting_poll',
+  'cancel_meeting_poll',
+  'delete_meeting_poll',
+  'finalize_meeting_poll',
   'get_event_type_waitlist',
   'set_event_type_waitlist',
   'list_waitlist_entries',
@@ -93,6 +99,7 @@ const all = [
   'publish_routing_form',
   'preview_routing_form',
   'get_public_routing_form',
+  'route_lead',
 ]
 // Hidden catalog entries never reach handlers. Workflows check scope first; SSO
 // answers sso_disabled before scope or arguments while both protocols are hard-off.
@@ -143,8 +150,12 @@ const writes = new Set([
   'submit_meeting_poll_vote',
   'withdraw_meeting_poll_vote',
   'opt_out_meeting_poll_reminder',
-
+  'close_meeting_poll',
+  'cancel_meeting_poll',
+  'delete_meeting_poll',
+  'finalize_meeting_poll',
   ...configurationWrites,
+  'route_lead',
   'create_booking',
   'reschedule_booking',
   'request_reschedule',
@@ -534,6 +545,13 @@ describe('CLI scope parity', () => {
     ['polls vote', 'submit_meeting_poll_vote'],
     ['polls withdraw', 'withdraw_meeting_poll_vote'],
     ['polls reminder-opt-out', 'opt_out_meeting_poll_reminder'],
+    ['polls list', 'list_meeting_polls'],
+    ['polls get', 'get_meeting_poll'],
+    ['polls results', 'get_meeting_poll_results'],
+    ['polls close', 'close_meeting_poll'],
+    ['polls cancel', 'cancel_meeting_poll'],
+    ['polls delete', 'delete_meeting_poll'],
+    ['polls finalize', 'finalize_meeting_poll'],
     ['event-waitlist', 'get_event_type_waitlist'],
     ['set-event-waitlist', 'set_event_type_waitlist'],
     ['waitlist-entries', 'list_waitlist_entries'],
@@ -564,6 +582,7 @@ describe('CLI scope parity', () => {
     ['routing-forms publish', 'publish_routing_form'],
     ['routing-forms preview', 'preview_routing_form'],
     ['routing-forms public', 'get_public_routing_form'],
+    ['routing-forms route', 'route_lead'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',
