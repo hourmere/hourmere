@@ -421,6 +421,14 @@ export async function findOneTimeEventType(
     : findPersonalEventType(db, { id: eventTypeId }, options)
 }
 
+/** Resolve a live booking path by event identity so a reused slug cannot redirect it. */
+export async function findPublicBookingPath(db: Db, eventTypeId: string) {
+  const eventType = await findOneTimeEventType(db, eventTypeId)
+  if (!eventType || !SLUG.test(eventType.slug)) return
+  if (eventType.team && !isPublicTeamSlug(eventType.handle)) return
+  return `${eventType.team ? '/team' : ''}/${encodeURIComponent(eventType.handle)}/${encodeURIComponent(eventType.slug)}`
+}
+
 /** Presentation only: no reusable personal or team booking address. */
 export interface OneTimeEventType
   extends Omit<PublicEventType, 'handle' | 'slug' | 'team' | 'allowEmbedParentRedirect'> {
