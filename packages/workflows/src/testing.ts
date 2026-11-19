@@ -1,5 +1,6 @@
 // Fixtures for the workflow contract tests: one personal owner, one team and foreign facts
-// the services would load by ID without an owner filter.
+// for validating workflow definitions.
+import type { Db } from '@hourmere/db'
 import type { WorkflowValidationContext } from './definition.ts'
 import type {
   WorkflowBookingFacts,
@@ -107,8 +108,30 @@ export const webhooks: ReadonlyMap<string, WorkflowWebhookFacts> = new Map(
     { id: ids.webhook, organizationId: ids.personalOrganization },
     { id: ids.teamWebhook, organizationId: ids.team },
     { id: ids.foreignWebhook, organizationId: ids.otherPersonalOrganization },
-  ].map((facts) => [facts.id, facts]),
+  ].map((facts) => [facts.id, { ...facts, isActive: true, events: ['workflow.executed'] }]),
 )
+
+export async function insertWorkflowWebhook(
+  db: Db,
+  organizationId: string,
+  {
+    isActive = true,
+    events = ['workflow.executed'],
+  }: { isActive?: boolean; events?: string[] } = {},
+): Promise<string> {
+  const row = await db
+    .insertInto('webhooks')
+    .values({
+      organization_id: organizationId,
+      url: 'https://hooks.example.test/receiver',
+      events,
+      is_active: isActive,
+      secret_ciphertext: Buffer.alloc(32),
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow()
+  return row.id
+}
 
 export const personalContext: WorkflowValidationContext = {
   owner: personalOwner,

@@ -4692,6 +4692,26 @@ export interface paths {
         patch: operations["updateSsoProvider"];
         trace?: never;
     };
+    "/api/v1/team/sso/providers/{providerId}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start explicit linking of the caller’s OIDC identity
+         * @description Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. SSO remains unavailable.
+         */
+        post: operations["linkSsoAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/sso/providers/{providerId}/test": {
         parameters: {
             query?: never;
@@ -6570,6 +6590,7 @@ export interface components {
                  */
                 oauthConsentId?: string;
             };
+            sso?: components["schemas"]["MeSso"];
             user: {
                 email: string;
                 /** Format: uuid */
@@ -6770,6 +6791,39 @@ export interface components {
             reason: "member_removed";
             /** Format: date-time */
             removedAt: string;
+        };
+        /** @description The caller’s own SSO status in the active team, when available to this session. */
+        MeSso: {
+            attempts: {
+                /** Format: date-time */
+                expiresAt: string;
+                /** Format: uuid */
+                id: string;
+                mailboxProven: boolean;
+                /** @description Current phases are fresh_proof, authorization and completion. */
+                phase: string;
+                /** Format: uuid */
+                providerId: string | null;
+            }[];
+            links: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                providerId: string;
+            }[];
+            proofs: {
+                /** Format: date-time */
+                expiresAt: string;
+                /** Format: uuid */
+                providerId: string;
+            }[];
+            providers: {
+                displayName: string;
+                /** Format: uuid */
+                id: string;
+                revision: number;
+            }[];
+            requireSso: boolean;
         };
         OneTimeBookingLink: {
             /** Format: uuid */
@@ -8158,7 +8212,8 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
-            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+            /** @description Subscription event kinds. Open enum. Ignore unknown event kinds. */
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
             /** Format: uuid */
             id: string;
             isActive: boolean;
@@ -8178,8 +8233,11 @@ export interface components {
             deliveredAt: string | null;
             /** Format: uuid */
             eventId: string;
-            /** @enum {string} */
-            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed";
+            /**
+             * @description Delivery event kind. Open enum. Ignore unknown event kinds.
+             * @enum {string}
+             */
+            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed";
             httpStatus: number | null;
             /** Format: uuid */
             id: string;
@@ -16843,6 +16901,97 @@ export interface operations {
             };
         };
     };
+    linkSsoAccount: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                providerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Authorization URL and link attempt ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attemptId: string;
+                        /** Format: uri */
+                        url: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, sso_configuration_changed or sso_domain_unverified */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     testSsoProvider: {
         parameters: {
             query?: never;
@@ -17097,7 +17246,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
                     isActive?: boolean;
                     url: string;
                 };
@@ -17144,7 +17293,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhook_not_found */
+            /** @description webhook_not_found or workflows_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -17265,7 +17414,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
                     isActive?: boolean;
                 };
             };
@@ -17307,7 +17456,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhook_not_found */
+            /** @description webhook_not_found or workflows_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;

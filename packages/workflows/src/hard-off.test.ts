@@ -269,13 +269,13 @@ describe('workflow hard-off', () => {
     }
   })
 
-  it('reaches production through one package entry that re-exports the guards unchanged', () => {
-    // `@hourmere/workflows` has a single entry, this package's index. A new subpath or a
-    // different entry module must update this pin.
+  it('exposes the same pinned guards at both package entry points', async () => {
+    // The webhook package imports the guard directly to avoid loading workflow services.
     const manifest = JSON.parse(
       readFileSync(join(root, 'packages/workflows/package.json'), 'utf8'),
     ) as { exports?: unknown }
-    expect(manifest.exports).toEqual({ '.': './src/index.ts' })
+    expect(manifest.exports).toEqual({ '.': './src/index.ts', './hard-off': './src/hard-off.ts' })
+    expect(await import('@hourmere/workflows/hard-off')).toBe(hardOff)
     // The constant and every guard, as production imports them, are hard-off.ts's own.
     for (const [name, value] of Object.entries(hardOff))
       expect((workflows as Record<string, unknown>)[name], name).toBe(value)

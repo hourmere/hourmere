@@ -3,6 +3,8 @@ import { openApiDocument } from '../../apps/server/src/openapi-document.ts'
 import { WEBHOOK_EVENTS } from '../../packages/webhooks/src/service.ts'
 import { EVENTS } from './nodes/HourmereTrigger/signature'
 
+const supportsTriggerEvent = (event: string) => event !== 'workflow.executed'
+
 type Schema = {
   $ref?: string
   properties?: Record<string, Schema>
@@ -83,7 +85,7 @@ it('keeps all action and credential endpoints and consumed fields in generated O
   }
 })
 it('matches the server webhook event source of truth', () => {
-  expect([...EVENTS]).toEqual([...WEBHOOK_EVENTS])
+  expect([...EVENTS]).toEqual(WEBHOOK_EVENTS.filter(supportsTriggerEvent))
 })
 it('keeps trigger registration and lifecycle contracts in generated OpenAPI', () => {
   const list = operation('/webhooks', 'get')
@@ -91,10 +93,9 @@ it('keeps trigger registration and lifecycle contracts in generated OpenAPI', ()
   const create = operation('/webhooks', 'post')
   const body = request(create)
   fields(body, ['url', 'events', 'isActive'])
-  expect(
-    resolve(required(required(resolve(body).properties?.events, 'events').items, 'event items'))
-      .enum,
-  ).toEqual([...EVENTS])
+  const items = required(required(resolve(body).properties?.events, 'events').items, 'event items')
+  const events = required(resolve(items).enum, 'subscription event enum')
+  expect(events.filter(supportsTriggerEvent)).toEqual([...EVENTS])
   fields(response(create, '201'), ['webhook.id', 'secret'])
   operation('/webhooks/{id}', 'delete')
 })

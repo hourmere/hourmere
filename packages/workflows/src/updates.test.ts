@@ -11,6 +11,7 @@ import {
 } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createWorkflowDefinition } from './creates.ts'
+import { insertWorkflowWebhook } from './testing.ts'
 import { updateWorkflow, updateWorkflowDefinition, type WorkflowUpdateContext } from './updates.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -307,7 +308,7 @@ describe.skipIf(!serverUrl)('workflow updates', () => {
       updateWorkflowDefinition(ctx, first.id, { expectedRevision: 1, enabled: true }),
     ).rejects.toMatchObject({ code: 'invalid_workflow' })
   })
-  it('requires full scope and rejects owner/identity changes, unknown fields and webhook actions', async () => {
+  it('requires full scope and rejects owner/identity changes and unknown fields', async () => {
     const user = await createTestUser(db),
       ctx = context(user)
     const first = await createWorkflowDefinition(ctx, input(user))
@@ -326,12 +327,52 @@ describe.skipIf(!serverUrl)('workflow updates', () => {
       { id: randomUUID() },
       { owner: { kind: 'personal', id: user.id } },
       { extra: true },
-      { actions: [{ type: 'webhook', webhookId: randomUUID() }] },
     ])
       await expect(
         updateWorkflowDefinition(ctx, first.id, { expectedRevision: 1, ...patch }),
       ).rejects.toMatchObject({ code: 'invalid_workflow' })
   })
+  it('validates webhook subscriptions on edit and enable while allowing disable after a pause', async () => {
+    const user = await createTestUser(db)
+    const ctx = context(user)
+    const organizationId = user.principal.organization.id
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const foreign = await insertWorkflowWebhook(db, team.id)
+    const inactive = await insertWorkflowWebhook(db, organizationId, { isActive: false })
+    const unsubscribed = await insertWorkflowWebhook(db, organizationId, {
+      events: ['booking.cancelled'],
+    })
+    const local = await insertWorkflowWebhook(db, organizationId)
+    const created = await createWorkflowDefinition(ctx, input(user, { enabled: true }))
+    const patch = (webhookId: string) => ({
+      expectedRevision: 1,
+      actions: [{ type: 'webhook', webhookId }],
+    })
+    for (const webhookId of [randomUUID(), foreign])
+      await expect(
+        updateWorkflowDefinition(ctx, created.id, patch(webhookId)),
+      ).rejects.toMatchObject({
+        code: 'invalid_workflow',
+        message: 'actions[0].webhookId: names a webhook that was not found',
+      })
+    for (const webhookId of [inactive, unsubscribed])
+      await expect(
+        updateWorkflowDefinition(ctx, created.id, patch(webhookId)),
+      ).rejects.toMatchObject({
+        code: 'invalid_workflow',
+        message: 'actions[0].webhookId: requires an active workflow.executed subscription',
+      })
+    const edited = await updateWorkflowDefinition(ctx, created.id, patch(local))
+    expect(edited).toMatchObject({ revision: 2, enabled: true, actions: patch(local).actions })
+    await db.updateTable('webhooks').set({ is_active: false }).where('id', '=', local).execute()
+    await expect(
+      updateWorkflowDefinition(ctx, created.id, { expectedRevision: 2, enabled: false }),
+    ).resolves.toMatchObject({ revision: 2, enabled: false, actions: edited.actions })
+    await expect(
+      updateWorkflowDefinition(ctx, created.id, { expectedRevision: 2, enabled: true }),
+    ).rejects.toMatchObject({ code: 'invalid_workflow' })
+  })
+
   it.each(['exclusive', 'shared'])(
     'waits for a contender holding a %s owner lock before the combined cap admission',
     async (mode) => {

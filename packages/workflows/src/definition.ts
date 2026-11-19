@@ -313,7 +313,8 @@ export function assertWorkflowTextPolicy(
  * Validates a candidate definition for `context.owner` and returns its canonical form: the
  * trimmed name, default delay and enabled flag, and normalized custom text. Every referenced
  * event type and webhook must be the owner's own; group and deleted event types are refused;
- * team definitions cannot read answers, sources or locations.
+ * webhooks must be active and subscribed to workflow executions; team definitions cannot
+ * read answers, sources or locations.
  */
 export function validateWorkflowDefinition(
   value: unknown,
@@ -334,6 +335,8 @@ export function validateWorkflowDefinition(
       const webhook = context.webhooks.get(action.webhookId)
       if (!webhook || webhook.id !== action.webhookId || !ownsWebhook(context.owner, webhook))
         throw invalid(`${path}.webhookId`, 'names a webhook that was not found')
+      if (!webhook.isActive || !webhook.events.includes('workflow.executed'))
+        throw invalid(`${path}.webhookId`, 'requires an active workflow.executed subscription')
       return action
     }
     const recipients = [...action.recipients].sort(

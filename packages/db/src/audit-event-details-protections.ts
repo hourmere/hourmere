@@ -34,6 +34,7 @@ export const slackAuditEvents = [
 ] as const
 /** The event names 0080 admits for webhooks: Slack's plus the attendee no-show change. */
 export const webhookAuditEvents = [...slackAuditEvents, 'booking.attendee_no_show_changed'] as const
+export const workflowWebhookAuditEvents = [...webhookAuditEvents, 'workflow.executed'] as const
 
 const insert = (pool: pg.Pool, action: string, details: unknown) =>
   pool.query(

@@ -43,10 +43,44 @@ function projectionAad(provider: SsoProviderRevision, id: string, binding: strin
   ])
 }
 
+export function sealOidcCompletion(
+  key: Buffer,
+  provider: SsoProviderRevision,
+  id: string,
+  binding: string,
+  result: object,
+) {
+  return encryptCredential(
+    key,
+    projectionAad(provider, id, binding),
+    JSON.stringify(result),
+  ).toString('base64url')
+}
+
+export function openOidcCompletion(
+  key: Buffer,
+  provider: SsoProviderRevision,
+  id: string,
+  binding: string,
+  envelope: string,
+): unknown {
+  return JSON.parse(
+    decryptCredential(
+      key,
+      projectionAad(provider, id, binding),
+      Buffer.from(envelope, 'base64url'),
+    ),
+  )
+}
+
+export function isOidcCompletionEnvelope(envelope: string | undefined): envelope is string {
+  return !!envelope && envelope.length <= 3800 && /^[A-Za-z0-9_-]+$/.test(envelope)
+}
+
 const mailboxSnapshot = (accountMailbox: string, linkMailbox: string, assertedMailbox: string) =>
   sha256(JSON.stringify([normalizeOidcMailbox(accountMailbox), linkMailbox, assertedMailbox]))
 
-function expiresDuringWrite(error: unknown): boolean {
+export function expiresDuringOidcWrite(error: unknown): boolean {
   return (
     error instanceof Error &&
     'constraint' in error &&
@@ -113,11 +147,7 @@ export async function stageOidcCompletion(
       }
       // The pending row freezes a digest of this encrypted projection. The browser carries
       // the ciphertext so the existing attempt storage needs no claim or token columns.
-      const envelope = encryptCredential(
-        configurationKey,
-        projectionAad(provider, id, binding),
-        JSON.stringify(projection),
-      ).toString('base64url')
+      const envelope = sealOidcCompletion(configurationKey, provider, id, binding, projection)
       await trx
         .insertInto('sso_attempts')
         .values({
@@ -138,7 +168,7 @@ export async function stageOidcCompletion(
       return { id, envelope, expiresAt }
     })
   } catch (error) {
-    if (expiresDuringWrite(error)) return { reason: 'attempt_expired' } as const
+    if (expiresDuringOidcWrite(error)) return { reason: 'attempt_expired' } as const
     throw error
   }
 }
@@ -161,8 +191,7 @@ export async function completeOidcSignIn(
   options: OidcSessionRequest,
 ) {
   const binding = browserBindingDigest(browserBinding)
-  if (!binding || !envelope || envelope.length > 3800 || !/^[A-Za-z0-9_-]+$/.test(envelope))
-    return invalid
+  if (!binding || !isOidcCompletionEnvelope(envelope)) return invalid
 
   const attempts = (executor: Db) =>
     executor
@@ -188,12 +217,9 @@ export async function completeOidcSignIn(
 
   let result: z.infer<typeof projectionSchema>
   try {
-    const plaintext = decryptCredential(
-      configurationKey,
-      projectionAad(provider, id, binding),
-      Buffer.from(envelope, 'base64url'),
+    result = projectionSchema.parse(
+      openOidcCompletion(configurationKey, provider, id, binding, envelope),
     )
-    result = projectionSchema.parse(JSON.parse(plaintext))
   } catch {
     return invalid
   }
@@ -278,7 +304,7 @@ export async function completeOidcSignIn(
       return { status: 'completed', returnPath, cookie: session.cookie } as const
     })
   } catch (error) {
-    if (error instanceof OidcAttemptRefused || expiresDuringWrite(error)) return invalid
+    if (error instanceof OidcAttemptRefused || expiresDuringOidcWrite(error)) return invalid
     throw error
   }
 }

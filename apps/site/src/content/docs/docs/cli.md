@@ -221,6 +221,13 @@ current team owner/admin. Denials retain REST codes such as `insufficient_scope`
 Save the destination and subscriptions in a JSON file such as `webhook.json`, or
 pass the JSON on standard input with `--input -`.
 
+The `events` values for `webhooks create` and `webhooks update` are `booking.created`,
+`booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
+`booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and
+`workflow.executed`. Workflows are hard-off. Adding `workflow.executed` exits with
+status `1` and `workflows_disabled` on stderr (REST 404). On create, this takes
+precedence over `webhooks_disabled` (REST 409).
+
 ```json
 {
   "url": "https://receiver.example.com/hourmere",
@@ -251,6 +258,8 @@ Delivery history accepts `read` or `full` and returns `{ data, nextAfter }` with
 fifty metadata rows from the last thirty days, newest first. Pass `nextAfter` as `after`
 in the next JSON input until it is null. Payloads, headers and secrets are omitted.
 History and rotation also return `webhook_not_found` for missing and foreign endpoints.
+Treat `Webhook.events` and `WebhookDelivery.eventType` as open enums and ignore unknown
+event types. Every delivery record has a required UUID `bookingId`.
 
 中文：`webhooks list` 使用 `read` 或 `full` 密钥。`webhooks create` 使用 `full`
 密钥，并要求 `--output` 或显式 `--json`。带日志采集的环境请使用 `--output`，它会把
@@ -260,6 +269,8 @@ History and rotation also return `webhook_not_found` for missing and foreign end
 `webhooks rotate-secret` 使用 `full` 密钥，需指定 `--output` 或 `--json`，仅在本次响应中返回新密钥。
 `webhooks deliveries` 使用 `read` 或 `full` 密钥，每页最多返回 50 条投递元数据。
 将 `nextAfter` 作为 `after` 请求下一页，直至其为 null。
+工作流仍处于硬关闭状态。新增 `workflow.executed` 订阅时，CLI 退出码为 `1`，
+并在标准错误输出 `workflows_disabled`（对应 REST 404），创建时优先于 `webhooks_disabled`。
 
 ## Draft open-time email snippets
 
