@@ -522,6 +522,37 @@ export interface BookingSeries {
   updated_at: Generated<Timestamp>;
 }
 
+export interface BookingSeriesAdmissions {
+  actor_digest: Buffer;
+  admitted_at: Generated<Timestamp>;
+  event_type_id: string;
+  id: Generated<string>;
+  organization_id: string;
+}
+
+export interface BookingSeriesNotifications {
+  attempts: number | null;
+  capability_scope: string | null;
+  due_at: Timestamp | null;
+  id: Generated<string>;
+  kind: string;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  manage_token_hash: Buffer | null;
+  organization_id: string;
+  outbox_state: string | null;
+  outcome: string | null;
+  recipient_id: string | null;
+  recipient_role: string | null;
+  reported_link_states: string[] | null;
+  reported_ordinals: number[] | null;
+  row_type: string;
+  sent_at: Timestamp | null;
+  sequence: Int8;
+  series_id: string;
+  suppression_reason: string | null;
+}
+
 export interface BookingSeriesOccurrences {
   end_at: Timestamp;
   id: Generated<string>;
@@ -531,6 +562,19 @@ export interface BookingSeriesOccurrences {
   root_booking_id: string;
   series_id: string;
   start_at: Timestamp;
+}
+
+export interface BookingSeriesReceipts {
+  affected_occurrence_ids: Generated<string[]>;
+  authority_scope: Buffer;
+  created_at: Generated<Timestamp>;
+  fingerprint: Buffer;
+  id: Generated<string>;
+  idempotency_key: Buffer;
+  operation_kind: string;
+  organization_id: string;
+  result_booking_ids: Generated<string[]>;
+  series_id: string;
 }
 
 export interface CalendarBusy {
@@ -1737,7 +1781,10 @@ export interface DB {
   booking_routing: BookingRouting;
   booking_scheduled_messages: BookingScheduledMessages;
   booking_series: BookingSeries;
+  booking_series_admissions: BookingSeriesAdmissions;
+  booking_series_notifications: BookingSeriesNotifications;
   booking_series_occurrences: BookingSeriesOccurrences;
+  booking_series_receipts: BookingSeriesReceipts;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
   calendar_connections: CalendarConnections;

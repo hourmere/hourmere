@@ -19,7 +19,7 @@ async function accepted<T>(write: Promise<T>, description?: string): Promise<T> 
   return write
 }
 
-async function createTenant(pool: pg.Pool): Promise<Tenant> {
+export async function createTenant(pool: pg.Pool): Promise<Tenant> {
   const result = await accepted(
     pool.query<{ id: string }>(
       `INSERT INTO auth.organization (name, slug, "createdAt")
@@ -92,7 +92,7 @@ function insertOccurrence(
   })
 }
 
-async function createSeries(
+export async function createSeries(
   pool: pg.Pool,
   tenant: Tenant,
   overrides: Record<string, unknown> = {},
