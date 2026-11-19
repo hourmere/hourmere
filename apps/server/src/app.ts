@@ -161,7 +161,7 @@ function isSlackDestinationPath(path: string): boolean {
 function isSsoTrustPath(path: string): boolean {
   return (
     /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path) ||
-    /^\/api\/auth\/(?:sign-in\/sso|sso\/callback)(?:\/|$)/i.test(path)
+    /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete))(?:\/|$)/i.test(path)
   )
 }
 

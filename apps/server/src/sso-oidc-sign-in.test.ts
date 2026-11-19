@@ -1,7 +1,9 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createAuth, createAuthPool, createCallerResolver, type SignupPolicy } from '@hourmere/auth'
+import { decryptCredential } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import type { MailMessage } from '@hourmere/mail'
 import type { SsoRequest, SsoResponse } from '@hourmere/outbound/sso'
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from 'jose'
 import { sql } from 'kysely'
@@ -13,13 +15,21 @@ import {
   ssoFixture,
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
-import { sealSsoProviderConfiguration } from './sso-configuration.ts'
+import { sealSsoProviderConfiguration, ssoProviderConfigurationAad } from './sso-configuration.ts'
+import {
+  deliverMailboxProof,
+  MAILBOX_PROOF_CONSUME_PATH,
+  MAILBOX_PROOF_SEND_PATH,
+  MailboxProofEmailPayload,
+  mailboxProofRoutes,
+} from './sso-mailbox-proof.ts'
 import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
 const startPath = '/api/auth/sign-in/sso'
 const callbackPath = (providerId: string) => `/api/auth/sso/callback/${providerId}`
+const completePath = '/api/auth/sso/oidc/complete'
 const refusedLocation = '/sign-in?error=unable_to_create_session'
 const bindingCookie = '__Host-hourmere.sso_binding'
 const secret = randomBytes(32).toString('base64url')
@@ -60,12 +70,17 @@ interface Attempt {
   id: string
 }
 
+interface PendingAttempt extends Attempt {
+  completionCookie: string
+}
+
 /** A networkless IdP at the transport boundary, with real PKCE verification and signed tokens. */
 function fakeIdp(signingKey: CryptoKey, jwks: SsoResponse, epoch: () => Promise<number>) {
   const codes = new Map<
     string,
     { parameters: URLSearchParams; claims: JWTPayload; beforeToken?: () => Promise<void> }
   >()
+  let issuedSecrets: string[] = []
   const exchange = vi.fn(async (request: SsoRequest) => {
     expect(request.method).toBe('POST')
     const clientAuthentication = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString(
@@ -97,7 +112,10 @@ function fakeIdp(signingKey: CryptoKey, jwks: SsoResponse, epoch: () => Promise<
     })
       .setProtectedHeader(signingHeader)
       .sign(signingKey)
-    return json({ id_token: idToken, access_token: randomUUID(), refresh_token: randomUUID() })
+    const accessToken = randomUUID()
+    const refreshToken = randomUUID()
+    issuedSecrets = [code, body.get('code_verifier') ?? '', idToken, accessToken, refreshToken]
+    return json({ id_token: idToken, access_token: accessToken, refresh_token: refreshToken })
   })
   const discovery = vi.fn(async () => json(metadata))
   const send = vi.fn(async (request: SsoRequest) => {
@@ -116,6 +134,9 @@ function fakeIdp(signingKey: CryptoKey, jwks: SsoResponse, epoch: () => Promise<
     discovery,
     exchange,
     send,
+    get issuedSecrets() {
+      return issuedSecrets
+    },
     issue(attempt: Attempt, claims: JWTPayload, beforeToken?: () => Promise<void>) {
       const code = randomUUID()
       codes.set(code, {
@@ -138,6 +159,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
   let fixture: SsoFixture
   let idp: ReturnType<typeof fakeIdp>
   let app: ReturnType<typeof createApp>
+  let mailboxJobs: MailboxProofEmailPayload[]
 
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'oidc_sign_in' })
@@ -174,18 +196,30 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
         ).now.getTime() / 1000,
       ),
     )
+    mailboxJobs = []
     app = instance()
   })
 
   function instance({ enabled = true, expiresIn }: { enabled?: boolean; expiresIn?: number } = {}) {
+    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl,
+      ssoMailboxProof: mailboxProofRoutes({
+        db,
+        capabilities,
+        queue: {
+          async enqueue(_name, payload) {
+            mailboxJobs.push(MailboxProofEmailPayload.parse(payload))
+            return 'job'
+          },
+        },
+      }),
       ssoOidcSignIn: oidcSignInRoutes({
         db,
-        capabilities: { ssoOidcEnabled: enabled, ssoSamlEnabled: false },
+        capabilities,
         configurationKey,
         privateTargets: [],
         send: idp.send,
@@ -273,8 +307,13 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     return { ...configured, link, claims: { sub: subject, email: configured.email } }
   }
 
-  function post(body: unknown, request = app, headers: Record<string, string> = {}) {
-    return request.request(new URL(startPath, publicUrl), {
+  function post(
+    body: unknown,
+    request = app,
+    headers: Record<string, string> = {},
+    path = startPath,
+  ) {
+    return request.request(new URL(path, publicUrl), {
       method: 'POST',
       headers: { origin: publicUrl, 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
@@ -285,22 +324,27 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     providerId: string,
     request = app,
     returnTo = '/app/bookings?tab=next#recent',
+    cookie?: string,
   ) {
-    const response = await post({ providerId, intent: 'sign_in', returnTo }, request)
+    const response = await post(
+      { providerId, intent: 'sign_in', returnTo },
+      request,
+      cookie ? { cookie } : {},
+    )
     expect(response.status).toBe(200)
     const { url, redirect } = (await response.json()) as { url: string; redirect: boolean }
     expect(redirect).toBe(true)
     const authorization = new URL(url)
-    const cookie = response.headers
+    const binding = response.headers
       .getSetCookie()
       .find((value) => value.startsWith(`${bindingCookie}=`))
-    expect(cookie).toMatch(/; HttpOnly/i)
-    expect(cookie).toMatch(/; Secure/i)
-    expect(cookie).toMatch(/; SameSite=Lax/i)
+    expect(binding).toMatch(/; HttpOnly/i)
+    expect(binding).toMatch(/; Secure/i)
+    expect(binding).toMatch(/; SameSite=Lax/i)
     return {
       authorization,
       providerId,
-      cookie: (cookie as string).split(';')[0] as string,
+      cookie: (binding as string).split(';')[0] as string,
       id: authorization.searchParams.get('state')?.split('.')[0] as string,
     }
   }
@@ -335,6 +379,113 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
   const attemptRow = (attempt: Attempt) =>
     db.selectFrom('sso_attempts').selectAll().where('id', '=', attempt.id).executeTakeFirstOrThrow()
 
+  function complete(
+    attempt: PendingAttempt,
+    extra: Record<string, unknown> = {},
+    request = app,
+    headers: Record<string, string> = {},
+  ) {
+    return post(
+      { attemptId: attempt.id, ...extra },
+      request,
+      { cookie: `${attempt.cookie}; ${attempt.completionCookie}`, ...headers },
+      completePath,
+    )
+  }
+
+  async function expectCompletionRefused(response: Response) {
+    expect(response.status).toBe(400)
+    expect(response.headers.getSetCookie()).toEqual([])
+    expect(await response.json()).toEqual({ error: 'sso_oidc_completion_invalid' })
+  }
+
+  async function pendingMailbox(
+    f: Awaited<ReturnType<typeof linked>>,
+    email = `changed@${f.claim.name}`,
+    claims: JWTPayload = {},
+    cookie?: string,
+  ) {
+    const attempt = await start(f.providerId, app, undefined, cookie)
+    const response = await callback(attempt, idp.issue(attempt, { ...f.claims, ...claims, email }))
+    expect(response.status).toBe(302)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const cookies = response.headers.getSetCookie()
+    expect(cookies).toHaveLength(1)
+    const [completion] = cookies as [string]
+    expect(completion).toContain(`Path=${completePath}`)
+    expect(completion).toMatch(/; HttpOnly/i)
+    expect(completion).toMatch(/; Secure/i)
+    const completionCookie = completion.split(';')[0] as string
+    const location = response.headers.get('location') ?? ''
+    expect(location).toMatch(/^\/app\/mailbox-proof#attempt=[0-9a-f-]+$/)
+    const id = location.split('=').at(-1) as string
+    const outcome = {
+      status: response.status,
+      body: await response.text(),
+      location: location.replace(id, 'ATTEMPT'),
+      type: response.headers.get('content-type'),
+      cookieOptions: completion
+        .slice(completion.indexOf(';'))
+        .replace(/Expires=[^;]+/i, 'Expires=DATE'),
+    }
+    expect(await attemptRow(attempt)).toMatchObject({
+      consumed_at: expect.any(Date),
+      mailbox: null,
+    })
+    return { pending: { ...attempt, id, completionCookie }, outcome }
+  }
+
+  async function mailboxMessage(attempt: Attempt, tokenLifetimeSeconds?: number) {
+    const response = await post(
+      { attemptId: attempt.id },
+      app,
+      { cookie: attempt.cookie },
+      MAILBOX_PROOF_SEND_PATH,
+    )
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ status: 'queued' })
+    const job = mailboxJobs.shift()
+    expect(job).toBeDefined()
+    const messages: MailMessage[] = []
+    await deliverMailboxProof(
+      {
+        capabilities: { ssoOidcEnabled: true, ssoSamlEnabled: false },
+        db,
+        mailer: {
+          send: async (message) => {
+            messages.push(message)
+          },
+        },
+        publicUrl,
+        secret,
+        mailMaxPerHour: 0,
+        ...(tokenLifetimeSeconds !== undefined && { limits: { tokenLifetimeSeconds } }),
+      },
+      job as MailboxProofEmailPayload,
+    )
+    expect(messages).toHaveLength(1)
+    const [message] = messages as [MailMessage]
+    const token = /#attempt=[0-9a-f-]+&token=([A-Za-z0-9_-]+)/.exec(message.text ?? '')?.[1]
+    expect(token).toBeDefined()
+    return { message, token: token as string }
+  }
+
+  function consumeMailbox(attempt: Attempt, token: string) {
+    return post(
+      { attemptId: attempt.id, token },
+      app,
+      { cookie: attempt.cookie },
+      MAILBOX_PROOF_CONSUME_PATH,
+    )
+  }
+
+  async function proveMailbox(attempt: Attempt, tokenLifetimeSeconds?: number) {
+    const { token } = await mailboxMessage(attempt, tokenLifetimeSeconds)
+    const response = await consumeMailbox(attempt, token)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'proven' })
+  }
+
   const effects = () =>
     db
       .selectNoFrom([
@@ -364,13 +515,14 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       .executeTakeFirstOrThrow()
   }
 
-  it('hard-disables both auth-protocol endpoints before looking up the request', async () => {
+  it('hard-disables OIDC auth-protocol endpoints before looking up the request', async () => {
     const off = instance({ enabled: false })
     const { providerId } = await linked()
     for (const provider of [providerId, randomUUID(), 'invalid']) {
       const responses = [
         await post({ providerId: provider, intent: 'sign_in' }, off),
         await off.request(new URL(`${callbackPath(provider)}?code=ignored`, publicUrl)),
+        await post({ attemptId: provider }, off, {}, completePath),
       ]
       for (const response of responses) {
         expect(response.status).toBe(404)
@@ -741,11 +893,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     expect(JSON.stringify(events)).not.toContain('exact subject')
   })
 
-  it('rejects changed linked mailboxes and mismatching signed issuer or nonce without issuing a session', async () => {
+  it('rejects missing mailboxes, mismatching signed issuer or nonce, and expired IdP sessions', async () => {
     const f = await linked()
     const before = await effects()
     for (const claims of [
-      { ...f.claims, email: `changed@${f.claim.name}`, email_verified: true },
+      { sub: f.claims.sub },
       { ...f.claims, iss: `${issuer}/other` },
       { ...f.claims, nonce: randomBytes(32).toString('base64url') },
       { ...f.claims, session_expires_at: Math.floor(new Date(at(-1)).getTime() / 1000) },
@@ -759,4 +911,291 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     }
     expect(await effects()).toEqual(before)
   })
+
+  it('finishes exactly one verified mailbox change for the original link and exchanges no further code', async () => {
+    const f = await linked()
+    const before = await effects()
+    const email = `changed@${f.claim.name}`
+    const { pending, outcome } = await pendingMailbox(f, email, {
+      email_verified: true,
+      name: 'private-idp-profile-fixture',
+    })
+    const stored = await attemptRow(pending)
+    expect(stored).toMatchObject({
+      kind: 'sign_in',
+      organization_id: fixture.team,
+      provider_id: f.providerId,
+      provider_revision: 1,
+      mailbox: email,
+      requires_mailbox: true,
+      mailbox_proven_at: null,
+      consumed_at: null,
+    })
+    const envelope = pending.completionCookie.slice(pending.completionCookie.indexOf('=') + 1)
+    const browserBinding = pending.cookie.slice(pending.cookie.indexOf('=') + 1)
+    const projection = decryptCredential(
+      configurationKey,
+      JSON.stringify([
+        'hourmere-oidc-completion-v1',
+        ssoProviderConfigurationAad({
+          organizationId: fixture.team,
+          providerId: f.providerId,
+          revision: 1,
+        }),
+        pending.id,
+        hash(browserBinding, 'hex'),
+      ]),
+      Buffer.from(envelope, 'base64url'),
+    )
+    const representations = JSON.stringify([stored, projection, outcome, await audit()])
+    expect(idp.issuedSecrets).toHaveLength(5)
+    expect(
+      [...idp.issuedSecrets, 'private-idp-profile-fixture'].every(
+        (value) => !representations.includes(value),
+      ),
+    ).toBe(true)
+    expect(await effects()).toEqual(before)
+
+    await expectCompletionRefused(await complete(pending))
+    const { token } = await mailboxMessage(pending)
+    const tokenRow = await db
+      .selectFrom('sso_mailbox_tokens')
+      .select('token_digest')
+      .where('attempt_id', '=', pending.id)
+      .executeTakeFirstOrThrow()
+    expect(tokenRow.token_digest === hash(token, 'hex')).toBe(true)
+    expect((await consumeMailbox(pending, token)).status).toBe(200)
+
+    expect(
+      (await complete(pending, {}, app, { origin: 'https://other.example.test' })).status,
+    ).toBe(403)
+    expect((await complete(pending, {}, app, { authorization: 'Bearer synthetic' })).status).toBe(
+      403,
+    )
+    const otherBrowser = `${bindingCookie}=${randomBytes(32).toString('base64url')}`
+    await expectCompletionRefused(
+      await complete(pending, {}, app, { cookie: `${otherBrowser}; ${pending.completionCookie}` }),
+    )
+    await expectCompletionRefused(await complete(pending, {}, app, { cookie: pending.cookie }))
+    const suppliedClaims = await complete(pending, {
+      email: f.email,
+      sub: f.claims.sub,
+      returnTo: '/app/other',
+    })
+    expect(suppliedClaims.status).toBe(400)
+    expect(await suppliedClaims.json()).toEqual({ error: 'invalid_request' })
+
+    const responses = await Promise.all([complete(pending), complete(pending, {}, instance())])
+    expect(responses.map(({ status }) => status).sort()).toEqual([302, 400])
+    const accepted = responses.find(({ status }) => status === 302) as Response
+    const denied = responses.find(({ status }) => status === 400) as Response
+    await expectCompletionRefused(denied)
+    expect(accepted.headers.get('location')).toBe('/app/bookings?tab=next#recent')
+    const cookie = accepted.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0])
+      .join('; ')
+    const signedIn = await app.request(new URL('/api/auth/get-session', publicUrl), {
+      headers: { cookie },
+    })
+    const issued = await proof(f.providerId)
+    expect(await signedIn.json()).toMatchObject({
+      user: { id: fixture.member, email: f.email },
+      session: { id: issued.session_id },
+    })
+    expect(issued).toMatchObject({ link_id: f.link.id, link_generation: f.link.generation + 1 })
+    expect(
+      await db
+        .selectFrom('sso_identity_links')
+        .selectAll()
+        .where('id', '=', f.link.id)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({
+      user_id: fixture.member,
+      generation: f.link.generation + 1,
+      proven_email: email,
+    })
+    expect((await effects()).sessions).toBe(String(Number(before.sessions) + 1))
+    expect((await effects()).proofs).toBe(String(Number(before.proofs) + 1))
+    expect(idp.exchange).toHaveBeenCalledTimes(1)
+    const later = await start(f.providerId)
+    expect(
+      (await callback(later, idp.issue(later, { ...f.claims, email }))).headers.get('location'),
+    ).toBe('/app/bookings?tab=next#recent')
+  })
+
+  it('delivers the same pending outcome and message for a collision and discloses it only after proof', async () => {
+    const f = await linked()
+    const collidingEmail = `occupied@${f.claim.name}`
+    const freeEmail = `free@${f.claim.name}`
+    await db
+      .updateTable('auth.user')
+      .set({ email: collidingEmail })
+      .where('id', '=', fixture.otherOwner)
+      .execute()
+    const before = await effects()
+    const free = await pendingMailbox(f, freeEmail, { email_verified: false })
+    const occupied = await pendingMailbox(f, collidingEmail, { email_verified: true })
+    expect(occupied.outcome).toEqual(free.outcome)
+    for (const { pending } of [free, occupied])
+      await expectCompletionRefused(await complete(pending))
+
+    const delivery = await mailboxMessage(free.pending)
+    const otherDelivery = await mailboxMessage(occupied.pending)
+    expect([delivery.message.to, otherDelivery.message.to]).toEqual([freeEmail, collidingEmail])
+    function messageShape({ message, token }: typeof delivery, pending: PendingAttempt) {
+      const normalize = (value: string | undefined) =>
+        value?.replaceAll(pending.id, 'ATTEMPT').replaceAll(token, 'TOKEN')
+      return {
+        ...message,
+        to: 'RECIPIENT',
+        text: normalize(message.text),
+        html: normalize(message.html),
+      }
+    }
+    expect(messageShape(otherDelivery, occupied.pending)).toEqual(
+      messageShape(delivery, free.pending),
+    )
+    expect((await consumeMailbox(occupied.pending, otherDelivery.token)).status).toBe(200)
+    const collision = await complete(occupied.pending)
+    expect(collision.status).toBe(409)
+    expect(await collision.json()).toEqual({ error: 'sso_email_collision' })
+    await expectCompletionRefused(await complete(occupied.pending))
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('id')
+        .where('id', '=', occupied.pending.id)
+        .executeTakeFirst(),
+    ).toBeUndefined()
+    expect(
+      await db
+        .selectFrom('sso_mailbox_tokens')
+        .select('attempt_id')
+        .where('attempt_id', '=', occupied.pending.id)
+        .executeTakeFirst(),
+    ).toBeUndefined()
+    expect(
+      await db
+        .selectFrom('sso_identity_links')
+        .selectAll()
+        .where('id', '=', f.link.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(f.link)
+    expect(await effects()).toEqual({
+      ...before,
+      mailboxTokens: String(Number(before.mailboxTokens) + 1),
+    })
+    expect(JSON.stringify(await audit()).includes(collidingEmail)).toBe(false)
+  })
+
+  it('will use only a proof recorded for its own attempt, even with one browser and mailbox', async () => {
+    const f = await linked()
+    const { pending: first } = await pendingMailbox(f)
+    const { pending: second } = await pendingMailbox(f, undefined, {}, first.cookie)
+    const { token } = await mailboxMessage(first)
+    const wrongProof = await consumeMailbox(second, token)
+    expect(wrongProof.status).toBe(400)
+    expect(await wrongProof.json()).toEqual({ error: 'sso_mailbox_proof_invalid' })
+    expect((await consumeMailbox(first, token)).status).toBe(200)
+    await expectCompletionRefused(await complete(second))
+    await expectCompletionRefused(
+      await complete(second, {}, app, { cookie: `${first.cookie}; ${first.completionCookie}` }),
+    )
+    expect((await attemptRow(second)).mailbox_proven_at).toBeNull()
+    await proveMailbox(second)
+    const cookieName = first.completionCookie.split('=')[0]
+    const otherEnvelope = second.completionCookie.slice(second.completionCookie.indexOf('=') + 1)
+    await expectCompletionRefused(
+      await complete(first, {}, app, { cookie: `${first.cookie}; ${cookieName}=${otherEnvelope}` }),
+    )
+    expect((await complete(first)).status).toBe(302)
+  })
+
+  it.each(['mailbox proof', 'pending result'] as const)(
+    'refuses completion after its %s expires',
+    async (expiry) => {
+      const f = await linked()
+      const deadline = Math.floor(new Date(at(3)).getTime() / 1000)
+      const { pending } = await pendingMailbox(
+        f,
+        undefined,
+        expiry === 'pending result' ? { session_expires_at: deadline } : {},
+      )
+      if (expiry === 'pending result')
+        expect((await attemptRow(pending)).expires_at).toEqual(new Date(deadline * 1000))
+      await proveMailbox(pending, expiry === 'mailbox proof' ? 2 : undefined)
+      await vi.waitFor(
+        async () => {
+          const row = await db
+            .selectFrom('sso_attempts')
+            .select([
+              sql<boolean>`mailbox_proof_expires_at <= clock_timestamp()`.as('proof_expired'),
+              sql<boolean>`expires_at <= clock_timestamp()`.as('attempt_expired'),
+            ])
+            .where('id', '=', pending.id)
+            .executeTakeFirstOrThrow()
+          expect(expiry === 'mailbox proof' ? row.proof_expired : row.attempt_expired).toBe(true)
+        },
+        { timeout: 3500, interval: 50 },
+      )
+      const before = await effects()
+      await expectCompletionRefused(await complete(pending))
+      expect(await effects()).toEqual(before)
+    },
+  )
+
+  it.each(['member removal', 'provider retirement', 'provider deletion'] as const)(
+    'refuses completion when concurrent %s commits first',
+    async (revocation) => {
+      const f = await linked()
+      const { pending } = await pendingMailbox(f)
+      await proveMailbox(pending)
+      const before = await effects()
+      const blocker = await owned.pool.connect()
+      let completion: Promise<Response> | undefined
+      try {
+        await blocker.query('BEGIN')
+        const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        if (revocation === 'member removal') {
+          await blocker.query('DELETE FROM auth.member WHERE id = $1', [fixture.memberMember])
+        } else if (revocation === 'provider retirement') {
+          await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+            fixture.team,
+          ])
+          await blocker.query(
+            `UPDATE sso_providers SET retired_at = clock_timestamp(), enabled = false,
+             revision = 2, configuration = $2 WHERE id = $1`,
+            [f.providerId, configuration(f.providerId, 2)],
+          )
+        } else {
+          // The provider guard allows hard deletion only through its owning team's deletion.
+          await blocker.query('DELETE FROM auth.organization WHERE id = $1', [fixture.team])
+        }
+        completion = Promise.resolve(complete(pending))
+        await vi.waitFor(
+          async () => {
+            const { rows: waiting } = await owned.pool.query<{ blocked: boolean }>(
+              'SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked',
+              [rows[0]?.pid],
+            )
+            expect(waiting[0]?.blocked).toBe(true)
+          },
+          { timeout: 2500, interval: 10 },
+        )
+        await blocker.query('COMMIT')
+      } finally {
+        await blocker.query('ROLLBACK')
+        blocker.release()
+      }
+      await expectCompletionRefused(await completion)
+      const after = await effects()
+      expect(after.sessions).toBe(before.sessions)
+      expect(after.proofs).toBe(before.proofs)
+      if (revocation === 'provider retirement') {
+        expect((await attemptRow(pending)).consumed_at).toBeNull()
+      }
+      expect(idp.exchange).toHaveBeenCalledTimes(1)
+    },
+  )
 })

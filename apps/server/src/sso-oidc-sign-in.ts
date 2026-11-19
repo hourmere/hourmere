@@ -4,13 +4,18 @@ import type { Db } from '@hourmere/db'
 import { writeSsoSecurityFailure } from '@hourmere/db/audit'
 import { type SsoRequest, sendSsoRequest, ssoUrl } from '@hourmere/outbound/sso'
 import type { Context, MiddlewareHandler } from 'hono'
-import { getCookie, setCookie } from 'hono/cookie'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { apiBodyLimit } from './body-limit.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { openSsoProviderConfiguration } from './sso-configuration.ts'
-import { bindingCookieName, browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
+import {
+  bindingCookieName,
+  browserBindingDigest,
+  MAILBOX_PROOF_CONFIRM_PATH,
+  sha256,
+} from './sso-mailbox-proof.ts'
 import {
   consumeOidcAttempt,
   OidcAttemptRefused,
@@ -18,12 +23,19 @@ import {
   oidcReturnDestination,
   startOidcAttempt,
 } from './sso-oidc-attempt.ts'
+import { completeOidcSignIn, stageOidcCompletion } from './sso-oidc-completion.ts'
 import { fetchOidcDiscovery, OidcJwksCache } from './sso-oidc-jwks.ts'
-import { issueOidcSession, type OidcSessionOptions } from './sso-oidc-session.ts'
+import {
+  findOidcLink,
+  issueOidcSession,
+  normalizeOidcMailbox,
+  type OidcSessionOptions,
+} from './sso-oidc-session.ts'
 import { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
 export const OIDC_CALLBACK_PATH = '/api/auth/sso/callback/:providerId'
+export const OIDC_COMPLETE_PATH = '/api/auth/sso/oidc/complete'
 const errorPath = '/sign-in?error=unable_to_create_session'
 const providerIdSchema = z.uuidv7()
 const startInput = z.strictObject({
@@ -31,6 +43,8 @@ const startInput = z.strictObject({
   intent: z.literal('sign_in'),
   returnTo: z.string().optional(),
 })
+const completeInput = z.strictObject({ attemptId: z.uuidv7() })
+const completionInvalid = { error: 'sso_oidc_completion_invalid' } as const
 const sealedConfig = z.strictObject({
   issuer: z.string().min(1),
   clientId: z.string().min(1).max(1024),
@@ -138,11 +152,26 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
   const transport = { send: deps.send ?? sendSsoRequest, privateTargets }
   const keys = new OidcJwksCache(transport)
   const starts = createRateLimiter({ limit: 30, windowSeconds: 60 })
+  const completions = createRateLimiter({ limit: 30, windowSeconds: 60 })
   return {
     mount({ app, publicUrl, requestLogger, clientIp }) {
       const origin = new URL(publicUrl).origin
       const cookie = bindingCookieName(publicUrl)
       const secure = new URL(publicUrl).protocol === 'https:'
+      const resultCookieName = (id: string) =>
+        `${secure ? '__Secure-' : ''}hourmere.oidc_result.${id}`
+      const resultCookieOptions = {
+        httpOnly: true,
+        secure,
+        sameSite: 'Strict',
+        path: OIDC_COMPLETE_PATH,
+      } as const
+      const sessionOptions = (c: Context) => ({
+        ...deps.session,
+        publicUrl,
+        headers: c.req.raw.headers,
+        ip: c.var.clientIp,
+      })
       const callbackUrl = (providerId: string) =>
         new URL(OIDC_CALLBACK_PATH.replace(':providerId', providerId), publicUrl).href
       const guard: MiddlewareHandler = async (c, next) => {
@@ -318,19 +347,67 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           return fail('response_malformed')
         }
         try {
-          const session = await issueOidcSession(db, provider, identity, attempt, {
-            ...deps.session,
-            publicUrl,
-            headers: c.req.raw.headers,
-            ip: c.var.clientIp,
-          })
-          if (session.reason !== undefined) return fail(session.reason)
+          const link = await findOidcLink(db, provider, identity)
+          if (!link || identity.email === undefined) return fail('mailbox_unproven')
+          const mailbox = normalizeOidcMailbox(identity.email)
+          if (mailbox !== link.proven_email) {
+            const pending = await stageOidcCompletion(
+              { db, configurationKey },
+              provider,
+              link,
+              mailbox,
+              identity.sessionDeadline,
+              attempt,
+              getCookie(c, cookie),
+            )
+            if (pending.reason !== undefined) return fail(pending.reason)
+            setCookie(c, resultCookieName(pending.id), pending.envelope, {
+              ...resultCookieOptions,
+              expires: pending.expiresAt,
+            })
+            return c.redirect(`${MAILBOX_PROOF_CONFIRM_PATH}#attempt=${pending.id}`)
+          }
+          const session = await issueOidcSession(
+            db,
+            provider,
+            link,
+            identity.sessionDeadline,
+            attempt,
+            sessionOptions(c),
+          )
+          if ('reason' in session) return fail(session.reason)
           c.header('Set-Cookie', session.cookie, { append: true })
           return c.redirect(attempt.returnPath)
         } catch (error) {
           if (error instanceof OidcAttemptRefused) return fail('configuration_changed')
           throw error
         }
+      })
+
+      app.all(OIDC_COMPLETE_PATH, requestLogger, guard, clientIp, apiBodyLimit(), async (c) => {
+        if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
+        if (c.req.header('origin') !== origin || c.req.header('authorization') !== undefined)
+          return c.json({ error: 'forbidden' }, 403)
+        const parsed = completeInput.safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+        const wait = completions.hit(rateLimitKey(c.var.clientIp))
+        if (wait !== undefined) {
+          c.header('Retry-After', String(wait))
+          return c.json({ error: 'rate_limited' }, 429)
+        }
+        if (!configurationKey) return c.json(completionInvalid, 400)
+        const id = parsed.data.attemptId
+        const name = resultCookieName(id)
+        const result = await completeOidcSignIn(
+          { db, configurationKey },
+          { id, browserBinding: getCookie(c, cookie), envelope: getCookie(c, name) },
+          sessionOptions(c),
+        )
+        if (result.status === 'invalid') return c.json(completionInvalid, 400)
+        deleteCookie(c, name, resultCookieOptions)
+        if (result.status === 'collision') return c.json({ error: 'sso_email_collision' }, 409)
+        c.header('Set-Cookie', result.cookie, { append: true })
+        return c.redirect(result.returnPath)
       })
     },
   }

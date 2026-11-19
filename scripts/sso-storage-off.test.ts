@@ -7,7 +7,8 @@
 // gate owns attempts and reads policies for browser draft writes. The OIDC attempt module
 // owns one-shot sign-in attempts and checks current providers. The OIDC sign-in adapter
 // reads providers and its session transaction rechecks the link, policy and domain
-// before writing browser proof. Draft reads owns only
+// before writing browser proof. OIDC completion uses pending attempts and updates the
+// proven mailbox on the link. Draft reads owns only
 // the provider/domain inventory and policies, behind the same hard-off gate. The other module
 // that names the tables, apps/server/src/sso-storage-errors.ts, only recognises them in
 // database errors so that the error log omits their row details; it imports nothing and
@@ -45,6 +46,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
   'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
   'apps/server/src/sso-fresh-proof.ts': ['sso_attempts', 'sso_policies'],
   'apps/server/src/sso-oidc-attempt.ts': ['sso_attempts', 'sso_providers'],
+  'apps/server/src/sso-oidc-completion.ts': ['sso_attempts', 'sso_identity_links'],
   'apps/server/src/sso-oidc-session.ts': [
     'sso_providers',
     'sso_policies',
