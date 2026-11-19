@@ -10,6 +10,11 @@ import {
 import { MAX_SLOT_RANGE_DAYS } from '../packages/scheduling/src/availability.ts'
 import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
 import { hasValidHostShape } from '../packages/scheduling/src/hosts.ts'
+import {
+  MAX_RECURRING_HORIZON_DAYS,
+  MAX_RECURRING_OCCURRENCES,
+  MIN_RECURRING_OCCURRENCES,
+} from '../packages/scheduling/src/recurring-rules.ts'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const document = read('../docs/recurring-bookings.md')
@@ -21,12 +26,11 @@ const sitePages = {
   notifications: read('../apps/site/src/content/docs/docs/notifications.md'),
 }
 
-// Proposed design values only. The step that first enforces one adds a shared constant and
-// compares that constant here instead of the literal.
+// Compare enforced limits with the runtime constants. The remaining values are design targets.
 const proposed = [
-  ['Minimum occurrences', 2],
-  ['Maximum occurrences', 12],
-  ['Maximum horizon in local calendar days', 366],
+  ['Minimum occurrences', MIN_RECURRING_OCCURRENCES],
+  ['Maximum occurrences', MAX_RECURRING_OCCURRENCES],
+  ['Maximum horizon in local calendar days', MAX_RECURRING_HORIZON_DAYS],
   ['Maximum occurrence-host evaluations', 96],
   ['Maximum batch database read statements', 32],
   ['Maximum batch fact rows', 10000],

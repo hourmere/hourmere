@@ -2,7 +2,11 @@ import type { OpenAPIHono } from '@hono/zod-openapi'
 import { z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
-import { QuestionSchema, type ServiceContext } from '@hourmere/scheduling'
+import {
+  QuestionSchema,
+  type RecurringBookingAdmissionDeps,
+  type ServiceContext,
+} from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import { routeBodyLimit } from './body-limit.ts'
 import type { CallerEnv, requireCaller } from './caller.ts'
@@ -65,7 +69,7 @@ export const callerWithBodyLimit = (
 export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware }) => void
 
 /** What a route module needs to call the service layer; server.ts provides it. */
-export interface ServiceDeps {
+export interface ServiceDeps extends RecurringBookingAdmissionDeps {
   db: Db
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   smsRemindersAvailable?: ServiceContext['smsRemindersAvailable']
@@ -86,6 +90,7 @@ export function serviceContext(
     successRedirectPolicy,
     smsRemindersAvailable,
     followUpHostNotesEnabled,
+    recurringBookingsEnabled,
   }: ServiceDeps,
   principal: Principal,
 ): ServiceContext {
@@ -98,6 +103,7 @@ export function serviceContext(
     successRedirectPolicy,
     smsRemindersAvailable,
     followUpHostNotesEnabled,
+    recurringBookingsEnabled,
   }
 }
 

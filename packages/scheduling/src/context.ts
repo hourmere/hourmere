@@ -1,5 +1,6 @@
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import type { RecurringBookingAdmissionDeps } from './recurring-admission.ts'
 import type { SuccessRedirectPolicy } from './success-redirect.ts'
 
 /**
@@ -39,7 +40,7 @@ export type AttendeeNoShowNotifier = (
  * What a service function receives for an authenticated call. REST routes and MCP tools
  * build it the same way, so people and agents get exactly the same behavior.
  */
-export interface ServiceContext {
+export interface ServiceContext extends RecurringBookingAdmissionDeps {
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   db: Db
   /** Server-generated correlation ID; never a raw header value. */
