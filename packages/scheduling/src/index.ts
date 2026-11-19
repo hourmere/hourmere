@@ -344,6 +344,15 @@ export {
   type RecurringAvailabilityResult,
 } from './recurring-availability.ts'
 export {
+  BookingSeriesRateLimitError,
+  type CreateBookingSeriesInput,
+  type CreateBookingSeriesOptions,
+  type CreateBookingSeriesResult,
+  createPublicBookingSeries,
+  createPublicTeamBookingSeries,
+  type ExpectedBookingSeriesPreview,
+} from './recurring-creation.ts'
+export {
   expandRecurringRule,
   MAX_RECURRING_HORIZON_DAYS,
   MAX_RECURRING_OCCURRENCES,

@@ -159,7 +159,7 @@ const MAX_LOCALE = 35
 const MAX_REASON = 1000
 // A BCP 47 language tag's shape, e.g. "en", "en-US", "zh-Hant-TW".
 const LOCALE = /^[A-Za-z0-9]{1,8}(?:-[A-Za-z0-9]{1,8})*$/
-const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
+export const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
 const MANAGE_TOKEN = /^[A-Za-z0-9_-]{43}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -267,10 +267,10 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest()
+export const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest()
 
 /** A new manage-link secret (32 random bytes, base64url) and the SHA-256 that is stored. */
-function newManageToken(): { token: string; hash: Buffer } {
+export function newManageToken(): { token: string; hash: Buffer } {
   const token = randomBytes(32).toString('base64url')
   return { token, hash: sha256(token) }
 }
@@ -963,6 +963,7 @@ export async function requireOfferedSlot(
 interface NewBooking {
   paymentHoldExpiresAt?: string | undefined
   groupSlotId?: string | undefined
+  seriesRoot?: { bookingId: string; occurrenceId: string } | undefined
   locationOption?: Json | null | undefined
   successRedirect?: BookingSuccessRedirect | undefined
   organizationId: string
@@ -1002,6 +1003,10 @@ export async function insertBooking(
   const { id } = await db
     .insertInto('bookings')
     .values({
+      ...(b.seriesRoot && {
+        id: b.seriesRoot.bookingId,
+        series_occurrence_id: b.seriesRoot.occurrenceId,
+      }),
       status: b.paymentHoldExpiresAt ? 'pending_payment' : 'confirmed',
       payment_hold_expires_at: b.paymentHoldExpiresAt ?? null,
       organization_id: b.organizationId,
@@ -1477,7 +1482,9 @@ function bookingEventUnavailable(oneTimeLink: boolean): DomainError {
   return oneTimeLink ? new DomainError('not_found', 'one_time_link_not_found') : eventTypeNotFound()
 }
 
-function prepareBookingAttendees(input: Omit<CreateBookingInput, 'handle' | 'slug'>) {
+function prepareBookingAttendees(
+  input: Pick<CreateBookingInput, 'invitee' | 'guests' | 'inviteePhone' | 'smsConsent'>,
+) {
   const invitee = validateInvitee(input.invitee)
   if (input.smsConsent !== undefined && typeof input.smsConsent !== 'boolean')
     throw new DomainError('invalid', 'invalid_sms_consent', 'SMS consent must be true or false.')
@@ -1513,8 +1520,8 @@ function prepareBookingAttendees(input: Omit<CreateBookingInput, 'handle' | 'slu
 /**
  * Admit the booking and write its intents in the caller's transaction. The caller holds
  * the event organization's authority lock (and the waitlist key fence, if applicable).
- * The resolver must lock and reread the event and host eligibility when asked to lock.
- * An additional event check runs against this locked configuration, before admission.
+ * A series caller also holds the host and event locks and has checked and assigned the
+ * full batch. Otherwise the resolver must lock and reread the event and host eligibility.
  * The check and notifier must use only transactional database work, with provider work
  * left to the existing outbox workers.
  */
@@ -1530,18 +1537,37 @@ async function createBookingInTransaction(
     scope,
     oneTimeLink,
     checkEvent,
+    seriesOccurrence,
   }: {
     input: Omit<CreateBookingInput, 'handle' | 'slug'>
     origin: BookingOrigin
     event: PublicEventTypeRecord
-    resolve: BookingEventResolver
     attendees: ReturnType<typeof prepareBookingAttendees>
-    scope?: IdempotencyScope | undefined
-    oneTimeLink?: { id: string; token: string } | undefined
-    checkEvent?: ((current: PublicEventTypeRecord) => Promise<void>) | undefined
-  },
+  } & (
+    | {
+        resolve: BookingEventResolver
+        scope?: IdempotencyScope | undefined
+        oneTimeLink?: { id: string; token: string } | undefined
+        checkEvent?: ((current: PublicEventTypeRecord) => Promise<void>) | undefined
+        seriesOccurrence?: undefined
+      }
+    | {
+        resolve?: never
+        scope?: never
+        oneTimeLink?: never
+        checkEvent?: never
+        seriesOccurrence: {
+          bookingId: string
+          occurrenceId: string
+          hostUserIds: string[]
+          now: Temporal.Instant
+        }
+      }
+  ),
 ): Promise<CreateBookingResult> {
-  await lockHosts(trx, et.hostUserIds)
+  if (!seriesOccurrence) {
+    await lockHosts(trx, et.hostUserIds)
+  }
   // A concurrent request with the same key may have committed while we waited.
   if (scope) {
     const replay = await findReplay(trx, scope)
@@ -1549,7 +1575,7 @@ async function createBookingInTransaction(
   }
   // The event type may have changed while we waited (duration, questions, rules), and
   // waiting took time: read both again now that the host is locked.
-  const current = await resolve(trx, { lock: true })
+  const current = seriesOccurrence ? et : await resolve(trx, { lock: true })
   if (
     !current ||
     current.id !== et.id ||
@@ -1567,7 +1593,7 @@ async function createBookingInTransaction(
   if (guests.length > 0 && !current.allowGuests) {
     throw new DomainError('invalid', 'guests_not_allowed', 'This event type does not allow guests')
   }
-  const now = ctx.now()
+  const now = seriesOccurrence?.now ?? ctx.now()
   // resolve(...lock:true) holds the event row until commit. This read sees exactly
   // the policy serialized with a concurrent full configuration replacement.
   const policy = await trx
@@ -1579,22 +1605,26 @@ async function createBookingInTransaction(
   const responses = validateResponses(current.questions, input.responses ?? {})
   const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
   const end = input.start.add({ minutes: durationMinutes })
-  const groupSlot = await admitGroupSlot(trx, {
-    event: current,
-    bookerEmail: invitee.email,
-    start: input.start,
-    end,
-    now,
-    snapshot,
-    expectedSlotId: input.expectedGroupSlotId,
-    locationOptionId: input.locationOptionId,
-    conference: ctx,
-  })
+  const groupSlot = seriesOccurrence
+    ? null
+    : await admitGroupSlot(trx, {
+        event: current,
+        bookerEmail: invitee.email,
+        start: input.start,
+        end,
+        now,
+        snapshot,
+        expectedSlotId: input.expectedGroupSlotId,
+        locationOptionId: input.locationOptionId,
+        conference: ctx,
+      })
   const chosenOption = groupSlot
     ? null
     : selectBookableLocationOption(current, input.locationOptionId)
   let selectedHostIds = current.hostUserIds
-  if (current.schedulingType === 'round_robin') {
+  if (seriesOccurrence) {
+    selectedHostIds = seriesOccurrence.hostUserIds
+  } else if (current.schedulingType === 'round_robin') {
     await lockRoundRobinState(trx, current.id)
     const available: string[] = []
     let stale = false
@@ -1648,7 +1678,9 @@ async function createBookingInTransaction(
   let settings: SuccessRedirect | null = null
   if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
     try {
-      settings = validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
+      settings = seriesOccurrence
+        ? null
+        : validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
     } catch (error) {
       if (!(error instanceof DomainError) || error.code !== 'invalid_success_redirect') throw error
       // An operator can tighten policy after this target was saved. Keep booking
@@ -1671,6 +1703,8 @@ async function createBookingInTransaction(
   const { id, manageToken } = await insertBooking(trx, {
     successRedirect,
     groupSlotId: groupSlot?.id,
+    seriesRoot: seriesOccurrence,
+    manageTokenHash: seriesOccurrence ? null : undefined,
     organizationId: current.organizationId,
     eventTypeId: current.id,
     start: input.start,
