@@ -1,18 +1,18 @@
 ---
 title: Paid bookings foundation
-description: What the payment hold foundation supports, its limits, and the future operator-owned Stripe setup.
+description: What the internal payment hold and Checkout foundation supports and where rollout stands.
 ---
 
-**Hourmere cannot collect payments yet.** This release adds an internal, disabled-by-default
-reservation foundation and a [payment design](https://github.com/hourmere/hourmere/blob/main/docs/payments.md).
-There is no Checkout page, payment settings UI, Stripe credential loader, incoming Stripe
-webhook receiver or automatic refund worker. Existing booking interfaces remain unchanged.
+**Paid booking admission remains disabled.** The internal foundation can reserve a slot
+and create a Stripe-hosted Checkout Session. Stripe credentials are optional server-only
+startup configuration. Public checkout, payment settings, an incoming Stripe webhook
+receiver and automatic refunds are future work. See the
+[payment design](https://github.com/hourmere/hourmere/blob/main/docs/payments.md).
 
 ## Operator note
 
-`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
-adapter. It has no runtime effect in this release: setting it to `true` does not permit
-hold creation or enable payment collection. Internal tests explicitly opt in through
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout.
+A deployed server leaves paid holds disabled regardless of its value. Internal tests explicitly opt in through
 the service context. Existing holds expire regardless of this environment setting.
 The planned rollout safeguard will be available to every self-hosted instance, with no
 subscription or license requirement.
@@ -28,13 +28,12 @@ Before upgrading the schema, back up and stop all old app and worker processes. 
 roles with the new version together; old processes do not understand the new booking states.
 Use the [backup and rollback procedure](/docs/self-hosting#upgrade-and-roll-back).
 
-## Planned Stripe setup
+## Stripe account ownership
 
-Each instance will use its operator's own Stripe account and privately injected credentials,
-including test-mode credentials for development. Nothing will require Hourmere's company
-payment account. Credentials will come from environment injection or a mounted secret file,
-never plaintext database settings. All organizations on an instance will settle to that
-operator account; per-organization connected accounts are outside the initial design.
+The adapter binds an instance to its operator's own Stripe account and test or live mode.
+Credentials come from environment injection or mounted read-only secret files. Leave the
+optional settings empty on deployed instances while Checkout is internal. The planned flow
+settles all organizations on an instance to that single operator account.
 
 The design recommends Stripe-hosted Checkout to keep card entry on Stripe's page and reduce
 the integration an operator must maintain. Both Checkout and correctly integrated Payment
@@ -49,9 +48,9 @@ operator intervention for failed refunds; none of those provider operations are 
 
 ## Testing and known limitations
 
-Current automated tests use a fake payment provider and throwaway PostgreSQL databases.
-They do not contact Stripe. After the Stripe adapter is implemented, self-hosters will be
-able to use their own test-mode account and the [Stripe CLI](https://docs.stripe.com/cli)
+Current automated tests use a fake payment provider, stubbed Stripe HTTP and throwaway
+PostgreSQL databases. After the receiver ships, self-hosters will be able to use their own
+test-mode account and the [Stripe CLI](https://docs.stripe.com/cli)
 to forward events to the local receiver. Use Stripe's
 [published test methods](https://docs.stripe.com/testing), synthetic attendees and matching
 test-mode secrets; never put credentials or card details in source files or support reports.
@@ -62,8 +61,8 @@ Internal holds support personal individual events with one host only; guests, te
 group events, waitlist conversion, automatic conferences and phone locations are unsupported.
 The foundation retains a supplied payment reference and refund-required marker, but has no
 authenticated Stripe receiver or refund executor. Ordinary booking cancellation and
-rescheduling reject paid foundation rows. Prices per duration, currencies, policy settings
-and provider reconciliation remain design work for later implementation. Tax calculation, subscriptions, deposits,
+rescheduling reject paid foundation rows. Price and policy settings, provider expiry on
+release and background reconciliation remain future work. Tax calculation, subscriptions, deposits,
 partial payments, currency conversion and Stripe Connect are out of scope. Payment-aware
 one-time links, waitlist conversion, shared group seats and the full paid reschedule flow
 must be implemented and tested before public rollout. No payment action is exposed through

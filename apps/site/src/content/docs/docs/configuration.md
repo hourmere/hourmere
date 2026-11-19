@@ -492,10 +492,10 @@ for public apps; its private/development apps do not trigger those notifications
 
 ## Paid-booking foundation
 
-`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
-adapter. It has no runtime effect in this release: setting it to `true` does not permit
-hold creation or enable payment collection. Existing holds expire regardless of this
-setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout. A deployed
+server leaves paid hold admission disabled regardless of its value. Existing holds still
+expire. Leave the optional server-only Stripe settings empty while Checkout is internal.
+See [the operator note and limitations](/docs/payments).
 
 ## SMS reminders
 
