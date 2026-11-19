@@ -1,13 +1,9 @@
 import type { Db } from '@hourmere/db'
 import { brandEmail, type Mailer, type MailMessage } from '@hourmere/mail'
 
-export async function lockVerifiedBookingHost(
-  db: Db,
-  bookingId: string,
-  identity: { id: string; email: string },
-): Promise<boolean> {
-  // Protect the user before their membership and before writing a delivery receipt.
-  const host = await db
+/** Protect the address before taking membership locks or writing a receipt. */
+export function lockVerifiedHostAddress(db: Db, identity: { id: string; email: string }) {
+  return db
     .selectFrom('auth.user')
     .select('id')
     .where('id', '=', identity.id)
@@ -15,16 +11,17 @@ export async function lockVerifiedBookingHost(
     .where('emailVerified', '=', true)
     .forShare()
     .executeTakeFirst()
-  if (!host) return false
-  const member = await db
+}
+
+export function lockBookingHostMembership(db: Db, bookingId: string, hostId: string) {
+  return db
     .selectFrom('auth.member as m')
     .innerJoin('bookings as b', 'b.organization_id', 'm.organizationId')
     .select('m.id')
     .where('b.id', '=', bookingId)
-    .where('m.userId', '=', identity.id)
+    .where('m.userId', '=', hostId)
     .forShare('m')
     .executeTakeFirst()
-  return member !== undefined
 }
 
 /** Caller holds the shared budget lock and owns the recipient receipt in this transaction. */

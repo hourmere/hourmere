@@ -34,7 +34,11 @@ import {
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { lockVerifiedBookingHost, sendAndRecordBookingEmail } from './booking-email-send.ts'
+import {
+  lockBookingHostMembership,
+  lockVerifiedHostAddress,
+  sendAndRecordBookingEmail,
+} from './booking-email-send.ts'
 import { enqueueGroupHostMail } from './group-host-mail.ts'
 
 export { groupHostMailJob } from './group-host-mail.ts'
@@ -668,11 +672,12 @@ export async function sendOnce(
   try {
     const outcome = await deps.db.transaction().execute(async (trx) => {
       if (await isImportedBooking(trx, key.bookingId)) throw new Overtaken()
-      if (
-        key.verifiedHost &&
-        !(await lockVerifiedBookingHost(trx, key.bookingId, key.verifiedHost))
-      )
-        throw new RecipientUnavailable()
+      if (key.verifiedHost) {
+        const host = await lockVerifiedHostAddress(trx, key.verifiedHost)
+        if (!host) throw new RecipientUnavailable()
+        const member = await lockBookingHostMembership(trx, key.bookingId, host.id)
+        if (!member) throw new RecipientUnavailable()
+      }
       // The same format as the token the booking services issue (32 random bytes, base64url).
       const token = withManageLink ? randomBytes(32).toString('base64url') : undefined
       const claimed = await trx

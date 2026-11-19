@@ -10,7 +10,11 @@ import {
 } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { lockVerifiedBookingHost, sendAndRecordBookingEmail } from './booking-email-send.ts'
+import {
+  lockBookingHostMembership,
+  lockVerifiedHostAddress,
+  sendAndRecordBookingEmail,
+} from './booking-email-send.ts'
 import { loadNotificationData, type NotificationDeps } from './index.ts'
 import {
   lockNotificationEmailBudget,
@@ -146,7 +150,10 @@ async function sendSeriesRecipient(
         .forShare()
         .executeTakeFirst()
       if (!attendee) return { state: 'done' } as const
-    } else if (!(await lockVerifiedBookingHost(trx, rootId, recipient))) {
+    } else if (
+      !(await lockVerifiedHostAddress(trx, recipient)) ||
+      !(await lockBookingHostMembership(trx, rootId, recipient.id))
+    ) {
       return { state: 'done' } as const
     }
 
