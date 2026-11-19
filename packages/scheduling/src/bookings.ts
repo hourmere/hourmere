@@ -1188,11 +1188,8 @@ async function cancelLocked(
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
   if (seat?.series_occurrence_id && !seriesAction)
     await advanceBookingSeries(db, row.organization_id, seat.series_occurrence_id)
-  await notify?.(
-    db,
-    { type: 'cancelled', bookingId: row.id, ...(seriesAction && { seriesAction }) },
-    now,
-  )
+  // In this transaction: the cancellation email exists exactly when the cancellation does.
+  await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
   return loadBooking(db, row.id)
 }
 
@@ -1209,12 +1206,16 @@ export async function cancelSeriesMemberInTransaction(
     asInvitee: boolean
   },
 ): Promise<void> {
+  const { notify } = options
+  const notifyBulkCancellation =
+    notify &&
+    (() => notify(trx, { type: 'cancelled', bookingId: row.id, seriesAction: 'bulk_cancel' }, now))
   await cancelLocked(
     trx,
     row,
     now,
     options.reason,
-    options.notify,
+    notifyBulkCancellation,
     options.origin,
     options.actorUserId,
     options.asInvitee,
