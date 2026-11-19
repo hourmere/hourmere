@@ -73,7 +73,7 @@ export function normalizeRecurringRule(input: unknown): RecurringRule {
 const FIRST_LOCAL_START =
   /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::[0-5]\d(?:\.\d{1,9})?)?)[+-]\d{2}:\d{2}$/
 
-function resolveFirstStart(value: string, timeZone: string): Temporal.ZonedDateTime {
+export function resolveFirstStart(value: string, timeZone: string): Temporal.ZonedDateTime {
   const local = typeof value === 'string' ? FIRST_LOCAL_START.exec(value)?.[1] : undefined
   if (local === undefined) {
     throw invalidRecurrence(
