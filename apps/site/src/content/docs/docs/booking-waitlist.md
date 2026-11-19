@@ -19,7 +19,9 @@ page hides the waitlist option and join/resend return HTTP 409 `waitlist_smtp_no
    requested periods, states and notification times. **Remove** clears that entry's
    contact details and stops future waitlist messages, without sending a removal email.
 
-Only one-on-one event types with a single host are eligible. Round-robin and collective
+Single-host event types with individual scheduling are eligible, including
+[group events](/docs/group-events). An available group seat counts as an open time;
+notifications do not reserve it. Round-robin and collective
 event types are unsupported. Personal owners manage their own waitlists; team owners and
 admins manage team waitlists. Ordinary team membership or being a host does not grant
 access to the contact list.

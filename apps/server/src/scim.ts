@@ -33,6 +33,8 @@ export interface ScimResourceRequest {
   principal: { tokenId: string; organizationId: string }
   /** `<PUBLIC_URL>/scim/v2/{organizationId}` for the token's organization. */
   base: string
+  /** Whether the client supplied a write precondition. This SCIM subset has no versions. */
+  hasWritePrecondition?: boolean
   /**
    * Reads the JSON request body, at most SCIM_BODY_LIMIT bytes of UTF-8. Only a handler that
    * needs the body calls it, after authentication; nothing is read before.
@@ -44,7 +46,7 @@ export interface ScimResourceRequest {
 export type ScimBody = { ok: true; value: unknown } | { ok: false; reply: ScimReply }
 
 export interface ScimReply {
-  status: 200 | 201 | 400 | 401 | 403 | 404 | 409 | 413 | 429 | 501
+  status: 200 | 201 | 400 | 401 | 403 | 404 | 409 | 412 | 413 | 429 | 501
   body: unknown
   /** Response headers such as Location or Retry-After; the content type is always SCIM's. */
   headers?: Record<string, string> | undefined
@@ -161,6 +163,9 @@ export function mountScim(
         query: new URL(c.req.url).searchParams,
         principal,
         base: `${origin}/scim/v2/${principal.organizationId}`,
+        hasWritePrecondition: ['if-match', 'if-none-match', 'if-unmodified-since'].some((header) =>
+          c.req.raw.headers.has(header),
+        ),
         body: () => readScimBody(c.req.raw),
       })
       if (reply) {

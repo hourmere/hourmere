@@ -1,5 +1,5 @@
 // Routing configuration interfaces are present by name, but production remains hard-off.
-// Allow only their five operations, schemas and CLI commands; publication, public routing,
+// Allow only their six operations, schemas and CLI commands; preview, public routing,
 // continuation and UI surfaces belong to later steps. Runtime refusal is tested by the
 // routing adapter tests. This inventory still examines production assembly and all source
 // paths, without snapshots or a git baseline. The web keeps its separate Off inventory.
@@ -72,6 +72,7 @@ const CONFIGURATION_OPERATIONS = [
   { method: 'post', path: '/api/v1/routing-forms', operationId: 'createRoutingForm' },
   { method: 'patch', path: '/api/v1/routing-forms/{id}', operationId: 'updateRoutingForm' },
   { method: 'delete', path: '/api/v1/routing-forms/{id}', operationId: 'archiveRoutingForm' },
+  { method: 'post', path: '/api/v1/routing-forms/{id}/publish', operationId: 'publishRoutingForm' },
 ]
 const CONFIGURATION_PATHS = [...new Set(CONFIGURATION_OPERATIONS.map(({ path }) => path))]
 const CONFIGURATION_COMMANDS = {
@@ -80,14 +81,18 @@ const CONFIGURATION_COMMANDS = {
   'routing-forms create': 'create_routing_form',
   'routing-forms update': 'update_routing_form',
   'routing-forms archive': 'archive_routing_form',
+  'routing-forms publish': 'publish_routing_form',
 }
-// Explicit component names keep a future publication or public schema visible to this test.
+// Explicit component names keep future preview and public schemas visible to this test.
 const CONFIGURATION_SCHEMAS = [
   'CreateRoutingForm',
   'ArchiveRoutingForm',
   'UpdateRoutingForm',
   'RoutingForm',
   'RoutingFormList',
+  'PublishRoutingForm',
+  'RoutingFormVersion',
+  'RoutingFormPublication',
 ]
 const CONFIGURATION_TAGS = ['Routing forms']
 
@@ -98,7 +103,7 @@ const STORAGE_LAYER =
 // `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
   /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_form_operations|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
-// Configuration adapters now load the existing service module; publication has no adapter.
+// Configuration and publication adapters load the existing service module.
 const CONFIGURATION_SERVICES = ['packages/scheduling/src/routing-form-service.ts']
 // Step a4's target invalidation and retention, loaded by event-type updates and deletion,
 // member removal and the worker.
@@ -963,7 +968,7 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
     }
   })
 
-  it('offers exactly the five configuration CLI commands', () => {
+  it('offers exactly the six configuration CLI commands', () => {
     const names = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),

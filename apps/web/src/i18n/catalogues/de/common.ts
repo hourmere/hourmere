@@ -558,4 +558,7 @@ export const common = {
     'Öffnet die Website des Gastgebers auf der übergeordneten Seite.',
   'Opens the host’s website in a new tab.': 'Öffnet die Website des Gastgebers in einem neuen Tab.',
   'Opens the host’s website in this tab.': 'Öffnet die Website des Gastgebers in diesem Tab.',
+  // Meeting poll reminder opt-out
+  'meetingPoll.optOutError':
+    'Die Erinnerungen konnten nicht abbestellt werden. Versuchen Sie es erneut.',
 } as const

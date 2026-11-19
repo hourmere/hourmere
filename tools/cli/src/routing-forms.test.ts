@@ -7,9 +7,10 @@ const commands = [
   ['create', 'create_routing_form'],
   ['update', 'update_routing_form'],
   ['archive', 'archive_routing_form'],
+  ['publish', 'publish_routing_form'],
 ] as const
 
-async function run(command: string, disabled = false) {
+async function run(command: string, disabled = false, result?: object) {
   const input = { id: '019a0000-0000-7000-8000-000000000001', expectedRevision: 1 }
   let stdout = ''
   let stderr = ''
@@ -22,7 +23,7 @@ async function run(command: string, disabled = false) {
             isError: true,
             content: [{ type: 'text', text: JSON.stringify({ error: 'routing_forms_disabled' }) }],
           }
-        : { structuredContent: { id: input.id, revision: 2 } },
+        : (result ?? { structuredContent: { id: input.id, revision: 2 } }),
     }),
   )
   const code = await runCli({
@@ -63,10 +64,26 @@ describe('routing form CLI configuration commands', () => {
     expect(result.fetcher).toHaveBeenCalledTimes(1)
   })
 
+  it('reads large publication replies and keeps the standard limit for other commands', async () => {
+    // MCP sends both the current form and published version as structured JSON and text.
+    const ruleContent = 'x'.repeat(3 * 1024 * 1024)
+    const publication = { form: { ruleContent }, version: { ruleContent } }
+    const reply = {
+      structuredContent: publication,
+      content: [{ type: 'text', text: JSON.stringify(publication) }],
+    }
+    const published = await run('publish', false, reply)
+    expect(published.code).toBe(0)
+    expect(published.stdout.length).toBe(JSON.stringify(publication, null, 2).length + 1)
+    const other = await run('get', false, reply)
+    expect(other.code).toBe(1)
+    expect(JSON.parse(other.stderr).error).toBe('response_too_large')
+  })
+
   it('advertises exactly the configuration commands', () => {
     expect(Object.keys(COMMANDS).filter((command) => command.startsWith('routing-forms '))).toEqual(
       commands.map(([command]) => `routing-forms ${command}`),
     )
-    expect(HELP).toContain('routing-forms list|get|create|update|archive')
+    expect(HELP).toContain('routing-forms list|get|create|update|archive|publish')
   })
 })

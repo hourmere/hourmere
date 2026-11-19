@@ -544,4 +544,6 @@ export const common = {
   'Opens the host’s website in the parent page.': 'Opens the host’s website in the parent page.',
   'Opens the host’s website in a new tab.': 'Opens the host’s website in a new tab.',
   'Opens the host’s website in this tab.': 'Opens the host’s website in this tab.',
+  // Meeting poll reminder opt-out
+  'meetingPoll.optOutError': 'We couldn’t stop reminders. Try again.',
 } as const

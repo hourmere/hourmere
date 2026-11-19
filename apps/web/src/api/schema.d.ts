@@ -2103,7 +2103,7 @@ export interface paths {
         };
         /**
          * Read the private attendee list for a group occurrence
-         * @description Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Includes cancelled seats. Invitee manage tokens grant no access.
+         * @description Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Defaults to active seats; cancelled seats require an explicit filter. Pages contain at most 100 seats. Invitee manage tokens grant no access.
          */
         get: operations["getGroupOccurrenceAttendees"];
         put?: never;
@@ -3453,6 +3453,26 @@ export interface paths {
          * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         patch: operations["updateRoutingForm"];
+        trace?: never;
+    };
+    "/api/v1/routing-forms/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.
+         */
+        post: operations["publishRoutingForm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/schedules": {
@@ -6266,6 +6286,11 @@ export interface components {
             eventTypeId: string | null;
             /** Format: uuid */
             id: string;
+            pagination: {
+                hasMore: boolean;
+                limit: number;
+                offset: number;
+            };
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -6903,6 +6928,11 @@ export interface components {
             /** @enum {string} */
             visibility: "private" | "aggregate";
         };
+        PublishRoutingForm: {
+            expectedRevision: number;
+            /** Format: uuid */
+            requestId?: string;
+        };
         /** @description A booking-form field beyond name and email. Its answer goes in `responses` under `id`: text for short_text, long_text and phone; one of `options` for select; a list of distinct `options` for multi_select; true or false for checkbox (a required checkbox must be true). */
         Question: {
             id: string;
@@ -7093,6 +7123,112 @@ export interface components {
                 updatedAt: string;
             }[];
             nextCursor: string | null;
+        };
+        RoutingFormPublication: {
+            form: components["schemas"]["RoutingForm"];
+            version: components["schemas"]["RoutingFormVersion"];
+        };
+        RoutingFormVersion: {
+            fallback: {
+                /** Format: uuid */
+                eventTypeId: string;
+                /** @enum {string} */
+                kind: "event";
+                mappings: {
+                    destination: {
+                        /** @enum {string} */
+                        kind: "inviteeName";
+                    } | {
+                        /** @enum {string} */
+                        kind: "inviteeEmail";
+                    } | {
+                        /** @enum {string} */
+                        kind: "question";
+                        questionId: string;
+                    };
+                    options?: {
+                        [key: string]: string;
+                    };
+                    /** Format: uuid */
+                    questionId: string;
+                }[];
+            } | {
+                /** @enum {string} */
+                kind: "message";
+                message: string;
+            };
+            /** Format: uuid */
+            formId: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            publishedAt: string;
+            questions: ({
+                /** Format: uuid */
+                id: string;
+                label: string;
+                required: boolean;
+                /** @enum {string} */
+                type: "short_text" | "email";
+            } | {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                options: {
+                    /** Format: uuid */
+                    id: string;
+                    label: string;
+                }[];
+                required: boolean;
+                /** @enum {string} */
+                type: "select";
+            })[];
+            rules: {
+                conditions: ({
+                    /** @enum {string} */
+                    operator: "equals";
+                    /** Format: uuid */
+                    questionId: string;
+                    value: string;
+                } | {
+                    /** @enum {string} */
+                    operator: "one_of";
+                    /** Format: uuid */
+                    questionId: string;
+                    values: string[];
+                })[];
+                /** Format: uuid */
+                id: string;
+                target: {
+                    /** Format: uuid */
+                    eventTypeId: string;
+                    /** @enum {string} */
+                    kind: "event";
+                    mappings: {
+                        destination: {
+                            /** @enum {string} */
+                            kind: "inviteeName";
+                        } | {
+                            /** @enum {string} */
+                            kind: "inviteeEmail";
+                        } | {
+                            /** @enum {string} */
+                            kind: "question";
+                            questionId: string;
+                        };
+                        options?: {
+                            [key: string]: string;
+                        };
+                        /** Format: uuid */
+                        questionId: string;
+                    }[];
+                } | {
+                    /** @enum {string} */
+                    kind: "message";
+                    message: string;
+                };
+            }[];
+            versionNumber: number;
         };
         Schedule: {
             /** Format: date-time */
@@ -11461,7 +11597,12 @@ export interface operations {
     };
     getGroupOccurrenceAttendees: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number | null;
+                /** @description Active seats by default; request cancelled or all seats explicitly. */
+                status?: "active" | "cancelled" | "all";
+            };
             header?: never;
             path: {
                 id: string;
@@ -14058,6 +14199,98 @@ export interface operations {
             };
             /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, slug_taken, routing_form_limit_reached, routing_form_not_published */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    publishRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session writes: the organization where the action opened. Optional on reads; ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishRoutingForm"];
+            };
+        };
+        responses: {
+            /** @description Current form and the immutable version created by the original request */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingFormPublication"];
+                };
+            };
+            /** @description invalid_request, invalid_routing_form, invalid_routing_target */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled, routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, routing_form_version_limit_reached */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

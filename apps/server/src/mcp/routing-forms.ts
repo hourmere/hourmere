@@ -5,16 +5,20 @@ import {
   createRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  publishRoutingForm,
   type ServiceContext,
   updateRoutingForm,
 } from '@hourmere/scheduling'
 import {
   ArchiveRoutingForm,
   CreateRoutingForm,
+  PublishRoutingForm,
+  ROUTING_FORM_PUBLICATION_BEHAVIOR,
   ROUTING_FORMS_DISABLED,
   RoutingFormId,
   RoutingFormList,
   RoutingFormListInput,
+  RoutingFormPublication,
   RoutingFormResponse,
   UpdateRoutingForm,
 } from '../routes/routing-forms.ts'
@@ -89,6 +93,15 @@ export function routingFormConfigurationTools({
         await archiveRoutingForm(context(call.caller), id, args)
         return { archived: true as const }
       },
+    }),
+    defineTool({
+      name: 'publish_routing_form',
+      title: 'Publish a routing form',
+      description: `${description} ${ROUTING_FORM_PUBLICATION_BEHAVIOR}`,
+      input: PublishRoutingForm.extend(RoutingFormId.shape),
+      output: RoutingFormPublication,
+      annotations: write,
+      run: ({ id, ...args }, call) => publishRoutingForm(context(call.caller), id, args),
     }),
   ])
 }

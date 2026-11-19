@@ -28,7 +28,7 @@ export type SuppressionReason =
 function recipientHash(
   email: string,
   secret: string,
-  purpose: 'booking' | 'sign-in' | 'invitation' | 'mailbox-proof',
+  purpose: 'booking' | 'sign-in' | 'invitation' | 'mailbox-proof' | 'workflow',
 ): Buffer {
   // Derive an independent key: ledger/log digests cannot be matched from an address
   // dictionary without BETTER_AUTH_SECRET, or reused in another server-secret protocol.
@@ -51,6 +51,11 @@ export function signInRecipientHash(email: string, secret: string): Buffer {
 
 export function invitationRecipientHash(email: string, secret: string): Buffer {
   return recipientHash(email, secret, 'invitation')
+}
+
+/** Workflow mail has fixed recipient caps independent of core booking mail. */
+export function workflowRecipientHash(email: string, secret: string): Buffer {
+  return recipientHash(email, secret, 'workflow')
 }
 
 /** SSO mailbox proof mail: its own recipient budget, separate from sign-in links. */
@@ -135,14 +140,34 @@ export async function signInEmailBudget(db: Db, limits: SignInMailLimits, hash: 
   )
 }
 
+const CLEANUP_RETENTION_MS = 2 * 86_400_000
+const SERIES_ADMISSION_CLEANUP_BATCH = 500
+
 export async function purgeNotificationEmailSends(db: Db, now = new Date()) {
+  const cutoff = new Date(now.getTime() - CLEANUP_RETENTION_MS)
   await db
     .deleteFrom('invitation_email_requests')
-    .where('requested_at', '<', new Date(now.getTime() - 2 * 86_400_000))
+    .where('requested_at', '<', cutoff)
     .executeTakeFirst()
-  return db
-    .deleteFrom('notification_email_sends')
-    .where('sent_at', '<', new Date(now.getTime() - 2 * 86_400_000))
+  return db.deleteFrom('notification_email_sends').where('sent_at', '<', cutoff).executeTakeFirst()
+}
+
+async function purgeBookingSeriesAdmissions(db: Db, now: Date) {
+  await db
+    .deleteFrom('booking_series_admissions')
+    .where(
+      'id',
+      'in',
+      db
+        .selectFrom('booking_series_admissions')
+        .select('id')
+        .where('admitted_at', '<', new Date(now.getTime() - CLEANUP_RETENTION_MS))
+        .orderBy('admitted_at')
+        .orderBy('id')
+        .limit(SERIES_ADMISSION_CLEANUP_BATCH)
+        .forUpdate()
+        .skipLocked(),
+    )
     .executeTakeFirst()
 }
 
@@ -156,10 +181,10 @@ export function notificationEmailCleanupJob(deps: {
     policy: 'exclusive',
     concurrency: 1,
     schedule: { cron: '17 * * * *', payload: {} },
-    handler: () =>
-      purgeNotificationEmailSends(
-        deps.db,
-        new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds),
-      ).then(() => {}),
+    handler: async () => {
+      const now = new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+      await purgeNotificationEmailSends(deps.db, now)
+      await purgeBookingSeriesAdmissions(deps.db, now)
+    },
   })
 }

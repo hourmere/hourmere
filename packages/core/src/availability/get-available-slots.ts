@@ -1,5 +1,10 @@
 import type { AvailabilityInput, InstantInterval, Slot } from './types.ts'
-import { type NormalizedBooking, normalizeInput } from './validate.ts'
+import {
+  AvailabilityInputError,
+  type NormalizedBooking,
+  type NormalizedInput,
+  normalizeInput,
+} from './validate.ts'
 
 const COMPATIBLE = { disambiguation: 'compatible' } as const
 const MINUTES_PER_DAY = 24 * 60
@@ -49,13 +54,7 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
   const timeZone = q.timeZone
   const duration = { minutes: q.durationMinutes }
 
-  // Bounds on a slot's start.
-  const earliest = later(q.rangeStart, q.now.add({ minutes: q.minimumNoticeMinutes }))
-  let latest = q.rangeEnd.subtract(duration)
-  if (q.bookingWindowDays !== undefined) {
-    const windowEnd = q.now.toZonedDateTimeISO(timeZone).add({ days: q.bookingWindowDays })
-    latest = earlier(latest, windowEnd.toInstant())
-  }
+  const { earliest, latest } = slotStartBounds(q)
   if (Temporal.Instant.compare(earliest, latest) > 0) return []
 
   const blocked = blockedIntervals(q.busy, q.bookings)
@@ -71,22 +70,9 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
   const lastDate = latest.toZonedDateTimeISO(timeZone).toPlainDate().add({ days: 1 })
   let date = earliest.toZonedDateTimeISO(timeZone).toPlainDate().subtract({ days: 1 })
   for (; Temporal.PlainDate.compare(date, lastDate) <= 0; date = date.add({ days: 1 })) {
-    const key = date.toString()
-    const bookedThatDay = bookingCounts.day.get(key) ?? 0
-    if (q.maxBookingsPerDay !== undefined && bookedThatDay >= q.maxBookingsPerDay) continue
-    if (
-      q.maxBookingsPerWeek !== undefined &&
-      (bookingCounts.week.get(weekKey(date)) ?? 0) >= q.maxBookingsPerWeek
-    )
-      continue
-    if (
-      q.maxBookingsPerMonth !== undefined &&
-      (bookingCounts.month.get(monthKey(date)) ?? 0) >= q.maxBookingsPerMonth
-    )
-      continue
+    if (!hasPeriodCapacity(q, getPeriodCounts(bookingCounts, periodKeys(date)))) continue
 
-    const intervals = q.dateOverrides.get(key) ?? q.weeklyHours.get(date.dayOfWeek) ?? []
-    for (const interval of intervals) {
+    for (const interval of workingIntervals(q, date)) {
       const intervalStart = boundaryInstant(date, interval.start, timeZone)
       const intervalEnd = boundaryInstant(date, interval.end, timeZone)
 
@@ -94,10 +80,8 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
       // later (02:30 becomes 03:30), so a candidate after 02:30 on the wall clock
       // (03:00) can still end in time. The resolved end instant stops the loop.
       for (let minute = interval.start; minute < MINUTES_PER_DAY; minute += q.slotStepMinutes) {
-        const start = existingWallClockInstant(date, minute, timeZone)
+        const start = workingStart(date, minute, timeZone, intervalStart)
         if (start === undefined) continue
-        // Only possible when the interval's start fell into a gap and was moved forward.
-        if (Temporal.Instant.compare(start, intervalStart) < 0) continue
         const end = start.add(duration)
         // Existing wall-clock times of one date map to strictly increasing instants,
         // so once a candidate fails one of these two checks, every later one does.
@@ -105,15 +89,116 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
         if (Temporal.Instant.compare(start, latest) > 0) break
         if (Temporal.Instant.compare(start, earliest) < 0) continue
 
-        const windowStart = start.subtract({ minutes: q.bufferBeforeMinutes })
-        const windowEnd = end.add({ minutes: q.bufferAfterMinutes })
-        if (overlapsAny(blocked, windowStart, windowEnd)) continue
+        if (overlapsAny(blocked, bufferedInterval({ start, end }, q))) continue
         slots.push({ start, end })
       }
     }
   }
 
   return sortedByUniqueStart(slots)
+}
+
+/** Existing bookings in the requested start's host-local periods. */
+export interface ExplicitStartCounts {
+  day?: number
+  week?: number
+  month?: number
+}
+
+export interface ExplicitStartAvailability {
+  available: boolean
+  outsideBookingWindow?: true
+}
+
+/**
+ * Checks only the requested slots, in input order. Counts are supplied by the fact loader
+ * and include any event bookings passed separately for blocking. Every proposed start
+ * consumes capacity before the later starts in its periods, even when it fails another rule.
+ * Proposed slots also block each other at both ends with the ordinary event buffers.
+ * For an unknown calendar snapshot, ignoreBusy checks only the independently known
+ * constraints. The caller must still treat a passing result for that date as unknown.
+ */
+export function checkExplicitStarts(
+  input: AvailabilityInput,
+  starts: readonly Slot[],
+  existingCounts: readonly ExplicitStartCounts[],
+  options: { checkpoint?: () => void; ignoreBusy?: readonly boolean[] } = {},
+): ExplicitStartAvailability[] {
+  if (starts.length !== existingCounts.length)
+    throw new AvailabilityInputError('Each requested start must have period counts')
+  const q = normalizeInput(input)
+  const { earliest, latest, windowEnd } = slotStartBounds(q)
+  const blocked = blockedIntervals(q.busy, q.bookings)
+  const booked = options.ignoreBusy?.some(Boolean) ? blockedIntervals([], q.bookings) : blocked
+  const ordered = starts
+    .map((slot, index) => ({ slot, index, buffered: bufferedInterval(slot, q) }))
+    .sort((a, b) => Temporal.Instant.compare(a.slot.start, b.slot.start))
+  const results: ExplicitStartAvailability[] = starts.map(() => ({ available: false }))
+  const proposedCounts = emptyPeriodCounts()
+
+  for (const { slot, index, buffered } of ordered) {
+    options.checkpoint?.()
+    const { start, end } = slot
+    const local = start.toZonedDateTimeISO(q.timeZone)
+    const date = local.toPlainDate()
+    const keys = periodKeys(date)
+    const proposed = getPeriodCounts(proposedCounts, keys)
+    incrementPeriodCounts(proposedCounts, keys)
+    if (windowEnd && Temporal.Instant.compare(start, windowEnd) > 0) {
+      results[index] = { available: false, outsideBookingWindow: true }
+      continue
+    }
+    const existing = existingCounts[index]
+    if (
+      !hasPeriodCapacity(q, {
+        day: (existing?.day ?? 0) + proposed.day,
+        week: (existing?.week ?? 0) + proposed.week,
+        month: (existing?.month ?? 0) + proposed.month,
+      }) ||
+      Temporal.Instant.compare(start, earliest) < 0 ||
+      Temporal.Instant.compare(start, latest) > 0 ||
+      !start.add({ minutes: q.durationMinutes }).equals(end)
+    )
+      continue
+
+    const minute = local.hour * 60 + local.minute
+    const fitsSchedule = workingIntervals(q, date).some((interval) => {
+      const offset = minute - interval.start
+      if (offset < 0 || offset % q.slotStepMinutes !== 0) return false
+      const intervalStart = boundaryInstant(date, interval.start, q.timeZone)
+      const candidate = workingStart(date, minute, q.timeZone, intervalStart)
+      return (
+        candidate?.equals(start) &&
+        Temporal.Instant.compare(end, boundaryInstant(date, interval.end, q.timeZone)) <= 0
+      )
+    })
+    if (!fitsSchedule || overlapsAny(options.ignoreBusy?.[index] ? booked : blocked, buffered))
+      continue
+
+    const conflictsWithProposal = ordered.some(
+      (other) =>
+        other.index !== index &&
+        buffered.start < other.buffered.end &&
+        other.buffered.start < buffered.end,
+    )
+    if (!conflictsWithProposal) results[index] = { available: true }
+  }
+  return results
+}
+
+function slotStartBounds(q: NormalizedInput) {
+  const earliest = later(q.rangeStart, q.now.add({ minutes: q.minimumNoticeMinutes }))
+  const lastInRange = q.rangeEnd.subtract({ minutes: q.durationMinutes })
+  const windowEnd =
+    q.bookingWindowDays === undefined
+      ? undefined
+      : q.now.toZonedDateTimeISO(q.timeZone).add({ days: q.bookingWindowDays }).toInstant()
+  const latest = windowEnd ? earlier(lastInRange, windowEnd) : lastInRange
+  return { earliest, latest, windowEnd }
+}
+
+function workingIntervals(q: NormalizedInput, date: Temporal.PlainDate) {
+  return q.dateOverrides.get(date.toString()) ?? q.weeklyHours.get(date.dayOfWeek) ?? []
 }
 
 /** Converts an interval boundary ('compatible' disambiguation; 1440 = start of the next day). */
@@ -123,11 +208,19 @@ function boundaryInstant(date: Temporal.PlainDate, minute: number, timeZone: str
 }
 
 /** Converts a candidate start; `undefined` when that wall-clock time does not exist (DST gap). */
-function existingWallClockInstant(date: Temporal.PlainDate, minute: number, timeZone: string) {
+function workingStart(
+  date: Temporal.PlainDate,
+  minute: number,
+  timeZone: string,
+  intervalStart: Temporal.Instant,
+) {
   const local = wallClock(date, minute)
   const zoned = local.toZonedDateTime(timeZone, COMPATIBLE)
   // 'compatible' moves a nonexistent time forward, so a changed wall-clock reading means a gap.
-  return zoned.toPlainDateTime().equals(local) ? zoned.toInstant() : undefined
+  if (!zoned.toPlainDateTime().equals(local)) return undefined
+  const start = zoned.toInstant()
+  // The interval's start can itself fall in a gap and move forward by its length.
+  return Temporal.Instant.compare(start, intervalStart) < 0 ? undefined : start
 }
 
 function wallClock(date: Temporal.PlainDate, minute: number) {
@@ -140,6 +233,19 @@ interface NsInterval {
 }
 
 const NS_PER_MINUTE = 60_000_000_000n
+
+function bufferedInterval(
+  { start, end }: InstantInterval,
+  {
+    bufferBeforeMinutes,
+    bufferAfterMinutes,
+  }: Pick<NormalizedInput, 'bufferBeforeMinutes' | 'bufferAfterMinutes'>,
+): NsInterval {
+  return {
+    start: start.epochNanoseconds - BigInt(bufferBeforeMinutes) * NS_PER_MINUTE,
+    end: end.epochNanoseconds + BigInt(bufferAfterMinutes) * NS_PER_MINUTE,
+  }
+}
 
 /**
  * Times new slots must keep clear: busy intervals as given, bookings widened by
@@ -154,10 +260,7 @@ function blockedIntervals(
     start: i.start.epochNanoseconds,
     end: i.end.epochNanoseconds,
   }))
-  const fromBookings = bookings.map((b) => ({
-    start: b.start.epochNanoseconds - BigInt(b.bufferBeforeMinutes) * NS_PER_MINUTE,
-    end: b.end.epochNanoseconds + BigInt(b.bufferAfterMinutes) * NS_PER_MINUTE,
-  }))
+  const fromBookings = bookings.map((booking) => bufferedInterval(booking, booking))
   return mergeIntervals([...fromBusy, ...fromBookings])
 }
 
@@ -180,24 +283,18 @@ function mergeIntervals(intervals: NsInterval[]): NsInterval[] {
 }
 
 /** Whether the open window (start, end) overlaps any of the sorted, disjoint intervals. */
-function overlapsAny(
-  blocked: readonly NsInterval[],
-  start: Temporal.Instant,
-  end: Temporal.Instant,
-) {
-  const windowStart = start.epochNanoseconds
-  const windowEnd = end.epochNanoseconds
+function overlapsAny(blocked: readonly NsInterval[], { start, end }: NsInterval) {
   // Binary search for the first interval that ends after the window starts.
   let low = 0
   let high = blocked.length
   while (low < high) {
     const mid = (low + high) >>> 1
     const interval = blocked[mid]
-    if (interval && interval.end <= windowStart) low = mid + 1
+    if (interval && interval.end <= start) low = mid + 1
     else high = mid
   }
   const candidate = blocked[low]
-  return candidate !== undefined && candidate.start < windowEnd
+  return candidate !== undefined && candidate.start < end
 }
 
 /** ISO week-year keeps weeks together when their dates cross a calendar-year boundary. */
@@ -209,22 +306,50 @@ function monthKey(date: Temporal.PlainDate): string {
   return `${date.year}-${date.month}`
 }
 
-/** Counts periods of the host-local, real start; buffers never change the counted period. */
-function countByLocalPeriods(intervals: readonly InstantInterval[], timeZone: string) {
-  const counts = {
+function periodKeys(date: Temporal.PlainDate) {
+  return { day: date.toString(), week: weekKey(date), month: monthKey(date) }
+}
+
+function emptyPeriodCounts() {
+  return {
     day: new Map<string, number>(),
     week: new Map<string, number>(),
     month: new Map<string, number>(),
   }
+}
+
+type PeriodCounts = ReturnType<typeof emptyPeriodCounts>
+type PeriodKeys = ReturnType<typeof periodKeys>
+
+function getPeriodCounts(counts: PeriodCounts, keys: PeriodKeys): Required<ExplicitStartCounts> {
+  return {
+    day: counts.day.get(keys.day) ?? 0,
+    week: counts.week.get(keys.week) ?? 0,
+    month: counts.month.get(keys.month) ?? 0,
+  }
+}
+
+function incrementPeriodCounts(counts: PeriodCounts, keys: PeriodKeys) {
+  for (const period of ['day', 'week', 'month'] as const) {
+    const key = keys[period]
+    counts[period].set(key, (counts[period].get(key) ?? 0) + 1)
+  }
+}
+
+function hasPeriodCapacity(q: NormalizedInput, counts: Required<ExplicitStartCounts>) {
+  return !(
+    (q.maxBookingsPerDay !== undefined && counts.day >= q.maxBookingsPerDay) ||
+    (q.maxBookingsPerWeek !== undefined && counts.week >= q.maxBookingsPerWeek) ||
+    (q.maxBookingsPerMonth !== undefined && counts.month >= q.maxBookingsPerMonth)
+  )
+}
+
+/** Counts periods of the host-local, real start; buffers never change the counted period. */
+function countByLocalPeriods(intervals: readonly InstantInterval[], timeZone: string) {
+  const counts = emptyPeriodCounts()
   for (const { start } of intervals) {
     const date = start.toZonedDateTimeISO(timeZone).toPlainDate()
-    for (const [period, key] of [
-      ['day', date.toString()],
-      ['week', weekKey(date)],
-      ['month', monthKey(date)],
-    ] as const) {
-      counts[period].set(key, (counts[period].get(key) ?? 0) + 1)
-    }
+    incrementPeriodCounts(counts, periodKeys(date))
   }
   return counts
 }
