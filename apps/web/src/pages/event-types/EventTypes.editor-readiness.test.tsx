@@ -1,9 +1,10 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { AppShell, EventTypeEditorPage, RequireSession, SessionLayout } from '../../lazy-pages.tsx'
 import {
   fakeApi,
   json,
@@ -21,10 +22,13 @@ import {
   SCHEDULE_ID,
   schedule,
 } from '../../test/fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 
 type SelfCheck = Schemas['SelfReadinessPage']['eventTypes']['data'][number]
 type Signal = SelfCheck['signals'][number]
 type TeamCheck = Schemas['TeamReadinessPage']['eventTypes']['data'][number]
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, EventTypeEditorPage))
 
 const NOW = '2026-10-30T12:00:00.000Z'
 const TEAM = {
