@@ -1,8 +1,8 @@
-import { MAX_GUESTS } from '@hourmere/core/booking-limits'
 import { useId, useState } from 'react'
 import { BreakableText } from '../../components/BreakableText.tsx'
 import { zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
+import { BOOKING } from '../../limits.ts'
 import { AVAILABILITY_LABEL } from './PollResultsMatrix.tsx'
 import {
   eligibleVoters,
@@ -45,7 +45,7 @@ export function PollFinalizeForm({
     votes.some((vote) => vote.slotId === slotId && vote.value === 'if_need_be'),
   )
   const ready = slot && booker && (!conditional || acknowledged)
-  const capReached = guests.length >= MAX_GUESTS
+  const capReached = guests.length >= BOOKING.maxGuests
   const hasTime = candidates.some(({ availability }) => availability === 'available')
 
   return (
@@ -148,7 +148,7 @@ export function PollFinalizeForm({
               <fieldset className="form-fieldset meeting-poll-attendees">
                 <legend>{t('Additional attendees')}</legend>
                 <p className="hint">
-                  {t('Choose up to {count} additional attendees.', { count: MAX_GUESTS })}
+                  {t('Choose up to {count} additional attendees.', { count: BOOKING.maxGuests })}
                 </p>
                 <div className="meeting-poll-voter-options">
                   {eligible
@@ -183,7 +183,7 @@ export function PollFinalizeForm({
                 {capReached && (
                   <p className="hint" role="status">
                     {t('Attendee limit reached ({count} including the booker).', {
-                      count: MAX_GUESTS + 1,
+                      count: BOOKING.maxGuests + 1,
                     })}
                   </p>
                 )}

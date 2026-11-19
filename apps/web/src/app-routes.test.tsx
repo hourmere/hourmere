@@ -53,7 +53,10 @@ describe('the app under /app', () => {
     expect(await screen.findByRole('heading', { name: 'Page not found', level: 1 })).toBeDefined()
     const nav = screen.getByRole('navigation', { name: 'Main' })
     // The audit log link joins once the personal owner's role is confirmed.
-    await waitFor(() => expect(within(nav).getAllByRole('link')).toHaveLength(10))
+    await waitFor(() => expect(within(nav).getAllByRole('link')).toHaveLength(11))
+    expect(within(nav).getByRole('link', { name: 'Meeting polls' }).getAttribute('href')).toBe(
+      '/app/meeting-polls',
+    )
     expect(
       within(nav).getByRole('link', { name: 'Conference accounts' }).getAttribute('href'),
     ).toBe('/app/conferences')

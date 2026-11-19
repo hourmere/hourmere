@@ -229,8 +229,12 @@ export async function openHostPollAuditPage(
       }
       if (id === 'host-poll-conditional' || id === 'host-poll-stale' || id === 'host-poll-retry') {
         const form = main.getByTestId('meeting-poll-finalize')
-        await form.getByLabel(copy('Meeting time'), { exact: true }).selectOption(availableSlotId)
-        await form.getByLabel(copy('Booker'), { exact: true }).selectOption(bookerId)
+        await form
+          .getByRole('combobox', { name: copy('Meeting time'), exact: true })
+          .selectOption(availableSlotId)
+        await form
+          .getByRole('combobox', { name: copy('Booker'), exact: true })
+          .selectOption(bookerId)
         const acknowledgment = form.getByRole('checkbox', {
           name: copy('I acknowledge the selected conditional votes.'),
         })

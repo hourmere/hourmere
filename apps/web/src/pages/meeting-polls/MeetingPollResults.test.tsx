@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { MAX_GUESTS } from '@hourmere/core/booking-limits'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
@@ -7,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import '../../i18n/admin.ts'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { BOOKING } from '../../limits.ts'
 import { bookingPath } from '../../paths.ts'
 import { type Call, fakeApi, json, later, ME } from '../../test/fake-api.tsx'
 import { MeetingPollResults } from './MeetingPollResults.tsx'
@@ -424,7 +424,7 @@ describe('meeting poll results', () => {
 
   it('caps the selection at the booker plus the allowed additional attendees', async () => {
     const user = userEvent.setup()
-    const extras = Array.from({ length: MAX_GUESTS + 1 }, (_, index) =>
+    const extras = Array.from({ length: BOOKING.maxGuests + 1 }, (_, index) =>
       voter(20 + index, `Extra attendee ${index + 1}`),
     )
     const results = sampleResults({}, { roster: [alice, ...extras] })
@@ -435,13 +435,13 @@ describe('meeting poll results', () => {
     renderResults()
     await chooseAlice(user)
     const checkboxes = screen.getAllByRole<HTMLInputElement>('checkbox')
-    for (const checkbox of checkboxes.slice(0, MAX_GUESTS)) await user.click(checkbox)
+    for (const checkbox of checkboxes.slice(0, BOOKING.maxGuests)) await user.click(checkbox)
     const [first] = checkboxes
-    const last = checkboxes[MAX_GUESTS]
+    const last = checkboxes[BOOKING.maxGuests]
     assert(first && last)
     expect(last.disabled).toBe(true)
     expect(screen.getByRole('status').textContent).toContain(
-      `Attendee limit reached (${MAX_GUESTS + 1} including the booker).`,
+      `Attendee limit reached (${BOOKING.maxGuests + 1} including the booker).`,
     )
     await user.click(first)
     expect(last.disabled).toBe(false)

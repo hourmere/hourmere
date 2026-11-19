@@ -2240,7 +2240,7 @@ export const admin = {
   'Currently unavailable': '当前不可用',
   'Availability unknown': '暂无法确认',
   Votes: '投票情况',
-  'Submitted ballots: {count}': '已提交的选票：{count} 份',
+  'Submitted ballots: {count}': '已提交的选票：{count}份',
   'Verified voters can see totals. In a small poll, subtracting their own vote can reveal how someone else voted.':
     '已验证的投票人可以查看票数。在参与人数较少的投票中，扣除自己的一票后，可能推断出他人的选择。',
   'Voters can see only their own votes. This results page is private to poll managers.':
@@ -2263,9 +2263,9 @@ export const admin = {
   'Choose a booker': '选择预约人',
   '{name} ({email})': '{name}（{email}）',
   'Additional attendees': '其他参会者',
-  'Choose up to {count} additional attendees.': '最多可选 {count} 位其他参会者。',
+  'Choose up to {count} additional attendees.': '最多可选{count}位其他参会者。',
   'Attendee limit reached ({count} including the booker).':
-    '已达到参会人数上限（含预约人共 {count} 位）。',
+    '已达到参会人数上限（含预约人共{count}位）。',
   'I acknowledge the selected conditional votes.': '我确认所选参会者中有人仅在有需要时可以参会。',
   'Scheduling…': '正在安排…',
   'Close voting…': '结束投票…',

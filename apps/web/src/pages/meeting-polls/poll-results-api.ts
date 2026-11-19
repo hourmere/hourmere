@@ -1,12 +1,12 @@
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { RequestError } from '../../api/errors.ts'
-import type { operations } from '../../api/schema.d.ts'
+import type { paths } from '../../api/schema.d.ts'
 
 export type PollResults = Schemas['MeetingPollHostResults']
 export type PollVoter = PollResults['roster'][number]
 export type PollCandidate = PollResults['candidates'][number]
 export type FinalizeBody =
-  operations['finalizeMeetingPoll']['requestBody']['content']['application/json']
+  paths['/api/v1/meeting-polls/{id}/finalize']['post']['requestBody']['content']['application/json']
 export type FinalizeAttempt = { key: string; body: FinalizeBody }
 export type LifecycleAction = 'close' | 'cancel' | 'delete'
 
