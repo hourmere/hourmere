@@ -37,6 +37,7 @@ import * as changeDeadlines from '../../../packages/scheduling/src/change-deadli
 import * as conferences from '../../../packages/scheduling/src/conferences.ts'
 import * as groupSeatAdmission from '../../../packages/scheduling/src/group-seat-admission.ts'
 import * as hosts from '../../../packages/scheduling/src/hosts.ts'
+import { enqueueMeetingPollBookingUpdate } from '../../../packages/scheduling/src/meeting-poll-outcomes.ts'
 import * as notificationSettings from '../../../packages/scheduling/src/notification-settings.ts'
 import { expirePaymentHolds } from '../../../packages/scheduling/src/payment-expiry.ts'
 import * as questions from '../../../packages/scheduling/src/questions.ts'
@@ -97,6 +98,7 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       ...conferences,
       ...groupSeatAdmission,
       ...hosts,
+      enqueueMeetingPollBookingUpdate,
       ...notificationSettings,
       expirePaymentHolds,
       ...questions,
