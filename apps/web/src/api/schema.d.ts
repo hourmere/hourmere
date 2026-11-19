@@ -4692,6 +4692,26 @@ export interface paths {
         patch: operations["updateSsoProvider"];
         trace?: never;
     };
+    "/api/v1/team/sso/providers/{providerId}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a browser-bound OIDC test of a disabled SSO provider
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.
+         */
+        post: operations["testSsoProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{teamId}/leave": {
         parameters: {
             query?: never;
@@ -16768,6 +16788,98 @@ export interface operations {
                 content: {
                     "application/json": {
                         provider: components["schemas"]["SsoProviderDraft"];
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    testSsoProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                providerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Authorization URL and test attempt ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attemptId: string;
+                        /** Format: uri */
+                        url: string;
                     };
                 };
             };

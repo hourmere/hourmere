@@ -830,6 +830,8 @@ The stable domain codes are exactly:
 | `sso_test_required` | 409 | Activation or enforcement needs a passed test for the exact current provider revision (an owner's, for enforcement) |
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), or the last recovery owner of an enforced team tries to leave, be removed or lose the owner role |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
+| `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
+| `sso_email_collision` | 409 | The independently proven new mailbox belongs to another account. Only the browser completing its own attempt can receive this response after proof |
 | `sso_not_found` | 404 | Unknown, other-team or retired provider, domain, link, nomination or delegation ID, all with one identical response; a nomination addressed to another owner and another person's delegation answer the same way. Only an authorized repeat delete of the team's own retired provider succeeds idempotently |
 
 The existing leave, member-removal and role-change operations gain
@@ -869,16 +871,19 @@ membership. `listSsoProviders` accepts `limit` (1–100, default 50) and `cursor
 to the team. Each provider exposes `id`, `protocol`, `revision`, `enabled`, `displayName`,
 `issuer`, nullable `clientId`, `createdAt`, `validationStatus`, `testStatus` and `domains`.
 Domain summaries expose only `id`, `name`, `generation` and `status`; failed and unknown
-checks remain distinct. Validation and test status are currently `unknown`: these reads
-neither decrypt configuration nor infer successful provider tests from proof attempts.
+checks remain distinct. Validation status is currently `unknown`. Test status reflects
+the latest `passed` or `failed` receipt at the current revision, or `unknown` if no
+applicable receipt is retained. These reads use the audit journal without opening the
+sealed provider configuration.
 `getSsoPolicy` returns `requireSso`, `admission`, `policyRevision` and `trustGeneration`;
 a team without a stored policy gets `false`, `invitation_only`, `1` and `1` respectively.
 No read creates a policy, changes trust, emits an audit event or returns identity links.
 
 当前草稿读取仅允许当前团队中已验证的所有者或管理员使用；API 密钥须具有 `read` 或
 `full` 范围，MCP OAuth 须具有 `mcp:tools` 权限。提供者列表按团队分页，不返回已退役
-提供者、密封配置、密钥、原始元数据或身份关联。验证和测试状态目前为 `unknown`，
-不能据此判断配置缺失。OIDC 和 SAML 仍在代码中保持关闭，读取返回 `sso_disabled`。
+提供者、密封配置、密钥、原始元数据或身份关联。验证状态目前为 `unknown`，测试状态
+仅显示当前版本的最新收据。没有适用收据时，测试状态为 `unknown`。OIDC 和 SAML 仍在
+代码中保持关闭，读取返回 `sso_disabled`。
 
 Provider draft writes are registered as browser-session-only POST/PATCH/DELETE operations,
 with no MCP tool or CLI write command. They remain unavailable (`sso_disabled`) while
@@ -958,6 +963,28 @@ Test/link returns a bounded authorization URL and its own ceremony attempt ID;
 completion is via protocol
 callback and status is observed in provider inventory or the caller's `/me` projection.
 Tests do not provision members, link accounts or elevate a session automatically.
+
+The OIDC test applies to a disabled draft. A verified current team owner or administrator
+submits the exact Origin and `X-Expected-Organization-Id`, completes fresh administration
+proof, and repeats the same revision and input with `proofAttemptId`. For a team without
+enforcement, the proof comes from the administrator's Hourmere mailbox. The successful
+retry returns `{url, attemptId}`. Open the URL in the initiating browser and keep the
+original Hourmere session. The shared OIDC callback uses the same PKCE, state and ID-token
+verification as sign-in, then returns to `/app/settings`. Follow provider inventory to
+read the result. The callback requires the same verified administrator, session, browser
+and draft revision even if the provider authenticated a different person. It records
+`sso_provider.tested` with the attempt ID and the safe result. The receipt preserves
+whether the tester held the owner role at completion. A revision change ends in-flight
+tests and invalidates earlier receipts for that provider. Both protocols stay hard-off
+and the REST operation returns `404 sso_disabled`.
+
+OIDC 测试仅适用于禁用的草稿。当前团队中已验证的所有者或管理员须提供同源请求和预期
+团队，完成新鲜管理证明后，以相同版本及输入携带 `proofAttemptId` 重试。未启用强制
+SSO 的团队使用管理员自己的 Hourmere 邮箱完成证明。重试成功后，在原浏览器和原会话
+中打开返回的 `url`。回调验证 OIDC 响应，返回设置页，并记录当前版本的测试结果；所有者
+的测试记录会保留其当时的角色。测试状态可在提供者列表查看。任何版本变更都会使之前的
+测试收据失效。测试不会创建账号、身份关联、团队成员或登录会话。两种协议仍在代码中保持
+关闭，接口返回 `404 sso_disabled`。
 
 Policy takes `{expectedRevision, requireSso, admission, proofAttemptId?}` with
 `admission` restricted to `invitation_only` or `jit`. Recovery enrollment takes
@@ -1116,8 +1143,8 @@ The S256 verifier binds that exchange to this attempt, and the IdP enforces sing
 of its code. The state also pins the resolved endpoints through the callback. The
 authorization endpoint must have no query parameters, so Hourmere controls all
 authorization parameters. After ID token verification, the callback rechecks the provider revision,
-the active domain claim, the linked issuer and subject, the proven and current verified
-mailbox, and team membership. The session, browser proof and success audit event
+the active domain claim, the linked issuer and subject, the proven IdP mailbox,
+the linked account's verified status and team membership. The session, browser proof and success audit event
 commit together. The proof expires at the first applicable deadline in
 [Browser proof](#browser-proof), including a signed
 `session_expires_at` claim when present, even if Better Auth later refreshes the session.
@@ -1125,23 +1152,46 @@ commit together. The proof expires at the first applicable deadline in
 An unlinked subject receives the same `302` redirect to `/sign-in?error=unable_to_create_session`
 for every combination of `email_verified` and local account existence. The callback
 does not look up a local account by email. It creates no account, identity link,
-session or pending result for an unlinked subject. A changed linked mailbox also
-receives the generic sign-in error until OIDC completion is available. While OIDC is
-hard-off, both endpoints return
-`404 sso_disabled` before looking up a provider or consuming an attempt.
+session or pending result for an unlinked subject. While OIDC is hard-off, sign-in,
+callback and completion return `404 sso_disabled` before checking their inputs or
+accessing the database.
 
 OIDC 登录仅为已关联的身份创建会话。发起登录时需校验 `Origin` 并将尝试绑定到浏览器；
 回调仅使用一次授权码和状态，并在创建会话前重新检查提供商版本、域名声明、身份关联、
 已证明的邮箱和当前团队成员资格。浏览器证明取适用期限中的最早时间，会话续期不延长证明。
 未关联身份一律收到相同的通用登录错误，不会创建账号、身份关联、会话或待处理结果。
-OIDC 在生产代码中保持关闭，两个端点均返回 `404 sso_disabled`。
+OIDC 在生产代码中保持关闭，登录发起、回调和完成端点均返回 `404 sso_disabled`。
 
-When OIDC callback needs mailbox proof, it stores a short-lived frozen validated result
-bound to the original browser/attempt, without creating a session or retaining tokens.
-After mailbox consumption, same-origin `POST /api/auth/sso/oidc/complete` with `attemptId`
-atomically consumes that pending result and its proof, rechecks provider/domain/policy
-and admission, and finishes only the original sign-in/link intent. It cannot re-exchange
-a code, accept caller-supplied claims or bypass existing-account independent linking.
+When the OIDC callback sees a changed email for a linked identity, it stores a short-lived,
+frozen result for the original browser and hands off to `/app/mailbox-proof` with the opaque
+pending attempt ID in the URL fragment. The callback puts the validated result in an encrypted
+HttpOnly cookie and binds it to the pending attempt with a stored digest. It issues no session
+and retains no OIDC tokens. The result and mailbox proof request are the same whether the new
+address belongs to another account or is unclaimed.
+
+After recording proof with the mailbox endpoints, the original browser can submit
+`POST /api/auth/sso/oidc/complete` with `{ "attemptId": "…" }`. Completion requires the
+exact `PUBLIC_URL` origin and rejects Authorization headers. It consumes the pending
+result and its proof once, rechecking the provider, domain, policy and current membership
+in the same transaction. A missing, expired or already consumed result, or an attempt
+without its own live mailbox proof, returns `400 sso_oidc_completion_invalid`. The
+service uses only the callback's frozen result and does
+not exchange the authorization code again. It reports `409 sso_email_collision` only after
+proof and deletes the pending attempt with its mailbox data. The collision leaves the link's
+proven address unchanged and exposes no address in the response or audit journal. Successful
+completion replaces the link's proven mailbox, creates the session and browser proof and
+redirects to the original `/app` destination. The account's email used for independent local
+sign-in is unchanged.
+
+已关联身份的邮箱发生变化时，OIDC 回调会为原浏览器保存短期的待处理结果，并将不透明的尝试
+标识放在 `/app/mailbox-proof` 的网址片段中。回调将已验证结果放入加密的 HttpOnly Cookie，
+并用数据库中的摘要将它与待处理尝试绑定。回调不会签发会话或保留 OIDC 令牌。新邮箱是否已属于
+其他账号，均返回相同的待验证结果。邮箱验证成功后，原浏览器以同源 POST 请求提交 `attemptId`
+来完成登录。服务器在同一事务中重新检查提供商、域名、策略和团队成员资格，待处理结果及其邮箱
+证明只能使用一次。只有验证邮箱后才会报告 `409 sso_email_collision` 并删除包含邮箱数据的待处理
+尝试。冲突不会更改关联身份的已验证邮箱，响应和审计记录均不会包含该地址。成功后会更新身份关联中
+的已验证邮箱，签发会话和浏览器证明，并跳转至原来的 `/app` 目标。账号用于独立登录的邮箱保持不变。
+
 Ownership (all auth-protocol exceptions, no MCP/CLI surface): OIDC sign-in owns
 initiation and callback for linked identities; OIDC completion owns
 `POST /api/auth/sso/oidc/complete` for linked identities, with its wrong-browser,
@@ -1306,8 +1356,9 @@ return `404 sso_disabled` before caller or database lookup, including malformed 
 parameters. MCP lists neither tool while off and direct calls return `sso_disabled`. There
 are also three earlier exact-path exemptions. The guarded auth-protocol endpoints that a
 built step mounts while hard-off, because each must answer `404 sso_disabled` itself
-(the Mailbox proof pair `/api/auth/sso/mailbox-proof/send` and `/consume`, and the OIDC sign-in
-pair `/api/auth/sign-in/sso` and `/api/auth/sso/callback/{providerId}`), are exempt
+(the Mailbox proof pair `/api/auth/sso/mailbox-proof/send` and `/consume`, the OIDC sign-in
+pair `/api/auth/sign-in/sso` and `/api/auth/sso/callback/{providerId}`, and OIDC completion
+at `/api/auth/sso/oidc/complete`), are exempt
 in the route inventory and the source literals only, and only because the suite requests
 each of them in the app built from `productionAppOptions` with `SSO_OIDC_ENABLED=true` and
 `SSO_SAML_ENABLED=true` in the environment and requires `404 {"error":"sso_disabled"}` for
