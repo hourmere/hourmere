@@ -875,16 +875,26 @@ providers' IDs, display names and revisions, the caller's live links as opaque I
 with their provider IDs and generations, and valid proofs for this session with their provider IDs
 and expiry times. The `attempts` array shows pending self-link attempts that belong
 to the session and its original browser. Each reports its ID, provider ID (null
-during fresh proof), phase, mailbox proof status and expiry. Personal sessions, API
-keys and OAuth clients use the existing response shape. With both protocols hard-off,
-the response body stays byte-for-byte identical.
+during fresh proof), phase, mailbox proof status and expiry. A browser session that
+lacks proof for an enforced team keeps its active organization ID for enrollment and
+receives empty organization name and slug strings. Unbound team API keys receive
+`403 sso_required` on private REST reads including `/me`. Private MCP reads including
+`whoami` return a tool error with `sso_required` for unbound API keys and OAuth grants.
+Personal spaces and teams
+without enforcement keep their previous responses. While both protocols are hard-off,
+`/me` omits the `sso` object and an enforced team's browser proofs cannot satisfy the policy.
 
 内部开启 OIDC 时，`GET /api/v1/me` 为当前团队成员的活动团队会话增加可选的 `sso`
 对象。它包含是否强制 SSO、已启用提供商的标识、显示名称与版本、本人有效关联的
 不透明标识、代数及对应提供商，以及当前会话有效证明的提供商与到期时间。`attempts`
 仅列出原发起浏览器与会话中待处理的自助关联尝试，并提供尝试标识、提供商标识
-（新鲜证明阶段为 null）、阶段、邮箱证明状态与到期时间。个人空间会话、API 密钥
-与 OAuth 客户端沿用原响应结构。两种协议均在代码中关闭时，响应正文保持逐字节一致。
+（新鲜证明阶段为 null）、阶段、邮箱证明状态与到期时间。若当前团队强制 SSO，
+未持有效证明的浏览器会话仍可获得登记所需的组织 ID，组织名称和标识符为空字符串。
+缺少绑定的团队 API 密钥读取私有 REST 数据（包括 `/me`）时会收到
+`403 sso_required`。缺少绑定的 API 密钥和 OAuth 授权调用私有 MCP 读取工具
+（包括 `whoami`）时会收到 `sso_required` 工具错误。个人空间和未强制 SSO 的团队
+沿用原响应。两种协议均在代码中关闭时，
+`/me` 省略 `sso` 对象，浏览器证明无法满足已存储的强制策略。
 
 The built draft reads use the current team context and freshly check verified owner/admin
 membership. `listSsoProviders` accepts `limit` (1–100, default 50) and `cursor`; it returns

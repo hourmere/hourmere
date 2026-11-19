@@ -28,6 +28,7 @@ import {
 import { hasUnsafeJsonText } from '../app.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import type { RateLimiter } from '../rate-limit.ts'
+import type { TeamReadAccess } from '../sso-team-reads.ts'
 import {
   type SuccessRedirectErrorField,
   successRedirectErrorField,
@@ -43,6 +44,7 @@ export type McpCaller = Extract<Principal, { kind: 'api_key' | 'oauth' }>
 /** What a tool's handler gets besides its arguments. */
 export interface ToolCall {
   caller: McpCaller
+  checkTeamRead?: ((toolName: string) => Promise<TeamReadAccess | undefined>) | undefined
   /** Trusted socket/proxy address resolved by the HTTP transport, never tool input. */
   trustedIp?: string | undefined
   /**
@@ -254,6 +256,7 @@ export async function runTool(
     // A feature that is not available answers its DomainError code here, after the scope
     // check and before the argument checks.
     checkAvailable(tool)
+    await call.checkTeamRead?.(tool.name)
     if (hasUnsafeJsonText(args)) {
       const field = privateInput ? undefined : successRedirectUnsafeField(args, hasUnsafeJsonText)
       return errorResult({
@@ -414,9 +417,11 @@ export function registerTools(
   caller: McpCaller,
   logError: ToolErrorLog,
   trustedIp?: string | undefined,
+  checkTeamRead?: ToolCall['checkTeamRead'],
 ): void {
   const call: ToolCall = {
     caller,
+    checkTeamRead,
     trustedIp,
     rateLimit(limiter) {
       const retryAfter = limiter.hit(`user:${caller.user.id}`)

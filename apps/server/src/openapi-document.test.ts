@@ -1,6 +1,43 @@
+import { API_KEY_REST_OPERATIONS } from '@hourmere/auth'
 import { WEBHOOK_EVENTS } from '@hourmere/webhooks'
 import { describe, expect, it } from 'vitest'
-import { openApiDocument } from './openapi-document.ts'
+import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
+
+it('attaches the team proof middleware to every private team read in the server inventory', async () => {
+  const { routes, teamReadRoutes } = await openApiRouteInventory()
+  const honoId = (id: string) => id.replace(/\{(\w+)\}/g, ':$1')
+  const excluded = new Set([
+    ...API_KEY_REST_OPERATIONS.filter((operation) =>
+      ['optional_key', 'public_metadata'].includes(operation.authentication),
+    ).map((operation) => honoId(operation.id)),
+    // These projections are account-owned or instance-wide.
+    'GET /api/v1/profile',
+    'GET /api/v1/schedules',
+    'GET /api/v1/schedules/:id',
+    'GET /api/v1/schedules/:id/availability',
+    'GET /api/v1/schedules/:id/overrides',
+    'GET /api/v1/calendar-connections',
+    'GET /api/v1/conference-connections',
+    'GET /api/v1/instance/embed',
+    'GET /api/v1/mcp-oauth/connections',
+  ])
+  const privateReads = new Set(['POST /api/v1/routing-forms/:id/preview'])
+  for (const operation of API_KEY_REST_OPERATIONS) {
+    const id = honoId(operation.id)
+    if (
+      operation.method === 'POST' &&
+      operation.operationClass.endsWith('_read') &&
+      !excluded.has(id)
+    )
+      privateReads.add(id)
+  }
+  for (const { method, path } of routes) {
+    const id = `${method} ${path}`
+    if (path.startsWith('/api/v1/') && ['GET', 'HEAD'].includes(method) && !excluded.has(id))
+      privateReads.add(id)
+  }
+  expect(new Set(teamReadRoutes)).toEqual(privateReads)
+})
 
 describe('openApiDocument', () => {
   it("publishes the caller's nullable personal organization separately from the active one", async () => {

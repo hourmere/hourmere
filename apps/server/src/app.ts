@@ -54,9 +54,11 @@ import {
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 import type { MailboxProofModule } from './sso-mailbox-proof.ts'
-import { readSsoMe, type SsoMeDeps } from './sso-me.ts'
+import { readSsoMe } from './sso-me.ts'
 import type { OidcSignInModule } from './sso-oidc-sign-in.ts'
+import { restTeamReadAccess } from './sso-read-routes.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
+import type { SsoTeamReadDeps } from './sso-team-reads.ts'
 import {
   successRedirectErrorField,
   successRedirectIssueField,
@@ -107,7 +109,7 @@ export interface AppDeps {
    */
   ssoMailboxProof?: MailboxProofModule | undefined
   ssoOidcSignIn?: OidcSignInModule | undefined
-  ssoMe?: SsoMeDeps | undefined
+  ssoTeamReads?: SsoTeamReadDeps | undefined
 }
 
 const Health = z
@@ -417,7 +419,7 @@ export function createApp({
   waitlist,
   ssoMailboxProof,
   ssoOidcSignIn,
-  ssoMe,
+  ssoTeamReads,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Generate correlation IDs locally; caller headers may contain private or forged values.
@@ -429,7 +431,12 @@ export function createApp({
     await next()
   })
   const apiNotFound = (c: Context) => c.json({ error: 'not_found' }, 404)
-  const unclassifiedScopeGuard = installRestApiKeyScopes(app, resolveCaller, apiNotFound)
+  const unclassifiedScopeGuard = installRestApiKeyScopes(
+    app,
+    resolveCaller,
+    apiNotFound,
+    ssoTeamReads,
+  )
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
@@ -717,12 +724,25 @@ export function createApp({
   app.openapi(meRoute, async (c) => {
     const principal = c.var.principal
     const identity = describeCaller(principal)
-    const sso = ssoMe && (await readSsoMe(ssoMe, principal, c.req.raw.headers, publicUrl))
+    const access = await restTeamReadAccess(c)?.()
+    if (access?.allowed === false) {
+      // Keep the active context ID needed for enrollment, without exposing team metadata.
+      identity.organization = { ...identity.organization, name: '', slug: '' }
+    }
+    const sso =
+      ssoTeamReads &&
+      (await readSsoMe(
+        ssoTeamReads,
+        principal,
+        c.req.raw.headers,
+        publicUrl,
+        access?.policy ?? null,
+      ))
     return c.json(sso ? { ...identity, sso } : identity, 200)
   })
 
   for (const register of routes) register({ app, caller })
-  mcp?.mount({ app, resolveCaller, publicUrl })
+  mcp?.mount({ app, resolveCaller, publicUrl, ssoTeamReads })
   mountScim(app, scim, trustedProxies, publicUrl)
 
   // The product API is versioned under /api/v1 (agents depend on it for years);

@@ -3,6 +3,7 @@
 import { inspect } from 'node:util'
 import type { OpenAPIHono } from '@hono/zod-openapi'
 import {
+  API_KEY_MCP_OPERATIONS,
   type CallerResolver,
   type createMcpOAuthResolver,
   escapeControlCharacters,
@@ -14,8 +15,17 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { withClientIpHeader } from '../client-ip.ts'
 import { createRateLimiter } from '../rate-limit.ts'
 import { BOOKING_BODY_LIMIT } from '../routes/public.ts'
+import { teamReadRoute } from '../sso-read-routes.ts'
+import { requireTeamRead, type SsoTeamReadDeps, teamReadAccess } from '../sso-team-reads.ts'
 import { VERSION } from '../version.ts'
-import { clip, type McpCaller, prepareTools, registerTools, type Tool } from './tools.ts'
+import {
+  clip,
+  type McpCaller,
+  prepareTools,
+  registerTools,
+  type Tool,
+  type ToolCall,
+} from './tools.ts'
 
 export const MCP_PATH = '/mcp'
 
@@ -59,6 +69,7 @@ export interface McpModule {
     resolveCaller: CallerResolver
     /** PUBLIC_URL: the only origin browsers may send requests from. */
     publicUrl: string
+    ssoTeamReads?: SsoTeamReadDeps | undefined
   }): void
 }
 
@@ -86,17 +97,34 @@ function logLine(level: 'ERROR' | 'WARN', what: string, detail: unknown): void {
   log(`${new Date().toISOString()} ${level} ${escapeControlCharacters(text)}`)
 }
 
+const teamReadTools = new Set(
+  API_KEY_MCP_OPERATIONS.filter((op) => op.rest.some(teamReadRoute)).map((op) => op.tool),
+)
+
 /**
  * The caller as the SDK carries it to the tools. Verification happened in front of the
  * handler (it never reads credentials itself), so the key's secret is not passed on: the
  * SDK only needs `token` for OAuth helpers that are not used here.
  */
-function toAuthInfo(caller: McpCaller, trustedIp: string | undefined): AuthInfo {
+function toAuthInfo(
+  caller: McpCaller,
+  trustedIp: string | undefined,
+  ssoTeamReads: SsoTeamReadDeps | undefined,
+): AuthInfo {
+  const check = ssoTeamReads && teamReadAccess(ssoTeamReads, caller)
+  const checkTeamRead: ToolCall['checkTeamRead'] =
+    check &&
+    (async (toolName) => {
+      if (!teamReadTools.has(toolName)) return
+      const access = await check()
+      requireTeamRead(access)
+      return access
+    })
   return {
     token: '',
     clientId: caller.kind === 'api_key' ? caller.apiKeyId : caller.clientId,
     scopes: caller.kind === 'oauth' ? [...caller.scopes] : [],
-    extra: { caller, trustedIp },
+    extra: { caller, trustedIp, checkTeamRead },
   }
 }
 
@@ -262,6 +290,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
         caller,
         (what, detail) => logLine('ERROR', `POST ${MCP_PATH} tools/call ${what}`, detail),
         typeof authInfo?.extra?.trustedIp === 'string' ? authInfo.extra.trustedIp : undefined,
+        authInfo?.extra?.checkTeamRead as ToolCall['checkTeamRead'],
       )
       return server
     },
@@ -272,7 +301,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
     },
   )
 
-  const mount: McpModule['mount'] = ({ app, resolveCaller, publicUrl }) => {
+  const mount: McpModule['mount'] = ({ app, resolveCaller, publicUrl, ssoTeamReads }) => {
     if (oauth) {
       for (const path of [
         '/.well-known/oauth-protected-resource',
@@ -316,7 +345,10 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
           }
         }),
         requireApiKey(resolveCaller, oauth, publicUrl),
-        (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller, c.var.clientIp) }),
+        (c) =>
+          handler.fetch(c.req.raw, {
+            authInfo: toAuthInfo(c.var.mcpCaller, c.var.clientIp, ssoTeamReads),
+          }),
       )
     }
 

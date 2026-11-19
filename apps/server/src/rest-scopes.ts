@@ -15,6 +15,8 @@ import { isRouteBodyLimit } from './body-limit.ts'
 import { withClientIpHeader } from './client-ip.ts'
 import { ErrorBody, json } from './openapi.ts'
 import { isRouteRateLimit } from './rate-limit.ts'
+import { teamReadMiddleware, teamReadRoute } from './sso-read-routes.ts'
+import type { SsoTeamReadDeps } from './sso-team-reads.ts'
 
 // Bound from the declared route at registration, never from a caller-controlled URL.
 const operations = new WeakMap<Context, string>()
@@ -126,6 +128,7 @@ export function installRestApiKeyScopes(
   app: OpenAPIHono,
   resolveCaller: CallerResolver,
   notFoundHandler: Handler,
+  ssoTeamReads?: SsoTeamReadDeps,
 ) {
   const boundHandlers = new WeakSet()
   const register = app.openapi
@@ -179,15 +182,27 @@ export function installRestApiKeyScopes(
         : 'Forbidden'
     const protectedByScope =
       policy?.authentication === 'key' || policy?.authentication === 'optional_key'
+    const protectedRead = teamReadRoute(operationId)
     return register(
       {
         ...route,
-        middleware: [scope, ...routeMiddleware],
+        middleware: [
+          scope,
+          ...routeMiddleware,
+          ...(ssoTeamReads && protectedRead
+            ? [teamReadMiddleware(ssoTeamReads, protectedRead)]
+            : []),
+        ],
         responses: {
           ...route.responses,
-          ...(protectedByScope && {
+          ...((protectedByScope || protectedRead) && {
             403: {
-              description: `${forbiddenDescription}. insufficient_scope: This API key does not allow this operation.`,
+              description:
+                forbiddenDescription +
+                (protectedByScope
+                  ? '. insufficient_scope: This API key does not allow this operation.'
+                  : '') +
+                (protectedRead ? ' sso_required: This team requires a current SSO proof.' : ''),
               content: json(ErrorBody),
             },
           }),
@@ -212,6 +227,8 @@ export function installRestApiKeyScopes(
     if (first && boundHandlers.has(first.handler)) return next()
     const id = first ? `${first.method} ${first.path}` : ''
     if (restPolicies.get(id)?.authentication === 'public_metadata') return next()
+    if (ssoTeamReads && first && teamReadRoute(`${c.req.method} ${first.path}`))
+      throw new Error('Team read must be registered with app.openapi')
     if (c.req.raw.headers.has('authorization')) {
       const refused = await checkBearer(c, resolveCaller, '')
       if (refused) return refused

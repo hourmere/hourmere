@@ -14,6 +14,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { Mailer, MailMessage } from '@hourmere/mail'
 import type { SsoRequest, SsoResponse } from '@hourmere/outbound/sso'
+import { createFixtures } from '@hourmere/scheduling/testing'
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from 'jose'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -26,6 +27,8 @@ import {
   ssoFixture,
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
+import { nativeTeamLeave } from './native-team-leave.ts'
+import { eventTypeRoutes } from './routes/event-types.ts'
 import { ssoRoutes } from './routes/sso.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
@@ -200,6 +203,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       baseURL: publicUrl,
       secret,
       signup,
+      leaveTeamMember: nativeTeamLeave(db, recordSsoAdmissionRemoval),
       mailer: { send: async () => expect.unreachable('OIDC sign-in must not send mail') },
     })
     scimAuth = createAuth({
@@ -260,6 +264,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       resolveCaller: createCallerResolver({ auth: authentication, db }),
       publicUrl,
       routes: [
+        eventTypeRoutes({ db }),
         ssoRoutes({ db, capabilities }),
         ssoDomainRoutes({ db, publicUrl, capabilities }),
         ssoIdentityRecoveryRoutes({
@@ -284,6 +289,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           send: idp.send,
         }),
       ],
+      ssoTeamReads: { db, capabilities },
       ssoMailboxProof: mailboxProofRoutes({
         db,
         capabilities,
@@ -431,8 +437,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       cookie ? { cookie } : {},
     )
     expect(response.status).toBe(200)
-    const { url, redirect } = (await response.json()) as { url: string; redirect: boolean }
-    expect(redirect).toBe(true)
+    const result = (await response.json()) as { url: string; redirect: boolean }
+    expect(result).toEqual({ url: expect.any(String), redirect: true })
+    const { url } = result
     const authorization = new URL(url)
     const binding = response.headers
       .getSetCookie()
@@ -652,6 +659,16 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       ),
     )
     return { id: session.id, cookie: session.cookie.split(';')[0] as string }
+  }
+
+  function readEvents(cookie: string) {
+    return app.request(new URL('/api/v1/event-types', publicUrl), { headers: { cookie } })
+  }
+
+  async function expectSsoRequired(cookie: string) {
+    const response = await readEvents(cookie)
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({ error: 'sso_required' })
   }
 
   function testRequest(
@@ -2308,6 +2325,86 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     await expectCompletionRefused(await complete(pending))
   })
 
+  it('keeps an existing team proof through another person’s invitation, JIT admission, role change and departure', async () => {
+    const f = await linked()
+    await enforceSso()
+    const eventId = await createFixtures(db).eventType(fixture.team, null, {
+      hosts: [{ userId: fixture.owner }],
+    })
+    const signIn = await start(f.providerId)
+    const signedIn = await callback(signIn, idp.issue(signIn, f.claims))
+    expect(signedIn.status).toBe(302)
+    const sessionCookie = (response: Response) => {
+      const session = response.headers
+        .getSetCookie()
+        .find((cookie) => cookie.includes('session_token='))
+      if (!session) expect.unreachable('SSO issued a session')
+      return (session as string).split(';')[0] as string
+    }
+    const survivor = sessionCookie(signedIn)
+    const assertReadable = async () => {
+      const response = await readEvents(survivor)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ data: [{ id: eventId }] })
+    }
+    await assertReadable()
+
+    const invitedEmail = `invited@${f.claim.name}`
+    const { pending: invited } = await pendingAdmission({ ...f, email: invitedEmail })
+    await proveMailbox(invited)
+    const invitation = await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: fixture.team,
+        inviterId: fixture.owner,
+        role: 'member',
+        status: 'pending',
+        expiresAt: at(300),
+        email: invitedEmail,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await assertReadable()
+    const accepted = await acceptInvitation(invited, invitation.id)
+    expect(accepted.status).toBe(200)
+    await assertReadable()
+
+    await db
+      .updateTable('sso_policies')
+      .set({ admission: 'jit', policy_revision: 2 })
+      .where('organization_id', '=', fixture.team)
+      .execute()
+    const { pending: joining } = await pendingAdmission(
+      { ...f, email: `jit@${f.claim.name}` },
+      { sub: 'JIT subject' },
+    )
+    await proveMailbox(joining)
+    const admitted = await complete(joining)
+    expect(admitted.status).toBe(302)
+    await assertReadable()
+
+    const owner = await browserSession(fixture.owner)
+    const postToTeam = (operation: string, cookie: string, input: Record<string, unknown>) =>
+      post(
+        { organizationId: fixture.team, ...input },
+        app,
+        {
+          cookie,
+          'X-Expected-Organization-Id': fixture.team,
+        },
+        `/api/auth/organization/${operation}`,
+      )
+    const changed = await postToTeam('update-member-role', owner.cookie, {
+      memberId: fixture.adminMember,
+      role: 'member',
+    })
+    expect(changed.status).toBe(200)
+    await assertReadable()
+    const departed = await postToTeam('leave', sessionCookie(admitted), {})
+    expect(departed.status).toBe(200)
+    await assertReadable()
+  })
+
   /** Lock the team and record a local removal as the OIDC-on removal paths do. */
   async function removeMember(userId: string, deleteAccount = false) {
     await db.transaction().execute(async (trx) => {
@@ -2819,6 +2916,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       .insertInto('sso_policies')
       .values({ organization_id: fixture.team, require_sso: true })
       .execute()
+    await expectSsoRequired(actor.cookie)
     const before = await effects()
 
     // A verified IdP email cannot substitute for the Hourmere mailbox challenge.
@@ -2830,6 +2928,31 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     idp.exchange.mockClear()
 
     const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    const me = await app.request(new URL('/api/v1/me', publicUrl), {
+      headers: { cookie: challenge.cookie },
+    })
+    expect(me.status).toBe(200)
+    expect(await me.json()).toEqual({
+      user: { id: fixture.member, name: expect.any(String), email: f.email },
+      personalOrganizationId: null,
+      organization: { id: fixture.team, name: '', slug: '', personal: false },
+      principal: { kind: 'session', apiKeyId: null },
+      sso: {
+        requireSso: true,
+        providers: [{ id: f.providerId, revision: 1, displayName: 'Synthetic OIDC' }],
+        attempts: [
+          {
+            id: challenge.id,
+            providerId: null,
+            phase: 'fresh_proof',
+            mailboxProven: false,
+            expiresAt: expect.any(String),
+          },
+        ],
+        links: [],
+        proofs: [],
+      },
+    })
     const retry = { proofAttemptId: challenge.id }
     expect(
       await freshProofChallenge(
@@ -2848,7 +2971,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     const wrongProof = await consumeMailbox({ ...challenge, cookie: wrongSessionCookie }, token)
     expect(wrongProof.status).toBe(400)
     expect(await wrongProof.json()).toEqual({ error: 'sso_mailbox_proof_invalid' })
-    expect((await consumeMailbox(challenge, token)).status).toBe(200)
+    const consumed = await consumeMailbox(challenge, token)
+    expect(consumed.status).toBe(200)
+    expect(await consumed.json()).toEqual({ status: 'proven' })
     const proofTime = (await attemptRow(challenge)).mailbox_proven_at
     expect(proofTime).toBeInstanceOf(Date)
     const wrongRetry = await linkRequest(f.providerId, wrongSessionCookie, retry)
@@ -2888,6 +3013,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     const denied = responses.find(({ status }) => status === 400) as Response
     await expectCompletionRefused(denied)
     expect(accepted.headers.get('location')).toBe('/app/settings')
+    await expectSsoRequired(actor.cookie)
     expect(
       accepted.headers.getSetCookie().some((cookie) => cookie.includes('session_token=')),
     ).toBe(false)
@@ -3047,6 +3173,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       .insertInto('sso_policies')
       .values({ organization_id: fixture.team, require_sso: true })
       .execute()
+    await expectSsoRequired(actor.cookie)
 
     const wrongLink = await recoveryRequest(path, actor.cookie, { linkId: other.link.id })
     expect(wrongLink.status).toBe(404)
@@ -3097,6 +3224,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     const removed = await recoveryRequest(path, challenge.cookie, retry)
     expect(removed.status).toBe(204)
     expect(await removed.text()).toBe('')
+    await expectSsoRequired(actor.cookie)
     expect(await storedLink(f.link.id)).toEqual({
       ...f.link,
       generation: f.link.generation + 1,

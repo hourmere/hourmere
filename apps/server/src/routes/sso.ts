@@ -3,6 +3,7 @@ import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { authenticated, errorResponses, json, type RouteModule } from '../openapi.ts'
 import { requireSsoEnabled } from '../sso.ts'
+import { restTeamReadAccess } from '../sso-read-routes.ts'
 import { authorizeSsoRead, getSsoPolicy, listSsoProviders, type SsoReadDeps } from '../sso-reads.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from '../team-management.ts'
 import { queryLimit } from './audit-log.ts'
@@ -119,7 +120,8 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
           c.var.principal,
           c.req.header(EXPECTED_ORGANIZATION_HEADER),
         )(deps.db, c.var.principal.organization.id)
-        return c.json(await getSsoPolicy(deps, c.var.principal), 200)
+        const access = await restTeamReadAccess(c)?.()
+        return c.json(await getSsoPolicy(deps, c.var.principal, access?.policy), 200)
       },
     )
   }

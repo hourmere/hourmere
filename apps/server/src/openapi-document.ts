@@ -1,6 +1,7 @@
 import { createDb, createPool } from '@hourmere/db'
 import { createApp } from './app.ts'
 import { productRoutes } from './server.ts'
+import { isTeamReadMiddleware } from './sso-read-routes.ts'
 
 /**
  * The OpenAPI document as the server publishes it, made without a database: the app with
@@ -21,6 +22,7 @@ export async function openApiRouteInventory() {
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
       publicUrl: 'http://localhost',
+      ssoTeamReads: { db, capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false } },
       routes: productRoutes({
         db,
         socialProviders: {},
@@ -32,6 +34,9 @@ export async function openApiRouteInventory() {
     return {
       document: (await res.json()) as unknown,
       routes: app.routes.map(({ method, path }) => ({ method, path })),
+      teamReadRoutes: app.routes
+        .filter(({ handler }) => isTeamReadMiddleware(handler))
+        .map(({ method, path }) => `${method} ${path}`),
     }
   } finally {
     await db.destroy()

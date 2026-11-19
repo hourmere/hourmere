@@ -109,6 +109,7 @@ export function productApp(
         : { ok: false, error: 'unauthorized', setCookie: [] }
     },
     publicUrl: PUBLIC_URL,
+    ssoTeamReads: { db, capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false } },
     routes,
   })
 }

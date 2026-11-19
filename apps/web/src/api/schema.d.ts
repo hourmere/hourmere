@@ -100,7 +100,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: requires the personal owner or a team owner/admin. insufficient_scope: This API key does not allow this operation. */
+                /** @description insufficient_role: requires the personal owner or a team owner/admin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -426,7 +426,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -500,7 +500,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -685,6 +685,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Forbidden sso_required: This team requires a current SSO proof. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
                 404: {
                     headers: {
@@ -810,7 +819,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1645,7 +1654,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1711,7 +1720,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1795,7 +1804,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+                /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1874,7 +1883,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+                /** @description insufficient_role; team_management_access_denied; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1952,7 +1961,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -2466,7 +2475,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -3487,7 +3496,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description readiness_access_denied: requires a current verified web session and membership */
+                /** @description readiness_access_denied: requires a current verified web session and membership sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4030,7 +4039,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization */
+                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4109,7 +4118,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization */
+                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4221,7 +4230,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: requires a current verified team owner/admin session without Authorization; invalid, personal or inaccessible expected organizations receive the same denial */
+                /** @description team_management_access_denied: requires a current verified team owner/admin session without Authorization; invalid, personal or inaccessible expected organizations receive the same denial sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4291,7 +4300,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied */
+                /** @description team_management_access_denied sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4386,7 +4395,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: inaccessible team or removal record */
+                /** @description team_management_access_denied: inaccessible team or removal record sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4472,7 +4481,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: requires a current team session without Authorization and an accessible member */
+                /** @description team_management_access_denied: requires a current team session without Authorization and an accessible member sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4567,7 +4576,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: inaccessible team or removal record */
+                /** @description team_management_access_denied: inaccessible team or removal record sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4869,7 +4878,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: requires current verified team membership */
+                /** @description team_management_access_denied: requires current verified team membership sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4962,7 +4971,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description team_management_access_denied: requires the current team owner/admin web session without Authorization */
+                /** @description team_management_access_denied: requires the current team owner/admin web session without Authorization sso_required: This team requires a current SSO proof. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -6620,6 +6629,7 @@ export interface components {
                 state: "pending" | "expired" | "replaced" | "rescheduled" | "cancelled";
             };
         };
+        /** @description The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings. */
         Me: {
             /** @description The organization the caller acts in */
             organization: {
@@ -8557,7 +8567,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8616,7 +8626,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8879,7 +8889,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9441,7 +9451,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials. insufficient_scope: This API key does not allow this operation. */
+            /** @description Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9694,7 +9704,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role, team_management_access_denied or forbidden. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role, team_management_access_denied or forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9949,7 +9959,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role, team_management_access_denied or forbidden. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role, team_management_access_denied or forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11565,7 +11575,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_scope: API keys need full scope. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_scope: API keys need full scope. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11883,7 +11893,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12036,7 +12046,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12182,7 +12192,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_scope. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12644,7 +12654,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12727,7 +12737,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden */
+            /** @description session_required or scim_token_access_denied or scim_token_forbidden or forbidden sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -14697,7 +14707,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -14857,7 +14867,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied, insufficient_scope, cross_origin_write. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -15104,7 +15114,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied, insufficient_scope, forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied, insufficient_scope, forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -15867,7 +15877,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16767,7 +16777,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16844,7 +16854,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17647,7 +17657,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17983,7 +17993,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role for API keys or session reads without the context header; team_management_access_denied for session context checks, including ordinary-member writes; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -18147,7 +18157,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: the owner is not the personal owner or a team the caller owns or administers in the organization it acts in. insufficient_scope: This API key does not allow this operation. */
+            /** @description insufficient_role: the owner is not the personal owner or a team the caller owns or administers in the organization it acts in. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -18286,7 +18296,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -1,11 +1,10 @@
 import { z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
-import type { Db } from '@hourmere/db'
 import { parse } from 'hono/utils/cookie'
 import { sql } from 'kysely'
-import type { SsoCapabilities } from './sso.ts'
 import { bindingCookieName, browserBindingDigest } from './sso-mailbox-proof.ts'
 import { LINK_SSO_ACCOUNT, OIDC_COMPLETE_LINK } from './sso-oidc-link.ts'
+import { liveBrowserProofs, type SsoTeamReadDeps, type TeamReadPolicy } from './sso-team-reads.ts'
 
 export const MeSso = z
   .object({
@@ -33,17 +32,13 @@ export const MeSso = z
     description: 'The caller’s own SSO status in the active team, when available to this session.',
   })
 
-export interface SsoMeDeps {
-  capabilities: SsoCapabilities
-  db: Db
-}
-
-/** The projection reads only current-team identifiers and status, in one database snapshot. */
+/** The enrollment projection excludes other members' attempts, links and proofs. */
 export async function readSsoMe(
-  { capabilities, db }: SsoMeDeps,
+  { capabilities, db }: SsoTeamReadDeps,
   principal: Principal,
   headers: Headers,
   publicUrl: string,
+  policy: TeamReadPolicy | null,
 ): Promise<z.infer<typeof MeSso> | undefined> {
   if (
     !capabilities.ssoOidcEnabled ||
@@ -56,20 +51,19 @@ export async function readSsoMe(
   const binding = browserBindingDigest(parse(headers.get('cookie') ?? '', cookieName)[cookieName])
   const { rows } = await sql<z.infer<typeof MeSso>>`
     WITH caller AS (
-      SELECT m.id AS member_id, m."userId" AS user_id, m."organizationId" AS organization_id,
-        s.id AS session_id, s."expiresAt" AS session_expiry,
-        coalesce(policy.require_sso, false) AS require_sso,
-        coalesce(policy.trust_generation, 1) AS trust_generation,
+      SELECT m."userId" AS user_id, m."organizationId" AS organization_id,
+        s.id AS session_id,
         statement_timestamp() AS observed_at
       FROM auth.session s
       JOIN auth.member m ON m."userId" = s."userId"
         AND m."organizationId"::text = lower(s."activeOrganizationId")
-      LEFT JOIN sso_policies policy ON policy.organization_id = m."organizationId"
+      JOIN auth."user" u ON u.id = m."userId"
       WHERE s.id = ${principal.sessionId}::uuid AND m."userId" = ${principal.user.id}::uuid
         AND m."organizationId" = ${principal.organization.id}::uuid
         AND s."expiresAt" > statement_timestamp()
+        AND (NOT ${policy?.require_sso ?? false}::boolean OR u."emailVerified")
     )
-    SELECT c.require_sso AS "requireSso",
+    SELECT ${policy?.require_sso ?? false}::boolean AS "requireSso",
       to_json(ARRAY(
         SELECT json_build_object('id', p.id, 'revision', p.revision, 'displayName', p.display_name)
         FROM sso_providers p
@@ -111,24 +105,9 @@ export async function readSsoMe(
         ORDER BY l.id
       )) AS links,
       to_json(ARRAY(
-        SELECT json_build_object(
-          'providerId', b.provider_id,
-          'expiresAt', least(b.expires_at, c.session_expiry, d.verification_expires_at)
-        )
-        FROM sso_browser_proofs b
-        JOIN sso_identity_links l ON l.id = b.link_id AND l.generation = b.link_generation
-        JOIN sso_providers p ON p.id = b.provider_id AND p.organization_id = b.organization_id
-        JOIN sso_domains d ON d.id = b.domain_id AND d.organization_id = b.organization_id
-          AND d.generation = b.domain_generation
-        JOIN sso_provider_domains pd ON pd.organization_id = b.organization_id
-          AND pd.domain_id = b.domain_id AND pd.provider_id = b.provider_id
-        WHERE b.session_id = c.session_id AND b.user_id = c.user_id AND b.member_id = c.member_id
-          AND b.organization_id = c.organization_id AND b.trust_generation = c.trust_generation
-          AND b.expires_at > c.observed_at AND l.retired_at IS NULL
-          AND p.protocol = 'oidc' AND p.enabled AND p.retired_at IS NULL
-          AND d.retired_at IS NULL AND d.verified_at IS NOT NULL
-          AND d.verification_expires_at > c.observed_at
-        ORDER BY b.id
+        SELECT json_build_object('providerId', proof.provider_id, 'expiresAt', proof.expires_at)
+        FROM (${liveBrowserProofs(principal, principal.organization.id, policy?.trust_generation ?? 1, capabilities)}) proof
+        ORDER BY proof.id
       )) AS proofs
     FROM caller c
   `.execute(db)
