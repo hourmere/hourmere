@@ -188,11 +188,6 @@ function isWaitlistEntryPath(path: string): boolean {
   return /^\/api\/v1\/event-types\/[^/]+\/waitlist\/entries(?:\/[^/]+)?\/?$/i.test(path)
 }
 
-/** Poll requests may carry invitee mailboxes, idempotency keys and voting capabilities. */
-function isMeetingPollPath(path: string): boolean {
-  return path.toLowerCase().includes('/meeting-polls')
-}
-
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
@@ -364,6 +359,11 @@ function isWaitlistLinkPath(path: string): boolean {
     decoded = decodeURIComponent(path)
   } catch {}
   return /^\/(?:team\/[^/]+\/[^/]+|[^/]+\/[^/]+)\/waitlist\/[^/]+(?:\/|$)/i.test(decoded)
+}
+
+/** Poll requests may carry invitee mailboxes, idempotency keys and voting capabilities. */
+function isMeetingPollPath(path: string): boolean {
+  return path.toLowerCase().includes('/meeting-polls')
 }
 
 const requestLineLogger = logger((line, ...rest) =>
