@@ -327,15 +327,23 @@ async function resolveManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget
  * hand-edited data from looping, and the id only orders such data's branches.
  */
 async function latestInChain(db: Db, id: string): Promise<string> {
-  const { rows } = await sql<{ id: string }>`
+  const row = await db.selectNoFrom(latestBookingId(id).as('id')).executeTakeFirst()
+  return row?.id ?? id
+}
+
+/** A scalar subquery, so callers can read the current booking in the same snapshot. */
+export function latestBookingId(id: string, organizationId?: string) {
+  const scope =
+    organizationId === undefined ? sql`` : sql`WHERE b.organization_id = ${organizationId}`
+  return sql<string>`(
     WITH RECURSIVE chain (id, depth) AS (
       SELECT ${id}::uuid, 0
       UNION ALL
       SELECT b.id, c.depth + 1
         FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
+        ${scope}
     ) CYCLE id SET is_cycle USING path
-    SELECT id FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1`.execute(db)
-  return rows[0]?.id ?? id
+    SELECT id FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1)`
 }
 
 /**
@@ -1550,12 +1558,11 @@ async function createBookingInTransaction(
   // The event type may have changed while we waited (duration, questions, rules), and
   // waiting took time: read both again now that the host is locked.
   const current = await resolve(trx, { lock: true })
-  if (
-    !current ||
-    current.id !== et.id ||
-    current.organizationId !== et.organizationId ||
-    current.schedulingType !== et.schedulingType
-  ) {
+  if (!current || current.id !== et.id || current.organizationId !== et.organizationId) {
+    throw bookingEventUnavailable(oneTimeLink !== undefined)
+  }
+  if (checkEvent) await checkEvent(current)
+  if (current.schedulingType !== et.schedulingType) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
   if (current.hostUserIds.join() !== et.hostUserIds.join()) {
@@ -1563,7 +1570,6 @@ async function createBookingInTransaction(
       throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
-  if (checkEvent) await checkEvent(current)
   if (guests.length > 0 && !current.allowGuests) {
     throw new DomainError('invalid', 'guests_not_allowed', 'This event type does not allow guests')
   }

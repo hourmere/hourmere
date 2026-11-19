@@ -135,6 +135,14 @@ unverified public enrollees. Removal deletes the voter row with its votes, crede
 deliveries and marks the mailbox counter row removed, which alone outlives it with its mail
 counts and opt-out. Removal checks only the host revision and advances the host and results
 revisions, so voter activity cannot make it fail.
+The internal finalize service in `packages/scheduling/src/meeting-poll-finalize.ts`
+selects a consenting booker and eligible guests for one candidate. It checks the consent
+snapshot against the locked event and delegates current availability and booking writes to
+the ordinary booking core. The booking, poll link and voter roles, finalize receipt, and
+delivery intents commit together. Selected attendees use the ordinary booking outbox;
+eligible non-selected voters get a poll outcome intent. An exact retry rechecks manager
+authority and returns a whitelist of current booking metadata from the original booking's
+reschedule chain.
 The internal cleanup service in `packages/scheduling/src/meeting-poll-cleanup.ts`, run by the
 hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending voters and
 replay tombstones past their purge instant (and terminal polls once an installation
