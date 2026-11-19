@@ -1,5 +1,5 @@
 // Host lifecycle for meeting polls: create, read, close, cancel, delete and public-link
-// rotation. This is an internal service with no transport; voter admission lives in
+// rotation. Voter admission lives in
 // meeting-poll-voters.ts, ballots in meeting-poll-ballots.ts and results and voter removal in
 // meeting-poll-results.ts. Finalization composes the booking core in meeting-poll-finalize.ts.
 //
@@ -994,38 +994,46 @@ async function requireBookableCandidates(
   for (const start of starts) {
     const from = Temporal.Instant.from(start)
     const to = from.add({ minutes: durationMinutes })
-    const offered =
-      event.schedulingType === 'round_robin'
-        ? await unionRoundRobinSlots(
-            trx,
-            event.id,
-            event.eligibleHostUserIds,
-            from,
-            to,
-            now,
-            durationMinutes,
-          )
-        : await intersectSlots(
-            trx,
-            event.id,
-            event.hostUserIds,
-            from,
-            to,
-            now,
-            undefined,
-            event.schedulingType === 'collective',
-            durationMinutes,
-          )
-    if (
-      !offered.some(
-        (slot) =>
-          Temporal.Instant.from(slot.start).equals(from) &&
-          Temporal.Instant.from(slot.end).equals(to),
-      )
-    )
+    if (!(await isMeetingPollCandidateOffered(trx, event, from, to, now, durationMinutes)))
       unavailable.push(start)
   }
   if (unavailable.length > 0) throw new MeetingPollSlotUnavailableError(unavailable)
+}
+
+export async function isMeetingPollCandidateOffered(
+  db: Db,
+  event: BookableEvent,
+  from: Temporal.Instant,
+  to: Temporal.Instant,
+  now: Temporal.Instant,
+  durationMinutes: number,
+): Promise<boolean> {
+  const offered =
+    event.schedulingType === 'round_robin'
+      ? await unionRoundRobinSlots(
+          db,
+          event.id,
+          event.eligibleHostUserIds,
+          from,
+          to,
+          now,
+          durationMinutes,
+        )
+      : await intersectSlots(
+          db,
+          event.id,
+          event.hostUserIds,
+          from,
+          to,
+          now,
+          undefined,
+          event.schedulingType === 'collective',
+          durationMinutes,
+        )
+  return offered.some(
+    (slot) =>
+      Temporal.Instant.from(slot.start).equals(from) && Temporal.Instant.from(slot.end).equals(to),
+  )
 }
 
 // --- Projection ----------------------------------------------------------------------------

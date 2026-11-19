@@ -384,12 +384,15 @@ a path, query string or JSON body, and both headers share one redaction rule. MC
 it as the `seriesManageToken` argument, as `reschedule_booking` and `cancel_booking` take
 `manageToken` today; the CLI passes it in JSON input, never as a flag.
 
-Each booker/guest series mail contains one `/series/manage#<token>` link. The page keeps the
-fragment token in memory, strips it from the address bar, sends it only in that header and
+Each booker/guest series mail contains one `/series/manage#<token>` link at the configured
+public origin. The fragment is the entire 43-character base64url capability, without a
+parameter name. The page keeps the fragment token in memory, strips it from the address
+bar, sends it only in that header and
 lists every occurrence with its current successor and meeting-link state. Booker
 capabilities can read the series and cancel all/following; guest mail capabilities expose
 only that recipient's permitted read-only details, never sibling attendee data or mutation
-authority. Host mail links to authenticated series detail instead. The series page invokes
+authority. Host mail links to authenticated series detail at `/app/booking-series/<series-id>`.
+The series page invokes
 the existing manage-booking read/slots/reschedule/cancel operations in series mode: the
 `X-Series-Manage-Token` header plus the stable `ordinal` (a GET query field or a POST body
 field, never the token), mutually exclusive with `X-Manage-Token`. The service resolves the
@@ -440,6 +443,12 @@ sends one email for that occurrence. Do not also queue the ordinary per-occurren
 messages for a series action. Reminders and follow-ups remain per occurrence with ordinary
 budgets and snapshotted due times. Refresh lifecycle/revision before send so an overtaken
 series mail cannot revive cancelled or moved events.
+
+The booking transaction records the series mail intent with the action receipt. The
+notification worker polls the series outbox on its own schedule and uses the shared
+booking-mail budget and SMTP transport. Each committed recipient receipt stops replays of that copy,
+including budget-suppressed copies. An SMTP retry reads the current member dates and
+skips recipients whose receipts already committed.
 
 Every series mail picks its language as existing booking mail does: the booking language
 for the booker and guests, each host's own language for host copies. Templates exist in

@@ -82,6 +82,55 @@ export function failureMessage(err: unknown): UiText {
 
 export const codeOf = (err: unknown) => (err instanceof RequestError ? err.code : undefined)
 
+type RoutingFormAddress = { slug: string } & ({ handle: string } | { teamSlug: string })
+const privateRoutingRequest = {
+  credentials: 'omit',
+  cache: 'no-store',
+  referrerPolicy: 'no-referrer',
+} as const
+
+export async function getRoutingForm(address: RoutingFormAddress, signal: AbortSignal) {
+  const options = { ...privateRoutingRequest, signal }
+  const { data } = await call(
+    () =>
+      'teamSlug' in address
+        ? api.GET('/api/v1/public/-/routing/teams/{teamSlug}/{slug}', {
+            ...options,
+            params: { path: address },
+          })
+        : api.GET('/api/v1/public/-/routing/{handle}/{slug}', {
+            ...options,
+            params: { path: address },
+          }),
+    signal,
+    true,
+  )
+  return data
+}
+
+export async function submitRoutingForm(
+  address: RoutingFormAddress,
+  body: Schemas['RoutingSubmission'],
+  signal: AbortSignal,
+) {
+  const options = { ...privateRoutingRequest, signal, body }
+  const { data } = await call(
+    () =>
+      'teamSlug' in address
+        ? api.POST('/api/v1/public/-/routing/teams/{teamSlug}/{slug}/route', {
+            ...options,
+            params: { path: address },
+          })
+        : api.POST('/api/v1/public/-/routing/{handle}/{slug}/route', {
+            ...options,
+            params: { path: address },
+          }),
+    signal,
+    true,
+  )
+  return data
+}
+
 export async function getHost(handle: string, signal: AbortSignal): Promise<PublicHost> {
   const { data } = await call(
     () => api.GET('/api/v1/public/{handle}', { params: { path: { handle } }, signal }),

@@ -1,16 +1,5 @@
-// Routing forms are storage only (docs/routing-forms.md, step a1a): the web mounts no
-// routing page and PATHS names none. Step a1b adds no web surface: the web does not read the
-// new `/instance` capability `routingFormsEnabled` yet. This is the web-route half of the
-// routing Off check; scripts/routing-forms-off.test.ts covers OpenAPI, MCP, CLI and storage
-// imports. It asserts absence by the names docs/routing-forms.md assigns and never
-// snapshots the route table. Route sources covered: the `appRoutes` table, PATHS, and every
-// `<Route path>` attribute and route object (a `path` beside `element`, `Component`, `lazy`,
-// `children`, `index`, `loader`, `action`, `errorElement` or `ErrorBoundary`) in every
-// non-test source under apps/web/src, which includes the
-// data router in main.tsx and any descendant `<Routes>` a page renders, relative paths too.
-// Later plan steps narrow it when they add their pages: c3 (`/route/{handle}/{slug}` and
-// `/route/team/{teamSlug}/{slug}`), c6 (`/route/continue`) and d1 (manager screens under
-// PATHS), each mounting its routes only while `routingFormsEnabled` is true.
+// Keep routing addresses out of the ordinary route table. Only the two gated public
+// form pages are declared. public/routes.test.tsx exercises the capability at runtime.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { parse } from '@babel/parser'
@@ -25,6 +14,7 @@ type Route = (typeof appRoutes)[number]
 // Routing-form names are matched token by token (`isRoutingName`): `route`, `routing` or
 // `routed` as a whole path segment or identifier word; `/routes/:id` or `/app/router` is not one.
 const PUBLIC_ROUTING_PAGES = ['/route/ada/intro', '/route/team/alpha/intro', '/route/continue']
+const GATED_FORM_PATHS = ['/route/:handle/:slug', '/route/team/:teamSlug/:slug']
 
 function routePaths(routes: Route[], parent = ''): string[] {
   return routes.flatMap((route) => {
@@ -135,8 +125,8 @@ function routePathsIn(file: string, source: string): string[] {
   return paths
 }
 
-describe('routing forms have no web route', () => {
-  it('mounts no routing route and names none in PATHS', () => {
+describe('routing forms stay outside the ordinary web routes', () => {
+  it('keeps routing routes out of appRoutes and PATHS', () => {
     const paths = routePaths(appRoutes)
     expect(paths).toContain('/app/event-types')
     expect(paths).toContain('/:handle/:slug')
@@ -146,7 +136,7 @@ describe('routing forms have no web route', () => {
     expect(names.filter(isRoutingName)).toEqual([])
   })
 
-  it('declares no routing route in any web source, relative or descendant routes included', () => {
+  it('declares only the two gated form routes in the web source', () => {
     const sources = webSources()
     expect(sources.map(([file]) => file)).toEqual(
       expect.arrayContaining(['main.tsx', 'App.tsx', 'pages/NotFound.tsx']),
@@ -156,7 +146,7 @@ describe('routing forms have no web route', () => {
     expect(paths).toEqual(
       expect.arrayContaining(['*', '/:handle/:slug', 'event-types', 'PATHS.join']),
     )
-    expect(paths.filter(isRoutingName)).toEqual([])
+    expect(paths.filter(isRoutingName)).toEqual(GATED_FORM_PATHS.toReversed())
   }, 30_000)
 
   it.each([
@@ -173,8 +163,11 @@ describe('routing forms have no web route', () => {
     ['App.tsx', `<Route path={\`\${APP_BASE}/routing-forms\`} element={<Page />} />`],
   ])('sees a routing route added to %s: %s', (file, added) => {
     const source = readFileSync(join(sourceRoot, file), 'utf8')
-    expect(routePathsIn(file, source).filter(isRoutingName)).toEqual([])
-    expect(routePathsIn(file, `${source}\n${added}\n`).filter(isRoutingName)).not.toEqual([])
+    const existing = file === 'App.tsx' ? GATED_FORM_PATHS.toReversed() : []
+    expect(routePathsIn(file, source).filter(isRoutingName)).toEqual(existing)
+    expect(routePathsIn(file, `${source}\n${added}\n`).filter(isRoutingName)).toHaveLength(
+      existing.length + 1,
+    )
     // Unrelated routes and a route object without a page are not routing routes.
     expect(
       routePathsIn(file, "[{ path: 'routes', element: <Page /> }, { path: 'route', size: 1 }]"),

@@ -1,0 +1,18 @@
+.public .routing-form-card {
+  overflow-wrap: anywhere;
+}
+
+.public .routing-form-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
+}
+
+.public .routing-form-copy {
+  white-space: pre-wrap;
+}
+
+.public .routing-form-progress:empty {
+  margin-top: calc(-1 * var(--space-3));
+}

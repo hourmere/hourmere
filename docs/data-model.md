@@ -129,7 +129,8 @@ recipient deliveries. Generated database interfaces and selectable row types des
 storage. The internal host lifecycle service in `packages/scheduling/src/meeting-polls.ts`
 creates, reads, closes, cancels and deletes polls and rotates public links; it validates
 every candidate against the availability engine at creation, fixes every
-creation setting, never reopens a closed or canceled poll, and adds no transport. The
+creation setting and never reopens a closed or canceled poll. Host reads and lifecycle
+writes are exposed through REST, MCP and CLI. Creation and link rotation remain internal. The
 internal enrollment and verification service in
 `packages/scheduling/src/meeting-poll-voters.ts` enrolls public voters, invites and
 re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
@@ -142,7 +143,8 @@ database deadline clock. Ballots and withdrawals advance the ballot and results 
 no voter write, opt-out included, moves the host revision.
 The internal results and removal service in
 `packages/scheduling/src/meeting-poll-results.ts` projects host results (separate counts
-of counted ballots, the roster and both revisions), removes one voter and bulk-removes
+of counted ballots, the roster and both revisions), then checks advisory availability after
+the snapshot commits. The service also removes one voter and bulk-removes
 unverified public enrollees. Removal deletes the voter row with its votes, credentials and
 deliveries and marks the mailbox counter row removed, which alone outlives it with its mail
 counts and opt-out. Removal checks only the host revision and advances the host and results

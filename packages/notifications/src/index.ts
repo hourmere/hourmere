@@ -19,7 +19,6 @@ import {
   bookingHostName,
   bookingHostNames,
   bookingLocationForRecipient,
-  brandEmail,
   calendarBookingDescription,
   calendarResponseDescription,
   calendarSummary,
@@ -35,6 +34,11 @@ import {
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import {
+  lockBookingHostMembership,
+  lockVerifiedHostAddress,
+  sendAndRecordBookingEmail,
+} from './booking-email-send.ts'
 import { enqueueGroupHostMail } from './group-host-mail.ts'
 
 export { groupHostMailJob } from './group-host-mail.ts'
@@ -77,6 +81,7 @@ export {
   signInEmailBudget,
   workflowRecipientHash,
 } from './mail-limits.ts'
+export { seriesNotificationDispatchJob } from './series-notifications.ts'
 export {
   createWaitlistEmailWorker,
   deliverWaitlistEmail,
@@ -159,7 +164,7 @@ export function bookingNotificationJob(deps: NotificationDeps) {
 // --- Queueing (called by the booking services, inside their transactions) ----------------
 
 export type BookingEvent =
-  | { type: 'created'; bookingId: string; start: Temporal.Instant }
+  | { type: 'created'; bookingId: string; start: Temporal.Instant; seriesAction?: 'create' }
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
   | { type: 'cancelled'; bookingId: string; seriesAction?: 'bulk_cancel' }
@@ -218,7 +223,9 @@ export async function enqueueBookingNotifications(
     await send('cancelled')
     return
   }
-  await send(event.type === 'created' ? 'confirmed' : 'rescheduled')
+  // Series creation owns the confirmation. Scheduled member email remains per booking.
+  if (event.type !== 'created' || event.seriesAction !== 'create')
+    await send(event.type === 'created' ? 'confirmed' : 'rescheduled')
   await enqueueBookingSmsReminders(
     queue as unknown as SmsReminderQueue,
     transaction,
@@ -666,25 +673,9 @@ export async function sendOnce(
     const outcome = await deps.db.transaction().execute(async (trx) => {
       if (await isImportedBooking(trx, key.bookingId)) throw new Overtaken()
       if (key.verifiedHost) {
-        // Parent protection before the notification's booking FK, matching user-deletion
-        // order. Hold verification/address stable until this bounded SMTP attempt ends.
-        const host = await trx
-          .selectFrom('auth.user')
-          .select('id')
-          .where('id', '=', key.verifiedHost.id)
-          .where('email', '=', key.verifiedHost.email)
-          .where('emailVerified', '=', true)
-          .forShare()
-          .executeTakeFirst()
+        const host = await lockVerifiedHostAddress(trx, key.verifiedHost)
         if (!host) throw new RecipientUnavailable()
-        const member = await trx
-          .selectFrom('auth.member as m')
-          .innerJoin('bookings as b', 'b.organization_id', 'm.organizationId')
-          .select('m.id')
-          .where('b.id', '=', key.bookingId)
-          .where('m.userId', '=', key.verifiedHost.id)
-          .forShare('m')
-          .executeTakeFirst()
+        const member = await lockBookingHostMembership(trx, key.bookingId, host.id)
         if (!member) throw new RecipientUnavailable()
       }
       // The same format as the token the booking services issue (32 random bytes, base64url).
@@ -787,18 +778,15 @@ export async function sendOnce(
         .select('organization_id')
         .where('id', '=', key.bookingId)
         .executeTakeFirstOrThrow()
-      const { getEmailBranding } = await import('@hourmere/scheduling')
-      await deps.mailer.send(
-        brandEmail(message(token), await getEmailBranding(trx, bookingBrand.organization_id)),
-        { signal },
+      await sendAndRecordBookingEmail(
+        trx,
+        deps.mailer,
+        bookingBrand.organization_id,
+        inviteeFacing ? recipientHash : null,
+        () => message(token),
+        () => new Date(clock().epochMilliseconds),
+        signal,
       )
-      await trx
-        .insertInto('notification_email_sends')
-        .values({
-          recipient_hash: inviteeFacing ? recipientHash : null,
-          sent_at: new Date(clock().epochMilliseconds),
-        })
-        .execute()
       return 'sent' as const
     })
     // A rolled-back attempt is never reported as durable suppression.

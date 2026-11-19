@@ -810,7 +810,13 @@ describe('routing forms remain hard-off with configuration and public metadata i
     expect(literals).toContain('/sign-in/confirm')
     expect(literals).toContain('/booking')
     expect([...new Set(literals.filter(isRoutingName))].sort()).toEqual(
-      [...SHIPPED_PATHS, '/api/v1/public/-/routing', '/route/continue'].sort(),
+      [
+        ...SHIPPED_PATHS,
+        '/api/v1/public/-/routing',
+        '/route/:handle/:slug',
+        '/route/team/:teamSlug/:slug',
+        '/route/continue',
+      ].sort(),
     )
     const built = sources.flatMap(([file, source]) => builtPaths(file, source))
     expect(built.length).toBeGreaterThan(50)

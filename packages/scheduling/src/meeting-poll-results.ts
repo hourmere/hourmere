@@ -1,6 +1,5 @@
 // Host results and voter removal for meeting polls: the results projection a manager reads,
-// removal of one voter and bulk removal of unverified public enrollees. Internal services
-// only: no transport, worker or mail sender (docs/meeting-polls.md).
+// removal of one voter and bulk removal of unverified public enrollees (docs/meeting-polls.md).
 //
 // Every service takes the meeting-poll key fence first (meeting-poll-key.ts), then the host
 // order of the lifecycle and invitation services: the organization-write hook (writes only),
@@ -18,6 +17,8 @@
 // host revision, so a voter replacing their ballot cannot make a removal fail.
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
+import { findOneTimeEventType } from './availability.ts'
+import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 import type { MeetingPollBallotVote, MeetingPollVoteValue } from './meeting-poll-ballots.ts'
 import { ensureMeetingPollKey } from './meeting-poll-key.ts'
@@ -31,6 +32,7 @@ import {
 } from './meeting-poll-voters.ts'
 import {
   alreadyScheduled,
+  isMeetingPollCandidateOffered,
   type LockedPoll,
   loadPoll,
   lockAuthority,
@@ -39,6 +41,7 @@ import {
   type MeetingPollCandidate,
   type MeetingPollHostWriteInput,
   manages,
+  meetingPollClock,
   pollNotFound,
   requireHostRevision,
   requireWriteScope,
@@ -51,6 +54,8 @@ export interface MeetingPollCandidateResult extends MeetingPollCandidate {
   yes: number
   ifNeedBe: number
   no: number
+  /** Current advisory availability; independent of the ballot snapshot and its revision. */
+  availability: 'available' | 'unavailable' | 'unknown'
 }
 
 /** A voter as the host sees them. Never a credential, a digest or an IP digest. */
@@ -120,7 +125,7 @@ export async function getMeetingPollResults(
   id: string,
 ): Promise<MeetingPollResults> {
   const secret = requireSecret(ctx.meetingPollSecret)
-  return ctx.db.transaction().execute(async (trx) => {
+  const snapshot = await ctx.db.transaction().execute(async (trx) => {
     await ensureMeetingPollKey(trx, secret)
     const poll = await lockResultsPoll(trx, ctx, id)
     const metadata = await loadPoll(trx, ctx, poll.id)
@@ -205,6 +210,49 @@ export async function getMeetingPollResults(
       })),
     }
   })
+  return { ...snapshot, candidates: await advisoryCandidates(ctx.db, snapshot) }
+}
+
+/** Run only after the results transaction commits. Availability may change independently. */
+async function advisoryCandidates(
+  db: Db,
+  snapshot: {
+    poll: MeetingPoll
+    candidates: Omit<MeetingPollCandidateResult, 'availability'>[]
+  },
+): Promise<MeetingPollCandidateResult[]> {
+  const { poll, candidates } = snapshot
+  if (poll.status === 'scheduled' || poll.status === 'canceled')
+    return candidates.map((candidate) => ({ ...candidate, availability: 'unavailable' }))
+
+  const event = await findOneTimeEventType(db, poll.eventTypeId)
+  if (!event || event.bookingMode === 'group')
+    return candidates.map((candidate) => ({ ...candidate, availability: 'unavailable' }))
+
+  const now = Temporal.Instant.from(await meetingPollClock(db))
+  const checked: MeetingPollCandidateResult[] = []
+  for (const candidate of candidates) {
+    let availability: MeetingPollCandidateResult['availability']
+    try {
+      const available = await isMeetingPollCandidateOffered(
+        db,
+        event,
+        Temporal.Instant.from(candidate.startAt),
+        Temporal.Instant.from(candidate.endAt),
+        now,
+        poll.durationMinutes,
+      )
+      availability = available ? 'available' : 'unavailable'
+    } catch (error) {
+      if (!(error instanceof DomainError)) throw error
+      if (error.code === 'calendar_sync_unavailable' || error.code === 'event_type_not_found')
+        availability = 'unknown'
+      else if (error.code === 'invalid_duration') availability = 'unavailable'
+      else throw error
+    }
+    checked.push({ ...candidate, availability })
+  }
+  return checked
 }
 
 /**

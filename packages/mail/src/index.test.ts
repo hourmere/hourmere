@@ -1,6 +1,6 @@
 import type { Server } from 'node:net'
 import addressparser from 'nodemailer/lib/addressparser'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   brandEmail,
   createLogMailer,
@@ -749,6 +749,27 @@ describe('createSmtpMailer', () => {
     } finally {
       received.rcptReplies.clear()
       received.dataReply = undefined
+    }
+  })
+
+  it('sends sensitive mail without logging its body even with SMTP debugging enabled', async () => {
+    const text = 'Private message fixture'
+    const message = { to: 'ada@example.com', subject: 'Fixture', text }
+    const messages = received.messages.length
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const mailer = createSmtpMailer({
+        url: `smtp://127.0.0.1:${port}?logger=true&debug=true`,
+        from: 'Hourmere <hourmere@example.com>',
+      })
+      await mailer.send(message)
+      expect(log.mock.calls.flat().some((value) => String(value).includes(text))).toBe(true)
+      log.mockClear()
+      await mailer.send({ ...message, sensitive: true })
+      expect(log.mock.calls.flat().some((value) => String(value).includes(text))).toBe(false)
+      expect(received.messages.slice(messages)).toHaveLength(2)
+    } finally {
+      log.mockRestore()
     }
   })
 
