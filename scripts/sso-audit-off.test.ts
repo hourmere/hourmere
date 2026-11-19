@@ -37,6 +37,7 @@ const EMITTERS: Readonly<Record<string, readonly string[]>> = {
     'sso_authentication.failed',
     'sso_authentication.replay_rejected',
   ],
+  'apps/server/src/sso-oidc-test-receipts.ts': ['sso_provider.tested'],
 }
 // An SSO action name as a string literal, whether or not the catalogue lists it.
 const SSO_ACTION = /['"`]sso_[a-z_]+\.[a-z_]+['"`]/

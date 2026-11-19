@@ -3,6 +3,7 @@ import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling'
 import { z } from 'zod'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
 
 export interface SsoReadDeps {
   db: Db
@@ -86,6 +87,7 @@ export async function listSsoProviders(
       'issuer',
       'client_id',
       'created_at',
+      currentSsoProviderTestStatus.as('test_status'),
     ])
     .where('organization_id', '=', principal.organization.id)
     .where('retired_at', 'is', null)
@@ -134,7 +136,7 @@ export async function listSsoProviders(
       clientId: row.client_id,
       createdAt: new Date(row.created_at).toISOString(),
       validationStatus: 'unknown',
-      testStatus: 'unknown',
+      testStatus: row.test_status,
       domains: domains
         .filter((d) => d.provider_id === row.id)
         .map((d) => ({

@@ -1116,7 +1116,11 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
   the state digest and browser-binding digest. The authenticated state envelope carries the
   nonce, PKCE verifier and return path, bound to the attempt and its provider revision.
-  Consumption commits before these values are returned to a future code-exchange caller.
+  State consumption commits before code exchange. A changed linked mailbox creates a separate,
+  browser-bound sign-in attempt with the normalized mailbox and the digest of a short-lived
+  frozen result in an encrypted HttpOnly cookie. The pending result contains no authorization
+  code or IdP token. Mailbox proof attaches to this attempt and completion uses it once.
+  A verified collision deletes the attempt and its token without updating the link.
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.

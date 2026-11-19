@@ -178,7 +178,7 @@ import {
   mailboxProofJobs,
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
-import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
+import { type OidcProviderTestDeps, oidcSignInRoutes } from './sso-oidc-sign-in.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -221,6 +221,7 @@ export function productRoutes({
   scimProvisioningEnabled = false,
   slotSnippetsEnabled = false,
   ssoConfigurationKey,
+  ssoPrivateTargets,
   ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
   ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
@@ -250,6 +251,7 @@ export function productRoutes({
   slotSnippetsEnabled?: boolean
   /** Operator-managed key for encrypted provider configuration; does not enable SSO. */
   ssoConfigurationKey?: Buffer | undefined
+  ssoPrivateTargets?: OidcProviderTestDeps['privateTargets']
   /** In-process test injection only; no operator setting exists during hard-off. */
   ssoOidcEnabled?: boolean
   /** In-process test injection only; no operator setting exists during hard-off. */
@@ -334,6 +336,7 @@ export function productRoutes({
       db,
       publicUrl,
       configurationKey: ssoConfigurationKey,
+      privateTargets: ssoPrivateTargets,
       capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
     }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
@@ -488,8 +491,8 @@ export function productTools({
 export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   config: Config
   db: Db
-  /** Better Auth: its request handler, and the MCP authorization provider when enabled. */
-  auth: Pick<Auth, 'handler'>
+  /** Better Auth session reads are used by the provider-test callback. */
+  auth: Pick<Auth, 'handler'> & { api?: Pick<Auth['api'], 'getSession'> }
   /** createCallerResolver for that auth. */
   resolveCaller: CallerResolver
   /** createMcpOAuthResolver for that auth; used when MCP_OAUTH_ENABLED. */
@@ -548,6 +551,7 @@ export function productionAppOptions({
   const ssoConfigurationKey = config.SSO_ENCRYPTION_KEY
     ? Buffer.from(config.SSO_ENCRYPTION_KEY, 'base64')
     : undefined
+  const ssoPrivateTargets = config.SSO_PRIVATE_TARGETS
   return {
     checkDb,
     scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
@@ -570,12 +574,20 @@ export function productionAppOptions({
       capabilities: { ssoOidcEnabled, ssoSamlEnabled },
       db,
       configurationKey: ssoConfigurationKey,
-      privateTargets: config.SSO_PRIVATE_TARGETS,
+      privateTargets: ssoPrivateTargets,
       session: { secret: config.BETTER_AUTH_SECRET },
+      readSession: async (headers) =>
+        (
+          await auth.api?.getSession({
+            headers,
+            query: { disableRefresh: true, disableCookieCache: true },
+          })
+        )?.session,
     }),
     // db is closed by the caller.
     routes: productRoutes({
       ssoConfigurationKey,
+      ssoPrivateTargets,
       scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
       mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
       publicUrl: config.PUBLIC_URL,
