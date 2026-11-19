@@ -58,6 +58,33 @@ describe('workflow definition shape', () => {
     })
   })
 
+  it.each([personalContext, teamContext])(
+    'applies host-text policy to every recipient for $owner.kind candidates',
+    (base) => {
+      for (const followUpHostNotesEnabled of [true, false]) {
+        const context = { ...base, followUpHostNotesEnabled }
+        for (const recipient of ['booker', 'guests', 'hosts']) {
+          const builtin = candidate({
+            scope: { type: 'all_event_types' },
+            actions: [email({ recipients: [recipient] })],
+          })
+          expect(validate(builtin, context).actions).toHaveLength(1)
+          const custom = candidate({
+            ...builtin,
+            actions: [
+              email({
+                recipients: [recipient],
+                content: content('Hello {{recipient.name}}', 'Body'),
+              }),
+            ],
+          })
+          if (followUpHostNotesEnabled) expect(validate(custom, context).actions).toHaveLength(1)
+          else expect(refused(custom, context)).toBe('actions[0].content: custom text is disabled')
+        }
+      }
+    },
+  )
+
   it('accepts every trigger, with a lifecycle delay defaulting to zero', () => {
     for (const type of ['booking.created', 'booking.cancelled', 'booking.rescheduled'] as const) {
       expect(validate(candidate({ trigger: { type } })).trigger).toEqual({ type, delayMinutes: 0 })
@@ -394,10 +421,16 @@ describe('workflow definition limits', () => {
   it('refuses header line breaks and control characters in custom text', () => {
     const action = (subject: string, body: string) =>
       candidate({ actions: [email({ content: content(subject, body) })] })
-    for (const subject of ['Hi\r\nBcc: x@example.com', 'Hi\nthere', 'Hi\u0007'])
+    for (const subject of ['Hi\r\nBcc: x@example.com', 'Hi\nthere', 'Hi\u0007', 'Hi\r\n', '\nHi'])
       expect(refused(action(subject, 'Body'))).toBe(
         'actions[0].content.en.subject: must be a single line of text without control characters',
       )
+    for (const control of ['\u200b', '\u200c', '\u200d', '\u202e', '\u2066', '\ufeff']) {
+      expect(refused(action(`Hi${control}`, 'Body'))).toContain('subject: must be a single line')
+      expect(refused(action('Subject', `${control}Body`))).toContain(
+        'body: must be text without control',
+      )
+    }
     expect(refused(action('Subject', 'Body\u0000'))).toBe(
       'actions[0].content.en.body: must be text without control characters other than tabs and line breaks',
     )

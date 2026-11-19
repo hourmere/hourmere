@@ -287,7 +287,11 @@ export function meetOrganizer(
 }
 
 /** Called after booking insertion, before its notifier, while booking/host locks are held. */
-export async function prepareBookingConference(ctx: PublicContext, trx: Db, bookingId: string) {
+export async function prepareBookingConference(
+  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'now'>,
+  trx: Db,
+  bookingId: string,
+) {
   const booking = await trx
     .selectFrom('bookings')
     .select([
