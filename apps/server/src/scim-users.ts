@@ -202,6 +202,8 @@ const notFound: ScimReply = { status: 404, body: scimError(404, 'Resource not fo
 // Resource IDs are case-exact; anything but a canonical lower-case UUID names no entry.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
+export { notFound as scimUserNotFound, UUID as SCIM_USER_ID }
+
 async function listUsers(db: Db, request: ScimResourceRequest): Promise<ScimReply> {
   const parsed = parseScimListQuery(request.query, scimUserQuery)
   if (!parsed.ok) return parsed.reply

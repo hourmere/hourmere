@@ -152,6 +152,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/routing-forms` | Session or API key | `full` |
 | `PATCH /api/v1/routing-forms/{id}` | Session or API key | `full` |
 | `DELETE /api/v1/routing-forms/{id}` | Session or API key | `full` |
+| `POST /api/v1/routing-forms/{id}/publish` | Session or API key | `full` |
 | `GET /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Browser session only | — |
@@ -309,6 +310,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `create_routing_form` | — | `routing-forms create` | `full` |
 | `update_routing_form` | — | `routing-forms update` | `full` |
 | `archive_routing_form` | — | `routing-forms archive` | `full` |
+| `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |

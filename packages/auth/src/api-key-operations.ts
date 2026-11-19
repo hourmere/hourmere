@@ -87,6 +87,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('POST', '/api/v1/routing-forms', 'other_write', 'key'),
   rest('PATCH', '/api/v1/routing-forms/{id}', 'other_write', 'key'),
   rest('DELETE', '/api/v1/routing-forms/{id}', 'other_write', 'key'),
+  rest('POST', '/api/v1/routing-forms/{id}/publish', 'other_write', 'key'),
   rest(
     'GET',
     '/api/v1/organizations/{organizationId}/provisioning-tokens',
@@ -314,6 +315,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('create_routing_form', 'other_write', ['POST /api/v1/routing-forms']),
   mcp('update_routing_form', 'other_write', ['PATCH /api/v1/routing-forms/{id}']),
   mcp('archive_routing_form', 'other_write', ['DELETE /api/v1/routing-forms/{id}']),
+  mcp('publish_routing_form', 'other_write', ['POST /api/v1/routing-forms/{id}/publish']),
   mcp('list_audit_events', 'audit_read', ['GET /api/v1/audit-events']),
   mcp('get_audit_log_settings', 'audit_read', ['GET /api/v1/audit-log/settings']),
   mcp('set_audit_log_settings', 'other_write', ['PUT /api/v1/audit-log/settings']),
@@ -472,6 +474,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('routing-forms create', 'create_routing_form'),
   cli('routing-forms update', 'update_routing_form'),
   cli('routing-forms archive', 'archive_routing_form'),
+  cli('routing-forms publish', 'publish_routing_form'),
   cli('audit-log list', 'list_audit_events'),
   cli('audit-log settings', 'get_audit_log_settings'),
   cli('audit-log set-retention', 'set_audit_log_settings'),

@@ -78,7 +78,7 @@ recorded. New detail keys require deliberate schema and documentation review. Th
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
-| SCIM Users | `scim_user.created`, `scim_user.claimed` |
+| SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |

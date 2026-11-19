@@ -172,6 +172,16 @@ describe('documented Compose configuration', () => {
     expect(compose).toMatch(/^ {6}ZOOM_MEETINGS_ENABLED: \$\{ZOOM_MEETINGS_ENABLED:-false\}$/m)
   })
 
+  it('forwards workflow mail sub-caps with empty defaults before operator publication', () => {
+    const environment = composeAppEnvironment(compose)
+    for (const key of ['WORKFLOW_MAIL_MAX_PER_HOUR', 'WORKFLOW_OWNER_MAIL_MAX_PER_HOUR']) {
+      expect(environment.get(key)).toBe(`\${${key}:-}`)
+      expect(example).not.toContain(key)
+      expect(reference).not.toContain(key)
+    }
+    expect(worker).toMatch(/extends:\s+file: docker-compose\.yml\s+service: app/)
+  })
+
   it('forwards operator policy links without supplying a hosted policy for self-hosted instances', () => {
     const environment = composeAppEnvironment(compose)
     for (const key of ['PRIVACY_POLICY_URL', 'TERMS_URL']) {

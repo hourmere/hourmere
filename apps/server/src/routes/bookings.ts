@@ -306,6 +306,14 @@ export const AttendeeNoShow = z
   })
   .openapi('AttendeeNoShow')
 
+export const GroupAttendeesQuery = z.object({
+  status: z.enum(['active', 'cancelled', 'all']).default('active').openapi({
+    description: 'Active seats by default; request cancelled or all seats explicitly.',
+  }),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).max(10000).default(0),
+})
+
 export const GroupOccurrenceAttendees = z
   .object({
     id: z.uuid(),
@@ -316,6 +324,7 @@ export const GroupOccurrenceAttendees = z
     capacity: z.int(),
     activeSeats: z.int(),
     state: z.enum(['open', 'retired', 'host_cancelled']),
+    pagination: z.object({ limit: z.int(), offset: z.int(), hasMore: z.boolean() }),
     attendees: z.array(
       z.object({
         bookingId: z.uuid(),
@@ -534,8 +543,8 @@ export function bookingRoutes({
         tags: ['Bookings'],
         summary: 'Read the private attendee list for a group occurrence',
         description:
-          'Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Includes cancelled seats. Invitee manage tokens grant no access.',
-        request: { params: z.object({ id: z.uuid() }) },
+          'Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Defaults to active seats; cancelled seats require an explicit filter. Pages contain at most 100 seats. Invitee manage tokens grant no access.',
+        request: { params: z.object({ id: z.uuid() }), query: GroupAttendeesQuery },
         responses: {
           200: {
             description: 'Occurrence and private seat holders',
@@ -550,7 +559,11 @@ export function bookingRoutes({
       }),
       async (c) =>
         c.json(
-          await getGroupOccurrenceAttendees(context(c.var.principal), c.req.valid('param').id),
+          await getGroupOccurrenceAttendees(
+            context(c.var.principal),
+            c.req.valid('param').id,
+            c.req.valid('query'),
+          ),
           200,
         ),
     )

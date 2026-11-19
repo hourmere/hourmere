@@ -115,6 +115,7 @@ const classes = {
     'POST /api/v1/routing-forms',
     'PATCH /api/v1/routing-forms/{id}',
     'DELETE /api/v1/routing-forms/{id}',
+    'POST /api/v1/routing-forms/{id}/publish',
     'POST /api/v1/workflows',
     'PATCH /api/v1/workflows/{id}',
     'DELETE /api/v1/workflows/{id}',
@@ -810,7 +811,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             )
           ).id
         if (method === 'POST') {
-          payload = input
+          payload = template.endsWith('/publish') ? { expectedRevision: 1 } : input
           expectedStatus = 201
         }
         if (method === 'PATCH') payload = { expectedRevision: 1, title: 'Updated' }
@@ -891,14 +892,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 153-operation contract and all 459 scope combinations', () => {
+    it('covers the exact 154-operation contract and all 462 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(153)
-      expect(new Set(ids).size).toBe(153)
+      expect(ids).toHaveLength(154)
+      expect(new Set(ids).size).toBe(154)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(459)
+      expect(cases).toHaveLength(462)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

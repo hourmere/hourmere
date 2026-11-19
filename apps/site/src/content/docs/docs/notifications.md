@@ -136,6 +136,23 @@ consent and complaints are reviewed and implemented, in addition to the shared l
 above. There is no automatic hosted-mode detection; attribution URLs do not
 select this policy. See [configuration](/docs/configuration#email-and-registration).
 
+## Meeting poll deadlines
+
+While voting is open, an eligible nonresponder can receive one reminder per poll and
+mailbox. It becomes due 24 hours before the deadline if the poll already existed at
+that time. The reminder includes a voting link and a separate link to stop reminders.
+The opt-out page asks for confirmation and works without signing in. The recipient's
+ballot stays intact.
+
+The hourly cleanup records closure at the voting deadline and queues a notice for the
+creator if they still manage the event. The notice contains the deadline, response count
+and an authenticated results link. Closing a poll early does not send the notice.
+The workers and opt-out page are available without a feature flag. Poll creation has
+yet to be exposed.
+
+See the [meeting poll design](https://github.com/hourmere/hourmere/blob/main/docs/meeting-polls.md#notifications-abuse-and-time-zones)
+for eligibility, mail budgets and privacy rules.
+
 ## Jobs
 
 Jobs live in Postgres, through [pg-boss](https://github.com/timgit/pg-boss) (pinned; it
