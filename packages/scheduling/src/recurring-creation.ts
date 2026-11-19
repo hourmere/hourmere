@@ -74,6 +74,8 @@ export interface CreateBookingSeriesOptions extends RecurringBookingAdmissionDep
   origin?: BookingOrigin | undefined
   /** The existing transaction-bound webhook notifier for booking.created. */
   notifyWebhook?: BookingNotifier | undefined
+  /** The transaction-bound email notifier for each member's reminders and follow-ups. */
+  notifyMemberEmail?: BookingNotifier | undefined
 }
 
 interface SeriesBooking {
@@ -221,7 +223,7 @@ async function createBookingSeries(
         : current.hostUserIds
 
       const { token, hash } = newManageToken()
-      const { id: seriesId } = await trx
+      const { id: seriesId, revision } = await trx
         .insertInto('booking_series')
         .values({
           organization_id: current.organizationId,
@@ -243,14 +245,17 @@ async function createBookingSeries(
           host_policy_snapshot: jsonb({ schedulingType: current.schedulingType, hostUserIds }),
           manage_token_hash: hash,
         })
-        .returning('id')
+        .returning(['id', 'revision'])
         .executeTakeFirstOrThrow()
 
-      // Only the webhook notifier runs for these roots. Series confirmation and
-      // provider calendar jobs are introduced by subsequent implementation steps.
+      // Roots use the explicitly supplied email and webhook hooks. The series
+      // outbox owns confirmation and provider calendar work has its own rollout.
       const bookingContext = {
         requestId: ctx.requestId,
-        notify: options.notifyWebhook,
+        notify: (async (trx, event, now) => {
+          await options.notifyMemberEmail?.(trx, event, now)
+          await options.notifyWebhook?.(trx, event, now)
+        }) satisfies BookingNotifier,
         now: ctx.now,
       }
       const occurrences: SeriesBooking[] = []
@@ -289,7 +294,7 @@ async function createBookingSeries(
         })
       }
 
-      await trx
+      const receipt = await trx
         .insertInto('booking_series_receipts')
         .values({
           organization_id: current.organizationId,
@@ -300,6 +305,21 @@ async function createBookingSeries(
           fingerprint: request.scope.fingerprint,
           affected_occurrence_ids: occurrences.map(({ id }) => id),
           result_booking_ids: occurrences.map(({ bookingId }) => bookingId),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await trx
+        .insertInto('booking_series_notifications')
+        .values({
+          id: receipt.id,
+          organization_id: current.organizationId,
+          series_id: seriesId,
+          row_type: 'outbox',
+          kind: 'confirmation',
+          sequence: revision,
+          due_at: now.toString(),
+          attempts: 0,
+          outbox_state: 'pending',
         })
         .execute()
       await trx

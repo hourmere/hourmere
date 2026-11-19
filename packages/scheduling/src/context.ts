@@ -9,7 +9,7 @@ import type { SuccessRedirectPolicy } from './success-redirect.ts'
  * booking is still as described.
  */
 export type BookingEvent =
-  | { type: 'created'; bookingId: string; start: Temporal.Instant }
+  | { type: 'created'; bookingId: string; start: Temporal.Instant; seriesAction?: 'create' }
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
   | { type: 'cancelled'; bookingId: string; seriesAction?: 'bulk_cancel' }

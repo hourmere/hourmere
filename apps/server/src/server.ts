@@ -83,6 +83,7 @@ import {
   type ScheduledEmailQueue,
   scheduledBookingEmailJob,
   scheduledBookingEmailRepairJob,
+  seriesNotificationDispatchJob,
   signInEmailJobs,
   waitlistEmailJob,
 } from '@hourmere/notifications'
@@ -1075,6 +1076,7 @@ async function start(
       scheduledBookingEmailJob(notificationDeps),
       scheduledBookingEmailRepairJob(notificationDeps, scheduledQueue),
       conferenceNotificationDispatchJob(notificationDeps),
+      seriesNotificationDispatchJob(notificationDeps),
       notificationEmailCleanupJob(notificationDeps),
       invitationEmailJob({
         ...notificationDeps,
