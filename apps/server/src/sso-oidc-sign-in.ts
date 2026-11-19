@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { OpenAPIHono } from '@hono/zod-openapi'
-import type { Principal, SignupPolicy } from '@hourmere/auth'
+import type { Principal, ScimClaimCompletion, SignupPolicy } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type SsoAuditReason, writeSsoSecurityFailure } from '@hourmere/db/audit'
 import { type SsoRequest, sendSsoRequest, ssoUrl } from '@hourmere/outbound/sso'
@@ -95,6 +95,11 @@ interface OidcSignInDeps {
   privateTargets: SsoRequest['privateTargets']
   send?: typeof sendSsoRequest | undefined
   signup: SignupPolicy
+  /**
+   * The SCIM claim completion native invitation acceptance receives (the resource test flag of
+   * docs/scim.md). Only test harnesses pass it, with the same value they pass createAuth.
+   */
+  scimClaims?: ScimClaimCompletion | undefined
   session: OidcSessionOptions
   readSession: (headers: Headers) => Promise<OidcTestActor | null | undefined>
 }
@@ -458,7 +463,7 @@ function admissionRefused(
 }
 
 export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
-  const { db, capabilities, configurationKey, privateTargets, signup } = deps
+  const { db, capabilities, configurationKey, privateTargets, signup, scimClaims } = deps
   const transport = { send: deps.send ?? sendSsoRequest, privateTargets }
   const keys = new OidcJwksCache(transport)
   const starts = createRateLimiter({ limit: 30, windowSeconds: 60 })
@@ -822,7 +827,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
         if (!configurationKey) return c.json(completionInvalid, 400)
         const result = await completeOidcAdmission(
-          { db, configurationKey, signup },
+          { db, configurationKey, signup, scimClaims },
           { id: id.data, browserBinding: getCookie(c, cookie), envelope },
           sessionOptions(c, publicUrl),
           { kind: 'invitation', invitationId: invitation.data.invitationId },

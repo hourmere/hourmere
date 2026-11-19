@@ -1,4 +1,4 @@
-import type { SignupPolicy } from '@hourmere/auth'
+import type { ScimClaimCompletion, SignupPolicy } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -97,7 +97,12 @@ export async function stageOidcAdmission(
 
 /** Both ways to admit a new user spend the same browser-bound proof under the team lock. */
 export async function completeOidcAdmission(
-  { db, configurationKey, signup }: AdmissionDependencies & { signup: SignupPolicy },
+  {
+    db,
+    configurationKey,
+    signup,
+    scimClaims,
+  }: AdmissionDependencies & { signup: SignupPolicy; scimClaims?: ScimClaimCompletion | undefined },
   { id, browserBinding, envelope }: AdmissionResultCookie,
   options: OidcSessionRequest,
   decision: OidcAdmissionDecision,
@@ -173,6 +178,7 @@ export async function completeOidcAdmission(
         .returning(sql<string>`mailbox_proven_at::text`.as('provenAt'))
         .executeTakeFirst()
     },
+    scimClaims,
   )
   return result.status === 'completed' ? { ...result, returnPath } : result
 }

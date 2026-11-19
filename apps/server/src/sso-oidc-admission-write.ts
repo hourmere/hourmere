@@ -5,6 +5,7 @@ import {
   invitationRefusalCode,
   lockTeamInvitationAcceptance,
   maySignUp,
+  type ScimClaimCompletion,
   type SignupPolicy,
   sanitizeInitialDisplayName,
   teamMembershipLimit,
@@ -67,6 +68,8 @@ export async function admitOidcAccount(
   options: OidcSessionRequest,
   decision: OidcAdmissionDecision,
   lockProof: (trx: Db) => Promise<{ provenAt: string } | undefined>,
+  /** The same SCIM claim completion native acceptance receives; production passes none. */
+  scimClaims?: ScimClaimCompletion,
 ) {
   const { organizationId, providerId, revision } = provider
   const details = { method: 'oidc', providerId, revision, correlationId: id } as const
@@ -120,6 +123,7 @@ export async function admitOidcAccount(
         let invitation:
           | Awaited<ReturnType<typeof lockTeamInvitationAcceptance>>['stored']
           | undefined
+        let checkedAt: string | undefined
         if (decision.kind === 'invitation') {
           try {
             const locked = await lockTeamInvitationAcceptance(trx, {
@@ -129,6 +133,7 @@ export async function admitOidcAccount(
               email: mailbox,
             })
             invitation = locked.stored
+            checkedAt = locked.checkedAt
           } catch (error) {
             const code = invitationRefusalCode(error)
             if (code === 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED')
@@ -244,7 +249,7 @@ export async function admitOidcAccount(
           targetType: 'sso_link',
           targetId: link.id,
         })
-        if (invitation) {
+        if (invitation && checkedAt !== undefined) {
           // The signup trigger, a conflicting signup or slug allocation can have waited since
           // the invitation was locked. Check the exact stored expiry again at the transition.
           const live = await trx
@@ -254,6 +259,19 @@ export async function admitOidcAccount(
             .where('expiresAt', '>', sql<Date>`clock_timestamp()`)
             .executeTakeFirst()
           if (!live) throw new AdmissionRefused('invitation_invalid')
+          // The native decision for a SCIM-issued invitation, with the expiry instant the
+          // invitation lock found. It runs here because its claim audit names this session; the
+          // claim is still locked after the invitation, and a refusal rolls back everything.
+          const claimDecision = await scimClaims?.invitation(trx, {
+            organizationId,
+            invitationId: invitation.id,
+            userId,
+            mailbox,
+            checkedAt,
+            audit: auditActor(principal),
+          })
+          if (claimDecision?.refused) throw new AdmissionRefused('blocked')
+          await claimDecision?.finish?.(trx, member)
           const accepted = await writeTeamInvitationAcceptance(trx, invitation, principal)
           return { status: 'completed', cookie, invitation: accepted, member } as const
         }

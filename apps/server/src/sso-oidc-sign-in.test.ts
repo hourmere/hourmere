@@ -6,6 +6,7 @@ import {
   createCallerResolver,
   recordSsoAdmissionRemoval,
   type SignupPolicy,
+  scimClaimCompletion,
   teamMembershipLimit,
 } from '@hourmere/auth'
 import { decryptCredential } from '@hourmere/calendars'
@@ -172,6 +173,8 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   let db: Db
   let authPool: ReturnType<typeof createAuthPool>
   let auth: ReturnType<typeof createAuth>
+  // Native acceptance with SCIM claim completion, as the resource test flag wires it.
+  let scimAuth: ReturnType<typeof createAuth>
   let keys: Awaited<ReturnType<typeof generateKeyPair>>
   let jwks: SsoResponse
   let fixture: SsoFixture
@@ -190,6 +193,15 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       secret,
       signup,
       mailer: { send: async () => expect.unreachable('OIDC sign-in must not send mail') },
+    })
+    scimAuth = createAuth({
+      pool: authPool,
+      db,
+      baseURL: publicUrl,
+      secret,
+      signup,
+      mailer: { send: async () => expect.unreachable('OIDC sign-in must not send mail') },
+      scimClaims: scimClaimCompletion,
     })
     keys = await generateKeyPair('RS256')
     jwks = json({ keys: [{ ...(await exportJWK(keys.publicKey)), ...signingHeader }] })
@@ -222,16 +234,19 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     enabled = true,
     expiresIn,
     signupPolicy = signup,
+    scimClaims = false,
   }: {
     enabled?: boolean
     expiresIn?: number
     signupPolicy?: SignupPolicy
+    scimClaims?: boolean
   } = {}) {
     const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
+    const authentication = scimClaims ? scimAuth : auth
     return createApp({
       checkDb: async () => {},
-      authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      authHandler: authentication.handler,
+      resolveCaller: createCallerResolver({ auth: authentication, db }),
       publicUrl,
       routes: [
         ssoRoutes({ db, capabilities }),
@@ -261,9 +276,10 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         privateTargets: [],
         send: idp.send,
         signup: signupPolicy,
+        ...(scimClaims && { scimClaims: scimClaimCompletion }),
         readSession: async (headers) =>
           (
-            await auth.api.getSession({
+            await authentication.api.getSession({
               headers,
               query: { disableRefresh: true, disableCookieCache: true },
             })
@@ -286,10 +302,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     enabled = true,
     domainExpiresIn,
     discovery = false,
+    domain = `team-${randomUUID().slice(0, 8)}.example.com`,
   }: {
     enabled?: boolean
     domainExpiresIn?: number
     discovery?: boolean
+    domain?: string
   } = {}) {
     const { id: providerId } = await db
       .selectNoFrom(sql<string>`uuidv7()`.as('id'))
@@ -307,7 +325,6 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         enabled,
       })
       .execute()
-    const domain = `team-${randomUUID().slice(0, 8)}.example.com`
     const domainValues = {
       ...claimedDomainValues(fixture.team, domain),
       ...(domainExpiresIn !== undefined && { verification_expires_at: at(domainExpiresIn) }),
@@ -1810,6 +1827,212 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect((await audit()).map(({ action }) => action)).toContain('membership.accepted')
     await expectCompletionRefused(await acceptInvitation(pending, invite.id, closed))
     await expectCompletionRefused(await complete(pending))
+  })
+
+  /** Lock the team and record a local removal as the OIDC-on removal paths do. */
+  async function removeMember(userId: string, deleteAccount = false) {
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .selectFrom('auth.organization')
+        .select('id')
+        .where('id', '=', fixture.team)
+        .forUpdate()
+        .execute()
+      await recordSsoAdmissionRemoval(trx, { organizationId: fixture.team, userId })
+      await trx
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', fixture.team)
+        .where('userId', '=', userId)
+        .execute()
+      if (deleteAccount) await trx.deleteFrom('auth.user').where('id', '=', userId).execute()
+    })
+  }
+
+  /** A pending member invitation, optionally issued by SCIM provisioning with its bound claim. */
+  async function issueInvitation(email: string, scim: boolean) {
+    const invitation = await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: fixture.team,
+        inviterId: fixture.owner,
+        role: 'member',
+        status: 'pending',
+        expiresAt: at(300),
+        email,
+        createdAt: sql<Date>`clock_timestamp()`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    if (!scim) return { invitationId: invitation.id, entryId: undefined }
+    const connection =
+      (await db
+        .selectFrom('scim_connections')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .executeTakeFirst()) ??
+      (await db
+        .insertInto('scim_connections')
+        .values({ organization_id: fixture.team })
+        .returning('id')
+        .executeTakeFirstOrThrow())
+    const entry = await db
+      .insertInto('scim_users')
+      .values({
+        organization_id: fixture.team,
+        connection_id: connection.id,
+        user_name: email,
+        work_email: email,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('scim_user_claims')
+      .values({
+        organization_id: fixture.team,
+        connection_id: connection.id,
+        scim_user_id: entry.id,
+        invitation_id: invitation.id,
+        work_email: email,
+        expires_at: at(300),
+      })
+      .execute()
+    return { invitationId: invitation.id, entryId: entry.id }
+  }
+
+  async function claimLinked(entryId: string | undefined) {
+    if (!entryId) return null
+    const entry = await db
+      .selectFrom('scim_users')
+      .select('linked_user_id')
+      .where('id', '=', entryId)
+      .executeTakeFirstOrThrow()
+    return entry.linked_user_id !== null
+  }
+
+  it.each([
+    { scim: false, removed: false },
+    { scim: false, removed: true },
+    { scim: true, removed: false },
+    { scim: true, removed: true },
+  ])(
+    'decides invitation kind %o identically through native and SSO acceptance',
+    async ({ scim, removed }) => {
+      const scimApp = instance({ scimClaims: true })
+      const f = await provider()
+      const { pending } = await pendingAdmission(f)
+      await proveMailbox(pending)
+
+      // Native: an existing account outside the team, removed earlier or never a member.
+      const nativeMailbox = await db
+        .selectFrom('auth.user')
+        .select('email')
+        .where('id', '=', fixture.member)
+        .executeTakeFirstOrThrow()
+      if (removed) await removeMember(fixture.member)
+      else
+        await db
+          .deleteFrom('auth.member')
+          .where('organizationId', '=', fixture.team)
+          .where('userId', '=', fixture.member)
+          .execute()
+      // SSO: the proved mailbox's earlier account was removed and deleted, or never existed.
+      if (removed) {
+        const earlier = await db
+          .insertInto('auth.user')
+          .values({ name: 'Earlier account', email: f.email, emailVerified: true })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        await db
+          .insertInto('auth.member')
+          .values({
+            organizationId: fixture.team,
+            userId: earlier.id,
+            role: 'member',
+            createdAt: new Date(),
+          })
+          .execute()
+        await removeMember(earlier.id, true)
+      }
+      const blocks = await db
+        .selectFrom('scim_membership_blocks')
+        .select('identity_email')
+        .where('organization_id', '=', fixture.team)
+        .where('cleared_at', 'is', null)
+        .orderBy('identity_email')
+        .execute()
+      expect(blocks.map(({ identity_email }) => identity_email)).toEqual(
+        removed ? [f.email, nativeMailbox.email].sort() : [],
+      )
+
+      const native = await issueInvitation(nativeMailbox.email, scim)
+      const sso = await issueInvitation(f.email, scim)
+      const session = await browserSession(fixture.member)
+      const nativeResponse = await post(
+        { invitationId: native.invitationId },
+        scimApp,
+        {
+          cookie: session.cookie,
+        },
+        acceptInvitationPath,
+      )
+      const ssoResponse = await acceptInvitation(pending, sso.invitationId, scimApp)
+
+      const refused = scim && removed
+      const outcome = (response: Response, entryId: string | undefined) =>
+        Promise.resolve(claimLinked(entryId)).then((claimed) => ({
+          status: response.status,
+          claimed,
+        }))
+      const expected = { status: refused ? 403 : 200, claimed: scim ? !refused : null }
+      expect({
+        native: await outcome(nativeResponse, native.entryId),
+        sso: await outcome(ssoResponse, sso.entryId),
+      }).toEqual({ native: expected, sso: expected })
+      if (refused) {
+        expect(await ssoResponse.json()).toEqual({ error: 'team_management_access_denied' })
+        expect(
+          await db.selectFrom('auth.user').select('id').where('email', '=', f.email).execute(),
+        ).toEqual([])
+        expect((await attemptRow(pending)).consumed_at).toBeNull()
+      }
+      if (scim && !refused) {
+        const joined = await db
+          .selectFrom('auth.user')
+          .select('id')
+          .where('email', '=', f.email)
+          .executeTakeFirstOrThrow()
+        const entry = await db
+          .selectFrom('scim_users')
+          .select(['linked_user_id', 'linked_member_id'])
+          .where('id', '=', sso.entryId as string)
+          .executeTakeFirstOrThrow()
+        expect(entry).toEqual({ linked_user_id: joined.id, linked_member_id: expect.any(String) })
+        expect(
+          (await audit()).filter(
+            ({ action, target_id }) => action === 'scim_user.claimed' && target_id === sso.entryId,
+          ),
+        ).toHaveLength(1)
+      }
+    },
+  )
+
+  it('honors a removal made before the team configured OIDC or JIT', async () => {
+    const domain = `team-${randomUUID().slice(0, 8)}.example.com`
+    const email = `linked@${domain}`
+    await db.updateTable('auth.user').set({ email }).where('id', '=', fixture.member).execute()
+    // Neither an OIDC provider nor a JIT policy exists when the member is removed.
+    await removeMember(fixture.member, true)
+    const f = await provider({ domain })
+    expect(f.email).toBe(email)
+    await selectJit()
+    const { pending } = await pendingAdmission(f)
+    await proveMailbox(pending)
+    const response = await complete(pending)
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+    expect(
+      await db.selectFrom('auth.user').select('id').where('email', '=', email).execute(),
+    ).toEqual([])
   })
 
   it('rejects missing mailboxes, mismatching signed issuer or nonce, and expired IdP sessions', async () => {

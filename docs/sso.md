@@ -1250,8 +1250,11 @@ The SSO branch requires its matching admission cookie, exact same origin and cur
 mailbox proof. It accepts a current `member` invitation matching the proven address and
 provider's team, with the same original-inviter membership and capacity checks as native
 acceptance. An eligible current invitation can satisfy the existing signup exception.
-A current invitation issued after a local removal can clear its mailbox block. A SCIM
-suspension requires its own reactivation. The SSO invitation branch returns `404 sso_disabled`
+A current invitation issued after a local removal can clear its mailbox block; a SCIM-issued
+invitation never clears a blocker, as in native acceptance. Accepting a SCIM-issued invitation
+completes its SCIM claim exactly as native acceptance does. A SCIM suspension requires its own
+reactivation. While OIDC is on, every removal or departure records its tombstone, even before
+the team configures a provider or JIT. The SSO invitation branch returns `404 sso_disabled`
 while OIDC is hard-off. Ordinary invitation acceptance uses the native session flow.
 
 未关联身份提交有效邮箱时，回调统一跳转至邮箱证明页面。请完成邮箱验证。已有账号的用户须先用
@@ -1262,7 +1265,9 @@ JIT 的团队中以成员身份加入，前提是域名核验有效、团队仍�
 
 仅邀请团队要求在原浏览器显式接受有效邀请。向现有邀请接受端点提交 `invitationId`，并在
 `X-Hourmere-Sso-Attempt` 中传递已证明的尝试标识。被移除后发出的有效邀请可清除本地邮箱
-阻止记录。SCIM 暂停须单独恢复。OIDC 仍在代码中关闭，带待处理 SSO 结果的邀请接受请求返回
+阻止记录；SCIM 发出的邀请与原生接受一样，从不清除阻止记录。接受 SCIM 发出的邀请时，与原生接受一样
+完成其 SCIM 认领。SCIM 暂停须单独恢复。OIDC 开启后，每次移除或离开都会记录移除记录，即使团队尚未配置
+身份提供方或 JIT。OIDC 仍在代码中关闭，带待处理 SSO 结果的邀请接受请求返回
 `404 sso_disabled`。普通邀请继续使用现有登录会话流程。
 
 Ownership (all auth-protocol exceptions, no MCP/CLI surface): OIDC sign-in owns

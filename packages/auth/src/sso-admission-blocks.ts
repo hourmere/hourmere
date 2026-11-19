@@ -8,7 +8,12 @@ interface AdmissionMember {
 
 export type SsoAdmissionRemoval = (trx: Db, member: AdmissionMember) => Promise<void>
 
-/** The caller holds the organization lock through the membership deletion. */
+/**
+ * The caller holds the organization lock through the membership deletion. Every removal or
+ * departure records its tombstone while OIDC is on (docs/sso.md, "Leaving/removal creates a
+ * team-local admission tombstone"), whether or not the team has configured a provider or JIT
+ * yet, so a later configuration cannot readmit a person removed before it.
+ */
 export const recordSsoAdmissionRemoval: SsoAdmissionRemoval = async (
   trx,
   { organizationId, userId },
@@ -23,12 +28,7 @@ export const recordSsoAdmissionRemoval: SsoAdmissionRemoval = async (
       SELECT proven_email FROM sso_identity_links
       WHERE organization_id = ${organizationId} AND user_id = ${userId} AND retired_at IS NULL
     ) AS mailboxes
-    WHERE char_length(mailbox) BETWEEN 1 AND 320 AND (
-      EXISTS (SELECT 1 FROM sso_providers
-        WHERE organization_id = ${organizationId} AND protocol = 'oidc' AND retired_at IS NULL)
-      OR EXISTS (SELECT 1 FROM sso_policies
-        WHERE organization_id = ${organizationId} AND admission = 'jit')
-    )
+    WHERE char_length(mailbox) BETWEEN 1 AND 320
   `.execute(trx)
   if (rows.length === 0) return
 
@@ -61,7 +61,11 @@ export const recordSsoAdmissionRemoval: SsoAdmissionRemoval = async (
     .execute()
 }
 
-/** A current invitation can clear a prior local removal under the organization lock. */
+/**
+ * A current invitation can clear a prior local removal under the organization lock. A
+ * SCIM-issued invitation (one a SCIM claim is bound to) never does: the same rule as native
+ * acceptance in scim-claims.ts, so both acceptance paths refuse it while any blocker is live.
+ */
 export async function checkSsoAdmissionBlocks(
   trx: Db,
   {
@@ -83,6 +87,11 @@ export async function checkSsoAdmissionBlocks(
         WHERE invitation.id = ${invitationId ?? null}::uuid
           AND invitation."organizationId" = block.organization_id
           AND invitation."createdAt" > block.created_at
+          AND NOT EXISTS (
+            SELECT 1 FROM scim_user_claims AS claim
+            WHERE claim.organization_id = invitation."organizationId"
+              AND claim.invitation_id = invitation.id
+          )
       )`.as('reinstates'),
     )
     .where('block.organization_id', '=', organizationId)
