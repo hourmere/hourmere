@@ -419,6 +419,10 @@ export {
   updateSchedule,
 } from './schedules.ts'
 export {
+  recordSeriesConferenceDeadline,
+  seriesConfirmationDeadline,
+} from './series-confirmation.ts'
+export {
   type BookingSuccessRedirect,
   SUCCESS_REDIRECT_MAX_LENGTH,
   SUCCESS_REDIRECT_PARAMETERS,

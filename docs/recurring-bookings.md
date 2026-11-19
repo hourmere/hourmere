@@ -486,6 +486,14 @@ whatever is still pending:
    from 20 minutes on, the lead point governs unless point 2 comes first. A later first
    start never makes the confirmation earlier.
 
+The first dispatch uses the series creation time and reads the member and conference rows
+together. A terminal provider result records an earlier deadline if it has already been
+reached, so retrying the provider before the next sweep keeps that due time. Before a future
+lead point, eligibility follows the current roots. An imminent-start deadline that passes
+between sweeps still releases the confirmation, and the started member is then listed without
+a calendar entry. Waiting for conferences uses no SMTP attempt. Once the first send is
+attempted, the usual outbox retry schedule applies.
+
 Started and cancelled members never delay it. Today's per-booking outbox skips a pending
 confirmation once its booking starts (`dispatchConferenceNotifications` in
 packages/notifications/src/index.ts); the series confirmation is skipped only when no member
