@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useId, useRef, useState } from 'react'
+import { type ReactNode, Suspense, useEffect, useId, useRef, useState } from 'react'
 import {
   createRoutesFromElements,
   type Location,
@@ -9,6 +9,7 @@ import {
   useNavigate,
   useRoutes,
 } from 'react-router'
+import { api } from './api/client.ts'
 import { AdminLoading } from './components/AdminLoading.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
@@ -38,6 +39,7 @@ import {
   MeetingPollPage,
   OneTimeBookingPage,
   RequireSession,
+  RoutingFormPage,
   ScheduleEditorPage,
   SessionLayout,
   SettingsPage,
@@ -118,6 +120,32 @@ export const appRoutes = createRoutesFromElements(
     <Route path="*" element={<NotFoundPage />} />
   </>,
 )
+
+const routingFormRoutes = createRoutesFromElements(
+  <>
+    <Route path="/route/:handle/:slug" element={<RoutingFormPage />} />
+    <Route path="/route/team/:teamSlug/:slug" element={<RoutingFormPage />} />
+  </>,
+)
+
+function RoutingFormGate({ fallback }: { fallback: ReactNode }) {
+  const [enabled, setEnabled] = useState<boolean>()
+  const form = useRoutes(routingFormRoutes)
+  useEffect(() => {
+    const controller = new AbortController()
+    api.GET('/api/v1/instance', { signal: controller.signal, cache: 'no-store' }).then(
+      ({ data }) => {
+        if (!controller.signal.aborted) setEnabled(data?.routingFormsEnabled === true)
+      },
+      () => {
+        if (!controller.signal.aborted) setEnabled(false)
+      },
+    )
+    return () => controller.abort()
+  }, [])
+  if (enabled === undefined) return <RouteLoadingStatus />
+  return enabled ? form : fallback
+}
 
 function RouteLoadingStatus() {
   const { t } = useI18n()
@@ -215,7 +243,13 @@ function AppRoutes() {
           )
         }
       >
-        <BookingPanelContext value={panel}>{routes}</BookingPanelContext>
+        <BookingPanelContext value={panel}>
+          {matchRoutes(routingFormRoutes, pathname) ? (
+            <RoutingFormGate key={pathname} fallback={routes} />
+          ) : (
+            routes
+          )}
+        </BookingPanelContext>
       </Suspense>
     </RouteErrorBoundary>
   )

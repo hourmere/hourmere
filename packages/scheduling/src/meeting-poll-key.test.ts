@@ -766,18 +766,18 @@ function verifyEveryServiceFenced(modules: { file: string; source: string }[]) {
 
 // The fence names that production code may use, and where: the generated table types, the
 // storage test support, the meeting-poll services and the internal meeting-poll mail workers.
-// B2 adds only the public adapters, shared error handling, startup check and generated schema.
-// Host transports remain unavailable until their assigned implementation steps.
+// Transport references are limited to the composition, shared errors and the generated schema.
 const FENCE_NAMES = /ensureMeetingPollKey|MeetingPollKeyMismatchError|meeting[-_]poll[-_]key/i
 const INTERNAL_FENCE_USERS =
   /^packages\/(db\/src\/(tables|meeting-poll-key-state-[a-z]+)\.ts|scheduling\/src\/meeting-poll-[a-z-]+\.ts|notifications\/src\/meeting-polls\.ts)$/
 
-const PUBLIC_FENCE_USERS = new Set([
+const TRANSPORT_FENCE_USERS = new Set([
   'packages/scheduling/src/index.ts',
   'apps/server/src/server.ts',
   'apps/server/src/app.ts',
   'apps/server/src/meeting-poll-rate-limit.ts',
   'apps/server/src/routes/meeting-polls.ts',
+  'apps/server/src/routes/meeting-poll-host.ts',
   'apps/server/src/mcp/meeting-polls.ts',
   'apps/server/src/mcp/tools.ts',
   'apps/web/src/api/schema.d.ts',
@@ -807,7 +807,7 @@ function productionSources(): string[] {
   return files.sort()
 }
 
-describe('meeting poll key fence wiring (public transports only)', () => {
+describe('meeting poll key fence wiring', () => {
   it('runs every voter service through the key fence before anything else', () => {
     verifyEveryServiceFenced(voterModules())
   })
@@ -839,12 +839,12 @@ describe('meeting poll key fence wiring (public transports only)', () => {
     )
   })
 
-  it('is used only by internal services and the exact public transport composition', () => {
+  it('is used only by internal services and the exact transport composition', () => {
     const users = productionSources().filter((file) =>
       FENCE_NAMES.test(readFileSync(join(root, file), 'utf8')),
     )
     expect(
-      users.filter((file) => !INTERNAL_FENCE_USERS.test(file) && !PUBLIC_FENCE_USERS.has(file)),
+      users.filter((file) => !INTERNAL_FENCE_USERS.test(file) && !TRANSPORT_FENCE_USERS.has(file)),
     ).toEqual([])
     expect(users).toEqual(
       expect.arrayContaining([
@@ -852,12 +852,12 @@ describe('meeting poll key fence wiring (public transports only)', () => {
         'packages/scheduling/src/meeting-poll-key.ts',
         'packages/scheduling/src/meeting-poll-voters.ts',
         'packages/scheduling/src/meeting-poll-public.ts',
-        ...PUBLIC_FENCE_USERS,
+        ...TRANSPORT_FENCE_USERS,
       ]),
     )
   })
 
-  it('exposes exactly the seven public operations and no host poll transport', () => {
+  it('keeps public operations and limits host transports to reads and lifecycle', () => {
     const routes = readFileSync(join(root, 'apps/server/src/routes/meeting-polls.ts'), 'utf8')
     expect([...routes.matchAll(/path: '([^']+)'/g)].map((match) => match[1]).sort()).toEqual(
       ['read', 'enroll', 'recover', 'verify', 'vote', 'withdraw', 'reminder-opt-out']
@@ -876,10 +876,20 @@ describe('meeting poll key fence wiring (public transports only)', () => {
         'opt_out_meeting_poll_reminder',
       ].sort(),
     )
-    const hostServices =
-      /\b(?:createMeetingPoll|listMeetingPolls|getMeetingPoll|closeMeetingPoll|cancelMeetingPoll|deleteMeetingPoll|rotateMeetingPollLink|inviteMeetingPollVoters|resendMeetingPollInvitation|getMeetingPollResults|removeMeetingPollVoter|removeUnverifiedMeetingPollVoters|finalizeMeetingPoll)\b/
-    for (const file of productionSources().filter((file) => /^(apps|tools)\//.test(file)))
-      expect(hostServices.test(readFileSync(join(root, file), 'utf8')), file).toBe(false)
+    const hostLifecycleServices =
+      /\b(?:listMeetingPolls|getMeetingPoll|getMeetingPollResults|closeMeetingPoll|cancelMeetingPoll|deleteMeetingPoll|finalizeMeetingPoll)\b/
+    const creationAndRosterServices =
+      /\b(?:createMeetingPoll|rotateMeetingPollLink|inviteMeetingPollVoters|resendMeetingPollInvitation|removeMeetingPollVoter|removeUnverifiedMeetingPollVoters)\b/
+    const hostAdapters = new Set([
+      'apps/server/src/routes/meeting-poll-host.ts',
+      'apps/server/src/mcp/meeting-poll-host.ts',
+      'apps/web/src/api/schema.d.ts',
+    ])
+    for (const file of productionSources().filter((file) => /^(apps|tools)\//.test(file))) {
+      const source = readFileSync(join(root, file), 'utf8')
+      expect(hostLifecycleServices.test(source), file).toBe(hostAdapters.has(file))
+      expect(creationAndRosterServices.test(source), file).toBe(false)
+    }
   })
 })
 

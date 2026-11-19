@@ -99,6 +99,7 @@ function productSourceCopy(change?: Change): Factory {
     routingFormConfigurationTools: () => [],
     waitlistTools: () => [],
     meetingPollTools: () => [],
+    meetingPollHostTools: () => [],
     brandingTools: () => [],
     auditLogTools: () => [],
   }

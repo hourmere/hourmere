@@ -11,6 +11,7 @@ import { brandingRoutes } from './branding.ts'
 import { calendarRoutes } from './calendars.ts'
 import { conferenceRoutes } from './conferences.ts'
 import { eventTypeRoutes } from './event-types.ts'
+import { meetingPollHostRoutes } from './meeting-poll-host.ts'
 import { meetingPollRoutes } from './meeting-polls.ts'
 import { memberDepartureImpactRoutes } from './member-departure-impact.ts'
 import { memberRemovalRoutes } from './member-removal.ts'
@@ -72,6 +73,7 @@ export const productRoutes = (db: Db) => [
   eventTypeRoutes({ db }),
   publicRoutes({ db }),
   meetingPollRoutes({ db, meetingPollSecret: 'synthetic-route-test-only' }),
+  meetingPollHostRoutes({ db, meetingPollSecret: 'synthetic-route-test-only' }),
   oneTimeLinkRoutes({ db, publicUrl: PUBLIC_URL }),
   bookingRoutes({ db }),
   teamBookingRoutes({ db }),

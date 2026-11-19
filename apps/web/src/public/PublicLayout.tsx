@@ -175,11 +175,13 @@ export function FocusHeading({
   level = 1,
   id,
   className,
+  describedBy,
 }: {
   children: ReactNode
   level?: 1 | 2 | 3
   id?: string
   className?: string
+  describedBy?: string
 }) {
   const ref = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
@@ -187,7 +189,7 @@ export function FocusHeading({
   }, [])
   const Tag = level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3'
   return (
-    <Tag ref={ref} id={id} tabIndex={-1} className={className}>
+    <Tag ref={ref} id={id} tabIndex={-1} className={className} aria-describedby={describedBy}>
       {children}
     </Tag>
   )

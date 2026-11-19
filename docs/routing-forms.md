@@ -618,6 +618,21 @@ transport checks return `routing_forms_disabled` and MCP discovery omits `route_
 隐藏凭据和链接，`--output FILE` 可将完整响应写入新建的 0600 文件。功能目前硬关闭，通过传输
 检查的调用返回 `routing_forms_disabled`，MCP 工具列表不显示 `route_lead`。
 
+When routing is enabled, invitees open a personal form at `/route/{handle}/{slug}` or
+a team form at `/route/team/{teamSlug}/{slug}`. The page marks optional questions and
+explains validation errors alongside the affected fields. If the host publishes a new
+version during a visit, the page reloads the questions. It keeps answers for matching
+question IDs and types in memory, and keeps a select answer only if its option is still
+available. Invitees review the updated form and submit again. A successful submission
+displays the host's message or opens the server's continuation link. If the form becomes
+unavailable, the page asks the invitee to check the link. Routing is currently hard-off.
+
+中文：启用后，受邀人可通过 `/route/{handle}/{slug}` 打开个人表单，或通过
+`/route/team/{teamSlug}/{slug}` 打开团队表单。页面会标出选填题，并在相应问题旁说明填写错误。
+如果填写期间主持人发布了新版本，页面会重新读取问题。编号和类型均未变化的答案仅保留在页面内存中，
+单选题还须保留原选项。受邀人检查新版表单后可再次提交。提交成功后，页面会显示主持人设定的留言，
+或打开服务器返回的后续链接。表单不可用时，页面会请受邀人检查链接。功能目前处于硬关闭状态。
+
 Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or
 OAuth grant), so two credentials of one user never share a key. Publish/update/archive take

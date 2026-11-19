@@ -2494,6 +2494,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/meeting-polls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List meeting polls in the current organization
+         * @description For the personal event owner or current team owners and admins. Newest first. Pass nextAfter as after to continue. Accepts read, bookings and full API-key scopes.
+         */
+        get: operations["listMeetingPolls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a meeting poll’s host metadata
+         * @description Includes effective lifecycle state, candidates and host revision.
+         */
+        get: operations["getMeetingPoll"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a meeting poll and its voter data
+         * @description Uses the current host revision. A linked booking is preserved. Requires bookings or full API-key scope, or a same-origin browser session bound to the expected organization.
+         */
+        delete: operations["deleteMeetingPoll"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an unscheduled meeting poll
+         * @description Requires bookings or full API-key scope, or a same-origin browser session bound to the expected organization. An already completed transition returns current state.
+         */
+        post: operations["cancelMeetingPoll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close voting on a meeting poll
+         * @description Requires bookings or full API-key scope, or a same-origin browser session bound to the expected organization. An already completed transition returns current state.
+         */
+        post: operations["closeMeetingPoll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book a meeting poll’s selected time and voters
+         * @description Finalize in one transaction. Retain the idempotency key for an exact retry. Requires bookings or full API-key scope, or a same-origin browser session bound to the expected organization.
+         */
+        post: operations["finalizeMeetingPoll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a meeting poll’s private results
+         * @description Includes the roster, separate ballot counts, results and ballot revisions, and advisory availability. Keep voter details private. Finalization revalidates current availability.
+         */
+        get: operations["getMeetingPollResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/open-time-snippets": {
         parameters: {
             query?: never;
@@ -6661,6 +6785,129 @@ export interface components {
         MeetingPollAccepted: {
             /** @enum {boolean} */
             accepted: true;
+        };
+        MeetingPollFinalization: {
+            booking: {
+                /** Format: date-time */
+                end: string;
+                /** Format: uuid */
+                eventTypeId: string | null;
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                source: "web" | "embed" | "api" | "mcp" | "import";
+                /** Format: date-time */
+                start: string;
+                /** @enum {string} */
+                status: "confirmed" | "cancelled";
+            };
+            poll: components["schemas"]["MeetingPollHost"];
+            replayed: boolean;
+        };
+        MeetingPollHost: {
+            /** @enum {string} */
+            admissionMode: "public_link" | "invited";
+            /** Format: uuid */
+            bookingId: string | null;
+            /** Format: date-time */
+            canceledAt: string | null;
+            candidates: {
+                /** Format: date-time */
+                endAt: string;
+                /** Format: uuid */
+                id: string;
+                position: number;
+                /** Format: date-time */
+                startAt: string;
+            }[];
+            /** Format: uuid */
+            chosenSlotId: string | null;
+            /** Format: date-time */
+            closedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: uuid */
+            createdByUserId: string | null;
+            /** Format: date-time */
+            deadlineAt: string;
+            displayTimeZone: string;
+            durationMinutes: number;
+            /** Format: uuid */
+            eventTypeId: string;
+            hostRevision: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            organizationId: string;
+            /** Format: date-time */
+            scheduledAt: string | null;
+            /** @enum {string} */
+            source: "web" | "api" | "mcp";
+            /** @enum {string} */
+            status: "open" | "closed" | "scheduled" | "canceled";
+            title: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @enum {string} */
+            visibility: "private" | "aggregate";
+        };
+        MeetingPollHostPage: {
+            data: components["schemas"]["MeetingPollHost"][];
+            nextAfter: string | null;
+        };
+        MeetingPollHostResults: {
+            candidates: {
+                /**
+                 * @description Advisory current availability. Finalization checks availability again.
+                 * @enum {string}
+                 */
+                availability: "available" | "unavailable" | "unknown";
+                /** Format: date-time */
+                endAt: string;
+                /** Format: uuid */
+                id: string;
+                ifNeedBe: number;
+                no: number;
+                position: number;
+                /** Format: date-time */
+                startAt: string;
+                yes: number;
+            }[];
+            countedBallots: number;
+            poll: components["schemas"]["MeetingPollHost"];
+            resultsRevision: number;
+            roster: {
+                ballotRevision: number;
+                /** Format: date-time */
+                consentedAt: string | null;
+                email: string;
+                /** Format: date-time */
+                invitedAt: string | null;
+                locale: string;
+                name: string;
+                /** Format: date-time */
+                pendingExpiresAt: string | null;
+                responses: {
+                    [key: string]: unknown;
+                };
+                /** @enum {string} */
+                status: "pending" | "invited" | "verified" | "withdrawn";
+                /** Format: date-time */
+                submittedAt: string | null;
+                timeZone: string;
+                /** Format: date-time */
+                verifiedAt: string | null;
+                /** Format: uuid */
+                voterId: string;
+                votes: {
+                    /** Format: uuid */
+                    slotId: string;
+                    /** @enum {string} */
+                    value: "yes" | "if_need_be" | "no";
+                }[];
+                /** Format: date-time */
+                withdrawnAt: string | null;
+            }[];
         };
         MeetingPollOwnBallot: {
             ballotRevision: number;
@@ -12615,6 +12862,583 @@ export interface operations {
             };
             /** @description The API key's rate limit is used up */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listMeetingPolls: {
+        parameters: {
+            query?: {
+                /** @description The previous page’s nextAfter cursor. */
+                after?: string;
+                /** @description Page size, an integer from 1 to 100. */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of polls */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollHostPage"];
+                };
+            };
+            /** @description invalid_request, invalid_cursor or invalid_limit */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getMeetingPoll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current host metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollHost"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteMeetingPoll: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedHostRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request or invalid_poll */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_canceled or poll_already_scheduled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelMeetingPoll: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedHostRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Current host metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollHost"];
+                };
+            };
+            /** @description invalid_request or invalid_poll */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_canceled or poll_already_scheduled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    closeMeetingPoll: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedHostRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Current host metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollHost"];
+                };
+            };
+            /** @description invalid_request or invalid_poll */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_canceled or poll_already_scheduled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    finalizeMeetingPoll: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A retained random key for this finalization attempt (1–255 printable ASCII characters). */
+                "idempotency-key": string;
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Explicitly accept a selected voter’s if_need_be response at the chosen time. */
+                    acknowledgeConditional: boolean;
+                    /** @description Selected voters, including the booker. */
+                    attendeeVoterIds: string[];
+                    /** Format: uuid */
+                    bookerVoterId: string;
+                    /** @description The current ballot revision of each selected voter, keyed by voter ID. */
+                    expectedBallotRevisions: {
+                        [key: string]: number;
+                    };
+                    expectedResultsRevision: number;
+                    locationOptionId?: string;
+                    /** Format: uuid */
+                    slotId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Exact replay with current booking metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollFinalization"];
+                };
+            };
+            /** @description Finalized with safe booking metadata */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollFinalization"];
+                };
+            };
+            /** @description invalid_request, invalid_poll, invalid_idempotency_key, poll_event_unsupported, poll_conditional_acknowledgment_required, too_many_guests, invalid_responses or a booking validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_canceled, poll_already_scheduled, idempotency_key_reused, poll_event_changed, poll_attendee_ineligible, event_type_unavailable, slot_unavailable, slot_taken, calendar_sync_unavailable or location_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] & {
+                        poll?: components["schemas"]["MeetingPollHost"] & unknown;
+                    };
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getMeetingPollResults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Poll results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollHostResults"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

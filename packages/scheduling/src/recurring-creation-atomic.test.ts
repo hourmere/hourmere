@@ -347,6 +347,7 @@ describe.skipIf(!serverUrl)('atomic recurring booking creation on PostgreSQL', (
     // The other candidate's overdue hold must be drained even though it won't get the series.
     const hold = await overdueHold(organizationId, firstHost, 1)
     const ordinaryNotify = vi.fn(async () => {})
+    const notifyMemberEmail = vi.fn<BookingNotifier>(async () => {})
     const notifyWebhook = webhookBookingNotifier(jobs, webhookSettings)
     const request = seriesRequest(page)
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
@@ -356,7 +357,7 @@ describe.skipIf(!serverUrl)('atomic recurring booking creation on PostgreSQL', (
       const created = await createPublicTeamBookingSeries(
         { db, now, notify: ordinaryNotify },
         request,
-        { ...recurring, notifyWebhook },
+        { ...recurring, notifyMemberEmail, notifyWebhook },
       )
       const ids = created.occurrences.map(({ bookingId }) => bookingId).sort()
       expect(created.replayed).toBe(false)
@@ -384,11 +385,35 @@ describe.skipIf(!serverUrl)('atomic recurring booking creation on PostgreSQL', (
         request,
         {
           ...recurring,
+          notifyMemberEmail,
           notifyWebhook,
         },
       )
       expect(replay.replayed).toBe(true)
       expect(await roundRobinAssignment(eventTypeId)).toEqual(fairness)
+      expect(notifyMemberEmail.mock.calls.map(([, event]) => event)).toEqual(
+        created.occurrences.map(({ bookingId, ordinal }) => ({
+          type: 'created',
+          bookingId,
+          start: occurrenceTime(ordinal),
+          seriesAction: 'create',
+        })),
+      )
+      const intents = await db
+        .selectFrom('booking_series_notifications as n')
+        .innerJoin('booking_series_receipts as r', 'r.id', 'n.id')
+        .select(['n.row_type', 'n.kind', 'n.sequence', 'n.outbox_state', 'r.operation_kind'])
+        .where('n.series_id', '=', created.seriesId)
+        .execute()
+      expect(intents).toEqual([
+        {
+          row_type: 'outbox',
+          kind: 'confirmation',
+          sequence: '1',
+          outbox_state: 'pending',
+          operation_kind: 'create',
+        },
+      ])
       const deliveries = await db
         .selectFrom('webhook_deliveries')
         .select(['id', 'event_type', 'booking_id', 'payload'])

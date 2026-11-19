@@ -45,6 +45,9 @@ const restContract = {
     'GET /api/v1/workflows/{id}',
   ],
   booking_read: [
+    'GET /api/v1/meeting-polls',
+    'GET /api/v1/meeting-polls/{id}',
+    'GET /api/v1/meeting-polls/{id}/results',
     'POST /api/v1/public/meeting-polls/read',
     'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
@@ -69,6 +72,10 @@ const restContract = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/meeting-polls/{id}/close',
+    'POST /api/v1/meeting-polls/{id}/cancel',
+    'DELETE /api/v1/meeting-polls/{id}',
+    'POST /api/v1/meeting-polls/{id}/finalize',
     'POST /api/v1/public/-/routing/{handle}/{slug}/route',
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     'POST /api/v1/public/meeting-polls/enroll',
@@ -302,6 +309,18 @@ function verifyOneTimeWrites(allows: Allows) {
   }
 }
 
+function verifyPollFinalizationScope(allows: Allows) {
+  for (const id of [
+    'POST /api/v1/meeting-polls/{id}/finalize',
+    'mcp:finalize_meeting_poll',
+    'cli:polls finalize',
+  ]) {
+    expect(allows({ kind: 'api_key', apiKeyScope: 'read' }, id), id).toBe(false)
+    for (const apiKeyScope of ['full', 'bookings'] as const)
+      expect(allows({ kind: 'api_key', apiKeyScope }, id), id).toBe(true)
+  }
+}
+
 function verifyOneTimeManagementScopes(operation: typeof apiKeyOperation) {
   for (const id of [
     'POST /api/v1/event-types/{eventTypeId}/one-time-links',
@@ -384,6 +403,20 @@ function verifyWaitlistScopes(operation: typeof apiKeyOperation) {
 }
 
 describe('shared API-key scope policy', () => {
+  it('detects reclassifying poll finalization as a booking read', () => {
+    verifyPollFinalizationScope(apiKeyAllows)
+    const mutated = sourceCopyRegistry([
+      "rest('POST', '/api/v1/meeting-polls/{id}/finalize', 'booking_write', 'key')",
+      "rest('POST', '/api/v1/meeting-polls/{id}/finalize', 'booking_read', 'key')",
+    ])
+    expect(() => verifyPollFinalizationScope(sourceCopyPolicy(undefined, mutated))).toThrow(
+      expect.objectContaining({
+        name: 'AssertionError',
+        message: expect.stringContaining('POST /api/v1/meeting-polls/{id}/finalize'),
+      }),
+    )
+  })
+
   for (const [operationClass, operations] of Object.entries(restContract)) {
     describe(operationClass, () => {
       it.each(operations)('%s follows the full/read/bookings contract', (id) => {
@@ -477,6 +510,13 @@ describe('shared API-key scope policy', () => {
         'remove_waitlist_entry',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_meeting_polls',
+        'get_meeting_poll',
+        'get_meeting_poll_results',
+        'close_meeting_poll',
+        'cancel_meeting_poll',
+        'delete_meeting_poll',
+        'finalize_meeting_poll',
         'read_meeting_poll',
         'enroll_meeting_poll_voter',
         'recover_meeting_poll_voter',
@@ -491,6 +531,9 @@ describe('shared API-key scope policy', () => {
         'get_workflow',
       ],
       read: [
+        'list_meeting_polls',
+        'get_meeting_poll',
+        'get_meeting_poll_results',
         'read_meeting_poll',
         'get_public_routing_form',
         'list_routing_forms',
@@ -547,6 +590,13 @@ describe('shared API-key scope policy', () => {
         'get_event_type',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_meeting_polls',
+        'get_meeting_poll',
+        'get_meeting_poll_results',
+        'close_meeting_poll',
+        'cancel_meeting_poll',
+        'delete_meeting_poll',
+        'finalize_meeting_poll',
         'read_meeting_poll',
         'enroll_meeting_poll_voter',
         'recover_meeting_poll_voter',
