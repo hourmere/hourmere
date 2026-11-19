@@ -140,14 +140,34 @@ export async function signInEmailBudget(db: Db, limits: SignInMailLimits, hash: 
   )
 }
 
+const CLEANUP_RETENTION_MS = 2 * 86_400_000
+const SERIES_ADMISSION_CLEANUP_BATCH = 500
+
 export async function purgeNotificationEmailSends(db: Db, now = new Date()) {
+  const cutoff = new Date(now.getTime() - CLEANUP_RETENTION_MS)
   await db
     .deleteFrom('invitation_email_requests')
-    .where('requested_at', '<', new Date(now.getTime() - 2 * 86_400_000))
+    .where('requested_at', '<', cutoff)
     .executeTakeFirst()
-  return db
-    .deleteFrom('notification_email_sends')
-    .where('sent_at', '<', new Date(now.getTime() - 2 * 86_400_000))
+  return db.deleteFrom('notification_email_sends').where('sent_at', '<', cutoff).executeTakeFirst()
+}
+
+async function purgeBookingSeriesAdmissions(db: Db, now: Date) {
+  await db
+    .deleteFrom('booking_series_admissions')
+    .where(
+      'id',
+      'in',
+      db
+        .selectFrom('booking_series_admissions')
+        .select('id')
+        .where('admitted_at', '<', new Date(now.getTime() - CLEANUP_RETENTION_MS))
+        .orderBy('admitted_at')
+        .orderBy('id')
+        .limit(SERIES_ADMISSION_CLEANUP_BATCH)
+        .forUpdate()
+        .skipLocked(),
+    )
     .executeTakeFirst()
 }
 
@@ -161,10 +181,10 @@ export function notificationEmailCleanupJob(deps: {
     policy: 'exclusive',
     concurrency: 1,
     schedule: { cron: '17 * * * *', payload: {} },
-    handler: () =>
-      purgeNotificationEmailSends(
-        deps.db,
-        new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds),
-      ).then(() => {}),
+    handler: async () => {
+      const now = new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+      await purgeNotificationEmailSends(deps.db, now)
+      await purgeBookingSeriesAdmissions(deps.db, now)
+    },
   })
 }

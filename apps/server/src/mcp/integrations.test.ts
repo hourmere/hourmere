@@ -52,6 +52,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
   let zoom: ReturnType<typeof fakeZoom>
   let app: ReturnType<typeof createApp>
   const ownIds = new Map<Name, string>()
+  const caldavIds = new Map<string, string>()
 
   beforeAll(async () => {
     database = await createTestDatabase(process.env.DATABASE_URL as string)
@@ -91,7 +92,23 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
     }
     google = fakeGoogle()
     zoom = fakeZoom(PUBLIC_URL)
-    calendar = { db, google: { client: google.client, encryptionKey: TEST_CALENDAR_KEY } }
+    calendar = {
+      db,
+      google: { client: google.client, encryptionKey: TEST_CALENDAR_KEY },
+      caldav: {
+        encryptionKey: TEST_CALENDAR_KEY,
+        discoveryClient: {
+          discover: async () => {
+            throw new Error('Listing must not discover')
+          },
+        },
+        syncClient: {
+          sync: async () => {
+            throw new Error('Listing must not sync')
+          },
+        },
+      },
+    }
     conference = { db, zoom: { client: zoom.client, encryptionKey: TEST_CONFERENCE_KEY } }
     for (const [index, principal] of [owner, other].entries()) {
       google.controls.identity.sub = `discovery-google-${index}`
@@ -139,9 +156,9 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
           .executeTakeFirstOrThrow()
       ).id,
     )
-    // Internal CalDAV persistence must not enable application/agent discovery.
+    // Agent discovery includes only the caller’s safe CalDAV metadata, never credentials.
     for (const principal of [owner, other]) {
-      await db
+      const inserted = await db
         .insertInto('calendar_connections')
         .values(
           createCalDavCredentialRecord(
@@ -154,7 +171,9 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
             },
           ),
         )
-        .execute()
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      caldavIds.set(principal.user.id, inserted.id)
     }
     // A browser-only pending attempt must not appear in agent discovery.
     await beginZoomConnection(conference, owner)
@@ -168,6 +187,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
         tools: productTools({
           db,
           googleCalendar: calendar.google,
+          caldavCalendar: calendar.caldav,
           zoomConference: conference.zoom,
         }),
       }),
@@ -234,7 +254,11 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
     '%s matches REST for personal and team keys and excludes another admin',
     async (name) => {
       const personal = await rest(name)
-      expect(personal.data.map((row) => row.id)).toEqual([ownIds.get(name)])
+      if (name === 'list_calendar_connections') expect(personal.caldavEnabled).toBe(true)
+      expect(personal.data.map((row) => row.id)).toEqual([
+        ownIds.get(name),
+        ...(name === 'list_calendar_connections' ? [caldavIds.get(owner.user.id)] : []),
+      ])
       for (const index of [0, 1]) {
         const result = await call(name, index)
         expect(result.isError).toBeFalsy()
@@ -242,7 +266,8 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
         expect(result.structuredContent).toEqual(await rest(name, index))
       }
       const otherView = await rest(name, 2)
-      expect(otherView.data).toHaveLength(1)
+      expect(otherView.data).toHaveLength(name === 'list_calendar_connections' ? 2 : 1)
+      expect(otherView.data.some((row) => row.id === caldavIds.get(owner.user.id))).toBe(false)
       expect(otherView.data.some((row) => row.id === ownIds.get(name))).toBe(false)
       expect((await call(name, 2)).structuredContent).toEqual(otherView)
     },

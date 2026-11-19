@@ -24,6 +24,7 @@ const connection: Schemas['CalendarConnection'] = {
       isPrimary: true,
       checkConflicts: false,
       accessRole: 'owner',
+      available: true,
       lastSyncedAt: null,
       syncError: null,
     },

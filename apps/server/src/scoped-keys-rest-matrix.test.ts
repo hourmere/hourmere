@@ -173,6 +173,8 @@ const classes = {
     'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
+    'POST /api/v1/calendar-connections/caldav/discover',
+    'POST /api/v1/calendar-connections/caldav',
     'POST /api/v1/calendar-connections/google/authorize',
     'POST /api/v1/calendar-connections/microsoft/authorize',
     'DELETE /api/v1/conference-connections/{id}',
@@ -225,7 +227,6 @@ const cases = Object.entries(classes).flatMap(([kind, operations]) =>
     scopes.map((scope) => ({ operation, kind: kind as Class, scope })),
   ),
 )
-const operationIds = Object.values(classes).flat()
 const denied = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
@@ -922,12 +923,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it(`covers the exact ${operationIds.length}-operation contract and all ${cases.length} scope combinations`, () => {
-      expect(new Set(operationIds).size).toBe(operationIds.length)
-      expect([...operationIds].sort()).toEqual(
+    it('covers the exact 158-operation contract and all 474 scope combinations', () => {
+      const ids = Object.values(classes).flat()
+      expect(ids).toHaveLength(158)
+      expect(new Set(ids).size).toBe(158)
+      expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(operationIds.length * scopes.length)
+      expect(cases).toHaveLength(474)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

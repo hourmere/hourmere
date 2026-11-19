@@ -11,6 +11,12 @@ import { MAX_SLOT_RANGE_DAYS } from '../packages/scheduling/src/availability.ts'
 import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
 import { hasValidHostShape } from '../packages/scheduling/src/hosts.ts'
 import {
+  MAX_RECURRING_AVAILABILITY_EVALUATIONS,
+  MAX_RECURRING_AVAILABILITY_READS,
+  MAX_RECURRING_AVAILABILITY_ROWS,
+  RECURRING_AVAILABILITY_DEADLINE_MS,
+} from '../packages/scheduling/src/recurring-availability-budget.ts'
+import {
   MAX_RECURRING_HORIZON_DAYS,
   MAX_RECURRING_OCCURRENCES,
   MIN_RECURRING_OCCURRENCES,
@@ -31,10 +37,10 @@ const proposed = [
   ['Minimum occurrences', MIN_RECURRING_OCCURRENCES],
   ['Maximum occurrences', MAX_RECURRING_OCCURRENCES],
   ['Maximum horizon in local calendar days', MAX_RECURRING_HORIZON_DAYS],
-  ['Maximum occurrence-host evaluations', 96],
-  ['Maximum batch database read statements', 32],
-  ['Maximum batch fact rows', 10000],
-  ['Batch deadline in milliseconds', 5000],
+  ['Maximum occurrence-host evaluations', MAX_RECURRING_AVAILABILITY_EVALUATIONS],
+  ['Maximum batch database read statements', MAX_RECURRING_AVAILABILITY_READS],
+  ['Maximum batch fact rows', MAX_RECURRING_AVAILABILITY_ROWS],
+  ['Batch deadline in milliseconds', RECURRING_AVAILABILITY_DEADLINE_MS],
   ['Series admissions per rolling hour per actor and event', 2],
   ['Series confirmation conference wait in minutes', 30],
   ['Series confirmation lead before the first start in minutes', 15],

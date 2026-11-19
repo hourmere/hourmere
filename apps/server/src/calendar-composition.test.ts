@@ -186,7 +186,23 @@ describe.skipIf(!process.env.DATABASE_URL)('calendar server composition', () => 
           })
         const list = await request('/api/v1/calendar-connections')
         expect(list.status).toBe(200)
-        expect(await list.json()).toMatchObject({ googleEnabled: true, microsoftEnabled: true })
+        expect(await list.json()).toMatchObject({
+          googleEnabled: true,
+          microsoftEnabled: true,
+          caldavEnabled: true,
+        })
+        const caldavJobs = await database.pool.query(
+          "SELECT name FROM pgboss.queue WHERE name IN ('caldav-sync', 'caldav-sync-dispatch', 'caldav-booking', 'caldav-booking-recover') ORDER BY name",
+        )
+        expect(caldavJobs.rows.map((row: { name: string }) => row.name)).toEqual([
+          'caldav-booking',
+          'caldav-booking-recover',
+          'caldav-sync',
+          'caldav-sync-dispatch',
+        ])
+        const discovery = await request('/api/v1/calendar-connections/caldav/discover', 'POST')
+        expect(discovery.status).toBe(400)
+        await discovery.body?.cancel()
         const authorize = await request('/api/v1/calendar-connections/microsoft/authorize', 'POST')
         expect(authorize.status).toBe(200)
         const { authorizationUrl } = (await authorize.json()) as { authorizationUrl: string }

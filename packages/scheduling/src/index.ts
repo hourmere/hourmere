@@ -339,6 +339,11 @@ export {
   recurringBookingAdmissionEnabled,
 } from './recurring-admission.ts'
 export {
+  checkRecurringAvailability,
+  type RecurringAvailabilityInput,
+  type RecurringAvailabilityResult,
+} from './recurring-availability.ts'
+export {
   expandRecurringRule,
   MAX_RECURRING_HORIZON_DAYS,
   MAX_RECURRING_OCCURRENCES,
