@@ -1,5 +1,5 @@
-// Routing configuration and public metadata interfaces are present by name. Production
-// remains hard-off. Submission, continuation and UI surfaces are reserved. Runtime refusal is tested by the
+// Routing configuration, public metadata and submission interfaces are present by name.
+// Production remains hard-off. Continuation and UI surfaces are reserved. Runtime refusal is tested by the
 // routing adapter tests. This inventory still examines production assembly and all source
 // paths, without snapshots or a git baseline. The web keeps its separate Off inventory.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -83,6 +83,16 @@ const SHIPPED_OPERATIONS = [
     path: '/api/v1/public/-/routing/teams/{teamSlug}/{slug}',
     operationId: 'getPublicTeamRoutingForm',
   },
+  {
+    method: 'post',
+    path: '/api/v1/public/-/routing/{handle}/{slug}/route',
+    operationId: 'routeLead',
+  },
+  {
+    method: 'post',
+    path: '/api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
+    operationId: 'routeTeamLead',
+  },
 ]
 const SHIPPED_PATHS = [...new Set(SHIPPED_OPERATIONS.map(({ path }) => path))]
 const SHIPPED_COMMANDS = {
@@ -94,6 +104,7 @@ const SHIPPED_COMMANDS = {
   'routing-forms publish': 'publish_routing_form',
   'routing-forms preview': 'preview_routing_form',
   'routing-forms public': 'get_public_routing_form',
+  'routing-forms route': 'route_lead',
 }
 // Explicit component names keep future public schemas visible to this test.
 const SHIPPED_SCHEMAS = [
@@ -108,6 +119,8 @@ const SHIPPED_SCHEMAS = [
   'PreviewRoutingForm',
   'RoutingFormPreview',
   'PublicRoutingForm',
+  'RoutingSubmission',
+  'RoutingSubmissionResponse',
 ]
 const SHIPPED_TAGS = ['Routing forms']
 
@@ -642,7 +655,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
           ? isRoutingName(property ?? '')
           : isRoutingName(name)
       }),
-    ).toEqual([INSTANCE_CAPABILITY])
+    ).toEqual([INSTANCE_CAPABILITY, 'RoutingSubmissionResponse.routeToken'])
   })
 
   it('registers exactly the configuration routes in production with every optional group on', async () => {
@@ -797,7 +810,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
     expect(literals).toContain('/sign-in/confirm')
     expect(literals).toContain('/booking')
     expect([...new Set(literals.filter(isRoutingName))].sort()).toEqual(
-      [...SHIPPED_PATHS, '/api/v1/public/-/routing'].sort(),
+      [...SHIPPED_PATHS, '/api/v1/public/-/routing', '/route/continue'].sort(),
     )
     const built = sources.flatMap(([file, source]) => builtPaths(file, source))
     expect(built.length).toBeGreaterThan(50)

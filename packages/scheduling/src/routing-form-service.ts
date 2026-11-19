@@ -1309,27 +1309,16 @@ function selectLivePublishedForms(db: Db) {
     .where('f.enabled', '=', true)
 }
 
-type PublicRoutingFormAddress =
+export type PublicRoutingFormAddress =
   | { handle: string; slug: string }
   | { teamSlug: string; slug: string }
 
-/** Resolves the public address and reads only form text and the current published questions. */
-export async function getPublicRoutingForm(db: Db, address: PublicRoutingFormAddress) {
-  const unavailable = () => new DomainError('not_found', 'routing_form_not_found')
+function selectPublicPublishedForm(db: Db, address: PublicRoutingFormAddress) {
   const slug = address.slug.toLowerCase()
-  if (!SLUG_PATTERN.test(slug)) throw unavailable()
+  if (!SLUG_PATTERN.test(slug)) throw formNotFound()
   const team = 'teamSlug' in address
   const ownerSlug = team ? address.teamSlug : servedHandle(address.handle)
-  if (ownerSlug === undefined || (team && !isPublicTeamSlug(ownerSlug))) throw unavailable()
-
-  const published = selectLivePublishedForms(db)
-    .select([
-      'v.id as versionId',
-      'v.questions',
-      sql<string>`f.draft->>'title'`.as('title'),
-      sql<string | null>`f.draft->>'description'`.as('description'),
-    ])
-    .where('f.slug', '=', slug)
+  if (ownerSlug === undefined || (team && !isPublicTeamSlug(ownerSlug))) throw formNotFound()
   const organizations = team
     ? db
         .selectFrom('auth.organization as o')
@@ -1347,8 +1336,31 @@ export async function getPublicRoutingForm(db: Db, address: PublicRoutingFormAdd
         .select('po.organization_id')
         .where('p.handle', '=', ownerSlug)
 
-  const form = await published.where('f.organization_id', 'in', organizations).executeTakeFirst()
-  if (!form) throw unavailable()
+  return selectLivePublishedForms(db)
+    .where('f.slug', '=', slug)
+    .where('f.organization_id', 'in', organizations)
+}
+
+/** Resolves the public address to the trusted organization and form IDs for submission. */
+export async function resolvePublicRoutingForm(db: Db, address: PublicRoutingFormAddress) {
+  const form = await selectPublicPublishedForm(db, address)
+    .select(['f.id as formId', 'f.organization_id as organizationId'])
+    .executeTakeFirst()
+  if (!form) throw formNotFound()
+  return form
+}
+
+/** Resolves the public address and reads only form text and the current published questions. */
+export async function getPublicRoutingForm(db: Db, address: PublicRoutingFormAddress) {
+  const form = await selectPublicPublishedForm(db, address)
+    .select([
+      'v.id as versionId',
+      'v.questions',
+      sql<string>`f.draft->>'title'`.as('title'),
+      sql<string | null>`f.draft->>'description'`.as('description'),
+    ])
+    .executeTakeFirst()
+  if (!form) throw formNotFound()
   const questions = (form.questions as unknown as RoutingQuestion[]).map((question) => {
     const { id, type, label, required } = question
     const fields = { id, label, required }
