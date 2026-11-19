@@ -651,7 +651,9 @@ clears opt-out or resets the once-per-poll/mailbox reminder receipt.
 
 Host resend invitation is an explicit operation for a retained, nonremoved,
 nonwithdrawn invitee while open: at most one accepted resend per mailbox per 15 minutes
-and three per poll/mailbox, plus existing actor/organization/IP/recipient mail budgets.
+and three per poll/mailbox, plus the per-organization and per-IP request limits shared with
+create and invite, the instance outbound mail cap and per-recipient limits. There is no
+per-organization mail budget yet; one is required before open Cloud sign-up.
 Persist these counters across removal and re-invitation. It rotates the emailed capability,
 invalidates the old generation and queues a new durable intent without reacquiring capacity.
 A retained idempotency key makes retry mail-free. Requests beyond cooldown/budgets return
@@ -728,7 +730,8 @@ bounded payloads, enrollment and mail work. Reuse existing email budgets; do not
 arbitrary host HTML or reminders to unverified public-link enrollees. Configure shared rate-limit enforcement
 for multiple processes; per-process limits alone are insufficient. Additional mail budgets must be selected and documented before service admission using
 existing abuse-control policy. The storage cleanup schedule is specified below; it does
-not replace the existing recipient and organization mail budgets. Forwarded public links and
+not replace the existing per-recipient limits and instance outbound mail cap (there is no
+per-organization mail budget yet). Forwarded public links and
 mailbox aliases can still admit unwanted voters; invited mode is recommended for sensitive
 meetings. Email verification is not proof of a unique human.
 
