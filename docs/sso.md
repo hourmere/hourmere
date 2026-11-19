@@ -15,10 +15,10 @@ while both protocols are hard-off, the worker job that delivers their email and 
 cleanup of attempts. The Fresh proof step adds the shared operation-bound retry gate,
 exercised only by a test operation; no production route calls it yet. Draft reads adds
 the redacted provider list and policy read across REST, MCP and CLI; both return
-`404 sso_disabled` before lookup in production, and their MCP tools are hidden while off. No SSO provider,
-sign-in route or feature flag is enabled. SSO will be available to every
-instance, including self-hosted ones; there is no license, subscription or hosted-service
-requirement.
+`404 sso_disabled` before lookup in production, and their MCP tools are hidden while off.
+The OIDC sign-in and callback endpoints also return `404 sso_disabled` in production.
+SSO will be available to every instance, including self-hosted ones. There is no license,
+subscription or hosted-service requirement.
 
 ## Decision and release conditions
 
@@ -558,8 +558,8 @@ signed RS256 ID tokens with a matching attempt nonce. It returns the exact issue
 subject and, when present, the signed `auth_time` for the future step-up flow.
 Sign-in attempts use a fresh S256 challenge and an authenticated state envelope. The
 attempt row binds that state to the initiating browser, provider revision and team, and
-only one callback can take the verifier and nonce. No callback or sign-in route uses
-these helpers yet.
+only one callback can take the verifier and nonce. The OIDC sign-in adapter uses these
+helpers behind the protocol switch.
 
 ### SAML
 
@@ -636,8 +636,8 @@ changes; no automatic trust replacement from a refreshed metadata URL.
 Self-hosted IdPs on a private network, or public ones served on a port other than 443,
 require a separate operator-owned exact host/port allowlist, `SSO_PRIVATE_TARGETS`, never a
 team-editable bypass or reuse of the webhook allowlist setting. The configuration loader
-parses it at startup, empty by default, and nothing else reads it until a later step calls
-the profile, so today it routes nothing. Each of at most 32 entries is one exact
+parses it at startup, empty by default, and server composition passes it to guarded OIDC
+sign-in. It routes nothing while OIDC stays hard-off. Each of at most 32 entries is one exact
 `host:port`, `IPv4:port` or `[IPv6]:port`, without networks, wildcards or port ranges; an
 IP entry must be RFC1918, loopback or IPv6 unique-local space, never metadata or
 link-local. A request URL's exact host and port must match an entry, so a different port,
@@ -699,9 +699,8 @@ with a bounded count per provider and source so failed attempts cannot flood the
 journal. The journal is local to the instance database, so emergency recovery never
 waits for a third-party audit sink.
 
-The Audit actions step built this vocabulary and records nothing itself: the
-[SSO actions](audit-log.md#sso-actions) are defined in `packages/db/src/sso-audit.ts`
-and checked by migration 0085, and no production code emits one yet. Later steps call
+The Audit actions step built this vocabulary. The [SSO actions](audit-log.md#sso-actions)
+are defined in `packages/db/src/sso-audit.ts` and checked by migration 0085. Later steps call
 `writeSsoAuditEvent` inside the transaction of the change they record, so a rollback removes
 the event with the change, and `writeSsoSecurityFailure` for a security failure. The
 provider and correlation IDs must be stored provider and attempt IDs (UUIDv7); the checks
@@ -1107,6 +1106,36 @@ Provider tests and self-link ceremonies get their authorization URL from
 `testSsoProvider` and `linkSsoAccount`, which create their own bound attempts.
 `returnTo` is an optional relative `/app` path checked by the safe-redirect rule below.
 
+The OIDC adapter implements `sign_in` for an enabled OIDC provider. The POST requires
+an exact `Origin` from `PUBLIC_URL` and refuses Authorization headers. It creates a
+browser-bound attempt before returning `200 {"url": "…", "redirect": true}`.
+Initiation preserves any existing binding value and issues the cookie with
+SameSite=Lax for the provider's top-level GET callback.
+The callback atomically consumes the state before exchanging the authorization code.
+The S256 verifier binds that exchange to this attempt, and the IdP enforces single use
+of its code. The state also pins the resolved endpoints through the callback. The
+authorization endpoint must have no query parameters, so Hourmere controls all
+authorization parameters. After ID token verification, the callback rechecks the provider revision,
+the active domain claim, the linked issuer and subject, the proven and current verified
+mailbox, and team membership. The session, browser proof and success audit event
+commit together. The proof expires at the first applicable deadline in
+[Browser proof](#browser-proof), including a signed
+`session_expires_at` claim when present, even if Better Auth later refreshes the session.
+
+An unlinked subject receives the same `302` redirect to `/sign-in?error=unable_to_create_session`
+for every combination of `email_verified` and local account existence. The callback
+does not look up a local account by email. It creates no account, identity link,
+session or pending result for an unlinked subject. A changed linked mailbox also
+receives the generic sign-in error until OIDC completion is available. While OIDC is
+hard-off, both endpoints return
+`404 sso_disabled` before looking up a provider or consuming an attempt.
+
+OIDC 登录仅为已关联的身份创建会话。发起登录时需校验 `Origin` 并将尝试绑定到浏览器；
+回调仅使用一次授权码和状态，并在创建会话前重新检查提供商版本、域名声明、身份关联、
+已证明的邮箱和当前团队成员资格。浏览器证明取适用期限中的最早时间，会话续期不延长证明。
+未关联身份一律收到相同的通用登录错误，不会创建账号、身份关联、会话或待处理结果。
+OIDC 在生产代码中保持关闭，两个端点均返回 `404 sso_disabled`。
+
 When OIDC callback needs mailbox proof, it stores a short-lived frozen validated result
 bound to the original browser/attempt, without creating a session or retaining tokens.
 After mailbox consumption, same-origin `POST /api/auth/sso/oidc/complete` with `attemptId`
@@ -1277,11 +1306,12 @@ return `404 sso_disabled` before caller or database lookup, including malformed 
 parameters. MCP lists neither tool while off and direct calls return `sso_disabled`. There
 are also three earlier exact-path exemptions. The guarded auth-protocol endpoints that a
 built step mounts while hard-off, because each must answer `404 sso_disabled` itself
-(today the Mailbox proof pair `/api/auth/sso/mailbox-proof/send` and `/consume`), are exempt
+(the Mailbox proof pair `/api/auth/sso/mailbox-proof/send` and `/consume`, and the OIDC sign-in
+pair `/api/auth/sign-in/sso` and `/api/auth/sso/callback/{providerId}`), are exempt
 in the route inventory and the source literals only, and only because the suite requests
 each of them in the app built from `productionAppOptions` with `SSO_OIDC_ENABLED=true` and
 `SSO_SAML_ENABLED=true` in the environment and requires `404 {"error":"sso_disabled"}` for
-every method, header set and attempt ID, with a queue, caller resolver and database that
+every tested method, header set and input ID, with a queue, caller resolver and database that
 would fail any effect; the worker role's routes get no exemption. The existing MCP OAuth discovery route
 `/.well-known/openid-configuration/api/auth` is exempt in the route inventory and the
 source literals, and the same document's Better Auth endpoint

@@ -15,8 +15,21 @@ const uuid = z.uuid()
 const statePattern =
   /^([a-f0-9]{8}-[a-f0-9]{4}-7[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\.([\w-]+)$/
 const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
-const statePayload = z.tuple([secret, secret, z.string()])
-const refused = () => new Error('OIDC attempt refused')
+const statePayload = z.tuple([secret, secret, z.string(), z.hex().length(64).optional()])
+export class OidcAttemptRefused extends Error {
+  constructor() {
+    super('OIDC attempt refused')
+  }
+}
+const refused = () => new OidcAttemptRefused()
+
+export class OidcStateReplay extends OidcAttemptRefused {
+  readonly attemptId: string
+  constructor(attemptId: string) {
+    super()
+    this.attemptId = attemptId
+  }
+}
 
 interface AttemptDependencies {
   db: Db
@@ -25,11 +38,12 @@ interface AttemptDependencies {
 
 type OriginatingBrowser = SsoProviderRevision & { browserBinding: string | undefined }
 
-function returnDestination(raw: string): string {
+/** A canonical, same-origin destination under /app, or undefined for unsafe input. */
+export function oidcReturnDestination(raw: string): string | undefined {
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.length > maxReturnPathLength)
-    throw refused()
+    return undefined
   // biome-ignore lint/suspicious/noControlCharactersInRegex: reject characters the URL parser strips
-  if (/[\u0000- \u007f-\u009f\\]/.test(raw)) throw refused()
+  if (/[\u0000- \u007f-\u009f\\]/.test(raw) || !raw.isWellFormed()) return undefined
   const url = new URL(raw, appOrigin)
   const path = url.pathname + url.search + url.hash
   if (
@@ -38,7 +52,7 @@ function returnDestination(raw: string): string {
     /%2f|%5c/i.test(url.pathname) ||
     path.length > maxReturnPathLength
   )
-    throw refused()
+    return undefined
   return path
 }
 
@@ -65,7 +79,7 @@ function stateAad(browser: OriginatingBrowser, id: string, binding: string): str
   ])
 }
 
-async function lockProvider(trx: Db, browser: OriginatingBrowser): Promise<void> {
+export async function lockOidcProvider(trx: Db, browser: SsoProviderRevision): Promise<void> {
   // Match the team-write order. Hold the provider revision stable until the attempt commits.
   const organization = await trx
     .selectFrom('auth.organization')
@@ -91,26 +105,29 @@ async function lockProvider(trx: Db, browser: OriginatingBrowser): Promise<void>
 /** Builds authorization parameters for a fresh browser-bound OIDC sign-in attempt. */
 export async function startOidcAttempt(
   { db, configurationKey }: AttemptDependencies,
-  browser: OriginatingBrowser & { returnPath: string },
+  browser: OriginatingBrowser & { returnPath: string; endpointsDigest?: string },
 ) {
   const binding = bindingDigest(browser)
-  const returnPath = returnDestination(browser.returnPath)
+  const returnPath = oidcReturnDestination(browser.returnPath)
+  if (!returnPath) throw refused()
   const codeVerifier = randomBytes(32).toString('base64url')
   const nonce = randomBytes(32).toString('base64url')
   const state = await db.transaction().execute(async (trx) => {
-    await lockProvider(trx, browser)
+    await lockOidcProvider(trx, browser)
     const { id, now } = await trx
       .selectNoFrom([
         sql<string>`uuidv7()`.as('id'),
         sql<string>`clock_timestamp()::text`.as('now'),
       ])
       .executeTakeFirstOrThrow()
-    // The verifier, nonce and return path travel in authenticated ciphertext. Storage keeps
-    // only digests of the browser binding and the full state for the eventual one-shot update.
+    // Ceremony material travels in authenticated ciphertext. The attempt stores only
+    // digests of the browser binding and full state for the eventual one-shot update.
+    const payload = [codeVerifier, nonce, returnPath]
+    if (browser.endpointsDigest) payload.push(browser.endpointsDigest)
     const envelope = encryptCredential(
       configurationKey,
       stateAad(browser, id, binding),
-      JSON.stringify([codeVerifier, nonce, returnPath]),
+      JSON.stringify(payload),
     ).toString('base64url')
     const state = `${id}.${envelope}`
     await trx
@@ -138,15 +155,15 @@ export async function startOidcAttempt(
   }
 }
 
-function openState(
-  configurationKey: Buffer,
-  aad: string,
-  envelope: string,
-): [string, string, string] {
+function openState(configurationKey: Buffer, aad: string, envelope: string) {
   try {
     const plaintext = decryptCredential(configurationKey, aad, Buffer.from(envelope, 'base64url'))
-    const [codeVerifier, nonce, returnPath] = statePayload.parse(JSON.parse(plaintext))
-    return [codeVerifier, nonce, returnDestination(returnPath)]
+    const [codeVerifier, nonce, returnPath, endpointsDigest] = statePayload.parse(
+      JSON.parse(plaintext),
+    )
+    const destination = oidcReturnDestination(returnPath)
+    if (!destination) throw refused()
+    return { codeVerifier, nonce, returnPath: destination, endpointsDigest }
   } catch {
     throw refused()
   }
@@ -167,17 +184,13 @@ export async function consumeOidcAttempt(
   const id = match?.[1]
   const envelope = match?.[2]
   if (!id || !envelope) throw refused()
-  const [codeVerifier, nonce, returnPath] = openState(
-    configurationKey,
-    stateAad(browser, id, binding),
-    envelope,
-  )
+  const material = openState(configurationKey, stateAad(browser, id, binding), envelope)
 
   const attempt = await db.transaction().execute(async (trx) => {
-    await lockProvider(trx, browser)
+    await lockOidcProvider(trx, browser)
     const eligible = await trx
       .selectFrom('sso_attempts')
-      .select('id')
+      .select(['id', 'consumed_at'])
       .where('id', '=', id)
       .where('kind', '=', 'sign_in')
       .where('operation', '=', operation)
@@ -186,10 +199,10 @@ export async function consumeOidcAttempt(
       .where('provider_revision', '=', browser.revision)
       .where('browser_binding_digest', '=', binding)
       .where('input_digest', '=', sha256(state))
-      .where('consumed_at', 'is', null)
       .forUpdate()
       .executeTakeFirst()
     if (!eligible) throw refused()
+    if (eligible.consumed_at) throw new OidcStateReplay(eligible.id)
     // Sample the database wall clock after acquiring the row lock.
     try {
       const consumed = await trx
@@ -213,9 +226,8 @@ export async function consumeOidcAttempt(
     }
   })
   return {
-    codeVerifier,
-    nonce,
-    returnPath,
+    id,
+    ...material,
     createdAt: attempt.created_at,
     expiresAt: attempt.expires_at,
   }
