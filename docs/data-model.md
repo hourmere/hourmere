@@ -162,8 +162,11 @@ row. Its expectation file is
 protection assertion to fail.
 
 The cleanup schedule is hourly, at most 500 rows per transaction. It deletes expired
-public pending voters and their dependent personal data, and clears expired capability
-ciphertext. Persisting deadline closure belongs to the later reminder step.
+public pending voters and their dependent personal data, clears expired capability
+ciphertext, and records deadline closure with `closed_at = deadline_at` while preserving
+both revisions. The deadline closure transaction queues a host delivery for the poll's
+creator if they still manage the event. The mail worker rechecks current authority before
+sending.
 Capacity and voting expiry are synchronous database-clock decisions, never dependent on
 worker punctuality. Normal terminal poll history follows the installation's booking-data
 retention policy from its terminal transition (deadline for automatic closure); with no
@@ -2268,6 +2271,13 @@ trigger. Booking lists, details and activity include hold-backed rows only after
 is present, including paid bookings later cancelled. Unconfirmed terminal holds remain hidden.
 Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
 unique index, so they cannot collide with ordinary booking idempotency keys.
+
+Migration `0124_payment_checkout_attempts.sql` adds one optional Checkout attempt per hold.
+It stores the amount and currency snapshot, account and mode, a random attempt ID and its
+creation key, and the operation start time and Session ID as they become known. Existing
+holds stay unchanged. The booking's deadline still governs capacity and payment acceptance.
+The attempt survives hold contact erasure. Its foreign key blocks booking deletion while
+the attempt is retained. Checkout URLs and provider credentials are kept out of storage.
 
 ## Private attendee no-show markers
 
