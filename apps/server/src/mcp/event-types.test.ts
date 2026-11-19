@@ -59,6 +59,7 @@ function productSourceCopy(change?: Change): Factory {
     auditLogTools: () => [],
     oneTimeLinkTools: () => [],
     slackDestinationTools: () => [],
+    webhookTools: () => [],
     openTimeSnippetTools: () => [],
     availabilityTroubleshootingTools: () => [],
     workflowTools: () => [],

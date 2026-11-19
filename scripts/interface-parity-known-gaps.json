@@ -3,7 +3,6 @@
   "configureCalendar": "calendar conflict-selection writes have no MCP tool or CLI command yet.",
   "confirmDefaultSchedule": "confirming starter working hours has no MCP tool or CLI command yet.",
   "createSchedule": "schedule creation has no MCP tool or CLI command yet.",
-  "createWebhook": "webhook creation and one-time signing-secret delivery have no MCP tool or CLI command yet.",
   "deleteEventType": "event-type deletion has no MCP tool or CLI command yet.",
   "deleteSchedule": "schedule deletion has no MCP tool or CLI command yet.",
   "deleteScheduleOverride": "removing a date's schedule override has no MCP tool or CLI command yet.",

@@ -123,9 +123,10 @@ Add **Hourmere Trigger**, select its credential and one or more events, then act
 workflow. The node registers its callback and stores the returned webhook ID and signing
 secret in workflow static data. Deactivation attempts to delete that endpoint. If Hourmere
 is unreachable, it returns false and keeps the registration details for recovery. Remove
-a leftover endpoint through REST: find its ID with `GET /api/v1/webhooks`, then call
-`DELETE /api/v1/webhooks/{id}` using a `full` API key for an organization owner/admin.
-Webhook management is REST-only; there is no settings page or MCP/CLI operation.
+a leftover endpoint by finding its ID with `GET /api/v1/webhooks`, MCP `list_webhooks`
+or CLI `webhooks list`. Then call REST `DELETE /api/v1/webhooks/{id}` using a `full`
+API key for an organization owner/admin. REST, MCP and the CLI also support manual
+endpoint creation. See [Booking webhooks](/docs/webhooks).
 The endpoint still occupies a webhook slot until removed. Reactivation can reuse or replace
 the retained registration once Hourmere is reachable. Each active trigger
 uses one of Hourmere's ten webhook endpoints per organization. Supported events are:

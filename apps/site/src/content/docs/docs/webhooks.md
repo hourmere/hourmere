@@ -4,9 +4,10 @@ description: Configure signed outbound booking webhooks and their delivery limit
 ---
 
 Webhooks are optional outbound signed notifications for booking creation, rescheduling and
-cancellation, plus private attendee no-show changes. They use the same booking services for public pages, REST and MCP. They do
-not depend on Google, Microsoft, mail or a billing account. Webhook management is REST-only;
-there is no webhook settings page. The private [Zapier app](/docs/zapier) and the trigger
+cancellation, plus private attendee no-show changes. They use the same booking services
+for public pages, REST and MCP, independently of Google, Microsoft, mail and billing.
+You can list and create endpoints through REST, MCP and the CLI.
+The private [Zapier app](/docs/zapier) and the trigger
 in the [n8n community node](/docs/n8n) use these endpoints to subscribe and unsubscribe
 automatically. [Make recipes](/docs/make) give manual module settings for
 `booking.created` and `booking.cancelled`. [Slack notifications](/docs/slack) provide a
@@ -22,16 +23,17 @@ enabling does not backfill past bookings. Turning the global switch off also ski
 deliveries when a worker sees them. This switch also controls Slack capture, test enqueue
 and delivery. Keep a worker running for delivery and retention cleanup.
 
-Organization owners and admins may use these endpoints with a session or API key acting in
-that organization. Ordinary members/hosts cannot configure or inspect webhooks, since each
-endpoint can receive events about the entire organization. A host can configure their own
-personal organization's webhook. Current verified membership and role are checked again in
-the service; possession of another organization's endpoint ID grants no access.
+Verified personal owners and current team owners/admins can manage webhooks in their
+acting organization. Each endpoint can receive events about that entire organization,
+so ordinary team members and hosts receive `insufficient_role` with an API key or MCP OAuth
+grant. The service takes the acting organization from the caller's credentials and checks
+current verified membership and role before granting access.
 
 API keys need `read` or `full` scope to inspect webhook metadata and deliveries, and `full`
-to configure webhooks or rotate a signing secret. `bookings` cannot access these endpoints.
-Disallowed scopes get `403 insufficient_scope` in addition to the existing role checks;
-see [API key scopes](/docs/api-keys) for the generated operation table.
+to configure webhooks or rotate a signing secret. Disallowed scopes get `insufficient_scope`
+(HTTP 403 in REST). An authorized `mcp:tools` OAuth grant can call both MCP tools with
+the same organization and role checks. See [API key scopes](/docs/api-keys) for the generated
+operation table.
 
 Cookie-session writes require `X-Expected-Organization-Id` set to the organization where
 the action started, including personal organizations. List and delivery reads accept the
@@ -47,14 +49,24 @@ same 409 as event-type writes; malformed read context returns 403. The service c
 context again inside its locked transaction. API keys ignore this header and keep their
 stored organization. See [browser organization context](/docs/api-conventions#browser-organization-context).
 
-| Method and path under `/api/v1` | Purpose |
-|---|---|
-| `POST /webhooks` | Create `{ url, events, isActive? }`; returns `{ webhook, secret }` |
-| `GET /webhooks` | List up to ten endpoints; never returns secrets |
-| `PATCH /webhooks/{id}` | Change `events` and/or `isActive` |
-| `POST /webhooks/{id}/rotate-secret` | Replace the signing secret; returns `{ secret }` once |
-| `DELETE /webhooks/{id}` | Delete the endpoint and all retained deliveries |
-| `GET /webhooks/{id}/deliveries?after=…` | At most fifty delivery metadata rows, newest first |
+| Method and path under `/api/v1` | MCP tool | CLI command | Purpose |
+|---|---|---|---|
+| `POST /webhooks` | `create_webhook` | `webhooks create` | Create from `{ url, events, isActive? }` and receive `{ webhook, secret }` once |
+| `GET /webhooks` | `list_webhooks` | `webhooks list` | List up to ten endpoints with metadata only |
+| `PATCH /webhooks/{id}` | — | — | Change `events` and/or `isActive` |
+| `POST /webhooks/{id}/rotate-secret` | — | — | Replace the signing secret and receive `{ secret }` once |
+| `DELETE /webhooks/{id}` | — | — | Delete the endpoint and all retained deliveries |
+| `GET /webhooks/{id}/deliveries?after=…` | — | — | At most fifty delivery metadata rows, newest first |
+
+MCP listing takes `{}`. MCP and CLI return the same metadata as the REST list in
+`{ data: [...] }`. For CLI creation, supply the JSON arguments via `--input FILE` or
+`--input -`. Use `--output FILE` to save the response to a new private file or explicit
+`--json` to send it to standard output. Route the signing secret directly to private storage.
+See [CLI webhook examples](/docs/cli#list-and-create-webhooks).
+
+中文：Webhook 列表支持 `read` 或 `full` 密钥，创建需要 `full` 密钥。操作仅针对凭证所属的
+个人或团队组织，调用者须为个人所有者或当前团队所有者／管理员。创建仅返回一次签名密钥，
+列表仅返回元数据。CLI 可用 `--output` 将创建结果写入新建的私有文件。
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,

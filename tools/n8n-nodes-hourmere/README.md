@@ -126,10 +126,11 @@ reschedule request expired, and **Attendee No-Show Changed**
 `data.noShowMarkedAt` and `data.noShowMarkedBy`; both marker fields are null when
 a host unmarks a no-show. Activation registers a
 REST webhook; deactivation attempts to delete it. If Hourmere is unreachable, deactivation
-returns false and retains registration details for recovery. Remove the leftover endpoint
-through REST: find its ID with `GET /api/v1/webhooks`, then call
-`DELETE /api/v1/webhooks/{id}` using a `full` API key for an organization owner/admin.
-Webhook management is REST-only; there is no settings page or MCP/CLI operation.
+returns false and retains registration details for recovery. Find the leftover endpoint's
+ID with `GET /api/v1/webhooks`, MCP `list_webhooks` or CLI `webhooks list`. Then call
+REST `DELETE /api/v1/webhooks/{id}` using a `full` API key for an organization owner/admin.
+REST, MCP and the CLI also support manual endpoint creation.
+See [Booking webhooks](https://hourmere.com/docs/webhooks).
 The endpoint consumes one of the organization’s ten webhook slots until removed.
 Hourmere webhooks must be enabled and its worker must reach n8n's configured callback URL.
 Private destinations need Hourmere's explicit operator allowlist; ordinary public

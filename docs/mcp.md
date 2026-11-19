@@ -79,6 +79,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `update_slack_destination` | — | `slack update` | `full` |
 | `delete_slack_destination` | — | `slack delete` | `full` |
 | `test_slack_destination` | — | `slack test` | `full` |
+| `list_webhooks` | — | `webhooks list` | `full, read` |
+| `create_webhook` | — | `webhooks create` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |
@@ -193,6 +195,23 @@ Before upgrading, stop every old web/all/worker and other old key-authenticating
 apply migrations and restart every role with the new code before allowing scoped keys.
 Do not run old and new servers side by side once scoped keys exist: old servers treat
 scoped keys as full access. Use the supported backup/restore procedure for rollback.
+
+## List and create booking webhooks
+
+`list_webhooks` takes `{}` and returns `{ data: [...] }` with up to ten endpoint records
+in the acting organization, with metadata only. Use a `read` or `full` API key.
+`create_webhook` requires a `full` API key and accepts `url`, `events` and optional
+`isActive` (default `true`). It returns `{ webhook, secret }` once. Save `secret` directly
+to the receiver's secret store and keep the tool result out of logs.
+
+An authorized `mcp:tools` OAuth grant can use both tools. Both take the organization from
+the credential and require a verified personal owner or current team owner/admin.
+Disallowed API key scopes return `insufficient_scope`, and callers without the required
+role get `insufficient_role`, matching REST. See [Booking webhooks](https://hourmere.com/docs/webhooks)
+for supported events, URL policy and configuration.
+
+中文：`list_webhooks` 接受 `read` 或 `full` 密钥，`create_webhook` 需要 `full` 密钥。
+两者均检查凭证所属组织及当前角色。创建仅返回一次签名密钥，请保存到接收端的密钥存储。
 
 ## Manage hosted bookings
 

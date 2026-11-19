@@ -14,6 +14,7 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   listSsoProviders: 'GET /api/v1/team/sso/providers',
   getGroupOccurrenceAttendees: 'GET /api/v1/group-occurrences/{id}/attendees',
   getSsoPolicy: 'GET /api/v1/team/sso/policy',
+  listWebhooks: 'GET /api/v1/webhooks',
 }
 
 const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'

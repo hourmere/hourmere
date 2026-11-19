@@ -373,6 +373,24 @@ was created, or from the list with a read/full key. Used links remain used. Exis
 ownership and team permissions still apply. See the
 [one-time link guide](https://hourmere.com/docs/one-time-links) for limits and retention.
 
+`webhooks list` returns `{ data: [...] }` with endpoint metadata for the key's organization
+and requires `read` or `full`. `webhooks create` requires `full` and accepts JSON with
+`url`, `events` and optional `isActive` (default `true`). Both commands require the
+verified personal owner or a current team owner/admin and use REST's error codes.
+
+```sh
+hourmere webhooks list --json
+hourmere webhooks create --input webhook.json --output webhook-result.json
+hourmere --help
+```
+
+Creation returns `{ webhook, secret }` once. It requires `--output FILE` to save the full
+response in a new `0600` file, or explicit `--json` to send the full response to stdout.
+Use `--output` when stdout is logged. It prints only `{"outputWritten":true}` on success.
+Copy the signing secret into the receiver's secret store and keep the response out of
+shell history and logs. See [Booking webhooks](https://hourmere.com/docs/webhooks) for the
+supported event kinds, destination policy and configuration.
+
 `workflows list` (JSON `owner` as `{"kind":"personal","id":USER_ID}` or
 `{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)
 read booking workflows with a `read` or `full` key. Booking workflows are not available yet:

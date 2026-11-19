@@ -171,6 +171,15 @@ describe('published API key scope tables', () => {
       )
   })
 
+  it.each(documents)('$path publishes webhook list and create scopes', ({ document, section }) => {
+    expect(document).toContain('| `list_webhooks` | — | `webhooks list` | `full, read` |')
+    expect(document).toContain('| `create_webhook` | — | `webhooks create` | `full` |')
+    if (section === 'all') {
+      expect(document).toContain('| `GET /api/v1/webhooks` | Session or API key | `full, read` |')
+      expect(document).toContain('| `POST /api/v1/webhooks` | Session or API key | `full` |')
+    }
+  })
+
   it.each(documents)(
     '$path matches the live operation registry exactly',
     ({ document, section }) => {
