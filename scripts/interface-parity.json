@@ -251,6 +251,34 @@
     "exemption": "browser-session-only",
     "reason": "Installing or replacing provider credentials requires the owner’s live browser session."
   },
+  "listMeetingPolls": {
+    "mcp": "list_meeting_polls",
+    "cli": "polls list"
+  },
+  "getMeetingPoll": {
+    "mcp": "get_meeting_poll",
+    "cli": "polls get"
+  },
+  "getMeetingPollResults": {
+    "mcp": "get_meeting_poll_results",
+    "cli": "polls results"
+  },
+  "closeMeetingPoll": {
+    "mcp": "close_meeting_poll",
+    "cli": "polls close"
+  },
+  "cancelMeetingPoll": {
+    "mcp": "cancel_meeting_poll",
+    "cli": "polls cancel"
+  },
+  "deleteMeetingPoll": {
+    "mcp": "delete_meeting_poll",
+    "cli": "polls delete"
+  },
+  "finalizeMeetingPoll": {
+    "mcp": "finalize_meeting_poll",
+    "cli": "polls finalize"
+  },
   "readMeetingPoll": {
     "mcp": "read_meeting_poll",
     "cli": "polls view"

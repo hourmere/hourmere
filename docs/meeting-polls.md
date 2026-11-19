@@ -12,7 +12,8 @@ services (host results, voter removal and bulk removal of unverified enrollees) 
 tombstones are implemented through migration `0088`; credential mail delivery and hourly
 capability ciphertext expiry are implemented, as are public REST/MCP/CLI transports,
 deadline reminders, the browser reminder opt-out page and creator deadline notices.
-Host transports and outcome mail remain proposed. Competitor research was checked
+Outcome mail and host list, read, results, close, cancel, delete and finalize are implemented.
+Host creation and roster writes remain planned. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -264,10 +265,12 @@ later transport steps map them, and the error codes stay as listed here.
   revision. The roster lists every voter with name, mailbox, status, zone, locale, invitation,
   verification, withdrawal and pending-expiry instants, ballot revision, submission and
   consent instants, votes and answers; removed voters and expired public reservations are
-  absent, and no credential or digest appears. Advisory availability is not part of this
-  projection: D1 extends the results service with it, computed after the locked results read
-  and never under the poll lock, and shared by REST, MCP and CLI rather than built by each
-  transport.
+  absent, and no credential or digest appears. The shared results service adds advisory
+  availability after the locked snapshot commits, using current schedules, bookings and
+  cached busy intervals. Candidate `availability` is `available`, `unavailable` or
+  `unknown`. Stale calendar coverage can yield `unknown`. Scheduled and canceled polls
+  report `unavailable` because no further selection is possible. Availability changes
+  independently of the results revision and finalization rechecks current conditions.
 - Removal works while the poll is open or closed, including closure by the deadline and a
   soft-deleted event; a scheduled poll gets 409 `poll_already_scheduled` and a canceled one
   409 `poll_canceled`. The voter lookup precedes the `expectedHostRevision` check, so a
@@ -807,9 +810,11 @@ Installation policies must delete poll history alongside due booking history rat
 leave an indefinitely retained personal-data copy. Numeric cleanup and delivery bounds
 are named in `MEETING_POLL_RETENTION` alongside the admission constants.
 
-## Proposed REST, MCP and CLI contract
+## REST, MCP and CLI contract
 
-All names below are proposals for later tasks. `/api/v1` responses use camelCase, UUID IDs,
+Public capability operations and the host list, read, results, close, cancel, delete and
+finalize operations are available. The creation and roster operations in the table are
+planned for D2. `/api/v1` responses use camelCase, UUID IDs,
 no-store, the existing `{error,message?,field?}` envelope and additive/open response schemas.
 Document stable errors in OpenAPI and regenerate clients; clients ignore unfamiliar fields
 and future response states. Services throw `DomainError`; no tool-specific business logic.
@@ -825,7 +830,7 @@ and future response states. Services throw `DomainError`; no tool-specific busin
 | POST `/meeting-polls/{id}/remove-unverified` | `remove_unverified_meeting_poll_voters` | `remove-unverified` | Manager; expectedHostRevision; bulk revoke only unverified public enrollments, preserve host invitations and abuse counters |
 | DELETE `/meeting-polls/{id}` | `delete_meeting_poll` | `delete` | Manager; expectedHostRevision; 204 privacy deletion, linked booking preserved |
 | POST `/meeting-polls/{id}/close`, `/cancel` | `close_meeting_poll`, `cancel_meeting_poll` | `close`, `cancel` | Manager; expectedHostRevision; 200 current state; a repeat on a poll already in that state returns 200 before the revision check, without extra mail |
-| POST `/meeting-polls/{id}/finalize` | `finalize_meeting_poll` | `finalize` | Manager; slotId, bookerVoterId, attendeeVoterIds, conditional acknowledgment, expectedResultsRevision, idempotency key; 201 safe booking metadata, 200 exact replay; never manageToken or manage URL |
+| POST `/meeting-polls/{id}/finalize` | `finalize_meeting_poll` | `finalize` | Manager; slotId, bookerVoterId, attendeeVoterIds, acknowledgeConditional, expectedResultsRevision, expectedBallotRevisions, idempotency key; 201 safe booking metadata, 200 exact replay; never manageToken or manage URL |
 | POST `/meeting-polls/{id}/rotate-link` | `rotate_meeting_poll_link` | `rotate-link` | Manager; public_link mode only, otherwise 409 poll_link_unavailable; expectedHostRevision + idempotency key; one-time new public link, matching replay returns safe conflict |
 | POST `/public/meeting-polls/read` | `read_meeting_poll` | `view` | Poll/voter capability; public projection, own ballot only, effective deadline and visibility |
 | POST `/public/meeting-polls/enroll`, `/recover` | `enroll_meeting_poll_voter`, `recover_meeting_poll_voter` | `join`, `recover` | Enrollment: public poll capability + name/email/zone/locale; recovery: poll ID + mailbox, uniform 202 that re-delivers the existing credential without rotation; enroll returns 409 poll_full for every mailbox when full |
@@ -847,6 +852,7 @@ always returns uniform 202 while enforcing its per-mailbox cooldown/cap, and re-
 | Status/code | Meaning |
 |---|---|
 | 400 `invalid_request` | Malformed shape at transport boundary |
+| 400 `poll_conditional_acknowledgment_required` | At least one selected attendee voted `if_need_be` for the chosen candidate and the host has yet to acknowledge it |
 | 400 `invalid_poll`, `poll_limit_exceeded`, `poll_event_unsupported` | Invalid instants/deadline/choices, bounded resource limit, or unsupported group/one-time-link mode; safe field hints |
 | 401 `unauthorized`; 403 `insufficient_scope` | Existing bearer/session rules; never downgrade a supplied bad bearer |
 | 403 `team_management_access_denied`; 409 `organization_context_changed` | Existing management/context boundary |

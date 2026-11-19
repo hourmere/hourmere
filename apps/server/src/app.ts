@@ -437,7 +437,7 @@ export function createApp({
               ? 'private waitlist request failed'
               : detail
     const path = c.req.path.toLowerCase().includes('/meeting-polls')
-      ? '/api/v1/public/meeting-polls/[redacted]'
+      ? '/api/v1/meeting-polls/[redacted]'
       : isOneTimeCapabilityPath(c.req.path)
         ? '/book/[redacted]'
         : isOneTimeLinkPath(c.req.path) ||

@@ -68,6 +68,13 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `branding get` | `get_branding` | `{}`; requires `read` or `full` |
 | `branding set` | `set_branding` | optional `brandPrimaryColor` (`#RRGGBB`), `brandLogo` (uploaded hash); `null` clears; requires `full` |
 | `branding upload` | REST `POST /api/v1/branding/logo` | `--file FILE --content-type image/png` (also `image/jpeg`, `image/webp`); requires `full` |
+| `polls list` | `list_meeting_polls` | optional `limit`, `after`. See [poll input rules](#manage-meeting-polls). |
+| `polls get` | `get_meeting_poll` | `id` |
+| `polls results` | `get_meeting_poll_results` | `id` |
+| `polls close` | `close_meeting_poll` | `id`, `expectedHostRevision` |
+| `polls cancel` | `cancel_meeting_poll` | `id`, `expectedHostRevision` |
+| `polls delete` | `delete_meeting_poll` | `id`, `expectedHostRevision` |
+| `polls finalize` | `finalize_meeting_poll` | `id`, `slotId`, `bookerVoterId`, `attendeeVoterIds`, `expectedResultsRevision`, `expectedBallotRevisions`, `acknowledgeConditional`, `idempotencyKey` and optional `locationOptionId` |
 | `whoami` | `whoami` | `{}` |
 | `profile` | `get_profile` | `{}` |
 | `catalog` | `list_event_types` | optional `limit`, `after` |
@@ -509,6 +516,31 @@ saving changes: `1440` means exactly 24 hours. With `cancelCutoffMinutes: 1440` 
 The exact deadline instant is closed; 1 millisecond before it remains eligible, subject
 to the other booking rules. Host actions still require the caller to host the booking;
 team-admin status alone grants no extra MCP/CLI or API-key access.
+
+## Manage meeting polls
+
+Use `hourmere polls list|get|results|close|cancel|delete|finalize --input -` with an API
+key for the poll's organization. Personal event owners and current team owners or admins
+can manage polls. Reads allow `full`, `read` or `bookings`. Writes require `full` or
+`bookings`. These commands read JSON only from stdin. Keep the finalize idempotency key
+out of shell history and process arguments.
+
+`list` takes `{}` or a `limit` from 1 to 100 and an `after` cursor from `nextAfter`.
+`results` returns the current results and ballot revisions. Its availability guidance
+is advisory, and finalization checks availability again. Include the booker in
+`attendeeVoterIds` and provide the ballot revision for every selected voter. Set
+`acknowledgeConditional` to `true` when selecting a voter who answered `if_need_be`.
+If the finalization response is lost, replay the exact input with the original key.
+The response contains safe booking metadata and `replayed`. A different key for an already
+scheduled poll returns `poll_already_scheduled` with the poll ID, booking ID, chosen slot ID,
+status and host revision. `delete` returns
+`{ "deleted": true }` and preserves any linked booking.
+
+中文：管理端命令使用投票所在组织的密钥，权限限个人活动所有者及团队当前所有者或管理员。
+读取允许 `full`、`read` 或 `bookings`，写入需要 `full` 或 `bookings`。所有参数通过
+`--input -` 从标准输入读取。结果中的可用性仅供参考；最终确认会重新检查，并核对结果版本及每位
+所选参与者的选票版本。选择有条件参与者时须明确确认。响应丢失后，用原幂等键和完全相同的输入重试。
+换用新键时，`poll_already_scheduled` 会返回预约和候选时间的 ID 等安全信息。删除投票会保留关联预约。
 
 ## Record attendee no-shows
 

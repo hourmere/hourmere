@@ -13,12 +13,21 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 const MAX_PUBLICATION_RESPONSE_BYTES = 32 * 1024 * 1024
 const PROTOCOL = '2026-07-28'
 
+type ScheduledMeetingPoll = {
+  id: string
+  bookingId: string
+  chosenSlotId: string
+  hostRevision: number
+  status: 'scheduled'
+}
+
 export class CliError extends Error {
   readonly code: string
   readonly status?: number
   readonly retryAfterSeconds?: number
   readonly detail?: string
   readonly field?: string
+  readonly poll?: ScheduledMeetingPoll
 
   constructor(
     code: string,
@@ -26,6 +35,7 @@ export class CliError extends Error {
     retryAfterSeconds?: number,
     detail?: string,
     field?: string,
+    poll?: ScheduledMeetingPoll,
   ) {
     super(code)
     this.code = code
@@ -33,6 +43,7 @@ export class CliError extends Error {
     this.retryAfterSeconds = retryAfterSeconds
     this.detail = detail
     this.field = field
+    this.poll = poll
   }
 }
 
@@ -117,6 +128,29 @@ function redirectField(code: string, value: unknown): string | undefined {
     ].includes(value)
     ? value
     : undefined
+}
+
+function scheduledMeetingPoll(
+  tool: string,
+  code: string,
+  value: unknown,
+): ScheduledMeetingPoll | undefined {
+  if (tool !== 'finalize_meeting_poll' || code !== 'poll_already_scheduled' || !isObject(value))
+    return undefined
+  const { id, bookingId, chosenSlotId, hostRevision, status } = value
+  const uuid = (value: unknown): value is string =>
+    typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value)
+  if (
+    status !== 'scheduled' ||
+    !uuid(id) ||
+    !uuid(bookingId) ||
+    !uuid(chosenSlotId) ||
+    typeof hostRevision !== 'number' ||
+    !Number.isSafeInteger(hostRevision) ||
+    hostRevision < 1
+  )
+    return undefined
+  return { id, bookingId, chosenSlotId, hostRevision, status }
 }
 
 async function readResponse(response: Response, maxBytes = MAX_RESPONSE_BYTES): Promise<unknown> {
@@ -254,6 +288,7 @@ export async function callTool(options: {
         retrySeconds(isObject(detail) ? detail.retryAfterSeconds : undefined),
         notificationDetail(code, isObject(detail) ? detail.message : undefined),
         redirectField(code, isObject(detail) ? detail.field : undefined),
+        scheduledMeetingPoll(tool, code, isObject(detail) ? detail.poll : undefined),
       )
     }
     if (result.isError !== undefined && result.isError !== false)

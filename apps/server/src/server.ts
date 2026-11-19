@@ -123,6 +123,7 @@ import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
 import { integrationTools } from './mcp/integrations.ts'
+import { meetingPollHostTools } from './mcp/meeting-poll-host.ts'
 import { meetingPollTools } from './mcp/meeting-polls.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
@@ -147,6 +148,7 @@ import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
+import { meetingPollHostRoutes } from './routes/meeting-poll-host.ts'
 import { meetingPollRoutes } from './routes/meeting-polls.ts'
 import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts'
 import { memberLeaveRoutes } from './routes/member-leave.ts'
@@ -346,6 +348,14 @@ export function productRoutes({
       recurringBookingsEnabled,
     }),
     meetingPollRoutes({ db, meetingPollSecret }),
+    meetingPollHostRoutes({
+      db,
+      meetingPollSecret,
+      notify,
+      automaticMeet,
+      automaticZoom,
+      smsRemindersAvailable,
+    }),
     publicRoutes({
       db,
       smsRemindersAvailable,
@@ -473,6 +483,14 @@ export function productTools({
       conference: { db, zoom: zoomConference },
     }),
     ...meetingPollTools({ db, meetingPollSecret }),
+    ...meetingPollHostTools({
+      db,
+      meetingPollSecret,
+      notify,
+      automaticMeet,
+      automaticZoom,
+      smsRemindersAvailable,
+    }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({ db, followUpHostNotesEnabled }),

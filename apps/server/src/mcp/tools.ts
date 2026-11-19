@@ -7,12 +7,14 @@ import { z } from '@hono/zod-openapi'
 import {
   ApiKeyScopeError,
   apiKeyAllows,
+  InvalidApiKeyError,
   type Principal,
   requireApiKeyOperation,
 } from '@hourmere/auth'
 import {
   DomainError,
   type DomainErrorKind,
+  MeetingPollAlreadyScheduledError,
   MeetingPollKeyMismatchError,
   MeetingPollRateLimitError,
   WaitlistRateLimitError,
@@ -25,6 +27,7 @@ import {
   type StandardSchemaWithJSON,
 } from '@modelcontextprotocol/server'
 import { hasUnsafeJsonText } from '../app.ts'
+import { MeetingPollHostOutput } from '../meeting-poll-host-schemas.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import type { RateLimiter } from '../rate-limit.ts'
 import {
@@ -121,6 +124,7 @@ export interface ToolErrorBody {
   error: string
   field?: SuccessRedirectErrorField
   message?: string
+  poll?: z.output<typeof MeetingPollHostOutput>
   retryAfterSeconds?: number
 }
 
@@ -290,6 +294,7 @@ export async function runTool(
   } catch (err) {
     if (err instanceof ApiKeyScopeError)
       return errorResult({ error: err.error, message: err.message })
+    if (err instanceof InvalidApiKeyError) return errorResult({ error: 'unauthorized' })
     if (err instanceof RateLimited) {
       return errorResult({
         error: 'rate_limited',
@@ -303,6 +308,10 @@ export async function runTool(
       return errorResult({ error: 'rate_limited', retryAfterSeconds: err.retryAfterSeconds })
     if (err instanceof MeetingPollKeyMismatchError)
       return errorResult({ error: 'meeting_poll_key_mismatch' })
+    if (err instanceof MeetingPollAlreadyScheduledError) {
+      const poll = MeetingPollHostOutput.safeParse(err.poll)
+      return errorResult({ error: err.code, ...(poll.success && { poll: poll.data }) })
+    }
     // An unknown kind (only possible by bypassing the type) is a bug, as in the REST API.
     if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.

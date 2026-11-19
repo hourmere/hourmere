@@ -11,6 +11,9 @@ const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(['post', 'put', 'patch', 
 // These administrator reads explicitly ship on all three interfaces. Other reads remain
 // outside required parity coverage. Exact routes prevent an operation ID from moving silently.
 const REQUIRED_READS: Readonly<Record<string, string>> = {
+  listMeetingPolls: 'GET /api/v1/meeting-polls',
+  getMeetingPoll: 'GET /api/v1/meeting-polls/{id}',
+  getMeetingPollResults: 'GET /api/v1/meeting-polls/{id}/results',
   listSsoProviders: 'GET /api/v1/team/sso/providers',
   getGroupOccurrenceAttendees: 'GET /api/v1/group-occurrences/{id}/attendees',
   getSsoPolicy: 'GET /api/v1/team/sso/policy',

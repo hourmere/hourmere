@@ -53,6 +53,32 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Manage meeting polls
+
+Read managed polls at `GET /api/v1/meeting-polls`, `/{id}` and `/{id}/results` under the
+same collection path. List pages default to 50 polls, up to 100. Pass the returned
+`nextAfter` as `after` for the next page. The personal event owner or current team
+owner/admin can read with a `read`, `bookings` or `full` key in the acting organization.
+The results contain private voter data and advisory candidate availability. Treat
+`unknown` as a neutral status and keep the roster private.
+
+A `bookings` or `full` key can close, cancel, finalize or delete a managed poll.
+Send `expectedHostRevision` in the JSON body for close, cancel and delete. Finalize uses
+`expectedResultsRevision`, each selected voter's `expectedBallotRevisions`, and an
+explicit `acknowledgeConditional` for a selected `if_need_be` vote. Send and retain a
+random `Idempotency-Key` header. A successful first call returns 201 and an exact retry
+returns 200 with the current booking metadata. The response omits booking management
+credentials. A different key on an already scheduled poll returns 409 with the
+current poll's safe metadata. Deleting a poll returns 204 and preserves any linked booking.
+Poll creation is planned for a later release.
+
+中文：个人活动所有者和当前团队所有者或管理员可在当前组织中读取投票、名单和结果。
+读取接受 `read`、`bookings` 或 `full` 密钥。关闭、取消、删除和确认预约需要
+`bookings` 或 `full`。关闭、取消和删除使用主持人版本，确认预约使用结果版本和入选者
+的选票版本，并需明确接受入选者的条件票。请保留随机 `Idempotency-Key` 以原样重试。
+候选时段的可用性仅供参考，确认预约时会再次检查。预约信息不含管理凭证，删除投票会
+保留关联预约。创建投票将在后续版本提供。
+
 ## Instance capabilities
 
 `GET /api/v1/instance` includes additive `ssoOidcEnabled` and `ssoSamlEnabled`
