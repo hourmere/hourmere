@@ -497,6 +497,15 @@ For webhook deliveries it bounds the first network attempt only; a delivery firs
 in time retains the existing roughly seven-hour retry schedule, even beyond due + 60 minutes.
 Each retry still checks cancellation, disablement, authority and endpoint policy.
 
+The shared webhook worker checks the booking, workflow and subscribed endpoint on every attempt.
+It records admission to the first guarded transport attempt durably before calling the transport.
+If the worker stops between admission and recording the result, the next attempt uses the same
+delivery ID. Pending deliveries use the existing bounded repair job. Workflow sends stay hard-off.
+
+中文：共享 webhook worker 每次尝试前都会检查预约、工作流和已订阅的端点。首次尝试通过检查后，
+worker 先持久化准入时间，再调用受保护的传输层。如果在记录结果之前中断，重试沿用同一个投递 ID。
+待处理投递沿用现有的有界修复任务。工作流发送仍处于硬关闭状态。
+
 Use durable definition revisions, booking associations, occurrences, per-action executions
 and per-recipient intents with database uniqueness; pg-boss jobs carry only opaque row IDs.
 Reconciliation recreates missing wakes without recreating intents. Lock in the existing

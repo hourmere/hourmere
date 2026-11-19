@@ -107,6 +107,7 @@ const DATA_ACCESS = [
   'packages/notifications/src/workflow-mail.ts',
 ]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
+const WEBHOOK_DELIVERY_TEST_FIXTURE = 'packages/webhooks/src/workflow-delivery-fixture.ts'
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
 function productionSources(): string[] {
@@ -130,7 +131,7 @@ function productionSources(): string[] {
         // Not a workspace with sources.
       }
     }
-  return files.sort()
+  return files.filter((file) => file !== WEBHOOK_DELIVERY_TEST_FIXTURE).sort()
 }
 
 // Frozen alongside the package hard-off module: availability and tool discovery must never
@@ -745,6 +746,20 @@ describe('booking workflows are off and expose only definition reads, creation, 
     )) {
       const source = readFileSync(new URL(file, root), 'utf8')
       expect(source, file).not.toMatch(/\bworkflowJobs\b|workflow-dispatch-v1|workflow-repair-v1/)
+    }
+  })
+
+  it('lets the shared webhook worker reach workflow sends only through the hard-off guard', () => {
+    const deliveryFile = 'packages/webhooks/src/delivery.ts'
+    const service = readFileSync(new URL(deliveryFile, root), 'utf8')
+    expect(service).toContain(
+      'const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)',
+    )
+    expect(service).toContain("if (retry === 'workflow') return guardedWorkflowWebhook(")
+    for (const file of productionSources()) {
+      const source = readFileSync(new URL(file, root), 'utf8')
+      expect(source, file).not.toContain('workflow-delivery-fixture')
+      if (file !== deliveryFile) expect(source, file).not.toContain('deliverWorkflowWebhook')
     }
   })
 

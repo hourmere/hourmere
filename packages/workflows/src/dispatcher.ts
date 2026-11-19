@@ -7,6 +7,7 @@ import { z } from 'zod'
 import type { WorkflowSkipReason } from './audit.ts'
 import { WorkflowDefinitionSchema } from './definition.ts'
 import { workflowExecution } from './hard-off.ts'
+import { WORKFLOW_MAX_LATE_MINUTES } from './limits.ts'
 import { workflowDispatchWindow, workflowTimerDueAt } from './timers.ts'
 
 export const WORKFLOW_DISPATCH_PAGE = 100
@@ -212,6 +213,7 @@ async function recoverWorkflowEmailMarker(trx: Db, locked: LockedRun, now: Tempo
 export async function workflowRunIneligibility(
   trx: Db,
   locked: LockedRun,
+  webhookId?: string,
 ): Promise<Terminal | undefined> {
   const { booking, definition, enrollment, run } = locked
   if (!definition || definition.deleted_at !== null || !booking) return 'retired'
@@ -253,6 +255,13 @@ export async function workflowRunIneligibility(
     .executeTakeFirst()
   const captured = WorkflowDefinitionSchema.safeParse(revision?.definition)
   if (!captured.success) return 'retired'
+  if (
+    webhookId !== undefined &&
+    !captured.data.actions.some(
+      (action) => action.type === 'webhook' && action.webhookId === webhookId,
+    )
+  )
+    return 'retired'
   const trigger = captured.data.trigger
   if (trigger.type === 'before_start' || trigger.type === 'after_end') {
     const due = workflowTimerDueAt(
@@ -264,6 +273,30 @@ export async function workflowRunIneligibility(
       { start: instant(booking.start_at), end: instant(booking.end_at) },
     )
     if (due.epochMilliseconds !== run.due_at.getTime()) return 'retired'
+  }
+}
+
+/** Take the same parent locks as dispatch, before the sender locks the endpoint. */
+export async function lockWorkflowWebhookRun(
+  trx: Db,
+  delivery: { runId: string; organizationId: string; bookingId: string | null; webhookId: string },
+) {
+  const locked = await lockedWorkflowRun(trx, delivery.runId)
+  if (
+    !locked ||
+    locked.run.organization_id !== delivery.organizationId ||
+    locked.run.booking_id !== delivery.bookingId ||
+    locked.run.state === 'retired' ||
+    locked.run.state === 'skipped' ||
+    (await workflowRunIneligibility(trx, locked, delivery.webhookId))
+  )
+    return
+  return {
+    eventTypeId: locked.booking?.event_type_id,
+    expiresAt: Math.min(
+      locked.run.expires_at.getTime(),
+      instant(locked.run.due_at).add({ minutes: WORKFLOW_MAX_LATE_MINUTES }).epochMilliseconds,
+    ),
   }
 }
 
