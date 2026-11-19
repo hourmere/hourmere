@@ -1,10 +1,10 @@
-// Internal due-work machinery. A ready claim is not a delivery: the later attempt layer must
-// establish its own fenced marker. Neither this module nor its jobs call a transport.
+// Internal due-work machinery. A ready claim still needs a fenced attempt marker.
 import { randomUUID } from 'node:crypto'
 import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import type { WorkflowSkipReason } from './audit.ts'
 import { WorkflowDefinitionSchema } from './definition.ts'
 import { workflowExecution } from './hard-off.ts'
 import { workflowDispatchWindow, workflowTimerDueAt } from './timers.ts'
@@ -36,7 +36,11 @@ function page(value = WORKFLOW_DISPATCH_PAGE) {
 }
 
 /** Re-read after each parent wait; never lock a run before its definition or booking. */
-async function lockedRun(trx: Db, runId: string) {
+export async function lockedWorkflowRun(
+  trx: Db,
+  runId: string,
+  afterOrganization?: (trx: Db) => Promise<void>,
+) {
   const identity = await trx
     .selectFrom('workflow_runs as r')
     .innerJoin('workflow_enrollments as e', 'e.id', 'r.enrollment_id')
@@ -63,6 +67,7 @@ async function lockedRun(trx: Db, runId: string) {
     .forKeyShare()
     .executeTakeFirst()
   if (!organization) return
+  await afterOrganization?.(trx)
   const booking = await trx
     .selectFrom('bookings')
     .selectAll()
@@ -91,27 +96,40 @@ async function lockedRun(trx: Db, runId: string) {
     .executeTakeFirstOrThrow()
   return { run, enrollment, definition, booking }
 }
-type LockedRun = NonNullable<Awaited<ReturnType<typeof lockedRun>>>
+type LockedRun = NonNullable<Awaited<ReturnType<typeof lockedWorkflowRun>>>
 type Terminal = 'workflow_disabled' | 'expired' | 'retired'
-async function finish(trx: Db, locked: LockedRun, reason: Terminal, now: Temporal.Instant) {
+export function workflowRunWindow(run: LockedRun['run'], now: Temporal.Instant) {
+  return workflowDispatchWindow(
+    { dueAt: instant(run.due_at), expiresAt: instant(run.expires_at) },
+    now,
+  )
+}
+
+export async function finishWorkflowRun(
+  trx: Db,
+  locked: LockedRun,
+  result: WorkflowSkipReason | 'completed' | 'retired',
+  now: Temporal.Instant,
+) {
   const { run, enrollment, definition } = locked
+  const terminal = result === 'retired' || result === 'completed'
   await trx
     .updateTable('workflow_runs')
     .set({
-      state: reason === 'retired' ? 'retired' : 'skipped',
-      skip_reason: reason === 'retired' ? null : reason,
+      state: terminal ? result : 'skipped',
+      skip_reason: terminal ? null : result,
       claim_token: null,
       lease_until: null,
       finished_at: date(now),
     })
     .where('id', '=', run.id)
     .execute()
-  if (reason !== 'retired')
+  if (!terminal)
     await trx
       .updateTable('workflow_recipient_claims')
       .set({
         state: 'skipped',
-        skip_reason: reason,
+        skip_reason: result,
         claim_token: null,
         next_attempt_at: null,
         finished_at: date(now),
@@ -122,9 +140,15 @@ async function finish(trx: Db, locked: LockedRun, reason: Terminal, now: Tempora
   if (definition) {
     const counts = await trx
       .selectFrom('workflow_recipient_claims')
-      .select(sql<number>`count(*)::integer`.as('skipped'))
+      .select([
+        sql<number>`count(*) FILTER (WHERE state = 'sent')::integer`.as('sent'),
+        sql<number>`count(*) FILTER (WHERE state = 'rejected')::integer`.as('rejected'),
+        sql<number>`count(*) FILTER (WHERE state = 'delivery_unknown')::integer`.as(
+          'delivery_unknown',
+        ),
+        sql<number>`count(*) FILTER (WHERE state = 'skipped')::integer`.as('skipped'),
+      ])
       .where('run_id', '=', run.id)
-      .where('state', '=', 'skipped')
       .executeTakeFirstOrThrow()
     await trx
       .insertInto('workflow_run_history')
@@ -136,16 +160,59 @@ async function finish(trx: Db, locked: LockedRun, reason: Terminal, now: Tempora
         trigger: enrollment.trigger,
         due_at: run.due_at,
         finished_at: date(now),
-        outcome: reason === 'retired' ? 'retired' : 'skipped',
-        reason: reason === 'retired' ? null : reason,
-        skipped: counts.skipped,
+        outcome: terminal ? result : 'skipped',
+        reason: terminal ? null : result,
+        ...counts,
       })
       .onConflict((oc) => oc.column('run_id').doNothing())
       .execute()
   }
 }
 
-async function eligibility(trx: Db, locked: LockedRun): Promise<Terminal | undefined> {
+export async function releaseWorkflowRun(trx: Db, runId: string) {
+  await trx
+    .updateTable('workflow_runs')
+    .set({ state: 'pending', claim_token: null, lease_until: null })
+    .where('id', '=', runId)
+    .execute()
+}
+
+/** Finish only after every recipient of an email run reaches an outcome. */
+export async function completeWorkflowEmailRun(
+  trx: Db,
+  locked: LockedRun,
+  now: Temporal.Instant,
+  skipReason?: 'budget_suppressed' | 'expired',
+) {
+  const recipients = await trx
+    .selectFrom('workflow_recipient_claims')
+    .select('state')
+    .where('run_id', '=', locked.run.id)
+    .execute()
+  if (recipients.some(({ state }) => state === 'pending' || state === 'dispatching')) return false
+  await finishWorkflowRun(
+    trx,
+    locked,
+    skipReason && recipients.every(({ state }) => state === 'skipped') ? skipReason : 'completed',
+    now,
+  )
+  return true
+}
+
+async function recoverWorkflowEmailMarker(trx: Db, locked: LockedRun, now: Temporal.Instant) {
+  const abandoned = await trx
+    .updateTable('workflow_recipient_claims')
+    .set({ state: 'delivery_unknown', claim_token: null, finished_at: date(now) })
+    .where('run_id', '=', locked.run.id)
+    .where('state', '=', 'dispatching')
+    .executeTakeFirst()
+  return abandoned.numUpdatedRows > 0n
+}
+
+export async function workflowRunIneligibility(
+  trx: Db,
+  locked: LockedRun,
+): Promise<Terminal | undefined> {
   const { booking, definition, enrollment, run } = locked
   if (!definition || definition.deleted_at !== null || !booking) return 'retired'
   if (!definition.enabled) return 'workflow_disabled'
@@ -208,19 +275,59 @@ async function dueCandidates(
 ) {
   const now = date(ctx.now())
   let query = ctx.db
-    .selectFrom('workflow_runs')
-    .select('id')
-    .where('due_at', '<=', now)
+    .selectFrom('workflow_runs as r')
+    .select('r.id')
+    .where('r.due_at', '<=', now)
     .where((eb) =>
       eb.or([
-        eb('state', '=', 'pending'),
-        eb.and([eb('state', '=', 'claimed'), eb('lease_until', '<=', now)]),
+        eb.and([eb('r.state', '=', 'claimed'), eb('r.lease_until', '<=', now)]),
+        eb.and([
+          eb('r.state', '=', 'pending'),
+          eb.or([
+            eb('r.expires_at', '<=', now),
+            eb(
+              eb.fn.coalesce(
+                eb
+                  .selectFrom('workflow_recipient_claims as c')
+                  .select('c.next_attempt_at')
+                  .whereRef('c.organization_id', '=', 'r.organization_id')
+                  .whereRef('c.run_id', '=', 'r.id')
+                  .where('c.state', '=', 'pending')
+                  .orderBy(sql`c.next_attempt_at ASC NULLS FIRST`)
+                  .limit(1),
+                eb.val(now),
+              ),
+              '<=',
+              now,
+            ),
+          ]),
+        ]),
       ]),
     )
   if (options.runId) query = query.where('id', '=', options.runId)
   if (afterId !== undefined)
     return query.where('id', '>', afterId).orderBy('id').limit(page(options.limit)).execute()
   return query.orderBy('due_at').orderBy('id').limit(page(options.limit)).execute()
+}
+
+function canClaim(run: LockedRun['run'], now: Temporal.Instant) {
+  return (
+    run.state === 'pending' ||
+    (run.state === 'claimed' && run.lease_until !== null && run.lease_until <= date(now))
+  )
+}
+
+/** Discovery races a reversal. Recheck when the run lock has been acquired. */
+async function waitingForEmailRetry(trx: Db, runId: string, now: Temporal.Instant) {
+  const first = await trx
+    .selectFrom('workflow_recipient_claims')
+    .select('next_attempt_at')
+    .where('run_id', '=', runId)
+    .where('state', '=', 'pending')
+    .orderBy(sql`next_attempt_at ASC NULLS FIRST`)
+    .limit(1)
+    .executeTakeFirst()
+  return first?.next_attempt_at != null && first.next_attempt_at > date(now)
 }
 
 /** Internal service; public callers use the guarded dispatcher below. */
@@ -231,30 +338,23 @@ export async function claimDueWorkflowRuns(
   const claims: WorkflowRunClaim[] = []
   for (const candidate of await dueCandidates(ctx, options)) {
     const claim = await ctx.db.transaction().execute(async (trx) => {
-      const locked = await lockedRun(trx, candidate.id)
+      const locked = await lockedWorkflowRun(trx, candidate.id)
       if (!locked) return
       const { run } = locked
       const now = ctx.now()
-      if (
-        run.state !== 'pending' &&
-        !(
-          run.state === 'claimed' &&
-          run.lease_until &&
-          run.lease_until.getTime() <= now.epochMilliseconds
-        )
-      )
-        return
+      if (!canClaim(run, now)) return
       if (run.due_at.getTime() > now.epochMilliseconds) return
-      const reason = await eligibility(trx, locked)
+      const recovered =
+        run.state === 'claimed' && (await recoverWorkflowEmailMarker(trx, locked, now))
+      if (recovered && (await completeWorkflowEmailRun(trx, locked, now))) return
+      const reason = await workflowRunIneligibility(trx, locked)
       const afterWait = ctx.now()
-      if (
-        reason ||
-        workflowDispatchWindow(
-          { dueAt: instant(run.due_at), expiresAt: instant(run.expires_at) },
-          afterWait,
-        ) === 'expired'
-      ) {
-        await finish(trx, locked, reason ?? 'expired', afterWait)
+      if (reason || workflowRunWindow(run, afterWait) === 'expired') {
+        await finishWorkflowRun(trx, locked, reason ?? 'expired', afterWait)
+        return
+      }
+      if (await waitingForEmailRetry(trx, run.id, afterWait)) {
+        if (run.state === 'claimed') await releaseWorkflowRun(trx, run.id)
         return
       }
       const token = randomUUID()
@@ -280,7 +380,7 @@ export async function dispatchClaimedWorkflowRun(
   claim: WorkflowRunClaim,
 ): Promise<'ready' | 'stale' | 'skipped' | 'retired'> {
   return ctx.db.transaction().execute(async (trx) => {
-    const locked = await lockedRun(trx, claim.runId)
+    const locked = await lockedWorkflowRun(trx, claim.runId)
     if (!locked) return 'stale'
     const { run } = locked
     if (
@@ -290,16 +390,21 @@ export async function dispatchClaimedWorkflowRun(
       run.lease_until.getTime() <= ctx.now().epochMilliseconds
     )
       return 'stale'
-    const reason = await eligibility(trx, locked)
+    const reason = await workflowRunIneligibility(trx, locked)
     const now = ctx.now()
     // Eligibility itself may wait on live parent rows, so fence and deadline are read again.
     if (run.lease_until.getTime() <= now.epochMilliseconds) return 'stale'
-    const window = workflowDispatchWindow(
-      { dueAt: instant(run.due_at), expiresAt: instant(run.expires_at) },
-      now,
-    )
+    const window = workflowRunWindow(run, now)
     if (reason || window === 'expired') {
-      await finish(trx, locked, reason ?? 'expired', now)
+      // A rechecked ready claim cannot retire or skip an in-flight email marker.
+      const marker = await trx
+        .selectFrom('workflow_recipient_claims')
+        .select('id')
+        .where('run_id', '=', run.id)
+        .where('state', '=', 'dispatching')
+        .executeTakeFirst()
+      if (marker) return 'stale'
+      await finishWorkflowRun(trx, locked, reason ?? 'expired', now)
       return reason === 'retired' ? 'retired' : 'skipped'
     }
     return window === 'open' ? 'ready' : 'stale'
@@ -317,6 +422,27 @@ export async function dispatchDueWorkflowRuns(
 const repairCursors = new WeakMap<WorkflowWakePort, string>()
 const FIRST_ID = '00000000-0000-0000-0000-000000000000'
 
+/** Lifecycle retirement can clear the run's lease after the marker has committed. */
+async function repairRetiredWorkflowEmailMarkers(ctx: WorkflowDispatchContext, limit?: number) {
+  const cutoff = () => date(ctx.now().subtract({ seconds: WORKFLOW_CLAIM_SECONDS }))
+  const candidates = await ctx.db
+    .selectFrom('workflow_recipient_claims as c')
+    .innerJoin('workflow_runs as r', 'r.id', 'c.run_id')
+    .select('r.id')
+    .distinct()
+    .where('c.state', '=', 'dispatching')
+    .where('r.finished_at', '<=', cutoff())
+    .orderBy('r.id')
+    .limit(page(limit))
+    .execute()
+  for (const { id } of candidates)
+    await ctx.db.transaction().execute(async (trx) => {
+      const locked = await lockedWorkflowRun(trx, id)
+      if (locked?.run.finished_at && locked.run.finished_at <= cutoff())
+        await recoverWorkflowEmailMarker(trx, locked, ctx.now())
+    })
+}
+
 /** Missing jobs are disposable wakes. Never insert a run, enrollment or recipient intent here. */
 export async function repairWorkflowRunWakes(
   ctx: WorkflowDispatchContext,
@@ -324,22 +450,21 @@ export async function repairWorkflowRunWakes(
   limit?: number,
 ): Promise<void> {
   const cursor = repairCursors.get(port) ?? FIRST_ID
+  await repairRetiredWorkflowEmailMarkers(ctx, limit)
   let candidates = await dueCandidates(ctx, { limit }, cursor)
   if (!candidates.length && cursor !== FIRST_ID)
     candidates = await dueCandidates(ctx, { limit }, FIRST_ID)
   for (const candidate of candidates) {
     await ctx.db.transaction().execute(async (trx) => {
-      const locked = await lockedRun(trx, candidate.id)
+      const locked = await lockedWorkflowRun(trx, candidate.id)
       if (!locked) return
       const { run } = locked
       const now = ctx.now()
+      if (!canClaim(run, now)) return
       if (
-        run.state !== 'pending' &&
-        !(
-          run.state === 'claimed' &&
-          run.lease_until &&
-          run.lease_until.getTime() <= now.epochMilliseconds
-        )
+        run.state === 'pending' &&
+        workflowRunWindow(run, now) !== 'expired' &&
+        (await waitingForEmailRetry(trx, run.id, now))
       )
         return
       if (run.due_at.getTime() <= now.epochMilliseconds) await port.ensureWake(trx, run.id)

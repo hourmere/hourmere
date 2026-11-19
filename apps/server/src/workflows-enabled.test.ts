@@ -183,6 +183,76 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     await owned?.drop()
   })
 
+  it('forwards the host-text switch through REST and MCP create/update', async () => {
+    const user = await createTestUser(db)
+    const token = bearer(user, 'full')
+    for (const followUpHostNotesEnabled of [true, false]) {
+      const testApp = createApp({
+        publicUrl: URL,
+        checkDb: async () => {},
+        authHandler: async () => new Response(null, { status: 404 }),
+        resolveCaller,
+        routes: [
+          workflowRoutes({ db, followUpHostNotesEnabled, audit: { record: async () => {} } }),
+        ],
+        mcp: mcpEndpoint({
+          tools: workflowTools({ db, followUpHostNotesEnabled, audit: { record: async () => {} } }),
+        }),
+      })
+      const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
+      const builtin = {
+        owner: { kind: 'personal', id: user.id },
+        idempotencyKey: randomUUID(),
+        name: 'Policy',
+        scope: { type: 'all_event_types' },
+        trigger: { type: 'booking.created' },
+        actions: [{ type: 'email', recipients: ['hosts'] }],
+      }
+      const actions = [
+        { ...builtin.actions[0], content: { en: { subject: 'Hello', body: 'Body' } } },
+      ]
+      const created = await testApp.request('/api/v1/workflows', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(builtin),
+      })
+      expect(created.status).toBe(201)
+      const { id } = (await created.json()) as { id: string }
+      const restCreated = await testApp.request('/api/v1/workflows', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...builtin, idempotencyKey: randomUUID(), actions }),
+      })
+      expect(restCreated.status).toBe(followUpHostNotesEnabled ? 201 : 400)
+      const updated = await testApp.request(`/api/v1/workflows/${id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ expectedRevision: 1, actions }),
+      })
+      expect(updated.status).toBe(followUpHostNotesEnabled ? 200 : 400)
+      for (const [name, args] of [
+        ['create_workflow', { ...builtin, idempotencyKey: randomUUID(), actions }],
+        ['update_workflow', { id, expectedRevision: followUpHostNotesEnabled ? 2 : 1, actions }],
+      ] as const) {
+        const response = await testApp.request('/mcp', {
+          method: 'POST',
+          headers: { ...headers, accept: 'application/json, text/event-stream' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name, arguments: args },
+          }),
+        })
+        const text = await response.text()
+        const data = text.split('\n').find((line) => line.startsWith('data: '))
+        const result = JSON.parse(data ? data.slice(6) : text).result
+        if (followUpHostNotesEnabled) expect(result.isError).not.toBe(true)
+        else expect(toolError(result)).toMatchObject({ error: 'invalid_workflow' })
+      }
+    }
+  })
+
   it('uses the enabled guards in this file only', () => {
     expect(WORKFLOWS_IMPLEMENTED).toBe(true)
   })

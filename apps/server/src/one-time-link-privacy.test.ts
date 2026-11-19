@@ -379,7 +379,10 @@ describe('one-time capability privacy source-copy controls', () => {
     await expect(verifyHeaders(module)).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('detects removing the capability referrer protection', async () => {
-    const module = await copy(undefined, ['if (isOneTimeLinkPath(c.req.path)) {', 'if (false) {'])
+    const module = await copy(undefined, [
+      'isOneTimeLinkPath(c.req.path) || isPublicRoutingFormPath(c.req.path)',
+      'isPublicRoutingFormPath(c.req.path)',
+    ])
     await expect(verifyHeaders(module)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 })
