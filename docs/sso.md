@@ -871,16 +871,19 @@ membership. `listSsoProviders` accepts `limit` (1–100, default 50) and `cursor
 to the team. Each provider exposes `id`, `protocol`, `revision`, `enabled`, `displayName`,
 `issuer`, nullable `clientId`, `createdAt`, `validationStatus`, `testStatus` and `domains`.
 Domain summaries expose only `id`, `name`, `generation` and `status`; failed and unknown
-checks remain distinct. Validation and test status are currently `unknown`: these reads
-neither decrypt configuration nor infer successful provider tests from proof attempts.
+checks remain distinct. Validation status is currently `unknown`. Test status reflects
+the latest `passed` or `failed` receipt at the current revision, or `unknown` if no
+applicable receipt is retained. These reads use the audit journal without opening the
+sealed provider configuration.
 `getSsoPolicy` returns `requireSso`, `admission`, `policyRevision` and `trustGeneration`;
 a team without a stored policy gets `false`, `invitation_only`, `1` and `1` respectively.
 No read creates a policy, changes trust, emits an audit event or returns identity links.
 
 当前草稿读取仅允许当前团队中已验证的所有者或管理员使用；API 密钥须具有 `read` 或
 `full` 范围，MCP OAuth 须具有 `mcp:tools` 权限。提供者列表按团队分页，不返回已退役
-提供者、密封配置、密钥、原始元数据或身份关联。验证和测试状态目前为 `unknown`，
-不能据此判断配置缺失。OIDC 和 SAML 仍在代码中保持关闭，读取返回 `sso_disabled`。
+提供者、密封配置、密钥、原始元数据或身份关联。验证状态目前为 `unknown`，测试状态
+仅显示当前版本的最新收据。没有适用收据时，测试状态为 `unknown`。OIDC 和 SAML 仍在
+代码中保持关闭，读取返回 `sso_disabled`。
 
 Provider draft writes are registered as browser-session-only POST/PATCH/DELETE operations,
 with no MCP tool or CLI write command. They remain unavailable (`sso_disabled`) while
@@ -960,6 +963,28 @@ Test/link returns a bounded authorization URL and its own ceremony attempt ID;
 completion is via protocol
 callback and status is observed in provider inventory or the caller's `/me` projection.
 Tests do not provision members, link accounts or elevate a session automatically.
+
+The OIDC test applies to a disabled draft. A verified current team owner or administrator
+submits the exact Origin and `X-Expected-Organization-Id`, completes fresh administration
+proof, and repeats the same revision and input with `proofAttemptId`. For a team without
+enforcement, the proof comes from the administrator's Hourmere mailbox. The successful
+retry returns `{url, attemptId}`. Open the URL in the initiating browser and keep the
+original Hourmere session. The shared OIDC callback uses the same PKCE, state and ID-token
+verification as sign-in, then returns to `/app/settings`. Follow provider inventory to
+read the result. The callback requires the same verified administrator, session, browser
+and draft revision even if the provider authenticated a different person. It records
+`sso_provider.tested` with the attempt ID and the safe result. The receipt preserves
+whether the tester held the owner role at completion. A revision change ends in-flight
+tests and invalidates earlier receipts for that provider. Both protocols stay hard-off
+and the REST operation returns `404 sso_disabled`.
+
+OIDC 测试仅适用于禁用的草稿。当前团队中已验证的所有者或管理员须提供同源请求和预期
+团队，完成新鲜管理证明后，以相同版本及输入携带 `proofAttemptId` 重试。未启用强制
+SSO 的团队使用管理员自己的 Hourmere 邮箱完成证明。重试成功后，在原浏览器和原会话
+中打开返回的 `url`。回调验证 OIDC 响应，返回设置页，并记录当前版本的测试结果；所有者
+的测试记录会保留其当时的角色。测试状态可在提供者列表查看。任何版本变更都会使之前的
+测试收据失效。测试不会创建账号、身份关联、团队成员或登录会话。两种协议仍在代码中保持
+关闭，接口返回 `404 sso_disabled`。
 
 Policy takes `{expectedRevision, requireSso, admission, proofAttemptId?}` with
 `admission` restricted to `invitation_only` or `jit`. Recovery enrollment takes

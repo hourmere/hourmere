@@ -143,6 +143,12 @@ const GUARDED_SSO_DRAFT_WRITES = [
     runtimePath: '/api/v1/team/sso/providers/:providerId',
     operationId: 'deleteSsoProvider',
   },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/providers/{providerId}/test',
+    runtimePath: '/api/v1/team/sso/providers/:providerId/test',
+    operationId: 'testSsoProvider',
+  },
 ] as const
 
 function expectNoUnguardedSsoRoutes(paths: string[]) {

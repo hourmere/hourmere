@@ -1,7 +1,7 @@
 // The SSO transport profile serves domain TXT proofs, OIDC documents and OIDC token exchange.
 // Interactive writes, rechecks and sign-in are hard-off. Offline retirement removes trust.
 // The configuration loader parses `SSO_PRIVATE_TARGETS` and server composition passes it
-// to guarded OIDC sign-in, so it routes nothing while OIDC is off. The production route tests
+// to guarded OIDC sign-in and provider tests, so it routes nothing while OIDC is off. The production route tests
 // in apps/server/src/sso-catalogues.test.ts assert sign-in and completion answer sso_disabled.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -17,6 +17,7 @@ const OIDC_COMPLETION = 'apps/server/src/sso-oidc-completion.ts'
 const OIDC_JWKS = 'apps/server/src/sso-oidc-jwks.ts'
 const OIDC_SESSION = 'apps/server/src/sso-oidc-session.ts'
 const OIDC_SIGN_IN = 'apps/server/src/sso-oidc-sign-in.ts'
+const OIDC_TEST_RECEIPTS = 'apps/server/src/sso-oidc-test-receipts.ts'
 const OIDC_VERIFIER = 'apps/server/src/sso-oidc-verifier.ts'
 const OIDC_VERIFIER_MODULES = new Set([OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER])
 
@@ -138,6 +139,7 @@ describe('SSO transport permits only domain TXT and guarded OIDC sign-in', () =>
       [OIDC_COMPLETION, [OIDC_ATTEMPT]],
       [OIDC_SESSION, [OIDC_ATTEMPT, OIDC_VERIFIER]],
       [OIDC_SIGN_IN, [OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER]],
+      [OIDC_TEST_RECEIPTS, [OIDC_ATTEMPT]],
     ])
   })
 
