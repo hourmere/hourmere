@@ -32,6 +32,7 @@ import * as groupSeatAdmission from './group-seat-admission.ts'
 import * as hosts from './hosts.ts'
 import * as locationOptions from './location-options.ts'
 import { listHostBookingSlots, listManagedSlots } from './manage.ts'
+import { enqueueMeetingPollBookingUpdate } from './meeting-poll-outcomes.ts'
 import * as notificationSettings from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 import { parseQuestions, validateResponses } from './questions.ts'
@@ -121,6 +122,7 @@ function sourceCopy(...changes: Change[]): Api {
     ...groupSeatAdmission,
     DomainError,
     ...hosts,
+    enqueueMeetingPollBookingUpdate,
     ...notificationSettings,
     expirePaymentHolds,
     parseQuestions,
