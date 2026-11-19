@@ -339,6 +339,13 @@ below with these internal choices; no transport is added.
   row stays until its purge instant, so a reused key is still refused. A linked booking is never deleted
   by poll deletion; deleting it first deletes the poll the same way. Booking deletion locks
   the booking and then the poll, and nothing locks a poll and then its booking before C2.
+  Booking cancellation and reschedule likewise lock the booking (and, for a reschedule, its
+  hosts) before the scheduled poll, and only for a booking whose chain an unlocked read found
+  poll-linked. Finalize locks a poll before the hosts in the opposite order, but only while
+  that poll is unscheduled (`booking_id` still null), and the lifecycle lookup matches only
+  scheduled polls joined on `booking_id`, so the two never wait on each other. A poll's
+  `booking_id` is written only by finalize, in the transaction that inserts the booking, and
+  is never re-pointed, which keeps that unlocked read sound.
 
 Privacy default is `private`: voters see only their own choices and the candidate list,
 not other names, email addresses, answers or totals. A host can choose `aggregate` at

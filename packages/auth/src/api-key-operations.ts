@@ -376,6 +376,8 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('create_webhook', 'other_write', ['POST /api/v1/webhooks']),
   mcp('update_webhook', 'other_write', ['PATCH /api/v1/webhooks/{id}']),
   mcp('delete_webhook', 'other_write', ['DELETE /api/v1/webhooks/{id}']),
+  mcp('rotate_webhook_secret', 'other_write', ['POST /api/v1/webhooks/{id}/rotate-secret']),
+  mcp('list_webhook_deliveries', 'other_read', ['GET /api/v1/webhooks/{id}/deliveries']),
   mcp('whoami', 'booking_read', ['GET /api/v1/me']),
   mcp('find_available_slots', 'booking_read', [
     'GET /api/v1/public/{handle}/{slug}/slots',
@@ -588,6 +590,8 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('webhooks create', 'create_webhook'),
   cli('webhooks update', 'update_webhook'),
   cli('webhooks delete', 'delete_webhook'),
+  cli('webhooks rotate-secret', 'rotate_webhook_secret'),
+  cli('webhooks deliveries', 'list_webhook_deliveries'),
   cli('one-time-links create', 'create_one_time_link'),
   cli('one-time-links list', 'list_one_time_links'),
   cli('one-time-links revoke', 'revoke_one_time_link'),

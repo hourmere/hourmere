@@ -355,6 +355,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `create_webhook` | — | `webhooks create` | `full` |
 | `update_webhook` | — | `webhooks update` | `full` |
 | `delete_webhook` | — | `webhooks delete` | `full` |
+| `rotate_webhook_secret` | — | `webhooks rotate-secret` | `full` |
+| `list_webhook_deliveries` | — | `webhooks deliveries` | `full, read` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |

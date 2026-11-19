@@ -215,6 +215,7 @@ export {
   MeetingPollAlreadyScheduledError,
 } from './meeting-poll-finalize.ts'
 export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
+export { bookingMeetingPollLinked } from './meeting-poll-outcomes.ts'
 export { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
 export {

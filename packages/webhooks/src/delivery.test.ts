@@ -592,6 +592,46 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     },
   )
 
+  it('serializes concurrent rotations and signs queued deliveries with the last committed secret', async () => {
+    const { delivery, ctx, webhook, secret } = await captured()
+    const locked = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const first = rotateWebhookSecret(
+      {
+        ...ctx,
+        authorizeOrganizationWrite: async () => {
+          locked.resolve()
+          await release.promise
+        },
+      },
+      settings,
+      webhook.id,
+    )
+    await Promise.race([locked.promise, first])
+    const second = rotateWebhookSecret(ctx, settings, webhook.id)
+    try {
+      await waitForBlocked('%from "webhooks"%for update%')
+    } finally {
+      release.resolve()
+      await Promise.all([first, second])
+    }
+    const [earlier, latest] = await Promise.all([first, second])
+    expect(new Set([secret, earlier.secret, latest.secret]).size).toBe(3)
+
+    let signedWithLatest = false
+    await deliverWebhook(
+      deps(async ({ headers, body }) => {
+        signedWithLatest =
+          headers['webhook-signature'] ===
+          webhookSignature(latest.secret, headers['webhook-timestamp'] ?? '', body)
+        return 204
+      }),
+      delivery.id,
+      signal(),
+    )
+    expect(signedWithLatest).toBe(true)
+  })
+
   it('returns not-found to a concurrent update when deletion locks the endpoint first', async () => {
     const { ctx, webhook, delivery } = await captured()
     const deleting = Promise.withResolvers<void>()

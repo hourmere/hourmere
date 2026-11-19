@@ -87,6 +87,8 @@ export const COMMANDS = {
   'webhooks create': 'create_webhook',
   'webhooks update': 'update_webhook',
   'webhooks delete': 'delete_webhook',
+  'webhooks rotate-secret': 'rotate_webhook_secret',
+  'webhooks deliveries': 'list_webhook_deliveries',
   'slack list': 'list_slack_destinations',
   'slack create': 'create_slack_destination',
   'slack update': 'update_slack_destination',
@@ -120,14 +122,19 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere webhooks create --input FILE|- (--json | --output FILE)
        hourmere webhooks update --input FILE|- [--json]
        hourmere webhooks delete --input FILE|- --yes [--json]
+       hourmere webhooks rotate-secret --input FILE|- (--json | --output FILE)
+       hourmere webhooks deliveries --input FILE|- [--json]
        hourmere branding upload --file IMAGE --content-type image/png|image/jpeg|image/webp
        hourmere --help | --version
 
-Webhooks: list requires read/full scope; writes require full. Personal owners and team owners/admins only.
-Create takes JSON {url, events, isActive?} and requires --output FILE (new private file) or --json
-(stdout). The signing secret is returned once. Use a private file when stdout is logged.
+Webhook reads require read or full scope and writes require full scope.
+All webhook commands require personal ownership or a team owner/admin role.
+Create takes JSON {url, events, isActive?}. Rotate-secret takes JSON {id}.
+Both require --output FILE (new private file) or --json (stdout) and return the signing secret once.
+Use a private file when stdout is logged.
 Update takes JSON {id, events?, isActive?}. The URL is immutable.
 Delete takes JSON {id} and requires --yes to confirm deletion of the endpoint and retained deliveries.
+Deliveries takes JSON {id, after?} and returns up to 50 metadata rows. Pass nextAfter as after for the next page.
 Events: booking.created, booking.rescheduled, booking.cancelled, booking.reschedule_requested,
         booking.reschedule_request_expired, booking.attendee_no_show_changed.
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
@@ -335,7 +342,11 @@ function parse(argv: readonly string[]): Options {
     throw new CliError('invalid_success_redirect_options')
   if (command === 'one-time-links create' && options.output)
     throw new CliError('one_time_link_output_forbidden')
-  if (command === 'webhooks create' && !seen.has('--json') && !options.output)
+  if (
+    ['webhooks create', 'webhooks rotate-secret'].includes(command) &&
+    !seen.has('--json') &&
+    !options.output
+  )
     throw new CliError('webhook_secret_output_required')
   if (command === 'webhooks delete' && !seen.has('--yes'))
     throw new CliError('webhook_delete_confirmation_required')

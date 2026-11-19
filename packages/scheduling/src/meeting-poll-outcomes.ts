@@ -48,7 +48,49 @@ export async function enqueueMeetingPollOutcomes(
     .execute()
 }
 
-/** Called by the ordinary booking write with its booking lock held. */
+/**
+ * Whether a booking's reschedule chain started at a finalized meeting poll, read without
+ * locks before a lifecycle write takes its first lock. Invariant: a poll's `booking_id` is
+ * written only by finalize, in the transaction that inserts that booking, and is never
+ * re-pointed (deleting the poll is the only way the link goes). Later bookings of a chain are
+ * created after its root. So a statement that can see a booking also sees whether its chain
+ * is linked, and the answer can only turn false later, never true. Ordinary bookings then run
+ * nothing poll-related under the booking (and host) locks; linked ones recheck under them.
+ */
+export function meetingPollChainLinked(bookingId: string) {
+  return sql<boolean>`EXISTS (
+    WITH RECURSIVE chain (id, rescheduled_from_id, organization_id) AS (
+      SELECT id, rescheduled_from_id, organization_id FROM bookings WHERE id = ${bookingId}
+      UNION ALL
+      SELECT b.id, b.rescheduled_from_id, b.organization_id
+        FROM bookings b JOIN chain c ON b.id = c.rescheduled_from_id
+       WHERE b.organization_id = c.organization_id
+    ) CYCLE id SET is_cycle USING path
+    SELECT FROM chain c JOIN meeting_polls p
+      ON p.booking_id = c.id AND p.organization_id = c.organization_id
+     WHERE NOT c.is_cycle)`
+}
+
+/** The same unlocked answer as one statement, for entry points without an earlier read. */
+export async function bookingMeetingPollLinked(
+  db: Db,
+  organizationId: string,
+  bookingId: string,
+): Promise<boolean> {
+  const row = await db
+    .selectFrom('bookings')
+    .select(meetingPollChainLinked(bookingId).as('linked'))
+    .where('id', '=', bookingId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  // A booking this statement cannot see yet may become visible by the locked read: recheck there.
+  return row?.linked ?? true
+}
+
+/**
+ * Called by the ordinary booking write with its booking lock held, only when
+ * meetingPollChainLinked was true before the first lock.
+ */
 export async function enqueueMeetingPollBookingUpdate(
   trx: Db,
   organizationId: string,

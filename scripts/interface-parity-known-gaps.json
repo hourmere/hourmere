@@ -7,7 +7,6 @@
   "deleteSchedule": "schedule deletion has no MCP tool or CLI command yet.",
   "deleteScheduleOverride": "removing a date's schedule override has no MCP tool or CLI command yet.",
   "refreshCalendarList": "refreshing a connected account's calendar list has no MCP tool or CLI command yet.",
-  "rotateWebhookSecret": "webhook signing-secret rotation and one-time secret delivery have no MCP tool or CLI command yet.",
   "setCalendarDestination": "choosing a calendar writeback destination has no MCP tool or CLI command yet.",
   "setScheduleOverride": "setting a date's schedule override has no MCP tool or CLI command yet.",
   "syncCalendar": "requesting a calendar busy-time sync has no MCP tool or CLI command yet.",
