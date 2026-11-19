@@ -417,6 +417,7 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting poll REST on Postgres',
   it('keeps malformed input and idempotency keys out of responses and diagnostics', async () => {
     const bookings = await key('bookings')
     const sentinel = 'synthetic-private-idempotency-key'
+    const mailbox = 'private-invitation-mailbox@example.test'
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
@@ -430,7 +431,17 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting poll REST on Postgres',
         { [sentinel]: true },
       )
       expect(response).toEqual({ status: 400, body: { error: 'invalid_request' } })
-      expect(JSON.stringify([log.mock.calls, error.mock.calls])).not.toContain(sentinel)
+      const invitation = await send(
+        'POST',
+        `${item(fixture.poll.id)}/invitations?email=${encodeURIComponent(mailbox)}`,
+        { ...bookings, 'idempotency-key': sentinel },
+        { invitees: [{ name: 'Invitee', email: mailbox, [mailbox]: true }] },
+      )
+      expect(invitation).toEqual({ status: 400, body: { error: 'invalid_request' } })
+      const diagnostics = JSON.stringify([log.mock.calls, error.mock.calls])
+      expect(diagnostics.includes(sentinel)).toBe(false)
+      expect(diagnostics.includes(mailbox)).toBe(false)
+      expect(diagnostics.includes(encodeURIComponent(mailbox))).toBe(false)
     } finally {
       log.mockRestore()
       error.mockRestore()

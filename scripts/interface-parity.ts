@@ -19,6 +19,7 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   getSsoPolicy: 'GET /api/v1/team/sso/policy',
   getPublicRoutingForm: 'GET /api/v1/public/-/routing/{handle}/{slug}',
   getPublicTeamRoutingForm: 'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
+  listWebhooks: 'GET /api/v1/webhooks',
 }
 
 const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'
