@@ -43,6 +43,7 @@ export const COMMANDS = {
   'routing-forms publish': 'publish_routing_form',
   'routing-forms preview': 'preview_routing_form',
   'routing-forms public': 'get_public_routing_form',
+  'routing-forms route': 'route_lead',
 
   'audit-log list': 'list_audit_events',
   'audit-log settings': 'get_audit_log_settings',
@@ -117,6 +118,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
+       hourmere routing-forms route --input FILE|- [--output FILE] [--url ORIGIN]
        hourmere workflows list|get|create|update|delete [--input FILE|-] [--url ORIGIN]
        hourmere webhooks list [--json]
        hourmere webhooks create --input FILE|- (--json | --output FILE)
@@ -136,7 +138,10 @@ Update takes JSON {id, events?, isActive?}. The URL is immutable.
 Delete takes JSON {id} and requires --yes to confirm deletion of the endpoint and retained deliveries.
 Deliveries takes JSON {id, after?} and returns up to 50 metadata rows. Pass nextAfter as after for the next page.
 Events: booking.created, booking.rescheduled, booking.cancelled, booking.reschedule_requested,
-        booking.reschedule_request_expired, booking.attendee_no_show_changed.
+        booking.reschedule_request_expired, booking.attendee_no_show_changed, workflow.executed.
+Adding workflow.executed on create or update is disabled (workflows_disabled, REST 404).
+On create this takes precedence over webhooks_disabled (REST 409).
+Endpoint events and delivery eventType are open enums. Ignore unknown event kinds.
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
 Supply incoming-webhook URLs only through private JSON input; responses are masked.
 Slack events: booking.created, booking.rescheduled, booking.cancelled,
@@ -173,6 +178,10 @@ Pass id, expectedRevision and an optional requestId (UUID) as JSON to routing-fo
 Publication requires full scope. Repeat the same input with the same requestId to recover its version.
 Pass id and answers (keyed by question ID) as JSON to routing-forms preview. Preview requires full scope.
 Pass slug and exactly one of handle or teamSlug as JSON to routing-forms public. Accepts read, bookings or full keys.
+Pass slug, exactly one of handle or teamSlug, versionId from public, and answers keyed by question ID
+as JSON to routing-forms route. Requires bookings or full scope. If the form changed, fetch public metadata again.
+Stdout redacts routeToken and continuationUrl. Use --output FILE to save them in a new 0600 JSON file.
+Existing files and symlinks are refused.
 Routing form commands return routing_forms_disabled until routing forms are enabled on the instance.
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
@@ -558,6 +567,14 @@ export async function runCli(options: {
     }
     const oneTimeToken = typeof input.oneTimeToken === 'string' ? input.oneTimeToken : ''
     const waitlistToken = typeof input.waitlistToken === 'string' ? input.waitlistToken : ''
+    if (args.command === 'routing-forms route') {
+      // Replace the whole link before replacing the token inside its fragment.
+      const { continuationUrl, routeToken } = result
+      secrets.unshift(
+        typeof continuationUrl === 'string' ? continuationUrl : '',
+        typeof routeToken === 'string' ? routeToken : '',
+      )
+    }
     if (output) {
       await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken, slackUrl]))
       await output.sync()

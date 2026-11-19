@@ -78,6 +78,8 @@ const classes = {
     'POST /api/v1/meeting-polls/{id}/cancel',
     'DELETE /api/v1/meeting-polls/{id}',
     'POST /api/v1/meeting-polls/{id}/finalize',
+    'POST /api/v1/public/-/routing/{handle}/{slug}/route',
+    'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -386,6 +388,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           db,
           slotSnippetsEnabled: true,
           routingFormsEnabled: true,
+          routingSecret: secret,
           scimProvisioningEnabled: true,
           // SSO reads answer sso_disabled before any scope check while hard-off; enable
           // them here so the matrix proves their scope enforcement.
@@ -646,6 +649,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replace('{handle}', 'rest-scoped-host')
           .replace('{teamSlug}', 'rest-scoped-team')
           .replace('{slug}', 'scope-matrix')
+        if (method === 'POST') {
+          const form = await db
+            .selectFrom('routing_forms')
+            .select('published_version_id')
+            .where(
+              'organization_id',
+              '=',
+              template.includes('/teams/') ? teamId : owner.organization.id,
+            )
+            .where('slug', '=', 'scope-matrix')
+            .executeTakeFirstOrThrow()
+          payload = { versionId: form.published_version_id, answers: {} }
+        }
       } else if (
         template.startsWith('/api/v1/public/') &&
         !template.startsWith('/api/v1/public/meeting-polls/')
@@ -973,14 +989,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 173-operation contract and all 519 scope combinations', () => {
+    it('covers the exact 175-operation contract and all 525 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(173)
-      expect(new Set(ids).size).toBe(173)
+      expect(ids).toHaveLength(175)
+      expect(new Set(ids).size).toBe(175)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(519)
+      expect(cases).toHaveLength(525)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

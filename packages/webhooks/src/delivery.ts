@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { type Db, isImportedBooking } from '@hourmere/db'
+import { type Db, isImportedBooking, type WebhookDeliveries } from '@hourmere/db'
 import { writeAuditEvent } from '@hourmere/db/audit'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { AttendeeNoShowNotifier, BookingEvent, BookingNotifier } from '@hourmere/scheduling'
-import { sql } from 'kysely'
+import type { WorkflowTriggerType } from '@hourmere/workflows'
+import { type Insertable, sql } from 'kysely'
 import { z } from 'zod'
 import { decryptWebhookSecret, webhookSignature } from './crypto.ts'
 import type { WebhookEventType, WebhookSettings } from './service.ts'
@@ -51,6 +52,94 @@ export function webhookAttendeeNoShowNotifier(
 ): AttendeeNoShowNotifier {
   return (trx, event, now) =>
     captureBookingWebhook(queue, settings, trx, { type: 'attendee_no_show_changed', ...event }, now)
+}
+
+interface WorkflowWebhookCapture {
+  webhookId: string
+  organizationId: string
+  bookingId: string
+  workflowId: string
+  workflowRevision: number
+  trigger: WorkflowTriggerType
+  workflowRunId: string
+}
+
+/** Internal outbox capture for an authorized workflow run, within its transaction. */
+export async function captureWorkflowWebhook(
+  queue: WebhookQueue,
+  settings: WebhookSettings,
+  trx: Db,
+  input: WorkflowWebhookCapture,
+  now: Temporal.Instant,
+): Promise<void> {
+  if (!settings.enabled) return
+  if (!trx.isTransaction) throw new Error('Webhook capture requires the workflow transaction')
+  const booking = await trx
+    .selectFrom('bookings as b')
+    .leftJoin('personal_organizations as p', 'p.organization_id', 'b.organization_id')
+    .select([
+      'b.id',
+      'b.organization_id',
+      'b.event_type_id',
+      'b.start_at',
+      'b.end_at',
+      'b.status',
+      'b.source',
+      'b.rescheduled_from_id',
+      'p.user_id as personal_owner_id',
+    ])
+    .where('b.id', '=', input.bookingId)
+    .where('b.organization_id', '=', input.organizationId)
+    .executeTakeFirst()
+  if (!booking || (await isImportedBooking(trx, booking.id))) return
+
+  const eventType = 'workflow.executed'
+  const endpoint = await trx
+    .selectFrom('webhooks')
+    .select('id')
+    .where('id', '=', input.webhookId)
+    .where('organization_id', '=', booking.organization_id)
+    .where('destination_kind', '=', 'webhook')
+    .where('is_active', '=', true)
+    .where(sql<boolean>`${eventType} = ANY(events)`)
+    .where((eb) =>
+      eb.or([eb('event_type_id', 'is', null), eb('event_type_id', '=', booking.event_type_id)]),
+    )
+    .forShare()
+    .executeTakeFirst()
+  if (!endpoint) return
+
+  const eventId = randomUUID()
+  await insertWebhookDelivery(queue, trx, {
+    webhook_id: endpoint.id,
+    organization_id: booking.organization_id,
+    booking_id: booking.id,
+    event_id: eventId,
+    event_type: eventType,
+    workflow_run_id: input.workflowRunId,
+    payload: JSON.stringify({
+      id: eventId,
+      type: eventType,
+      occurredAt: now.toString(),
+      data: {
+        bookingId: booking.id,
+        organizationId: booking.organization_id,
+        eventTypeId: booking.event_type_id,
+        start: booking.start_at.toISOString(),
+        end: booking.end_at.toISOString(),
+        status: booking.status,
+        ...(booking.personal_owner_id !== null && {
+          source: booking.source,
+          rescheduledFromId: booking.rescheduled_from_id,
+        }),
+        workflowId: input.workflowId,
+        workflowRevision: input.workflowRevision,
+        trigger: input.trigger,
+        workflowRunId: input.workflowRunId,
+      },
+    }),
+    created_at: new Date(now.epochMilliseconds),
+  })
 }
 
 async function captureBookingWebhook(
@@ -152,7 +241,7 @@ async function captureBookingWebhook(
   const eventId = randomUUID()
   // Attendance changes reuse request_id (a plain uuid without a foreign key, added by 0064)
   // as a per-change receipt identity: this capture's fresh event ID, created in the same
-  // transaction as the change. The 0064 key (webhook, booking, event type, request) then
+  // transaction as the change. With workflow_run_id null for existing kinds, the key
   // gives every transition its own delivery, while lifecycle and reschedule-request receipts
   // deduplicate exactly as before. The value is never sent as data.requestId.
   const receiptId = event.type === 'attendee_no_show_changed' ? eventId : requestId
@@ -178,46 +267,56 @@ async function captureBookingWebhook(
     },
   })
   for (const endpoint of endpoints) {
-    const delivery = await trx
-      .insertInto('webhook_deliveries')
-      .values({
-        webhook_id: endpoint.id,
-        organization_id: booking.organization_id,
-        booking_id: booking.id,
-        event_id: eventId,
-        event_type: eventType,
-        request_id: receiptId,
-        payload:
-          endpoint.destination_kind === 'slack'
-            ? slackPayload({
-                type: eventType,
-                bookingId: booking.id,
-                start: booking.start_at.toISOString(),
-                end: booking.end_at.toISOString(),
-                status: booking.status,
-                eventTypeTitle: activity?.title,
-                timeZone: personal?.time_zone ?? 'UTC',
-                ...(invitee ? { inviteeName: invitee.name } : {}),
-                ...(bookingUrl ? { bookingUrl } : {}),
-              })
-            : payload,
-        created_at: new Date(now.epochMilliseconds),
-      })
-      .onConflict((oc) =>
-        oc.columns(['webhook_id', 'booking_id', 'event_type', 'request_id']).doNothing(),
-      )
-      .returning('id')
-      .executeTakeFirst()
-    if (delivery)
-      await queue.enqueue(
-        WEBHOOK_DELIVERY_JOB,
-        { deliveryId: delivery.id },
-        {
-          transaction: trx,
-          singletonKey: delivery.id,
-        },
-      )
+    await insertWebhookDelivery(queue, trx, {
+      webhook_id: endpoint.id,
+      organization_id: booking.organization_id,
+      booking_id: booking.id,
+      event_id: eventId,
+      event_type: eventType,
+      request_id: receiptId,
+      payload:
+        endpoint.destination_kind === 'slack'
+          ? slackPayload({
+              type: eventType,
+              bookingId: booking.id,
+              start: booking.start_at.toISOString(),
+              end: booking.end_at.toISOString(),
+              status: booking.status,
+              eventTypeTitle: activity?.title,
+              timeZone: personal?.time_zone ?? 'UTC',
+              ...(invitee ? { inviteeName: invitee.name } : {}),
+              ...(bookingUrl ? { bookingUrl } : {}),
+            })
+          : payload,
+      created_at: new Date(now.epochMilliseconds),
+    })
   }
+}
+
+async function insertWebhookDelivery(
+  queue: WebhookQueue,
+  trx: Db,
+  values: Insertable<WebhookDeliveries>,
+) {
+  const delivery = await trx
+    .insertInto('webhook_deliveries')
+    .values(values)
+    .onConflict((oc) =>
+      oc
+        .columns(['webhook_id', 'booking_id', 'event_type', 'request_id', 'workflow_run_id'])
+        .doNothing(),
+    )
+    .returning('id')
+    .executeTakeFirst()
+  if (delivery)
+    await queue.enqueue(
+      WEBHOOK_DELIVERY_JOB,
+      { deliveryId: delivery.id },
+      {
+        transaction: trx,
+        singletonKey: delivery.id,
+      },
+    )
 }
 
 export function webhookDeliveryJob(deps: WebhookDeps) {

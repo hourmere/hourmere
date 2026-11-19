@@ -40,6 +40,8 @@ import {
 import * as notificationSettings from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 import { parseQuestions, validateResponses } from './questions.ts'
+import * as recurringCapabilities from './recurring-capabilities.ts'
+import * as recurringMembers from './recurring-members.ts'
 import * as roundRobin from './round-robin.ts'
 import * as successRedirect from './success-redirect.ts'
 import {
@@ -133,6 +135,8 @@ function sourceCopy(...changes: Change[]): Api {
     expirePaymentHolds,
     parseQuestions,
     validateResponses,
+    ...recurringCapabilities,
+    ...recurringMembers,
     ...roundRobin,
     ...successRedirect,
     cleanInviteeEmail,

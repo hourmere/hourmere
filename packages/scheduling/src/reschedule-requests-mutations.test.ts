@@ -74,8 +74,8 @@ describe.skipIf(!serverUrl)('reschedule request source-copy mutations', () => {
           .map((action) => ({
             name: `manage token booking scope for ${state} request ${action}`,
             change: [
-              ".where((eb) =>\n      eb.or([eb('booking_id', '=', bookingId), eb('picked_booking_id', '=', bookingId)]),\n    )",
-              '',
+              "return eb.or([eb('booking_id', '=', bookingId), eb('picked_booking_id', '=', bookingId)])",
+              'return eb.val(true)',
             ] as Change,
             verify: (copy: BookingModule) =>
               assertManageRequestIsolation(db, copy, setup, state, action),

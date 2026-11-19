@@ -2922,6 +2922,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/-/routing/{handle}/{slug}/route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit answers to a public personal routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         */
+        post: operations["routeLead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/-/routing/teams/{teamSlug}/{slug}": {
         parameters: {
             query?: never;
@@ -2936,6 +2956,26 @@ export interface paths {
         get: operations["getPublicTeamRoutingForm"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/-/routing/teams/{teamSlug}/{slug}/route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit answers to a public team routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         */
+        post: operations["routeTeamLead"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7871,6 +7911,34 @@ export interface components {
             }[];
             versionNumber: number;
         };
+        RoutingSubmission: {
+            /** @description Map question UUIDs to text or select option UUIDs. Omit or use null for an unanswered optional question. */
+            answers: {
+                [key: string]: string | null;
+            };
+            /**
+             * Format: uuid
+             * @description Current published version from public metadata
+             */
+            versionId: string;
+        };
+        RoutingSubmissionResponse: {
+            /** @enum {string} */
+            kind: "message";
+            message: string;
+        } | {
+            /**
+             * Format: uri
+             * @description Private continuation link
+             */
+            continuationUrl: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @enum {string} */
+            kind: "continuation";
+            /** @description Private bearer capability */
+            routeToken: string;
+        };
         Schedule: {
             /** Format: date-time */
             createdAt: string;
@@ -8595,7 +8663,8 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
-            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+            /** @description Subscription event kinds. Open enum. Ignore unknown event kinds. */
+            events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
             /** Format: uuid */
             id: string;
             isActive: boolean;
@@ -8615,8 +8684,11 @@ export interface components {
             deliveredAt: string | null;
             /** Format: uuid */
             eventId: string;
-            /** @enum {string} */
-            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed";
+            /**
+             * @description Delivery event kind. Open enum. Ignore unknown event kinds.
+             * @enum {string}
+             */
+            eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed";
             httpStatus: number | null;
             /** Format: uuid */
             id: string;
@@ -14677,6 +14749,96 @@ export interface operations {
             };
         };
     };
+    routeLead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoutingSubmission"];
+            };
+        };
+        responses: {
+            /** @description Routing outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingSubmissionResponse"];
+                };
+            };
+            /** @description invalid_request or invalid_routing_answers */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled or routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_form_changed or routing_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (maximum 65,536 bytes) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After when present */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getPublicTeamRoutingForm: {
         parameters: {
             query?: never;
@@ -14726,6 +14888,96 @@ export interface operations {
                 };
             };
             /** @description rate_limited; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    routeTeamLead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                teamSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoutingSubmission"];
+            };
+        };
+        responses: {
+            /** @description Routing outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingSubmissionResponse"];
+                };
+            };
+            /** @description invalid_request or invalid_routing_answers */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled or routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_form_changed or routing_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (maximum 65,536 bytes) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After when present */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -18791,7 +19043,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+                    events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
                     isActive?: boolean;
                     url: string;
                 };
@@ -18838,7 +19090,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhook_not_found */
+            /** @description webhook_not_found or workflows_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -18959,7 +19211,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed")[];
+                    events?: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
                     isActive?: boolean;
                 };
             };
@@ -19001,7 +19253,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description webhook_not_found */
+            /** @description webhook_not_found or workflows_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -112,7 +112,7 @@ export function bookingHostNames(
 }
 
 const meetingHosts = (
-  meeting: BookingEmailMeeting,
+  meeting: Pick<BookingEmailMeeting, 'hostName' | 'hostNames'>,
   language: InterfaceLanguage,
   compact = false,
 ) =>
@@ -295,6 +295,11 @@ const htmlLines = (text: string, language: InterfaceLanguage) =>
 const textField = (label: string, value: string, language: InterfaceLanguage) =>
   message(language, 'format.field', { label, value: value.replaceAll('\n', '\n  ') })
 
+interface MeetingDates {
+  label: string
+  dates: { when: string; status: string; join?: { label: string; url: string } }[]
+}
+
 interface Content {
   language: InterfaceLanguage
   subject: string
@@ -309,7 +314,10 @@ interface Content {
   footer?: { language: InterfaceLanguage; text: string } | undefined
   /** Replies to this email do not reach the hosts. */
   replyNotice?: string | undefined
-  receivedWhy: string
+  receivedWhy?: string
+  meetingDates?: MeetingDates[]
+  seriesAction?: { label: string; url: string }
+  repairNote?: string
 }
 
 function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
@@ -332,6 +340,17 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     c.intro,
     '',
     ...c.fields.map((f) => textField(f.label, f.text, c.language)),
+    ...(c.meetingDates ?? []).flatMap(({ label, dates }) => [
+      '',
+      label,
+      ...dates.map(({ when, status, join }) =>
+        [
+          `- ${when}`,
+          ...(status ? [`  ${status}`] : []),
+          ...(join ? [`  ${textField(join.label, join.url, c.language)}`] : []),
+        ].join('\n'),
+      ),
+    ]),
     ...(c.answers.length
       ? [
           '',
@@ -342,11 +361,14 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     ...(c.hostNote ? ['', c.hostNote.label, c.hostNote.text] : []),
     ...(c.join ? ['', c.join.label, c.join.url] : []),
     ...(c.bookingUrl ? ['', textField(t('Open in Hourmere'), c.bookingUrl, c.language)] : []),
+    ...(c.repairNote ? ['', c.repairNote] : []),
+    ...(c.seriesAction
+      ? ['', textField(c.seriesAction.label, c.seriesAction.url, c.language)]
+      : []),
     ...actionText,
     ...(c.footer && !c.manageLinks ? ['', c.footer.text] : []),
     ...(c.replyNotice ? ['', c.replyNotice] : []),
-    '',
-    c.receivedWhy,
+    ...(c.receivedWhy === undefined ? [] : ['', c.receivedWhy]),
   ].join('\n')
 
   const cell = 'padding: 2px 16px 2px 0; vertical-align: top;'
@@ -390,17 +412,35 @@ ${emailButton(c.join.label, c.join.url, false, c.language)}
   const bookingLink = c.bookingUrl
     ? `<div style="margin: 24px 0 0;">${emailButton(t('Open in Hourmere'), c.bookingUrl, false, c.language)}</div>`
     : ''
+  const meetingDates = (c.meetingDates ?? [])
+    .map(({ label, dates }) => {
+      const items = dates.map(({ when, status, join }) => {
+        const detail = join
+          ? `<a href="${escapeHtml(join.url)}" style="${emailLinkStyle}">${htmlText(join.label)}</a>`
+          : status && htmlText(status)
+        return `<li style="margin: 0 0 8px; ${emailWrapStyle}">${htmlText(when)}${detail ? `<br>${detail}` : ''}</li>`
+      })
+      return `<p style="margin: 24px 0 8px; font-weight: 600;">${htmlText(label)}</p>\n<ul style="margin: 0; padding-left: 24px;">\n${items.join('\n')}\n</ul>`
+    })
+    .join('\n')
   const afterDetails = [
+    meetingDates,
     answers,
     hostNote,
     join,
     bookingLink,
+    c.repairNote
+      ? `<p style="margin: 24px 0 0; ${emailWrapStyle}">${htmlText(c.repairNote)}</p>`
+      : '',
+    c.seriesAction ? emailButton(c.seriesAction.label, c.seriesAction.url, false, c.language) : '',
     links,
     ...(!c.manageLinks ? [footer] : []),
     c.replyNotice
       ? `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(c.replyNotice)}</p>`
       : '',
-    `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(c.receivedWhy)}</p>`,
+    c.receivedWhy === undefined
+      ? ''
+      : `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(c.receivedWhy)}</p>`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -694,4 +734,180 @@ export function bookingEmail(
     },
     options.attachment,
   )
+}
+
+export type SeriesBookingEmailKind = 'confirmed' | 'cancelled' | 'link_update'
+
+export interface SeriesEmailMember {
+  start: Temporal.Instant
+  end: Temporal.Instant
+  state: 'confirmed' | 'updated_separately' | 'started' | 'cancelled'
+  conference?: { state: 'pending' | 'failed' } | { state: 'ready'; url: string }
+  /** This cancellation affected this date. Other dates retain their current state. */
+  affected?: boolean
+}
+
+export interface SeriesEmailDetails {
+  eventName: string
+  hostName: string
+  /** Required hosts for a collective booking, in stable booking order. */
+  hostNames?: readonly string[]
+  inviteeName: string
+  /** Booking language used for the booker and every guest. */
+  locale?: string | null
+  /** Dates in series order, or the recipient's net changes for a link update. */
+  members: readonly SeriesEmailMember[]
+  /** The instance's canonical PUBLIC_URL from server configuration. */
+  publicUrl: string
+  cancelReason?: string | null
+}
+
+export type SeriesEmailRecipient = { email: string; timeZone: string } & (
+  | {
+      role: 'booker' | 'guest'
+      /** A capability issued for this recipient. A guest's capability must be read-only. */
+      token: string
+    }
+  | {
+      role: 'host'
+      locale?: string | null
+      /** Absolute same-origin URL to authenticated series detail. */
+      seriesUrl: string
+    }
+)
+
+const seriesStateLabels = {
+  updated_separately: 'series.updatedSeparately',
+  started: 'series.started',
+  cancelled: 'series.cancelled.member',
+  pending: 'series.pending',
+  failed: 'series.failed',
+} as const satisfies Record<string, MailKey>
+
+function seriesMemberLabel(member: SeriesEmailMember, language: InterfaceLanguage) {
+  const state = member.state === 'confirmed' ? member.conference?.state : member.state
+  return state && state !== 'ready' ? message(language, seriesStateLabels[state]) : ''
+}
+
+const singleLineUrl = (url: string) => (url === singleLine(url) ? linkableUrl(url) : undefined)
+
+function seriesMemberJoinUrl(member: SeriesEmailMember) {
+  return member.state === 'confirmed' && member.conference?.state === 'ready'
+    ? singleLineUrl(member.conference.url)
+    : undefined
+}
+
+/** Localized plain text for VEVENT DESCRIPTION. Apply iCalendar escaping at serialization. */
+export function seriesMemberDescription(member: SeriesEmailMember, locale?: string | null): string {
+  const language = interfaceLanguage(locale) ?? 'en'
+  return seriesMemberLabel(member, language) || seriesMemberJoinUrl(member) || ''
+}
+
+function seriesActionUrl(publicUrl: string, recipient: SeriesEmailRecipient): string {
+  const origin = URL.parse(publicUrl)?.origin
+  if (!origin || !linkableUrl(origin) || (publicUrl !== origin && publicUrl !== `${origin}/`)) {
+    throw new Error('Invalid series mail instance origin')
+  }
+  if (recipient.role === 'host') {
+    const url = singleLineUrl(recipient.seriesUrl) && URL.parse(recipient.seriesUrl)
+    if (!url || url.origin !== origin || url.username || url.password || url.hash) {
+      throw new Error('Invalid host series detail URL')
+    }
+    return recipient.seriesUrl
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(recipient.token)) throw new Error('Invalid series mail capability')
+  return `${origin}/series/manage#${recipient.token}`
+}
+
+const seriesSubjectKeys = {
+  confirmed: 'series.confirmed.subject',
+  cancelled: 'series.cancelled.subject',
+  link_update: 'series.linkUpdate.subject',
+} as const satisfies Record<SeriesBookingEmailKind, MailKey>
+
+/** Render one series email. The caller supplies the recipient's current dates and capability. */
+export function seriesBookingEmail(
+  kind: SeriesBookingEmailKind,
+  series: SeriesEmailDetails,
+  recipient: SeriesEmailRecipient,
+): MailMessage {
+  const isHost = recipient.role === 'host'
+  const language = interfaceLanguage(isHost ? recipient.locale : series.locale) ?? 'en'
+  const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
+  const event = singleLine(series.eventName)
+  const host = meetingHosts(series, language) || t('Host')
+  const invitee = singleLine(series.inviteeName)
+  const reason = kind === 'cancelled' && series.cancelReason ? multiLine(series.cancelReason) : ''
+
+  const dates = (label: MailKey, members: readonly SeriesEmailMember[]): MeetingDates => ({
+    label: t(label),
+    dates: members.map((member) => {
+      const url = kind === 'cancelled' ? undefined : seriesMemberJoinUrl(member)
+      const status =
+        kind === 'cancelled' && member.affected
+          ? t('series.cancelled.member')
+          : seriesMemberLabel(member, language)
+      return {
+        when: formatMeetingTime(member.start, member.end, recipient.timeZone, language),
+        status,
+        ...(url && { join: { label: joinLabel({ kind: 'link', url }, language), url } }),
+      }
+    }),
+  })
+  const affected = kind === 'cancelled' ? series.members.filter((member) => member.affected) : []
+  const reported =
+    kind === 'link_update'
+      ? series.members.filter(
+          (member) =>
+            seriesMemberJoinUrl(member) ||
+            (recipient.role !== 'guest' &&
+              member.state === 'confirmed' &&
+              member.conference?.state === 'failed'),
+        )
+      : series.members
+  const meetingDates =
+    kind === 'cancelled'
+      ? [
+          dates('series.affected', affected),
+          dates(
+            'series.unchanged',
+            series.members.filter((member) => !member.affected),
+          ),
+        ]
+      : [dates('series.occurrences', reported)]
+  const count = kind === 'cancelled' ? affected.length : reported.length
+  const locale = formattingLocale(language)
+  const plural = new Intl.PluralRules(locale).select(count) === 'one' ? 'One' : 'Other'
+  const intro =
+    kind === 'confirmed'
+      ? t(`series.confirmed.${recipient.role}`, { host, invitee })
+      : t(`series.${kind === 'cancelled' ? 'cancelled' : 'linkUpdate'}.body${plural}`, {
+          count: new Intl.NumberFormat(locale).format(count),
+        })
+  const repair =
+    isHost &&
+    kind !== 'cancelled' &&
+    reported.some((member) => member.state === 'confirmed' && member.conference?.state === 'failed')
+  const action = isHost
+    ? 'Open in Hourmere'
+    : recipient.role === 'guest'
+      ? 'series.view'
+      : 'series.manage'
+  return {
+    ...render(recipient.email, {
+      language,
+      subject: t(seriesSubjectKeys[kind], { event }),
+      intro,
+      fields: [
+        field(t('What'), event),
+        isHost ? field(t('Invitee'), invitee) : field(t('Host'), host),
+        ...(reason ? [field(t('Reason'), reason)] : []),
+      ],
+      answers: [],
+      meetingDates: meetingDates.filter((section) => section.dates.length > 0),
+      ...(repair && { repairNote: t('series.repair') }),
+      seriesAction: { label: t(action), url: seriesActionUrl(series.publicUrl, recipient) },
+    }),
+    sensitive: true,
+  }
 }

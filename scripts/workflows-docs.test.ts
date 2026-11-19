@@ -55,6 +55,45 @@ const prose = (values: readonly string[]) =>
   values.length < 2 ? values.join('') : `${values.slice(0, -1).join(', ')} and ${values.at(-1)}`
 const numberWords = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
 
+describe('workflow webhook guides', () => {
+  const site = 'apps/site/src/content/docs/docs'
+
+  it.each([
+    `${site}/webhooks.md`,
+    `${site}/mcp.md`,
+    `${site}/cli.md`,
+    'docs/mcp.md',
+    'tools/cli/README.md',
+  ])('%s documents the event kinds and hard-off behavior', (path) => {
+    const guide = read(path)
+    for (const event of WEBHOOK_EVENTS) expect(guide).toContain(`\`${event}\``)
+    expect(guide).toMatch(/`(?:404 )?workflows_disabled`/)
+    expect(guide).toMatch(/`(?:409 )?webhooks_disabled`/)
+    expect(guide).toContain('`Webhook.events`')
+    expect(guide).toMatch(/`(?:WebhookDelivery\.)?eventType`/)
+    expect(guide).toContain('open enum')
+  })
+
+  it.each(['zapier', 'n8n', 'make'])('%s excludes the workflow kind', (integration) => {
+    expect(read(`${site}/${integration}.md`)).toMatch(
+      /(?:do|does) not offer (?:a )?`workflow\.executed`/,
+    )
+  })
+
+  it('documents the workflow delivery fields', () => {
+    const guide = read(`${site}/webhooks.md`).split('The `workflow.executed` payload')[1]
+    for (const field of [
+      'bookingId',
+      'workflowId',
+      'workflowRevision',
+      'trigger',
+      'workflowRunId',
+    ]) {
+      expect(guide).toContain(`\`data.${field}\``)
+    }
+  })
+})
+
 /** Every migration in order, so the last match of a constraint is the one main installs. */
 const migrations = readdirSync(new URL('../packages/db/migrations/', import.meta.url))
   .filter((name) => name.endsWith('.sql'))
@@ -593,31 +632,28 @@ describe('workflow design numeric contracts', () => {
     }
   })
 
-  it('binds the webhook expansion to the enum, constraints and delivery key on main', () => {
-    const current = WEBHOOK_EVENTS.length
-    const extended = current + 1
+  it('binds the webhook expansion to the enum, constraints and delivery key', () => {
+    const bookingEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')
+    const current = bookingEvents.length
+    const extended = WEBHOOK_EVENTS.length
+    expect(WEBHOOK_EVENTS).toEqual([...bookingEvents, 'workflow.executed'])
     expect(text).toContain(
-      `\`WEBHOOK_EVENTS\` has ${current} kinds: ${prose(code(WEBHOOK_EVENTS))}.`,
+      `\`WEBHOOK_EVENTS\` has ${extended} kinds: ${prose(code(WEBHOOK_EVENTS))}.`,
     )
     // The service already derives its bound from the constant, so appending needs no literal.
     expect(read('packages/webhooks/src/service.ts')).toContain('.max(WEBHOOK_EVENTS.length)')
-    expect(text).toContain('Service `eventsOf()` already validates `.max(WEBHOOK_EVENTS.length)`')
+    expect(text).toContain('Service `eventsOf()` validates `.max(WEBHOOK_EVENTS.length)`')
     expect(text).toContain('`eventsOf()` keeps `.max(WEBHOOK_EVENTS.length)` and gains no literal')
 
     // The installed subscription CHECK is the last one in migration order.
     const subscriptionCheck =
       /cardinality\(events\) BETWEEN 1 AND (\d+) AND\s+events <@ ARRAY\[([^\]]*)\]/g
     const subscription = latest(subscriptionCheck)
-    expect(Number(subscription.match[1])).toBe(current)
+    expect(Number(subscription.match[1])).toBe(extended)
     expect(quoted(subscription.match[2])).toEqual([...WEBHOOK_EVENTS])
     expect(text).toContain(
-      `The webhook baseline on main comes from migration ${subscription.number}`,
+      `${subscription.number}'s \`webhooks_events_check\` is \`cardinality(events) BETWEEN 1 AND ${extended}\``,
     )
-    expect(text).toContain(
-      `${subscription.number}'s \`webhooks_events_check\` is \`cardinality(events) BETWEEN 1 AND ${current}\``,
-    )
-    // Step 13d replaces the installed CHECK; every migration that defined one stays as published.
-    expect(text).toContain(`replaces ${subscription.number}'s \`webhooks.events\` CHECK`)
     // Both event CHECKs, inline in the first migration and named later, in migration order.
     const deliveryCheck =
       /event_type(?:_check| text NOT NULL) CHECK \(\s*event_type IN \(([^)]*)\)\s*\)/g
@@ -629,7 +665,9 @@ describe('workflow design numeric contracts', () => {
     const deliveries = history(deliveryCheck, 1)
     const definers = subscriptions.map(({ number }) => number)
     expect(definers.at(-1)).toBe(subscription.number)
-    expect(deliveries.map(({ number }) => number)).toEqual(definers)
+    const bookingDefiners = definers.slice(0, -1)
+    expect(deliveries.slice(0, -1).map(({ number }) => number)).toEqual(bookingDefiners)
+    expect(deliveries.map(({ kinds }) => kinds)).toEqual(subscriptions.map(({ kinds }) => kinds))
     // Each definition keeps the earlier kinds in order and only appends ("only widened").
     for (const defined of [subscriptions, deliveries])
       for (const [index, { kinds }] of defined.entries()) {
@@ -638,11 +676,9 @@ describe('workflow design numeric contracts', () => {
         expect(kinds.length).toBeGreaterThan(earlier.length)
       }
     for (const { match, kinds } of subscriptions) expect(Number(match[1])).toBe(kinds.length)
-    expect(text).toContain(
-      `${definers.at(-1)} only widened both constraints; ${definers[0]} created them and ${prose(definers.slice(1, -1))} replaced them before`,
-    )
-    expect(text).toContain(`Published migrations ${prose(definers)} remain unchanged`)
-    expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${current}\``)
+    const predecessor = bookingDefiners.at(-1)
+    expect(text).toContain(`Published migrations ${prose(bookingDefiners)} remain unchanged`)
+    expect(text).toContain(`replaces ${predecessor}'s \`webhooks.events\` CHECK`)
     expect(text).toContain(`\`cardinality(events) BETWEEN 1 AND ${extended}\``)
     for (const [, upper] of text.matchAll(/BETWEEN 1 AND (\d+)/g))
       expect([current, extended]).toContain(Number(upper))
@@ -670,47 +706,47 @@ describe('workflow design numeric contracts', () => {
     for (const [phrase, upper] of ranges)
       expect([current, extended], phrase).toContain(Number(upper))
     expect(text).toContain(
-      `The bound of ${extended} lets an endpoint already subscribed to all ${current} current kinds add the workflow kind`,
+      `The bound of ${extended} lets an endpoint already subscribed to all ${current} booking kinds add the workflow kind`,
     )
 
     // Delivery kinds and the delivery uniqueness key as main installs and uses them.
     const deliveryKinds = latest(deliveryCheck)
     expect(quoted(deliveryKinds.match[1])).toEqual([...WEBHOOK_EVENTS])
-    // The baseline says one migration ("its") defines both event CHECKs.
-    expect(deliveryKinds.number).toBe(subscription.number)
     expect(text).toContain(
-      `replaces ${deliveryKinds.number}'s \`webhook_deliveries.event_type\` CHECK`,
+      `Migration ${deliveryKinds.number}'s \`webhook_deliveries_event_type_check\` allows the same ${extended} kinds`,
     )
-    const key = latest(/ALTER TABLE webhook_deliveries ADD UNIQUE NULLS NOT DISTINCT \(([^)]*)\)/g)
+    expect(text).toContain(`replaces ${predecessor}'s \`webhook_deliveries.event_type\` CHECK`)
+    const oldKey = latest(
+      /ALTER TABLE webhook_deliveries ADD UNIQUE NULLS NOT DISTINCT \(([^)]*)\)/g,
+    )
+    const key = latest(
+      /CREATE UNIQUE INDEX \w+ ON webhook_deliveries\s*\(([^)]*)\) NULLS NOT DISTINCT/g,
+    )
+    expect(key.number).toBe(deliveryKinds.number)
     const columns = key.match[1] as string
-    expect(columns).toBe('webhook_id, booking_id, event_type, request_id')
+    expect(columns).toBe('webhook_id, booking_id, event_type, request_id, workflow_run_id')
+    expect(columns).toBe(`${oldKey.match[1]}, workflow_run_id`)
     const delivery = read('packages/webhooks/src/delivery.ts')
-    expect(delivery).toContain(
-      `oc.columns([${columns
+    expect(delivery.replace(/\s*\n\s*(?=\.)/g, '')).toContain(
+      `.columns([${columns
         .split(', ')
         .map((column) => `'${column}'`)
         .join(', ')}]).doNothing()`,
     )
-    expect(key.number).not.toBe(subscription.number)
     expect(text).toContain(
-      `\`UNIQUE NULLS NOT DISTINCT (${columns})\`, which ${key.number} added and ${subscription.number} left unchanged`,
+      `Migration ${key.number} installs \`UNIQUE NULLS NOT DISTINCT (${columns})\``,
     )
-    expect(text).toContain(`the delivery key is still the one ${key.number} added`)
+    expect(text).toContain(
+      `\`UNIQUE NULLS NOT DISTINCT (${oldKey.match[1]})\`, which ${oldKey.number} added`,
+    )
     const requestColumn = latest(/ALTER TABLE webhook_deliveries ADD COLUMN (request_id) uuid;/g)
-    expect(text).toContain(`follows ${requestColumn.number}'s \`request_id\` pattern`)
-    // Migration numbers in these spellings must be main's: "NNNN's `webhooks.events` CHECK",
-    // "the NNNN event_type/delivery/subscription CHECK", "NNNN's `webhooks_events_check`" or
-    // "`webhook_deliveries_event_type_check`", and for the key "NNNN's NULLS NOT DISTINCT",
-    // "NNNN's delivery key" or "the delivery key is still the one NNNN added".
-    for (const [phrase, checkNumber, constraintNumber] of text.matchAll(
-      /\b(\d{4})(?:'s)? `?(?:webhooks_events_check|webhooks\.events|webhook_deliveries(?:\.event_type|_event_type_check)|event_type|delivery|subscription)`? CHECK|\b(\d{4})(?:'s)? `(?:webhooks_events_check|webhook_deliveries_event_type_check)`/g,
-    ))
-      expect(checkNumber ?? constraintNumber, phrase).toBe(subscription.number)
-    for (const [phrase, keyNumber, addedNumber] of text.matchAll(
-      /\b(\d{4})(?:'s)? (?:NULLS NOT DISTINCT|delivery key)|\bdelivery key is still the one (\d{4}) added/g,
-    ))
-      expect(keyNumber ?? addedNumber, phrase).toBe(key.number)
-    expect(text).toContain(`\`UNIQUE NULLS NOT DISTINCT (${columns}, workflow_run_id)\``)
+    expect(text).toContain(
+      `Migration ${key.number} follows ${requestColumn.number}'s \`request_id\` pattern`,
+    )
+    const workflowColumn = latest(
+      /ALTER TABLE webhook_deliveries ADD COLUMN workflow_run_id uuid;/g,
+    )
+    expect(workflowColumn.number).toBe(key.number)
     expect(text).toContain('No existing row is rewritten or backfilled')
     // Attendance rows store a fresh per-change receipt in request_id, as the baseline says.
     expect(delivery).toContain(
@@ -745,15 +781,16 @@ describe('workflow design numeric contracts', () => {
     expect(text).toContain('verifies an additive OpenAPI diff')
     expect(text).toContain('so `workflows_disabled` wins when both apply')
     expect(text).toContain('compares the requested set with the row locked by `lockedWebhook()`')
-    // Postgres needs the exact arbiter columns once 14a re-keys the delivery uniqueness.
-    expect(text).toContain("moves the existing capture's conflict target")
+    expect(text).toContain(
+      '`packages/webhooks/src/delivery.ts` uses the five-column key for every kind',
+    )
     const step = (id: string) => planRows().find((row) => row[1] === id)?.[4] ?? ''
-    expect(step('13d')).toContain(`replaces the ${subscription.number} webhooks.events CHECK`)
+    expect(step('13d')).toContain(`replaces the ${predecessor} webhooks.events CHECK`)
     expect(step('13d')).toContain(`BETWEEN 1 AND ${extended}`)
     expect(step('13d')).toContain(`${current} to ${extended} kinds`)
     expect(step('14a')).toContain('webhook_deliveries.workflow_run_id')
-    expect(step('14a')).toContain(`re-keys the ${key.number} NULLS NOT DISTINCT uniqueness`)
-    expect(step('14a')).toContain(`replaces the ${deliveryKinds.number} event_type CHECK`)
+    expect(step('14a')).toContain(`re-keys the ${oldKey.number} NULLS NOT DISTINCT uniqueness`)
+    expect(step('14a')).toContain(`replaces the ${predecessor} event_type CHECK`)
   })
 
   it('keeps plan rows and prose agreeing on precedence, lazy disable, the ledger and availability', () => {
@@ -881,13 +918,14 @@ describe('workflow design numeric contracts', () => {
       .filter((file) => file !== 'scripts/workflows-docs.test.ts')
       .filter((file) => read(file).includes('WEBHOOK_EVENTS'))
       .sort()
-    const subscribers = ['packages', 'apps']
-      .flatMap((directory) => files(directory, testFile))
-      .filter((file) =>
-        /events:\s*(?:\[\s*\.\.\.WEBHOOK_EVENTS\s*\]|Array\.from\(\s*WEBHOOK_EVENTS\s*\)|WEBHOOK_EVENTS(?:\.slice\(\))?\b)/.test(
-          read(file),
-        ),
-      )
+    const subscribers = files('packages/webhooks/src', testFile)
+      .filter((file) => {
+        const source = read(file)
+        return (
+          source.includes("WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')") &&
+          /events:\s*bookingEvents\b/.test(source)
+        )
+      })
       .sort()
     expect(binders.length).toBeGreaterThan(0)
     expect(subscribers.length).toBeGreaterThan(0)

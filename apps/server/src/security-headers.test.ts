@@ -272,6 +272,37 @@ describe('security headers', () => {
     )
   })
 
+  it('keeps public routing form HTML private only while the capability is enabled', async () => {
+    const enabled = createApp(deps({ webDist: dist, routingFormsEnabled: true }))
+    for (const path of [
+      '/route/ada/intro',
+      '/route/team/alpha/intro',
+      '/%72oute/ada/intro/',
+      '/route/acme%2Ffoo/intro',
+      '/route/team/acme%2Ffoo/intro',
+    ]) {
+      const on = await enabled.request(path)
+      expect(on.status).toBe(200)
+      expect(on.headers.get('cache-control'), path).toBe('no-store')
+      expect(securityHeadersOf(on)).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
+      const off = await app.request(path)
+      expect(off.headers.get('cache-control'), path).toBe('no-cache')
+      expect(securityHeadersOf(off)).toEqual(APP_PAGE)
+    }
+    for (const path of [
+      '/route',
+      '/route/continue',
+      '/route/legacy',
+      '/team/route/legacy',
+      '/route%2Fteam/alpha/intro',
+      '/%2572oute/ada/intro',
+    ]) {
+      const response = await enabled.request(path)
+      expect(response.headers.get('cache-control'), path).toBe('no-cache')
+      expect(securityHeadersOf(response)).toEqual(APP_PAGE)
+    }
+  })
+
   it('leave hashed bundles and other files their own type and long-lived cache', async () => {
     const bundle = await app.request('/assets/app-abc123.js')
     expect(bundle.status).toBe(200)
@@ -355,7 +386,7 @@ describe('security headers', () => {
     })
   })
 
-  it('cover the MCP endpoint, refused or answered', async () => {
+  it('keeps refused and answered MCP requests private', async () => {
     const initialize = {
       jsonrpc: '2.0',
       id: 1,
@@ -378,10 +409,11 @@ describe('security headers', () => {
       })
     const refused = await post({})
     expect(refused.status).toBe(401)
-    expect(securityHeadersOf(refused)).toEqual(NOT_HTML)
+    expect(securityHeadersOf(refused)).toEqual({ ...NOT_HTML, referrer: 'no-referrer' })
+    expect(refused.headers.get('cache-control')).toBe('no-store')
     const answered = await post({ authorization: 'Bearer hm_good' })
     expect(answered.status).toBe(200)
-    expect(securityHeadersOf(answered)).toEqual(NOT_HTML)
+    expect(securityHeadersOf(answered)).toEqual({ ...NOT_HTML, referrer: 'no-referrer' })
     expect(answered.headers.get('cache-control')).toBe('no-store')
     await answered.body?.cancel()
   })

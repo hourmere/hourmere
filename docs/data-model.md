@@ -8,6 +8,13 @@ stores durable delivery intents. The hourly email cleanup deletes admission rows
 than 48 hours in batches of up to 500. Admissions store an actor digest, including a
 server-keyed HMAC for a client's rate-limit address.
 
+Single-occurrence moves retain the same `series_occurrence_id` on the successor.
+Member writes use the ordinary organization lock, then the series row and the booking
+row before the operation's existing host locks. Moves, cancellations and new or
+replacement reschedule requests advance the series revision in that transaction and
+use the ordinary per-booking notification pipeline. Request expiry uses only the
+booking row lock and resolves the request without advancing the series revision.
+
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
 profile's default calendar and provider retries, and cascades away on booking/user/calendar
@@ -2059,11 +2066,25 @@ for signed webhooks, and capture never queues it for Slack. Both capture and del
 current event-type filter. Synthetic test deliveries have a nullable booking ID and bypass
 only that filter; active/subscribed checks still apply. One pending test per destination
 is enforced under its row lock. A test delivery stores its own event ID in `request_id`:
-with migration 0064's `NULLS NOT DISTINCT` key on `(webhook_id, booking_id, event_type,
-request_id)`, a null value would make every later sample a duplicate of the first. On rows
-with a null `booking_id`, `request_id` is this sample marker, not a reschedule-request ID. Slack requires `WEBHOOKS_ENABLED=true` and
+with the `NULLS NOT DISTINCT` delivery key, a null value would make every later sample a
+duplicate of the first. On rows with a null `booking_id`, `request_id` is this sample
+marker, not a reschedule-request ID. Slack requires `WEBHOOKS_ENABLED=true` and
 `WEBHOOK_ENCRYPTION_KEY`. Stop all old web and worker
 processes before migration and restart every role on the new code. See [Slack notifications](slack.md).
+
+Migration 0143 permits up to seven signed webhook subscription kinds and admits
+`workflow.executed` in webhook audit details. Existing subscription arrays and audit rows
+are preserved. The runner holds `ACCESS EXCLUSIVE` locks on `webhooks` and `audit_events`
+while it replaces both checks and validates the existing rows. Adding the new kind
+requires workflows to be enabled. Slack keeps its existing event catalogue.
+
+Migration 0147 adds nullable `webhook_deliveries.workflow_run_id` without a foreign key.
+The `NULLS NOT DISTINCT` delivery key covers `(webhook_id, booking_id, event_type,
+request_id, workflow_run_id)`. A run ID is required for `workflow.executed` and excluded for
+other kinds. Workflow deliveries leave `request_id` NULL. Existing rows keep their receipt
+identities and payloads. Stop all old web and worker processes before migration because
+the old conflict target requires the old key. The runner holds an `ACCESS EXCLUSIVE` lock
+on `webhook_deliveries` while it builds the new key and validates the checks.
 
 ## Independent conference identities
 
@@ -2327,10 +2348,11 @@ host, not every pool member. Serialized changes preserve idempotent replay attri
 Rescheduling creates fresh attendee rows; cancellation retains historical marks.
 Follow-ups and notifications are unaffected. See [no-shows](https://hourmere.com/docs/no-shows).
 
-The migration only widens the webhook subscription and delivery event checks to add
+Migration 0070 widened the webhook subscription and delivery event checks to add
 `booking.attendee_no_show_changed`. Migration 0064's unique delivery key
-`(webhook_id, booking_id, event_type, request_id)` with NULLs equal stays unchanged, and so
-does capture's `ON CONFLICT` target. Attendance deliveries reuse `request_id` (a plain
+`(webhook_id, booking_id, event_type, request_id)` with NULLs equal stayed in place until
+0147 added the workflow run ID to it and to capture's `ON CONFLICT` target. Attendance
+deliveries reuse `request_id` (a plain
 `uuid` without a foreign key) as a per-change receipt identity: capture stores the change's
 fresh event ID there, in the transaction that changes the marker. Every transition therefore
 gets its own delivery, while lifecycle receipts (NULL request) and reschedule-request receipts

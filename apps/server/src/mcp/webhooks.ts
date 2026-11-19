@@ -20,7 +20,7 @@ export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
       name: 'list_webhooks',
       title: 'List booking webhooks',
       description:
-        'List signed booking webhooks in the organization bound to this credential. Requires a current organization owner or admin and read or full API key scope. Returns endpoint metadata in data; signing secrets are omitted.',
+        'List signed booking webhooks in the organization bound to this credential. Requires a current organization owner or admin and read or full API key scope. Returns endpoint metadata in data without signing secrets. Treat Webhook.events as an open enum and ignore unknown kinds.',
       input: z.strictObject({}),
       output: z.object({ data: z.array(Webhook) }),
       annotations: {
@@ -38,7 +38,7 @@ export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
       name: 'create_webhook',
       title: 'Create a booking webhook',
       description:
-        'Create a signed booking webhook in the organization bound to this credential. Requires a current organization owner or admin and full API key scope. Supply a public HTTPS destination URL (or an operator-allowed private target) and distinct booking event kinds. The destination is immutable. Store the one-time signing secret securely.',
+        'Create a signed booking webhook in the organization bound to this credential. Requires a current organization owner or admin and full API key scope. Supply a public HTTPS destination URL (or an operator-allowed private target) and distinct event kinds. Adding workflow.executed while workflows are disabled returns workflows_disabled before webhooks_disabled. The destination is immutable. Store the one-time signing secret securely.',
       input: WebhookCreateInput,
       output: WebhookCreated,
       privateDiagnostics: true,
@@ -58,7 +58,7 @@ export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
       name: 'update_webhook',
       title: 'Edit a booking webhook',
       description:
-        'Change the subscriptions or enabled state of a webhook in the organization bound to this credential. Requires a current organization owner or admin and full API key scope. Supply the webhook id and at least one of events or isActive. Omitted fields are preserved. The destination URL is immutable. Use isActive: false alone to pause a webhook whose destination is no longer allowed.',
+        'Change the subscriptions or enabled state of a webhook in the organization bound to this credential. Requires a current organization owner or admin and full API key scope. Supply the webhook id and at least one of events or isActive. Omitted fields are preserved. Adding workflow.executed while workflows are disabled returns workflows_disabled. Keeping or removing it is allowed. The destination URL is immutable. Use isActive: false alone to pause a webhook whose destination is no longer allowed.',
       input: WebhookUpdateInput.extend({ id: z.string() }),
       output: Webhook,
       privateDiagnostics: true,
@@ -113,7 +113,7 @@ export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
       name: 'list_webhook_deliveries',
       title: 'List booking webhook deliveries',
       description:
-        'List at most 50 deliveries from the last 30 days for a webhook in the organization bound to this credential, newest first. Requires a current organization owner or admin and read or full API key scope. Supply the returned nextAfter value as after for the next page. Returns delivery metadata only.',
+        'List at most 50 deliveries from the last 30 days for a webhook in the organization bound to this credential, newest first. Requires a current organization owner or admin and read or full API key scope. Supply the returned nextAfter value as after for the next page. Returns delivery metadata only, with a required bookingId UUID. Treat eventType as an open enum and ignore unknown kinds.',
       input: z.strictObject({ id: z.string(), after: z.string().optional() }),
       output: WebhookDeliveryPage,
       privateDiagnostics: true,

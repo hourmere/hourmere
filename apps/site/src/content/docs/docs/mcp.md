@@ -106,6 +106,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
@@ -341,6 +342,12 @@ a destination's allowlist entry is removed, pass only `id` and `isActive: false`
 after removing the endpoint and its retained deliveries. Both writes require a `full`
 API key. IDs that are missing or belong to another organization return `webhook_not_found`.
 
+`create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
+`booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. Workflows are
+hard-off. Adding `workflow.executed` returns a tool error with `workflows_disabled`
+(REST 404). On create, it takes precedence over `webhooks_disabled` (REST 409).
+
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
 call replaces the signing secret and returns the new `{ secret }` once. Save it directly
 to the receiver's secret store and keep the result out of logs. Coordinate one rotation
@@ -351,6 +358,8 @@ It returns `{ data, nextAfter }` with up to fifty delivery metadata rows from th
 thirty days, newest first. Omit `after` for the first page, then pass `nextAfter` as
 `after` until it is null. Payloads, headers and secrets are omitted. Rotation and
 history both return `webhook_not_found` for missing or out-of-organization endpoints.
+Treat `Webhook.events` and `WebhookDelivery.eventType` as open enums and ignore unknown
+event types. Every delivery record has a required UUID `bookingId`.
 
 An authorized `mcp:tools` OAuth grant can call these tools. They use REST's checks for the
 verified personal owner or current team owner/admin in the acting organization.
@@ -365,6 +374,8 @@ URL policy and configuration.
 `rotate_webhook_secret` 需要 `full` 密钥，每次成功轮换仅在本次响应中返回新签名密钥。
 `list_webhook_deliveries` 接受 `read` 或 `full` 密钥，每页最多返回最近 30 天的 50 条元数据。
 下一页将 `nextAfter` 作为 `after` 传入，直至其为 null。投递历史不包含正文、请求头或密钥。
+工作流仍处于硬关闭状态。新增 `workflow.executed` 订阅会返回 `workflows_disabled`
+工具错误（对应 REST 404），创建时优先于 `webhooks_disabled`（对应 REST 409）。
 
 ## Create and manage event types
 

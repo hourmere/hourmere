@@ -340,40 +340,36 @@ in a workflow or a template. Extend the existing signed transactional webhook ou
 a distinct `workflow.executed` event kind and stable event/delivery IDs; do not manufacture
 another `booking.created` subscription event. Only the selected endpoint gets this event.
 
-The webhook baseline on main comes from migration 0070 (attendee no-shows), which last
-redefined both event CHECKs; the delivery key is still the one 0064 added:
+The installed webhook subscription CHECK and the delivery event CHECK are defined separately.
 
-- `WEBHOOK_EVENTS` has 6 kinds: `booking.created`, `booking.rescheduled`,
-  `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`
-  and `booking.attendee_no_show_changed`.
-- Service `eventsOf()` already validates `.max(WEBHOOK_EVENTS.length)`.
-- 0070's `webhooks_events_check` is `cardinality(events) BETWEEN 1 AND 6` over those kinds,
-  and its `webhook_deliveries_event_type_check` allows the same set. 0070 only widened both
-  constraints; 0017 created them and 0064 replaced them before.
-- Deliveries are unique by
-  `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id)`, which 0064
-  added and 0070 left unchanged. `request_id` is a plain `uuid` without a foreign key, and
-  it has two uses. Request-origin rows carry the reschedule request's ID. Attendance rows
-  carry a fresh per-change receipt ID, so every mark or unmark gets its own delivery; that
-  value never appears as `data.requestId`. Booking-origin rows leave it NULL.
+- `WEBHOOK_EVENTS` has 7 kinds: `booking.created`, `booking.rescheduled`,
+  `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
+  `booking.attendee_no_show_changed` and `workflow.executed`.
+- Service `eventsOf()` validates `.max(WEBHOOK_EVENTS.length)`.
+- 0143's `webhooks_events_check` is `cardinality(events) BETWEEN 1 AND 7` over those kinds.
+  Migration 0147's `webhook_deliveries_event_type_check` allows the same 7 kinds. 0017
+  created both constraints, and 0064 and 0070 widened both as booking kinds were added.
+- Migration 0147 installs
+  `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id, workflow_run_id)`.
+  It extends `UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id)`,
+  which 0064 added. `request_id` is a plain `uuid` without a foreign key. Request-origin
+  rows carry the reschedule request's ID. Attendance rows carry a fresh per-change receipt
+  ID, so every mark or unmark gets its own delivery. That value is private to the outbox.
+  Booking-origin rows leave it NULL.
 
-That key cannot represent several workflow executions for one booking and endpoint. Step
-14a's new outbox migration follows 0064's `request_id` pattern. It adds a nullable
-`workflow_run_id uuid` with no foreign key, like `request_id`, and replaces the key with
-`UNIQUE NULLS NOT DISTINCT (webhook_id, booking_id, event_type, request_id, workflow_run_id)`.
-Workflow rows get their own column instead of reusing `request_id` as attendance rows do,
-so each column keeps a meaning the schema can check. A CHECK requires `workflow_run_id`
-exactly on `workflow.executed` rows, and another forbids a row carrying both `request_id`
-and `workflow_run_id`. No existing row is rewritten or
-backfilled: booking-origin rows (both columns NULL), request-origin rows and attendance
-rows (`request_id` set) keep their uniqueness, payloads, signatures and receipts. The same
-migration replaces 0070's `webhook_deliveries.event_type` CHECK, extending it from the
-6 current kinds to 7, before any workflow delivery can be inserted. Postgres infers an
-`ON CONFLICT` arbiter only from the exact column set, so step 14a also moves the existing
-capture's conflict target in `packages/webhooks/src/delivery.ts` from the four columns to
-the five. Booking and request duplicate capture must still coalesce, and each attendance
-change must still get its own delivery. Verify a populated predecessor that includes
-request-origin and attendance rows, fresh installation and a no-op rerun.
+Migration 0147 follows 0064's `request_id` pattern and adds a nullable `workflow_run_id uuid`
+without a foreign key. Separate run identities let several workflow executions for one
+booking target the same endpoint. A CHECK requires `workflow_run_id` exactly on
+`workflow.executed` rows, and another forbids a row carrying both `request_id` and
+`workflow_run_id`. No existing row is rewritten or backfilled. Booking-origin rows (both
+columns NULL), request-origin rows and attendance rows (`request_id` set) keep their
+uniqueness, payloads, signatures and receipts. The same migration replaces 0070's
+`webhook_deliveries.event_type` CHECK, extending it from the 6 current kinds to 7.
+Postgres infers an `ON CONFLICT` arbiter only from the exact column set. Capture in
+`packages/webhooks/src/delivery.ts` uses the five-column key for every kind. Booking and
+request duplicate capture coalesces, and each attendance change gets its own delivery.
+The upgrade test covers a populated predecessor with booking-origin, request-origin and
+attendance rows, fresh installation and a no-op rerun.
 
 The endpoint must explicitly subscribe to this new event kind and remain active; removal,
 rotation, pause, global webhook disablement and private-target policy retain their existing
@@ -401,7 +397,7 @@ subscription expansion:
 Existing subscriptions that include `booking.attendee_no_show_changed` keep working
 unchanged. No stored `events` array is rewritten or expanded: as with the attendance kind,
 an endpoint receives `workflow.executed` only after it subscribes explicitly. The bound of 7
-lets an endpoint already subscribed to all 6 current kinds add the workflow kind. The
+lets an endpoint already subscribed to all 6 booking kinds add the workflow kind. The
 `workflows_disabled` check below concerns only adding `workflow.executed`, so keeping,
 adding or removing the attendance kind behaves as today. An attendance change never emits
 `workflow.executed`, and a workflow never emits the attendance kind.
@@ -453,11 +449,9 @@ The workflow payload has the existing bounded booking ID/time/status projection 
 `workflowId`, `workflowRevision`, `trigger` and stable `workflowRunId`, never `requestId`;
 existing booking, request and attendance payloads stay unchanged.
 `WebhookDelivery.bookingId` remains a required UUID, never null or omitted, including team
-workflow deliveries. Internal
-subscription tests may use the enabled context after 13d but insert no workflow deliveries
-before 14a. Before step 13d, steps 5–6 validate endpoint existence and ownership but
-reject webhook action definitions as `invalid_workflow`; 13d enables their subscription
-validation in internal tests. Production workflow operations remain hard-off until step 19b.
+workflow deliveries. Workflow create/update validate that a referenced signed webhook belongs to
+the workflow's organization, is active, and subscribes to `workflow.executed`. Production
+workflow operations remain hard-off until step 19b.
 
 Use the current bounded identifier/time/status payload projection; no custom JSON templates,
 answers, names, addresses or location fields. Team workflow payloads also omit source and
@@ -712,9 +706,8 @@ recipient intents, minimal run history and workflow mail reservations, plus the 
 step 5) adds the creation keys: each created definition's retained client idempotency key,
 scoped to its organization, actor and credential, with a fingerprint of the create input; it
 is never changed and goes only with its definition row; see
-[workflow creation key storage](data-model.md#workflow-creation-key-storage). The remaining proposed
-column on an existing table is `webhook_deliveries.workflow_run_id` (step 14a), nullable and
-without a foreign key.
+[workflow creation key storage](data-model.md#workflow-creation-key-storage). Migration 0147
+adds `webhook_deliveries.workflow_run_id` (step 14a), nullable and without a foreign key.
 Use organization-scoped FKs and unique occurrence/
 revision/action/recipient identities, with bounded indexes for pending due work and
 retention. Deleting a workflow tombstones its identity and disables pending work while

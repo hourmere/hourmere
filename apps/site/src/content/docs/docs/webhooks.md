@@ -56,7 +56,7 @@ stored organization. See [browser organization context](/docs/api-conventions#br
 | `PATCH /webhooks/{id}` | `update_webhook` | `webhooks update` | Change `events` and/or `isActive` and return endpoint metadata |
 | `POST /webhooks/{id}/rotate-secret` | `rotate_webhook_secret` | `webhooks rotate-secret` | Replace the signing secret and receive `{ secret }` once |
 | `DELETE /webhooks/{id}` | `delete_webhook` | `webhooks delete` | Delete the endpoint and all retained deliveries |
-| `GET /webhooks/{id}/deliveries?after=…` | `list_webhook_deliveries` | `webhooks deliveries` | At most fifty delivery metadata rows, newest first |
+| `GET /webhooks/{id}/deliveries?after=…` | `list_webhook_deliveries` | `webhooks deliveries` | At most fifty delivery metadata rows, newest first, each with a required UUID `bookingId` |
 
 MCP listing takes `{}`. MCP and CLI return the same metadata as the REST list in
 `{ data: [...] }`. For CLI creation, supply the JSON arguments via `--input FILE` or
@@ -77,11 +77,17 @@ endpoint or one outside the credential's organization. See
 更新可修改订阅事件和启用状态，目标 URL 固定。移除目标白名单条目后，仍可仅传
 `isActive: false` 暂停。删除会一并清除保留的投递记录，CLI 需加 `--yes` 确认；
 不存在或属于其他组织的端点均返回 `webhook_not_found`。
+工作流仍处于硬关闭状态。创建或更新端点时新增 `workflow.executed` 订阅会返回
+`404 workflows_disabled`，创建时优先于 `409 webhooks_disabled`。
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
-`booking.reschedule_request_expired` and `booking.attendee_no_show_changed`. Request events
-add `data.requestId`, keep `data.status` as `confirmed`, and omit notes and management links.
+`booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and `workflow.executed`.
+Workflows are hard-off. Creating or updating an endpoint to add `workflow.executed` returns
+`404 workflows_disabled`. On create, that takes precedence over `409 webhooks_disabled`.
+An endpoint already subscribed to `workflow.executed` can keep or remove it.
+
+Request events add `data.requestId`, keep `data.status` as `confirmed`, and omit notes and management links.
 Each replacement request has its own delivery identity. There are at most ten endpoints per organization.
 The URL is immutable: create a replacement endpoint to change the destination. By default,
 URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user information
@@ -181,10 +187,19 @@ The JSON is an immutable snapshot captured inside the booking's transaction:
 For `booking.attendee_no_show_changed`, `data` additionally contains `attendeeId`,
 `noShowMarkedAt` and `noShowMarkedBy`. Unmarking sets both marker fields to null. Each
 actual transition has a new event ID; repeating the same state emits no event. The event uses the same
-envelope, `v1` signature and headers as every other event, so one verifier handles all of them. Existing
-subscriptions are not expanded automatically. This extends the subscription and delivery
-response event enums: consumers must ignore unknown event types and update closed
-validators when upgrading. See [no-shows](/docs/no-shows).
+envelope, `v1` signature and headers as every other event, so one verifier handles all of them.
+See [no-shows](/docs/no-shows).
+
+The `workflow.executed` payload carries the bounded booking projection, including
+`data.bookingId` (a required UUID), `data.start`, `data.end` and `data.status`. It adds
+`data.workflowId`, `data.workflowRevision`, `data.trigger` and `data.workflowRunId` (stable
+across delivery attempts). Team workflow deliveries omit `data.source` and
+`data.rescheduledFromId`. `data.requestId` is reserved for request events. Workflow
+deliveries are unavailable while workflows are hard-off.
+
+Treat `Webhook.events` and `WebhookDelivery.eventType` in list responses as open enums.
+The request, attendance and workflow kinds are additive. Ignore unknown event types and
+update closed validators when upgrading. Subscribe explicitly to receive a new kind.
 
 Only these bounded identifiers, timestamps and status/source values are included. Invitee
 and host names/emails, attendee contact details, answers, locations, management capabilities, API keys and

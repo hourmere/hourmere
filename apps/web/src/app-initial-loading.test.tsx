@@ -32,6 +32,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'MeetingPollPage',
     'OneTimeBookingPage',
     'RequireSession',
+    'RoutingFormPage',
     'ScheduleEditorPage',
     'SessionLayout',
     'SettingsPage',

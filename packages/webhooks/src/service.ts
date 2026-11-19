@@ -3,6 +3,7 @@ import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
+import { requireWorkflowsImplemented } from '@hourmere/workflows/hard-off'
 import { z } from 'zod'
 import { encryptWebhookSecret, newWebhookSecret } from './crypto.ts'
 import type { WebhookPrivateTarget } from './private-targets.ts'
@@ -20,6 +21,7 @@ export const WEBHOOK_EVENTS = [
   'booking.reschedule_requested',
   'booking.reschedule_request_expired',
   'booking.attendee_no_show_changed',
+  'workflow.executed',
 ] as const
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number]
 export const WebhookCreateInput = z.strictObject({
@@ -121,6 +123,11 @@ function eventsOf(events: unknown): WebhookEventType[] {
   return [...parsed.data].sort()
 }
 
+function requireWorkflowSubscription(events: readonly string[], previous: readonly string[] = []) {
+  if (events.includes('workflow.executed') && !previous.includes('workflow.executed'))
+    requireWorkflowsImplemented()
+}
+
 const view = (row: {
   id: string
   organization_id: string
@@ -186,8 +193,9 @@ export async function createWebhook(
 ) {
   const parsed = WebhookCreateInput.safeParse(input)
   if (!parsed.success) throw invalid()
-  const url = webhookUrl(parsed.data.url, settings.privateTargets)
   const events = eventsOf(parsed.data.events)
+  requireWorkflowSubscription(events)
+  const url = webhookUrl(parsed.data.url, settings.privateTargets)
   if (!url) throw destinationNotAllowed(settings)
   const encryptionKey = requireEnabled(settings)
   return ctx.db.transaction().execute(async (trx) => {
@@ -268,6 +276,7 @@ export async function updateWebhook(
   const pauseOnly = parsed.data.isActive === false && parsed.data.events === undefined
   return ctx.db.transaction().execute(async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
+    if (events) requireWorkflowSubscription(events, row.events)
     // Pausing must remain available after an operator revokes a destination. Every
     // other update rechecks syntax/policy only: resolving here would expose an
     // internal-host existence oracle to callers.

@@ -7,6 +7,7 @@ Hourmere Trigger supports six events: `booking.created`, `booking.cancelled`,
 `booking.rescheduled`, `booking.reschedule_requested`,
 `booking.reschedule_request_expired` and `booking.attendee_no_show_changed`.
 The last appears as **Attendee No-Show Changed**, matching the Zapier trigger.
+The n8n trigger does not offer `workflow.executed`. Workflows are hard-off.
 
 Select this event to receive attendance changes. Its signed payload includes
 `data.bookingId`, `data.attendeeId`, `data.noShowMarkedAt` and `data.noShowMarkedBy`
