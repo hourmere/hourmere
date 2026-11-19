@@ -60,13 +60,13 @@ async function readAccess(
 ): Promise<TeamReadAccess> {
   const hasProof =
     principal.kind === 'session' && (capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)
-      ? sql<boolean>`EXISTS (${liveBrowserProofs(principal, scope.id, sql<number>`sso_policies.trust_generation`, capabilities)})`
+      ? sql<boolean>`EXISTS (${liveBrowserProofs(principal, scope.id, sql<number>`policy.trust_generation`, capabilities)})`
       : sql<boolean>`false`
   const policy = await db
-    .selectFrom('sso_policies')
+    .selectFrom('sso_policies as policy')
     .select(['require_sso', 'admission', 'policy_revision', 'trust_generation'])
     .select(sql<boolean>`CASE WHEN require_sso THEN ${hasProof} ELSE true END`.as('allowed'))
-    .where('organization_id', '=', scope.id)
+    .where('policy.organization_id', '=', scope.id)
     .executeTakeFirst()
   return { allowed: policy?.allowed ?? true, policy: policy ?? null }
 }
