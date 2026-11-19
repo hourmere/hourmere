@@ -54,7 +54,7 @@ The website at hourmere.com is separate from your Hourmere instance.
   MCP or CLI. Available in full to self-hosters.
 
 - [Voting in a meeting poll](/docs/meeting-poll-voting): understand verification, ballots
-  and privacy. The voter page is implemented; poll creation is not available yet.
+  and privacy. Hosts can create polls through [REST](/docs/rest#manage-meeting-polls), MCP and CLI.
 
 ## Create an event type
 

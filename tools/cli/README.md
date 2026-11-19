@@ -586,11 +586,31 @@ MCP 工具列表不显示此工具。
 
 ## Manage meeting polls
 
-Use `hourmere polls list|get|results|close|cancel|delete|finalize --input -` with a key
-for the poll's organization. Personal event owners and current team owners or admins
-can manage polls. Reads allow `full`, `read` or `bookings`. Writes require `full` or
-`bookings`. Each command takes its JSON from stdin. Keep the finalization key out of
-command-line arguments and shell history.
+Use `hourmere polls <command> --input -` with a key for the poll's organization.
+Personal event owners and current team owners or admins can manage polls. Reads allow
+`full`, `read` or `bookings`. Writes require `full` or `bookings`. Each command takes
+its JSON from stdin and rejects `--output`. Keep idempotency keys and invitation
+addresses out of command-line arguments and shell history.
+
+| Command | JSON input |
+|---|---|
+| `create` | `eventTypeId`, `candidateStarts`, `deadlineAt`, `displayTimeZone`, `admissionMode`, `idempotencyKey`; optional `durationMinutes`, `visibility` |
+| `invite` | `id`, `idempotencyKey`, up to 40 `invitees` with `name`, `email`, optional `locale` and `timeZone` |
+| `resend-invitation` | `id`, `voterId`, `expectedHostRevision`, `idempotencyKey` |
+| `remove-voter` | `id`, `voterId`, `expectedHostRevision` |
+| `remove-unverified` | `id`, `expectedHostRevision` |
+| `rotate-link` | `id`, `expectedHostRevision`, `idempotencyKey` |
+
+Use offset-bearing instants for `candidateStarts` and `deadlineAt`. Create and rotate-link
+print the `publicLink` only on the successful write; keep stdout private. Invited polls
+have `publicLink: null` and reject rotation with `poll_link_unavailable`. An exact create
+retry reports `poll_already_created` with `pollId` (null if deleted). Rotate with the current
+`hostRevision` and a new key to replace a lost link and immediately invalidate the previous
+one. An exact rotation retry returns `poll_link_already_rotated`.
+
+Invitation queues email only to supplied addresses, subject to mail and admission limits.
+An exact invite retry returns current outcomes without sending again. Bulk removal removes
+unverified public enrollments and preserves host invitations.
 
 `list` accepts `{}` or a `limit` from 1 to 100 and an `after` cursor from `nextAfter`.
 `get` and `results` take `id`. Results include the current revisions and advisory
@@ -608,9 +628,12 @@ current booking status. Finalization returns safe booking metadata and `replayed
 When a different key returns `poll_already_scheduled`, the JSON error includes the
 poll ID, booking ID, chosen slot ID, status and host revision.
 
-中文：使用 `hourmere polls list|get|results|close|cancel|delete|finalize --input -` 管理会议投票。
+中文：使用 `hourmere polls <command> --input -` 管理会议投票。
 需要投票所在组织的密钥，权限限个人活动所有者及团队当前所有者或管理员。读取允许 `full`、`read`
 或 `bookings`，写入需要 `full` 或 `bookings`。JSON 从标准输入读取，幂等键请勿放入命令参数或历史。
+公开投票创建或轮换仅在成功写入时返回一次 `publicLink`。轮换会立即使旧链接失效。仅限邀请的投票不支持
+轮换。创建重试可取得 `pollId`，邀请重试返回名单状态且不会重发邮件。邀请只发给提交的地址。批量移除
+仅清理未验证的公开报名，保留主持人发出的邀请。
 `list` 可传 `limit` 和 `after`（使用上一页 `nextAfter`）；`get` 和 `results` 使用 `id`。
 候选时间的可用性仅供参考。关闭、取消和删除使用 `id` 和 `expectedHostRevision`，删除保留关联预约。
 最终确认需提供结果版本和所选投票者的选票版本，对有条件参与者须明确确认。响应丢失后，用原幂等键

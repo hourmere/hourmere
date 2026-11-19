@@ -289,18 +289,14 @@ describe('meeting poll privacy and ballot boundaries', () => {
     'does not display aggregate counts without an active verified voter (%j)',
     async (ownBallot) => {
       language('en')
+      // The read service sends no counts to public, unverified or withdrawn readers.
       fakeApi({
         [endpoint('read')]: () =>
-          json(200, {
-            ...poll,
-            visibility: 'aggregate',
-            ownBallot,
-            counts: [{ slotId: slotA, yes: 17, ifNeedBe: 19, no: 23 }],
-          }),
+          json(200, { ...poll, visibility: 'aggregate', ownBallot, counts: null }),
       })
       renderApp(`/poll/voter#${token}`)
       await screen.findByRole('heading', { name: poll.title })
-      expect(screen.queryByText(/17|19|23/)).toBeNull()
+      expect(document.querySelector('.poll-counts')).toBeNull()
     },
   )
 

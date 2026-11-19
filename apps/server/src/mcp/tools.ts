@@ -14,9 +14,11 @@ import {
 import {
   DomainError,
   type DomainErrorKind,
+  MeetingPollAlreadyCreatedError,
   MeetingPollAlreadyScheduledError,
   MeetingPollKeyMismatchError,
   MeetingPollRateLimitError,
+  MeetingPollSlotUnavailableError,
   RoutingAdmissionError,
   WaitlistRateLimitError,
 } from '@hourmere/scheduling'
@@ -126,6 +128,8 @@ export interface ToolErrorBody {
   field?: SuccessRedirectErrorField
   message?: string
   poll?: z.output<typeof MeetingPollHostOutput>
+  pollId?: string | null
+  unavailableStarts?: string[]
   retryAfterSeconds?: number
 }
 
@@ -310,10 +314,14 @@ export async function runTool(
     if (err instanceof RoutingAdmissionError) return errorResult({ error: 'rate_limited' })
     if (err instanceof MeetingPollKeyMismatchError)
       return errorResult({ error: 'meeting_poll_key_mismatch' })
+    if (err instanceof MeetingPollAlreadyCreatedError)
+      return errorResult({ error: err.code, pollId: err.pollId })
     if (err instanceof MeetingPollAlreadyScheduledError) {
       const poll = MeetingPollHostOutput.safeParse(err.poll)
       return errorResult({ error: err.code, ...(poll.success && { poll: poll.data }) })
     }
+    if (err instanceof MeetingPollSlotUnavailableError)
+      return errorResult({ error: err.code, unavailableStarts: err.unavailableStarts })
     // An unknown kind (only possible by bypassing the type) is a bug, as in the REST API.
     if (err instanceof DomainError && DOMAIN_KINDS.has(err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.

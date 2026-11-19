@@ -2507,7 +2507,11 @@ export interface paths {
          */
         get: operations["listMeetingPolls"];
         put?: never;
-        post?: never;
+        /**
+         * Create a meeting poll
+         * @description Create an open poll over offered candidate times. Only the initial response discloses its public link, and invited polls have no public link. Requires bookings or full API-key scope, or a same-origin session bound to the expected organization.
+         */
+        post: operations["createMeetingPoll"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2598,6 +2602,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/meeting-polls/{id}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite voters to a meeting poll
+         * @description Admit an entire bounded batch or refuse it when there is insufficient capacity. Queues invitations only for newly admitted or upgraded host-supplied mailboxes. Exact retries return current roster outcomes for those addresses without more mail.
+         */
+        post: operations["inviteMeetingPollVoters"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/invitations/{voterId}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend a meeting poll invitation
+         * @description Queue a new credential for the retained invitee under mail and resend limits. The old credential is invalidated. An exact retry queues no further mail.
+         */
+        post: operations["resendMeetingPollInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/remove-unverified": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove unverified public meeting poll voters
+         * @description Remove live unverified public enrollments and preserve host invitations.
+         */
+        post: operations["removeUnverifiedMeetingPollVoters"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meeting-polls/{id}/results": {
         parameters: {
             query?: never;
@@ -2613,6 +2677,46 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/rotate-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the public link for a meeting poll
+         * @description Invalidates the old public link immediately. The new link is disclosed only on the first successful response. Available in public_link mode.
+         */
+        post: operations["rotateMeetingPollLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-polls/{id}/voters/{voterId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a meeting poll voter
+         * @description Revoke voter access, delete the voter row and release capacity.
+         */
+        delete: operations["removeMeetingPollVoter"];
         options?: never;
         head?: never;
         patch?: never;
@@ -6889,6 +6993,33 @@ export interface components {
                 withdrawnAt: string | null;
             }[];
         };
+        MeetingPollInvitation: {
+            entries: {
+                email: string;
+                /** @enum {string} */
+                outcome: "invited" | "upgraded" | "unchanged";
+                /** @enum {string} */
+                status: "pending" | "invited" | "verified" | "withdrawn" | "absent";
+                /** Format: uuid */
+                voterId: string | null;
+            }[];
+            poll: components["schemas"]["MeetingPollHost"];
+            replayed: boolean;
+        };
+        MeetingPollInvitationResend: {
+            poll: components["schemas"]["MeetingPollHost"];
+            replayed: boolean;
+            /** Format: uuid */
+            voterId: string;
+        };
+        MeetingPollLink: {
+            poll: components["schemas"]["MeetingPollHost"];
+            /**
+             * Format: uri
+             * @description One-time disclosure of the public voting link. Null for invited polls.
+             */
+            publicLink: string | null;
+        };
         MeetingPollOwnBallot: {
             ballotRevision: number;
             consentedAt: string | null;
@@ -6907,6 +7038,11 @@ export interface components {
             optedOutAt: string;
             /** Format: uuid */
             pollId: string;
+        };
+        MeetingPollRemoval: {
+            poll: components["schemas"]["MeetingPollHost"];
+            removedVoterIds: string[];
+            resultsRevision: number;
         };
         MeetingPollVerification: {
             voter: components["schemas"]["MeetingPollVoter"];
@@ -12881,6 +13017,119 @@ export interface operations {
             };
         };
     };
+    createMeetingPoll: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A retained random key for this operation (1–255 printable ASCII characters). */
+                "idempotency-key": string;
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    admissionMode: "public_link" | "invited";
+                    /** @description 2–20 distinct offered start times. */
+                    candidateStarts: string[];
+                    /** Format: date-time */
+                    deadlineAt: string;
+                    displayTimeZone: string;
+                    durationMinutes?: number;
+                    /** Format: uuid */
+                    eventTypeId: string;
+                    /** @enum {string} */
+                    visibility?: "private" | "aggregate";
+                };
+            };
+        };
+        responses: {
+            /** @description Created with a one-time public link disclosure */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollLink"];
+                };
+            };
+            /** @description invalid_request, invalid_poll, invalid_duration, invalid_time_zone, invalid_idempotency_key, poll_limit_exceeded, event_type_inactive or poll_event_unsupported */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description event_type_not_found: the event type is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_already_created, idempotency_key_reused, slot_unavailable, calendar_sync_unavailable, event_type_unavailable or poll_event_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"] & {
+                        /**
+                         * Format: uuid
+                         * @description For poll_already_created, the authorized poll ID or null after deletion.
+                         */
+                        pollId?: string | null;
+                        /** @description For slot_unavailable, the candidate starts the event does not currently offer. */
+                        unavailableStarts?: string[];
+                    };
+                };
+            };
+            /** @description rate_limited: host admission, API key or resend limit. Retry-After when known. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getMeetingPoll: {
         parameters: {
             query?: never;
@@ -12993,7 +13242,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied: requires current poll management authority; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13078,7 +13327,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied: requires current poll management authority; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13163,7 +13412,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied: requires current poll management authority; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13205,7 +13454,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description A retained random key for this finalization attempt (1–255 printable ASCII characters). */
+                /** @description A retained random key for this operation (1–255 printable ASCII characters). */
                 "idempotency-key": string;
                 /** @description Required for cookie-authenticated writes. The space where the action began. */
                 "x-expected-organization-id"?: string;
@@ -13321,6 +13570,300 @@ export interface operations {
             };
         };
     };
+    inviteMeetingPollVoters: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A retained random key for this operation (1–255 printable ASCII characters). */
+                "idempotency-key": string;
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Up to 40 host-supplied invitees. */
+                    invitees: {
+                        /** Format: email */
+                        email: string;
+                        locale?: string;
+                        name: string;
+                        timeZone?: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Invitation outcomes and safe poll metadata */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollInvitation"];
+                };
+            };
+            /** @description invalid_request, invalid_poll, invalid_idempotency_key, invalid_voter, invalid_time_zone or poll_limit_exceeded */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space; unknown or inaccessible voters also return poll_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_full, poll_closed, poll_canceled, poll_already_scheduled, voter_withdrawn or idempotency_key_reused */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: host admission, API key or resend limit. Retry-After when known. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resendMeetingPollInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A retained random key for this operation (1–255 printable ASCII characters). */
+                "idempotency-key": string;
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+                voterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedHostRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Resend accepted or replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollInvitationResend"];
+                };
+            };
+            /** @description invalid_request, invalid_poll, invalid_idempotency_key, invalid_voter, invalid_time_zone or poll_limit_exceeded */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space; unknown or inaccessible voters also return poll_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_full, poll_closed, poll_canceled, poll_already_scheduled, voter_withdrawn or idempotency_key_reused */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: host admission, API key or resend limit. Retry-After when known. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removeUnverifiedMeetingPollVoters: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedHostRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Current poll metadata, results revision and removed voter IDs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollRemoval"];
+                };
+            };
+            /** @description invalid_request or invalid_poll */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_canceled or poll_already_scheduled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getMeetingPollResults: {
         parameters: {
             query?: never;
@@ -13370,6 +13913,188 @@ export interface operations {
             };
             /** @description poll_not_found: the poll is missing or inaccessible in the current space */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rotateMeetingPollLink: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A retained random key for this operation (1–255 printable ASCII characters). */
+                "idempotency-key": string;
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedHostRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Rotated with a one-time public link disclosure */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollLink"];
+                };
+            };
+            /** @description invalid_request, invalid_poll or invalid_idempotency_key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_link_unavailable, poll_link_already_rotated or idempotency_key_reused */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removeMeetingPollVoter: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for cookie-authenticated writes. The space where the action began. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+                voterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedHostRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Current poll metadata, results revision and removed voter IDs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingPollRemoval"];
+                };
+            };
+            /** @description invalid_request or invalid_poll */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires current poll management authority; insufficient_scope; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description poll_not_found: the poll is missing or inaccessible in the current space */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; poll_changed, poll_canceled or poll_already_scheduled */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

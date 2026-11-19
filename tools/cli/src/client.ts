@@ -21,13 +21,18 @@ type ScheduledMeetingPoll = {
   status: 'scheduled'
 }
 
+type MeetingPollErrorDetails =
+  | { poll: ScheduledMeetingPoll }
+  | { pollId: string | null }
+  | { unavailableStarts: string[] }
+
 export class CliError extends Error {
   readonly code: string
   readonly status?: number
   readonly retryAfterSeconds?: number
   readonly detail?: string
   readonly field?: string
-  readonly poll?: ScheduledMeetingPoll
+  readonly meetingPoll?: MeetingPollErrorDetails
 
   constructor(
     code: string,
@@ -35,7 +40,7 @@ export class CliError extends Error {
     retryAfterSeconds?: number,
     detail?: string,
     field?: string,
-    poll?: ScheduledMeetingPoll,
+    meetingPoll?: MeetingPollErrorDetails,
   ) {
     super(code)
     this.code = code
@@ -43,7 +48,7 @@ export class CliError extends Error {
     this.retryAfterSeconds = retryAfterSeconds
     this.detail = detail
     this.field = field
-    this.poll = poll
+    this.meetingPoll = meetingPoll
   }
 }
 
@@ -136,16 +141,36 @@ function redirectField(code: string, value: unknown): string | undefined {
     : undefined
 }
 
-function scheduledMeetingPoll(
+function meetingPollErrorDetails(
   tool: string,
   code: string,
   value: unknown,
-): ScheduledMeetingPoll | undefined {
-  if (tool !== 'finalize_meeting_poll' || code !== 'poll_already_scheduled' || !isObject(value))
-    return undefined
-  const { id, bookingId, chosenSlotId, hostRevision, status } = value
+): MeetingPollErrorDetails | undefined {
+  if (!isObject(value)) return undefined
   const uuid = (value: unknown): value is string =>
     typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value)
+  if (tool === 'create_meeting_poll') {
+    const { pollId, unavailableStarts } = value
+    if (code === 'poll_already_created' && (pollId === null || uuid(pollId))) return { pollId }
+    if (
+      code === 'slot_unavailable' &&
+      Array.isArray(unavailableStarts) &&
+      unavailableStarts.every(
+        (start) =>
+          typeof start === 'string' &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/.test(start),
+      )
+    )
+      return { unavailableStarts }
+    return undefined
+  }
+  if (
+    tool !== 'finalize_meeting_poll' ||
+    code !== 'poll_already_scheduled' ||
+    !isObject(value.poll)
+  )
+    return undefined
+  const { id, bookingId, chosenSlotId, hostRevision, status } = value.poll
   if (
     status !== 'scheduled' ||
     !uuid(id) ||
@@ -156,7 +181,7 @@ function scheduledMeetingPoll(
     hostRevision < 1
   )
     return undefined
-  return { id, bookingId, chosenSlotId, hostRevision, status }
+  return { poll: { id, bookingId, chosenSlotId, hostRevision, status } }
 }
 
 async function readResponse(response: Response, maxBytes = MAX_RESPONSE_BYTES): Promise<unknown> {
@@ -294,7 +319,7 @@ export async function callTool(options: {
         retrySeconds(isObject(detail) ? detail.retryAfterSeconds : undefined),
         notificationDetail(code, isObject(detail) ? detail.message : undefined),
         redirectField(code, isObject(detail) ? detail.field : undefined),
-        scheduledMeetingPoll(tool, code, isObject(detail) ? detail.poll : undefined),
+        meetingPollErrorDetails(tool, code, detail),
       )
     }
     if (result.isError !== undefined && result.isError !== false)
