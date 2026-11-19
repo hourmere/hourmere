@@ -18,6 +18,7 @@ import * as management from '../team-management.ts'
 import * as bookings from './bookings.ts'
 import * as publicPage from './public.ts'
 import { PublicBranding } from './public-branding.ts'
+import { publicRoutingFormRoutes } from './public-routing-forms.ts'
 import { openApiDocument, resolve } from './test-app.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -41,6 +42,7 @@ function routeCopy<T>(file: 'public' | 'bookings', returned: string, change?: Ch
   ).replace(/\bexport /g, '')
   const bindings = {
     publicBookingAuditOrigin,
+    publicRoutingFormRoutes,
     PublicBranding,
     createRoute,
     z,

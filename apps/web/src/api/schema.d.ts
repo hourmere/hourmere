@@ -2674,6 +2674,46 @@ export interface paths {
         patch: operations["updateDisplayName"];
         trace?: never;
     };
+    "/api/v1/public/-/routing/{handle}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a public personal routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         */
+        get: operations["getPublicRoutingForm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/-/routing/teams/{teamSlug}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a public team routing form
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         */
+        get: operations["getPublicTeamRoutingForm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/{handle}": {
         parameters: {
             query?: never;
@@ -3494,6 +3534,26 @@ export interface paths {
          * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         patch: operations["updateRoutingForm"];
+        trace?: never;
+    };
+    "/api/v1/routing-forms/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a routing form draft
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications. Session requests require a same-origin Origin/Referer.
+         */
+        post: operations["previewRoutingForm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/routing-forms/{id}/publish": {
@@ -6811,6 +6871,12 @@ export interface components {
             }[];
             text: string;
         };
+        PreviewRoutingForm: {
+            /** @description Map question UUIDs to text or select option UUIDs. Omit or use null for an unanswered optional question. */
+            answers: {
+                [key: string]: string | null;
+            };
+        };
         Profile: {
             /** Format: date-time */
             createdAt: string;
@@ -6989,6 +7055,32 @@ export interface components {
             title: string;
             /** @enum {string} */
             visibility: "private" | "aggregate";
+        };
+        PublicRoutingForm: {
+            description?: string;
+            questions: ({
+                /** Format: uuid */
+                id: string;
+                label: string;
+                required: boolean;
+                /** @enum {string} */
+                type: "short_text" | "email";
+            } | {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                options: {
+                    /** Format: uuid */
+                    id: string;
+                    label: string;
+                }[];
+                required: boolean;
+                /** @enum {string} */
+                type: "select";
+            })[];
+            title: string;
+            /** Format: uuid */
+            versionId: string;
         };
         PublishRoutingForm: {
             expectedRevision: number;
@@ -7185,6 +7277,56 @@ export interface components {
                 updatedAt: string;
             }[];
             nextCursor: string | null;
+        };
+        RoutingFormPreview: {
+            draftRevision: number;
+            /** @description First matching rule, or fallback */
+            matchedRuleId: string | "fallback";
+            /** @description Rule or fallback whose target applies, or null when neither can be used */
+            resolvedRuleId: string | "fallback" | null;
+            /** @description Rules evaluated in order, through the first matching rule */
+            rules: {
+                conditions: {
+                    matched: boolean;
+                    /** Format: uuid */
+                    questionId: string;
+                }[];
+                matched: boolean;
+                /** Format: uuid */
+                ruleId: string;
+            }[];
+            target: {
+                /** Format: uuid */
+                eventTypeId: string;
+                /** @enum {string} */
+                kind: "event";
+                mappings: {
+                    destination: {
+                        /** @enum {string} */
+                        kind: "inviteeName";
+                    } | {
+                        /** @enum {string} */
+                        kind: "inviteeEmail";
+                    } | {
+                        /** @enum {string} */
+                        kind: "question";
+                        questionId: string;
+                    };
+                    options?: {
+                        [key: string]: string;
+                    };
+                    /** Format: uuid */
+                    questionId: string;
+                }[];
+            } | {
+                /** @enum {string} */
+                kind: "message";
+                message: string;
+            } | null;
+            unavailableTargets: {
+                reason: string;
+                ruleId: string | "fallback";
+            }[];
         };
         RoutingFormPublication: {
             form: components["schemas"]["RoutingForm"];
@@ -12873,6 +13015,124 @@ export interface operations {
             };
         };
     };
+    getPublicRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public routing form metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRoutingForm"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled or routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicTeamRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                teamSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public routing form metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRoutingForm"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled or routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     createPublicBooking: {
         parameters: {
             query?: never;
@@ -14444,6 +14704,98 @@ export interface operations {
             };
             /** @description organization_context_changed, routing_revision_conflict, idempotency_key_reused, slug_taken, routing_form_limit_reached, routing_form_not_published */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewRoutingForm: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional for sessions. Pins the preview to the organization where it opened. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRoutingForm"];
+            };
+        };
+        responses: {
+            /** @description Draft route and author diagnostics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingFormPreview"];
+                };
+            };
+            /** @description invalid_request, invalid_routing_answers, invalid_routing_form, invalid_routing_target */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied, insufficient_scope, forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled, routing_form_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

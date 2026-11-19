@@ -40,6 +40,9 @@
   "updateRoutingForm": { "mcp": "update_routing_form", "cli": "routing-forms update" },
   "archiveRoutingForm": { "mcp": "archive_routing_form", "cli": "routing-forms archive" },
   "publishRoutingForm": { "mcp": "publish_routing_form", "cli": "routing-forms publish" },
+  "previewRoutingForm": { "mcp": "preview_routing_form", "cli": "routing-forms preview" },
+  "getPublicRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
+  "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {
