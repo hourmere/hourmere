@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   cancelHostBooking,
   cancelManagedBooking,
+  createPublicBooking,
   expireRescheduleRequest,
   getHostBooking,
   getManagedBooking,
@@ -391,6 +392,93 @@ describe.skipIf(!serverUrl)('series member lifecycle on PostgreSQL', () => {
         bookingId: f.root,
         requestId: pending.id,
       })
+    } finally {
+      await Promise.all(locks.map((lock) => lock.release()))
+      await run
+    }
+  })
+
+  // Ordinary bookings read their series link before any lock and take no series lock, so
+  // the organization is their first lock and nothing comes between it and the group lock.
+  it.each([
+    'host move',
+    'host cancel',
+    'invitee move',
+    'invitee cancel',
+    'request create',
+  ] as const)('takes no extra lock for an ordinary booking on %s', async (operation) => {
+    const f = createFixtures(db)
+    const host = await f.host({ timeZone: 'UTC' })
+    await f.schedule(host.userId, { timeZone: 'UTC' })
+    const group = operation !== 'request create'
+    const slug = group ? 'ordinary-group' : 'ordinary'
+    const event = await f.eventType(host.organizationId, host.userId, { slug })
+    if (group)
+      await db
+        .updateTable('event_types')
+        .set({ booking_mode: 'group', group_capacity: 2 })
+        .where('id', '=', event)
+        .execute()
+    const notify = vi.fn<BookingNotifier>(async () => {})
+    const publicCtx = { db, now, notify }
+    const created = await createPublicBooking(publicCtx, {
+      handle: host.handle,
+      slug,
+      start: original,
+      invitee,
+      idempotencyKey: randomUUID(),
+    })
+    const id = created.booking.id
+    const token = required(created.manageToken)
+    const hostCtx: ServiceContext = {
+      ...publicCtx,
+      principal: {
+        kind: 'session',
+        sessionId: randomUUID(),
+        user: { id: host.userId, name: 'Host', email: 'host@example.test' },
+        organization: {
+          id: host.organizationId,
+          name: 'Personal',
+          slug: 'personal',
+          personal: true,
+        },
+      },
+    }
+    const action = {
+      'host move': () =>
+        rescheduleHostBooking(hostCtx, id, { start: later, idempotencyKey: randomUUID() }),
+      'host cancel': () => cancelHostBooking(hostCtx, id),
+      'invitee move': () =>
+        rescheduleManagedBooking(publicCtx, token, { start: later, idempotencyKey: randomUUID() }),
+      'invitee cancel': () => cancelManagedBooking(publicCtx, token),
+      'request create': () =>
+        requestReschedule(hostCtx, id, { idempotencyKey: randomUUID(), note: 'Another time' }),
+    }[operation]
+    const locks: Awaited<ReturnType<typeof holdLock>>[] = []
+    let run: Promise<PromiseSettledResult<unknown>[]> | undefined
+    try {
+      locks.push(
+        await holdLock(
+          'SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE',
+          host.organizationId,
+        ),
+      )
+      if (group)
+        locks.push(
+          await holdLock(
+            "SELECT pg_advisory_xact_lock(hashtextextended('booking-host:' || $1, 0))",
+            host.userId,
+          ),
+        )
+      locks.push(await holdLock('SELECT id FROM bookings WHERE id = $1 FOR UPDATE', id))
+      run = Promise.allSettled([action()])
+      while (locks.length) {
+        const lock = required(locks[0])
+        await expect.poll(() => isWaitingOn(lock.pid), { timeout: 1500 }).toBe(true)
+        locks.shift()
+        await lock.release()
+      }
+      expect(await run).toEqual([{ status: 'fulfilled', value: expect.anything() }])
     } finally {
       await Promise.all(locks.map((lock) => lock.release()))
       await run
