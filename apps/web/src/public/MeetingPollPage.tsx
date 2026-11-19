@@ -145,7 +145,11 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
     return () => controller.abort()
   }, [token, entry, reload])
 
-  async function perform(action: () => Promise<void>, ballotWrite = false) {
+  async function perform(
+    action: () => Promise<void>,
+    ballotWrite = false,
+    failure: MessageKey = 'meetingPoll.loadError',
+  ) {
     if (lock.current || (ballotWrite && blocked)) return
     lock.current = true
     setBusy(true)
@@ -172,7 +176,7 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
         setBlocked(true)
       } else if (err instanceof RequestError && err.status === 400) setError('meetingPoll.invalid')
       else {
-        setError(ballotWrite ? 'meetingPoll.uncertain' : 'meetingPoll.loadError')
+        setError(ballotWrite ? 'meetingPoll.uncertain' : failure)
         if (ballotWrite) setBlocked(true)
       }
     } finally {
@@ -281,7 +285,8 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
                                   : 'enroll'
         }
       >
-        <FocusHeading>
+        {/* Remount after opting out so focus leaves the removed button for the heading. */}
+        <FocusHeading key={optedOut ? 'opted-out' : 'page'}>
           {poll?.title ?? t(entry === 'optOut' ? 'meetingPoll.optOutTitle' : 'meetingPoll.title')}
         </FocusHeading>
         {loading ? (
@@ -370,16 +375,22 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
                     type="button"
                     disabled={busy}
                     onClick={() =>
-                      void perform(async () => {
-                        await unwrap(
-                          api.POST('/api/v1/public/meeting-polls/reminder-opt-out', {
-                            body: { token },
-                            cache: 'no-store',
-                            referrerPolicy: 'no-referrer',
-                          }),
-                        )
-                        if (alive.current) setOptedOut(true)
-                      })
+                      void perform(
+                        async () => {
+                          await unwrap(
+                            api.POST('/api/v1/public/meeting-polls/reminder-opt-out', {
+                              body: { token },
+                              cache: 'no-store',
+                              credentials: 'omit',
+                              redirect: 'error',
+                              referrerPolicy: 'no-referrer',
+                            }),
+                          )
+                          if (alive.current) setOptedOut(true)
+                        },
+                        false,
+                        'meetingPoll.optOutError',
+                      )
                     }
                   >
                     {t('meetingPoll.optOut')}

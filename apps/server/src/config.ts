@@ -11,6 +11,7 @@ import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
 import { DEFAULT_HSTS_MAX_AGE } from './security-headers.ts'
 import { resolveSmsSecretFiles, smsConfigSchema, validateSmsConfig } from './sms-config.ts'
+import { loadStripeConfig, type StripeConfig } from './stripe-config.ts'
 
 // docker compose passes unset optional variables as empty strings.
 const optional = <T extends z.ZodType>(schema: T) =>
@@ -109,6 +110,48 @@ const schema = z
     ZOOM_MEETINGS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     GOOGLE_MEET_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOKS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
+    CALDAV_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
+      try {
+        return parseWebhookPrivateTargets(value)
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'CALDAV_PRIVATE_TARGETS requires exact private host:port or IP/CIDR:port entries; metadata and link-local targets are forbidden',
+        })
+        return z.NEVER
+      }
+    }),
+    CALDAV_ALLOWED_ORIGINS: optional(z.string().max(16384)).transform((value, ctx) => {
+      const origins = value ? value.split(',').map((v) => v.trim()) : []
+      if (
+        origins.length > 32 ||
+        origins.some((origin) => {
+          try {
+            const url = new URL(origin)
+            return (
+              url.protocol !== 'https:' ||
+              !!url.username ||
+              !!url.password ||
+              url.pathname !== '/' ||
+              !!url.search ||
+              !!url.hash ||
+              origin.includes('*')
+            )
+          } catch {
+            return true
+          }
+        })
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'CALDAV_ALLOWED_ORIGINS requires at most 32 exact HTTPS origins without credentials, paths, queries or wildcards',
+        })
+        return z.NEVER
+      }
+      return [...new Set(origins.map((origin) => new URL(origin).origin))]
+    }),
     WEBHOOK_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
       try {
         return parseWebhookPrivateTargets(value)
@@ -240,6 +283,8 @@ const schema = z
     INVITATION_TEAM_MAX_PER_HOUR: emailLimit('INVITATION_TEAM_MAX_PER_HOUR', 50, 1),
     INVITATION_TEAM_MAX_PER_DAY: emailLimit('INVITATION_TEAM_MAX_PER_DAY', 200, 1),
     MAIL_MAX_PER_HOUR: emailLimit('MAIL_MAX_PER_HOUR', 100, 0),
+    WORKFLOW_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_MAIL_MAX_PER_HOUR', 20, 0),
+    WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_OWNER_MAIL_MAX_PER_HOUR', 5, 0),
     GOOGLE_CLIENT_ID: optional(z.string()),
     GOOGLE_CLIENT_SECRET: optional(z.string()),
     GOOGLE_CALENDAR_CLIENT_ID: optional(z.string().trim().min(1)),
@@ -639,6 +684,7 @@ export type Config = Omit<
   databaseConnectionTimeout: number
   /** Social sign-in providers whose credentials are set. */
   socialProviders: { google?: OAuthClient; microsoft?: OAuthClient }
+  stripe?: StripeConfig
 }
 
 function oauthClient(clientId?: string, clientSecret?: string): OAuthClient | undefined {
@@ -653,6 +699,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const c = parsed.data
   const google = oauthClient(c.GOOGLE_CLIENT_ID, c.GOOGLE_CLIENT_SECRET)
   const microsoft = oauthClient(c.MICROSOFT_CLIENT_ID, c.MICROSOFT_CLIENT_SECRET)
+  const stripe = loadStripeConfig(env)
   const {
     TRUSTED_PROXIES,
     SIGNUP,
@@ -675,5 +722,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databaseConnectionTimeout: DATABASE_CONNECTION_TIMEOUT * 1000,
     PUBLIC_URL: c.PUBLIC_URL ? new URL(c.PUBLIC_URL).origin : `http://localhost:${c.PORT}`,
     socialProviders: { ...(google && { google }), ...(microsoft && { microsoft }) },
+    ...(stripe && { stripe }),
   }
 }

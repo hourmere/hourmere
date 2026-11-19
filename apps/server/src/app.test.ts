@@ -380,6 +380,7 @@ describe('route modules and errors', () => {
     ['invalid', 400],
     ['forbidden', 403],
     ['not_found', 404],
+    ['unavailable', 503],
   ] as const)('maps a %s DomainError to %i with its code', async (kind, status) => {
     const res = await post(`?fail=${kind}`, valid)
     expect(res.status).toBe(status)

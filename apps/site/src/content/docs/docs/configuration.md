@@ -338,7 +338,7 @@ together or leave them unset. See [Google Calendar](/docs/google-calendar).
 | `MICROSOFT_CALENDAR_CLIENT_SECRET` | Unset | Matching Entra secret value. Requests delegated `Calendars.ReadBasic` with identity and offline access; lists calendars only, without busy-time synchronization or event writes. |
 | `CALENDAR_ENCRYPTION_KEY` | Unset | Exactly 32 random bytes in base64 (`openssl rand -base64 32`), independent of authentication and webhook keys. Startup rejects reused keys. Back up securely; losing/changing it makes saved tokens unreadable. |
 
-Each provider requires its client ID, secret and `CALENDAR_ENCRYPTION_KEY` together. Calendar
+Each OAuth calendar provider requires its client ID, secret and `CALENDAR_ENCRYPTION_KEY` together. Calendar
 connections require HTTPS except on loopback development hosts. Disabled configuration
 keeps local connections visible so people can disconnect or stop using their calendars.
 
@@ -355,6 +355,27 @@ for their project. Each Google Cloud project is verified separately; a self-host
 uses your own project. See
 [Google Calendar publishing requirements](/docs/google-calendar#publishing-status-and-verification)
 for recovery and exceptions.
+
+## CalDAV
+
+`CALENDAR_ENCRYPTION_KEY` enables [CalDAV connections](/docs/caldav); no OAuth client or
+hosted-service entitlement is needed. Use the same existing calendar key if other
+calendar accounts are already connected. Run workers with the same key and outbound
+settings as the web process.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CALDAV_PRIVATE_TARGETS` | Unset | Operator-only private host/port or CIDR/port exceptions, using the same syntax as `WEBHOOK_PRIVATE_TARGETS`. This is a separate allowlist; webhook exceptions do not permit CalDAV traffic. |
+| `CALDAV_ALLOWED_ORIGINS` | Unset | At most 32 comma-separated exact HTTPS origins allowed to receive CalDAV Basic credentials in addition to the submitted server origin. No wildcards, userinfo, paths, queries or fragments. Approve only origins you trust with every affected connection's credentials. |
+
+Public destinations require a DNS hostname and HTTPS port 443. Private exceptions do
+not permit link-local or cloud metadata targets and never disable TLS verification.
+An allowed private address does not authorize credentials to cross origins; an allowed
+origin does not bypass address checks. Both policies apply to discovery, sync and writes.
+An iCloud account may require exact shard origins to be approved; no generic Apple-domain
+wildcard or automatic trust is supplied. Private Nextcloud servers need their own narrow
+exception and a certificate trusted by the process. No real-account acceptance has been
+completed for these providers.
 
 ## Compose-only settings and overrides
 
@@ -492,10 +513,13 @@ for public apps; its private/development apps do not trigger those notifications
 
 ## Paid-booking foundation
 
-`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for the future payment
-adapter. It has no runtime effect in this release: setting it to `true` does not permit
-hold creation or enable payment collection. Existing holds expire regardless of this
-setting. No Stripe credentials are read; see [the operator note and limitations](/docs/payments).
+`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout. It has no
+runtime effect in this release. Setting it to `true` does not permit hold creation or enable
+payment collection. Existing holds expire regardless of this setting. Leave the optional
+server-only Stripe settings empty while Checkout is internal. Compose forwards them unset
+by default. When using a `_FILE` setting, supply the path inside the container and mount the
+secret file read-only for each server role.
+See [the operator note and limitations](/docs/payments).
 
 ## SMS reminders
 

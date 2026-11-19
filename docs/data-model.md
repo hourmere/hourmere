@@ -1,7 +1,12 @@
 # Data model
 
-[Recurring bookings design](recurring-bookings.md) proposes bounded series with ordinary
-booking rows per occurrence. It is not implemented and does not change the schema below.
+[Recurring bookings](recurring-bookings.md) have internal storage for bounded series with
+ordinary booking rows per occurrence. Admission remains hard-off. Replay receipts scope
+the request-key digest to the organization, authority digest and operation. Series
+notification receipts store the outcome and any capability digest, and the same table
+stores durable delivery intents. The hourly email cleanup deletes admission rows older
+than 48 hours in batches of up to 500. Admissions store an actor digest, including a
+server-keyed HMAC for a client's rate-limit address.
 
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
@@ -10,7 +15,7 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
-CalDAV's internal write service reuses these targets and mappings: the root booking UUID
+CalDAV's write service reuses these targets and mappings: the root booking UUID
 is the stable UID, `external_event_id` is the resource href, and `etag` is the last
 acknowledged strong ETag (null after deletion). Group copies use
 `group_slot_calendar_events`. `calendars.sync_state.caldavWriteback` stores the last
@@ -170,8 +175,11 @@ row. Its expectation file is
 protection assertion to fail.
 
 The cleanup schedule is hourly, at most 500 rows per transaction. It deletes expired
-public pending voters and their dependent personal data, and clears expired capability
-ciphertext. Persisting deadline closure belongs to the later reminder step.
+public pending voters and their dependent personal data, clears expired capability
+ciphertext, and records deadline closure with `closed_at = deadline_at` while preserving
+both revisions. The deadline closure transaction queues a host delivery for the poll's
+creator if they still manage the event. The mail worker rechecks current authority before
+sending.
 Capacity and voting expiry are synchronous database-clock decisions, never dependent on
 worker punctuality. Normal terminal poll history follows the installation's booking-data
 retention policy from its terminal transition (deadline for automatic closure); with no
@@ -364,8 +372,8 @@ reruns cannot restore erased targets. See the [0060 rollout note](../packages/db
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
   The [CalDAV design](caldav.md) specifies its encrypted credential record and guarded
-  discovery and busy-sync foundation; CalDAV is not yet enabled in the product.
-  Its internal sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
+  discovery and busy sync; the Calendars page uses owner-session-only connection operations.
+  Its sync reuses `calendar_busy` and version-2 `calendars.sync_state`, retaining
   intervals, hashed instance IDs, resource href/etag mappings and an opaque sync token,
   never event bodies, titles or attendee lists.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
@@ -1113,6 +1121,10 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   what it relied on is unchanged: its provider still at the frozen revision and not retired
   (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
   trust generation current. Logging out deletes the session's attempts.
+  The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
+  the state digest and browser-binding digest. The authenticated state envelope carries the
+  nonce, PKCE verifier and return path, bound to the attempt and its provider revision.
+  Consumption commits before these values are returned to a future code-exchange caller.
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
@@ -1218,8 +1230,10 @@ capturing its own occurrence. Request, request-expiry and no-show events write n
 rows. Timer and wake-time skips write minimal history. The internal dispatcher uses bounded
 due scans, token-fenced leases and live checks after lock waits; repair queues only existing
 run IDs and never recreates identities or intents. Eligible runs await the later delivery
-implementation. There is no production workflow worker, retention worker or setting, and
-workflow capture, dispatch and repair stay hard-off behind
+implementation. Internal mail admission writes reservations and shared ledger charges
+atomically, and retry admission restamps both under the same organization and mail-budget
+locks. Instance and owner sub-cap settings do not enable delivery. There is no production
+workflow worker or retention worker, and workflow capture, dispatch and repair stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 
@@ -1734,7 +1748,7 @@ The phases within that organization boundary are:
   invitation. It locks no member row: the organization lock excludes membership changes while it
   reads the earliest owner who invites. When the address's pending invitation expires during
   one of those waits, it rolls back to the savepoint and runs the invitation service once more.
-- SCIM User replacement takes the organization update lock, the provisioning token key
+- SCIM User replacement and PATCH take the organization update lock, the provisioning token key
   share lock, and the live resource update lock. It holds the organization lock through
   any claim invalidation and the audit write, so invitation acceptance cannot hold a claim
   lock while competing with that replacement for the resource.
@@ -2274,6 +2288,13 @@ is present, including paid bookings later cancelled. Unconfirmed terminal holds 
 Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
 unique index, so they cannot collide with ordinary booking idempotency keys.
 
+Migration `0124_payment_checkout_attempts.sql` adds one optional Checkout attempt per hold.
+It stores the amount and currency snapshot, account and mode, a random attempt ID and its
+creation key, and the operation start time and Session ID as they become known. Existing
+holds stay unchanged. The booking's deadline still governs capacity and payment acceptance.
+The attempt survives hold contact erasure. Its foreign key blocks booking deletion while
+the attempt is retained. Checkout URLs and provider credentials are kept out of storage.
+
 ## Private attendee no-show markers
 
 Migration 0070 adds nullable `booking_attendees.no_show_marked_at` and
@@ -2319,7 +2340,10 @@ location, buffers, calendar destination and notification policy. Each seat is a 
 `bookings` row with `group_slot_id`, one booker and private answers, management capability,
 idempotency scope and reschedule chain. Guests and multiple-seat purchases are unsupported.
 Group mode and capacity are configurable in the admin editor and REST/MCP/CLI.
-Occurrence attendee reads are authenticated and retain the existing host-only API-key/OAuth
+Occurrence attendee reads use a repeatable-read snapshot for membership authorization,
+occurrence counts and bounded status-filtered rows, without exclusive host or slot locks.
+They default to confirmed seats; cancelled history must be requested explicitly.
+They are authenticated and retain the existing host-only API-key/OAuth
 boundary; current team owners/admins may also read through a browser session. Public and
 invitee-managed projections never include sibling seats. See [group events](https://hourmere.com/docs/group-events).
 

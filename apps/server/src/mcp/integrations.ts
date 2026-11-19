@@ -24,7 +24,7 @@ export function integrationTools({
       name: 'list_calendar_connections',
       title: 'List my calendar connections',
       description:
-        'Lists your connected Google and Microsoft accounts, safe connection status, calendars, conflict selections and default write destination, as GET /api/v1/calendar-connections does. Connections follow your user across organizations. Never returns credentials or contacts a provider. Use the REST API with your own API key to change selections, refresh the calendar list or sync now; provider authorization and disconnect require browser consent.',
+        'Lists your connected Google, Microsoft and CalDAV accounts, safe connection status, calendars, conflict selections and default write destination, as GET /api/v1/calendar-connections does. Connections follow your user across organizations. Never returns credentials or contacts a provider. Use the REST API with your own API key to change selections, refresh the calendar list or sync now; CalDAV changes, provider authorization and disconnect require browser consent.',
       input: z.strictObject({}),
       output: CalendarConnections,
       annotations,

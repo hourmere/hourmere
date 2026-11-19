@@ -252,6 +252,7 @@ describe('security headers', () => {
       '/poll/voter',
       '/poll/recover',
       '/poll/reminder-opt-out',
+      '/POLL/reminder-opt-out/?source=email',
       '/POLL/',
       '/%70oll/voter',
       '/poll/%76oter/',

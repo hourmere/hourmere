@@ -40,7 +40,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
-| `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks send through it; CalDAV reuses its address and private-target policy; the SSO profile also guards domain-proof TXT queries, while its HTTP transport has no caller yet. |
+| `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks send through it; CalDAV reuses its address and private-target policy. The hard-off SSO paths use the profile for domain-proof TXT queries and OIDC discovery and signing keys. |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `packages/workflows` | Booking workflow definition contract: strict schemas, AND conditions, ownership selectors, template variables and limits. Not available yet: a source constant keeps workflows off. See the [design](docs/workflows.md). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
@@ -48,9 +48,11 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
 | `tools/zapier-hourmere` | Private Zapier Platform CLI app with its own npm lockfile and install, outside the root workspaces; deployed separately and excluded from the Docker image. See [Zapier](https://hourmere.com/docs/zapier). |
 
-CalDAV is currently a [design and internal calendar services](docs/caldav.md) only.
-iCloud, Fastmail and Nextcloud connections, busy sync and booking writes are not yet
-available in the app, REST, MCP or CLI; no real-account acceptance has been completed.
+[CalDAV connections](https://hourmere.com/docs/caldav) are available on the Calendars
+page with iCloud, Fastmail, Nextcloud and generic HTTPS presets, busy-time sync and
+booking writes. Credential entry requires the owner’s browser session; MCP, CLI and
+API keys cannot submit provider passwords. No real-account acceptance has been completed;
+cross-origin iCloud discovery and private servers remain subject to the documented limits.
 
 ## Development
 

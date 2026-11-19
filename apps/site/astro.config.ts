@@ -118,6 +118,7 @@ export default defineConfig({
           items: [
             { label: 'Google Calendar', link: '/docs/google-calendar' },
             { label: 'Microsoft Calendar', link: '/docs/microsoft-calendar' },
+            { label: 'CalDAV', link: '/docs/caldav' },
             { label: 'Zoom accounts', link: '/docs/zoom-connections' },
             { label: 'Automatic Zoom', link: '/docs/automatic-zoom' },
             { label: 'Automatic Google Meet', link: '/docs/automatic-google-meet' },

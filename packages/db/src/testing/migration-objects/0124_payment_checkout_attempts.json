@@ -1,0 +1,20 @@
+{
+  "migration": "0124_payment_checkout_attempts.sql",
+  "objects": {
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_booking_id_fkey": "FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE RESTRICT",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_booking_id_key": "UNIQUE (booking_id)",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_currency": "CHECK ((currency ~ '^[a-z]{3}$'::text))",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_idempotency_key_key": "UNIQUE (idempotency_key)",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_mode": "CHECK ((mode = ANY (ARRAY['test'::text, 'live'::text])))",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_pkey": "PRIMARY KEY (id)",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_positive_amount": "CHECK ((amount_minor > 0))",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_session_id_key": "UNIQUE (session_id)",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_session_started": "CHECK (((session_id IS NULL) OR (started_at IS NOT NULL)))",
+    "not_null public.payment_checkout_attempts.account_id": "NOT NULL",
+    "not_null public.payment_checkout_attempts.amount_minor": "NOT NULL",
+    "not_null public.payment_checkout_attempts.booking_id": "NOT NULL",
+    "not_null public.payment_checkout_attempts.currency": "NOT NULL",
+    "not_null public.payment_checkout_attempts.idempotency_key": "NOT NULL",
+    "not_null public.payment_checkout_attempts.mode": "NOT NULL"
+  }
+}

@@ -563,6 +563,16 @@ export function requireWriteScope(ctx: ServiceContext) {
  */
 export async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Authority> {
   const { principal } = ctx
+  const { personal, userId } = await lockMeetingPollManager(db, principal)
+  if (principal.kind === 'api_key') await requireActiveApiKey(db, principal, Date.now)
+  return { personal, userId }
+}
+
+/** Current management authority and mailbox, shared by host services and deadline delivery. */
+export async function lockMeetingPollManager(
+  db: Db,
+  principal: { user: { id: string }; organization: { id: string } },
+): Promise<Authority & { email: string }> {
   if (!isUuid(principal.user.id) || !isUuid(principal.organization.id)) throw denied()
   const personal = await db
     .selectFrom('personal_organizations')
@@ -572,7 +582,7 @@ export async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Author
   if (personal && personal.user_id !== principal.user.id) throw denied()
   const actor = await db
     .selectFrom('auth.user')
-    .select('emailVerified')
+    .select(['emailVerified', 'email'])
     .where('id', '=', principal.user.id)
     .forShare()
     .executeTakeFirst()
@@ -594,8 +604,7 @@ export async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Author
   if (!membership) throw denied()
   const roles = membership.role.split(',').map((role) => role.trim())
   if (!personal && !roles.includes('owner') && !roles.includes('admin')) throw denied()
-  if (principal.kind === 'api_key') await requireActiveApiKey(db, principal, Date.now)
-  return { personal: personal !== undefined, userId: principal.user.id }
+  return { personal: personal !== undefined, userId: principal.user.id, email: actor.email }
 }
 
 /** A personal space manages its owner's events; a team manages its team events. */
