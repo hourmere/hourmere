@@ -1210,8 +1210,10 @@ capturing its own occurrence. Request, request-expiry and no-show events write n
 rows. Timer and wake-time skips write minimal history. The internal dispatcher uses bounded
 due scans, token-fenced leases and live checks after lock waits; repair queues only existing
 run IDs and never recreates identities or intents. Eligible runs await the later delivery
-implementation. There is no production workflow worker, retention worker or setting, and
-workflow capture, dispatch and repair stay hard-off behind
+implementation. Internal mail admission writes reservations and shared ledger charges
+atomically, and retry admission restamps both under the same organization and mail-budget
+locks. Instance and owner sub-cap settings do not enable delivery. There is no production
+workflow worker or retention worker, and workflow capture, dispatch and repair stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 
