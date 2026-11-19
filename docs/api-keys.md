@@ -136,6 +136,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | Method and path | Authentication boundary | Allowed key scopes |
 | --- | --- | --- |
+| `GET /api/v1/meeting-polls` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/meeting-polls/{id}` | Session or API key | `full, read, bookings` |
+| `GET /api/v1/meeting-polls/{id}/results` | Session or API key | `full, read, bookings` |
+| `POST /api/v1/meeting-polls/{id}/close` | Session or API key | `full, bookings` |
+| `POST /api/v1/meeting-polls/{id}/cancel` | Session or API key | `full, bookings` |
+| `DELETE /api/v1/meeting-polls/{id}` | Session or API key | `full, bookings` |
+| `POST /api/v1/meeting-polls/{id}/finalize` | Session or API key | `full, bookings` |
 | `POST /api/v1/public/meeting-polls/read` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/meeting-polls/enroll` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/meeting-polls/recover` | Public or manage token; check a supplied key | `full, bookings` |
@@ -303,6 +310,13 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `list_meeting_polls` | — | `polls list` | `full, read, bookings` |
+| `get_meeting_poll` | — | `polls get` | `full, read, bookings` |
+| `get_meeting_poll_results` | — | `polls results` | `full, read, bookings` |
+| `close_meeting_poll` | — | `polls close` | `full, bookings` |
+| `cancel_meeting_poll` | — | `polls cancel` | `full, bookings` |
+| `delete_meeting_poll` | — | `polls delete` | `full, bookings` |
+| `finalize_meeting_poll` | — | `polls finalize` | `full, bookings` |
 | `read_meeting_poll` | — | `polls view` | `full, read, bookings` |
 | `enroll_meeting_poll_voter` | — | `polls join` | `full, bookings` |
 | `recover_meeting_poll_voter` | — | `polls recover` | `full, bookings` |

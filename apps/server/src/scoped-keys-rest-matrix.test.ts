@@ -41,6 +41,9 @@ const scopes = ['full', 'read', 'bookings'] as const
 // Do not derive expectations from the production registry being tested.
 const classes = {
   booking_read: [
+    'GET /api/v1/meeting-polls',
+    'GET /api/v1/meeting-polls/{id}',
+    'GET /api/v1/meeting-polls/{id}/results',
     'POST /api/v1/public/meeting-polls/read',
     'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
@@ -65,6 +68,10 @@ const classes = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/meeting-polls/{id}/close',
+    'POST /api/v1/meeting-polls/{id}/cancel',
+    'DELETE /api/v1/meeting-polls/{id}',
+    'POST /api/v1/meeting-polls/{id}/finalize',
     'POST /api/v1/public/-/routing/{handle}/{slug}/route',
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     'POST /api/v1/public/meeting-polls/enroll',
@@ -412,6 +419,24 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
+      if (template.startsWith('/api/v1/meeting-polls/{id}')) {
+        id = randomUUID()
+        expectedStatus = 404
+        if (template.endsWith('/finalize')) {
+          const voterId = randomUUID()
+          headers['idempotency-key'] = randomUUID()
+          payload = {
+            slotId: randomUUID(),
+            bookerVoterId: voterId,
+            attendeeVoterIds: [voterId],
+            expectedResultsRevision: 1,
+            expectedBallotRevisions: { [voterId]: 1 },
+            acknowledgeConditional: false,
+          }
+        } else if (method !== 'GET') {
+          payload = { expectedHostRevision: 1 }
+        }
+      }
       if (template.startsWith('/api/v1/public/meeting-polls/')) {
         payload = template.endsWith('/recover')
           ? { pollId: randomUUID(), email: 'missing@example.test' }
@@ -941,14 +966,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 162-operation contract and all 486 scope combinations', () => {
+    it('covers the exact 169-operation contract and all 507 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(162)
-      expect(new Set(ids).size).toBe(162)
+      expect(ids).toHaveLength(169)
+      expect(new Set(ids).size).toBe(169)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(486)
+      expect(cases).toHaveLength(507)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -1008,7 +1033,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
           } else if (operation.includes(' /api/v1/workflows')) {
             expect(await response.json()).toEqual({ error: 'workflows_disabled' })
-          } else if (operation.includes('/public/meeting-polls/') && response.status === 404) {
+          } else if (operation.includes('/meeting-polls/') && response.status === 404) {
             expect(await response.json()).toMatchObject({ error: 'poll_not_found' })
           } else if (response.status !== 204) {
             const data = await response.json()
