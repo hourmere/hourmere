@@ -40,6 +40,8 @@ import * as hosts from '../../../packages/scheduling/src/hosts.ts'
 import * as notificationSettings from '../../../packages/scheduling/src/notification-settings.ts'
 import { expirePaymentHolds } from '../../../packages/scheduling/src/payment-expiry.ts'
 import * as questions from '../../../packages/scheduling/src/questions.ts'
+import * as recurringCapabilities from '../../../packages/scheduling/src/recurring-capabilities.ts'
+import * as recurringMembers from '../../../packages/scheduling/src/recurring-members.ts'
 import * as roundRobin from '../../../packages/scheduling/src/round-robin.ts'
 import * as text from '../../../packages/scheduling/src/text.ts'
 import { createApp } from './app.ts'
@@ -100,6 +102,8 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       ...notificationSettings,
       expirePaymentHolds,
       ...questions,
+      ...recurringCapabilities,
+      ...recurringMembers,
       ...roundRobin,
       ...text,
       DomainError: scheduling.DomainError,
@@ -659,15 +663,9 @@ describe.skipIf(!bootstrap)(
       'detects guest %s taking its booking before its organization with a real assertion failure',
       async (action) => {
         const source = guestLocks[action]
-        const row = action === 'cancel' ? 'row' : 'old'
-        const following = `    const ${row} = await lockManagedBooking(trx, hash)`
-        const groupLock =
-          action === 'cancel'
-            ? '    await lockGroupBooking(trx, target.id)'
-            : '    await lockGroupBooking(trx, target.id, start, durationMinutes)'
         const copy = await guestRoutesCopy(
-          `${source}\n${groupLock}\n${following}`,
-          `${following}\n${source}\n${groupLock}`,
+          source,
+          `    if (hash) await lockManagedBooking(trx, hash)\n${source}`,
         )
         await expect(verifyGuestRace(action, 'admin', copy)).rejects.toMatchObject({
           name: 'AssertionError',

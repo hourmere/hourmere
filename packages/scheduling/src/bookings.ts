@@ -73,6 +73,12 @@ import {
 } from './one-time-links.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 import { parseQuestions, type Question, type Responses, validateResponses } from './questions.ts'
+import {
+  resolveSeriesMember,
+  type SeriesMemberMutationSelector,
+  type SeriesMemberSelector,
+} from './recurring-capabilities.ts'
+import { advanceBookingSeries, lockBookingSeries } from './recurring-members.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
   type BookingSuccessRedirect,
@@ -86,6 +92,8 @@ import { attributeWaitlistBooking } from './waitlist-booking.ts'
 
 export type BookingStatus = 'confirmed' | 'cancelled'
 export type BookingSource = 'web' | 'embed' | 'api' | 'mcp' | 'import'
+export type ManagedBookingSelector = string | SeriesMemberSelector | undefined
+export type ManagedBookingMutationSelector = string | SeriesMemberMutationSelector | undefined
 
 export interface Attendee {
   /** Private attendance metadata: authenticated booking reads only. */
@@ -394,6 +402,7 @@ const RESCHEDULE_COLUMNS = [
   'notification_snapshot',
   'sms_reminders_enabled',
   'group_slot_id',
+  'series_occurrence_id',
   'reschedule_cutoff_minutes',
   'cancel_cutoff_minutes',
 ] as const
@@ -963,7 +972,8 @@ export async function requireOfferedSlot(
 interface NewBooking {
   paymentHoldExpiresAt?: string | undefined
   groupSlotId?: string | undefined
-  seriesRoot?: { bookingId: string; occurrenceId: string } | undefined
+  id?: string | undefined
+  seriesOccurrenceId?: string | null | undefined
   locationOption?: Json | null | undefined
   successRedirect?: BookingSuccessRedirect | undefined
   organizationId: string
@@ -1003,10 +1013,8 @@ export async function insertBooking(
   const { id } = await db
     .insertInto('bookings')
     .values({
-      ...(b.seriesRoot && {
-        id: b.seriesRoot.bookingId,
-        series_occurrence_id: b.seriesRoot.occurrenceId,
-      }),
+      ...(b.id && { id: b.id }),
+      ...(b.seriesOccurrenceId && { series_occurrence_id: b.seriesOccurrenceId }),
       status: b.paymentHoldExpiresAt ? 'pending_payment' : 'confirmed',
       payment_hold_expires_at: b.paymentHoldExpiresAt ?? null,
       organization_id: b.organizationId,
@@ -1131,7 +1139,12 @@ async function cancelLocked(
   await assertBookingLocallyManaged(db, row.id)
   const seat = await db
     .selectFrom('bookings')
-    .select(['group_slot_id', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
+    .select([
+      'group_slot_id',
+      'series_occurrence_id',
+      'reschedule_cutoff_minutes',
+      'cancel_cutoff_minutes',
+    ])
     .where('id', '=', row.id)
     .executeTakeFirst()
   if (seat?.group_slot_id && row.status === 'cancelled') return loadBooking(db, row.id)
@@ -1170,6 +1183,8 @@ async function cancelLocked(
   await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
+  if (seat?.series_occurrence_id)
+    await advanceBookingSeries(db, row.organization_id, seat.series_occurrence_id)
   // In this transaction: the cancellation email exists exactly when the cancellation does.
   await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
   return loadBooking(db, row.id)
@@ -1703,7 +1718,8 @@ async function createBookingInTransaction(
   const { id, manageToken } = await insertBooking(trx, {
     successRedirect,
     groupSlotId: groupSlot?.id,
-    seriesRoot: seriesOccurrence,
+    id: seriesOccurrence?.bookingId,
+    seriesOccurrenceId: seriesOccurrence?.occurrenceId,
     manageTokenHash: seriesOccurrence ? null : undefined,
     organizationId: current.organizationId,
     eventTypeId: current.id,
@@ -1769,12 +1785,59 @@ async function createBookingInTransaction(
  */
 export async function getManagedBooking(
   ctx: PublicContext,
-  token: string | undefined,
+  token: ManagedBookingSelector,
 ): Promise<Booking> {
+  if (token && typeof token === 'object') {
+    const member = await resolveSeriesMember(ctx.db, token, { scope: 'read' })
+    if (!member) throw bookingNotFound()
+    const booking = await loadBooking(ctx.db, member.bookingId, ctx.now())
+    if (member.guestEmail === undefined) return booking
+    delete booking.pendingReschedule
+    return {
+      ...booking,
+      attendees: booking.attendees.filter((a) => !a.isBooker && a.email === member.guestEmail),
+      responses: {},
+      cancelReason: null,
+    }
+  }
   const hash = manageTokenHash(token)
   const target = hash && (await resolveManagedTarget(ctx.db, hash))
   if (!target) throw bookingNotFound()
   return loadBooking(ctx.db, target.id, ctx.now())
+}
+
+/** Reload the selector after the series lock, then lock only its current member. */
+async function lockSeriesManagedBooking(
+  trx: Db,
+  selector: SeriesMemberMutationSelector,
+  series: { id: string },
+  organizationId: string,
+) {
+  const member = await resolveSeriesMember(trx, selector, {
+    scope: 'manage',
+    seriesId: series.id,
+    organizationId,
+  })
+  if (!member) throw bookingNotFound()
+  const row = await trx
+    .selectFrom('bookings')
+    .select(RESCHEDULE_COLUMNS)
+    .where('id', '=', member.bookingId)
+    .where('organization_id', '=', member.organizationId)
+    .where('series_occurrence_id', '=', member.occurrenceId)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!row) throw bookingNotFound()
+  return { row, member }
+}
+
+function assertSeriesRevision(expected: string, revision: string) {
+  if (expected !== revision)
+    throw new DomainError(
+      'conflict',
+      'series_changed',
+      'This series has changed. Reload it and try again.',
+    )
 }
 
 /** What became of a host's request, as the invitee's request email link reports it. */
@@ -1837,18 +1900,22 @@ export async function managedLinkRescheduleRequest(
 /** Cancels through a manage link: `booking_cancelled` if already cancelled, `booking_in_past` once started. */
 export async function cancelManagedBooking(
   ctx: PublicContext,
-  token: string | undefined,
+  token: ManagedBookingMutationSelector,
   {
     reason,
     rescheduleRequestId,
   }: { reason?: string | undefined; rescheduleRequestId?: string | undefined } = {},
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<Booking> {
-  const hash = manageTokenHash(token)
-  if (!hash) throw bookingNotFound()
+  const selector = typeof token === 'object' ? token : undefined
+  const hash = typeof token === 'string' ? manageTokenHash(token) : undefined
+  if (!hash && !selector) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
-    const target = await resolveManagedTarget(trx, hash)
+    const seriesTarget = selector && (await resolveSeriesMember(trx, selector, { scope: 'manage' }))
+    const target = seriesTarget
+      ? { id: seriesTarget.bookingId }
+      : hash && (await resolveManagedTarget(trx, hash))
     const parent =
       target &&
       (await trx
@@ -1858,11 +1925,21 @@ export async function cancelManagedBooking(
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
     await lockCancellationOrganization(trx, parent.organization_id)
+    const series = await lockBookingSeries(trx, target.id, parent.organization_id)
     await lockGroupBooking(trx, target.id)
-    const row = await lockManagedBooking(trx, hash)
+    const locked =
+      selector &&
+      series &&
+      (await lockSeriesManagedBooking(trx, selector, series, parent.organization_id))
+    const row = locked ? locked.row : hash && (await lockManagedBooking(trx, hash))
     if (!row) throw bookingNotFound()
     if (rescheduleRequestId) {
-      const request = await managedRequest(trx, row.id, rescheduleRequestId)
+      const request = await managedRequest(
+        trx,
+        row.id,
+        rescheduleRequestId,
+        locked?.member.occurrenceId,
+      )
       if (request.state === 'cancelled') return loadBooking(trx, row.id)
       if (
         request.state !== 'pending' ||
@@ -1870,6 +1947,7 @@ export async function cancelManagedBooking(
       )
         throw requestChanged()
     }
+    if (selector && locked) assertSeriesRevision(selector.expectedRevision, locked.member.revision)
     return cancelLocked(
       trx,
       row,
@@ -1893,7 +1971,7 @@ export async function cancelManagedBooking(
  */
 export async function rescheduleManagedBooking(
   ctx: PublicContext,
-  token: string | undefined,
+  token: ManagedBookingMutationSelector,
   {
     start,
     durationMinutes,
@@ -1909,17 +1987,23 @@ export async function rescheduleManagedBooking(
   },
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<BookingWithToken> {
-  const hash = manageTokenHash(token)
-  if (!hash) throw bookingNotFound()
+  const selector = typeof token === 'object' ? token : undefined
+  const hash = typeof token === 'string' ? manageTokenHash(token) : undefined
+  if (!hash && !selector) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
-    const receiptReplay = await groupCapabilityMoveReplay(
-      trx,
-      hash,
-      { start, durationMinutes, idempotencyKey, expectedGroupSlotId },
-      origin,
-    )
+    const receiptReplay =
+      hash &&
+      (await groupCapabilityMoveReplay(
+        trx,
+        hash,
+        { start, durationMinutes, idempotencyKey, expectedGroupSlotId },
+        origin,
+      ))
     if (receiptReplay) return receiptReplay
-    const target = await resolveManagedTarget(trx, hash)
+    const seriesTarget = selector && (await resolveSeriesMember(trx, selector, { scope: 'manage' }))
+    const target = seriesTarget
+      ? { id: seriesTarget.bookingId }
+      : hash && (await resolveManagedTarget(trx, hash))
     const parent =
       target &&
       (await trx
@@ -1929,11 +2013,21 @@ export async function rescheduleManagedBooking(
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
     await lockOrganization(trx, parent.organization_id)
+    const series = await lockBookingSeries(trx, target.id, parent.organization_id)
     await lockGroupBooking(trx, target.id, start, durationMinutes)
-    const old = await lockManagedBooking(trx, hash)
+    const locked =
+      selector &&
+      series &&
+      (await lockSeriesManagedBooking(trx, selector, series, parent.organization_id))
+    const old = locked ? locked.row : hash && (await lockManagedBooking(trx, hash))
     if (!old) throw bookingNotFound()
     if (rescheduleRequestId) {
-      const request = await managedRequest(trx, old.id, rescheduleRequestId)
+      const request = await managedRequest(
+        trx,
+        old.id,
+        rescheduleRequestId,
+        locked?.member.occurrenceId,
+      )
       if (request.state === 'picked' && request.picked_booking_id) {
         const booking = await loadBooking(trx, request.picked_booking_id)
         if (
@@ -1952,6 +2046,20 @@ export async function rescheduleManagedBooking(
       )
         throw requestChanged()
     }
+    if (selector && locked) {
+      assertSeriesRevision(selector.expectedRevision, locked.member.revision)
+      const { booking } = await rescheduleLocked(
+        ctx,
+        trx,
+        old,
+        start,
+        origin,
+        false,
+        durationMinutes,
+      )
+      return { booking, manageToken: null }
+    }
+    if (!hash) throw bookingNotFound()
     return replayableGroupMove(
       ctx,
       trx,
@@ -2061,6 +2169,12 @@ async function rescheduleLocked(
   }
 
   // Cancel first: the trigger frees the old host rows, so the new time may overlap them.
+  // Series roots have no occurrence API token. Keep a discarded hash on the first
+  // invitee-moved predecessor so the ordinary invitee move counter also counts that edge.
+  const inviteeMoveHash =
+    !carryManageToken && old.series_occurrence_id && old.manage_token_hash === null
+      ? newManageToken().hash
+      : undefined
   await trx
     .updateTable('bookings')
     .set({
@@ -2070,10 +2184,12 @@ async function rescheduleLocked(
       cancelled_api_key_id: origin.apiKeyId,
       cancelled_oauth_consent_id: origin.oauthConsentId ?? null,
       ...(carryManageToken ? { manage_token_hash: null } : {}),
+      ...(inviteeMoveHash && { manage_token_hash: inviteeMoveHash }),
     })
     .where('id', '=', old.id)
     .execute()
   const { id, manageToken } = await insertBooking(trx, {
+    seriesOccurrenceId: old.series_occurrence_id,
     organizationId: old.organization_id,
     eventTypeId: eventType.id,
     start,
@@ -2112,6 +2228,7 @@ async function rescheduleLocked(
     .where('picked_booking_id', 'is', null)
     .execute()
   await skipScheduledMessages(trx, old.id, 'booking_replaced')
+  await advanceBookingSeries(trx, old.organization_id, old.series_occurrence_id)
   // In this transaction: the new booking's emails. The old booking's queued ones find it
   // cancelled and replaced when they run, and send nothing.
   await auditBooking(trx, old.organization_id, id, 'booking.rescheduled', {
@@ -2504,6 +2621,7 @@ export async function rescheduleHostBooking(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
+    await lockBookingSeries(trx, id, ctx.principal.organization.id, ctx.principal.user.id)
     await lockGroupBooking(trx, id, start, durationMinutes, ctx.principal.organization.id)
     const old = await trx
       .selectFrom('bookings')
@@ -2575,6 +2693,7 @@ export async function cancelHostBooking(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
+    await lockBookingSeries(trx, id, ctx.principal.organization.id, ctx.principal.user.id)
     await lockGroupBooking(trx, id, undefined, undefined, ctx.principal.organization.id)
     const row = await trx
       .selectFrom('bookings as b')
@@ -2631,6 +2750,7 @@ export async function cancelTeamBookingInTransaction(
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
   if (!UUID.test(id)) throw bookingNotFound()
+  await lockBookingSeries(trx, id, actor.organizationId)
   await lockGroupBooking(trx, id, undefined, undefined, actor.organizationId)
   const row = await trx
     .selectFrom('bookings')
@@ -2842,6 +2962,7 @@ export async function requestReschedule(
   return ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
+    await lockBookingSeries(trx, id, ctx.principal.organization.id, ctx.principal.user.id)
     const row = await trx
       .selectFrom('bookings')
       .selectAll()
@@ -2919,6 +3040,7 @@ export async function requestReschedule(
       })
       .returning('id')
       .executeTakeFirstOrThrow()
+    await advanceBookingSeries(trx, row.organization_id, row.series_occurrence_id)
     await auditBooking(trx, row.organization_id, row.id, 'booking.reschedule_requested', {
       source:
         ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
@@ -2979,15 +3101,32 @@ function requestChanged() {
     'This reschedule request has already been resolved or replaced',
   )
 }
-async function managedRequest(trx: Db, bookingId: string, requestId: string) {
+async function managedRequest(
+  trx: Db,
+  bookingId: string,
+  requestId: string,
+  occurrenceId?: string,
+) {
   if (!UUID.test(requestId)) throw requestChanged()
   const request = await trx
     .selectFrom('booking_reschedule_requests')
     .selectAll()
     .where('id', '=', requestId)
-    .where((eb) =>
-      eb.or([eb('booking_id', '=', bookingId), eb('picked_booking_id', '=', bookingId)]),
-    )
+    .where((eb) => {
+      if (!occurrenceId)
+        return eb.or([eb('booking_id', '=', bookingId), eb('picked_booking_id', '=', bookingId)])
+      const member = eb
+        .selectFrom('bookings')
+        .select('id')
+        .where('series_occurrence_id', '=', occurrenceId)
+      return eb.and([
+        eb.exists(member.whereRef('id', '=', 'booking_reschedule_requests.booking_id')),
+        eb.or([
+          eb('picked_booking_id', 'is', null),
+          eb.exists(member.whereRef('id', '=', 'booking_reschedule_requests.picked_booking_id')),
+        ]),
+      ])
+    })
     .executeTakeFirst()
   if (!request) throw requestChanged()
   return request

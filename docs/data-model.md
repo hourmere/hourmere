@@ -8,6 +8,13 @@ stores durable delivery intents. The hourly email cleanup deletes admission rows
 than 48 hours in batches of up to 500. Admissions store an actor digest, including a
 server-keyed HMAC for a client's rate-limit address.
 
+Single-occurrence moves retain the same `series_occurrence_id` on the successor.
+Member writes use the ordinary organization lock, then the series row and the booking
+row before the operation's existing host locks. Moves, cancellations and new or
+replacement reschedule requests advance the series revision in that transaction and
+use the ordinary per-booking notification pipeline. Request expiry uses only the
+booking row lock and resolves the request without advancing the series revision.
+
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
 profile's default calendar and provider retries, and cascades away on booking/user/calendar

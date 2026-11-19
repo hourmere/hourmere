@@ -99,6 +99,8 @@ export {
   listHostBookings,
   MAX_GUESTS,
   MAX_PAGE_SIZE,
+  type ManagedBookingMutationSelector,
+  type ManagedBookingSelector,
   type PersonInput,
   RESCHEDULE_REQUEST_TIMEOUT_HOURS,
   RescheduleRequestNoteSchema,
@@ -343,6 +345,12 @@ export {
   type RecurringAvailabilityInput,
   type RecurringAvailabilityResult,
 } from './recurring-availability.ts'
+export {
+  resolveSeriesCapability,
+  resolveSeriesMember,
+  type SeriesMemberMutationSelector,
+  type SeriesMemberSelector,
+} from './recurring-capabilities.ts'
 export {
   BookingSeriesRateLimitError,
   type CreateBookingSeriesInput,
