@@ -211,12 +211,31 @@ profile defaults, empty-result handling, DST boundaries and taken-time fallback.
 ## Explain why times cannot be booked
 
 Call `troubleshoot_availability` with `eventTypeId` and a local `date` (`YYYY-MM-DD`), plus
-optional `timeZone` and `durationMinutes`. It returns every possible start time of that day
-with `status` and ordered reason codes, the same object as the REST endpoint. Only personal
-owners and team owners/admins may call it, with a `full` key or an `mcp:tools` OAuth grant;
-anything else answers `event_type_not_found`. `calendar_sync_unavailable` means connected
-calendars could not be read right now. See [Troubleshoot availability](/docs/availability-troubleshooting) for every reason
-code and the known limitations.
+optional `timeZone` and `durationMinutes`. Its `structuredContent` matches the REST response:
+`available` slots have empty reasons; unavailable slots list blocking reasons in priority
+order. Personal owners and current team owners/admins may call it with a `full` key or an
+`mcp:tools` OAuth grant. `read`/`bookings` keys get `insufficient_scope`; other unauthorized
+callers get the same `event_type_not_found` as an unknown event.
+
+`calendar_sync_unavailable` means selected Google/CalDAV cached snapshots cannot establish
+fresh, complete availability; it does not mean a known busy event or missing setup. The tool
+does not refresh providers. CalDAV busy sync and write-back exist as internal services but
+are not exposed through user connection flows yet. Microsoft connections currently list
+calendars only: there is no busy sync or sync-freshness check. An available explanation does
+not establish that an Outlook calendar is free.
+
+This diagnoses new slots, not invitee permission to change an existing booking. Change
+deadlines are separate action errors. Busy intervals omit event titles, attendees, locations
+and calendar/booking IDs. See [Troubleshoot availability](/docs/availability-troubleshooting) for
+reason-by-reason actions, DST behavior, privacy and provider limitations.
+
+中文：`troubleshoot_availability` 输入事件 ID、本地日期，可选时区和时长；
+`structuredContent` 与 REST 一致，原因按优先级排列，可预约时原因为空。
+仅所有者/团队管理员使用 `full` 密钥或有权限的 MCP OAuth 可调用；低权限密钥返回
+`insufficient_scope`，其他越权与不存在均返回 `event_type_not_found`。
+Google/内部 CalDAV 快照过期或不完整返回 `calendar_sync_unavailable`，不能说成缺少配置。
+CalDAV 同步及写回尚未开放连接入口；Microsoft 只有日历列表，没有忙碌同步或新鲜度检查。
+此工具不刷新日历、不检查已有预约的改期截止时间，也不返回事件详情。
 
 ## Configure notice, booking window and buffers
 
@@ -284,6 +303,26 @@ The same organization and ownership checks apply as for browser sessions.
 OAuth authorization, code exchange and disconnect require a live browser session;
 explicit Zoom credential refresh remains session-only. Calendar settings mutations use REST
 with a `full` API key; MCP OAuth grants do not authenticate REST requests.
+
+## Create and manage event types
+
+Creation requires `slug`, `title` and `durationMinutes`. The web form's suggested booking
+link, duration preset buttons and connected-service location default are conveniences;
+REST, MCP and CLI do not apply those suggestions. Omitted location configuration stays
+unset. Timing units remain whole minutes for notice/buffers and whole calendar days for
+`bookingWindowDays`, regardless of the web editor's selected display unit.
+
+Enable or disable with `isActive: true` or `false` through REST
+`PATCH /api/v1/event-types/{id}`, MCP `update_event_type`, or CLI `update-event`.
+MCP and CLI take `id` beside the changed fields; omitted fields keep their saved values.
+These writes require a `full` API key and the existing ownership/organization permissions.
+Disabling does not cancel existing bookings. Delete uses the web confirmation or REST
+`DELETE /api/v1/event-types/{id}` (204 on success); REST has no confirmation step.
+There is currently no event-type deletion MCP tool or CLI command. See
+[creating and managing event types](/docs/event-types) for the editor, copying rules and limitations.
+
+中文：三个接口均需明确传入创建字段，不套用网页的链接建议或已连接会议服务默认值。
+用 `isActive` 启停不会取消已有预约；删除仅支持网页确认或 REST，目前没有 MCP／CLI 删除命令。
 
 ## Configure meeting lengths
 

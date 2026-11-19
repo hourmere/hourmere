@@ -110,7 +110,7 @@ describe.each([
     fireEvent.change(input, { target: { value: '0.001' } })
     expect(input.getAttribute('aria-invalid')).toBe('true')
     expect(input.getAttribute('aria-describedby')).toContain(`${field}-error`)
-    expect(document.getElementById(`${field}-error`)?.textContent).toContain('Hours')
+    expect(document.getElementById(`${field}-error`)?.textContent).toContain('hours')
     fireEvent.change(input, {
       target: {
         value: String((RULES[field].max + 1) * (field === 'bookingWindowDays' ? 24 : 1 / 60)),
@@ -118,7 +118,7 @@ describe.each([
     })
     expect(input.getAttribute('aria-invalid')).toBe('true')
     await user.selectOptions(selector, 'days')
-    expect(document.getElementById(`${field}-error`)?.textContent).toContain('Days')
+    expect(document.getElementById(`${field}-error`)?.textContent).toContain('days')
   })
 })
 
@@ -165,3 +165,34 @@ it.each([
     expect(screen.getByTestId('changes').textContent).toBe('0')
   },
 )
+
+describe.each(['en', 'zh-CN'] as const)('time field feedback in %s', (language) => {
+  it('keeps invalid text visible through unit changes and shows no converted value', async () => {
+    chooseLanguage(language)
+    render(<Harness field="minimumNoticeMinutes" initial="60" />)
+    const user = userEvent.setup()
+    const input = document.getElementById('minimumNoticeMinutes') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'not a number' } })
+    const selector = screen.getByRole('combobox')
+    for (const unit of ['days', 'minutes', 'hours']) {
+      await user.selectOptions(selector, unit)
+      expect(input.value).toBe('not a number')
+      expect(input.getAttribute('aria-invalid')).toBe('true')
+      expect(screen.getByTestId('stored').textContent).toBe('invalid')
+      expect(document.getElementById('minimumNoticeMinutes-hint')?.textContent).not.toMatch(
+        /Current value|当前值|NaN/,
+      )
+    }
+  })
+
+  it('labels the current draft and joins Chinese sentences without half-width spaces', () => {
+    chooseLanguage(language)
+    render(<Harness field="bookingWindowDays" initial="30" />)
+    const input = document.getElementById('bookingWindowDays') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '60' } })
+    const hint = document.getElementById('bookingWindowDays-hint')?.textContent
+    expect(hint).toContain(language === 'en' ? 'Current value: 60 days.' : '当前值：60 天。')
+    expect(hint).not.toMatch(/Stored value|存储值|。 /)
+    if (language === 'en') expect(hint).toContain('Enter 1–3650 days, in whole days.')
+  })
+})

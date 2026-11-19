@@ -68,6 +68,8 @@ The other settings are grouped in closed disclosures. Open a group to configure
 availability, booking limits, notice and buffers, multiple meeting lengths, additional
 locations, hosts, questions, guests, notifications, waitlists or the after-booking redirect.
 You can create immediately using the existing defaults, then adjust these settings later.
+See [creating and editing event types](/docs/event-types) for the complete walkthrough,
+connected-service defaults, list actions and copying rules.
 A team event initially selects you as its host. Availability still depends on the host's
 configured working hours; creating an event does not create a schedule.
 
@@ -85,7 +87,7 @@ event, a minute-based value uses the largest unit that expresses it as a whole n
 Zero stays in minutes. A saved booking window opens in days; an empty window has no limit.
 
 Changing only the unit changes the display, not the saved value, and does not mark the
-form as changed. Saving an unchanged editor sends no update. Saving another field omits
+form as changed. Saving an unchanged editor reports that there are no changes and sends no update. Saving another field omits
 untouched timing settings, so a timing setting
 changed concurrently through the API is preserved. The selected display unit is not saved.
 

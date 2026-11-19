@@ -69,6 +69,9 @@ describe('SSO read commands', () => {
       ['sso', 'providers'],
       ['sso', 'providers', 'create'],
       ['sso', 'policy', 'set'],
+      ['sso', 'domains', 'create'],
+      ['sso', 'domains', 'verify'],
+      ['sso', 'domains', 'delete'],
     ]) {
       const result = await run(args, fetcher)
       expect(result.code).toBe(1)

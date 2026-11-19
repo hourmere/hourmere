@@ -50,16 +50,14 @@ export function TimeUnitField({
   error?: UiText
   extra?: string
 }) {
-  const { t, uiText } = useI18n()
+  const { t, ui, locale } = useI18n()
   const [unit, setUnit] = useState<TimeUnit>(() => initialTimeUnit(value, storageUnit))
   const [entry, setEntry] = useState<{ canonical: string; unit: TimeUnit; text: string } | null>(
     null,
   )
   // Multiply before dividing: a precomputed 1/60 factor shows 111 minutes as 1.8499999999999999 hours.
   const inUnit = (stored: number) => (stored * MINUTES[storageUnit]) / MINUTES[unit]
-  const unitLabel = t(
-    unit === 'minutes' ? 'Minutes' : unit === 'hours' ? 'Time unit: hours' : 'Days',
-  )
+  const unitLabel = t(unit === 'minutes' ? 'minutes' : unit === 'hours' ? 'hours' : 'days')
   const display =
     entry?.canonical === value && entry.unit === unit
       ? entry.text
@@ -70,7 +68,7 @@ export function TimeUnitField({
     min: String(inUnit(rule.min)),
     max: String(inUnit(rule.max)),
     unit: unitLabel,
-    storageUnit: t(storageUnit === 'minutes' ? 'Minutes' : 'Days'),
+    storageUnit: t(storageUnit === 'minutes' ? 'minutes' : 'days'),
   })
   return (
     <Field
@@ -78,18 +76,19 @@ export function TimeUnitField({
       label={label}
       optional={optional}
       error={error ? range : undefined}
-      hint={
-        <>
-          {extra} {uiText(range)}{' '}
-          {value !== '' && value !== 'invalid'
-            ? t('Stored value: {value} {unit}.', {
-                value,
-                unit: t(storageUnit === 'minutes' ? 'Minutes' : 'Days'),
-              })
-            : ''}
-          {optional ? ` ${t('Empty: no limit.')}` : ''}
-        </>
-      }
+      hint={[
+        extra,
+        ui(range),
+        value !== '' && value !== 'invalid'
+          ? t('Current value: {value} {unit}.', {
+              value,
+              unit: t(storageUnit === 'minutes' ? 'minutes' : 'days'),
+            })
+          : '',
+        optional ? t('Empty: no limit.') : '',
+      ]
+        .filter(Boolean)
+        .join(locale === 'zh-CN' ? '' : ' ')}
     >
       {(props) => (
         <>

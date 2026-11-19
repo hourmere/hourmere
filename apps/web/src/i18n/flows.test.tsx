@@ -310,12 +310,12 @@ describe('changing interface language through booking and account flows', () => 
     expect(screen.getByLabelText('要添加的时长（分钟）')).toBe(duration)
     expect(document.getElementById('duration-to-add-error')?.textContent).toContain('请输入数字。')
     expect(document.getElementById('minimumNoticeMinutes-hint')?.textContent).toBe(
-      '会议至少需要提前多久预约。 请输入 0–525600 分钟，且必须为整数分钟。 存储值：0 分钟。',
+      '会议至少需要提前多久预约。请输入 0–525600 分钟，且必须为整数分钟。当前值：0 分钟。',
     )
     await user.clear(screen.getByLabelText('最短提前预约时间', { exact: true }))
     await user.type(screen.getByLabelText('最短提前预约时间', { exact: true }), '1440')
     expect(document.getElementById('minimumNoticeMinutes-hint')?.textContent).toBe(
-      '会议至少需要提前多久预约。 请输入 0–525600 分钟，且必须为整数分钟。 存储值：1440 分钟。',
+      '会议至少需要提前多久预约。请输入 0–525600 分钟，且必须为整数分钟。当前值：1440 分钟。',
     )
     expect(confirm).not.toHaveBeenCalled()
     await user.click(screen.getByRole('link', { name: '预约' }))
