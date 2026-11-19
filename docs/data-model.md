@@ -2268,6 +2268,13 @@ is present, including paid bookings later cancelled. Unconfirmed terminal holds 
 Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
 unique index, so they cannot collide with ordinary booking idempotency keys.
 
+Migration `0124_payment_checkout_attempts.sql` adds one optional Checkout attempt per hold.
+It stores the amount and currency snapshot, account and mode, a random attempt ID and its
+creation key, and the operation start time and Session ID as they become known. Existing
+holds stay unchanged. The booking's deadline still governs capacity and payment acceptance.
+The attempt survives hold contact erasure. Its foreign key blocks booking deletion while
+the attempt is retained. Checkout URLs and provider credentials are kept out of storage.
+
 ## Private attendee no-show markers
 
 Migration 0070 adds nullable `booking_attendees.no_show_marked_at` and
