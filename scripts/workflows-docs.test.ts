@@ -55,6 +55,45 @@ const prose = (values: readonly string[]) =>
   values.length < 2 ? values.join('') : `${values.slice(0, -1).join(', ')} and ${values.at(-1)}`
 const numberWords = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
 
+describe('workflow webhook guides', () => {
+  const site = 'apps/site/src/content/docs/docs'
+
+  it.each([
+    `${site}/webhooks.md`,
+    `${site}/mcp.md`,
+    `${site}/cli.md`,
+    'docs/mcp.md',
+    'tools/cli/README.md',
+  ])('%s documents the event kinds and hard-off behavior', (path) => {
+    const guide = read(path)
+    for (const event of WEBHOOK_EVENTS) expect(guide).toContain(`\`${event}\``)
+    expect(guide).toMatch(/`(?:404 )?workflows_disabled`/)
+    expect(guide).toMatch(/`(?:409 )?webhooks_disabled`/)
+    expect(guide).toContain('`Webhook.events`')
+    expect(guide).toMatch(/`(?:WebhookDelivery\.)?eventType`/)
+    expect(guide).toContain('open enum')
+  })
+
+  it.each(['zapier', 'n8n', 'make'])('%s excludes the workflow kind', (integration) => {
+    expect(read(`${site}/${integration}.md`)).toMatch(
+      /(?:do|does) not offer (?:a )?`workflow\.executed`/,
+    )
+  })
+
+  it('documents the planned workflow delivery fields', () => {
+    const guide = read(`${site}/webhooks.md`).split('The planned `workflow.executed` payload')[1]
+    for (const field of [
+      'bookingId',
+      'workflowId',
+      'workflowRevision',
+      'trigger',
+      'workflowRunId',
+    ]) {
+      expect(guide).toContain(`\`data.${field}\``)
+    }
+  })
+})
+
 /** Every migration in order, so the last match of a constraint is the one main installs. */
 const migrations = readdirSync(new URL('../packages/db/migrations/', import.meta.url))
   .filter((name) => name.endsWith('.sql'))

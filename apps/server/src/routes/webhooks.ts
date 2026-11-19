@@ -33,7 +33,9 @@ export const Webhook = z
     id: z.uuid(),
     organizationId: z.uuid(),
     url: z.string(),
-    events: z.array(z.enum(WEBHOOK_EVENTS)),
+    events: z.array(z.enum(WEBHOOK_EVENTS)).openapi({
+      description: 'Subscription event kinds. Open enum. Ignore unknown event kinds.',
+    }),
     isActive: z.boolean(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -49,7 +51,9 @@ const Delivery = z
   .object({
     id: z.uuid(),
     eventId: z.uuid(),
-    eventType: z.enum(WEBHOOK_EVENTS),
+    eventType: z.enum(WEBHOOK_EVENTS).openapi({
+      description: 'Delivery event kind. Open enum. Ignore unknown event kinds.',
+    }),
     bookingId: z.uuid(),
     status: z.enum(['pending', 'delivered', 'failed', 'skipped']),
     attempts: z.number().int(),

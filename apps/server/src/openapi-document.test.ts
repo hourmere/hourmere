@@ -1,3 +1,4 @@
+import { WEBHOOK_EVENTS } from '@hourmere/webhooks'
 import { describe, expect, it } from 'vitest'
 import { openApiDocument } from './openapi-document.ts'
 
@@ -12,6 +13,24 @@ describe('openApiDocument', () => {
       format: 'uuid',
     })
     expect(me.required).toContain('personalOrganizationId')
+  })
+
+  it('documents open webhook response enums and requires a UUID booking ID on deliveries', async () => {
+    type Schema = { properties: Record<string, unknown>; required: string[] }
+    const { components } = (await openApiDocument()) as {
+      components: { schemas: { Webhook: Schema; WebhookDelivery: Schema } }
+    }
+    const { Webhook, WebhookDelivery } = components.schemas
+    expect(Webhook.properties.events).toMatchObject({
+      description: expect.stringContaining('Open enum'),
+      items: { enum: WEBHOOK_EVENTS },
+    })
+    expect(WebhookDelivery.properties.eventType).toMatchObject({
+      description: expect.stringContaining('Open enum'),
+      enum: WEBHOOK_EVENTS,
+    })
+    expect(WebhookDelivery.properties.bookingId).toMatchObject({ type: 'string', format: 'uuid' })
+    expect(WebhookDelivery.required).toContain('bookingId')
   })
 
   it("lists every route group's paths, without a database", async () => {

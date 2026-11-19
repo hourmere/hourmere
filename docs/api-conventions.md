@@ -12,11 +12,12 @@ from source attribution. Imported booking mutations return `imported_booking_rea
 
 ### Webhook event compatibility
 
-`booking.attendee_no_show_changed` extends the webhook subscription `events` and delivery
-`eventType` response enums within `/api/v1`. Regenerate clients from the current OpenAPI
-document and update closed validators. Consumers must ignore unknown event types rather
-than reject otherwise valid responses. Existing subscriptions are unchanged; attendance
-notifications require explicit subscription to the new event.
+`Webhook.events` and `WebhookDelivery.eventType` are open response enums within `/api/v1`.
+Additions include the reschedule-request events, `booking.attendee_no_show_changed` and
+`workflow.executed`. Regenerate clients from the current OpenAPI document, update closed
+validators and ignore unknown event types. New kinds require explicit subscription.
+Workflows are hard-off, so attempts to add `workflow.executed` return
+`404 workflows_disabled`.
 
 ### Booking activity no-show counts
 

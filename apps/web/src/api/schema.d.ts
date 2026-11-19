@@ -8138,6 +8138,7 @@ export interface components {
         Webhook: {
             /** Format: date-time */
             createdAt: string;
+            /** @description Subscription event kinds. Open enum. Ignore unknown event kinds. */
             events: ("booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed")[];
             /** Format: uuid */
             id: string;
@@ -8158,7 +8159,10 @@ export interface components {
             deliveredAt: string | null;
             /** Format: uuid */
             eventId: string;
-            /** @enum {string} */
+            /**
+             * @description Delivery event kind. Open enum. Ignore unknown event kinds.
+             * @enum {string}
+             */
             eventType: "booking.created" | "booking.rescheduled" | "booking.cancelled" | "booking.reschedule_requested" | "booking.reschedule_request_expired" | "booking.attendee_no_show_changed" | "workflow.executed";
             httpStatus: number | null;
             /** Format: uuid */
