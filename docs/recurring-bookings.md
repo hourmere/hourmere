@@ -416,7 +416,11 @@ failure through authorized reads and document host assistance, not guaranteed de
 
 Bulk cancel accepts `scope: "all" | "following"`, `fromOrdinal` only for following,
 `expectedRevision`, a request key and optional reason. Sample one clock after locks; compute
-and return affected/unchanged IDs explicitly. An empty eligible set succeeds without mail.
+and return affected/unchanged IDs explicitly within the caller's visibility. For the booker,
+if any selected, upcoming confirmed occurrence has reached its snapshotted cancellation
+deadline, the whole action is refused with `booking_cancel_deadline_passed`. Hosts bypass
+that deadline. An empty eligible set records a receipt and advances the revision without
+queuing mail. A replay uses its saved affected IDs and returns the current state.
 Every member move or cancel, through any route, and every bulk cancellation increments the
 series revision in the same transaction. Occurrence-token and host operations keep their
 existing inputs. A non-replay stale revision returns `series_changed` for a reload; never

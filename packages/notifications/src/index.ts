@@ -162,7 +162,7 @@ export type BookingEvent =
   | { type: 'created'; bookingId: string; start: Temporal.Instant }
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
-  | { type: 'cancelled'; bookingId: string }
+  | { type: 'cancelled'; bookingId: string; seriesAction?: 'bulk_cancel' }
   | {
       type: 'reschedule_requested' | 'reschedule_request_expired'
       bookingId: string
@@ -195,6 +195,9 @@ export async function enqueueBookingNotifications(
   if (!transaction.isTransaction) {
     throw new Error('enqueueBookingNotifications needs the transaction that writes the booking')
   }
+  // A bulk series action owns its cancellation mail. Other booking-change consumers
+  // still receive the ordinary cancellation event for each affected booking.
+  if (event.type === 'cancelled' && event.seriesAction === 'bulk_cancel') return
   if (await isImportedBooking(transaction as Db, event.bookingId)) return
   if ('requestId' in event) {
     await queue.enqueue(

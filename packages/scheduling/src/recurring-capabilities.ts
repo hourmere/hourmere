@@ -104,6 +104,30 @@ export async function resolveSeriesCapability(
   return row && toCapability(row)
 }
 
+/** Revalidates a booker's capability and retained ownership of locked current members. */
+export async function resolveSeriesBookerBookingIds(
+  db: Db,
+  token: string,
+  organizationId: string,
+  seriesId: string,
+  bookingIds: readonly string[],
+): Promise<string[]> {
+  const authority = scopedAuthority(token, { scope: 'manage', organizationId, seriesId })
+  if (!authority) return []
+  const { rows } = await sql<{ id: string }>`
+    ${authority}
+    SELECT b.id FROM authority a
+    JOIN booking_series_occurrences o
+      ON o.series_id = a.series_id AND o.organization_id = a.organization_id
+    JOIN bookings b ON b.series_occurrence_id = o.id AND b.organization_id = o.organization_id
+    WHERE b.id = ANY(${bookingIds}::uuid[])
+      AND EXISTS (
+        SELECT 1 FROM booking_attendees attendee WHERE attendee.booking_id = b.id
+          AND attendee.is_booker AND attendee.email = a.email
+      )`.execute(db)
+  return rows.map(({ id }) => id)
+}
+
 /** Resolves an ordinal and its current booking in the same snapshot as the capability. */
 export async function resolveSeriesMember(
   db: Db,

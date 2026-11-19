@@ -248,7 +248,7 @@ function validateGuests(guests: readonly PersonInput[], invitee: Attendee): Atte
   }))
 }
 
-function normalizeReason(reason: string | undefined): string | null {
+export function normalizeReason(reason: string | undefined): string | null {
   if (reason === undefined || reason.trim() === '') return null
   const text = cleanText(reason, { multiline: true, max: MAX_REASON })
   if (text === undefined) {
@@ -1135,6 +1135,7 @@ async function cancelLocked(
   actorUserId: string | null,
   /** Only the invitee's own link is limited by the booking's cancel deadline. */
   asInvitee = false,
+  seriesAction?: 'bulk_cancel',
 ): Promise<Booking> {
   await assertBookingLocallyManaged(db, row.id)
   const seat = await db
@@ -1148,6 +1149,8 @@ async function cancelLocked(
     .where('id', '=', row.id)
     .executeTakeFirst()
   if (seat?.group_slot_id && row.status === 'cancelled') return loadBooking(db, row.id)
+  if (seriesAction && !seat?.series_occurrence_id)
+    throw new Error('Bulk cancellation requires a series member')
   assertChangeable(row, now)
   if (asInvitee && seat)
     assertInviteeChangeOpen('cancel', toInstant(row.start_at), cutoffsOf(seat), now)
@@ -1183,11 +1186,40 @@ async function cancelLocked(
   await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
-  if (seat?.series_occurrence_id)
+  if (seat?.series_occurrence_id && !seriesAction)
     await advanceBookingSeries(db, row.organization_id, seat.series_occurrence_id)
-  // In this transaction: the cancellation email exists exactly when the cancellation does.
-  await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
+  await notify?.(
+    db,
+    { type: 'cancelled', bookingId: row.id, ...(seriesAction && { seriesAction }) },
+    now,
+  )
   return loadBooking(db, row.id)
+}
+
+/** Bulk cancellation authorizes and locks the current members together, then owns the revision. */
+export async function cancelSeriesMemberInTransaction(
+  trx: Transaction<Database>,
+  row: { id: string; organization_id: string; status: string; start_at: Date },
+  now: Temporal.Instant,
+  options: {
+    reason: string | null
+    notify: BookingNotifier | undefined
+    origin: BookingOrigin
+    actorUserId: string | null
+    asInvitee: boolean
+  },
+): Promise<void> {
+  await cancelLocked(
+    trx,
+    row,
+    now,
+    options.reason,
+    options.notify,
+    options.origin,
+    options.actorUserId,
+    options.asInvitee,
+    'bulk_cancel',
+  )
 }
 
 /** Fence queued and claimed work without deleting terminal recipient history. */
@@ -1831,7 +1863,7 @@ async function lockSeriesManagedBooking(
   return { row, member }
 }
 
-function assertSeriesRevision(expected: string, revision: string) {
+export function assertSeriesRevision(expected: string, revision: string) {
   if (expected !== revision)
     throw new DomainError(
       'conflict',

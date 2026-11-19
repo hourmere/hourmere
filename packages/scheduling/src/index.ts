@@ -346,6 +346,12 @@ export {
   type RecurringAvailabilityResult,
 } from './recurring-availability.ts'
 export {
+  type CancelBookingSeriesInput,
+  type CancelBookingSeriesResult,
+  cancelHostBookingSeries,
+  cancelManagedBookingSeries,
+} from './recurring-cancellation.ts'
+export {
   resolveSeriesCapability,
   resolveSeriesMember,
   type SeriesMemberMutationSelector,
