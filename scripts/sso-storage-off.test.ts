@@ -14,7 +14,8 @@
 // before writing browser proof. OIDC completion uses pending attempts and updates the
 // proven mailbox on the link. Draft reads owns
 // the provider/domain inventory, policies and opaque recovery link summaries, behind the same
-// hard-off gate. The provider test
+// hard-off gate. The team-read service checks stored policy and live browser proofs
+// in every state, and shares the proof query with the caller's own summary. The provider test
 // receipt query correlates the audit journal with the provider's current revision. The other module
 // that names the tables, apps/server/src/sso-storage-errors.ts, only recognises them in
 // database errors so that the error log omits their row details; it imports nothing and
@@ -50,8 +51,8 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_policies',
   ],
   'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
-  'apps/server/src/sso-me.ts': [
-    'sso_attempts',
+  'apps/server/src/sso-me.ts': ['sso_attempts', 'sso_identity_links', 'sso_providers'],
+  'apps/server/src/sso-team-reads.ts': [
     'sso_browser_proofs',
     'sso_domains',
     'sso_identity_links',
