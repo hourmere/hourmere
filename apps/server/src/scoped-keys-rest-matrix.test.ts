@@ -166,6 +166,8 @@ const classes = {
     'DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}',
     'GET /api/v1/bookings/{id}/organization',
     'DELETE /api/v1/calendar-connections/{id}',
+    'POST /api/v1/calendar-connections/caldav/discover',
+    'POST /api/v1/calendar-connections/caldav',
     'POST /api/v1/calendar-connections/google/authorize',
     'POST /api/v1/calendar-connections/microsoft/authorize',
     'DELETE /api/v1/conference-connections/{id}',
@@ -892,14 +894,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 154-operation contract and all 462 scope combinations', () => {
+    it('covers the exact 156-operation contract and all 468 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(154)
-      expect(new Set(ids).size).toBe(154)
+      expect(ids).toHaveLength(156)
+      expect(new Set(ids).size).toBe(156)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(462)
+      expect(cases).toHaveLength(468)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

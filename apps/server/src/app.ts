@@ -166,6 +166,11 @@ function isSsoTrustPath(path: string): boolean {
   )
 }
 
+/** CalDAV credential input must never be reflected, including invalid property names. */
+function isCalDavConnectionPath(path: string): boolean {
+  return /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path)
+}
+
 /** Admission bodies carry private contacts and arbitrary keys can themselves contain PII. */
 function isWaitlistAdmissionPath(path: string): boolean {
   let decoded = path
@@ -187,7 +192,8 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
   if (c.req.path.toLowerCase().includes('/meeting-polls'))
     return c.json({ error: 'invalid_request' }, 400)
-  if (isSsoTrustPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
+  if (isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
+    return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
@@ -379,7 +385,7 @@ const requestLogger = createMiddleware(async (c, next) => {
   if (
     !isOneTimeLinkPath(c.req.path) &&
     !isSlackDestinationPath(c.req.path) &&
-    !isSsoTrustPath(c.req.path)
+    !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
   )
     return ordinaryRequestLogger(c, next)
   await next()
@@ -421,20 +427,23 @@ export function createApp({
     // Driver messages and disconnect causes can echo contact values and malformed keys.
     const text = c.req.path.toLowerCase().includes('/meeting-polls')
       ? 'private meeting poll request failed'
-      : isSsoTrustPath(c.req.path)
-        ? '[private SSO diagnostic omitted]'
-        : isSlackDestinationPath(c.req.path)
-          ? '[private Slack diagnostic omitted]'
-          : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
-            ? 'private waitlist request failed'
-            : detail
+      : isCalDavConnectionPath(c.req.path)
+        ? '[private CalDAV diagnostic omitted]'
+        : isSsoTrustPath(c.req.path)
+          ? '[private SSO diagnostic omitted]'
+          : isSlackDestinationPath(c.req.path)
+            ? '[private Slack diagnostic omitted]'
+            : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
+              ? 'private waitlist request failed'
+              : detail
     const path = c.req.path.toLowerCase().includes('/meeting-polls')
       ? '/api/v1/public/meeting-polls/[redacted]'
       : isOneTimeCapabilityPath(c.req.path)
         ? '/book/[redacted]'
         : isOneTimeLinkPath(c.req.path) ||
             isSlackDestinationPath(c.req.path) ||
-            isSsoTrustPath(c.req.path)
+            isSsoTrustPath(c.req.path) ||
+            isCalDavConnectionPath(c.req.path)
           ? routePath(c)
           : c.req.path
     const message = c.req.path.includes('/provisioning-tokens')
@@ -484,7 +493,7 @@ export function createApp({
           !isWaitlistAdmissionPath(c.req.path) &&
           !c.req.path.toLowerCase().includes('/meeting-polls') &&
           !isSlackDestinationPath(c.req.path) &&
-          !isSsoTrustPath(c.req.path)
+          !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
           ? { error, message: err.message }
           : { error },
         err.status,
@@ -519,7 +528,9 @@ export function createApp({
         ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail &&
           !isOneTimeLinkPath(c.req.path) &&
-          !isSsoTrustPath(c.req.path) && { message: err.detail }),
+          !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path)) && {
+            message: err.detail,
+          }),
         ...(err.code === 'one_time_link_already_created' &&
           /\/one-time-links(?:\/|$)/i.test(c.req.path) && {
             message: ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,

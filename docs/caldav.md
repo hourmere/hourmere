@@ -1,10 +1,11 @@
 # CalDAV connections
 
-This document defines Hourmere's internal CalDAV connection, discovery and busy-time
-synchronization services, and booking-write services. Encrypted credentials, guarded discovery, bounded busy reads,
-incremental sync, conditional booking writes and internal job factories are implemented.
-**CalDAV remains unavailable in the application:** no UI, REST, MCP or CLI connection
-surface and no production worker registration is added. Real-account compatibility remains pending. Tests use synthetic Nextcloud-style and iCloud-style responses.
+Hourmere's Calendars page connects CalDAV accounts through browser-session-only REST
+operations. Encrypted credentials, guarded discovery, bounded busy reads, incremental
+sync and conditional booking writes use the existing calendar services and background
+jobs. See the bilingual [setup guide](https://hourmere.com/docs/caldav).
+Real-account compatibility remains pending: tests use synthetic Nextcloud-style and
+iCloud-style responses, not real provider accounts.
 
 ## Credentials and ownership
 
@@ -25,8 +26,8 @@ preserves the uniqueness constraint across encryption-key rotation without rewri
 account identities; confidentiality relies on access controls and encrypted credentials.
 This identifies the submitted
 endpoint/login, not a globally verified person: aliases or different server paths can
-represent the same provider account. A future connection service must reconcile such
-cases using authenticated discovery rather than equating email addresses.
+represent the same provider account. The connection identity does not reconcile such
+aliases; do not equate them using email addresses.
 
 Encryption reuses `packages/calendars/src/credentials.ts`: AES-256-GCM with a fresh
 96-bit nonce, authenticated tag and version byte. The dedicated
@@ -53,21 +54,43 @@ a reliable guarantee of memory zeroization. Back up the encryption key separatel
 the database. Losing it requires reconnecting; rotation must explicitly decrypt and
 re-encrypt records with both keys available, not simply replace the environment value.
 
-The internal connection service authorizes the owner's live browser session before
+The connection service authorizes the owner's live browser session before
 network access and rechecks it before saving. Successful discovery precedes transactional
 persistence of encrypted credentials and VEVENT calendar metadata. Connections belong to
 the user across organizations; a team administrator gains no access to another user's
 connection. Agent credentials cannot create or replace provider credentials in this step.
-No application route or tool calls this service yet; REST, MCP, CLI and UI connection
-contracts remain deferred, as does operator configuration wiring.
+Credential discovery, connection and replacement are browser-session-only REST
+operations declared in OpenAPI. They are explicitly exempt from MCP/CLI write parity:
+API keys and MCP OAuth cannot submit provider credentials. Do not give an agent your
+provider password or add a credential-accepting MCP tool.
+
+`POST /api/v1/calendar-connections/caldav/discover` accepts the URL, username and
+password (and optional reconnect ID), checks live ownership, and returns sanitized
+names, capabilities and opaque selection keys without persistence. Provider URLs and
+credentials are not returned. `POST /api/v1/calendar-connections/caldav` accepts the
+same credentials and explicit inventory/conflict/destination selections, performs fresh
+discovery, and saves them atomically. Reconnect requires re-entry of all three fields;
+stored credentials are never prefilled. Reconnect must preserve the canonical endpoint
+and username identity; an account/endpoint change requires disconnect and a new connection. Existing list, selection, sync and disconnect
+operations apply the CalDAV owner-session boundary as well.
 
 `connectCalDav` discovers and saves the chosen inventory; `listCalDavConnections`
 returns only owner-scoped connection IDs/status and calendar IDs, names, colours,
 read-only and availability flags. `disconnectCalDav` deletes the owner's connection
 and its dependent calendars, including local encrypted credentials; provider-side app
-password revocation remains the host's action. Reconnect keeps connection and calendar
+password revocation remains the host's action. Disconnect stops future sync and writes,
+removes local busy snapshots and write mappings, and leaves already written events on
+the provider unchanged. Delete those events in the provider if desired; Hourmere can no
+longer update or cancel them after disconnect. Reconnect keeps connection and calendar
 IDs stable and replaces credentials using the existing row's authenticated encryption
 identity. A failed discovery leaves the prior inventory untouched.
+
+Successful reconnect transactionally queues a finite write-recovery pass for this
+connection's pinned booking chains and group slots. Recovery walks at most 100 targets
+per page, including cancelled bookings, and queues ordinary conditional reconciliation
+against current booking state. It preserves the original destinations and ownership
+checks; it does not override external edits or recreate disconnected mappings. Recovery
+pages have five bounded retries, rather than an indefinite reset of the write retry budget.
 
 No migration is needed: `calendars.sync_state.caldavDiscovery` stores version 1
 metadata (`available`, `color`), not an event sync cursor. Deselected or removed
@@ -80,14 +103,17 @@ names, normalized `color` (`#RRGGBB` or `#RRGGBBAA`), and advisory `canWrite` fl
 missing or invalid colours are null, and missing privileges never imply write access.
 The caller explicitly supplies collection URLs to include in the saved inventory;
 unknown, duplicate or explicitly non-VEVENT selections are refused. This is inventory
-selection only. Discovery does not establish that event bodies can be read. The internal
+selection only. Discovery does not establish that event bodies can be read. The
 `configureCalDavCalendar` service separately authorizes conflict selection; booking
-destinations are selected only through the internal write service. No production jobs are registered.
+destinations are selected through `configureCalDavWriteCalendar`. Saving explicitly
+selected calendars queues busy sync; production workers also dispatch periodic refreshes
+and booking lifecycle writes.
 
-此阶段仅提供内部连接服务：先验证本人有效会话，再发现并以事务保存加密凭据及
+连接服务：先验证本人有效会话，再发现并以事务保存加密凭据及
 支持 VEVENT 的日历。连接属于用户，切换组织不会转移所有权，团队管理员也不能
 读取其他用户的连接。颜色缺失或无效时为 null；未确认权限不代表可写。
-应用界面、REST、MCP、CLI 入口仍未开放，不注册生产任务。内部忙闲读取、增量同步及预约写回服务可供受控测试调用。
+日历页通过仅限本人浏览器会话的 REST 接口连接，MCP、CLI 和 API 密钥不接受日历密码。
+生产任务执行忙闲读取、增量同步及预约写回；尚未完成真实账号验收。
 
 ## Discovery
 
@@ -152,8 +178,8 @@ environment, cookie jar or automatic redirect forwarding may bypass this boundar
 
 Two independent trusted-operator decisions exist: which private host/network and port
 may be reached (`privateTargets`), and which extra HTTPS origins may receive the
-connection's Basic credentials (`allowedOrigins`). Both are constructor options, not
-user-submitted fields or environment settings wired into the application. A private
+connection's Basic credentials (`allowedOrigins`). The application supplies these constructor options from operator-only
+`CALDAV_PRIVATE_TARGETS` and `CALDAV_ALLOWED_ORIGINS`; they are never user-submitted fields. A private
 network exception alone does not authorize cross-origin password forwarding; an origin
 exception alone does not bypass the address guard. The original server origin is the
 credential boundary by default. A cross-origin redirect or href fails closed unless
@@ -178,7 +204,7 @@ retries are not part of discovery; the caller decides when to try again. Product
 transport errors expose only the bounded `CalDavError.code` classification and a fixed
 message; they carry no HTTP status, raw provider exception or response.
 
-The future connection UX should distinguish these states; these are design meanings,
+Connection troubleshooting distinguishes these states; these are protocol meanings,
 not new translated strings or an API contract in this change:
 
 | Condition | Meaning and host action |
@@ -198,7 +224,7 @@ global concurrency, use exponential backoff with jitter for transient errors, ca
 `Retry-After`, and stop retrying rejected credentials until reconnect. Never convert a
 partial/failed busy sync into an empty, apparently free calendar.
 
-## Internal busy synchronization
+## Busy synchronization
 
 `createCalDavSyncClient` reads the selected collection through the discovery transport's
 HTTPS, DNS pinning, exact-origin credential and redirect guards. It discovers advertised
@@ -226,7 +252,7 @@ conflict-calendar limit. Calendar jobs use the existing Postgres job system, bou
 concurrency and exponential retry backoff with jitter. Wire selection and dispatch through
 `createCalDavSyncEnqueuer(jobs)`: its per-calendar singleton key preserves delayed retries
 and its optional transaction keeps initial enqueue atomic with selection. Rejected credentials stop retrying until
-reconnect. These factories remain internal and unregistered in the application.
+reconnect. The application registers these factories for production workers.
 Failures retain the last snapshot and mark freshness unavailable. Availability and
 readiness apply the same ten-minute freshness and range-coverage contract as Google;
 failed or stale data cannot advertise free slots.
@@ -247,9 +273,9 @@ conservatively remains busy. Provider usernames are never assumed to be email id
 保存，不保存标题、参会者或原始事件。失败保留旧快照并标记暂时不可用；同一连接
 串行同步。未经验证的浮动时区、未展开的重复规则及无法解释的 VTIMEZONE 会使同步
 失败，不会被当作空闲。尚未验证本人日历地址时，已拒绝邀请仍保守地占用时间。
-界面及 REST/MCP/CLI、生产任务注册和真实账号验收均未开放；预约写回仅供内部调用。
+界面和仅限浏览器会话的 REST 已接入生产任务；MCP/CLI 不接收凭据，真实账号验收仍未完成。
 
-## Synchronization and internal writes
+## Synchronization and booking writes
 
 ### Calendar selection and freshness
 
@@ -341,10 +367,9 @@ revision. Collective hosts each receive a copy in their own pinned destination.
 
 `configureCalDavWriteCalendar` authorizes the owner's live browser session and selects a
 verified writable calendar as the profile default (or clears it). It does not move
-existing pinned targets. A trusted embedding caller wires `calDavBookingNotifier` into
-the booking transaction and registers `calDavBookingJob`; neither is wired in production.
-`writeCalDavBooking` reconciles a booking-chain or group-slot payload. No REST/MCP/CLI
-contract or UI string is added.
+existing pinned targets. The application wires `calDavBookingNotifier` into
+the booking transaction and registers `calDavBookingJob`.
+`writeCalDavBooking` reconciles a booking-chain or group-slot payload.
 
 Writes and busy sync share the connection row lock, so only one request sequence runs
 per connection. Internal jobs reconcile current database state rather than the queued
@@ -394,14 +419,14 @@ made during implementation or tests.
 | Fastmail | `https://caldav.fastmail.com/`, full Fastmail username and an app password with calendar access. | Basic plans do not include CalDAV. Regional/account paths and capabilities require discovery; there is no tested Hourmere compatibility claim or published request quota here. |
 | Nextcloud | `https://<host>[/installation-prefix]/remote.php/dav/`; dedicated app password recommended and required for the documented 2FA client setup. | Preserve the installation prefix. Correct well-known redirects depend on proxy configuration. Server/app versions, sharing permissions and installed Calendar app matter. Private addresses require operator exceptions; self-signed TLS is rejected unless the operator explicitly trusts its CA through process configuration. |
 
-**Open design decision for the next CalDAV task:** define how iCloud calendar homes
+**Known limitation:** define how iCloud calendar homes
 on `pNN-caldav.icloud.com` will be authorized under the exact-origin credential policy.
 One candidate is a narrowly scoped, code-defined allowlist of Apple-controlled shard
 hosts for connections explicitly identified as iCloud, with tests for lookalike hosts,
 redirects and DNS/address validation. Decide the supported host pattern and trust
-source before enabling iCloud. Do not infer trust from response XML or enable a generic
-suffix wildcard. This foundation implements no such provider exception; operators
-would currently need to approve each exact shard origin.
+source before authorizing these cross-origin requests. Do not infer trust from response XML
+or enable a generic suffix wildcard. The iCloud preset does not grant any shard exception;
+connections that require one fail closed. There is no user-facing bypass.
 
 Apple's [app-specific-password guide](https://support.apple.com/en-us/102654) states that
 2FA is required, permits up to 25 active app passwords, and revokes them when the primary
@@ -424,26 +449,26 @@ above is our security decision, not a claim that Nextcloud forbids self-signed s
 
 ## Operator note and scope limits
 
-There is no CalDAV setting to turn on yet. A future self-hosted integration will use the
-same functionality without a hosted-service gate. Plan outbound DNS and verified HTTPS
-from every process that will run discovery or sync; do not expose a new inbound port.
-Allow PROPFIND/REPORT and later PUT/DELETE in the destination reverse proxy. Restrict
+CalDAV uses `CALENDAR_ENCRYPTION_KEY`, with the same functionality on self-hosted
+instances and no hosted-service entitlement gate. Plan outbound DNS and verified HTTPS
+from every process that runs discovery, sync or writes; do not expose a new inbound port.
+Allow PROPFIND/REPORT and PUT/DELETE in the destination reverse proxy. Restrict
 network egress at the infrastructure layer as well as the application guard.
 
-For internal Nextcloud, a trusted embedding caller can supply narrow private host/port
-or private CIDR/port exceptions to the discovery interface. The application does not
-read `WEBHOOK_PRIVATE_TARGETS` for CalDAV: that existing environment variable remains
-webhook-specific. Do not broaden it expecting CalDAV to become available. Future
-configuration wiring must introduce and document a separate operator-only setting and
-apply it consistently to web and worker processes. Link-local/metadata destinations
-remain blocked; an allowlist never disables TLS or permits password forwarding to an
-unapproved origin.
+For internal Nextcloud, `CALDAV_PRIVATE_TARGETS` supplies narrow private host/port or
+private CIDR/port exceptions using the same syntax as `WEBHOOK_PRIVATE_TARGETS`.
+The settings are separate: webhook exceptions never authorize CalDAV traffic.
+`CALDAV_ALLOWED_ORIGINS` supplies at most 32 comma-separated exact HTTPS origins that
+may receive the connection's Basic credentials. No wildcard, userinfo, path, query or
+fragment is allowed. Apply both settings consistently to web and worker processes;
+they cover discovery, busy reads and writes. An origin exception does not bypass the
+address guard, and a private address exception does not authorize cross-origin secrets.
+Link-local/metadata destinations remain blocked; exceptions never disable TLS.
 
-Out of scope here: connection UI/API/MCP/CLI, live-account
-acceptance, client-side recurring expansion, production job registration,
+Out of scope here: credential entry through API keys/MCP/CLI, live-account
+acceptance, client-side recurring expansion,
 OAuth, Digest/NTLM/client-certificate login, DNS SRV/TXT discovery, calendar creation,
 sharing management, CardDAV, VTODO, attachments, RSVP processing, scheduling delivery,
 provider-specific push, and arbitrary self-signed-certificate acceptance. Mock tests
-establish the foundation's behavior only; each future provider adapter needs fixtures
-for its capabilities, recurrence, DST, replay, concurrency, reschedule and cancellation
-before it can affect availability or bookings.
+establish behavior against synthetic servers only. Each provider still needs separately
+authorized live acceptance before compatibility can be claimed.
