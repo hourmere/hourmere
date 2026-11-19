@@ -8,7 +8,7 @@ const METHODS = ['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'del
 export type HttpMethod = (typeof METHODS)[number]
 const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(['post', 'put', 'patch', 'delete'])
 
-// These administrator reads explicitly ship on all three interfaces. Other reads remain
+// These reads explicitly ship on all three interfaces. Other reads remain
 // outside required parity coverage. Exact routes prevent an operation ID from moving silently.
 const REQUIRED_READS: Readonly<Record<string, string>> = {
   listMeetingPolls: 'GET /api/v1/meeting-polls',
@@ -17,6 +17,8 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   listSsoProviders: 'GET /api/v1/team/sso/providers',
   getGroupOccurrenceAttendees: 'GET /api/v1/group-occurrences/{id}/attendees',
   getSsoPolicy: 'GET /api/v1/team/sso/policy',
+  getPublicRoutingForm: 'GET /api/v1/public/-/routing/{handle}/{slug}',
+  getPublicTeamRoutingForm: 'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
 }
 
 const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'

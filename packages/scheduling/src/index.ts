@@ -374,11 +374,19 @@ export {
 export {
   archiveRoutingForm,
   createRoutingForm,
+  getPublicRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  previewRoutingForm,
   publishRoutingForm,
+  ROUTING_RECEIPT_LIMITS,
+  RoutingAdmissionError,
+  type RoutingSubmissionContext,
+  type RoutingSubmissionResult,
+  submitRoutingForm,
   updateRoutingForm,
 } from './routing-form-service.ts'
+export { routingRequestKey } from './routing-receipt-crypto.ts'
 export {
   confirmDefaultSchedule,
   createSchedule,

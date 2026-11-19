@@ -358,6 +358,7 @@ export function productRoutes({
     }),
     publicRoutes({
       db,
+      routingFormsEnabled: routingEnabled,
       smsRemindersAvailable,
       waitlistSecret,
       smtpConfigured,
