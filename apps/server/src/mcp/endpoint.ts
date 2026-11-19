@@ -103,6 +103,11 @@ const teamReadTools = new Set(
   API_KEY_MCP_OPERATIONS.filter((op) => op.rest.some(teamReadRoute)).map((op) => op.tool),
 )
 
+/** Whether the tool's calls pass the team read proof check before argument parsing. */
+export function teamReadTool(toolName: string): boolean {
+  return teamReadTools.has(toolName)
+}
+
 /**
  * The caller as the SDK carries it to the tools. Verification happened in front of the
  * handler (it never reads credentials itself), so the key's secret is not passed on: the
@@ -117,7 +122,7 @@ function toAuthInfo(
   const checkTeamRead: ToolCall['checkTeamRead'] =
     check &&
     (async (toolName) => {
-      if (!teamReadTools.has(toolName)) return
+      if (!teamReadTool(toolName)) return
       const access = await check()
       requireTeamRead(access)
       return access
