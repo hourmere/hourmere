@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildIcs,
   calendarResponseDescription,
+  calendarSnapshotAttachment,
   foldIcsLine,
   type IcsEvent,
+  type IcsSnapshotEvent,
   icsAttachment,
 } from './ics.ts'
 
@@ -25,7 +27,7 @@ const unfold = (ics: string) => ics.replaceAll('\r\n ', '')
 const contentLines = (ics: string) => physicalLines(unfold(ics))
 
 /** Structure every invitation must have, whatever it contains. */
-function expectWellFormed(ics: string) {
+function expectWellFormed(ics: string, count = 1) {
   expect(ics.endsWith('\r\n')).toBe(true)
   // CRLF only: no bare CR or LF anywhere.
   expect(ics.replaceAll('\r\n', '')).not.toMatch(/[\r\n]/)
@@ -37,7 +39,7 @@ function expectWellFormed(ics: string) {
   const lines = contentLines(ics)
   expect(lines[0]).toBe('BEGIN:VCALENDAR')
   expect(lines.at(-1)).toBe('END:VCALENDAR')
-  expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1)
+  expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(count)
   for (const line of lines) expect(line).toMatch(/^[A-Z-]+[;:]/)
 }
 
@@ -270,6 +272,42 @@ describe('icsAttachment', () => {
       filename: 'cancel.ics',
       contentType: 'text/calendar; method=CANCEL; charset=UTF-8',
     })
+  })
+})
+
+describe('calendarSnapshotAttachment', () => {
+  it('serializes independent events into one importable snapshot using the same escaping', () => {
+    const { method: _, ...fields } = base
+    const first: IcsSnapshotEvent = {
+      ...fields,
+      status: 'CONFIRMED',
+      description: `会议 ${'😀'.repeat(30)}\nPending, review; later\\today`,
+    }
+    const second: IcsSnapshotEvent = {
+      ...fields,
+      status: 'CANCELLED',
+      uid: 'second@cal.example.com',
+      sequence: 2,
+      attendees: [],
+    }
+    const attachment = calendarSnapshotAttachment([first, second])
+    expect(attachment.filename).toBe('series.ics')
+    expect(attachment.contentType).toBe('text/calendar; charset=UTF-8')
+    expectWellFormed(attachment.content, 2)
+    const calendar = new ICAL.Component(ICAL.parse(attachment.content))
+    expect(calendar.hasProperty('method')).toBe(false)
+    const events = calendar.getAllSubcomponents('vevent')
+    expect(events.map((event) => event.getFirstPropertyValue('uid'))).toEqual([
+      first.uid,
+      second.uid,
+    ])
+    expect(events.map((event) => event.getFirstPropertyValue('status'))).toEqual([
+      'CONFIRMED',
+      'CANCELLED',
+    ])
+    expect(events.map((event) => event.getFirstPropertyValue('sequence'))).toEqual([0, 2])
+    expect(events[0]?.getFirstPropertyValue('description')).toBe(first.description)
+    expect(events[1]?.getAllProperties('attendee')).toEqual([])
   })
 })
 

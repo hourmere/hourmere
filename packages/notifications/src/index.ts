@@ -775,18 +775,39 @@ export async function sendOnce(
       // An abort (worker shutdown) rejects here and rolls the row back for another worker.
       const bookingBrand = await trx
         .selectFrom('bookings')
-        .select('organization_id')
+        .select(['organization_id', 'series_occurrence_id'])
         .where('id', '=', key.bookingId)
         .executeTakeFirstOrThrow()
+      let calendarAttached = false
       await sendAndRecordBookingEmail(
         trx,
         deps.mailer,
         bookingBrand.organization_id,
         inviteeFacing ? recipientHash : null,
-        () => message(token),
+        () => {
+          const mail = message(token)
+          calendarAttached =
+            bookingBrand.series_occurrence_id !== null &&
+            (key.kind === 'confirmed' || key.kind === 'rescheduled') &&
+            Boolean(
+              mail.attachments?.some((attachment) =>
+                attachment.contentType.startsWith('text/calendar; method=REQUEST;'),
+              ),
+            )
+          return mail
+        },
         () => new Date(clock().epochMilliseconds),
         signal,
       )
+      if (calendarAttached)
+        await trx
+          .updateTable('booking_notifications')
+          .set({ calendar_attached: true })
+          .where('booking_id', '=', key.bookingId)
+          .where('kind', '=', key.kind)
+          .where('message_key', '=', key.messageKey ?? '')
+          .where('recipient', '=', key.recipient)
+          .execute()
       return 'sent' as const
     })
     // A rolled-back attempt is never reported as durable suppression.
@@ -816,6 +837,32 @@ export class NotificationRetryError extends Error {
 const codesOf = (err: MailRejectedError) =>
   [err.responseCode, err.enhancedCode].filter(Boolean).join(' ') || 'no code'
 
+export function invitationOrganizer(data: NotificationData) {
+  const identity = data.conferenceIdentity
+  return identity?.email && identity.name
+    ? { id: identity.organizerId, name: identity.name, email: identity.email }
+    : identity
+      ? data.hosts.find((host) => host.id === identity.organizerId)
+      : data.hosts[0]
+}
+
+/** Compare and set the root snapshot before SMTP. Every later version keeps this organizer. */
+export async function pinCalendarOrganizer(db: Db, rootId: string, candidate: IcsPerson) {
+  await db
+    .updateTable('bookings')
+    .set({ ical_organizer_name: candidate.name, ical_organizer_email: candidate.email })
+    .where('id', '=', rootId)
+    .where('ical_organizer_email', 'is', null)
+    .execute()
+  const pinned = await db
+    .selectFrom('bookings')
+    .select(['ical_organizer_name', 'ical_organizer_email'])
+    .where('id', '=', rootId)
+    .executeTakeFirstOrThrow()
+  if (pinned.ical_organizer_name && pinned.ical_organizer_email)
+    return { name: pinned.ical_organizer_name, email: pinned.ical_organizer_email }
+}
+
 /**
  * Sends the emails for one booking event to every host and attendee who has not had them
  * yet, if they still describe the booking (a later change may have overtaken them).
@@ -839,11 +886,7 @@ async function deliverBookingNotification(
   if (!data || !stillApplies(kind, data, now)) return 'skipped'
   const { booking, hosts, attendees } = data
   const identity = data.conferenceIdentity
-  const currentOrganizer = identity ? hosts.find((h) => h.id === identity.organizerId) : hosts[0]
-  const organizer =
-    identity?.email && identity.name
-      ? { id: identity.organizerId, name: identity.name, email: identity.email }
-      : currentOrganizer
+  const organizer = invitationOrganizer(data)
   if (
     data.automaticConference &&
     kind !== 'cancelled' &&
@@ -929,19 +972,7 @@ async function deliverBookingNotification(
           email: deps.mailer.senderEmail,
         }
       : { name: organizer.name, email: modern ? deps.mailer.senderEmail : organizer.email }
-    await deps.db
-      .updateTable('bookings')
-      .set({ ical_organizer_name: candidate.name, ical_organizer_email: candidate.email })
-      .where('id', '=', data.root.id)
-      .where('ical_organizer_email', 'is', null)
-      .execute()
-    const pinned = await deps.db
-      .selectFrom('bookings')
-      .select(['ical_organizer_name', 'ical_organizer_email'])
-      .where('id', '=', data.root.id)
-      .executeTakeFirstOrThrow()
-    if (pinned.ical_organizer_name && pinned.ical_organizer_email)
-      calendarOrganizer = { name: pinned.ical_organizer_name, email: pinned.ical_organizer_email }
+    calendarOrganizer = await pinCalendarOrganizer(deps.db, data.root.id, candidate)
   }
   calendarOrganizer ??= organizer
   // Hosts listed with their addresses in a calendar invitation. Hosts see each other; an
