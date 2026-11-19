@@ -27,9 +27,11 @@ import {
 } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { WorkflowAuditRecord } from './audit.ts'
 import { captureBookingWorkflows } from './capture.ts'
 import { createWorkflowDefinition } from './creates.ts'
 import { deleteWorkflowDefinition } from './deletes.ts'
+import { createRecordingWorkflowAudit, expectWorkflowAuditRedacted } from './testing.ts'
 import { updateWorkflowDefinition } from './updates.ts'
 
 const NOW = Temporal.Instant.from('2030-01-07T08:00:00Z')
@@ -105,6 +107,24 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow booking lifecycle capture',
   const invoke = (event: BookingEvent, now = NOW, operation = captureBookingWorkflows) =>
     db.transaction().execute((trx) => operation(trx, event, now, secret))
 
+  function expectLifecycleAudit(
+    user: TestUser,
+    records: WorkflowAuditRecord[],
+    transitions: Pick<WorkflowAuditRecord, 'event' | 'workflowId' | 'trigger'>[],
+  ) {
+    expectWorkflowAuditRedacted(records, [secret, 'Booker', 'booker@example.com', user.email])
+    const expected: WorkflowAuditRecord[] = transitions.map((transition) => ({
+      ...transition,
+      occurredAt: NOW,
+      actor: { kind: 'background', job: 'capture' },
+      owner: { kind: 'personal', organizationId: user.principal.organization.id, userId: user.id },
+      revision: 1,
+    }))
+    const order = (a: WorkflowAuditRecord, b: WorkflowAuditRecord) =>
+      a.event.localeCompare(b.event) || (a.workflowId ?? '').localeCompare(b.workflowId ?? '')
+    expect(records.sort(order)).toEqual(expected.sort(order))
+  }
+
   async function setup(operation: Capture = captureBookingWorkflows, at = NOW, start = START) {
     const user = await createTestUser(db)
     const handle = `lifecycle-${randomUUID().slice(0, 8)}`
@@ -156,9 +176,10 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow booking lifecycle capture',
   async function cancellationCheck(operation: Capture) {
     const s = await setup(operation)
     const workflow = await define(s.user, { type: 'booking.cancelled', delayMinutes: 30 })
-    await define(s.user, { type: 'booking.created', delayMinutes: 60 })
-    await define(s.user, { type: 'before_start', offsetMinutes: 30 })
+    const delayed = await define(s.user, { type: 'booking.created', delayMinutes: 60 })
+    const timer = await define(s.user, { type: 'before_start', offsetMinutes: 30 })
     const created = await s.create()
+    await updateWorkflowDefinition(s.ctx, delayed.id, { expectedRevision: 1, enabled: false })
     await cancelHostBooking(s.ctx, created.booking.id)
     const before = await runs(created.booking.id)
     expect(before.filter((r) => r.state === 'retired')).toHaveLength(2)
@@ -175,9 +196,20 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow booking lifecycle capture',
     expect(saved.filter((e) => e.occurrence === 'cancelled')).toMatchObject([
       { workflow_id: workflow.id, revision: 1 },
     ])
+    return { user: s.user, workflow, delayed, timer }
   }
   it('coalesces cancellation replay without retiring its delayed cancellation action', async () => {
-    await cancellationCheck(captureBookingWorkflows)
+    const audit = await createRecordingWorkflowAudit(db)
+    const { user, workflow, delayed, timer } = await cancellationCheck((trx, event, now, secret) =>
+      captureBookingWorkflows(trx, event, now, secret, audit.port),
+    )
+    expectLifecycleAudit(user, await audit.read(), [
+      { event: 'workflow.run_scheduled', workflowId: delayed.id, trigger: 'booking.created' },
+      { event: 'workflow.run_scheduled', workflowId: timer.id, trigger: 'before_start' },
+      { event: 'workflow.run_cancelled', workflowId: delayed.id, trigger: 'booking.created' },
+      { event: 'workflow.run_cancelled', workflowId: timer.id, trigger: 'before_start' },
+      { event: 'workflow.run_scheduled', workflowId: workflow.id, trigger: 'booking.cancelled' },
+    ])
   })
 
   async function successorCheck(operation: Capture) {
@@ -238,10 +270,25 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow booking lifecycle capture',
     expect(
       (await enrollments(original.booking.id)).some((e) => e.trigger === 'booking.cancelled'),
     ).toBe(false)
-    return { s, original, moved, timer }
+    return { s, original, moved, timer, delayed, movedWorkflow }
   }
   it('retains timer revisions and retires delayed created work without transferring it or firing created/cancelled', async () => {
-    await successorCheck(captureBookingWorkflows)
+    const audit = await createRecordingWorkflowAudit(db)
+    const { s, timer, delayed, movedWorkflow } = await successorCheck((trx, event, now, secret) =>
+      captureBookingWorkflows(trx, event, now, secret, audit.port),
+    )
+    expectLifecycleAudit(s.user, await audit.read(), [
+      { event: 'workflow.run_scheduled', workflowId: timer.id, trigger: 'before_start' },
+      { event: 'workflow.run_scheduled', workflowId: delayed.id, trigger: 'booking.created' },
+      { event: 'workflow.run_cancelled', workflowId: timer.id, trigger: 'before_start' },
+      { event: 'workflow.run_cancelled', workflowId: delayed.id, trigger: 'booking.created' },
+      { event: 'workflow.run_scheduled', workflowId: timer.id, trigger: 'before_start' },
+      {
+        event: 'workflow.run_scheduled',
+        workflowId: movedWorkflow.id,
+        trigger: 'booking.rescheduled',
+      },
+    ])
   })
 
   it('recalculates timer instants on a DST-night successor across the repeated hour', async () => {

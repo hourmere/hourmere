@@ -1,6 +1,11 @@
 // Fixtures for the workflow contract tests: one personal owner, one team and foreign facts
 // for validating workflow definitions.
+
+import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { sql } from 'kysely'
+import { expect } from 'vitest'
+import type { WorkflowAuditPort, WorkflowAuditRecord } from './audit.ts'
 import type { WorkflowValidationContext } from './definition.ts'
 import type {
   WorkflowBookingFacts,
@@ -162,4 +167,51 @@ export function booking(overrides: Partial<WorkflowBookingFacts> = {}): Workflow
     guestCount: 2,
     ...overrides,
   }
+}
+
+type StoredRecord = Omit<WorkflowAuditRecord, 'occurredAt'> & { occurredAt: string }
+
+/** Use the same connection as the transition so the fake also observes rollback semantics. */
+export async function createRecordingWorkflowAudit(db: Db) {
+  const table = sql.id(`test_workflow_audit_${randomUUID().replaceAll('-', '')}`)
+  await sql`CREATE TABLE ${table} (id bigint GENERATED ALWAYS AS IDENTITY, record jsonb NOT NULL)`.execute(
+    db,
+  )
+  const port: WorkflowAuditPort = {
+    async record(trx, record) {
+      await sql`INSERT INTO ${table} (record) VALUES (${JSON.stringify(record)}::jsonb)`.execute(
+        trx,
+      )
+    },
+  }
+  return {
+    port,
+    async read(connection: Db = db): Promise<WorkflowAuditRecord[]> {
+      const { rows } = await sql<{
+        record: StoredRecord
+      }>`SELECT record FROM ${table} ORDER BY id`.execute(connection)
+      return rows.map(({ record }) => ({
+        ...record,
+        occurredAt: Temporal.Instant.from(record.occurredAt),
+      }))
+    },
+  }
+}
+
+export function expectWorkflowAuditRedacted(
+  events: WorkflowAuditRecord[],
+  forbidden: readonly string[],
+): void {
+  function scan(value: unknown): void {
+    if (typeof value === 'string') {
+      for (const fixture of forbidden) expect(value).not.toContain(fixture)
+    } else if (value !== null && typeof value === 'object') {
+      for (const [key, child] of Object.entries(value)) {
+        scan(key)
+        scan(child)
+      }
+    }
+  }
+
+  scan(events)
 }

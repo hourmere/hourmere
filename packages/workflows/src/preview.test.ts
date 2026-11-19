@@ -25,7 +25,11 @@ import {
   WORKFLOW_RECIPIENT_EMAILS_PER_HOUR,
 } from './limits.ts'
 import { previewWorkflowCandidate } from './preview.ts'
-import { insertWorkflowWebhook } from './testing.ts'
+import {
+  createRecordingWorkflowAudit,
+  expectWorkflowAuditRedacted,
+  insertWorkflowWebhook,
+} from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
@@ -53,6 +57,75 @@ describe.skipIf(!serverUrl)('synthetic workflow preview', () => {
   })
   afterAll(async () => {
     await owned?.drop()
+  })
+
+  it('audits only a successful authorized preview and omits synthetic content', async () => {
+    const user = await createTestUser(db)
+    const principal = user.principal
+    if (principal.kind !== 'api_key') throw new Error('Expected a full-scope API key fixture')
+    const audit = await createRecordingWorkflowAudit(db)
+    const now = Temporal.Instant.from('2030-02-02T01:30:00Z')
+    const ctx = { ...testContext(db, principal, () => now), audit: audit.port }
+    const answer = 'Private synthetic response'
+    const body = 'Private preview notes for {{recipient.name}}'
+    const rawUrl = 'https://preview.example.test/private'
+    const fakeSecret = 'synthetic-preview-query-credential'
+    const address = 'preview.address@example.test'
+    const example = {
+      recipientName: address,
+      publicPath: `${rawUrl}?key=${fakeSecret}`,
+      answers: { notes: answer },
+    }
+    const candidate = request(user, {
+      example,
+      actions: [
+        {
+          type: 'email',
+          recipients: ['booker'],
+          content: { en: { subject: 'Private subject', body } },
+        },
+      ],
+    })
+
+    const unauthorized = await createTestUser(db)
+    await expect(
+      previewWorkflowCandidate({ ...ctx, principal: unauthorized.principal }, candidate),
+    ).rejects.toMatchObject({ code: 'workflow_not_found' })
+    await expect(
+      previewWorkflowCandidate(ctx, {
+        ...candidate,
+        example: { ...example, start: '2030-02-02T02:00:00Z', end: '2030-02-02T01:00:00Z' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_workflow' })
+    expect(await audit.read()).toEqual([])
+
+    const preview = await previewWorkflowCandidate(ctx, candidate)
+    expect(preview.emails[0]?.text).toContain(address)
+    const records = await audit.read()
+    expectWorkflowAuditRedacted(records, [
+      answer,
+      body,
+      rawUrl,
+      fakeSecret,
+      address,
+      'Private subject',
+      'Private preview notes for',
+    ])
+    expect(records).toEqual([
+      {
+        event: 'workflow.previewed',
+        occurredAt: now,
+        owner: {
+          kind: 'personal',
+          userId: user.id,
+          organizationId: user.principal.organization.id,
+        },
+        workflowId: null,
+        revision: null,
+        trigger: 'booking.created',
+        actor: { kind: 'api_key', userId: user.id, apiKeyId: principal.apiKeyId },
+      },
+    ])
   })
 
   it('uses the execution renderer, including escaping and locale fallback, against example data', async () => {
