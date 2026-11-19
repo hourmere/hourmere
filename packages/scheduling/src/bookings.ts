@@ -1797,8 +1797,7 @@ async function createBookingInTransaction(
     changeCutoffs: cutoffsOf(policy),
   })
   if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)
-  // In this transaction, and never on the replay paths: one set of emails per booking,
-  // queued only if the booking commits.
+  // Side effects queue through this transaction only when a new booking commits.
   if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
     await attributeWaitlistBooking(trx, {
       secret: ctx.waitlistSecret,
@@ -1823,7 +1822,16 @@ async function createBookingInTransaction(
       id,
       isPreservedSingleton(current.locations, input.locationOptionId),
     )
-  await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
+  await ctx.notify?.(
+    trx,
+    {
+      type: 'created',
+      bookingId: id,
+      start: input.start,
+      ...(seriesOccurrence && { seriesAction: 'create' as const }),
+    },
+    now,
+  )
   return {
     booking: await loadBooking(trx, id),
     manageToken,

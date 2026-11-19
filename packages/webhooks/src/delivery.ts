@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { type Db, isImportedBooking, type WebhookDeliveries } from '@hourmere/db'
+import { type Db, isImportedBooking, type WebhookDeliveries, type Webhooks } from '@hourmere/db'
 import { writeAuditEvent } from '@hourmere/db/audit'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { AttendeeNoShowNotifier, BookingEvent, BookingNotifier } from '@hourmere/scheduling'
 import type { WorkflowTriggerType } from '@hourmere/workflows'
-import { type Insertable, sql } from 'kysely'
+import { workflowExecution } from '@hourmere/workflows/hard-off'
+import { type Insertable, type Selectable, sql } from 'kysely'
 import { z } from 'zod'
 import { decryptWebhookSecret, webhookSignature } from './crypto.ts'
 import type { WebhookEventType, WebhookSettings } from './service.ts'
 import { SLACK_EVENTS, slackPayload, slackUrl } from './slack-format.ts'
-import { sendWebhook, type WebhookTransport } from './transport.ts'
+import { sendWebhook, type WebhookTransport, webhookUrl } from './transport.ts'
 
 export const WEBHOOK_DELIVERY_JOB = 'webhook-delivery'
 export const WebhookDeliveryPayload = z.strictObject({ deliveryId: z.uuid() })
@@ -333,6 +334,114 @@ export function webhookDeliveryJob(deps: WebhookDeps) {
   })
 }
 
+/** Internal workflow path. Production callers reach it through the hard-off guard. */
+export async function deliverWorkflowWebhook(
+  deps: WebhookDeps,
+  deliveryId: string,
+  signal: AbortSignal,
+  jobAttempt = 1,
+) {
+  const identity = await deps.db
+    .selectFrom('webhook_deliveries')
+    .select(['workflow_run_id', 'organization_id', 'booking_id', 'webhook_id'])
+    .where('id', '=', deliveryId)
+    .where('status', '=', 'pending')
+    .executeTakeFirst()
+  if (!identity?.workflow_run_id) return
+  // Keep workflow schema initialization out of ordinary webhook delivery.
+  const { lockWorkflowWebhookRun } = await import('@hourmere/workflows')
+  const runId = identity.workflow_run_id
+  const now = deps.now ?? (() => Temporal.Now.instant())
+  const retry = await deps.db.transaction().execute(async (trx) => {
+    // Match capture and lifecycle lock order. The endpoint and delivery lock order
+    // remains the same as for booking webhooks.
+    const run = await lockWorkflowWebhookRun(trx, {
+      runId,
+      organizationId: identity.organization_id,
+      bookingId: identity.booking_id,
+      webhookId: identity.webhook_id,
+    })
+    const endpoint = await trx
+      .selectFrom('webhooks')
+      .selectAll()
+      .where('id', '=', identity.webhook_id)
+      .forShare()
+      .executeTakeFirst()
+    if (!endpoint) return false
+    const delivery = await trx
+      .selectFrom('webhook_deliveries')
+      .select(['status', 'event_type', 'last_attempt_at', 'created_at'])
+      .where('id', '=', deliveryId)
+      .executeTakeFirst()
+    if (delivery?.status !== 'pending') return false
+    const eligible =
+      run &&
+      deps.enabled &&
+      endpoint.is_active &&
+      endpoint.destination_kind === 'webhook' &&
+      endpoint.events.includes(delivery.event_type) &&
+      (endpoint.event_type_id === null || endpoint.event_type_id === run.eventTypeId)
+    const credentials = eligible ? webhookCredentials(deps, endpoint) : undefined
+    let markedHere = false
+    if (
+      eligible &&
+      credentials?.error === null &&
+      delivery.last_attempt_at === null &&
+      !signal.aborted &&
+      webhookUrl(endpoint.url, deps.privateTargets)
+    ) {
+      // The run serializes senders. Keep its and the endpoint's locks while a short
+      // separate transaction records admission to the first guarded transport attempt.
+      // A process lost after the receiver accepts can then retry this same delivery ID.
+      markedHere = await deps.db.transaction().execute(async (marker) => {
+        const current = await marker
+          .selectFrom('webhook_deliveries')
+          .select(['status', 'last_attempt_at'])
+          .where('id', '=', deliveryId)
+          .forUpdate()
+          .executeTakeFirst()
+        const started = now()
+        if (
+          current?.status !== 'pending' ||
+          current.last_attempt_at !== null ||
+          signal.aborted ||
+          started.epochMilliseconds >= run.expiresAt ||
+          delivery.created_at.getTime() < started.subtract({ hours: 24 * 30 }).epochMilliseconds
+        )
+          return false
+        await marker
+          .updateTable('webhook_deliveries')
+          .set({ last_attempt_at: new Date(started.epochMilliseconds) })
+          .where('id', '=', deliveryId)
+          .execute()
+        return true
+      })
+    }
+    let current = await trx
+      .selectFrom('webhook_deliveries')
+      .selectAll()
+      .where('id', '=', deliveryId)
+      .forUpdate()
+      .executeTakeFirst()
+    if (current?.status !== 'pending') return false
+    if (!eligible) return skipWebhookDelivery(trx, deliveryId, 'disabled')
+    const attemptAt = now()
+    const firstAttempt = markedHere || current.last_attempt_at === null
+    if (
+      (firstAttempt && attemptAt.epochMilliseconds >= run.expiresAt) ||
+      delivery.created_at.getTime() < attemptAt.subtract({ hours: 24 * 30 }).epochMilliseconds
+    )
+      return skipWebhookDelivery(trx, deliveryId, 'expired', markedHere)
+    // This worker knows it has not yet entered the transport. A marker left by
+    // a previous worker is ambiguous and must still allow a retry.
+    if (markedHere && signal.aborted) current = { ...current, last_attempt_at: null }
+    return attemptWebhook(trx, deps, endpoint, current, signal, attemptAt, jobAttempt, credentials)
+  })
+  throwIfWebhookRetry(retry, signal)
+}
+
+const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)
+
 /** At least once. A crash after the receiver accepts but before commit can duplicate an ID. */
 export async function deliverWebhook(
   deps: WebhookDeps,
@@ -389,6 +498,7 @@ export async function deliverWebhook(
       .forUpdate()
       .executeTakeFirst()
     if (delivery?.status !== 'pending') return false
+    if (delivery.workflow_run_id != null) return 'workflow'
     if (delivery.booking_id && (await isImportedBooking(trx, delivery.booking_id))) return false
     const filterMismatch =
       endpoint.destination_kind === 'slack' &&
@@ -424,102 +534,145 @@ export async function deliverWebhook(
         .execute()
       return false
     }
-    // pg-boss also counts runs lost to a killed worker, whose transaction rolled back.
-    const attempt = Math.min(13, Math.max(delivery.attempts + 1, jobAttempt))
-    const timestamp = Math.floor(now.epochMilliseconds / 1000).toString()
-    let status: number | null = null
-    let error: 'secret_unavailable' | 'transport_error' | 'http_error' | 'interrupted' | null = null
-    let secret: string
-    let destination = endpoint.url
-    const isSlack = endpoint.destination_kind === 'slack'
-    try {
-      if (isSlack) {
-        destination = decryptWebhookSecret(
-          endpoint.url_ciphertext ?? Buffer.alloc(0),
-          deps.encryptionKey ?? '',
-          `${endpoint.id}:url`,
-          endpoint.organization_id,
-        )
-        if (!slackUrl(destination)) throw new Error('Invalid Slack destination')
-        secret = ''
-      } else
-        secret = decryptWebhookSecret(
-          endpoint.secret_ciphertext,
-          deps.encryptionKey ?? '',
-          endpoint.id,
-          endpoint.organization_id,
-        )
-    } catch {
-      error = 'secret_unavailable'
-      secret = ''
-    }
-    if (!error && !signal.aborted) {
-      try {
-        status = await (deps.transport ?? sendWebhook)({
-          url: destination,
-          privateTargets: isSlack ? [] : deps.privateTargets,
-          body: delivery.payload,
-          signal,
-          headers: isSlack
-            ? {}
-            : {
-                'webhook-id': delivery.id,
-                'webhook-event-id': delivery.event_id,
-                'webhook-timestamp': timestamp,
-                'webhook-signature': webhookSignature(secret, timestamp, delivery.payload),
-              },
-        })
-        if (!Number.isInteger(status) || status < 100 || status > 599) {
-          status = null
-          error = 'transport_error'
-        } else if (status < 200 || status >= 300) error = 'http_error'
-      } catch {
-        error = 'transport_error'
-      }
-    }
-    // A received 2xx acknowledges delivery even if shutdown raced its response. Otherwise
-    // commit shutdown consumption before retrying. A killed process is accounted for by
-    // the next jobAttempt or by periodic orphan reconciliation.
-    if (signal.aborted && (status === null || error !== null)) {
-      error = 'interrupted'
-      status = null
-    }
-    const slackRevoked = isSlack && (status === 404 || status === 410)
-    if (slackRevoked) {
-      await trx
-        .updateTable('webhooks')
-        .set({
-          is_active: false,
-          pause_reason: 'url_rejected',
-          updated_at: new Date(now.epochMilliseconds),
-        })
-        .where('id', '=', endpoint.id)
-        .execute()
-      // The destination was active under the sender lock, so this is the one transition.
-      await writeAuditEvent(trx, {
-        organizationId: endpoint.organization_id,
-        actor: { type: 'system', id: WEBHOOK_DELIVERY_JOB },
-        credential: { type: 'none' },
-        action: 'slack_destination.paused',
-        targetType: 'slack_destination',
-        targetId: endpoint.id,
-        details: { events: endpoint.events },
-      })
-    }
-    await trx
-      .updateTable('webhook_deliveries')
-      .set({
-        attempts: attempt,
-        last_attempt_at: new Date(now.epochMilliseconds),
-        http_status: status,
-        last_error: error,
-        status: error ? (slackRevoked || attempt === 13 ? 'failed' : 'pending') : 'delivered',
-        delivered_at: error ? null : new Date(now.epochMilliseconds),
-      })
-      .where('id', '=', deliveryId)
-      .execute()
-    return error !== null && !slackRevoked
+    return attemptWebhook(trx, deps, endpoint, delivery, signal, now, jobAttempt)
   })
+  if (retry === 'workflow') return guardedWorkflowWebhook(deps, deliveryId, signal, jobAttempt)
+  throwIfWebhookRetry(retry, signal)
+}
+
+function webhookCredentials(deps: WebhookDeps, endpoint: Selectable<Webhooks>) {
+  let error: 'secret_unavailable' | null = null
+  let secret: string
+  let destination = endpoint.url
+  const isSlack = endpoint.destination_kind === 'slack'
+  try {
+    if (isSlack) {
+      destination = decryptWebhookSecret(
+        endpoint.url_ciphertext ?? Buffer.alloc(0),
+        deps.encryptionKey ?? '',
+        `${endpoint.id}:url`,
+        endpoint.organization_id,
+      )
+      if (!slackUrl(destination)) throw new Error('Invalid Slack destination')
+      secret = ''
+    } else
+      secret = decryptWebhookSecret(
+        endpoint.secret_ciphertext,
+        deps.encryptionKey ?? '',
+        endpoint.id,
+        endpoint.organization_id,
+      )
+  } catch {
+    error = 'secret_unavailable'
+    secret = ''
+  }
+  return { destination, isSlack, secret, error }
+}
+
+async function attemptWebhook(
+  trx: Db,
+  deps: WebhookDeps,
+  endpoint: Selectable<Webhooks>,
+  delivery: Selectable<WebhookDeliveries>,
+  signal: AbortSignal,
+  now: Temporal.Instant,
+  jobAttempt: number,
+  credentials = webhookCredentials(deps, endpoint),
+) {
+  const deliveryId = delivery.id
+  // pg-boss also counts runs lost to a killed worker, whose transaction rolled back.
+  const attempt = Math.min(13, Math.max(delivery.attempts + 1, jobAttempt))
+  const timestamp = Math.floor(now.epochMilliseconds / 1000).toString()
+  let status: number | null = null
+  let error: 'secret_unavailable' | 'transport_error' | 'http_error' | 'interrupted' | null =
+    credentials.error
+  const { destination, isSlack, secret } = credentials
+  if (!error && !signal.aborted) {
+    try {
+      status = await (deps.transport ?? sendWebhook)({
+        url: destination,
+        privateTargets: isSlack ? [] : deps.privateTargets,
+        body: delivery.payload,
+        signal,
+        headers: isSlack
+          ? {}
+          : {
+              'webhook-id': delivery.id,
+              'webhook-event-id': delivery.event_id,
+              'webhook-timestamp': timestamp,
+              'webhook-signature': webhookSignature(secret, timestamp, delivery.payload),
+            },
+      })
+      if (!Number.isInteger(status) || status < 100 || status > 599) {
+        status = null
+        error = 'transport_error'
+      } else if (status < 200 || status >= 300) error = 'http_error'
+    } catch {
+      error = 'transport_error'
+    }
+  }
+  // A received 2xx acknowledges delivery even if shutdown raced its response. Otherwise
+  // commit shutdown consumption before retrying. A killed process is accounted for by
+  // the next jobAttempt or by periodic orphan reconciliation.
+  if (signal.aborted && (status === null || error !== null)) {
+    error = 'interrupted'
+    status = null
+  }
+  const slackRevoked = isSlack && (status === 404 || status === 410)
+  if (slackRevoked) {
+    await trx
+      .updateTable('webhooks')
+      .set({
+        is_active: false,
+        pause_reason: 'url_rejected',
+        updated_at: new Date(now.epochMilliseconds),
+      })
+      .where('id', '=', endpoint.id)
+      .execute()
+    // The destination was active under the sender lock, so this is the one transition.
+    await writeAuditEvent(trx, {
+      organizationId: endpoint.organization_id,
+      actor: { type: 'system', id: WEBHOOK_DELIVERY_JOB },
+      credential: { type: 'none' },
+      action: 'slack_destination.paused',
+      targetType: 'slack_destination',
+      targetId: endpoint.id,
+      details: { events: endpoint.events },
+    })
+  }
+  await trx
+    .updateTable('webhook_deliveries')
+    .set({
+      attempts: attempt,
+      last_attempt_at:
+        delivery.workflow_run_id == null || delivery.last_attempt_at !== null
+          ? new Date(now.epochMilliseconds)
+          : null,
+      http_status: status,
+      last_error: error,
+      status: error ? (slackRevoked || attempt === 13 ? 'failed' : 'pending') : 'delivered',
+      delivered_at: error ? null : new Date(now.epochMilliseconds),
+    })
+    .where('id', '=', deliveryId)
+    .execute()
+  return error !== null && !slackRevoked
+}
+
+async function skipWebhookDelivery(
+  trx: Db,
+  deliveryId: string,
+  reason: 'disabled' | 'expired',
+  clearMarker = false,
+) {
+  await trx
+    .updateTable('webhook_deliveries')
+    .set({ status: 'skipped', last_error: reason, ...(clearMarker && { last_attempt_at: null }) })
+    .where('id', '=', deliveryId)
+    .execute()
+  return false
+}
+
+function throwIfWebhookRetry(retry: boolean, signal: AbortSignal) {
   // Safe even when a request failed with a body, query credential, headers or secret.
   if (retry)
     throw new Error(signal.aborted ? 'Webhook delivery interrupted' : 'Webhook delivery failed')

@@ -7,6 +7,7 @@ import { z } from 'zod'
 import type { WorkflowSkipReason } from './audit.ts'
 import { WorkflowDefinitionSchema } from './definition.ts'
 import { workflowExecution } from './hard-off.ts'
+import { WORKFLOW_MAX_LATE_MINUTES } from './limits.ts'
 import { workflowDispatchWindow, workflowTimerDueAt } from './timers.ts'
 
 export const WORKFLOW_DISPATCH_PAGE = 100
@@ -280,6 +281,37 @@ export async function workflowRunEligibility(trx: Db, locked: LockedRun) {
     if (due.epochMilliseconds !== run.due_at.getTime()) return retired
   }
   return { reason: undefined, booking, eventType, captured: captured.data }
+}
+
+/** Take the same parent locks as dispatch, before the sender locks the endpoint. */
+export async function lockWorkflowWebhookRun(
+  trx: Db,
+  delivery: { runId: string; organizationId: string; bookingId: string | null; webhookId: string },
+) {
+  const locked = await lockedWorkflowRun(trx, delivery.runId)
+  if (
+    !locked ||
+    locked.run.organization_id !== delivery.organizationId ||
+    locked.run.booking_id !== delivery.bookingId ||
+    locked.run.state === 'retired' ||
+    locked.run.state === 'skipped'
+  )
+    return
+  const eligibility = await workflowRunEligibility(trx, locked)
+  if (
+    eligibility.reason ||
+    !eligibility.captured.actions.some(
+      (action) => action.type === 'webhook' && action.webhookId === delivery.webhookId,
+    )
+  )
+    return
+  return {
+    eventTypeId: eligibility.eventType.id,
+    expiresAt: Math.min(
+      locked.run.expires_at.getTime(),
+      instant(locked.run.due_at).add({ minutes: WORKFLOW_MAX_LATE_MINUTES }).epochMilliseconds,
+    ),
+  }
 }
 
 /** Bounded discovery is unlocked; each candidate is rechecked under ordered locks. */
