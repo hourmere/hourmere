@@ -1122,8 +1122,9 @@ reads of step 4 (`packages/workflows/src/reads.ts`), creation of step 5
 (`packages/workflows/src/creates.ts`), updates of step 6
 (`packages/workflows/src/updates.ts`) and deletion of step 7
 (`packages/workflows/src/deletes.ts`) and booking lifecycle capture
-(`packages/workflows/src/capture.ts`) access them behind the hard-off guard. Definition
-operations answer `workflows_disabled`, and capture does nothing, while workflows stay off behind
+(`packages/workflows/src/capture.ts`) and internal dispatch/repair
+(`packages/workflows/src/dispatcher.ts`) access them behind the hard-off guard. Definition
+operations answer `workflows_disabled`, and capture, dispatch and repair do nothing, while workflows stay off behind
 `WORKFLOWS_IMPLEMENTED = false`. Creation writes the definition and immutable first revision
 with its retained creation key. Updates check the expected revision, append immutable content
 revisions and change the live enabled flag without touching execution snapshots; no worker
@@ -1186,10 +1187,13 @@ transaction after core notifications, sharing live definitions in ID order after
 lock. Reschedule retires predecessor work before carrying captured timer revisions to the
 successor; cancellation retires pending timer and delayed-created/rescheduled runs before
 capturing its own occurrence. Request, request-expiry and no-show events write no workflow
-rows. Timer skips also write minimal history. Internal mail admission writes reservations and
-shared ledger charges atomically, and retry admission restamps both under the same organization
-and mail-budget locks. Instance and owner sub-cap settings do not enable delivery. There is no
-dispatcher or retention worker, and workflows stay hard-off behind
+rows. Timer and wake-time skips write minimal history. The internal dispatcher uses bounded
+due scans, token-fenced leases and live checks after lock waits; repair queues only existing
+run IDs and never recreates identities or intents. Eligible runs await the later delivery
+implementation. Internal mail admission writes reservations and shared ledger charges
+atomically, and retry admission restamps both under the same organization and mail-budget
+locks. Instance and owner sub-cap settings do not enable delivery. There is no production
+workflow worker or retention worker, and workflow capture, dispatch and repair stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.
 
