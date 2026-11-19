@@ -103,6 +103,7 @@ const DATA_ACCESS = [
   'packages/workflows/src/deletes.ts',
   'packages/workflows/src/capture.ts',
   'packages/workflows/src/dispatcher.ts',
+  'packages/workflows/src/email-attempt.ts',
   'packages/notifications/src/workflow-mail.ts',
 ]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
@@ -636,33 +637,41 @@ describe('booking workflows are off and expose only definition reads, creation, 
         expect(source).toContain('workflow_mail_reservations')
         for (const table of STORAGE_TABLES.filter((name) => name !== 'workflow_mail_reservations'))
           expect(source).not.toContain(table)
+      } else if (file === 'packages/workflows/src/email-attempt.ts') {
+        expect(source).toContain('workflow_recipient_claims')
+        expect(source).toContain('workflow_runs')
+        for (const table of STORAGE_TABLES.filter(
+          (name) => name !== 'workflow_recipient_claims' && name !== 'workflow_runs',
+        ))
+          expect(source).not.toContain(table)
       } else expect(executionNames.test(source), file).toBe(false)
     }
     // Only the package entry and definition services load definition modules. Production
     // callers outside those modules receive only the guarded operations.
     const loaders = sources.filter((file) =>
-      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture|dispatcher))(?:\.ts)?['"`]/.test(
+      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher|email-attempt)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture|dispatcher|email-attempt))(?:\.ts)?['"`]/.test(
         readFileSync(new URL(file, root), 'utf8'),
       ),
     )
     expect(loaders).toEqual([
       'packages/workflows/src/creates.ts',
       'packages/workflows/src/deletes.ts',
+      'packages/workflows/src/email-attempt.ts',
       'packages/workflows/src/index.ts',
       'packages/workflows/src/updates.ts',
     ])
   })
 
-  it('keeps workflow mail admission internal with no production callers while hard-off', () => {
+  it('lets only the internal attempt service stamp workflow mail while hard-off', () => {
     const admission = 'packages/notifications/src/workflow-mail.ts'
     const callers = productionSources().filter((file) => {
       if (file === admission) return false
       const source = readFileSync(new URL(file, root), 'utf8')
-      return /\b(?:admitWorkflowEmail|readmitWorkflowEmail)\b|['"`][^'"`]*workflow-mail(?:\.ts)?['"`]/.test(
+      return /\b(?:admitWorkflowEmail|readmitWorkflowEmail|stampWorkflowEmail)\b|['"`][^'"`]*workflow-mail(?:\.ts)?['"`]/.test(
         source,
       )
     })
-    expect(callers).toEqual([])
+    expect(callers).toEqual(['packages/workflows/src/email-attempt.ts'])
   })
 
   it('exposes no storage module through a package entry point', () => {

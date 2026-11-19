@@ -1221,10 +1221,11 @@ successor; cancellation retires pending timer and delayed-created/rescheduled ru
 capturing its own occurrence. Request, request-expiry and no-show events write no workflow
 rows. Timer and wake-time skips write minimal history. The internal dispatcher uses bounded
 due scans, token-fenced leases and live checks after lock waits; repair queues only existing
-run IDs and never recreates identities or intents. Eligible runs await the later delivery
-implementation. Internal mail admission writes reservations and shared ledger charges
-atomically, and retry admission restamps both under the same organization and mail-budget
-locks. Instance and owner sub-cap settings do not enable delivery. There is no production
+run IDs and never recreates identities or intents. The internal email attempt service
+commits the reservation and shared ledger charge with the recipient marker, then calls
+SMTP outside the transaction. Only the matching marker token can schedule a known-not-sent
+retry. Retry admission restamps both rows under the same organization and mail-budget locks.
+Expired marker leases resolve to `delivery_unknown`. There is no production
 workflow worker or retention worker, and workflow capture, dispatch and repair stay hard-off behind
 `WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
 tables covers these tables too.

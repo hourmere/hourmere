@@ -71,9 +71,13 @@ async function document(url: string, transport: Transport) {
 
 /** Fetches only the configured discovery location and binds its JWKS URI to the exact issuer. */
 export async function fetchOidcDiscovery(
-  config: { issuer: string; discoveryUrl: string; jwksUrl?: string },
+  config: {
+    issuer: string
+    discoveryUrl: string
+    jwksUrl?: string | undefined
+  },
   transport: Transport,
-): Promise<{ issuer: string; jwksUrl: string }> {
+) {
   try {
     const issuerUrl = ssoUrl(config.issuer, transport.privateTargets)
     const discoveryUrl = ssoUrl(config.discoveryUrl, transport.privateTargets)
@@ -87,7 +91,16 @@ export async function fetchOidcDiscovery(
       (config.jwksUrl !== undefined && ssoUrl(config.jwksUrl, transport.privateTargets) !== jwksUrl)
     )
       throw new OidcDocumentError('invalid_discovery')
-    return { issuer: config.issuer, jwksUrl }
+    return {
+      issuer: config.issuer,
+      jwksUrl,
+      ...(metadata.authorization_endpoint !== undefined && {
+        authorizationEndpoint: ssoUrl(metadata.authorization_endpoint, transport.privateTargets),
+      }),
+      ...(metadata.token_endpoint !== undefined && {
+        tokenEndpoint: ssoUrl(metadata.token_endpoint, transport.privateTargets),
+      }),
+    }
   } catch {
     // Never forward parsing errors, provider response text, or transport details.
     throw new OidcDocumentError('invalid_discovery')
