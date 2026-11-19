@@ -93,6 +93,7 @@ export interface AppDeps {
   trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
   webDist?: string | undefined
+  routingFormsEnabled?: boolean | undefined
   /** Groups of /api/v1 routes, created by the composition root with their services. */
   routes?: readonly RouteModule[]
   /**
@@ -407,6 +408,7 @@ export function createApp({
   hstsMaxAge = DEFAULT_HSTS_MAX_AGE,
   trustedProxies = [],
   webDist,
+  routingFormsEnabled,
   routes = [],
   mcp,
   waitlist,
@@ -570,7 +572,11 @@ export function createApp({
   // First, so it also covers what every later middleware, route and onError answers.
   app.use(
     '*',
-    securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge), embedOrigins }),
+    securityHeaders({
+      hsts: strictTransportSecurity(publicUrl, hstsMaxAge),
+      embedOrigins,
+      routingFormsEnabled,
+    }),
   )
   const resolveClientIp = clientIp(trustedProxies)
   // Hard-off answers even precede the general auth credential and body checks.
