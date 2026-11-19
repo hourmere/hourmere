@@ -86,7 +86,7 @@ export async function runWithFreshProof<T>(
   request: FreshProofRequest,
   callbacks: {
     authorize: (trx: Db) => Promise<void>
-    mutate: (trx: Db, input: Record<string, unknown>) => Promise<T>
+    mutate: (trx: Db, input: Record<string, unknown>, browserBinding: string) => Promise<T>
   },
 ): Promise<FreshProofResult<T>> {
   requireSsoEnabled(deps.capabilities)
@@ -102,18 +102,20 @@ export async function runWithFreshProof<T>(
   const { proofAttemptId, ...input } = parsed.data
   const inputDigest = sha256(canonical(input))
   const cookieName = bindingCookieName(deps.publicUrl)
-  const cookieValue = request.headers
-    .get('cookie')
-    ?.split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${cookieName}=`))
-    ?.slice(cookieName.length + 1)
-  let binding = browserBindingDigest(cookieValue)
+  const cookieValue =
+    request.headers
+      .get('cookie')
+      ?.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${cookieName}=`))
+      ?.slice(cookieName.length + 1) ?? ''
+  let browserBinding = cookieValue
+  let binding = browserBindingDigest(browserBinding)
   let setCookie: string | undefined
   if (binding === null) {
-    const value = randomBytes(32).toString('base64url')
-    binding = sha256(value)
-    setCookie = `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Strict${publicUrl.protocol === 'https:' ? '; Secure' : ''}`
+    browserBinding = randomBytes(32).toString('base64url')
+    binding = sha256(browserBinding)
+    setCookie = `${cookieName}=${browserBinding}; Path=/; HttpOnly; SameSite=Strict${publicUrl.protocol === 'https:' ? '; Secure' : ''}`
   }
   const cookie = setCookie === undefined ? {} : { setCookie }
   const clock = deps.now ?? databaseClock
@@ -185,7 +187,11 @@ export async function runWithFreshProof<T>(
           }
         await sql`UPDATE sso_attempts SET consumed_at = ${now}::timestamptz
           WHERE id = ${attempt.id}::uuid`.execute(trx)
-        return { status: 'complete', value: await callbacks.mutate(trx, input), ...cookie }
+        return {
+          status: 'complete',
+          value: await callbacks.mutate(trx, input, browserBinding),
+          ...cookie,
+        }
       }
     }
     const issuedAt = await databaseClock(trx)
