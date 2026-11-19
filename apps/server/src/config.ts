@@ -240,6 +240,8 @@ const schema = z
     INVITATION_TEAM_MAX_PER_HOUR: emailLimit('INVITATION_TEAM_MAX_PER_HOUR', 50, 1),
     INVITATION_TEAM_MAX_PER_DAY: emailLimit('INVITATION_TEAM_MAX_PER_DAY', 200, 1),
     MAIL_MAX_PER_HOUR: emailLimit('MAIL_MAX_PER_HOUR', 100, 0),
+    WORKFLOW_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_MAIL_MAX_PER_HOUR', 20, 0),
+    WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_OWNER_MAIL_MAX_PER_HOUR', 5, 0),
     GOOGLE_CLIENT_ID: optional(z.string()),
     GOOGLE_CLIENT_SECRET: optional(z.string()),
     GOOGLE_CALENDAR_CLIENT_ID: optional(z.string().trim().min(1)),

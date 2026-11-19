@@ -35,6 +35,7 @@
   "createRoutingForm": { "mcp": "create_routing_form", "cli": "routing-forms create" },
   "updateRoutingForm": { "mcp": "update_routing_form", "cli": "routing-forms update" },
   "archiveRoutingForm": { "mcp": "archive_routing_form", "cli": "routing-forms archive" },
+  "publishRoutingForm": { "mcp": "publish_routing_form", "cli": "routing-forms publish" },
   "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "generateOpenTimeSnippet": {

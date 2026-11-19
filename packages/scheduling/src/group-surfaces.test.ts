@@ -172,7 +172,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await cancelManagedBooking({ db, now: () => NOW }, b.manageToken!)
       const partial = await getGroupOccurrenceAttendees(s.ctx, id)
       expect(partial.activeSeats).toBe(1)
-      expect(partial.attendees.map((seat) => seat.status)).toEqual(['confirmed', 'cancelled'])
+      expect(partial.attendees.map((seat) => seat.status)).toEqual(['confirmed'])
+      expect(
+        (await getGroupOccurrenceAttendees(s.ctx, id, { status: 'cancelled' })).attendees.map(
+          (seat) => seat.bookingId,
+        ),
+      ).toEqual([b.booking.id])
+      expect(
+        (await getGroupOccurrenceAttendees(s.ctx, id, { status: 'all' })).attendees.map(
+          (seat) => seat.status,
+        ),
+      ).toEqual(['confirmed', 'cancelled'])
       await expect(
         getGroupOccurrenceAttendees(testContext(db, s.outsider.principal), id),
       ).rejects.toMatchObject({ code: 'group_occurrence_not_found' })
@@ -180,6 +190,75 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(await cancelGroupOccurrence(s.ctx, id)).toEqual({ id, cancelledSeatCount: 0 })
       expect((await getGroupOccurrenceAttendees(s.ctx, id)).state).toBe('host_cancelled')
       await expect(s.book('new@example.test')).rejects.toMatchObject({ code: 'slot_unavailable' })
+    })
+    it('bounds pages and filters before pagination with deterministic order', async () => {
+      const s = await setup()
+      const a = await s.book('page-a@example.test')
+      const b = await s.book('page-b@example.test')
+      const id = (await getHostBooking(s.ctx, a.booking.id)).groupSlotId!
+      const first = await getGroupOccurrenceAttendees(s.ctx, id, { limit: 1 })
+      const second = await getGroupOccurrenceAttendees(s.ctx, id, { limit: 1, offset: 1 })
+      expect(first.pagination).toEqual({ limit: 1, offset: 0, hasMore: true })
+      expect(second.pagination).toEqual({ limit: 1, offset: 1, hasMore: false })
+      expect(first.attendees.map((seat) => seat.bookingId)).toEqual([a.booking.id])
+      expect(second.attendees.map((seat) => seat.bookingId)).toEqual([b.booking.id])
+      expect((await getGroupOccurrenceAttendees(s.ctx, id, { offset: 10000 })).attendees).toEqual(
+        [],
+      )
+      await cancelManagedBooking({ db, now: () => NOW }, a.manageToken!)
+      expect(
+        (await getGroupOccurrenceAttendees(s.ctx, id, { limit: 1 })).attendees.map(
+          (seat) => seat.bookingId,
+        ),
+      ).toEqual([b.booking.id])
+      expect(
+        (
+          await getGroupOccurrenceAttendees(s.ctx, id, { status: 'cancelled', limit: 1 })
+        ).attendees.map((seat) => seat.bookingId),
+      ).toEqual([a.booking.id])
+      for (const input of [
+        { limit: 0 },
+        { limit: 101 },
+        { limit: 1.5 },
+        { offset: -1 },
+        { offset: 10001 },
+        { offset: 0.5 },
+      ]) {
+        await expect(getGroupOccurrenceAttendees(s.ctx, id, input)).rejects.toMatchObject({
+          code: 'invalid_request',
+        })
+      }
+    })
+    it('reads while the host and occurrence are locked by booking writes', async () => {
+      const s = await setup()
+      const a = await s.book('nonblocking@example.test')
+      const id = (await getHostBooking(s.ctx, a.booking.id)).groupSlotId!
+      const locked = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const writer = db.transaction().execute(async (trx) => {
+        await lockOrganization(trx, s.ctx.principal.organization.id)
+        await lockHosts(trx, [s.user.id])
+        await trx.selectFrom('group_slots').select('id').where('id', '=', id).forUpdate().execute()
+        locked.resolve()
+        await release.promise
+      })
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        await locked.promise
+        const result = await Promise.race([
+          getGroupOccurrenceAttendees(s.ctx, id),
+          new Promise<null>((resolve) => {
+            timeout = setTimeout(() => resolve(null), 2000)
+          }),
+        ])
+        expect(result).not.toBeNull()
+        expect(result?.activeSeats).toBe(1)
+        expect(result?.attendees).toHaveLength(1)
+      } finally {
+        clearTimeout(timeout)
+        release.resolve()
+        await writer
+      }
     })
     it('enforces the host/team-session authorization matrix and rechecks cancellation retries', async () => {
       const s = await setup(true)
@@ -246,6 +325,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
         .execute()
       await expect(
         cancelGroupOccurrence({ ...s.ctx, principal: session(s.admin) }, id),
+      ).rejects.toMatchObject({ code: 'group_occurrence_not_found' })
+      await expect(
+        getGroupOccurrenceAttendees({ ...s.ctx, principal: session(s.admin) }, id),
+      ).rejects.toMatchObject({ code: 'group_occurrence_not_found' })
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('organizationId', '=', s.organization!.id)
+        .where('userId', '=', s.owner.id)
+        .execute()
+      await expect(
+        getGroupOccurrenceAttendees({ ...s.ctx, principal: session(s.owner) }, id),
       ).rejects.toMatchObject({ code: 'group_occurrence_not_found' })
     })
     it('kills occurrence authorization and organization-isolation source-copy mutations', async () => {

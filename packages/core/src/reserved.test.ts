@@ -127,12 +127,12 @@ describe('claim-reserved handles', () => {
   it('reserve route for claims only, in any case, and are listed in lowercase', () => {
     assertRoute({ isReservedName, isPublicTeamSlug, isClaimReservedHandle })
     assertRoute(copy())
-    expect([...CLAIM_RESERVED_HANDLES]).toEqual(['route'])
+    expect([...CLAIM_RESERVED_HANDLES]).toEqual(['route', 'poll'])
     expect(RESERVED_NAMES.has('route')).toBe(false)
   })
 
   it.each([
-    ['the route entry', "new Set(['route'])", 'new Set([])'],
+    ['the route entry', "new Set(['route', 'poll'])", "new Set(['poll'])"],
     [
       'case folding',
       'CLAIM_RESERVED_HANDLES.has(name.toLowerCase())',
@@ -144,4 +144,13 @@ describe('claim-reserved handles', () => {
       expect.objectContaining({ name: 'AssertionError' }),
     )
   })
+})
+
+it('reserves poll only for new personal claims and preserves legacy personal and team URLs', () => {
+  for (const name of ['poll', 'Poll', 'POLL']) {
+    expect(isClaimReservedHandle(name)).toBe(true)
+    expect(isReservedName(name)).toBe(false)
+    expect(isPublicTeamSlug(name)).toBe(true)
+  }
+  expect(isClaimReservedHandle('polls')).toBe(false)
 })

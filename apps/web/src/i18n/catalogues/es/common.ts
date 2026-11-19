@@ -1,4 +1,67 @@
 export const common = {
+  'meetingPoll.title': 'Encuesta de reunión',
+  'meetingPoll.unavailable': 'Esta encuesta no está disponible.',
+  'meetingPoll.unavailableHelp':
+    'Abre el enlace original de tu invitación o contacta con la persona organizadora.',
+  'meetingPoll.loading': 'Cargando la encuesta…',
+  'meetingPoll.loadError': 'No se pudo cargar esta encuesta. Inténtalo más tarde.',
+  'meetingPoll.retry': 'Volver a intentar',
+  'meetingPoll.name': 'Tu nombre',
+  'meetingPoll.email': 'Correo electrónico',
+  'meetingPoll.timeZone': 'Zona horaria',
+  'meetingPoll.enroll': 'Enviar correo de verificación',
+  'meetingPoll.checkEmail': 'Revisa tu correo',
+  'meetingPoll.checkEmailHelp':
+    'Si cumples los requisitos, recibirás un enlace para continuar. Revisa tu bandeja de entrada y la carpeta de spam.',
+  'meetingPoll.verify': 'Verificar mi correo',
+  'meetingPoll.verifyHelp':
+    'Confirma tu correo para continuar. Abrir esta página no emite ningún voto.',
+  'meetingPoll.recover': 'Recuperar acceso',
+  'meetingPoll.pollId': 'ID de la encuesta',
+  'meetingPoll.recoverSubmit': 'Enviar correo de acceso',
+  'meetingPoll.yes': 'Sí',
+  'meetingPoll.ifNeedBe': 'Si es necesario',
+  'meetingPoll.no': 'No',
+  'meetingPoll.consent':
+    'Acepto participar en la reunión si se me selecciona y compartir mis respuestas con la persona organizadora.',
+  'meetingPoll.selectionHelp':
+    'La persona organizadora puede seleccionar solo a algunos votantes. Quien se designe para la reserva podrá gestionar toda la reunión, y la invitación del calendario puede revelar a los asistentes entre sí.',
+  'meetingPoll.save': 'Guardar voto',
+  'meetingPoll.saving': 'Guardando…',
+  'meetingPoll.saved': 'Tu voto se ha guardado.',
+  'meetingPoll.changed': 'Tus cambios se han guardado.',
+  'meetingPoll.withdraw': 'Retirar mi voto',
+  'meetingPoll.withdrawn':
+    'Tu voto se ha retirado. Se han eliminado tus respuestas y se han detenido los correos de la encuesta.',
+  'meetingPoll.reactivate': 'Enviar un nuevo voto',
+  'meetingPoll.private':
+    'Solo la persona organizadora y los gestores autorizados pueden ver tu identidad y tus respuestas. Los demás votantes no pueden ver tu voto.',
+  'meetingPoll.aggregate':
+    'Los votantes verificados pueden ver los totales de cada opción. En grupos pequeños, los totales pueden revelar las elecciones de otra persona. Solo la persona organizadora y los gestores autorizados ven tu identidad y tus respuestas.',
+  'meetingPoll.deadline': 'La votación cierra el {date}',
+  'meetingPoll.closed': 'La votación está cerrada. Puedes ver tus respuestas anteriores.',
+  'meetingPoll.scheduled': 'Se ha elegido un horario. La votación está cerrada.',
+  'meetingPoll.canceled': 'Esta encuesta ha terminado. La votación está cerrada.',
+  'meetingPoll.chosen': 'Horario elegido',
+  'meetingPoll.rateLimited': 'Demasiadas solicitudes. Espera antes de volver a intentarlo.',
+  'meetingPoll.invalid': 'Revisa los datos introducidos e inténtalo de nuevo.',
+  'meetingPoll.full': 'Esta encuesta está completa. Aún puedes recuperar un enlace existente.',
+  'meetingPoll.stale':
+    'Tu voto se ha cambiado en otro lugar. Recárgalo y revísalo antes de volver a guardarlo.',
+  'meetingPoll.uncertain':
+    'No se pudo confirmar este cambio. Recarga tu voto antes de volver a intentarlo.',
+  'meetingPoll.reload': 'Recargar voto',
+  'meetingPoll.optOutTitle': 'Detener recordatorios de la encuesta',
+  'meetingPoll.optOutHelp':
+    'Confirma para detener los recordatorios de esta encuesta. Esto no retira tu voto.',
+  'meetingPoll.optOut': 'Detener recordatorios',
+  'meetingPoll.optedOut': 'Se han detenido los recordatorios de esta encuesta.',
+  'meetingPoll.optionsOne': '{count} opción de horario',
+  'meetingPoll.optionsOther': '{count} opciones de horario',
+  'meetingPoll.countYes': 'Sí: {count}',
+  'meetingPoll.countIfNeedBe': 'Si es necesario: {count}',
+  'meetingPoll.countNo': 'No: {count}',
+  'meetingPoll.required': 'Obligatorio',
   'No location has been specified. Contact the host for meeting details.':
     'No se ha especificado un lugar. Contacta con el anfitrión para conocer los detalles de la reunión.',
   '{count} seat left': 'Queda {count} plaza',
