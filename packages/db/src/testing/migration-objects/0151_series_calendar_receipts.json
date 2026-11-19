@@ -1,0 +1,7 @@
+{
+  "migration": "0151_series_calendar_receipts.sql",
+  "objects": {
+    "constraint public.booking_notifications.booking_notifications_calendar_attached_check": "CHECK (((calendar_attached IS NULL) OR (calendar_attached AND (outcome = 'sent'::text) AND (kind = ANY (ARRAY['confirmed'::text, 'rescheduled'::text])))))",
+    "constraint public.booking_series_notifications.booking_series_notifications_calendar_ordinals_check": "CHECK (((calendar_ordinals IS NULL) OR ((NOT (outcome IS DISTINCT FROM 'delivered'::text)) AND (cardinality(calendar_ordinals) <= 12) AND (COALESCE(array_ndims(calendar_ordinals), 1) = 1) AND (calendar_ordinals <@ reported_ordinals))))"
+  }
+}
