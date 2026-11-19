@@ -132,6 +132,12 @@
   "workflow.beforeStart.body": "Hola, {recipient}:\nSu reunión «{event}» se celebrará pronto.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Seguimiento de su reunión: {event}",
   "workflow.afterEnd.body": "Hola, {recipient}:\nEl horario programado para su reunión «{event}» ha finalizado.\n{start} – {end} ({zone})",
+  "poll.outcome.selected.subject": "Horario elegido para {poll}",
+  "poll.outcome.selected.body": "La persona que organiza la reunión ha elegido el horario que aparece abajo. No estás en la lista de asistentes.",
+  "poll.outcome.rescheduled.subject": "Reunión reprogramada: {poll}",
+  "poll.outcome.rescheduled.body": "La reunión se ha cambiado al horario que aparece abajo. No estás en la lista de asistentes.",
+  "poll.outcome.cancelled.subject": "Reunión cancelada: {poll}",
+  "poll.outcome.cancelled.body": "La reunión se ha cancelado. Abajo figura el último horario previsto.",
   "ssoLinkRemoval.subject": "Se ha eliminado una vinculación de inicio de sesión único",
   "ssoLinkRemoval.message": "Se ha eliminado una vinculación de inicio de sesión único de tu cuenta de Hourmere. Puedes seguir iniciando sesión por correo electrónico. Si no esperabas este cambio, contacta con la persona que administra tu equipo."
 }

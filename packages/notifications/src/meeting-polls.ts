@@ -1,4 +1,4 @@
-// Durable credential outbox. SMTP never holds a database transaction or a poll lock.
+// Durable poll mail outbox. SMTP never holds a database transaction or a poll lock.
 import { createHmac, randomUUID } from 'node:crypto'
 import type { Db, MeetingPollDeliveryRow, MeetingPollRow } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
@@ -7,6 +7,7 @@ import {
   type MailMessage,
   MailRejectedError,
   meetingPollCredentialEmail,
+  meetingPollOutcomeEmail,
   meetingPollReminderEmail,
 } from '@hourmere/mail'
 import { DomainError } from '@hourmere/scheduling/errors'
@@ -38,7 +39,15 @@ export interface MeetingPollEmailDeps extends NotificationMailLimits {
 export interface MeetingPollEmailRequest {
   id: string
 }
-const KINDS = ['verification', 'invitation', 'recovery', 'reminder', 'deadline_closed']
+const KINDS = [
+  'verification',
+  'invitation',
+  'recovery',
+  'reminder',
+  'deadline_closed',
+  'selected',
+  'booking_update',
+]
 async function clock(db: Db, deps: MeetingPollEmailDeps): Promise<Date> {
   if (deps.now) return new Date(deps.now().epochMilliseconds)
   return (await sql<{ at: Date }>`SELECT clock_timestamp() AS at`.execute(db)).rows[0]?.at as Date
@@ -107,6 +116,66 @@ async function finish(
     .where('id', '=', row.id)
     .execute()
 }
+
+function deliveryVoter(db: Db, voterId: string | null) {
+  return voterId
+    ? db.selectFrom('meeting_poll_voters').selectAll().where('id', '=', voterId).executeTakeFirst()
+    : undefined
+}
+
+async function prepareOutcome(
+  db: Db,
+  deps: MeetingPollEmailDeps,
+  poll: MeetingPollRow,
+  row: MeetingPollDeliveryRow,
+) {
+  if (poll.status !== 'scheduled' || !poll.booking_id) return
+  const voter = await deliveryVoter(db, row.voter_id)
+  if (
+    !voter ||
+    voter.withdrawn_at ||
+    voter.selected_booking_role ||
+    !(voter.verified_at || voter.invited_at)
+  )
+    return
+
+  const { latestBookingInChain, meetingPollBookingUpdateSequence } = await import(
+    '@hourmere/scheduling/meeting-poll-delivery'
+  )
+  // Booking lifecycle writes lock the booking before the poll. Read through one snapshot
+  // without locking booking rows, and load only the facts an informational email needs.
+  const booking = await db
+    .selectFrom(latestBookingInChain(poll.booking_id, poll.organization_id).as('latest'))
+    .innerJoin('bookings as b', 'b.id', 'latest.id')
+    .select(['latest.depth', 'b.status', 'b.start_at', 'b.end_at'])
+    .executeTakeFirst()
+  if (!booking || (booking.status !== 'confirmed' && booking.status !== 'cancelled'))
+    return 'booking_unavailable' as const
+
+  const { status, depth } = booking
+  const initial = row.kind === 'selected'
+  if (
+    initial
+      ? depth !== 0 || status !== 'confirmed'
+      : row.sequence !== meetingPollBookingUpdateSequence(depth, status)
+  )
+    return 'booking_changed' as const
+  const kind = initial ? 'selected' : status === 'cancelled' ? 'cancelled' : 'rescheduled'
+  return {
+    email: voter.email,
+    message: meetingPollOutcomeEmail({
+      to: voter.email,
+      pollTitle: poll.title,
+      startAt: booking.start_at,
+      endAt: booking.end_at,
+      timeZone: voter.time_zone,
+      language: voter.locale,
+      defaultLanguage: deps.defaultLanguage,
+      kind,
+    }),
+  }
+}
+
 async function prepareCredential(
   db: Db,
   deps: MeetingPollEmailDeps,
@@ -122,13 +191,7 @@ async function prepareCredential(
     .select('deleted_at')
     .where('id', '=', poll.event_type_id)
     .executeTakeFirst()
-  const voter = row.voter_id
-    ? await db
-        .selectFrom('meeting_poll_voters')
-        .selectAll()
-        .where('id', '=', row.voter_id)
-        .executeTakeFirst()
-    : undefined
+  const voter = await deliveryVoter(db, row.voter_id)
   if (
     !event ||
     event.deleted_at ||
@@ -271,10 +334,12 @@ async function prepare(deps: MeetingPollEmailDeps, request: MeetingPollEmailRequ
     const recipient =
       row.kind === 'deadline_closed'
         ? await prepareCreator(db, deps, poll, creator)
-        : await prepareCredential(db, deps, poll, row, ready)
+        : row.kind === 'selected' || row.kind === 'booking_update'
+          ? await prepareOutcome(db, deps, poll, row)
+          : await prepareCredential(db, deps, poll, row, ready)
     if (!recipient) return finish(db, row, ready, 'skipped', 'recipient_unavailable')
     if (typeof recipient === 'string') return finish(db, row, ready, 'skipped', recipient)
-    const inviteeFacing = !('message' in recipient)
+    const inviteeFacing = row.kind !== 'deadline_closed'
     const hash = notificationRecipientHash(recipient.email, deps.secret)
     const suppressed = await notificationEmailBudget(db, deps, hash, inviteeFacing, ready)
     if ('voter' in recipient && row.kind === 'reminder' && row.attempts === 0)

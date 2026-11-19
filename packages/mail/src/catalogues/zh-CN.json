@@ -132,6 +132,12 @@
   "workflow.beforeStart.body": "{recipient}，您好：\n您的“{event}”预约即将开始。\n{start} – {end}（{zone}）",
   "workflow.afterEnd.subject": "预约后续：{event}",
   "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）",
+  "poll.outcome.selected.subject": "已选定会议时间：{poll}",
+  "poll.outcome.selected.body": "主持人已选定下方的会议时间。您未被选为参会者。",
+  "poll.outcome.rescheduled.subject": "会议已改期：{poll}",
+  "poll.outcome.rescheduled.body": "会议已改至下方的时间。您不在参会名单中。",
+  "poll.outcome.cancelled.subject": "会议已取消：{poll}",
+  "poll.outcome.cancelled.body": "会议已取消。下方是取消前安排的时间。",
   "ssoLinkRemoval.subject": "单点登录关联已解除",
   "ssoLinkRemoval.message": "您的 Hourmere 账户有一项单点登录关联已解除。您仍可使用邮箱登录。如果您没有预期此变更，请联系团队管理员。"
 }
