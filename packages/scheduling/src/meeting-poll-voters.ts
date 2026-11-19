@@ -248,6 +248,7 @@ export function openMeetingPollCredential(
   secret: string,
   binding: MeetingPollCredentialBinding,
   ciphertext: Buffer | null,
+  { includeActor = false }: { includeActor?: boolean } = {},
 ): { purpose: CredentialPurpose; token: string; actor?: TeamSsoSession } | undefined {
   try {
     if (!ciphertext || ciphertext.length < 30 || ciphertext.length > 1024 || ciphertext[0] !== 1)
@@ -271,7 +272,7 @@ export function openMeetingPollCredential(
     if ((purpose !== 'verification' && purpose !== 'voting') || typeof token !== 'string')
       return undefined
     if (!TOKEN.test(token)) return undefined
-    if (actor && isUuid(actor.userId) && isUuid(actor.sessionId))
+    if (includeActor && actor && isUuid(actor.userId) && isUuid(actor.sessionId))
       return { purpose, token, actor: { userId: actor.userId, sessionId: actor.sessionId } }
     return { purpose, token }
   } catch {

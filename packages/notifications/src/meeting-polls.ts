@@ -241,6 +241,7 @@ async function prepareCredential(
       generation: row.generation,
     },
     row.capability_ciphertext,
+    { includeActor: row.kind === 'invitation' },
   )
   if (!opened || (row.kind === 'reminder' && opened.purpose !== 'voting'))
     return 'credential_unavailable'

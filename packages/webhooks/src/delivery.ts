@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { ssoHardOff, teamSsoAccess } from '@hourmere/auth'
+import { ssoHardOff, type TeamSsoSession, teamSsoAccess } from '@hourmere/auth'
 import { type Db, isImportedBooking, type WebhookDeliveries, type Webhooks } from '@hourmere/db'
 import { writeAuditEvent } from '@hourmere/db/audit'
-import { defineJob, type EnqueueOptions, type QueuedSessionActor } from '@hourmere/jobs'
+import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { AttendeeNoShowNotifier, BookingEvent, BookingNotifier } from '@hourmere/scheduling'
 import type { WorkflowTriggerType } from '@hourmere/workflows'
 import { workflowExecution } from '@hourmere/workflows/hard-off'
@@ -452,7 +452,7 @@ export async function deliverWebhook(
   deliveryId: string,
   signal: AbortSignal,
   jobAttempt = 1,
-  actor?: QueuedSessionActor,
+  actor?: TeamSsoSession,
 ) {
   const found = await deps.db
     .selectFrom('webhook_deliveries')

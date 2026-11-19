@@ -119,12 +119,6 @@ export interface InvitationEmailJobIdentity {
   generation: number
 }
 
-/** Opaque database identities for rechecking the initiating session. Never carry a token. */
-export interface QueuedSessionActor {
-  userId: string
-  sessionId: string
-}
-
 export interface Jobs<Defs extends readonly AnyJobDefinition[]> {
   /**
    * Validates the payload and queues a job. Resolves to the job id, or null when the job's
@@ -348,6 +342,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       if (state !== 'running') throw new Error(`jobs are not running (${state})`)
       // This intentionally reads pg-boss internals. Startup pins their version; never add
       // an application FK. Use its clock so expiry agrees with pg-boss in transactions too.
+      // Session provenance is checked by the sender. It does not change the job identity.
       const connection = transaction ? fromKysely(transaction) : boss.getDb()
       const result = await connection.executeSql(
         `SELECT 1 FROM pgboss.job
