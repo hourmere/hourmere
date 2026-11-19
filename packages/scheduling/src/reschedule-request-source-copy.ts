@@ -16,6 +16,7 @@ import * as Errors from './errors.ts'
 import * as GroupSeatAdmission from './group-seat-admission.ts'
 import * as Hosts from './hosts.ts'
 import * as LocationOptions from './location-options.ts'
+import * as MeetingPollOutcomes from './meeting-poll-outcomes.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
@@ -51,6 +52,7 @@ const dependencies: Record<string, object> = {
   './hosts.ts': Hosts,
   './location-options.ts': LocationOptions,
   './group-seat-admission.ts': GroupSeatAdmission,
+  './meeting-poll-outcomes.ts': MeetingPollOutcomes,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
   './payment-expiry.ts': PaymentExpiry,
