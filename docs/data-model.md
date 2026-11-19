@@ -1753,7 +1753,7 @@ The phases within that organization boundary are:
   invitation. It locks no member row: the organization lock excludes membership changes while it
   reads the earliest owner who invites. When the address's pending invitation expires during
   one of those waits, it rolls back to the savepoint and runs the invitation service once more.
-- SCIM User replacement takes the organization update lock, the provisioning token key
+- SCIM User replacement and PATCH take the organization update lock, the provisioning token key
   share lock, and the live resource update lock. It holds the organization lock through
   any claim invalidation and the audit write, so invitation acceptance cannot hold a claim
   lock while competing with that replacement for the resource.

@@ -8,17 +8,23 @@ import {
   scimError,
 } from './scim.ts'
 import { parseScimProjection, projectScimResource, scimUserQuery } from './scim-query.ts'
+import { normalizeScimUserPatch, parseScimUserPatch } from './scim-user-patch.ts'
 import {
+  assertScimActiveUnchanged,
   invalidSyntax,
   lockScimWriteConnection,
   parseScimUserWrite,
-  refuse,
   scimUserWriteError,
   validateScimManager,
 } from './scim-user-write.ts'
 import { readScimUser, SCIM_USER_ID, scimUserNotFound } from './scim-users.ts'
 
-async function replace(db: Db, request: ScimResourceRequest, id: string): Promise<ScimReply> {
+async function replace(
+  db: Db,
+  request: ScimResourceRequest,
+  id: string,
+  method: 'PUT' | 'PATCH',
+): Promise<ScimReply> {
   if (request.hasWritePrecondition)
     return {
       status: 412,
@@ -28,13 +34,15 @@ async function replace(db: Db, request: ScimResourceRequest, id: string): Promis
   const projection = parseScimProjection(request.query, scimUserQuery)
   if (!projection.ok) return projection.reply
   const body = await request.body?.()
-  if (!body) return invalidSyntax('The request body must be a User object.').reply
+  if (!body) return invalidSyntax('The request body is required.').reply
   if (!body.ok) return body.reply
   const { principal } = request
   const organizationId = principal.organizationId
   try {
-    const { profile, active } = parseScimUserWrite(body.value, 'PUT')
-    const fields = Object.keys(profile) as (keyof typeof profile)[]
+    const write =
+      method === 'PATCH'
+        ? { method, operations: parseScimUserPatch(body.value) }
+        : { method, ...parseScimUserWrite(body.value, 'PUT') }
     return await db
       .transaction()
       .setIsolationLevel('read committed')
@@ -43,8 +51,7 @@ async function replace(db: Db, request: ScimResourceRequest, id: string): Promis
         // Acceptance takes the same organization lock before it reaches the claim and User.
         const entry = await trx
           .selectFrom('scim_users')
-          .select(fields)
-          .select('active')
+          .selectAll()
           .where('id', '=', id)
           .where('organization_id', '=', organizationId)
           .where('connection_id', '=', connectionId)
@@ -52,9 +59,13 @@ async function replace(db: Db, request: ScimResourceRequest, id: string): Promis
           .forUpdate()
           .executeTakeFirst()
         if (!entry) return scimUserNotFound
-        if (active !== undefined && active !== entry.active)
-          throw refuse(403, 'Changing the active attribute is not supported yet.', 'mutability')
-        await validateScimManager(trx, organizationId, connectionId, profile.manager_id)
+        if (write.method === 'PUT') assertScimActiveUnchanged(write.active, entry.active)
+        const { profile, managers } =
+          write.method === 'PATCH'
+            ? normalizeScimUserPatch(entry, write.operations)
+            : { profile: write.profile, managers: [write.profile.manager_id] }
+        await validateScimManager(trx, organizationId, connectionId, ...managers)
+        const fields = Object.keys(profile) as (keyof typeof profile)[]
         if (fields.some((field) => profile[field] !== entry[field])) {
           if (profile.work_email?.toLowerCase() !== entry.work_email?.trim().toLowerCase()) {
             // The old proof cannot claim the new mailbox. Keep the invitation under its own
@@ -81,6 +92,9 @@ async function replace(db: Db, request: ScimResourceRequest, id: string): Promis
             action: 'scim_user.updated',
             targetType: 'scim_user',
             targetId: id,
+            ...(write.method === 'PATCH'
+              ? { details: { operations: write.operations.map(({ op }) => op) } }
+              : {}),
           })
         }
         const representation = await readScimUser(trx, request, id)
@@ -97,11 +111,11 @@ async function replace(db: Db, request: ScimResourceRequest, id: string): Promis
   }
 }
 
-/** PUT /Users/{id}, registered only by the SCIM resource test harness. */
+/** PUT and PATCH /Users/{id}, registered only by the SCIM resource test harness. */
 export function scimUserReplacement(db: Db): ScimResourceHandler {
   return (request) => {
-    if (request.method !== 'PUT') return
+    if (request.method !== 'PUT' && request.method !== 'PATCH') return
     const match = /^\/Users\/([^/]*)$/.exec(request.path)
-    if (match?.[1] !== undefined) return replace(db, request, match[1])
+    if (match?.[1] !== undefined) return replace(db, request, match[1], request.method)
   }
 }
