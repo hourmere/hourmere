@@ -77,7 +77,7 @@ const roomy: InvitationMailLimits & { secret: string } = {
   invitationTeamMaxPerDay: 1000,
 }
 
-async function sourceCopy<T>(file: string, ...mutations: [string, string][]): Promise<T> {
+function sourceCopyUrl(file: string, ...mutations: [string, string][]) {
   const location = new URL(file, import.meta.url)
   let source = readFileSync(location, 'utf8')
   for (const [from, to] of mutations) {
@@ -89,7 +89,11 @@ async function sourceCopy<T>(file: string, ...mutations: [string, string][]): Pr
     (_, prefix: string, specifier: string) =>
       `${prefix}'${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
+  return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+}
+
+async function sourceCopy<T>(file: string, ...mutations: [string, string][]): Promise<T> {
+  return import(sourceCopyUrl(file, ...mutations))
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () => {
@@ -1770,12 +1774,20 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     verifyRefusals(scimUserCreation))
 
   it('detects each weakened protection in a source copy', async () => {
-    const control =
-      await sourceCopy<typeof import('./scim-user-create.ts')>('./scim-user-create.ts')
+    const createSource = './scim-user-create.ts'
+    const sharedSource = './scim-user-write.ts'
+    const useSharedCopy = (url: string): [string, string] => [
+      `from '${sharedSource}'`,
+      `from '${url}'`,
+    ]
+    const control = await sourceCopy<typeof import('./scim-user-create.ts')>(
+      createSource,
+      useSharedCopy(sourceCopyUrl(sharedSource)),
+    )
     serverErrors = 0
     for (const verify of Object.values(verifiers)) await verify(control.scimUserCreation)
     expect(serverErrors).toBe(0)
-    const mutants: [keyof typeof verifiers, [string, string]][] = [
+    const mutants: [keyof typeof verifiers, [string, string], typeof sharedSource?][] = [
       // The sign-up policy ignored.
       [
         'signup',
@@ -1785,7 +1797,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         ],
       ],
       // Live duplicates no longer answered as conflicts.
-      ['uniqueness', ["if (database?.code === '23505'", "if (database?.code === 'none'"]],
+      [
+        'uniqueness',
+        ["if (database?.code === '23505'", "if (database?.code === 'none'"],
+        sharedSource,
+      ],
       // The creation event written outside the transaction.
       [
         'atomicity',
@@ -1852,13 +1868,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       // A claim without an invitation that expires at once, or never.
       ['held', ['invitationLifetimeMs / 1000}::double precision', '1}::double precision']],
       // The organization lock dropped: an invitation in the app is no longer serialized.
-      [
-        'deduplication',
-        [
-          '          .forUpdate()\n          .executeTakeFirst()\n        // A token',
-          '          .executeTakeFirst()\n        // A token',
-        ],
-      ],
+      ['deduplication', ['    .forUpdate()\n', ''], sharedSource],
       // The queue fed before commit, for a create that then fails.
       [
         'atomicity',
@@ -1870,10 +1880,8 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       // A revoked token still creating.
       [
         'revocation',
-        [
-          "          .where('revoked_at', 'is', null)\n          .forKeyShare()",
-          '          .forKeyShare()',
-        ],
+        ["    .where('revoked_at', 'is', null)\n    .forKeyShare()", '    .forKeyShare()'],
+        sharedSource,
       ],
       // A queue outage after commit turned into a failed create.
       [
@@ -1896,37 +1904,37 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       [
         'refusals',
         ['    named.set(key, item ?? undefined)', '    if (item !== null) named.set(key, item)'],
+        sharedSource,
       ],
       // Admission limits ignored.
       ['limits', ['          { reserve: deps.reserve },\n', '          {},\n']],
-      // A refused or unauthorized-looking value echoed, inactive entries created, and a
-      // manager from outside the connection accepted.
+      // A retired manager accepted or an inactive entry created.
       [
         'refusals',
         [
-          "          throw invalidValue('The manager attribute does not name a User of this connection.')\n        // Live",
-          '          void 0\n        // Live',
+          "    .where('retired_at', 'is', null)\n    .executeTakeFirst()",
+          '    .executeTakeFirst()',
         ],
+        sharedSource,
       ],
-      [
-        'refusals',
-        [
-          '  if (active !== undefined && active !== true)',
-          '  if (active !== undefined && active !== true && active !== false)',
-        ],
-      ],
-      ['refusals', ['  if (value.length > 0)\n', '  if (false)\n']],
+      ['refusals', ["  if (method === 'POST' && active === false)", '  if (false)'], sharedSource],
+      ['refusals', ['  if (value.length > 0)\n', '  if (false)\n'], sharedSource],
       // The work address read from the wrong entry: any type as work, the primary work
       // email not preferred, typeless primary or single emails dropped, two primaries let
       // through.
       [
         'creation',
         ["const work = emails.filter((email) => email.type === 'work')", 'const work = emails'],
+        sharedSource,
       ],
-      ['emails', ['    work.find((email) => email.primary) ??\n', '']],
-      ['emails', ['    untyped.find((email) => email.primary) ??\n', '']],
-      ['emails', ['(emails.length === 1 ? untyped[0] : undefined)', 'undefined']],
-      ['refusals', ['  if (emails.filter((email) => email.primary).length > 1)', '  if (false)']],
+      ['emails', ['    work.find((email) => email.primary) ??\n', ''], sharedSource],
+      ['emails', ['    untyped.find((email) => email.primary) ??\n', ''], sharedSource],
+      ['emails', ['(emails.length === 1 ? untyped[0] : undefined)', 'undefined'], sharedSource],
+      [
+        'refusals',
+        ['  if (emails.filter((email) => email.primary).length > 1)', '  if (false)'],
+        sharedSource,
+      ],
       // Limits answered with the old organization wording.
       [
         'limits',
@@ -1938,10 +1946,10 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     ]
     // Each mutant must fail an assertion of its verifier; anything else is a survivor.
     const survivors: string[] = []
-    for (const [name, mutation] of mutants) {
+    for (const [name, mutation, source = createSource] of mutants) {
       const mutant = await sourceCopy<typeof import('./scim-user-create.ts')>(
-        './scim-user-create.ts',
-        mutation,
+        createSource,
+        source === sharedSource ? useSharedCopy(sourceCopyUrl(sharedSource, mutation)) : mutation,
       )
       serverErrors = 0
       const outcome = await verifiers[name](mutant.scimUserCreation).then(
