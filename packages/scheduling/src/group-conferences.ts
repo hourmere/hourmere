@@ -135,7 +135,11 @@ export async function requireGroupSlotConferenceUsable(
 }
 
 /** Caller owns the slot lock. Resource ownership never follows an attendee chain. */
-export async function prepareGroupSlotConference(ctx: PublicContext, trx: Db, slotId: string) {
+export async function prepareGroupSlotConference(
+  ctx: ConferenceFlags & Pick<PublicContext, 'now'>,
+  trx: Db,
+  slotId: string,
+) {
   const slot = await trx
     .selectFrom('group_slots')
     .selectAll()

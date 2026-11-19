@@ -790,7 +790,7 @@ async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<
  * share it so a hold stores the chosen option exactly as its confirmed booking would.
  */
 export async function resolveBookingLocation(
-  ctx: PublicContext,
+  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>,
   db: Db,
   event: PublicEventTypeRecord,
   hosts: string[],
@@ -853,7 +853,7 @@ export async function resolveBookingLocation(
  * never shows a host-facing provider hint to a visitor.
  */
 async function prepareExistingGroupSlotConference(
-  ctx: PublicContext,
+  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'now'>,
   db: Db,
   bookingId: string,
 ): Promise<void> {
@@ -873,7 +873,7 @@ async function prepareExistingGroupSlotConference(
 
 /** Keep a readiness race during conference intent creation inside the choice error contract. */
 async function prepareChosenBookingConference(
-  ctx: PublicContext,
+  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'now'>,
   db: Db,
   bookingId: string,
   preserveLegacyErrors: boolean,
@@ -1417,17 +1417,20 @@ function bookingIdempotency(
   }
 }
 
+type BookingEventResolver = (
+  db: Db,
+  options?: { lock?: boolean },
+) => Promise<PublicEventTypeRecord | undefined>
+
 async function publicBooking(
   ctx: PublicContext,
   input: Omit<CreateBookingInput, 'handle' | 'slug'>,
   origin: BookingOrigin,
-  resolve: (db: Db, options?: { lock?: boolean }) => Promise<PublicEventTypeRecord | undefined>,
+  resolve: BookingEventResolver,
   oneTimeLink?: { id: string; token: string },
 ): Promise<CreateBookingResult> {
   const et = await resolve(ctx.db)
-  const unavailable = () =>
-    oneTimeLink ? new DomainError('not_found', 'one_time_link_not_found') : eventTypeNotFound()
-  if (!et) throw unavailable()
+  if (!et) throw bookingEventUnavailable(oneTimeLink !== undefined)
 
   const scope = bookingIdempotency(et, input, origin, oneTimeLink?.id)
   if (scope) {
@@ -1435,8 +1438,46 @@ async function publicBooking(
     if (replay) return { ...replay, replayed: true }
   }
 
-  // Fails fast before taking the lock; checked again below against the current questions.
+  // Fails fast before taking the lock; checked again against the current questions.
   validateResponses(et.questions, input.responses ?? {})
+  const attendees = prepareBookingAttendees(input)
+
+  try {
+    return await ctx.db.transaction().execute(async (trx) => {
+      // The accounting-key fence precedes ordinary booking locks, matching discovery
+      // and preventing a key rotation from forming a host/event/key lock cycle.
+      if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
+        await ensureWaitlistKey(trx, ctx.waitlistSecret, new Date(ctx.now().epochMilliseconds))
+      }
+      await lockOrganization(trx, et.organizationId)
+      return createBookingInTransaction(ctx, trx, {
+        input,
+        origin,
+        event: et,
+        resolve,
+        attendees,
+        scope,
+        oneTimeLink,
+      })
+    })
+  } catch (err) {
+    // The same key was committed concurrently for another host (the lock did not apply).
+    const { code, constraint } = pgError(err)
+    if (scope && code === '23505' && constraint === 'bookings_idempotency') {
+      const replay = await findReplay(ctx.db, scope)
+      if (replay) return { ...replay, replayed: true }
+    }
+    if (code === '23505' && constraint === 'bookings_group_active_mailbox')
+      throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
+    throw err
+  }
+}
+
+function bookingEventUnavailable(oneTimeLink: boolean): DomainError {
+  return oneTimeLink ? new DomainError('not_found', 'one_time_link_not_found') : eventTypeNotFound()
+}
+
+function prepareBookingAttendees(input: Omit<CreateBookingInput, 'handle' | 'slug'>) {
   const invitee = validateInvitee(input.invitee)
   if (input.smsConsent !== undefined && typeof input.smsConsent !== 'boolean')
     throw new DomainError('invalid', 'invalid_sms_consent', 'SMS consent must be true or false.')
@@ -1466,210 +1507,223 @@ async function publicBooking(
       invitee.smsConsent = true
     }
   }
-  const guests = validateGuests(input.guests ?? [], invitee)
+  return { invitee, guests: validateGuests(input.guests ?? [], invitee) }
+}
 
-  try {
-    return await ctx.db.transaction().execute(async (trx) => {
-      // The accounting-key fence precedes ordinary booking locks, matching discovery
-      // and preventing a key rotation from forming a host/event/key lock cycle.
-      if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
-        await ensureWaitlistKey(trx, ctx.waitlistSecret, new Date(ctx.now().epochMilliseconds))
-      }
-      await lockOrganization(trx, et.organizationId)
-      await lockHosts(trx, et.hostUserIds)
-      // A concurrent request with the same key may have committed while we waited.
-      if (scope) {
-        const replay = await findReplay(trx, scope)
-        if (replay) return { ...replay, replayed: true }
-      }
-      // The event type may have changed while we waited (duration, questions, rules), and
-      // waiting took time: read both again now that the host is locked.
-      const current = await resolve(trx, { lock: true })
-      if (!current || current.id !== et.id || current.schedulingType !== et.schedulingType) {
-        throw unavailable()
-      }
-      if (current.hostUserIds.join() !== et.hostUserIds.join()) {
-        if (current.schedulingType === 'round_robin')
-          throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
-        throw unavailable()
-      }
-      if (guests.length > 0 && !current.allowGuests) {
-        throw new DomainError(
-          'invalid',
-          'guests_not_allowed',
-          'This event type does not allow guests',
+/**
+ * Admit the booking and write its intents in the caller's transaction. The caller holds
+ * the event organization's authority lock (and the waitlist key fence, if applicable).
+ * The resolver must lock and reread the event and host eligibility when asked to lock.
+ * An additional event check runs against this locked configuration, before admission.
+ * The check and notifier must use only transactional database work, with provider work
+ * left to the existing outbox workers.
+ */
+async function createBookingInTransaction(
+  ctx: Omit<PublicContext, 'db'>,
+  trx: Transaction<Database>,
+  {
+    input,
+    origin,
+    event: et,
+    resolve,
+    attendees: { invitee, guests },
+    scope,
+    oneTimeLink,
+    checkEvent,
+  }: {
+    input: Omit<CreateBookingInput, 'handle' | 'slug'>
+    origin: BookingOrigin
+    event: PublicEventTypeRecord
+    resolve: BookingEventResolver
+    attendees: ReturnType<typeof prepareBookingAttendees>
+    scope?: IdempotencyScope | undefined
+    oneTimeLink?: { id: string; token: string } | undefined
+    checkEvent?: ((current: PublicEventTypeRecord) => Promise<void>) | undefined
+  },
+): Promise<CreateBookingResult> {
+  await lockHosts(trx, et.hostUserIds)
+  // A concurrent request with the same key may have committed while we waited.
+  if (scope) {
+    const replay = await findReplay(trx, scope)
+    if (replay) return { ...replay, replayed: true }
+  }
+  // The event type may have changed while we waited (duration, questions, rules), and
+  // waiting took time: read both again now that the host is locked.
+  const current = await resolve(trx, { lock: true })
+  if (
+    !current ||
+    current.id !== et.id ||
+    current.organizationId !== et.organizationId ||
+    current.schedulingType !== et.schedulingType
+  ) {
+    throw bookingEventUnavailable(oneTimeLink !== undefined)
+  }
+  if (current.hostUserIds.join() !== et.hostUserIds.join()) {
+    if (current.schedulingType === 'round_robin')
+      throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
+    throw bookingEventUnavailable(oneTimeLink !== undefined)
+  }
+  if (checkEvent) await checkEvent(current)
+  if (guests.length > 0 && !current.allowGuests) {
+    throw new DomainError('invalid', 'guests_not_allowed', 'This event type does not allow guests')
+  }
+  const now = ctx.now()
+  // resolve(...lock:true) holds the event row until commit. This read sees exactly
+  // the policy serialized with a concurrent full configuration replacement.
+  const policy = await trx
+    .selectFrom('event_types')
+    .select(['notifications', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
+    .where('id', '=', current.id)
+    .executeTakeFirstOrThrow()
+  const snapshot = createNotificationSnapshot(policy.notifications)
+  const responses = validateResponses(current.questions, input.responses ?? {})
+  const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
+  const end = input.start.add({ minutes: durationMinutes })
+  const groupSlot = await admitGroupSlot(trx, {
+    event: current,
+    bookerEmail: invitee.email,
+    start: input.start,
+    end,
+    now,
+    snapshot,
+    expectedSlotId: input.expectedGroupSlotId,
+    locationOptionId: input.locationOptionId,
+    conference: ctx,
+  })
+  const chosenOption = groupSlot
+    ? null
+    : selectBookableLocationOption(current, input.locationOptionId)
+  let selectedHostIds = current.hostUserIds
+  if (current.schedulingType === 'round_robin') {
+    await lockRoundRobinState(trx, current.id)
+    const available: string[] = []
+    let stale = false
+    const candidates = automaticMeet(chosenOption)
+      ? await withLocationAvailability(current.locations, input.locationOptionId, () =>
+          eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet),
         )
+      : current.eligibleHostUserIds
+    for (const hostUserId of candidates) {
+      await expirePaymentHolds({ db: trx, hostUserId })
+      try {
+        const slots = await findSlots(trx, {
+          eventTypeId: current.id,
+          hostUserId,
+          rangeStart: input.start,
+          rangeEnd: end,
+          now,
+          durationMinutes: input.durationMinutes,
+          useDefaultSchedule: true,
+        })
+        if (slots.some((slot) => slot.start.equals(input.start) && slot.end.equals(end)))
+          available.push(hostUserId)
+      } catch (error) {
+        if (!(error instanceof DomainError) || error.code !== 'calendar_sync_unavailable')
+          throw error
+        stale = true
       }
-      const now = ctx.now()
-      // resolve(...lock:true) holds the event row until commit. This read sees exactly
-      // the policy serialized with a concurrent full configuration replacement.
-      const policy = await trx
-        .selectFrom('event_types')
-        .select(['notifications', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
-        .where('id', '=', current.id)
-        .executeTakeFirstOrThrow()
-      const snapshot = createNotificationSnapshot(policy.notifications)
-      const responses = validateResponses(current.questions, input.responses ?? {})
-      const durationMinutes = selectDurationMinutes(current, input.durationMinutes)
-      const end = input.start.add({ minutes: durationMinutes })
-      const groupSlot = await admitGroupSlot(trx, {
-        event: current,
-        bookerEmail: invitee.email,
+    }
+    if (!available.length && stale)
+      throw new DomainError(
+        'conflict',
+        'calendar_sync_unavailable',
+        'The host calendars are temporarily unavailable. Try again shortly.',
+      )
+    selectedHostIds = [await assignRoundRobinHost(trx, current.id, available)]
+  } else if (!groupSlot) {
+    for (const hostUserId of current.hostUserIds)
+      await requireOfferedSlot(trx, {
+        eventTypeId: current.id,
+        hostUserId,
         start: input.start,
         end,
         now,
-        snapshot,
-        expectedSlotId: input.expectedGroupSlotId,
-        locationOptionId: input.locationOptionId,
-        conference: ctx,
+        durationMinutes: input.durationMinutes,
+        useDefaultSchedule: current.schedulingType === 'collective',
       })
-      const chosenOption = groupSlot
-        ? null
-        : selectBookableLocationOption(current, input.locationOptionId)
-      let selectedHostIds = current.hostUserIds
-      if (current.schedulingType === 'round_robin') {
-        await lockRoundRobinState(trx, current.id)
-        const available: string[] = []
-        let stale = false
-        const candidates = automaticMeet(chosenOption)
-          ? await withLocationAvailability(current.locations, input.locationOptionId, () =>
-              eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet),
-            )
-          : current.eligibleHostUserIds
-        for (const hostUserId of candidates) {
-          await expirePaymentHolds({ db: trx, hostUserId })
-          try {
-            const slots = await findSlots(trx, {
-              eventTypeId: current.id,
-              hostUserId,
-              rangeStart: input.start,
-              rangeEnd: end,
-              now,
-              durationMinutes: input.durationMinutes,
-              useDefaultSchedule: true,
-            })
-            if (slots.some((slot) => slot.start.equals(input.start) && slot.end.equals(end)))
-              available.push(hostUserId)
-          } catch (error) {
-            if (!(error instanceof DomainError) || error.code !== 'calendar_sync_unavailable')
-              throw error
-            stale = true
-          }
-        }
-        if (!available.length && stale)
-          throw new DomainError(
-            'conflict',
-            'calendar_sync_unavailable',
-            'The host calendars are temporarily unavailable. Try again shortly.',
-          )
-        selectedHostIds = [await assignRoundRobinHost(trx, current.id, available)]
-      } else if (!groupSlot) {
-        for (const hostUserId of current.hostUserIds)
-          await requireOfferedSlot(trx, {
-            eventTypeId: current.id,
-            hostUserId,
-            start: input.start,
-            end,
-            now,
-            durationMinutes: input.durationMinutes,
-            useDefaultSchedule: current.schedulingType === 'collective',
-          })
-      }
-      const choice =
-        groupSlot ?? (await resolveBookingLocation(ctx, trx, current, selectedHostIds, input))
-      requireCollectedPhone(choice.location)
-      let settings: SuccessRedirect | null = null
-      if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
-        try {
-          settings = validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
-        } catch (error) {
-          if (!(error instanceof DomainError) || error.code !== 'invalid_success_redirect')
-            throw error
-          // An operator can tighten policy after this target was saved. Keep booking
-          // available, with no continuation. Never log the URL, its query or invitee data.
-          console.warn('success_redirect_disabled', { eventTypeId: current.id })
-        }
-      }
-      const selectedHosts = selectedHostIds.map(
-        (id) => current.hosts[current.hostUserIds.indexOf(id)]?.name ?? current.hostName,
-      )
-      const successRedirect = bookingSuccessRedirect(settings, {
-        eventTypeSlug: current.slug,
-        start: toIso(input.start),
-        end: toIso(end),
-        timeZone: invitee.timeZone,
-        hostName: selectedHosts.join(', '),
-        inviteeName: invitee.name,
-        inviteeEmail: invitee.email,
-      })
-      const { id, manageToken } = await insertBooking(trx, {
-        successRedirect,
-        groupSlotId: groupSlot?.id,
-        organizationId: current.organizationId,
-        eventTypeId: current.id,
-        start: input.start,
-        end,
-        title: `${current.title} with ${invitee.name}`,
-        location: groupSlot ? groupSlot.location : choice.location,
-        locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
-        responses,
-        source: origin.source,
-        apiKeyId: origin.apiKeyId,
-        oauthConsentId: origin.oauthConsentId ?? null,
-        idempotency: scope && { key: scope.key, fingerprint: scope.fingerprint },
-        hostUserIds: selectedHostIds,
-        hostsUseDefaultSchedule: current.schedulingType !== 'individual',
-        attendees: [invitee, ...guests],
-        notificationSnapshot: snapshot,
-        smsRemindersEnabled: current.smsRemindersEnabled && ctx.smsRemindersAvailable === true,
-        // The deadlines that apply when it is booked, from the same locked row.
-        changeCutoffs: cutoffsOf(policy),
-      })
-      if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)
-      // In this transaction, and never on the replay paths: one set of emails per booking,
-      // queued only if the booking commits.
-      if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
-        await attributeWaitlistBooking(trx, {
-          secret: ctx.waitlistSecret,
-          token: input.waitlistToken,
-          eventTypeId: current.id,
-          bookingId: id,
-          email: invitee.email,
-          start: input.start,
-          end,
-          now: ctx.now,
-        })
-      }
-      await auditBooking(trx, current.organizationId, id, 'booking.created', {
-        ...origin,
-        requestId: origin.requestId ?? ctx.requestId,
-      })
-      if (groupSlot?.existing) await prepareExistingGroupSlotConference(ctx, trx, id)
-      else
-        await prepareChosenBookingConference(
-          ctx,
-          trx,
-          id,
-          isPreservedSingleton(current.locations, input.locationOptionId),
-        )
-      await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
-      return {
-        booking: await loadBooking(trx, id),
-        manageToken,
-        replayed: false,
-        ...(successRedirect && { successRedirect }),
-      }
-    })
-  } catch (err) {
-    // The same key was committed concurrently for another host (the lock did not apply).
-    const { code, constraint } = pgError(err)
-    if (scope && code === '23505' && constraint === 'bookings_idempotency') {
-      const replay = await findReplay(ctx.db, scope)
-      if (replay) return { ...replay, replayed: true }
+  }
+  const choice =
+    groupSlot ?? (await resolveBookingLocation(ctx, trx, current, selectedHostIds, input))
+  requireCollectedPhone(choice.location)
+  let settings: SuccessRedirect | null = null
+  if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
+    try {
+      settings = validateSuccessRedirect(current.successRedirect, ctx.successRedirectPolicy)
+    } catch (error) {
+      if (!(error instanceof DomainError) || error.code !== 'invalid_success_redirect') throw error
+      // An operator can tighten policy after this target was saved. Keep booking
+      // available, with no continuation. Never log the URL, its query or invitee data.
+      console.warn('success_redirect_disabled', { eventTypeId: current.id })
     }
-    if (code === '23505' && constraint === 'bookings_group_active_mailbox')
-      throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
-    throw err
+  }
+  const selectedHosts = selectedHostIds.map(
+    (id) => current.hosts[current.hostUserIds.indexOf(id)]?.name ?? current.hostName,
+  )
+  const successRedirect = bookingSuccessRedirect(settings, {
+    eventTypeSlug: current.slug,
+    start: toIso(input.start),
+    end: toIso(end),
+    timeZone: invitee.timeZone,
+    hostName: selectedHosts.join(', '),
+    inviteeName: invitee.name,
+    inviteeEmail: invitee.email,
+  })
+  const { id, manageToken } = await insertBooking(trx, {
+    successRedirect,
+    groupSlotId: groupSlot?.id,
+    organizationId: current.organizationId,
+    eventTypeId: current.id,
+    start: input.start,
+    end,
+    title: `${current.title} with ${invitee.name}`,
+    location: groupSlot ? groupSlot.location : choice.location,
+    locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
+    responses,
+    source: origin.source,
+    apiKeyId: origin.apiKeyId,
+    oauthConsentId: origin.oauthConsentId ?? null,
+    idempotency: scope && { key: scope.key, fingerprint: scope.fingerprint },
+    hostUserIds: selectedHostIds,
+    hostsUseDefaultSchedule: current.schedulingType !== 'individual',
+    attendees: [invitee, ...guests],
+    notificationSnapshot: snapshot,
+    smsRemindersEnabled: current.smsRemindersEnabled && ctx.smsRemindersAvailable === true,
+    // The deadlines that apply when it is booked, from the same locked row.
+    changeCutoffs: cutoffsOf(policy),
+  })
+  if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)
+  // In this transaction, and never on the replay paths: one set of emails per booking,
+  // queued only if the booking commits.
+  if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
+    await attributeWaitlistBooking(trx, {
+      secret: ctx.waitlistSecret,
+      token: input.waitlistToken,
+      eventTypeId: current.id,
+      bookingId: id,
+      email: invitee.email,
+      start: input.start,
+      end,
+      now: ctx.now,
+    })
+  }
+  await auditBooking(trx, current.organizationId, id, 'booking.created', {
+    ...origin,
+    requestId: origin.requestId ?? ctx.requestId,
+  })
+  if (groupSlot?.existing) await prepareExistingGroupSlotConference(ctx, trx, id)
+  else
+    await prepareChosenBookingConference(
+      ctx,
+      trx,
+      id,
+      isPreservedSingleton(current.locations, input.locationOptionId),
+    )
+  await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
+  return {
+    booking: await loadBooking(trx, id),
+    manageToken,
+    replayed: false,
+    ...(successRedirect && { successRedirect }),
   }
 }
 
@@ -2938,3 +2992,6 @@ export async function cancelOccurrenceSeatInTransaction(
     ctx.principal.user.id,
   )
 }
+
+// Internal entry points for services that own the booking transaction.
+export { createBookingInTransaction, prepareBookingAttendees }
