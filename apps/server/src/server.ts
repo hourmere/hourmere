@@ -236,6 +236,7 @@ export function productRoutes({
   invitationMailLimits,
   waitlistSecret,
   meetingPollSecret,
+  routingSecret,
   smtpConfigured,
   recurringBookingsEnabled,
   auditLogRetentionDays = null,
@@ -269,6 +270,7 @@ export function productRoutes({
   invitationMailLimits: InvitationSummaryMailLimits
   waitlistSecret?: string | undefined
   meetingPollSecret?: string | undefined
+  routingSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
@@ -354,6 +356,7 @@ export function productRoutes({
     publicRoutes({
       db,
       routingFormsEnabled: routingEnabled,
+      routingSecret,
       smsRemindersAvailable,
       waitlistSecret,
       smtpConfigured,
@@ -410,6 +413,7 @@ export function productTools({
   webhookQueue,
   waitlistSecret,
   meetingPollSecret,
+  routingSecret,
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
@@ -434,6 +438,7 @@ export function productTools({
   webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
   waitlistSecret?: string | undefined
   meetingPollSecret?: string | undefined
+  routingSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
   routingFormsEnabled?: boolean | undefined
@@ -490,7 +495,12 @@ export function productTools({
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({ db, followUpHostNotesEnabled }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
-    ...routingFormConfigurationTools({ db, routingFormsEnabled: routingEnabled }),
+    ...routingFormConfigurationTools({
+      db,
+      routingFormsEnabled: routingEnabled,
+      routingSecret,
+      publicUrl,
+    }),
   ]
 }
 
@@ -632,6 +642,7 @@ export function productionAppOptions({
       zoomWebhookClientId: config.ZOOM_CLIENT_ID,
       enqueueCalendarSync,
       enqueueCalendarWritebackRecovery,
+      routingSecret: config.BETTER_AUTH_SECRET,
     }),
     mcp: mcpEndpoint({
       ...(config.MCP_OAUTH_ENABLED
@@ -663,6 +674,7 @@ export function productionAppOptions({
         zoomConference,
         webhooks: webhookSettings,
         webhookQueue,
+        routingSecret: config.BETTER_AUTH_SECRET,
       }),
     }),
   }
