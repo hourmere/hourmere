@@ -13,6 +13,7 @@ creation step adds `POST /Users` under it, with pending claims and invitations t
 existing invitation service; production registers none of them either. The claim completion
 step completes a claim when its invitation is accepted, through a dependency that only test
 harnesses pass to `createAuth`; production acceptance completes none.
+The User profile replacement step adds `PUT /Users/{id}` under the resource test flag.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -207,9 +208,29 @@ expire after 48 hours without renewal: acceptance never completes them, whicheve
 accepted, and nothing links them by email. `ScimClaimCompletion` in
 `packages/auth/src/scim-claims.ts` is the extension point where that step adds its proof.
 
+User profile replacement requires `userName` and replaces the mapped profile, including
+`userName`, `externalId` and the work address, on a live User in the token's connection.
+Omitted or null optional profile attributes and an empty `emails` array clear those fields.
+The response is 200 with the current representation. The server preserves the resource
+ID, scope, creation time and account and membership links. It ignores supplied read-only
+attributes, including `id`, `meta`, `groups` and `manager.displayName`, and refuses
+nonempty roles or entitlements. Omit `active` or echo its current value until the lifecycle
+step enables changes. A profile replacement never changes a personal account, a global
+email, or an organization's membership or role.
+
+A different normalized work address, or clearing the address, invalidates any unfinished
+claim atomically with the profile change. An existing invitation can still be accepted
+under its usual rules, but its old mailbox proof cannot complete the invalidated claim.
+Replacement issues no invitation, creates no claim, and preserves any completed claim and
+its link. The organization lock serializes replacement with invitation acceptance. If
+acceptance completes the claim first, replacement keeps that link and stores the new work
+address as profile data only.
+
 No ETags or `meta.version` in the first release; advertise `etag.supported=false`.
-Reject conditional writes with 412 rather than pretend to honor If-Match. Serialize
+PUT rejects `If-Match`, `If-None-Match` and `If-Unmodified-Since` with 412. Serialize
 writes under the resource lock; ordinary concurrent writes otherwise use commit order.
+Repeating an identical profile replacement preserves `meta.lastModified` and writes no
+additional audit event.
 IdP retries must not duplicate memberships, notifications or revocation operations.
 
 SCIM failures use `schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"]`, a **string**
@@ -532,11 +553,13 @@ new resource ID, with the provisioning token as actor (`scim_token`, credential 
 empty details; the invitation it issues records `membership.invited` the same way. Claim
 completion records `scim_user.claimed` on the resource ID with empty details, attributed to the
 accepting person's session like the `membership.accepted` event beside it, in the acceptance
-transaction. Token foundation must never claim full audit coverage. SCIM action names follow the journal's
+transaction. Profile replacement records `scim_user.updated` on the resource ID, with the
+same token attribution and empty details as creation, in the profile transaction.
+Token foundation must never claim full audit coverage. SCIM action names follow the journal's
 one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
 check allows exactly one dot. Required future actions:
 `scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
-aggregation); `scim_user.updated`, `scim_user.deactivated`,
+aggregation); `scim_user.deactivated`,
 `scim_user.reactivated`, `scim_user.deleted`; `scim_group.created`, `scim_group.updated`,
 `scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
 `scim_mapping.linked`, `scim_mapping.unlinked`; `scim_user.conflicted`;

@@ -26,7 +26,7 @@ export async function startFixtureServer(
   listening.subscribe(subscribers)
   try {
     running = await startupScope.run(scope, () =>
-      start({ ...env, PORT: '0', PUBLIC_URL: listener.url }),
+      start({ ...env, PORT: '0', PUBLIC_URL: listener.url }, { recurringBookingsEnabled: true }),
     )
   } catch (error) {
     await Promise.allSettled(captured.map((owned) => owned.close()))

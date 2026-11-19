@@ -475,7 +475,10 @@ configuration, signed STOP handling and limitations.
 Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
 `allowGuests: false` and individual single-host scheduling. Configuration requires `full`
 API-key scope. Omitted update fields preserve saved values; existing future booked work
-prevents switching mode. Capacity edits affect new occurrences only.
+prevents switching mode. Capacity edits affect new occurrences only. To switch back,
+send `bookingMode: "individual"` **and** `groupCapacity: null` in the same update;
+omitting capacity preserves it and fails validation. Group occurrences use one shared
+location; invitee-chosen and invitee-phone locations are unavailable.
 
 Authorized booking reads/lists represent each seat separately and include `groupSlotId`.
 `GET /api/v1/group-occurrences/{id}/attendees`, MCP `get_group_occurrence_attendees` and
@@ -484,12 +487,39 @@ status and no-show state. MCP/CLI take `occurrenceId`. Reads allow `full`, `read
 `bookings` keys, with actual host authority in the current organization. Non-host team
 owners/admins need a browser session; MCP OAuth has the same host-only boundary.
 
+Attendee reads default to active (confirmed) seats. REST query parameters and MCP/CLI
+JSON inputs accept `status: "active" | "cancelled" | "all"`, `limit` (1–100, default 25),
+and `offset` (0–10000, default 0). Responses include `pagination: {limit, offset, hasMore}`;
+advance offset by limit while hasMore is true, preserving filters. Ordering is booking
+creation time then booking ID. Each page is a snapshot; bookings/cancellations between
+requests can move rows, so restart at offset 0 to refresh. `activeSeats` always describes
+the whole occurrence. Example CLI input:
+`{"occurrenceId":"OCCURRENCE_UUID","status":"cancelled","limit":25,"offset":0}`.
+
 `POST /api/v1/group-occurrences/{id}/cancel`, MCP `cancel_group_occurrence` and CLI
 `cancel-group` cancel the whole future occurrence. MCP/CLI take `occurrenceId` and
 optional `reason`; REST takes optional `reason` in JSON. Keys need `full` or `bookings`.
 Ordinary booking cancellation still cancels only one seat. Public and invitee-management
 reads never return the roster or sibling answers. See [group events](https://hourmere.com/docs/group-events)
 for setup, privacy and limitations.
+
+Public pages show remaining seats, never the roster. Each seat receives its own mail and
+calendar invitation. Single-host group waitlists use ordinary verified, unreserved opening
+notifications; a full occurrence does not offer a waitlist if other selected times are open.
+Guests, multiple-seat purchases, collective/round-robin groups and group checkout are unsupported.
+
+中文：名单默认仅含有效座位；`status` 可为 `active`、`cancelled` 或 `all`，
+`limit` 为 1–100（默认 25），`offset` 为 0–10000（默认 0）。REST 用查询参数，
+MCP/CLI 用 JSON，按返回的 `pagination.hasMore` 翻页。切回个人模式须同时传入
+`bookingMode: "individual"` 与 `groupCapacity: null`。群组每场共用一个地点，
+不允许受邀人选择地点。公开页面只显示剩余座位；单座取消释放座位，整场取消关闭该时间，
+每人收到独立邮件。候补通知不保留座位、不自动预约。
+
+Attendee pagination stops at offset 10000; `hasMore` indicates another permitted page,
+not whether older retained history exists beyond that bound.
+
+中文：名单翻页最多到偏移量 10000；`hasMore` 表示还有可请求的下一页，
+不保证该范围之外没有保留的历史记录。
 
 ## Public meeting polls
 
@@ -516,7 +546,10 @@ Withdraw takes the token and revision. On `poll_changed`, read and reconcile bef
 submission; never automatically retry a lost response. Reminder opt-out takes the separate
 mail opt-out token and cannot access ballots. Admission requests share 10 per minute per
 trusted IP across REST/MCP/processes; reads use 120 and vote/withdraw/opt-out share 30.
-Host creation and lifecycle transports and the browser voting page are not available yet.
+The [browser voting page](https://hourmere.com/docs/meeting-poll-voting) is available without
+a flag; host creation and lifecycle transports are not available yet. Polls cannot yet be
+created through the product. The page hides aggregate counts for withdrawn voters; the
+public read API retains its verified-credential behavior.
 
 中文：公开投票工具已提供，无功能开关。读取需要 `read`、`bookings` 或 `full` 密钥，
 写入需要 `bookings` 或 `full`；MCP 连接仍需认证，公开 REST 不要求登录或密钥。
@@ -527,7 +560,8 @@ Host creation and lifecycle transports and the browser voting page are not avail
 原令牌，不轮换或延长有效期。验证需明确提交，首次返回的新 `votingToken` 须保密。
 投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
 `poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
-管理端创建/生命周期接口和浏览器投票页面尚未提供。
+浏览器投票页面已提供，无功能开关；管理端创建/生命周期接口尚未提供，产品仍无法创建投票。
+页面对已撤回者隐藏汇总，公开读取 API 的已验证凭证行为保持不变。
 
 ## Duplicate an event type
 

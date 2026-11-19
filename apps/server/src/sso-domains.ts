@@ -157,8 +157,8 @@ function summary(row: Domain, now: string) {
     nextCheckAt: row.next_check_at ? new Date(row.next_check_at).toISOString() : null,
   }
 }
-function digest(
-  deps: SsoDomainDeps,
+export function ssoDomainChallengeDigest(
+  deps: Pick<SsoDomainDeps, 'publicUrl'>,
   row: Pick<Domain, 'organization_id' | 'name' | 'generation'>,
   value: string,
 ) {
@@ -227,7 +227,7 @@ export async function createSsoDomainChallenge(
         const expiresAt = new Date(
           Date.parse(now) + SSO_DOMAIN_LIMITS.domainChallengeLifetime * 1000,
         ).toISOString()
-        const challengeDigest = digest(
+        const challengeDigest = ssoDomainChallengeDigest(
           deps,
           { organization_id: p.organization.id, name, generation: nextGeneration },
           txtValue,
@@ -328,7 +328,7 @@ export async function verifySsoDomain(
           )
           outcome = answers.some((parts) =>
             timingSafeEqual(
-              Buffer.from(digest(deps, row, parts.join('')), 'hex'),
+              Buffer.from(ssoDomainChallengeDigest(deps, row, parts.join('')), 'hex'),
               Buffer.from(row.challenge_digest, 'hex'),
             ),
           )
