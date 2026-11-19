@@ -833,6 +833,7 @@ current team owners or admins can open a poll's results and review who voted for
 A deadline notice takes you to the results in that poll's space. Sign in and switch spaces
 if prompted. The matrix keeps the three vote counts separate. In an aggregate poll, verified
 voters can see those totals, and a small group can make individual votes easy to infer.
+Candidate times include UTC offsets to distinguish repeated hours after a clock change.
 
 Choose a time, a booker and up to ten other eligible voters when the event allows guests.
 A selected voter who chose **If need be** at that time requires explicit acknowledgment.
@@ -847,7 +848,7 @@ preserves that booking.
 中文：请在对应的个人或团队空间打开**会议投票**。个人活动所有者和当前团队所有者或
 管理员可以查看每位投票者为各时段所作的选择。截止通知会打开投票所属空间的结果页，
 必要时请先登录并切换空间。汇总投票会向已验证的投票者显示三类票数，人数较少时仍可能
-推断个人选择。
+推断个人选择。候选时段会显示 UTC 偏移，方便区分时钟回拨时重复的本地时间。
 
 选定时段和预约人后，如果活动允许添加访客，还可选择最多十名符合条件的投票者。任何
 入选者在该时段选择了“必要时可以”，都需要明确确认。页面显示的可用性仅供参考，排定时

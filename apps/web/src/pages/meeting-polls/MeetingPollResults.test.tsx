@@ -401,6 +401,27 @@ describe('meeting poll results', () => {
     expect(server.to(postFinalize)[1]?.body).toMatchObject({ slotId: times[2].id })
   })
 
+  it('distinguishes repeated local times in the matrix and picker', async () => {
+    const first = { ...times[0], startAt: '2027-11-07T05:00:00Z', endAt: '2027-11-07T05:30:00Z' }
+    const second = {
+      ...times[1],
+      startAt: '2027-11-07T06:00:00Z',
+      endAt: '2027-11-07T06:30:00Z',
+      availability: 'available',
+    } as const
+    const results = sampleResults(
+      { displayTimeZone: 'America/New_York' },
+      { candidates: [first, second] },
+    )
+    fakeApi({ [getResults]: () => json(200, results) })
+    renderResults()
+    const choices = await time()
+    expect(choices.options.item(1)?.text).toContain('GMT-4')
+    expect(choices.options.item(2)?.text).toContain('GMT-5')
+    expect(screen.getByRole('columnheader', { name: /GMT-4/ })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /GMT-5/ })).toBeTruthy()
+  })
+
   it('caps the selection at the booker plus the allowed additional attendees', async () => {
     const user = userEvent.setup()
     const extras = Array.from({ length: MAX_GUESTS + 1 }, (_, index) =>

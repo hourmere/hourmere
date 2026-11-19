@@ -23,6 +23,7 @@ import {
   POLL_STATUS,
   type PollResults,
 } from './poll-results-api.ts'
+import { pollTimeRange } from './poll-time.ts'
 import './meeting-poll-results.css'
 
 type Props = {
@@ -324,14 +325,14 @@ function ResultsView({
         {chosenSlot && (
           <p>
             {t('Original scheduled time: {time}', {
-              time: format.dateTimeRange(chosenSlot.startAt, chosenSlot.endAt),
+              time: pollTimeRange(format, chosenSlot.startAt, chosenSlot.endAt),
             })}
           </p>
         )}
         {movedBooking && (
           <p>
             {t('Current booking time: {time}', {
-              time: format.dateTimeRange(booking.start, booking.end),
+              time: pollTimeRange(format, booking.start, booking.end),
             })}
           </p>
         )}

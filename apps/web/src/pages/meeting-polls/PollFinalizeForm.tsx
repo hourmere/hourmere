@@ -10,6 +10,7 @@ import {
   type PollCandidate,
   type PollResults,
 } from './poll-results-api.ts'
+import { pollTimeRange } from './poll-time.ts'
 
 export function PollFinalizeForm({
   results,
@@ -108,7 +109,7 @@ export function PollFinalizeForm({
                     disabled={candidate.availability !== 'available'}
                   >
                     {t('{time} ({availability})', {
-                      time: format.dateTimeRange(candidate.startAt, candidate.endAt),
+                      time: pollTimeRange(format, candidate.startAt, candidate.endAt),
                       availability: t(
                         AVAILABILITY_LABEL[candidate.availability] ?? AVAILABILITY_LABEL.unknown,
                       ),

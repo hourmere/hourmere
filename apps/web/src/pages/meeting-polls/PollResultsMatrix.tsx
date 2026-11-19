@@ -3,6 +3,7 @@ import { BreakableText } from '../../components/BreakableText.tsx'
 import { zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { PollCandidate, PollResults } from './poll-results-api.ts'
+import { pollTimeRange } from './poll-time.ts'
 
 const VOTER_STATUS = {
   pending: 'Verification pending',
@@ -64,7 +65,7 @@ export function PollResultsMatrix({
               {candidates.map((candidate) => (
                 <th scope="col" key={candidate.id}>
                   <time dateTime={candidate.startAt}>
-                    {format.dateTimeRange(candidate.startAt, candidate.endAt)}
+                    {pollTimeRange(format, candidate.startAt, candidate.endAt)}
                   </time>
                   {showAvailability && (
                     <span className="meeting-poll-cell-detail">
