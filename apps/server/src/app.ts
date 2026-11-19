@@ -22,6 +22,7 @@ import {
   MeetingPollKeyMismatchError,
   MeetingPollRateLimitError,
   ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
+  RoutingAdmissionError,
 } from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
 import { etag } from 'hono/etag'
@@ -53,6 +54,7 @@ import {
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 import type { MailboxProofModule } from './sso-mailbox-proof.ts'
+import { readSsoMe, type SsoMeDeps } from './sso-me.ts'
 import type { OidcSignInModule } from './sso-oidc-sign-in.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 import {
@@ -105,6 +107,7 @@ export interface AppDeps {
    */
   ssoMailboxProof?: MailboxProofModule | undefined
   ssoOidcSignIn?: OidcSignInModule | undefined
+  ssoMe?: SsoMeDeps | undefined
 }
 
 const Health = z
@@ -196,6 +199,7 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
+  if (isPublicRoutingFormPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isOneTimeLinkPath(c.req.path) || isSlackDestinationPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
   if (c.req.path.includes('/provisioning-tokens')) return c.json({ error: 'invalid_request' }, 400)
@@ -320,9 +324,10 @@ const jsonTextGuard = createMiddleware(async (c, next) => {
       }
       if (hasUnsafeJsonText(parsed)) {
         const message = 'Text in the request must not contain NUL characters or malformed Unicode'
-        const field = isOneTimeLinkPath(c.req.path)
-          ? undefined
-          : successRedirectUnsafeField(parsed, hasUnsafeJsonText)
+        const field =
+          isOneTimeLinkPath(c.req.path) || isPublicRoutingFormPath(c.req.path)
+            ? undefined
+            : successRedirectUnsafeField(parsed, hasUnsafeJsonText)
         throw new HTTPException(400, {
           message,
           ...(field && { res: c.json({ error: 'invalid_request', message, field }, 400) }),
@@ -409,6 +414,7 @@ export function createApp({
   waitlist,
   ssoMailboxProof,
   ssoOidcSignIn,
+  ssoMe,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Generate correlation IDs locally; caller headers may contain private or forged values.
@@ -424,7 +430,7 @@ export function createApp({
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
-  const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: string) => {
+  const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: () => string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
     if (isPublicRoutingFormPath(c.req.path)) {
       const write = level === 'ERROR' ? console.error : console.warn
@@ -433,24 +439,25 @@ export function createApp({
       )
       return
     }
+    const ssoTrust = c.var.oidcInvitationAcceptance || isSsoTrustPath(c.req.path)
     const text = c.req.path.toLowerCase().includes('/meeting-polls')
       ? 'private meeting poll request failed'
       : isCalDavConnectionPath(c.req.path)
         ? '[private CalDAV diagnostic omitted]'
-        : isSsoTrustPath(c.req.path)
+        : ssoTrust
           ? '[private SSO diagnostic omitted]'
           : isSlackDestinationPath(c.req.path)
             ? '[private Slack diagnostic omitted]'
             : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
               ? 'private waitlist request failed'
-              : detail
+              : detail()
     const path = c.req.path.toLowerCase().includes('/meeting-polls')
       ? '/api/v1/meeting-polls/[redacted]'
       : isOneTimeCapabilityPath(c.req.path)
         ? '/book/[redacted]'
         : isOneTimeLinkPath(c.req.path) ||
             isSlackDestinationPath(c.req.path) ||
-            isSsoTrustPath(c.req.path) ||
+            ssoTrust ||
             isCalDavConnectionPath(c.req.path)
           ? routePath(c)
           : c.req.path
@@ -472,9 +479,8 @@ export function createApp({
     logLine(
       c,
       'ERROR',
-      isSlackDestinationPath(c.req.path)
-        ? '[private Slack diagnostic omitted]'
-        : `${label}${ssoStorageDiagnostic(detail) ?? inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+      () =>
+        `${label}${ssoStorageDiagnostic(detail) ?? inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
     )
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
@@ -488,7 +494,7 @@ export function createApp({
     // closed request") for the request log. Any other error is logged as usual, even when
     // the client has left meanwhile.
     if (c.req.raw.signal.aborted && isDisconnect(err)) {
-      logLine(c, 'WARN', `client closed the connection before the answer (${summary(err)})`)
+      logLine(c, 'WARN', () => `client closed the connection before the answer (${summary(err)})`)
       return new Response(null, { status: 499 })
     }
     if (err instanceof HTTPException && err.status < 500) {
@@ -499,6 +505,7 @@ export function createApp({
         err.message &&
           !isOneTimeLinkPath(c.req.path) &&
           !isWaitlistAdmissionPath(c.req.path) &&
+          !isPublicRoutingFormPath(c.req.path) &&
           !c.req.path.toLowerCase().includes('/meeting-polls') &&
           !isSlackDestinationPath(c.req.path) &&
           !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
@@ -512,6 +519,7 @@ export function createApp({
         c.header('Retry-After', String(err.retryAfterSeconds))
       return c.json({ error: 'rate_limited' }, 429)
     }
+    if (err instanceof RoutingAdmissionError) return c.json({ error: 'rate_limited' }, 429)
     if (err instanceof MeetingPollKeyMismatchError)
       return c.json({ error: 'meeting_poll_key_mismatch' }, 503)
     if (err instanceof ScimTokenError)
@@ -546,6 +554,7 @@ export function createApp({
       }
       if (
         isWaitlistAdmissionPath(c.req.path) ||
+        isPublicRoutingFormPath(c.req.path) ||
         isSlackDestinationPath(c.req.path) ||
         c.req.path.toLowerCase().includes('/meeting-polls')
       )
@@ -555,7 +564,7 @@ export function createApp({
     // Every database connection stayed busy (or the database did not answer) for the whole
     // DATABASE_CONNECTION_TIMEOUT. Temporary: the client may retry. One line, no stack.
     if (isConnectionTimeout(err)) {
-      logLine(c, 'ERROR', `database connection unavailable (${summary(err)})`)
+      logLine(c, 'ERROR', () => `database connection unavailable (${summary(err)})`)
       c.header('Retry-After', DATABASE_RETRY_AFTER_SECONDS)
       return c.json({ error: 'service_unavailable' }, 503)
     }
@@ -570,6 +579,10 @@ export function createApp({
   const resolveClientIp = clientIp(trustedProxies)
   // Hard-off answers even precede the general auth credential and body checks.
   ssoOidcSignIn?.mount({ app, publicUrl, requestLogger, clientIp: resolveClientIp })
+  app.use('/api/*', resolveClientIp)
+  app.use('/api/v1/*', noStoreByDefault)
+  // Routing submissions count even when a credential or declared body length is refused.
+  app.use('/api/v1/*', routeRateLimits({ beforeBodyLimit: true }))
   // Provisioning credentials never fall back to a browser cookie on another surface.
   app.use('*', async (c, next) => {
     if (
@@ -595,9 +608,6 @@ export function createApp({
     c.res.headers.set('Referrer-Policy', 'no-referrer')
   })
   app.use('/api/*', requestLogger)
-  app.use('/api/*', resolveClientIp)
-  // First on /api/v1, so it also covers what the middleware below and onError answer.
-  app.use('/api/v1/*', noStoreByDefault)
   // 64 KB unless the route declares more (routeBodyLimit). A Content-Length over the limit
   // gets 413 here; any other body is counted while whoever needs it reads it, so the size
   // check precedes every read without reading anything itself.
@@ -609,9 +619,18 @@ export function createApp({
   // request body itself.
   app.use('/api/v1/*', jsonTextGuard)
   app.use('/api/v1/*', unclassifiedScopeGuard)
-  // The MCP endpoint (and anything under it) is logged, body-limited and never cached like
-  // /api/v1, 413s included; it applies its own checks.
-  app.use('/mcp/*', noStoreByDefault, requestLogger, resolveClientIp, apiBodyLimit())
+  // MCP replies can contain private capabilities. Apply privacy headers even to refusals.
+  app.use(
+    '/mcp/*',
+    noStoreByDefault,
+    async (c, next) => {
+      await next()
+      c.res.headers.set('Referrer-Policy', 'no-referrer')
+    },
+    requestLogger,
+    resolveClientIp,
+    apiBodyLimit(),
+  )
   app.use('/.well-known/*', resolveClientIp)
 
   app.post('/api/sms/twilio', (c) => (smsInbound ? smsInbound(c.req.raw) : c.notFound()))
@@ -660,6 +679,7 @@ export function createApp({
     }
   }
   ssoMailboxProof?.mount({ app, resolveCaller, publicUrl })
+  ssoOidcSignIn?.mountInvitationAcceptance(app, publicUrl)
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),
   )
@@ -691,7 +711,12 @@ export function createApp({
       429: { description: "The API key's rate limit is used up", content: json(ErrorBody) },
     },
   })
-  app.openapi(meRoute, (c) => c.json(describeCaller(c.var.principal), 200))
+  app.openapi(meRoute, async (c) => {
+    const principal = c.var.principal
+    const identity = describeCaller(principal)
+    const sso = ssoMe && (await readSsoMe(ssoMe, principal, c.req.raw.headers, publicUrl))
+    return c.json(sso ? { ...identity, sso } : identity, 200)
+  })
 
   for (const register of routes) register({ app, caller })
   mcp?.mount({ app, resolveCaller, publicUrl })

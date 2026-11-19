@@ -69,11 +69,12 @@ export function endpoint(value: string | undefined): URL {
   }
 }
 
-function safeCode(value: unknown, fallback: string): string {
-  // A signing secret can resemble a stable error code if it contains only lowercase characters.
+function safeCode(value: unknown, fallback: string, tool?: string): string {
+  // A signing secret or routing token can resemble a lowercase error code.
   return typeof value === 'string' &&
     /^[a-z][a-z0-9_]{0,79}$/.test(value) &&
-    !/whsec_[a-z0-9_]{43}/.test(value)
+    !/whsec_[a-z0-9_]{43}/.test(value) &&
+    !(tool === 'route_lead' && value.length === 43)
     ? value
     : fallback
 }
@@ -254,7 +255,7 @@ export async function callTool(options: {
     if (!response.ok) {
       const retry = response.headers.get('retry-after')
       throw new CliError(
-        safeCode(isObject(reply) ? reply.error : undefined, 'http_error'),
+        safeCode(isObject(reply) ? reply.error : undefined, 'http_error', tool),
         response.status,
         retry && /^\d{1,9}$/.test(retry) ? retrySeconds(Number(retry)) : undefined,
       )
@@ -286,7 +287,7 @@ export async function callTool(options: {
       } catch {
         // Neither server errors nor SDK messages are safe to echo into a terminal.
       }
-      const code = safeCode(isObject(detail) ? detail.error : undefined, 'tool_error')
+      const code = safeCode(isObject(detail) ? detail.error : undefined, 'tool_error', tool)
       throw new CliError(
         code,
         undefined,

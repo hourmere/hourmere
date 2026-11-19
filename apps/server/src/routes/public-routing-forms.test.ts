@@ -6,18 +6,28 @@ import { createFixtures, createTestTeam, createTestUser } from '@hourmere/schedu
 import createClient from 'openapi-fetch'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { RoutingForm } from '../../../../packages/scheduling/src/routing-form-service.ts'
-import type { paths } from '../../../web/src/api/schema.d.ts'
+import type { components, paths } from '../../../web/src/api/schema.d.ts'
 import { createApp } from '../app.ts'
+import { chunkedBody } from '../chunked-body.ts'
 import { productRoutes } from '../server.ts'
 import { publicRoutes } from './public.ts'
-import { openApiDocument, syntheticSessionCookie } from './test-app.ts'
+import {
+  escapedJson,
+  openApiDocument,
+  responseAndRequestStrictness,
+  syntheticSessionCookie,
+} from './test-app.ts'
 
 const publicUrl = 'https://routing.example.test'
+const routingSecret = 'synthetic-public-routing-receipt-fixture'
 const personalTemplate = '/api/v1/public/-/routing/{handle}/{slug}'
 const teamTemplate = '/api/v1/public/-/routing/teams/{teamSlug}/{slug}'
+const personalSubmissionTemplate = `${personalTemplate}/route` as const
+const teamSubmissionTemplate = `${teamTemplate}/route` as const
 const personalPath = '/api/v1/public/-/routing/route/consultation'
 const teamPath = '/api/v1/public/-/routing/teams/Advisory/consultation'
 const readPaths = [personalPath, teamPath]
+const submissionPaths = readPaths.map((path) => `${path}/route`)
 const formNotFound = { error: 'routing_form_not_found' }
 const disabled = { error: 'routing_forms_disabled' }
 const unauthorized = { ok: false, error: 'unauthorized', setCookie: [] } as const
@@ -38,11 +48,26 @@ function app(
 function product(db: Db, routingFormsEnabled?: boolean) {
   return productRoutes({
     db,
+    publicUrl,
+    routingSecret,
     notify: async () => {},
     socialProviders: {},
     invitationMailLimits: { secret: 'synthetic-public-routing-fixture' },
     meetingPollSecret: 'synthetic-poll-collision-fixture',
     ...(routingFormsEnabled === undefined ? {} : { routingFormsEnabled }),
+  })
+}
+
+function post(
+  server: ReturnType<typeof createApp>,
+  path: string,
+  body: string,
+  headers: Record<string, string> = {},
+) {
+  return server.request(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body,
   })
 }
 
@@ -87,6 +112,55 @@ describe('public routing form REST transport', () => {
       'title',
       'versionId',
     ])
+  })
+
+  it('documents strict submission requests and both public outcomes on both routes', async () => {
+    const doc = await openApiDocument(app(product({} as Db)))
+    for (const [path, operationId, addressParameter] of [
+      [personalSubmissionTemplate, 'routeLead', 'handle'],
+      [teamSubmissionTemplate, 'routeTeamLead', 'teamSlug'],
+    ] as const) {
+      expect(Object.keys(doc.paths[path] ?? {})).toEqual(['post'])
+      expect(doc.paths[path]?.post).toMatchObject({
+        operationId,
+        security: [{}, { apiKey: [] }],
+        parameters: [
+          { name: addressParameter, in: 'path', required: true },
+          { name: 'slug', in: 'path', required: true },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/RoutingSubmission' } },
+          },
+        },
+        responses: {
+          200: {
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RoutingSubmissionResponse' },
+              },
+            },
+          },
+          400: {},
+          401: {},
+          403: {},
+          404: { description: expect.stringContaining('routing_forms_disabled') },
+          409: { description: expect.stringContaining('routing_form_changed') },
+          413: {},
+          429: {},
+        },
+      })
+    }
+    expect(
+      responseAndRequestStrictness(doc, [personalSubmissionTemplate, teamSubmissionTemplate]),
+    ).toEqual({ closedResponses: [], openRequests: [] })
+    expect(doc.components.schemas.RoutingSubmissionResponse).toMatchObject({
+      oneOf: [
+        { required: ['kind', 'message'] },
+        { required: ['kind', 'routeToken', 'expiresAt', 'continuationUrl'] },
+      ],
+    })
   })
 
   it.each(readPaths)(
@@ -150,23 +224,97 @@ describe('public routing form REST transport', () => {
       log.mockRestore()
     }
   })
+
+  it.each(submissionPaths)(
+    'shares the submission bucket and counts every refusal from %s before reading a body',
+    async (path) => {
+      const server = app([
+        publicRoutes({
+          db: {} as Db,
+          routingFormsEnabled: true,
+          routingSecret,
+          rateLimits: { routingSubmission: { limit: 3, windowSeconds: 60 } },
+        }),
+      ])
+      const other = submissionPaths.find((candidate) => candidate !== path) as string
+      const refused = await post(server, path, '{}', { authorization: 'Bearer hm_invalid' })
+      expect(refused.headers.get('WWW-Authenticate')).toBe('Bearer')
+      await assertReply(refused, 401, { error: 'unauthorized' })
+      await assertReply(await post(server, other, '{}'), 400, { error: 'invalid_request' })
+      await assertReply(await post(server, path, '{}', { 'content-length': '65537' }), 413, {
+        error: 'payload_too_large',
+      })
+      for (const candidate of submissionPaths) {
+        const { init, pulled } = chunkedBody('{}')
+        const response = await server.request(candidate, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'X-Forwarded-For': '203.0.113.20' },
+          ...init,
+        })
+        expect(Number(response.headers.get('Retry-After'))).toBeGreaterThan(0)
+        await assertReply(response, 429, { error: 'rate_limited' })
+        expect(pulled()).toBe(0)
+      }
+    },
+  )
+
+  it('omits submitted answers, capability tokens and private route addresses from diagnostics', async () => {
+    const answer = 'synthetic sensitive routing contact'
+    const token = 'synthetic private routing capability'
+    const body = JSON.stringify({ versionId: randomUUID(), answers: { [randomUUID()]: answer } })
+    const lookup = vi.fn(() => {
+      throw new Error(`Database diagnostic containing ${body} and ${token}`)
+    })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const server = app(product({ selectFrom: lookup } as unknown as Db, true))
+      for (const path of submissionPaths) {
+        await assertReply(
+          await post(server, `${path}?token=${encodeURIComponent(token)}`, body),
+          500,
+          { error: 'internal_error' },
+        )
+        await assertReply(await post(server, path, JSON.stringify({ [answer]: token })), 400, {
+          error: 'invalid_request',
+        })
+      }
+      expect(lookup).toHaveBeenCalledTimes(2)
+      expect(log.mock.calls).toEqual([])
+      expect(error.mock.calls).toHaveLength(2)
+      for (const [line] of error.mock.calls) {
+        expect(line).toContain('POST /api/v1/public/-/routing/[redacted]')
+        expect(line).not.toContain('consultation')
+        expect(line).not.toContain(answer)
+        expect(line).not.toContain(token)
+      }
+    } finally {
+      log.mockRestore()
+      error.mockRestore()
+    }
+  })
 })
 
-describe.skipIf(!process.env.DATABASE_URL)('public routing form REST metadata', () => {
+describe.skipIf(!process.env.DATABASE_URL)('public routing form REST with published forms', () => {
   let owned: TestDatabase
   let db: Db
   let enabled: ReturnType<typeof createApp>
   let off: ReturnType<typeof createApp>
   let personalForm: RoutingForm
   let teamForm: RoutingForm
+  let personalOwner: Principal
+  let teamOwner: Principal
+  let teamEvent: string
   const option = { id: randomUUID(), label: 'Advice' }
+  const otherOption = { id: randomUUID(), label: 'Other' }
+  const selectQuestionId = randomUUID()
   const questions = [
     {
-      id: randomUUID(),
+      id: selectQuestionId,
       type: 'select',
       label: 'What are you looking for?',
       required: true,
-      options: [option],
+      options: [option, otherOption],
     },
     { id: randomUUID(), type: 'email', label: 'Work email', required: false },
     { id: randomUUID(), type: 'short_text', label: 'Your name', required: false },
@@ -182,7 +330,7 @@ describe.skipIf(!process.env.DATABASE_URL)('public routing form REST metadata', 
     return principal ? { ok: true, principal, setCookie: [] } : { ...unauthorized, setCookie: [] }
   }
 
-  async function configure(principal: Principal, draft: Record<string, unknown>, publish = true) {
+  async function ownerHeaders(principal: Principal) {
     const cookie = randomUUID()
     const { id: sessionId } = await db
       .insertInto('auth.session')
@@ -196,12 +344,16 @@ describe.skipIf(!process.env.DATABASE_URL)('public routing form REST metadata', 
       .returning('id')
       .executeTakeFirstOrThrow()
     credentials.set(cookie, { ...principal, kind: 'session', sessionId })
-    const headers = {
+    return {
       cookie: syntheticSessionCookie(cookie),
       origin: publicUrl,
       'content-type': 'application/json',
       'X-Expected-Organization-Id': principal.organization.id,
     }
+  }
+
+  async function configure(principal: Principal, draft: Record<string, unknown>, publish = true) {
+    const headers = await ownerHeaders(principal)
     const created = await enabled.request('/api/v1/routing-forms', {
       method: 'POST',
       headers,
@@ -267,26 +419,26 @@ describe.skipIf(!process.env.DATABASE_URL)('public routing form REST metadata', 
       slug: 'consultation',
       title: 'Personal booking',
     })
-    await fixtures.eventType(team.id, null, {
+    teamEvent = await fixtures.eventType(team.id, null, {
       slug: 'consultation',
       title: 'Team booking',
       hosts: [{ userId: owner.id }],
     })
     const hidden = await fixtures.eventType(ownerOrg, owner.id, { slug: 'private-hidden-target' })
     await db.updateTable('event_types').set({ is_hidden: true }).where('id', '=', hidden).execute()
-    personalForm = await configure(owner.principal, {
-      description: 'Which consultation is right for you?',
-      rules: [
-        {
-          id: randomUUID(),
-          conditions: [{ questionId: questions[0]?.id, operator: 'equals', value: option.id }],
-          target: { kind: 'event', eventTypeId: hidden, mappings: [] },
-        },
-      ],
+    const rule = (eventTypeId: string) => ({
+      id: randomUUID(),
+      conditions: [{ questionId: selectQuestionId, operator: 'equals', value: option.id }],
+      target: { kind: 'event', eventTypeId, mappings: [] },
     })
-    const teamPrincipal = team.as(owner)
-    teamPrincipal.organization.slug = 'Advisory'
-    teamForm = await configure(teamPrincipal, { title: 'Team consultation' })
+    personalOwner = owner.principal
+    personalForm = await configure(personalOwner, {
+      description: 'Which consultation is right for you?',
+      rules: [rule(hidden)],
+    })
+    teamOwner = team.as(owner)
+    teamOwner.organization.slug = 'Advisory'
+    teamForm = await configure(teamOwner, { title: 'Team consultation', rules: [rule(teamEvent)] })
     await configure(owner.principal, { slug: 'draft' }, false)
     await configure(outsider.principal, {})
     for (const apiKeyScope of ['read', 'bookings', 'full'] as const) {
@@ -306,6 +458,225 @@ describe.skipIf(!process.env.DATABASE_URL)('public routing form REST metadata', 
 
   afterAll(async () => {
     await owned?.drop()
+  })
+
+  async function receiptCount(formId: string) {
+    const { count } = await db
+      .selectFrom('routing_receipts')
+      .select((eb) => eb.fn.countAll().as('count'))
+      .where('form_id', '=', formId)
+      .executeTakeFirstOrThrow()
+    return Number(count)
+  }
+
+  it('mints same-origin continuations through both generated operations and returns messages without a receipt', async () => {
+    const server = app(product(db, true), resolveCaller)
+    const client = createClient<paths>({
+      baseUrl: 'https://request-host.example.test',
+      fetch: async (request) => server.fetch(request),
+    })
+    const personalBefore = await receiptCount(personalForm.id)
+    const teamBefore = await receiptCount(teamForm.id)
+    const input = (form: RoutingForm) => ({
+      versionId: form.publishedVersionId as string,
+      answers: { [selectQuestionId]: option.id },
+    })
+    const personal = await client.POST(personalSubmissionTemplate, {
+      params: { path: { handle: 'route', slug: 'consultation' } },
+      body: input(personalForm),
+    })
+    const team = await client.POST(teamSubmissionTemplate, {
+      params: { path: { teamSlug: 'Advisory', slug: 'consultation' } },
+      body: input(teamForm),
+    })
+    for (const result of [personal, team]) {
+      expect(result.response.status).toBe(200)
+      expect(result.response.headers.get('Cache-Control')).toBe('no-store')
+      expect(result.response.headers.get('Referrer-Policy')).toBe('no-referrer')
+      expect(result.data?.kind).toBe('continuation')
+      if (result.data?.kind !== 'continuation') throw new Error('Expected a routing receipt')
+      expect(Object.keys(result.data).sort()).toEqual([
+        'continuationUrl',
+        'expiresAt',
+        'kind',
+        'routeToken',
+      ])
+      expect(/^[A-Za-z0-9_-]{43}$/.test(result.data.routeToken)).toBe(true)
+      expect(
+        result.data.continuationUrl ===
+          `${publicUrl}/route/continue#token=${encodeURIComponent(result.data.routeToken)}`,
+      ).toBe(true)
+      expect(Temporal.Instant.from(result.data.expiresAt).epochMilliseconds).toBeGreaterThan(
+        Date.now(),
+      )
+    }
+    await assertReply(
+      await post(
+        server,
+        `${teamPath}/route`,
+        JSON.stringify({ ...input(teamForm), answers: { [selectQuestionId]: otherOption.id } }),
+      ),
+      200,
+      { kind: 'message', message: 'private-fallback-message' },
+    )
+    expect(await receiptCount(personalForm.id)).toBe(personalBefore + 1)
+    expect(await receiptCount(teamForm.id)).toBe(teamBefore + 1)
+  })
+
+  it.each(readPaths)('accepts only bookings/full bearers for %s', async (path) => {
+    const server = app(product(db, true), resolveCaller)
+    const form = path === personalPath ? personalForm : teamForm
+    const before = await receiptCount(form.id)
+    const address = `${path}/route`
+    const body = JSON.stringify({
+      versionId: form.publishedVersionId,
+      answers: { [selectQuestionId]: option.id },
+    })
+    const cookie = syntheticSessionCookie('outsider-session')
+    for (const authorization of ['Bearer hm_invalid', 'Basic nonsense', '']) {
+      const response = await post(server, address, body, { authorization, cookie })
+      expect(response.headers.get('WWW-Authenticate')).toBe('Bearer')
+      await assertReply(response, 401, { error: 'unauthorized' })
+    }
+    const denied = await post(server, address, body, { authorization: 'Bearer hm_read', cookie })
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toMatchObject({ error: 'insufficient_scope' })
+    for (const answers of [
+      `{"${selectQuestionId}":"${option.id}","__proto__":"unknown"}`,
+      `{"${selectQuestionId}":"${option.id}","unknown":"sensitive"}`,
+      `{"${selectQuestionId}":{"nested":{"value":"sensitive"}}}`,
+    ]) {
+      const response = await post(
+        server,
+        address,
+        `{"versionId":"${form.publishedVersionId}","answers":${answers}}`,
+      )
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({
+        error: expect.stringMatching(/^invalid_(request|routing_answers)$/),
+      })
+    }
+    expect(await receiptCount(form.id)).toBe(before)
+    for (const scope of ['bookings', 'full']) {
+      const response = await post(server, address, body, { authorization: `Bearer hm_${scope}` })
+      expect(response.status).toBe(200)
+      expect(((await response.json()) as { kind?: string }).kind).toBe('continuation')
+    }
+    expect(await receiptCount(form.id)).toBe(before + 2)
+  })
+
+  it.each(readPaths)('enforces the byte cap for maximum valid submissions to %s', async (path) => {
+    const server = app(product(db, true), resolveCaller)
+    const principal = path === personalPath ? personalOwner : teamOwner
+    const maxQuestions = Array.from({ length: 20 }, (_, i) => ({
+      id: randomUUID(),
+      label: `Question ${i + 1}`,
+      type: 'short_text',
+      required: true,
+    }))
+    const form = await configure(principal, { slug: 'max-answers', questions: maxQuestions })
+    const route = `${path.replace(/consultation$/, 'max-answers')}/route`
+    const input = {
+      versionId: form.publishedVersionId,
+      answers: Object.fromEntries(maxQuestions.map(({ id }) => [id, '汉'.repeat(500)])),
+    }
+    const unescaped = JSON.stringify(input)
+    const escaped = escapedJson(input)
+    expect(Buffer.byteLength(unescaped)).toBe(30_904)
+    expect(Buffer.byteLength(escaped)).toBe(64_764)
+    const limit = 65_536
+    const atLimit = escaped.padEnd(limit)
+    for (const body of [unescaped, escaped, atLimit]) {
+      await assertReply(await post(server, route, body), 200, {
+        kind: 'message',
+        message: 'private-fallback-message',
+      })
+    }
+    const tooBig = `${atLimit} `
+    await assertReply(
+      await post(server, route, tooBig, { 'content-length': String(limit + 1) }),
+      413,
+      { error: 'payload_too_large' },
+    )
+    const { init } = chunkedBody(tooBig)
+    await assertReply(
+      await server.request(route, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        ...init,
+      }),
+      413,
+      { error: 'payload_too_large' },
+    )
+  })
+
+  it('permits refreshing a stale version without minting a receipt for it', async () => {
+    const server = app(product(db, true), resolveCaller)
+    const path = '/api/v1/public/-/routing/teams/Advisory/refresh'
+    const form = await configure(teamOwner, {
+      slug: 'refresh',
+      fallback: { kind: 'event', eventTypeId: teamEvent },
+    })
+    const old = await server.request(path)
+    expect(old.status).toBe(200)
+    const { versionId: oldVersion } =
+      (await old.json()) as components['schemas']['PublicRoutingForm']
+    const published = await post(
+      server,
+      `/api/v1/routing-forms/${form.id}/publish`,
+      JSON.stringify({ expectedRevision: form.draftRevision }),
+      await ownerHeaders(teamOwner),
+    )
+    expect(published.status).toBe(201)
+    const answers = { [selectQuestionId]: option.id }
+    await assertReply(
+      await post(server, `${path}/route`, JSON.stringify({ versionId: oldVersion, answers })),
+      409,
+      { error: 'routing_form_changed' },
+    )
+    expect(await receiptCount(form.id)).toBe(0)
+    const fresh = await server.request(path)
+    expect(fresh.status).toBe(200)
+    const { versionId, questions: publishedQuestions } =
+      (await fresh.json()) as components['schemas']['PublicRoutingForm']
+    expect(versionId).not.toBe(oldVersion)
+    expect(publishedQuestions[0]?.label).toBe('private-unpublished-label')
+    const routed = await post(server, `${path}/route`, JSON.stringify({ versionId, answers }))
+    expect(routed.status).toBe(200)
+    expect(((await routed.json()) as { kind?: string }).kind).toBe('continuation')
+    expect(await receiptCount(form.id)).toBe(1)
+  })
+
+  it('refuses both submissions while off before reading answers or issuing receipts', async () => {
+    const server = app(product(db), resolveCaller)
+    for (const [path, form] of [
+      [personalPath, personalForm],
+      [teamPath, teamForm],
+    ] as const) {
+      const before = await receiptCount(form.id)
+      const body = JSON.stringify({
+        versionId: form.publishedVersionId,
+        answers: { [selectQuestionId]: option.id },
+      })
+      for (const authorization of [undefined, 'Bearer hm_read', 'Bearer hm_bookings']) {
+        const { init, pulled } = chunkedBody(body)
+        await assertReply(
+          await server.request(`${path}/route`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              ...(authorization === undefined ? {} : { authorization }),
+            },
+            ...init,
+          }),
+          404,
+          disabled,
+        )
+        expect(pulled()).toBe(0)
+      }
+      await assertReply(await post(server, `${path}-missing/route`, '{}'), 404, disabled)
+      expect(await receiptCount(form.id)).toBe(before)
+    }
   })
 
   it('returns the version and published questions through both generated operations', async () => {

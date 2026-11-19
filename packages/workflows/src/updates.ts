@@ -1,20 +1,16 @@
 import { ApiKeyScopeError } from '@hourmere/auth'
-import { parseQuestions } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { hardOffWorkflowAuditPort } from './audit.ts'
 import { WorkflowConditionsSchema } from './conditions.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
-import {
-  validateWorkflowDefinition,
-  WorkflowDefinitionSchema,
-  workflowReferences,
-} from './definition.ts'
+import { WorkflowDefinitionSchema } from './definition.ts'
 import { workflowOperation } from './hard-off.ts'
 import { WORKFLOW_MAX_ENABLED_PER_EVENT } from './limits.ts'
 import { uuidSchema } from './ownership.ts'
 import { type WorkflowView, workflowView } from './reads.ts'
+import { validateWorkflowWriteDefinition } from './write-definition.ts'
 
 export const UpdateWorkflowInputSchema = WorkflowDefinitionSchema.partial().extend({
   expectedRevision: z.number().int().min(1),
@@ -78,45 +74,10 @@ export async function updateWorkflowDefinition(
       enabled: current.enabled,
       ...patch,
     })
-    if (candidate.actions.some((action) => action.type === 'webhook')) throw invalid()
     const disableOnly = patch.enabled === false && Object.keys(patch).length === 1
-    const refs = workflowReferences(candidate)
-    const events =
-      !disableOnly && refs.eventTypeIds.length
-        ? await trx
-            .selectFrom('event_types')
-            .select([
-              'id',
-              'organization_id',
-              'owner_user_id',
-              'booking_mode',
-              'deleted_at',
-              'questions',
-            ])
-            .where('id', 'in', refs.eventTypeIds)
-            .forShare()
-            .execute()
-        : []
     const definition = disableOnly
       ? candidate
-      : validateWorkflowDefinition(candidate, {
-          owner,
-          followUpHostNotesEnabled: ctx.followUpHostNotesEnabled,
-          webhooks: new Map(),
-          eventTypes: new Map(
-            events.map((event) => [
-              event.id,
-              {
-                id: event.id,
-                organizationId: event.organization_id,
-                ownerUserId: event.owner_user_id,
-                bookingMode: event.booking_mode,
-                deleted: event.deleted_at !== null,
-                questions: parseQuestions(event.questions),
-              },
-            ]),
-          ),
-        })
+      : await validateWorkflowWriteDefinition(trx, candidate, owner, ctx.followUpHostNotesEnabled)
     const existing = await trx
       .selectFrom('workflow_definitions as d')
       .innerJoin('workflow_revisions as r', (join) =>

@@ -14,6 +14,7 @@ import {
   type TestTeam,
   type TestUser,
 } from '@hourmere/scheduling/testing'
+import { WEBHOOK_EVENTS } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   validateWorkflowDefinition,
@@ -31,6 +32,7 @@ import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { workflowTools } from './mcp/workflows.ts'
 import { instanceRoutes } from './routes/instance.ts'
+import { webhookRoutes } from './routes/webhooks.ts'
 import { Workflow, WorkflowPage, workflowRoutes } from './routes/workflows.ts'
 
 // The enabled build's guards, for this file only: every operation runs its service.
@@ -175,12 +177,46 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       routes: [
         workflowRoutes({ db, audit: { record: async () => {} } }),
         instanceRoutes({ publicUrl: URL, socialProviders: {} }),
+        webhookRoutes({ db, enabled: true, encryptionKey: Buffer.alloc(32, 4).toString('base64') }),
       ],
       mcp: mcpEndpoint({ tools: workflowTools({ db, audit: { record: async () => {} } }) }),
     })
   })
   afterAll(async () => {
     await owned?.drop()
+  })
+
+  it('adds the workflow event to an endpoint subscribed to all booking kinds', async () => {
+    const headers = {
+      authorization: `Bearer ${bearer(owner, 'full')}`,
+      'content-type': 'application/json',
+    }
+    const created = await app.request('/api/v1/webhooks', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        url: 'https://hooks.example.com/',
+        events: WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed'),
+      }),
+    })
+    expect(created.status).toBe(201)
+    const { webhook } = (await created.json()) as { webhook: { id: string } }
+    const events = [...WEBHOOK_EVENTS].sort()
+    const updated = await app.request(`/api/v1/webhooks/${webhook.id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ events }),
+    })
+    expect(updated.status).toBe(200)
+    expect(await updated.json()).toMatchObject({ events })
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select('details')
+        .where('action', '=', 'webhook.updated')
+        .where('target_id', '=', webhook.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ details: { events } })
   })
 
   it('forwards the host-text switch through REST and MCP create/update', async () => {
@@ -628,7 +664,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     )
   })
 
-  it('rejects unknown update fields and webhook actions across all surfaces', async () => {
+  it('rejects unknown update fields and missing webhook targets across all surfaces', async () => {
     const token = bearer(owner, 'full')
     const created = Workflow.parse(await (await post(token, createInput())).json())
     for (const fields of [
@@ -691,7 +727,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     }
   })
 
-  it('rejects caller IDs, unknown fields and webhook actions on every creation surface', async () => {
+  it('rejects caller IDs, unknown fields and missing webhook targets on every creation surface', async () => {
     const token = bearer(owner, 'full')
     const before = await db.selectFrom('workflow_definitions').select('id').execute()
     for (const extra of [

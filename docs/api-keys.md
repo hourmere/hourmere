@@ -241,6 +241,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `GET /api/v1/public/{handle}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/-/routing/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/public/-/routing/{handle}/{slug}/route` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
@@ -299,6 +301,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `DELETE /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `POST /api/v1/team/sso/providers/{providerId}/test` | Browser session only | — |
+| `POST /api/v1/team/sso/providers/{providerId}/link` | Browser session only | — |
 | `GET /api/v1/team/sso/providers` | Session or API key | `full, read` |
 | `GET /api/v1/team/sso/policy` | Session or API key | `full, read` |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
@@ -329,6 +332,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |

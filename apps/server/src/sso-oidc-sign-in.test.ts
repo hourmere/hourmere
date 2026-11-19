@@ -4,7 +4,10 @@ import {
   createAuthPool,
   createBrowserSession,
   createCallerResolver,
+  recordSsoAdmissionRemoval,
   type SignupPolicy,
+  scimClaimCompletion,
+  teamMembershipLimit,
 } from '@hourmere/auth'
 import { decryptCredential } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
@@ -40,8 +43,10 @@ const publicUrl = 'https://hourmere.example.test'
 const startPath = '/api/auth/sign-in/sso'
 const callbackPath = (providerId: string) => `/api/auth/sso/callback/${providerId}`
 const completePath = '/api/auth/sso/oidc/complete'
+const acceptInvitationPath = '/api/auth/organization/accept-invitation'
 const providersPath = '/api/v1/team/sso/providers'
 const providerTestPath = (providerId: string) => `${providersPath}/${providerId}/test`
+const linkPath = (providerId: string) => `${providersPath}/${providerId}/link`
 const providerTestLocation = '/app/settings'
 const refusedLocation = '/sign-in?error=unable_to_create_session'
 const bindingCookie = '__Host-hourmere.sso_binding'
@@ -163,11 +168,13 @@ function fakeIdp(signingKey: CryptoKey, jwks: SsoResponse, epoch: () => Promise<
   }
 }
 
-describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
+describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and admission', () => {
   let owned: TestDatabase
   let db: Db
   let authPool: ReturnType<typeof createAuthPool>
   let auth: ReturnType<typeof createAuth>
+  // Native acceptance with SCIM claim completion, as the resource test flag wires it.
+  let scimAuth: ReturnType<typeof createAuth>
   let keys: Awaited<ReturnType<typeof generateKeyPair>>
   let jwks: SsoResponse
   let fixture: SsoFixture
@@ -186,6 +193,15 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       secret,
       signup,
       mailer: { send: async () => expect.unreachable('OIDC sign-in must not send mail') },
+    })
+    scimAuth = createAuth({
+      pool: authPool,
+      db,
+      baseURL: publicUrl,
+      secret,
+      signup,
+      mailer: { send: async () => expect.unreachable('OIDC sign-in must not send mail') },
+      scimClaims: scimClaimCompletion,
     })
     keys = await generateKeyPair('RS256')
     jwks = json({ keys: [{ ...(await exportJWK(keys.publicKey)), ...signingHeader }] })
@@ -214,12 +230,23 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     app = instance()
   })
 
-  function instance({ enabled = true, expiresIn }: { enabled?: boolean; expiresIn?: number } = {}) {
+  function instance({
+    enabled = true,
+    expiresIn,
+    signupPolicy = signup,
+    scimClaims = false,
+  }: {
+    enabled?: boolean
+    expiresIn?: number
+    signupPolicy?: SignupPolicy
+    scimClaims?: boolean
+  } = {}) {
     const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
+    const authentication = scimClaims ? scimAuth : auth
     return createApp({
       checkDb: async () => {},
-      authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      authHandler: authentication.handler,
+      resolveCaller: createCallerResolver({ auth: authentication, db }),
       publicUrl,
       routes: [
         ssoRoutes({ db, capabilities }),
@@ -248,9 +275,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
         configurationKey,
         privateTargets: [],
         send: idp.send,
+        signup: signupPolicy,
+        ...(scimClaims && { scimClaims: scimClaimCompletion }),
         readSession: async (headers) =>
           (
-            await auth.api.getSession({
+            await authentication.api.getSession({
               headers,
               query: { disableRefresh: true, disableCookieCache: true },
             })
@@ -273,10 +302,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     enabled = true,
     domainExpiresIn,
     discovery = false,
+    domain = `team-${randomUUID().slice(0, 8)}.example.com`,
   }: {
     enabled?: boolean
     domainExpiresIn?: number
     discovery?: boolean
+    domain?: string
   } = {}) {
     const { id: providerId } = await db
       .selectNoFrom(sql<string>`uuidv7()`.as('id'))
@@ -294,7 +325,6 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
         enabled,
       })
       .execute()
-    const domain = `team-${randomUUID().slice(0, 8)}.example.com`
     const domainValues = {
       ...claimedDomainValues(fixture.team, domain),
       ...(domainExpiresIn !== undefined && { verification_expires_at: at(domainExpiresIn) }),
@@ -315,7 +345,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     return { providerId, claim, email: `linked@${domain}` }
   }
 
-  async function linked(options?: Parameters<typeof provider>[0]) {
+  async function enrollment(options?: Parameters<typeof provider>[0]) {
     const configured = await provider(options)
     await db
       .updateTable('auth.user')
@@ -323,6 +353,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       .where('id', '=', fixture.member)
       .execute()
     const subject = 'Exact Subject'
+    return { ...configured, claims: { sub: subject, email: configured.email } }
+  }
+
+  async function linked(options?: Parameters<typeof provider>[0]) {
+    const configured = await enrollment(options)
     const link = await db
       .insertInto('sso_identity_links')
       .values({
@@ -330,13 +365,13 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
         provider_id: configured.providerId,
         user_id: fixture.member,
         issuer,
-        subject,
+        subject: configured.claims.sub,
         proven_email: configured.email,
         email_proven_at: at(-60),
       })
       .returningAll()
       .executeTakeFirstOrThrow()
-    return { ...configured, link, claims: { sub: subject, email: configured.email } }
+    return { ...configured, link }
   }
 
   function post(
@@ -429,6 +464,57 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     expect(response.status).toBe(400)
     expect(response.headers.getSetCookie()).toEqual([])
     expect(await response.json()).toEqual({ error: 'sso_oidc_completion_invalid' })
+  }
+
+  function acceptInvitation(pending: PendingAttempt, invitationId: string, request = app) {
+    return post(
+      { invitationId },
+      request,
+      {
+        cookie: `${pending.cookie}; ${pending.completionCookie}`,
+        'X-Hourmere-Sso-Attempt': pending.id,
+      },
+      acceptInvitationPath,
+    )
+  }
+
+  async function pendingAdmission(
+    f: Awaited<ReturnType<typeof provider>>,
+    claims: JWTPayload = {},
+  ) {
+    const attempt = await start(f.providerId)
+    const code = idp.issue(attempt, { sub: 'New OIDC subject', email: f.email, ...claims })
+    const response = await callback(attempt, code)
+    expect(response.status).toBe(302)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+    const location = response.headers.get('location') ?? ''
+    expect(location).toMatch(/^\/app\/mailbox-proof#attempt=[0-9a-f-]+$/)
+    const id = location.split('=').at(-1) as string
+    const cookies = response.headers.getSetCookie()
+    expect(cookies).toHaveLength(1)
+    const [completion] = cookies as [string]
+    expect(completion).toMatch(/^__Secure-hourmere\.oidc_admission\./)
+    expect(completion).toContain('Path=/api/auth;')
+    expect(completion).toContain('HttpOnly; Secure; SameSite=Strict')
+    const completionCookie = completion.split(';')[0] as string
+    const outcome = {
+      status: response.status,
+      body: await response.text(),
+      location: location.replace(id, 'ATTEMPT'),
+      contentType: response.headers.get('content-type'),
+      cookieOptions: completion
+        .slice(completion.indexOf(';'))
+        .replace(/Expires=[^;]+/i, 'Expires=DATE'),
+    }
+    return { pending: { ...attempt, id, completionCookie }, outcome, code }
+  }
+
+  function selectJit() {
+    return db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, admission: 'jit' })
+      .execute()
   }
 
   async function pendingMailbox(
@@ -608,6 +694,61 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     return data.find(({ id }) => id === providerId)
   }
 
+  function linkRequest(
+    providerId: string,
+    cookie: string,
+    body: Record<string, unknown> = {},
+    headers: Record<string, string> = {},
+  ) {
+    return post(
+      body,
+      app,
+      { cookie, 'X-Expected-Organization-Id': fixture.team, ...headers },
+      linkPath(providerId),
+    )
+  }
+
+  const requestLinkProof = async (providerId: string, cookie: string) =>
+    freshProofChallenge(await linkRequest(providerId, cookie), cookie)
+
+  async function startLink(providerId: string, challenge: MailboxAttempt): Promise<Attempt> {
+    const response = await linkRequest(providerId, challenge.cookie, {
+      proofAttemptId: challenge.id,
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const { url, attemptId } = (await response.json()) as { url: string; attemptId: string }
+    const authorization = new URL(url)
+    expect(authorization.origin + authorization.pathname).toBe(config.authorizationEndpoint)
+    expect(authorization.searchParams.get('state')?.split('.')[0]).toBe(attemptId)
+    expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+    return { id: attemptId, providerId, authorization, cookie: challenge.cookie }
+  }
+
+  async function pendingLink(attempt: Attempt, code: string): Promise<PendingAttempt> {
+    const response = await callback(attempt, code)
+    expect(response.status).toBe(302)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const location = response.headers.get('location') ?? ''
+    expect(location).toMatch(/^\/app\/settings#sso-link=[0-9a-f-]+$/)
+    const id = location.split('=').at(-1) as string
+    const cookies = response.headers.getSetCookie()
+    expect(cookies).toHaveLength(1)
+    const [completion] = cookies as [string]
+    expect(completion).toContain(`Path=${completePath}`)
+    expect(completion).toMatch(/; HttpOnly/i)
+    const completionCookie = completion.split(';')[0] as string
+    return { ...attempt, id, completionCookie }
+  }
+
+  async function prepareLink(f: Awaited<ReturnType<typeof enrollment>>) {
+    const session = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, session.cookie)
+    await proveMailbox(challenge)
+    const attempt = await startLink(f.providerId, challenge)
+    return pendingLink(attempt, idp.issue(attempt, f.claims))
+  }
+
   async function expectProviderTestRedirect(response: Response) {
     expect(response.status).toBe(302)
     expect(response.headers.get('location')).toBe(providerTestLocation)
@@ -643,6 +784,20 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       .selectAll()
       .where('provider_id', '=', providerId)
       .executeTakeFirstOrThrow()
+  }
+
+  async function waitForBlocked(pid: number | undefined) {
+    expect(pid).toEqual(expect.any(Number))
+    await vi.waitFor(
+      async () => {
+        const { rows } = await owned.pool.query<{ blocked: boolean }>(
+          'SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked',
+          [pid],
+        )
+        expect(rows[0]?.blocked).toBe(true)
+      },
+      { timeout: 2500, interval: 10 },
+    )
   }
 
   it('hard-disables OIDC auth-protocol endpoints before looking up the request', async () => {
@@ -1274,44 +1429,610 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
     },
   )
 
-  it('gives unlinked subjects one generic outcome without storing identity data', async () => {
+  it('gives unlinked subjects identical pending outcomes and mail without an account lookup', async () => {
     const f = await linked()
     const before = await effects()
     const outcomes = []
+    const messages = []
+    const deliveries = []
+    const accountLock = await owned.pool.connect()
+    let staging: ReturnType<typeof pendingAdmission> | undefined
+    try {
+      await accountLock.query('BEGIN')
+      await accountLock.query('LOCK TABLE auth."user" IN ACCESS EXCLUSIVE MODE')
+      const finished = vi.fn()
+      staging = pendingAdmission(f, { email_verified: true })
+      void staging.then(finished, finished)
+      await vi.waitFor(() => expect(finished).toHaveBeenCalledOnce(), { timeout: 2500 })
+    } finally {
+      await accountLock.query('ROLLBACK')
+      accountLock.release()
+    }
     for (const email of [f.email, `unknown@${f.claim.name}`]) {
       for (const verified of [undefined, false, true]) {
-        const attempt = await start(f.providerId)
-        const claims = {
-          sub: 'exact subject',
-          email,
-          ...(verified !== undefined && { email_verified: verified }),
-        }
-        const code = idp.issue(attempt, claims)
-        outcomes.push(await refusal(await callback(attempt, code)))
-        const stored = await attemptRow(attempt)
+        const result =
+          email === f.email && verified === true && staging
+            ? await staging
+            : await pendingAdmission(f, {
+                email,
+                ...(verified !== undefined && { email_verified: verified }),
+              })
+        const { pending, outcome, code } = result
+        outcomes.push(outcome)
+        const stored = await attemptRow(pending)
         expect(stored).toMatchObject({
-          consumed_at: expect.any(Date),
-          mailbox: null,
+          consumed_at: null,
+          mailbox: email,
           user_id: null,
           session_id: null,
-          requires_mailbox: false,
+          requires_mailbox: true,
           mailbox_proven_at: null,
         })
-        for (const sensitive of [claims.sub, email, code])
+        for (const sensitive of ['New OIDC subject', code, ...idp.issuedSecrets])
           expect(JSON.stringify(stored)).not.toContain(sensitive)
+        await expectCompletionRefused(await complete(pending))
+        expect(mailboxJobs).toEqual([])
+        const { message, token } = await mailboxMessage(pending)
+        expect(message.to).toBe(email)
+        const normalize = (value: string | undefined) =>
+          value?.replaceAll(pending.id, 'ATTEMPT').replaceAll(token, 'TOKEN')
+        messages.push({
+          ...message,
+          to: 'RECIPIENT',
+          text: normalize(message.text),
+          html: normalize(message.html),
+        })
+        deliveries.push({ pending, token })
       }
     }
-    expect(new Set(outcomes).size).toBe(1)
+    for (const outcome of outcomes) expect(outcome).toEqual(outcomes[0])
+    for (const message of messages) expect(message).toEqual(messages[0])
     expect(idp.exchange).toHaveBeenCalledTimes(6)
-    expect(await effects()).toEqual(before)
-    const events = await audit()
-    expect(events).toHaveLength(6)
-    expect(new Set(events.map(({ action }) => action))).toEqual(new Set([failureAction]))
-    expect(new Set(events.map(({ details }) => (details as { reason: string }).reason)).size).toBe(
-      1,
+    const first = deliveries[0]
+    if (!first) expect.unreachable('The existing mailbox received a proof')
+    expect((await consumeMailbox(first.pending, first.token)).status).toBe(200)
+    const link = await complete(first.pending)
+    expect(link.status).toBe(200)
+    expect(await link.json()).toEqual({ status: 'link_required' })
+    expect(link.headers.getSetCookie().every((cookie) => !cookie.includes('session_token'))).toBe(
+      true,
     )
-    expect(JSON.stringify(events)).not.toContain(f.email)
-    expect(JSON.stringify(events)).not.toContain('exact subject')
+    await expectCompletionRefused(await complete(first.pending))
+    expect(await audit()).toEqual([])
+    expect(await effects()).toEqual({
+      ...before,
+      mailboxTokens: String(Number(before.mailboxTokens) + 6),
+    })
+  })
+
+  it('uses one proved admission in the original browser to create a new member and personal space', async () => {
+    const f = await provider()
+    await selectJit()
+    const { pending } = await pendingAdmission(f, { email_verified: false, role: 'owner' })
+    await expectCompletionRefused(await complete(pending))
+    await proveMailbox(pending)
+    const before = await effects()
+    await expectCompletionRefused(
+      await complete(pending, {}, app, {
+        cookie: `${bindingCookie}=${randomBytes(32).toString('base64url')}; ${pending.completionCookie}`,
+      }),
+    )
+    expect(await effects()).toEqual(before)
+
+    const outcomes = await Promise.all([complete(pending), complete(pending)])
+    expect(outcomes.map((value) => value.status).sort()).toEqual([302, 400])
+    const winner = outcomes.find((value) => value.status === 302)
+    const loser = outcomes.find((value) => value.status === 400)
+    if (!winner || !loser) expect.unreachable('Exactly one completion succeeded')
+    expect(winner.headers.get('location')).toBe('/app/bookings?tab=next#recent')
+    await expectCompletionRefused(loser)
+    const sessionCookie = winner.headers
+      .getSetCookie()
+      .find((cookie) => cookie.includes('session_token='))
+    if (!sessionCookie) expect.unreachable('Admission issued a session')
+    const login = await auth.api.getSession({
+      headers: new Headers({ cookie: sessionCookie.split(';')[0] as string }),
+      query: { disableRefresh: true, disableCookieCache: true },
+    })
+    expect(login?.user).toMatchObject({ email: f.email, emailVerified: true })
+    expect(login?.session).toMatchObject({ activeOrganizationId: fixture.team })
+    const browserProof = await proof(f.providerId)
+    expect(browserProof).toMatchObject({ user_id: login?.user.id, session_id: login?.session.id })
+    const memberships = await db
+      .selectFrom('auth.member as member')
+      .leftJoin(
+        'personal_organizations as personal',
+        'personal.organization_id',
+        'member.organizationId',
+      )
+      .select(['member.organizationId', 'member.role', 'personal.user_id'])
+      .where('member.userId', '=', browserProof.user_id)
+      .orderBy('member.role')
+      .execute()
+    expect(memberships).toEqual([
+      { organizationId: fixture.team, role: 'member', user_id: null },
+      { organizationId: expect.any(String), role: 'owner', user_id: browserProof.user_id },
+    ])
+    expect((await audit()).map(({ action }) => action).sort()).toEqual([
+      signInAction,
+      'sso_jit.admitted',
+      'sso_link.linked',
+    ])
+    expect(idp.exchange).toHaveBeenCalledOnce()
+  })
+
+  it('refuses an expired admission result even when this browser proved its mailbox', async () => {
+    const f = await provider()
+    await selectJit()
+    const { pending } = await pendingAdmission(f, {
+      session_expires_at: Math.floor(new Date(at(4)).getTime() / 1000),
+    })
+    await proveMailbox(pending)
+    await vi.waitFor(
+      async () => {
+        const row = await db
+          .selectFrom('sso_attempts')
+          .select(sql<boolean>`expires_at <= clock_timestamp()`.as('expired'))
+          .where('id', '=', pending.id)
+          .executeTakeFirstOrThrow()
+        expect(row.expired).toBe(true)
+      },
+      { timeout: 4500, interval: 40 },
+    )
+    const before = await effects()
+    await expectCompletionRefused(await complete(pending))
+    expect(await effects()).toEqual(before)
+  })
+
+  it('checks signup eligibility without making a denied new account or supplying its session', async () => {
+    const f = await provider()
+    await selectJit()
+    const { pending } = await pendingAdmission(f, { email_verified: true })
+    await proveMailbox(pending)
+    const before = await effects()
+    const closed = instance({ signupPolicy: { mode: 'closed', allowedDomains: [] } })
+    const response = await complete(pending, {}, closed)
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'signup_disabled' })
+    expect(response.headers.getSetCookie()).toEqual([])
+    expect(await effects()).toEqual(before)
+    expect((await attemptRow(pending)).consumed_at).toBeNull()
+  })
+
+  it('uses the database first-user guard across different teams and provisions only one account', async () => {
+    const empty = await createTestDatabase(databaseUrl as string, undefined, {
+      tag: 'oidc_first_user',
+    })
+    const original = { db, auth, fixture, app }
+    const signupPolicy = { mode: 'first-user', allowedDomains: [] } as const
+    let firstUserPool: ReturnType<typeof createAuthPool> | undefined
+    try {
+      db = createDb(empty.pool)
+      firstUserPool = createAuthPool(empty.url, signupPolicy)
+      auth = createAuth({
+        pool: firstUserPool,
+        db,
+        baseURL: publicUrl,
+        secret,
+        signup: signupPolicy,
+        mailer: { send: async () => expect.unreachable('OIDC uses queued proof mail') },
+      })
+      app = instance({ signupPolicy })
+      const attempts: PendingAttempt[] = []
+      for (const slug of ['first-user-team-one', 'first-user-team-two']) {
+        const team = await db
+          .insertInto('auth.organization')
+          .values({ name: 'First signup team', slug, createdAt: at(-60) })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        fixture = { ...fixture, team: team.id }
+        await selectJit()
+        const { pending } = await pendingAdmission(await provider())
+        await proveMailbox(pending)
+        attempts.push(pending)
+      }
+      let completions: Promise<Response[]> | undefined
+      await db.transaction().execute(async (trx) => {
+        // Let both advisory-gated inserts reach the trigger before either can win.
+        await sql`SELECT pg_advisory_xact_lock(7340173)`.execute(trx)
+        completions = Promise.all(attempts.map((pending) => complete(pending)))
+        await vi.waitFor(
+          async () => {
+            const { rows } = await sql<{ waiting: string }>`SELECT count(*) AS waiting
+            FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory'`.execute(
+              db,
+            )
+            expect(Number(rows[0]?.waiting)).toBe(2)
+          },
+          { timeout: 2500 },
+        )
+      })
+      if (!completions) expect.unreachable('Both first-user requests reached the signup trigger')
+      const outcomes = await completions
+      expect(outcomes.map((outcome) => outcome.status).sort()).toEqual([302, 403])
+      expect(await outcomes.find((outcome) => outcome.status === 403)?.json()).toEqual({
+        error: 'signup_disabled',
+      })
+      expect(await effects()).toMatchObject({
+        users: '1',
+        memberships: '2',
+        links: '1',
+        sessions: '1',
+        proofs: '1',
+      })
+      expect(await db.selectFrom('personal_organizations').select('user_id').execute()).toEqual([
+        { user_id: expect.any(String) },
+      ])
+    } finally {
+      db = original.db
+      auth = original.auth
+      fixture = original.fixture
+      app = original.app
+      await firstUserPool?.end()
+      await empty.drop()
+    }
+  })
+
+  it('waits for removal and honors the mailbox tombstone after deletion of the old account', async () => {
+    const f = await provider()
+    await selectJit()
+    await db
+      .updateTable('auth.user')
+      .set({ email: f.email })
+      .where('id', '=', fixture.member)
+      .execute()
+    const { pending } = await pendingAdmission(f)
+    await proveMailbox(pending)
+    let completion: Promise<Response> | undefined
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .selectFrom('auth.user')
+        .select('id')
+        .where('id', '=', fixture.member)
+        .forUpdate()
+        .execute()
+      await trx
+        .selectFrom('auth.organization')
+        .select('id')
+        .where('id', '=', fixture.team)
+        .forUpdate()
+        .execute()
+      await recordSsoAdmissionRemoval(trx, { organizationId: fixture.team, userId: fixture.member })
+      await trx.deleteFrom('auth.member').where('id', '=', fixture.memberMember).execute()
+      await trx.deleteFrom('auth.user').where('id', '=', fixture.member).execute()
+      const { pid } = await trx
+        .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+        .executeTakeFirstOrThrow()
+      completion = Promise.resolve(complete(pending))
+      await waitForBlocked(pid)
+    })
+    const response = await completion
+    expect(response?.status).toBe(403)
+    expect(await response?.json()).toEqual({ error: 'team_management_access_denied' })
+    expect(
+      await db.selectFrom('auth.user').select('id').where('email', '=', f.email).execute(),
+    ).toEqual([])
+    expect(
+      await db
+        .selectFrom('sso_identity_links')
+        .select('id')
+        .where('provider_id', '=', f.providerId)
+        .execute(),
+    ).toEqual([])
+    expect((await attemptRow(pending)).consumed_at).toBeNull()
+    expect(idp.exchange).toHaveBeenCalledOnce()
+  })
+
+  it('rechecks JIT domain verification and limits concurrent admissions to the final slot', async () => {
+    const f = await provider()
+    await selectJit()
+    const attempts = [
+      (await pendingAdmission(f)).pending,
+      (await pendingAdmission(f, { sub: 'Other subject', email: `other@${f.claim.name}` })).pending,
+    ] as const
+    for (const attempt of attempts) await proveMailbox(attempt)
+    const setOutcome = (last_check_outcome: 'failed' | 'positive') =>
+      db
+        .updateTable('sso_domains')
+        .set({ last_check_outcome, last_checked_at: sql`clock_timestamp()` })
+        .where('id', '=', f.claim.id)
+        .execute()
+    await setOutcome('failed')
+    const before = await effects()
+    const frozen = await complete(attempts[0])
+    expect(frozen.status).toBe(409)
+    expect(await frozen.json()).toEqual({ error: 'sso_domain_unverified' })
+    expect(await effects()).toEqual(before)
+    expect((await attemptRow(attempts[0])).consumed_at).toBeNull()
+    await setOutcome('positive')
+    await sql`
+      WITH users AS (
+        INSERT INTO auth."user" (name, email, "emailVerified")
+        SELECT 'Capacity fixture', ${randomUUID()} || n || '@example.test', true
+        FROM generate_series(1, ${teamMembershipLimit - 5}) AS n RETURNING id
+      )
+      INSERT INTO auth.member ("organizationId", "userId", role, "createdAt")
+      SELECT ${fixture.team}, id, 'member', clock_timestamp() FROM users`.execute(db)
+    const outcomes = await Promise.all(attempts.map((attempt) => complete(attempt)))
+    expect(outcomes.map((value) => value.status).sort()).toEqual([302, 403])
+    expect(await outcomes.find((value) => value.status === 403)?.json()).toEqual({
+      error: 'organization_membership_limit_reached',
+    })
+    const count = await db
+      .selectFrom('auth.member')
+      .select((eb) => eb.fn.countAll().as('total'))
+      .where('organizationId', '=', fixture.team)
+      .executeTakeFirstOrThrow()
+    expect(Number(count.total)).toBe(teamMembershipLimit)
+    expect(idp.exchange).toHaveBeenCalledTimes(2)
+  })
+
+  it('requires explicit invitation acceptance and preserves role, expiry, team and inviter checks', async () => {
+    const f = await provider()
+    const { pending } = await pendingAdmission(f, { role: 'admin' })
+    await proveMailbox(pending)
+    const before = await effects()
+    const waiting = await complete(pending)
+    expect(waiting.status).toBe(409)
+    expect(await waiting.json()).toEqual({ error: 'sso_invitation_required' })
+    const createInvite = async (
+      changes: {
+        organizationId?: string
+        inviterId?: string
+        role?: string
+        expiresAt?: string
+      } = {},
+    ) =>
+      db
+        .insertInto('auth.invitation')
+        .values({
+          organizationId: fixture.team,
+          inviterId: fixture.owner,
+          role: 'member',
+          status: 'pending',
+          expiresAt: at(300),
+          email: f.email,
+          ...changes,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow()
+    for (const changes of [
+      { organizationId: fixture.otherTeam, inviterId: fixture.otherOwner },
+      { role: 'admin' },
+      { expiresAt: at(-10) },
+      { inviterId: fixture.otherOwner },
+    ]) {
+      const invite = await createInvite(changes)
+      const response = await acceptInvitation(pending, invite.id)
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+      await db.deleteFrom('auth.invitation').where('id', '=', invite.id).execute()
+    }
+    expect(await effects()).toEqual(before)
+    expect((await attemptRow(pending)).consumed_at).toBeNull()
+    const invite = await createInvite()
+    const off = await acceptInvitation(pending, invite.id, instance({ enabled: false }))
+    expect(off.status).toBe(404)
+    expect(await off.json()).toEqual({ error: 'sso_disabled' })
+    const closed = instance({ signupPolicy: { mode: 'closed', allowedDomains: ['example.test'] } })
+    const accepted = await acceptInvitation(pending, invite.id, closed)
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toMatchObject({
+      invitation: { id: invite.id, status: 'accepted', role: 'member' },
+      member: { organizationId: fixture.team, role: 'member' },
+    })
+    expect(
+      accepted.headers.getSetCookie().some((cookie) => cookie.includes('session_token=')),
+    ).toBe(true)
+    expect((await audit()).map(({ action }) => action)).toContain('membership.accepted')
+    await expectCompletionRefused(await acceptInvitation(pending, invite.id, closed))
+    await expectCompletionRefused(await complete(pending))
+  })
+
+  /** Lock the team and record a local removal as the OIDC-on removal paths do. */
+  async function removeMember(userId: string, deleteAccount = false) {
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .selectFrom('auth.organization')
+        .select('id')
+        .where('id', '=', fixture.team)
+        .forUpdate()
+        .execute()
+      await recordSsoAdmissionRemoval(trx, { organizationId: fixture.team, userId })
+      await trx
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', fixture.team)
+        .where('userId', '=', userId)
+        .execute()
+      if (deleteAccount) await trx.deleteFrom('auth.user').where('id', '=', userId).execute()
+    })
+  }
+
+  /** A pending member invitation, optionally issued by SCIM provisioning with its bound claim. */
+  async function issueInvitation(email: string, scim: boolean) {
+    const invitation = await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: fixture.team,
+        inviterId: fixture.owner,
+        role: 'member',
+        status: 'pending',
+        expiresAt: at(300),
+        email,
+        createdAt: sql<Date>`clock_timestamp()`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    if (!scim) return { invitationId: invitation.id, entryId: undefined }
+    const connection =
+      (await db
+        .selectFrom('scim_connections')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .executeTakeFirst()) ??
+      (await db
+        .insertInto('scim_connections')
+        .values({ organization_id: fixture.team })
+        .returning('id')
+        .executeTakeFirstOrThrow())
+    const entry = await db
+      .insertInto('scim_users')
+      .values({
+        organization_id: fixture.team,
+        connection_id: connection.id,
+        user_name: email,
+        work_email: email,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('scim_user_claims')
+      .values({
+        organization_id: fixture.team,
+        connection_id: connection.id,
+        scim_user_id: entry.id,
+        invitation_id: invitation.id,
+        work_email: email,
+        expires_at: at(300),
+      })
+      .execute()
+    return { invitationId: invitation.id, entryId: entry.id }
+  }
+
+  async function claimLinked(entryId: string | undefined) {
+    if (!entryId) return null
+    const entry = await db
+      .selectFrom('scim_users')
+      .select('linked_user_id')
+      .where('id', '=', entryId)
+      .executeTakeFirstOrThrow()
+    return entry.linked_user_id !== null
+  }
+
+  it.each([
+    { scim: false, removed: false },
+    { scim: false, removed: true },
+    { scim: true, removed: false },
+    { scim: true, removed: true },
+  ])(
+    'decides invitation kind %o identically through native and SSO acceptance',
+    async ({ scim, removed }) => {
+      const scimApp = instance({ scimClaims: true })
+      const f = await provider()
+      const { pending } = await pendingAdmission(f)
+      await proveMailbox(pending)
+
+      // Native: an existing account outside the team, removed earlier or never a member.
+      const nativeMailbox = await db
+        .selectFrom('auth.user')
+        .select('email')
+        .where('id', '=', fixture.member)
+        .executeTakeFirstOrThrow()
+      if (removed) await removeMember(fixture.member)
+      else
+        await db
+          .deleteFrom('auth.member')
+          .where('organizationId', '=', fixture.team)
+          .where('userId', '=', fixture.member)
+          .execute()
+      // SSO: the proved mailbox's earlier account was removed and deleted, or never existed.
+      if (removed) {
+        const earlier = await db
+          .insertInto('auth.user')
+          .values({ name: 'Earlier account', email: f.email, emailVerified: true })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        await db
+          .insertInto('auth.member')
+          .values({
+            organizationId: fixture.team,
+            userId: earlier.id,
+            role: 'member',
+            createdAt: new Date(),
+          })
+          .execute()
+        await removeMember(earlier.id, true)
+      }
+      const blocks = await db
+        .selectFrom('scim_membership_blocks')
+        .select('identity_email')
+        .where('organization_id', '=', fixture.team)
+        .where('cleared_at', 'is', null)
+        .orderBy('identity_email')
+        .execute()
+      expect(blocks.map(({ identity_email }) => identity_email)).toEqual(
+        removed ? [f.email, nativeMailbox.email].sort() : [],
+      )
+
+      const native = await issueInvitation(nativeMailbox.email, scim)
+      const sso = await issueInvitation(f.email, scim)
+      const session = await browserSession(fixture.member)
+      const nativeResponse = await post(
+        { invitationId: native.invitationId },
+        scimApp,
+        {
+          cookie: session.cookie,
+        },
+        acceptInvitationPath,
+      )
+      const ssoResponse = await acceptInvitation(pending, sso.invitationId, scimApp)
+
+      const refused = scim && removed
+      const outcome = (response: Response, entryId: string | undefined) =>
+        Promise.resolve(claimLinked(entryId)).then((claimed) => ({
+          status: response.status,
+          claimed,
+        }))
+      const expected = { status: refused ? 403 : 200, claimed: scim ? !refused : null }
+      expect({
+        native: await outcome(nativeResponse, native.entryId),
+        sso: await outcome(ssoResponse, sso.entryId),
+      }).toEqual({ native: expected, sso: expected })
+      if (refused) {
+        expect(await ssoResponse.json()).toEqual({ error: 'team_management_access_denied' })
+        expect(
+          await db.selectFrom('auth.user').select('id').where('email', '=', f.email).execute(),
+        ).toEqual([])
+        expect((await attemptRow(pending)).consumed_at).toBeNull()
+      }
+      if (scim && !refused) {
+        const joined = await db
+          .selectFrom('auth.user')
+          .select('id')
+          .where('email', '=', f.email)
+          .executeTakeFirstOrThrow()
+        const entry = await db
+          .selectFrom('scim_users')
+          .select(['linked_user_id', 'linked_member_id'])
+          .where('id', '=', sso.entryId as string)
+          .executeTakeFirstOrThrow()
+        expect(entry).toEqual({ linked_user_id: joined.id, linked_member_id: expect.any(String) })
+        expect(
+          (await audit()).filter(
+            ({ action, target_id }) => action === 'scim_user.claimed' && target_id === sso.entryId,
+          ),
+        ).toHaveLength(1)
+      }
+    },
+  )
+
+  it('honors a removal made before the team configured OIDC or JIT', async () => {
+    const domain = `team-${randomUUID().slice(0, 8)}.example.com`
+    const email = `linked@${domain}`
+    await db.updateTable('auth.user').set({ email }).where('id', '=', fixture.member).execute()
+    // Neither an OIDC provider nor a JIT policy exists when the member is removed.
+    await removeMember(fixture.member, true)
+    const f = await provider({ domain })
+    expect(f.email).toBe(email)
+    await selectJit()
+    const { pending } = await pendingAdmission(f)
+    await proveMailbox(pending)
+    const response = await complete(pending)
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+    expect(
+      await db.selectFrom('auth.user').select('id').where('email', '=', email).execute(),
+    ).toEqual([])
   })
 
   it('rejects missing mailboxes, mismatching signed issuer or nonce, and expired IdP sessions', async () => {
@@ -1594,16 +2315,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
           await blocker.query('DELETE FROM auth.organization WHERE id = $1', [fixture.team])
         }
         completion = Promise.resolve(complete(pending))
-        await vi.waitFor(
-          async () => {
-            const { rows: waiting } = await owned.pool.query<{ blocked: boolean }>(
-              'SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked',
-              [rows[0]?.pid],
-            )
-            expect(waiting[0]?.blocked).toBe(true)
-          },
-          { timeout: 2500, interval: 10 },
-        )
+        await waitForBlocked(rows[0]?.pid)
         await blocker.query('COMMIT')
       } finally {
         await blocker.query('ROLLBACK')
@@ -1619,4 +2331,342 @@ describe.skipIf(!databaseUrl)('OIDC sign-in for linked identities', () => {
       expect(idp.exchange).toHaveBeenCalledTimes(1)
     },
   )
+
+  it('self-links only after independent mailbox proof, the original session and explicit completion', async () => {
+    const f = await enrollment({ discovery: true })
+    const actor = await browserSession(fixture.member, fixture.team.toUpperCase())
+    const secondSession = await browserSession(fixture.member)
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: true })
+      .execute()
+    const before = await effects()
+
+    // A verified IdP email cannot substitute for the Hourmere mailbox challenge.
+    const linkedClaims = { ...f.claims, email: f.email.toUpperCase(), email_verified: true }
+    const { pending: ordinarySignIn } = await pendingAdmission(f, linkedClaims)
+    await expectCompletionRefused(await complete(ordinarySignIn))
+    expect(await effects()).toEqual(before)
+    idp.send.mockClear()
+    idp.exchange.mockClear()
+
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    const retry = { proofAttemptId: challenge.id }
+    expect(
+      await freshProofChallenge(
+        await linkRequest(f.providerId, challenge.cookie, retry),
+        challenge.cookie,
+      ),
+    ).toEqual(challenge)
+    expect(idp.send).not.toHaveBeenCalled()
+    const { message, token } = await mailboxMessage(challenge)
+    expect(message.to).toBe(f.email)
+    const binding = challenge.cookie
+      .split('; ')
+      .find((part) => part.startsWith(`${bindingCookie}=`))
+    expect(binding).toBeDefined()
+    const wrongSessionCookie = `${secondSession.cookie}; ${binding}`
+    const wrongProof = await consumeMailbox({ ...challenge, cookie: wrongSessionCookie }, token)
+    expect(wrongProof.status).toBe(400)
+    expect(await wrongProof.json()).toEqual({ error: 'sso_mailbox_proof_invalid' })
+    expect((await consumeMailbox(challenge, token)).status).toBe(200)
+    const proofTime = (await attemptRow(challenge)).mailbox_proven_at
+    expect(proofTime).toBeInstanceOf(Date)
+    const wrongRetry = await linkRequest(f.providerId, wrongSessionCookie, retry)
+    expect((await freshProofChallenge(wrongRetry, wrongSessionCookie)).id).not.toBe(challenge.id)
+    expect((await attemptRow(challenge)).consumed_at).toBeNull()
+
+    const attempt = await startLink(f.providerId, challenge)
+    expect((await attemptRow(challenge)).consumed_at).toBeInstanceOf(Date)
+    expect(await attemptRow(attempt)).toMatchObject({
+      kind: 'link',
+      organization_id: fixture.team,
+      provider_id: f.providerId,
+      user_id: fixture.member,
+      session_id: actor.id,
+    })
+    const code = idp.issue(attempt, linkedClaims)
+    await refusal(await callback(attempt, code, { cookie: wrongSessionCookie }))
+    expect(idp.exchange).not.toHaveBeenCalled()
+    const pending = await pendingLink(attempt, code)
+    expect((await effects()).links).toBe(before.links)
+    await expectCompletionRefused(
+      await complete(pending, {}, app, {
+        cookie: `${wrongSessionCookie}; ${pending.completionCookie}`,
+      }),
+    )
+    const otherBrowser = `${bindingCookie}=${randomBytes(32).toString('base64url')}`
+    await expectCompletionRefused(
+      await complete(pending, {}, app, {
+        cookie: `${actor.cookie}; ${otherBrowser}; ${pending.completionCookie}`,
+      }),
+    )
+    expect((await effects()).links).toBe(before.links)
+
+    const responses = await Promise.all([complete(pending), complete(pending, {}, instance())])
+    expect(responses.map(({ status }) => status).sort()).toEqual([302, 400])
+    const accepted = responses.find(({ status }) => status === 302) as Response
+    const denied = responses.find(({ status }) => status === 400) as Response
+    await expectCompletionRefused(denied)
+    expect(accepted.headers.get('location')).toBe('/app/settings')
+    expect(
+      accepted.headers.getSetCookie().some((cookie) => cookie.includes('session_token=')),
+    ).toBe(false)
+    expect(idp.exchange).toHaveBeenCalledTimes(1)
+    const link = await db
+      .selectFrom('sso_identity_links')
+      .selectAll()
+      .where('provider_id', '=', f.providerId)
+      .executeTakeFirstOrThrow()
+    expect(link).toMatchObject({
+      organization_id: fixture.team,
+      user_id: fixture.member,
+      issuer,
+      subject: f.claims.sub,
+      proven_email: f.email,
+      email_proven_at: proofTime,
+    })
+    const { users, accounts, memberships, sessions, proofs, links } = await effects()
+    expect({ users, accounts, memberships, sessions, proofs, links }).toMatchObject({
+      users: before.users,
+      accounts: before.accounts,
+      memberships: before.memberships,
+      sessions: before.sessions,
+      proofs: before.proofs,
+      links: String(Number(before.links) + 1),
+    })
+    const linkEvents = (await audit()).filter(({ action }) => action === 'sso_link.linked')
+    expect(linkEvents).toMatchObject([{ actor_id: fixture.member, credential_id: actor.id }])
+    const journal = JSON.stringify(linkEvents)
+    expect(
+      [f.email, f.claims.sub, ...idp.issuedSecrets].every((value) => !journal.includes(value)),
+    ).toBe(true)
+  })
+
+  it('rejects cross-origin, bearer and unadmitted callers and accepts only strict self-link input', async () => {
+    const f = await enrollment()
+    const actor = await browserSession(fixture.member)
+    const outsiderEmail = `invited@${f.claim.name}`
+    await db
+      .updateTable('auth.user')
+      .set({ email: outsiderEmail })
+      .where('id', '=', fixture.otherOwner)
+      .execute()
+    const outsider = await browserSession(fixture.otherOwner)
+    await db
+      .insertInto('auth.invitation')
+      .values({
+        inviterId: fixture.owner,
+        organizationId: fixture.team,
+        role: 'member',
+        status: 'pending',
+        email: outsiderEmail,
+        expiresAt: at(300),
+      })
+      .execute()
+    const me = await app.request(new URL('/api/v1/me', publicUrl), {
+      headers: { cookie: outsider.cookie },
+    })
+    expect(me.status).toBe(200)
+    expect(await me.json()).toMatchObject({ organization: { personal: true } })
+    const before = await effects()
+    for (const response of [
+      await linkRequest(
+        f.providerId,
+        actor.cookie,
+        {},
+        { origin: 'https://different.example.test' },
+      ),
+      await linkRequest(f.providerId, actor.cookie, {}, { authorization: 'Bearer synthetic' }),
+      await linkRequest(f.providerId, outsider.cookie),
+    ]) {
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: 'team_management_access_denied' })
+    }
+    const missingContext = await post({}, app, { cookie: actor.cookie }, linkPath(f.providerId))
+    expect(missingContext.status).toBe(409)
+    expect(await missingContext.json()).toMatchObject({ error: 'organization_context_changed' })
+    const badInput = await linkRequest(f.providerId, actor.cookie, { userId: fixture.otherOwner })
+    expect(badInput.status).toBe(400)
+    expect(await badInput.json()).toMatchObject({ error: 'invalid_request' })
+    expect(await effects()).toEqual(before)
+    expect(idp.send).not.toHaveBeenCalled()
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .execute(),
+    ).toEqual([])
+  })
+
+  it('refuses link when the IdP asserts a different mailbox despite email_verified', async () => {
+    const f = await enrollment()
+    const actor = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    await proveMailbox(challenge)
+    const attempt = await startLink(f.providerId, challenge)
+    const before = await effects()
+    const code = idp.issue(attempt, {
+      ...f.claims,
+      email: `different@${f.claim.name}`,
+      email_verified: true,
+    })
+    await refusal(await callback(attempt, code))
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses link completion after the local account changes its frozen mailbox', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const before = await effects()
+    await db
+      .updateTable('auth.user')
+      .set({ email: `different@${f.claim.name}` })
+      .where('id', '=', fixture.member)
+      .execute()
+    await expectCompletionRefused(await complete(pending))
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses a subject bound to another user before completion and preserves their link', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const other = await db
+      .insertInto('sso_identity_links')
+      .values({
+        organization_id: fixture.team,
+        provider_id: f.providerId,
+        user_id: fixture.coOwner,
+        issuer,
+        subject: f.claims.sub,
+        proven_email: `other@${f.claim.name}`,
+        email_proven_at: at(-60),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    const before = await effects()
+    await expectCompletionRefused(await complete(pending))
+    expect(await effects()).toEqual(before)
+    expect(
+      await db
+        .selectFrom('sso_identity_links')
+        .selectAll()
+        .where('id', '=', other.id)
+        .executeTakeFirst(),
+    ).toEqual(other)
+  })
+
+  it('freezes new links when the current positive domain proof has a failed recheck', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const actor = await browserSession(fixture.member)
+    const before = await effects()
+    await db
+      .updateTable('sso_domains')
+      .set({ last_check_outcome: 'failed', last_checked_at: sql`clock_timestamp()` })
+      .where('id', '=', f.claim.id)
+      .execute()
+    for (const response of [
+      await linkRequest(f.providerId, actor.cookie),
+      await complete(pending),
+    ]) {
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'sso_domain_unverified' })
+    }
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses a link result after its IdP deadline', async () => {
+    const f = await enrollment()
+    const actor = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    await proveMailbox(challenge)
+    const attempt = await startLink(f.providerId, challenge)
+    const deadline = Math.floor(new Date(at(3)).getTime() / 1000)
+    const pending = await pendingLink(
+      attempt,
+      idp.issue(attempt, { ...f.claims, session_expires_at: deadline }),
+    )
+    const before = await effects()
+    await vi.waitFor(
+      async () => {
+        const row = await db
+          .selectFrom('sso_attempts')
+          .select(sql<boolean>`expires_at <= clock_timestamp()`.as('expired'))
+          .where('id', '=', pending.id)
+          .executeTakeFirstOrThrow()
+        expect(row.expired).toBe(true)
+      },
+      { timeout: 3500, interval: 50 },
+    )
+    await expectCompletionRefused(await complete(pending))
+    expect(await effects()).toEqual(before)
+  })
+
+  it('refuses link completion when concurrent membership removal commits first', async () => {
+    const f = await enrollment()
+    const pending = await prepareLink(f)
+    const before = await effects()
+    const blocker = await owned.pool.connect()
+    let completion: Promise<Response> | undefined
+    try {
+      await blocker.query('BEGIN')
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+        fixture.team,
+      ])
+      await blocker.query('DELETE FROM auth.member WHERE id = $1', [fixture.memberMember])
+      completion = Promise.resolve(complete(pending))
+      await waitForBlocked(rows[0]?.pid)
+      await blocker.query('COMMIT')
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    await expectCompletionRefused(await completion)
+    expect(await effects()).toEqual({
+      ...before,
+      memberships: String(Number(before.memberships) - 1),
+    })
+  })
+
+  it('discovers before taking team locks and rechecks the provider revision before spending proof', async () => {
+    const f = await enrollment({ discovery: true })
+    const actor = await browserSession(fixture.member)
+    const challenge = await requestLinkProof(f.providerId, actor.cookie)
+    await proveMailbox(challenge)
+    idp.discovery.mockImplementationOnce(async () => {
+      await db.transaction().execute(async (trx) => {
+        await sql`SET LOCAL lock_timeout = '500ms'`.execute(trx)
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', fixture.team)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
+        await trx
+          .updateTable('sso_providers')
+          .set({ revision: 2, configuration: configuration(f.providerId, 2, true) })
+          .where('id', '=', f.providerId)
+          .execute()
+      })
+      return json(metadata)
+    })
+    const response = await linkRequest(f.providerId, challenge.cookie, {
+      proofAttemptId: challenge.id,
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'sso_configuration_changed' })
+    expect(idp.discovery).toHaveBeenCalledTimes(1)
+    expect((await attemptRow(challenge)).consumed_at).toBeNull()
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .where('kind', '=', 'link')
+        .execute(),
+    ).toEqual([])
+  })
 })

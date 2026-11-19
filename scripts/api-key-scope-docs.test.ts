@@ -165,6 +165,7 @@ describe('published API key scope tables', () => {
         'PATCH /api/v1/team/sso/providers/{providerId}',
         'DELETE /api/v1/team/sso/providers/{providerId}',
         'POST /api/v1/team/sso/providers/{providerId}/test',
+        'POST /api/v1/team/sso/providers/{providerId}/link',
       ])
         expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
     }
@@ -173,6 +174,7 @@ describe('published API key scope tables', () => {
       'update_sso_provider',
       'delete_sso_provider',
       'test_sso_provider',
+      'link_sso_account',
       'create_sso_domain_challenge',
       'verify_sso_domain',
       'delete_sso_domain',
@@ -211,15 +213,19 @@ describe('published API key scope tables', () => {
   )
 
   it.each(documents)(
-    '$path lists optional-key public routing metadata',
+    '$path lists optional-key public routing metadata and submission',
     ({ document, section }) => {
       expect(document).toContain(
         '| `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |',
       )
+      expect(document).toContain('| `route_lead` | — | `routing-forms route` | `full, bookings` |')
       if (section === 'all') {
         for (const path of ['{handle}/{slug}', 'teams/{teamSlug}/{slug}']) {
           expect(document).toContain(
             `| \`GET /api/v1/public/-/routing/${path}\` | Public or manage token; check a supplied key | \`full, read, bookings\` |`,
+          )
+          expect(document).toContain(
+            `| \`POST /api/v1/public/-/routing/${path}/route\` | Public or manage token; check a supplied key | \`full, bookings\` |`,
           )
         }
       }

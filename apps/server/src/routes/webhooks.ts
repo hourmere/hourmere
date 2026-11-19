@@ -33,7 +33,9 @@ export const Webhook = z
     id: z.uuid(),
     organizationId: z.uuid(),
     url: z.string(),
-    events: z.array(z.enum(WEBHOOK_EVENTS)),
+    events: z.array(z.enum(WEBHOOK_EVENTS)).openapi({
+      description: 'Subscription event kinds. Open enum. Ignore unknown event kinds.',
+    }),
     isActive: z.boolean(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -49,7 +51,9 @@ const Delivery = z
   .object({
     id: z.uuid(),
     eventId: z.uuid(),
-    eventType: z.enum(WEBHOOK_EVENTS),
+    eventType: z.enum(WEBHOOK_EVENTS).openapi({
+      description: 'Delivery event kind. Open enum. Ignore unknown event kinds.',
+    }),
     bookingId: z.uuid(),
     status: z.enum(['pending', 'delivered', 'failed', 'skipped']),
     attempts: z.number().int(),
@@ -83,6 +87,10 @@ const errors = errorResponses({
   404: 'webhook_not_found',
   409: 'webhooks_disabled, webhook_limit_reached or organization_context_changed',
 })
+const subscriptionErrors = {
+  ...errors,
+  ...errorResponses({ 404: 'webhook_not_found or workflows_disabled' }),
+}
 
 /** Organization-wide outbound booking events; ordinary hosts have no administrative access. */
 export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule {
@@ -156,7 +164,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
             description: 'Endpoint and one-time secret',
             content: json(WebhookCreated),
           },
-          ...errors,
+          ...subscriptionErrors,
         },
       }),
       async (c) =>
@@ -184,7 +192,10 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
           headers: ExpectedWriteHeaders,
           body: { required: true, content: json(WebhookUpdateInput) },
         },
-        responses: { 200: { description: 'Updated endpoint', content: json(Webhook) }, ...errors },
+        responses: {
+          200: { description: 'Updated endpoint', content: json(Webhook) },
+          ...subscriptionErrors,
+        },
       }),
       async (c) =>
         c.json(

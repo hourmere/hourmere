@@ -3,6 +3,7 @@ import {
   ensurePersonalOrganization,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
+  type SsoAdmissionRemoval,
   TeamManagementError,
   teamRoles,
 } from '@hourmere/auth'
@@ -17,6 +18,7 @@ import { getTeamMemberDepartureImpact } from './member-departure-impact.ts'
 export async function leaveTeamMember(
   ctx: ServiceContext,
   input: { teamId: string; expectedOrganizationId: string },
+  recordAdmissionRemoval?: SsoAdmissionRemoval,
 ): Promise<{ organizationId: string }> {
   if (ctx.principal.kind !== 'session') {
     throw new DomainError('forbidden', 'team_management_access_denied')
@@ -69,6 +71,12 @@ export async function leaveTeamMember(
       )
       if (impact.eventTypes.totalCount > 0 || impact.bookings.totalCount > 0) {
         throw new MemberDepartureBlockedError(impact)
+      }
+      if (recordAdmissionRemoval) {
+        await recordAdmissionRemoval(trx, {
+          organizationId: actor.organizationId,
+          userId: actor.userId,
+        })
       }
       const removed = await trx
         .deleteFrom('auth.member')

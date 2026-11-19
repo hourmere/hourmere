@@ -3,21 +3,17 @@
 import { createHash } from 'node:crypto'
 import { ApiKeyScopeError, type Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
-import { lockWorkflowOwner, parseQuestions } from '@hourmere/scheduling'
+import { lockWorkflowOwner } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { hardOffWorkflowAuditPort, type WorkflowAuditPort } from './audit.ts'
-import {
-  assertWorkflowTextPolicy,
-  validateWorkflowDefinition,
-  WorkflowDefinitionSchema,
-  workflowReferences,
-} from './definition.ts'
+import { assertWorkflowTextPolicy, WorkflowDefinitionSchema } from './definition.ts'
 import { workflowOperation } from './hard-off.ts'
 import { WORKFLOW_MAX_DEFINITIONS_PER_OWNER, WORKFLOW_MAX_ENABLED_PER_EVENT } from './limits.ts'
 import { type WorkflowOwner, WorkflowOwnerSelectorSchema } from './ownership.ts'
 import { type WorkflowView, workflowView } from './reads.ts'
+import { validateWorkflowWriteDefinition } from './write-definition.ts'
 
 export const CreateWorkflowInputSchema = WorkflowDefinitionSchema.extend({
   owner: WorkflowOwnerSelectorSchema,
@@ -179,41 +175,12 @@ export async function createWorkflowDefinition(
       return workflowView(owner, row)
     }
     const { owner: _, idempotencyKey: __, ...candidate } = request
-    if (candidate.actions.some((action) => action.type === 'webhook')) throw invalid()
-    const refs = workflowReferences(candidate)
-    const events = refs.eventTypeIds.length
-      ? await trx
-          .selectFrom('event_types')
-          .select([
-            'id',
-            'organization_id',
-            'owner_user_id',
-            'booking_mode',
-            'deleted_at',
-            'questions',
-          ])
-          .where('id', 'in', refs.eventTypeIds)
-          .forShare()
-          .execute()
-      : []
-    const definition = validateWorkflowDefinition(candidate, {
+    const definition = await validateWorkflowWriteDefinition(
+      trx,
+      candidate,
       owner,
-      followUpHostNotesEnabled: ctx.followUpHostNotesEnabled,
-      webhooks: new Map(),
-      eventTypes: new Map(
-        events.map((event) => [
-          event.id,
-          {
-            id: event.id,
-            organizationId: event.organization_id,
-            ownerUserId: event.owner_user_id,
-            bookingMode: event.booking_mode,
-            deleted: event.deleted_at !== null,
-            questions: parseQuestions(event.questions),
-          },
-        ]),
-      ),
-    })
+      ctx.followUpHostNotesEnabled,
+    )
     const existing = await trx
       .selectFrom('workflow_definitions as d')
       .innerJoin('workflow_revisions as r', (join) =>

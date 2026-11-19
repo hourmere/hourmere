@@ -9,6 +9,7 @@ import { browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
 import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 
 export const TEST_SSO_PROVIDER = 'testSsoProvider'
+export const LINK_SSO_ACCOUNT = 'linkSsoAccount'
 const signInOperation = 'oidcSignIn'
 const maxReturnPathLength = 2048
 const maxStateLength = 4096
@@ -17,7 +18,21 @@ const uuid = z.uuid()
 const statePattern =
   /^([a-f0-9]{8}-[a-f0-9]{4}-7[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\.([\w-]+)$/
 const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
-const statePayload = z.tuple([secret, secret, z.string(), z.hex().length(64).optional()])
+export const oidcLinkBinding = z.strictObject({
+  memberId: uuid,
+  domainId: uuid,
+  domainGeneration: z.int().positive(),
+  mailboxDigest: z.hex().length(64),
+  provenAt: z.string(),
+  proofExpiresAt: z.string(),
+})
+const statePayload = z.tuple([
+  secret,
+  secret,
+  z.string(),
+  z.hex().length(64).optional(),
+  oidcLinkBinding.optional(),
+])
 export class OidcAttemptRefused extends Error {
   constructor() {
     super('OIDC attempt refused')
@@ -43,7 +58,16 @@ export interface OidcTestActor {
   userId: string
   id: string
 }
-type Ceremony = { kind: 'sign_in' } | { kind: 'test'; actor: OidcTestActor }
+type Ceremony =
+  | { kind: 'sign_in' }
+  | { kind: 'test'; actor: OidcTestActor }
+  | { kind: 'link'; actor: OidcTestActor; binding: z.infer<typeof oidcLinkBinding> }
+
+const operations = {
+  sign_in: signInOperation,
+  test: TEST_SSO_PROVIDER,
+  link: LINK_SSO_ACCOUNT,
+}
 
 /** A canonical, same-origin destination under /app, or undefined for unsafe input. */
 export function oidcReturnDestination(raw: string): string | undefined {
@@ -86,11 +110,7 @@ function stateAad(browser: OriginatingBrowser, id: string, binding: string): str
   ])
 }
 
-export async function lockOidcProvider(
-  trx: Db,
-  browser: SsoProviderRevision,
-  enabled = true,
-): Promise<void> {
+export async function lockOidcProvider(trx: Db, browser: SsoProviderRevision, enabled = true) {
   // Match the team-write order. Hold the provider revision stable until the attempt commits.
   const organization = await trx
     .selectFrom('auth.organization')
@@ -101,7 +121,7 @@ export async function lockOidcProvider(
   if (!organization) throw refused()
   const provider = await trx
     .selectFrom('sso_providers')
-    .select('id')
+    .select('issuer')
     .where('id', '=', browser.providerId)
     .where('organization_id', '=', browser.organizationId)
     .where('revision', '=', browser.revision)
@@ -111,6 +131,7 @@ export async function lockOidcProvider(
     .forShare()
     .executeTakeFirst()
   if (!provider) throw refused()
+  return provider
 }
 
 /** Recheck the original test session and current authority around the outbound exchange. */
@@ -166,7 +187,7 @@ export async function startOidcAttempt(
   const codeVerifier = randomBytes(32).toString('base64url')
   const nonce = randomBytes(32).toString('base64url')
   const write = async (trx: Db) => {
-    await lockOidcProvider(trx, browser, ceremony.kind === 'sign_in')
+    await lockOidcProvider(trx, browser, ceremony.kind !== 'test')
     const { id, now } = await trx
       .selectNoFrom([
         sql<string>`uuidv7()`.as('id'),
@@ -175,8 +196,12 @@ export async function startOidcAttempt(
       .executeTakeFirstOrThrow()
     // Ceremony material travels in authenticated ciphertext. The attempt stores only
     // digests of the browser binding and full state for the eventual one-shot update.
-    const payload = [codeVerifier, nonce, returnPath]
+    const payload: z.infer<typeof statePayload> = [codeVerifier, nonce, returnPath]
     if (browser.endpointsDigest) payload.push(browser.endpointsDigest)
+    if (ceremony.kind === 'link') {
+      if (!browser.endpointsDigest) throw refused()
+      payload.push(ceremony.binding)
+    }
     const envelope = encryptCredential(
       configurationKey,
       stateAad(browser, id, binding),
@@ -191,15 +216,18 @@ export async function startOidcAttempt(
         organization_id: browser.organizationId,
         provider_id: browser.providerId,
         provider_revision: browser.revision,
-        ...(ceremony.kind === 'test' && {
+        ...(ceremony.kind !== 'sign_in' && {
           user_id: ceremony.actor.userId,
           session_id: ceremony.actor.id,
         }),
         browser_binding_digest: binding,
-        operation: ceremony.kind === 'test' ? TEST_SSO_PROVIDER : signInOperation,
+        operation: operations[ceremony.kind],
         input_digest: sha256(state),
         created_at: now,
-        expires_at: sql`${now}::timestamptz + make_interval(secs => ${authenticationAttemptLifetime})`,
+        expires_at: sql`least(
+          ${now}::timestamptz + make_interval(secs => ${authenticationAttemptLifetime}),
+          ${ceremony.kind === 'link' ? ceremony.binding.proofExpiresAt : null}::timestamptz
+        )`,
       })
       .execute()
     return { id, state }
@@ -217,12 +245,12 @@ export async function startOidcAttempt(
 function openState(configurationKey: Buffer, aad: string, envelope: string) {
   try {
     const plaintext = decryptCredential(configurationKey, aad, Buffer.from(envelope, 'base64url'))
-    const [codeVerifier, nonce, returnPath, endpointsDigest] = statePayload.parse(
+    const [codeVerifier, nonce, returnPath, endpointsDigest, linkBinding] = statePayload.parse(
       JSON.parse(plaintext),
     )
     const destination = oidcReturnDestination(returnPath)
     if (!destination) throw refused()
-    return { codeVerifier, nonce, returnPath: destination, endpointsDigest }
+    return { codeVerifier, nonce, returnPath: destination, endpointsDigest, linkBinding }
   } catch {
     throw refused()
   }
@@ -235,7 +263,8 @@ function openState(configurationKey: Buffer, aad: string, envelope: string) {
 export async function consumeOidcAttempt(
   { db, configurationKey }: AttemptDependencies,
   browser: OriginatingBrowser & { state: string | null },
-  ceremony: Ceremony = { kind: 'sign_in' },
+  test: Extract<Ceremony, { kind: 'test' }> | undefined = undefined,
+  readLinkActor?: () => Promise<OidcTestActor | null | undefined>,
 ) {
   const binding = bindingDigest(browser)
   const state = browser.state
@@ -245,6 +274,12 @@ export async function consumeOidcAttempt(
   const envelope = match?.[2]
   if (!id || !envelope) throw refused()
   const material = openState(configurationKey, stateAad(browser, id, binding), envelope)
+  let ceremony: Ceremony = test ?? { kind: 'sign_in' }
+  if (material.linkBinding) {
+    const actor = !test && (await readLinkActor?.())
+    if (!actor) throw refused()
+    ceremony = { kind: 'link', actor, binding: material.linkBinding }
+  }
 
   const attempt = await db.transaction().execute(async (trx) => {
     if (ceremony.kind === 'test') await lockOidcTestActor(trx, browser, ceremony.actor)
@@ -254,13 +289,13 @@ export async function consumeOidcAttempt(
       .select(['id', 'consumed_at'])
       .where('id', '=', id)
       .where('kind', '=', ceremony.kind)
-      .where('operation', '=', ceremony.kind === 'test' ? TEST_SSO_PROVIDER : signInOperation)
+      .where('operation', '=', operations[ceremony.kind])
       .where('organization_id', '=', browser.organizationId)
       .where('provider_id', '=', browser.providerId)
       .where('provider_revision', '=', browser.revision)
       .where('browser_binding_digest', '=', binding)
       .where('input_digest', '=', sha256(state))
-    const eligible = await (ceremony.kind === 'test'
+    const eligible = await (ceremony.kind !== 'sign_in'
       ? query
           .where('user_id', '=', ceremony.actor.userId)
           .where('session_id', '=', ceremony.actor.id)
@@ -297,5 +332,6 @@ export async function consumeOidcAttempt(
     ...material,
     createdAt: attempt.created_at,
     expiresAt: attempt.expires_at,
+    link: ceremony.kind === 'link' ? ceremony : undefined,
   }
 }
