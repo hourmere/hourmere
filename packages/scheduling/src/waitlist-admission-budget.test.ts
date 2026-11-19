@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import * as availability from './availability.ts'
 import { DomainError } from './errors.ts'
+import * as sealedSecret from './sealed-secret.ts'
 import { createFixtures } from './testing.ts'
 import { cleanText } from './text.ts'
 import * as waitlist from './waitlist.ts'
@@ -25,11 +26,8 @@ function sourceCopy(change: Change): Service {
     source.replace(...change).replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
   ).replace(/\bexport /g, '')
   const bindings = {
-    createCipheriv: crypto.createCipheriv,
-    createDecipheriv: crypto.createDecipheriv,
     createHash: crypto.createHash,
     createHmac: crypto.createHmac,
-    hkdfSync: crypto.hkdfSync,
     randomBytes: crypto.randomBytes,
     randomUUID: crypto.randomUUID,
     isIP,
@@ -37,6 +35,7 @@ function sourceCopy(change: Change): Service {
     sql,
     z,
     ...availability,
+    ...sealedSecret,
     ...policy,
     DomainError,
     cleanText,

@@ -12,6 +12,7 @@ import { z } from 'zod'
 import * as availability from './availability.ts'
 import { createPublicBooking } from './bookings.ts'
 import { DomainError } from './errors.ts'
+import * as sealedSecret from './sealed-secret.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 import { cleanText } from './text.ts'
 import * as waitlist from './waitlist.ts'
@@ -34,11 +35,8 @@ function sourceCopy(changes: Change[] = [], overrides: Partial<typeof availabili
     '',
   )
   const bindings = {
-    createCipheriv: crypto.createCipheriv,
-    createDecipheriv: crypto.createDecipheriv,
     createHash: crypto.createHash,
     createHmac: crypto.createHmac,
-    hkdfSync: crypto.hkdfSync,
     randomBytes: crypto.randomBytes,
     randomUUID: crypto.randomUUID,
     isIP,
@@ -46,6 +44,7 @@ function sourceCopy(changes: Change[] = [], overrides: Partial<typeof availabili
     sql,
     z,
     ...availability,
+    ...sealedSecret,
     ...policy,
     DomainError,
     cleanText,

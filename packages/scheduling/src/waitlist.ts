@@ -1,13 +1,5 @@
 // Internal waitlist admission and capability services. No sender, route or provider calls.
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  createHmac,
-  hkdfSync,
-  randomBytes,
-  randomUUID,
-} from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { interfaceLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
@@ -22,6 +14,7 @@ import {
 } from './availability.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { derivePurposeKey, openSecret, sealSecret } from './sealed-secret.ts'
 import { cleanText } from './text.ts'
 import { WAITLIST_ABUSE_RETENTION_DAYS, WAITLIST_WINDOW_MAX_DAYS } from './waitlist-policy.ts'
 
@@ -378,7 +371,7 @@ async function admissionBudget(
 }
 
 const outboxKey = (secret: string) =>
-  Buffer.from(hkdfSync('sha256', secret, 'Hourmere waitlist verification', 'outbox-v1', 32))
+  derivePurposeKey(secret, 'Hourmere waitlist verification', 'outbox-v1')
 const outboxAad = (
   ctx: Pick<WaitlistContext, 'publicUrl'>,
   row: { id: string; entry_id: string; generation: number },
@@ -391,14 +384,11 @@ function sealOutbox(
   row: { id: string; entry_id: string; generation: number },
   token: string,
 ) {
-  const iv = randomBytes(12),
-    cipher = createCipheriv('aes-256-gcm', outboxKey(ctx.secret), iv)
-  cipher.setAAD(outboxAad(ctx, row))
-  const encrypted = Buffer.concat([
-    cipher.update(JSON.stringify({ verificationToken: token }), 'utf8'),
-    cipher.final(),
-  ])
-  return Buffer.concat([Buffer.from([1]), iv, cipher.getAuthTag(), encrypted])
+  return sealSecret(
+    outboxKey(ctx.secret),
+    outboxAad(ctx, row),
+    JSON.stringify({ verificationToken: token }),
+  )
 }
 /** Internal sender utility: ciphertext is authenticated to origin, row, entry and generation. */
 export function openWaitlistVerificationOutbox(
@@ -407,12 +397,9 @@ export function openWaitlistVerificationOutbox(
 ): { verificationToken: string } | undefined {
   try {
     const value = row.encrypted_payload
-    if (!value || value.length < 30 || value.length > 4096 || value[0] !== 1) return undefined
-    const decipher = createDecipheriv('aes-256-gcm', outboxKey(ctx.secret), value.subarray(1, 13))
-    decipher.setAAD(outboxAad(ctx, row))
-    decipher.setAuthTag(value.subarray(13, 29))
+    if (!value || value.length > 4096) return undefined
     const parsed: unknown = JSON.parse(
-      Buffer.concat([decipher.update(value.subarray(29)), decipher.final()]).toString('utf8'),
+      openSecret(outboxKey(ctx.secret), outboxAad(ctx, row), value),
     )
     if (
       typeof parsed !== 'object' ||

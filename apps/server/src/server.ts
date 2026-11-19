@@ -348,6 +348,7 @@ export function productRoutes({
     meetingPollRoutes({ db, meetingPollSecret }),
     publicRoutes({
       db,
+      routingFormsEnabled: routingEnabled,
       smsRemindersAvailable,
       waitlistSecret,
       smtpConfigured,
