@@ -1,12 +1,13 @@
-// Durable credential outbox. SMTP never holds a database transaction or a poll lock.
+// Durable poll mail outbox. SMTP never holds a database transaction or a poll lock.
 import { createHmac, randomUUID } from 'node:crypto'
-import type { Db, MeetingPollDeliveryRow } from '@hourmere/db'
+import type { Db, MeetingPollDeliveryRow, MeetingPollRow, MeetingPollVoterRow } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import {
   type Mailer,
   type MailMessage,
   MailRejectedError,
   meetingPollCredentialEmail,
+  meetingPollOutcomeEmail,
 } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -32,7 +33,8 @@ export interface MeetingPollEmailDeps extends NotificationMailLimits {
 export interface MeetingPollEmailRequest {
   id: string
 }
-const KINDS = ['verification', 'invitation', 'recovery']
+const KINDS = ['verification', 'invitation', 'recovery', 'selected', 'booking_update']
+const SEND_TIMEOUT_MS = 60_000
 async function clock(db: Db, deps: MeetingPollEmailDeps): Promise<Date> {
   if (deps.now) return new Date(deps.now().epochMilliseconds)
   return (await sql<{ at: Date }>`SELECT clock_timestamp() AS at`.execute(db)).rows[0]?.at as Date
@@ -81,6 +83,93 @@ async function finish(
     .where('id', '=', row.id)
     .execute()
 }
+
+async function claimDelivery(
+  db: Db,
+  deps: MeetingPollEmailDeps,
+  row: MeetingPollDeliveryRow,
+  ready: Date,
+  recipient: string,
+  remaining: number,
+  render: () => MailMessage | Promise<MailMessage>,
+) {
+  const { MEETING_POLL_RETENTION } = await import('@hourmere/scheduling/meeting-poll-delivery')
+  const hash = notificationRecipientHash(recipient, deps.secret)
+  const suppressed = await notificationEmailBudget(db, deps, hash, true, ready)
+  if (suppressed) return finish(db, row, ready, 'suppressed', suppressed)
+  if (!deps.smtpConfigured) return finish(db, row, ready, 'skipped', 'smtp_not_configured')
+  const message = await render()
+  const leaseId = randomUUID()
+  await db
+    .insertInto('notification_email_sends')
+    .values({ recipient_hash: hash, sent_at: ready })
+    .execute()
+  await db
+    .updateTable('meeting_poll_deliveries')
+    .set({
+      state: 'processing',
+      attempts: row.attempts + 1,
+      lease_id: leaseId,
+      lease_until: new Date(ready.getTime() + MEETING_POLL_RETENTION.deliveryLeaseSeconds * 1000),
+      updated_at: ready,
+    })
+    .where('id', '=', row.id)
+    .execute()
+  return { message, leaseId, attempt: row.attempts + 1, remaining }
+}
+
+async function prepareOutcome(
+  db: Db,
+  deps: MeetingPollEmailDeps,
+  poll: MeetingPollRow,
+  row: MeetingPollDeliveryRow,
+  voter: MeetingPollVoterRow,
+  ready: Date,
+) {
+  if (
+    poll.status !== 'scheduled' ||
+    !poll.booking_id ||
+    voter.selected_booking_role ||
+    !(voter.verified_at || voter.invited_at)
+  )
+    return finish(db, row, ready, 'skipped', 'recipient_unavailable')
+
+  const { latestBookingInChain, meetingPollBookingUpdateSequence } = await import(
+    '@hourmere/scheduling/meeting-poll-delivery'
+  )
+  // Booking lifecycle writes lock the booking before the poll. Read through one snapshot
+  // without locking booking rows, and load only the facts an informational email needs.
+  const booking = await db
+    .selectFrom(latestBookingInChain(poll.booking_id, poll.organization_id).as('latest'))
+    .innerJoin('bookings as b', 'b.id', 'latest.id')
+    .select(['latest.depth', 'b.status', 'b.start_at', 'b.end_at'])
+    .executeTakeFirst()
+  if (!booking || (booking.status !== 'confirmed' && booking.status !== 'cancelled'))
+    return finish(db, row, ready, 'skipped', 'booking_unavailable')
+
+  const { status, depth } = booking
+  const initial = row.kind === 'selected'
+  if (
+    initial
+      ? depth !== 0 || status !== 'confirmed'
+      : row.sequence !== meetingPollBookingUpdateSequence(depth, status)
+  )
+    return finish(db, row, ready, 'skipped', 'booking_changed')
+  const kind = initial ? 'selected' : status === 'cancelled' ? 'cancelled' : 'rescheduled'
+  return claimDelivery(db, deps, row, ready, voter.email, SEND_TIMEOUT_MS, () =>
+    meetingPollOutcomeEmail({
+      to: voter.email,
+      pollTitle: poll.title,
+      startAt: booking.start_at,
+      endAt: booking.end_at,
+      timeZone: voter.time_zone,
+      language: voter.locale,
+      defaultLanguage: deps.defaultLanguage,
+      kind,
+    }),
+  )
+}
+
 // Scheduling constructs Zod schemas; load it only when work runs, after the HTTP
 // composition has installed its OpenAPI extension (including the policy subpath).
 async function prepare(deps: MeetingPollEmailDeps, request: MeetingPollEmailRequest) {
@@ -109,11 +198,6 @@ async function prepare(deps: MeetingPollEmailDeps, request: MeetingPollEmailRequ
     // this transaction; failed/uncertain SMTP consumes it conservatively as well.
     await lockNotificationEmailBudget(db)
     const ready = await clock(db, deps)
-    const event = await db
-      .selectFrom('event_types')
-      .select('deleted_at')
-      .where('id', '=', poll.event_type_id)
-      .executeTakeFirst()
     const voter = row.voter_id
       ? await db
           .selectFrom('meeting_poll_voters')
@@ -122,14 +206,25 @@ async function prepare(deps: MeetingPollEmailDeps, request: MeetingPollEmailRequ
           .executeTakeFirst()
       : undefined
     if (
+      !voter ||
+      voter.withdrawn_at ||
+      (voter.pending_expires_at && voter.pending_expires_at <= ready)
+    )
+      return finish(db, row, ready, 'skipped', 'recipient_unavailable')
+    if (row.kind === 'selected' || row.kind === 'booking_update')
+      return prepareOutcome(db, deps, poll, row, voter, ready)
+
+    const event = await db
+      .selectFrom('event_types')
+      .select('deleted_at')
+      .where('id', '=', poll.event_type_id)
+      .executeTakeFirst()
+    if (
       !event ||
       event.deleted_at ||
       !['open', 'closed'].includes(poll.status) ||
       (poll.status === 'closed' && row.kind !== 'recovery') ||
-      poll.deadline_at <= ready ||
-      !voter ||
-      voter.withdrawn_at ||
-      (voter.pending_expires_at && voter.pending_expires_at <= ready)
+      poll.deadline_at <= ready
     )
       return finish(db, row, ready, 'skipped', 'recipient_unavailable')
     const opened = openMeetingPollCredential(
@@ -156,70 +251,47 @@ async function prepare(deps: MeetingPollEmailDeps, request: MeetingPollEmailRequ
       .where('expires_at', '>', ready)
       .executeTakeFirst()
     if (!capability) return finish(db, row, ready, 'skipped', 'credential_unavailable')
-    const hash = notificationRecipientHash(voter.email, deps.secret)
-    const suppressed = await notificationEmailBudget(db, deps, hash, true, ready)
-    if (suppressed) return finish(db, row, ready, 'suppressed', suppressed)
-    if (!deps.smtpConfigured) return finish(db, row, ready, 'skipped', 'smtp_not_configured')
-    // Independent preference capability: deterministic per retained voter, so recovery
-    // and host resend preserve it without retaining another plaintext/ciphertext copy.
-    const optOutToken = createHmac('sha256', deps.meetingPollSecret)
-      .update(
-        `hourmere/meeting-poll/reminder-opt-out/v1\0${row.organization_id}\0${row.poll_id}\0${voter.id}`,
-      )
-      .digest('base64url')
-    if (opened.purpose === 'voting')
-      await db
-        .insertInto('meeting_poll_capabilities')
-        .values({
-          organization_id: row.organization_id,
-          poll_id: row.poll_id,
-          voter_id: voter.id,
-          purpose: 'reminder_opt_out',
-          generation: 1,
-          token_digest: meetingPollCapabilityDigest('reminder_opt_out', optOutToken),
-          expires_at: poll.deadline_at,
-          capability_ciphertext: null,
-        })
-        .onConflict((c) => c.column('token_digest').doNothing())
-        .execute()
-    const message = meetingPollCredentialEmail({
-      to: voter.email,
-      publicUrl: deps.publicUrl,
-      token: opened.token,
-      purpose: opened.purpose,
-      optOutToken: opened.purpose === 'voting' ? optOutToken : undefined,
-      pollTitle: poll.title,
-      expiresAt: capability.expires_at,
-      timeZone: voter.time_zone,
-      language: voter.locale,
-      defaultLanguage: deps.defaultLanguage,
-    })
-    const leaseId = randomUUID()
-    await db
-      .insertInto('notification_email_sends')
-      .values({ recipient_hash: hash, sent_at: ready })
-      .execute()
-    await db
-      .updateTable('meeting_poll_deliveries')
-      .set({
-        state: 'processing',
-        attempts: row.attempts + 1,
-        lease_id: leaseId,
-        lease_until: new Date(ready.getTime() + MEETING_POLL_RETENTION.deliveryLeaseSeconds * 1000),
-        updated_at: ready,
+    const remaining = Math.min(
+      SEND_TIMEOUT_MS,
+      capability.expires_at.getTime() - ready.getTime(),
+      poll.deadline_at.getTime() - ready.getTime(),
+    )
+    return claimDelivery(db, deps, row, ready, voter.email, remaining, async () => {
+      // Independent preference capability: deterministic per retained voter, so recovery
+      // and host resend preserve it without retaining another plaintext/ciphertext copy.
+      const optOutToken = createHmac('sha256', deps.meetingPollSecret)
+        .update(
+          `hourmere/meeting-poll/reminder-opt-out/v1\0${row.organization_id}\0${row.poll_id}\0${voter.id}`,
+        )
+        .digest('base64url')
+      if (opened.purpose === 'voting')
+        await db
+          .insertInto('meeting_poll_capabilities')
+          .values({
+            organization_id: row.organization_id,
+            poll_id: row.poll_id,
+            voter_id: voter.id,
+            purpose: 'reminder_opt_out',
+            generation: 1,
+            token_digest: meetingPollCapabilityDigest('reminder_opt_out', optOutToken),
+            expires_at: poll.deadline_at,
+            capability_ciphertext: null,
+          })
+          .onConflict((c) => c.column('token_digest').doNothing())
+          .execute()
+      return meetingPollCredentialEmail({
+        to: voter.email,
+        publicUrl: deps.publicUrl,
+        token: opened.token,
+        purpose: opened.purpose,
+        optOutToken: opened.purpose === 'voting' ? optOutToken : undefined,
+        pollTitle: poll.title,
+        expiresAt: capability.expires_at,
+        timeZone: voter.time_zone,
+        language: voter.locale,
+        defaultLanguage: deps.defaultLanguage,
       })
-      .where('id', '=', row.id)
-      .execute()
-    return {
-      message,
-      leaseId,
-      attempt: row.attempts + 1,
-      remaining: Math.min(
-        60_000,
-        capability.expires_at.getTime() - ready.getTime(),
-        poll.deadline_at.getTime() - ready.getTime(),
-      ),
-    }
+    })
   })
 }
 function failureCode(error: unknown) {

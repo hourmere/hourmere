@@ -115,5 +115,11 @@
   "poll.vote.body": "Verwenden Sie Ihren privaten Link, um an {poll} teilzunehmen.",
   "poll.expiry": "Dieser Link ist bis {expiry} gültig.",
   "poll.confirm": "Das Öffnen dieses Links bestätigt weder Ihre E-Mail-Adresse noch gibt es eine Stimme ab.",
-  "poll.optout": "Erinnerungs-E-Mails für diese Abstimmung abbestellen."
+  "poll.optout": "Erinnerungs-E-Mails für diese Abstimmung abbestellen.",
+  "poll.outcome.selected.subject": "Termin für {poll} ausgewählt",
+  "poll.outcome.selected.body": "Die gastgebende Person hat den unten stehenden Termin ausgewählt. Sie wurden nicht zur Teilnahme ausgewählt.",
+  "poll.outcome.rescheduled.subject": "Termin verschoben: {poll}",
+  "poll.outcome.rescheduled.body": "Das Treffen wurde auf den unten stehenden Termin verschoben. Sie stehen nicht auf der Teilnahmeliste.",
+  "poll.outcome.cancelled.subject": "Treffen abgesagt: {poll}",
+  "poll.outcome.cancelled.body": "Das Treffen wurde abgesagt. Unten steht der zuletzt geplante Termin."
 }

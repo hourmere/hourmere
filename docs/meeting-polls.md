@@ -678,6 +678,13 @@ attendees receive it through normal booking confirmation rather than a duplicate
 invite. Non-selected voters get plain informational mail, no ICS, join URL or manage link.
 Preserve ordinary conference gates. Invitations and pre-booking cancellations carry no ICS.
 
+The poll email worker delivers the committed outcome intents using each recipient's saved
+language and time zone. A finalized booking's reschedule or cancellation creates an update
+intent in the same transaction. The worker checks that the recipient is still eligible and
+uses the latest booking in the reschedule chain. A newer change supersedes older queued
+notices. Informational mail can go out while a conference is being created, and the ordinary
+booking mail continues to wait for conference readiness.
+
 Host mail: on deadline closure, enqueue one `deadline_closed` notice for the creator if
 still authorized; never fan out to all team admins or transfer it after departure. It
 contains title, deadline in the profile zone, response count and an authenticated results
@@ -688,8 +695,8 @@ confirmation/lifecycle mail, without an extra poll-selected host message. Delive
 supports a host recipient separately from a voter; dedupe host deadline mail once per poll.
 Use the shared locale registry in `packages/core/src/locales.ts`: invitation language
 chosen by host then instance fallback, subsequent poll mail in voter's saved locale, host
-mail in current profile locale. Add complete natural public translations in every shipped
-locale and en/zh-CN admin text in the later tasks; no new product strings in this task.
+mail in current profile locale. Voter-facing messages are translated into every shipped
+public locale. Admin text uses en and zh-CN.
 
 Store start/end/deadline as UTC `timestamptz`. Accept explicit offsets, normalize to database
 microseconds before fingerprints/comparisons, and return RFC 3339 Z timestamps. Reject

@@ -115,5 +115,11 @@
   "poll.vote.body": "Usa tu enlace privado para participar en {poll}.",
   "poll.expiry": "Este enlace es válido hasta {expiry}.",
   "poll.confirm": "Abrir este enlace no confirma tu correo ni envía un voto.",
-  "poll.optout": "Dejar de recibir recordatorios de esta encuesta."
+  "poll.optout": "Dejar de recibir recordatorios de esta encuesta.",
+  "poll.outcome.selected.subject": "Horario elegido para {poll}",
+  "poll.outcome.selected.body": "La persona que organiza la reunión ha elegido el horario que aparece abajo. No estás en la lista de asistentes.",
+  "poll.outcome.rescheduled.subject": "Reunión reprogramada: {poll}",
+  "poll.outcome.rescheduled.body": "La reunión se ha cambiado al horario que aparece abajo. No estás en la lista de asistentes.",
+  "poll.outcome.cancelled.subject": "Reunión cancelada: {poll}",
+  "poll.outcome.cancelled.body": "La reunión se ha cancelado. Abajo figura el último horario previsto."
 }

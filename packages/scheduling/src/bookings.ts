@@ -60,6 +60,7 @@ import {
   resolveLocationChoice,
   selectLocationOption,
 } from './location-options.ts'
+import { enqueueMeetingPollBookingUpdate } from './meeting-poll-outcomes.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -333,9 +334,13 @@ async function latestInChain(db: Db, id: string): Promise<string> {
 
 /** A scalar subquery, so callers can read the current booking in the same snapshot. */
 export function latestBookingId(id: string, organizationId?: string) {
+  return sql<string>`(SELECT id FROM ${latestBookingInChain(id, organizationId)} AS latest)`
+}
+
+export function latestBookingInChain(id: string, organizationId?: string) {
   const scope =
     organizationId === undefined ? sql`` : sql`WHERE b.organization_id = ${organizationId}`
-  return sql<string>`(
+  return sql<{ id: string; depth: number }>`(
     WITH RECURSIVE chain (id, depth) AS (
       SELECT ${id}::uuid, 0
       UNION ALL
@@ -343,7 +348,7 @@ export function latestBookingId(id: string, organizationId?: string) {
         FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
         ${scope}
     ) CYCLE id SET is_cycle USING path
-    SELECT id FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1)`
+    SELECT id, depth FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1)`
 }
 
 /**
@@ -1173,6 +1178,8 @@ async function cancelLocked(
   await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
+  if (!seat?.group_slot_id)
+    await enqueueMeetingPollBookingUpdate(db, row.organization_id, row.id, 'cancelled', now)
   // In this transaction: the cancellation email exists exactly when the cancellation does.
   await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
   return loadBooking(db, row.id)
@@ -2091,6 +2098,7 @@ async function rescheduleLocked(
     requestId: origin.requestId ?? ctx.requestId,
   })
   await prepareBookingConference(ctx, trx, id)
+  await enqueueMeetingPollBookingUpdate(trx, old.organization_id, id, 'confirmed', now)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
   return { booking: await loadBooking(trx, id), manageToken }
 }

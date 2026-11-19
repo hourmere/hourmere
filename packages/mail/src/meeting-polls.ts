@@ -1,5 +1,10 @@
-import { formattingLocale, interfaceLanguage } from '@hourmere/core/language'
+import {
+  formattingLocale,
+  type InterfaceLanguage,
+  interfaceLanguage,
+} from '@hourmere/core/language'
 import { mailMessage } from './catalogue.ts'
+import { formatMailDateTime } from './date-time.ts'
 import type { MailMessage } from './index.ts'
 import { emailLayout, emailLinkStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
@@ -83,6 +88,71 @@ export function meetingPollCredentialEmail(
             `<p>${emailText(p.text, language)}${p.url ? `<br><a href="${escapeHtml(p.url)}" style="${emailLinkStyle}" rel="noreferrer">${emailText(p.url, language)}</a>` : ''}</p>`,
         )
         .join('\n'),
+    ),
+  }
+}
+
+export interface MeetingPollOutcomeEmailOptions {
+  to: string
+  pollTitle: string
+  kind: 'selected' | 'rescheduled' | 'cancelled'
+  startAt: Date
+  endAt: Date
+  timeZone: string
+  language?: unknown
+  defaultLanguage?: unknown
+}
+
+function outcomeTime(date: Date, timeZone: string, language: InterfaceLanguage): string {
+  try {
+    const time = Temporal.Instant.fromEpochMilliseconds(date.getTime()).toZonedDateTimeISO(timeZone)
+    const formatted = formatMailDateTime(
+      time,
+      {
+        dateStyle: 'full',
+        timeStyle: 'short',
+        ...(language === 'zh-CN' ? { hourCycle: 'h23' } : {}),
+      },
+      language,
+    )
+    return (
+      formatted +
+      mailMessage(language, 'format.zone', {
+        name: timeZone.replaceAll('_', ' '),
+        offset: `GMT${time.offset}`,
+      })
+    )
+  } catch {
+    throw new Error('Invalid meeting poll display time')
+  }
+}
+
+/** Informational poll outcome for a voter outside the booking's attendee list. */
+export function meetingPollOutcomeEmail(options: MeetingPollOutcomeEmailOptions): MailMessage {
+  const language =
+    interfaceLanguage(options.language) ?? interfaceLanguage(options.defaultLanguage) ?? 'en'
+  if (!options.to || singleLine(options.to) !== options.to)
+    throw new Error('Invalid meeting poll recipient')
+  const subject = subjectLine(
+    mailMessage(language, `poll.outcome.${options.kind}.subject`, {
+      poll: singleLine(options.pollTitle),
+    }),
+  ).toWellFormed()
+  const body = mailMessage(language, `poll.outcome.${options.kind}.body`)
+  const when = mailMessage(language, 'format.timeRange', {
+    start: outcomeTime(options.startAt, options.timeZone, language),
+    end: outcomeTime(options.endAt, options.timeZone, language),
+    zone: '',
+  })
+  return {
+    sensitive: true,
+    to: options.to,
+    subject,
+    text: `Hourmere\n\n${body}\n\n${when}\n`,
+    html: emailLayout(
+      language,
+      subject,
+      `<p>${emailText(body, language)}</p>\n<p>${emailText(when, language)}</p>`,
     ),
   }
 }

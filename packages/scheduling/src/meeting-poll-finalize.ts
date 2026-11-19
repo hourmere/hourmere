@@ -13,6 +13,7 @@ import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 import { LOCATION_OPTION_LIMITS } from './location-options.ts'
 import { ensureMeetingPollKey } from './meeting-poll-key.ts'
+import { enqueueMeetingPollOutcomes } from './meeting-poll-outcomes.ts'
 import { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 import { type MeetingPollHostContext, requireSecret } from './meeting-poll-voters.ts'
 import {
@@ -215,7 +216,7 @@ export async function finalizeMeetingPoll(
       .where('id', 'in', request.attendeeVoterIds)
       .execute()
     await insertReceipt(trx, receipt, poll.id, at, booking.id)
-    await enqueueOutcomes(trx, poll, request.attendeeVoterIds, at)
+    await enqueueMeetingPollOutcomes(trx, poll, at, 'selected')
     return {
       poll: await loadPoll(trx, ctx, poll.id),
       booking: {
@@ -297,45 +298,6 @@ async function selectAttendees(
       .filter((voter) => voter.id !== booker.id)
       .map(({ name, email }) => ({ name, email })),
   }
-}
-
-async function enqueueOutcomes(
-  trx: Db,
-  poll: HostPoll,
-  attendeeIds: readonly string[],
-  at: string,
-) {
-  // Selected voters receive the ordinary confirmation and calendar invite from the booking core.
-  await trx
-    .insertInto('meeting_poll_deliveries')
-    .columns([
-      'organization_id',
-      'poll_id',
-      'voter_id',
-      'kind',
-      'due_at',
-      'created_at',
-      'updated_at',
-    ])
-    .expression((eb) =>
-      eb
-        .selectFrom('meeting_poll_voters')
-        .select(['organization_id', 'poll_id', 'id'])
-        .select([
-          sql<string>`'selected'`.as('kind'),
-          sql`${at}::timestamptz`.as('due_at'),
-          sql`${at}::timestamptz`.as('created_at'),
-          sql`${at}::timestamptz`.as('updated_at'),
-        ])
-        .where('organization_id', '=', poll.organization_id)
-        .where('poll_id', '=', poll.id)
-        .where('id', 'not in', attendeeIds)
-        .where('withdrawn_at', 'is', null)
-        .where((eb) =>
-          eb.or([eb('verified_at', 'is not', null), eb('invited_at', 'is not', null)]),
-        ),
-    )
-    .execute()
 }
 
 async function currentBooking(
