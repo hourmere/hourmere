@@ -163,13 +163,20 @@ describe('published API key scope tables', () => {
     },
   )
 
-  it.each(documents)('$path lists publication as full-scope only', ({ document, section }) => {
-    expect(document).toContain('| `publish_routing_form` | — | `routing-forms publish` | `full` |')
-    if (section === 'all')
-      expect(document).toContain(
-        '| `POST /api/v1/routing-forms/{id}/publish` | Session or API key | `full` |',
-      )
-  })
+  it.each(documents)(
+    '$path lists publication and preview as full-scope only',
+    ({ document, section }) => {
+      for (const verb of ['publish', 'preview']) {
+        expect(document).toContain(
+          `| \`${verb}_routing_form\` | — | \`routing-forms ${verb}\` | \`full\` |`,
+        )
+        if (section === 'all')
+          expect(document).toContain(
+            `| \`POST /api/v1/routing-forms/{id}/${verb}\` | Session or API key | \`full\` |`,
+          )
+      }
+    },
+  )
 
   it.each(documents)(
     '$path matches the live operation registry exactly',

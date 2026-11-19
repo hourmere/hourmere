@@ -1,5 +1,5 @@
 // Routing configuration interfaces are present by name, but production remains hard-off.
-// Allow only their six operations, schemas and CLI commands; preview, public routing,
+// Allow the seven configuration operations, schemas and CLI commands. Public routing,
 // continuation and UI surfaces belong to later steps. Runtime refusal is tested by the
 // routing adapter tests. This inventory still examines production assembly and all source
 // paths, without snapshots or a git baseline. The web keeps its separate Off inventory.
@@ -73,6 +73,7 @@ const CONFIGURATION_OPERATIONS = [
   { method: 'patch', path: '/api/v1/routing-forms/{id}', operationId: 'updateRoutingForm' },
   { method: 'delete', path: '/api/v1/routing-forms/{id}', operationId: 'archiveRoutingForm' },
   { method: 'post', path: '/api/v1/routing-forms/{id}/publish', operationId: 'publishRoutingForm' },
+  { method: 'post', path: '/api/v1/routing-forms/{id}/preview', operationId: 'previewRoutingForm' },
 ]
 const CONFIGURATION_PATHS = [...new Set(CONFIGURATION_OPERATIONS.map(({ path }) => path))]
 const CONFIGURATION_COMMANDS = {
@@ -82,8 +83,9 @@ const CONFIGURATION_COMMANDS = {
   'routing-forms update': 'update_routing_form',
   'routing-forms archive': 'archive_routing_form',
   'routing-forms publish': 'publish_routing_form',
+  'routing-forms preview': 'preview_routing_form',
 }
-// Explicit component names keep future preview and public schemas visible to this test.
+// Explicit component names keep future public schemas visible to this test.
 const CONFIGURATION_SCHEMAS = [
   'CreateRoutingForm',
   'ArchiveRoutingForm',
@@ -93,6 +95,8 @@ const CONFIGURATION_SCHEMAS = [
   'PublishRoutingForm',
   'RoutingFormVersion',
   'RoutingFormPublication',
+  'PreviewRoutingForm',
+  'RoutingFormPreview',
 ]
 const CONFIGURATION_TAGS = ['Routing forms']
 
@@ -968,7 +972,7 @@ describe('routing forms remain hard-off with configuration interfaces', () => {
     }
   })
 
-  it('offers exactly the six configuration CLI commands', () => {
+  it('offers exactly the configuration CLI commands', () => {
     const names = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),

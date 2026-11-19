@@ -1,3 +1,6 @@
+import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { COMMANDS, HELP, runCli } from './cli.ts'
 
@@ -8,10 +11,14 @@ const commands = [
   ['update', 'update_routing_form'],
   ['archive', 'archive_routing_form'],
   ['publish', 'publish_routing_form'],
+  ['preview', 'preview_routing_form'],
 ] as const
 
-async function run(command: string, disabled = false, result?: object) {
-  const input = { id: '019a0000-0000-7000-8000-000000000001', expectedRevision: 1 }
+const id = '019a0000-0000-7000-8000-000000000001'
+const previewInput = { id, answers: { '019a0000-0000-7000-8000-000000000002': 'Example answer' } }
+
+async function run(command: string, disabled = false, result?: object, inputPath = '-') {
+  const input = command === 'preview' ? previewInput : { id, expectedRevision: 1 }
   let stdout = ''
   let stderr = ''
   const fetcher = vi.fn<typeof fetch>(async () =>
@@ -27,10 +34,10 @@ async function run(command: string, disabled = false, result?: object) {
     }),
   )
   const code = await runCli({
-    argv: ['routing-forms', command, '--input', '-'],
+    argv: ['routing-forms', command, '--input', inputPath],
     env: { HOURMERE_URL: 'https://hourmere.example', HOURMERE_API_KEY: 'hm_routing_cli_test' },
     stdin: (async function* () {
-      yield JSON.stringify(input)
+      if (inputPath === '-') yield JSON.stringify(input)
     })(),
     stdout: (text) => {
       stdout += text
@@ -64,6 +71,34 @@ describe('routing form CLI configuration commands', () => {
     expect(result.fetcher).toHaveBeenCalledTimes(1)
   })
 
+  it('reads preview answers from a file and prints the draft diagnostics', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hourmere-cli-preview-'))
+    const path = join(dir, 'preview.json')
+    const diagnostics = {
+      draftRevision: 2,
+      matchedRuleId: 'fallback',
+      resolvedRuleId: 'fallback',
+      target: { kind: 'message', message: 'Thank you for your interest' },
+      unavailableTargets: [],
+      rules: [],
+    }
+    try {
+      await writeFile(path, JSON.stringify(previewInput))
+      const result = await run('preview', false, { structuredContent: diagnostics }, path)
+      expect(result.code).toBe(0)
+      expect(result.stderr).toBe('')
+      expect(JSON.parse(result.stdout)).toEqual(diagnostics)
+      expect(result.fetcher).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+        name: 'preview_routing_form',
+        arguments: previewInput,
+      })
+    } finally {
+      await unlink(path).catch(() => {})
+      await rmdir(dir)
+    }
+  })
+
   it('reads large publication replies and keeps the standard limit for other commands', async () => {
     // MCP sends both the current form and published version as structured JSON and text.
     const ruleContent = 'x'.repeat(3 * 1024 * 1024)
@@ -84,6 +119,6 @@ describe('routing form CLI configuration commands', () => {
     expect(Object.keys(COMMANDS).filter((command) => command.startsWith('routing-forms '))).toEqual(
       commands.map(([command]) => `routing-forms ${command}`),
     )
-    expect(HELP).toContain('routing-forms list|get|create|update|archive|publish')
+    expect(HELP).toContain('routing-forms list|get|create|update|archive|publish|preview')
   })
 })

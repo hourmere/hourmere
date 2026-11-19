@@ -2,10 +2,10 @@
 
 Status: storage, internal services and hard-off configuration interfaces. Migration
 0072 adds the five storage tables and migration 0083 their idempotency records. The
-configuration list/get/create/update/archive operations are registered together in REST,
-MCP and CLI, but production always returns `routing_forms_disabled`; discovery omits
-these five MCP tools. There is no operator setting or public routing execution yet.
-The shared validator, evaluator, target checks and configuration/publication services
+configuration list/get/create/update/archive/publish/preview operations are registered
+together in REST, MCP and CLI. Production returns `routing_forms_disabled` for all seven
+operations and discovery omits their MCP tools. There is no operator setting or public
+routing execution yet. The shared validator, evaluator, target checks and draft services
 are implemented. Target invalidation and retention cleanup run inside existing mutations
 and in a background job; with no routing form they change nothing.
 The eventual feature is free on self-hosted and Cloud alike,
@@ -545,6 +545,31 @@ revision. `version` is the immutable snapshot created by the original request, e
 retry after a newer version has been published. Publication rechecks event targets and
 mappings against current data, returning `invalid_routing_target` for invalid mappings or
 unsupported targets such as group or payment-requiring events.
+
+Preview evaluates the current saved draft using the same rules and answer validation as
+routing. Personal owners and current team owners or admins can preview with a session,
+an MCP OAuth grant, or a `full` API key for the form's organization. Session REST calls
+require a same-origin `Origin` or `Referer` and can supply `X-Expected-Organization-Id`
+to pin the workspace. Send `{ answers }` to `POST /api/v1/routing-forms/{id}/preview`.
+Pass `{ id, answers }` to `preview_routing_form` or `hourmere routing-forms preview`,
+using `--input -` or `--input FILE` with the CLI. Key answers by question UUID and use
+option UUIDs for select answers. Use `null` or omit the key for an unanswered optional
+question.
+
+The result includes `draftRevision`, `matchedRuleId`, `resolvedRuleId`, `target`,
+`unavailableTargets` and the ordered `rules` trace with per-condition matches through the
+first matching rule. `matchedRuleId` is `fallback` if no rule matches. If the matched
+event is unavailable, preview tries the fallback directly. `resolvedRuleId` and `target`
+are `null` when neither target is usable. Preview evaluates answers in memory and
+returns diagnostics only. Routing is hard-off and the preview interfaces return
+`routing_forms_disabled`. MCP discovery omits the tool while off.
+
+中文：个人空间所有者及团队当前的所有者或管理员可预览已保存的草稿。API 密钥须属于表单所在
+空间并具有 `full` 权限。REST 接收 `{ answers }`，会话请求须同源。MCP 和 CLI 接收
+`{ id, answers }`，CLI 可从标准输入或文件读取 JSON。答案以问题 UUID 为键，单选题传选项
+UUID。未回答的选填题可省略或传 `null`。预览返回匹配规则、实际采用的目标及不可用原因，
+只在内存中处理答案。功能目前处于硬关闭状态，调用返回 `routing_forms_disabled`，MCP 工具
+列表不显示预览工具。
 
 Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or

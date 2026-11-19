@@ -330,6 +330,7 @@ export {
   createRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  previewRoutingForm,
   publishRoutingForm,
   updateRoutingForm,
 } from './routing-form-service.ts'
