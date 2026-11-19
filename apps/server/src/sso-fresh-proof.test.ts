@@ -617,12 +617,15 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
       await expect(expiryScenario(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     })
     it('detects reading time before the attempt lock', async () => {
-      const mutant = await sourceCopy([
+      const lock = [
+        '      if (proofAttemptId)',
         // biome-ignore lint/suspicious/noTemplateCurlyInString: source-copy mutation anchor.
-        '    if (proofAttemptId)\n      await sql`SELECT id FROM sso_attempts WHERE id = ${proofAttemptId}::uuid FOR UPDATE`.execute(\n        trx,\n      )\n    const now = await clock(trx)',
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: source-copy mutation anchor.
-        '    const now = await clock(trx)\n    if (proofAttemptId)\n      await sql`SELECT id FROM sso_attempts WHERE id = ${proofAttemptId}::uuid FOR UPDATE`.execute(\n        trx,\n      )',
-      ])
+        '        await sql`SELECT id FROM sso_attempts WHERE id = ${proofAttemptId}::uuid FOR UPDATE`.execute(',
+        '          trx,',
+        '        )',
+      ].join('\n')
+      const clock = '      const now = await clock(trx)'
+      const mutant = await sourceCopy([`${lock}\n${clock}`, `${clock}\n${lock}`])
       await expect(lockedExpiryScenario(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
     })
   })

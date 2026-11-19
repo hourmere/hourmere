@@ -29,6 +29,14 @@
     "exemption": "browser-session-only",
     "reason": "Retiring authentication authority requires interactive administrator proof."
   },
+  "testSsoProvider": {
+    "exemption": "browser-session-only",
+    "reason": "Testing a provider binds the current administrator and browser to a configuration revision."
+  },
+  "linkSsoAccount": {
+    "exemption": "browser-session-only",
+    "reason": "Explicit self-linking requires independent local proof and a browser-bound IdP ceremony."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
   "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },

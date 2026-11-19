@@ -27,11 +27,11 @@ request-expiry events leave workflow state untouched, and attendee no-show notif
 no workflow listener. The internal dispatcher now claims bounded due batches with leased tokens,
 rechecks live eligibility after lock waits and records terminal skips. Repair queues wakes for
 existing run identities without recreating enrollments or recipient intents. Eligible runs remain
-claimed for the later delivery implementation; no email or webhook attempt is made. Dispatcher
-and repair entry points are no-ops while hard-off, and no workflow worker is registered in
-production. The wake port requires transactional enqueueing deduplicated by run ID; its production
-adapter belongs with later worker wiring. A ready result is not permission to send after releasing
-locks: the later attempt layer must recheck inside its own marker transaction. No retention
+claimed for the internal attempt service. The email attempt resolves the captured recipient and
+revision under the marker transaction, rechecks live booking and workflow eligibility and
+resolves the current host-text policy. Dispatcher and repair entry points are no-ops while
+hard-off, and production registers no workflow worker. The wake port requires transactional
+enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. No retention
 worker or web interface exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
@@ -40,18 +40,22 @@ attributed to another product. Existing reminders and follow-ups remain availabl
 取消和改期使用各自的生命周期标识；改期保留原有定时工作流版本并重新计算到期时间，
 延迟的创建通知会终止，不会转移至后继预约。改期请求、请求到期及缺席标记不改变工作流状态。
 内部调度器按有界批次领取到期任务，以租约令牌校验归属，并在等待锁后重新检查有效性；
-补唤醒仅复用已有任务标识，不重建登记或收件人意图。有效任务保持已领取状态，发送留待后续实现。
+补唤醒仅复用已有任务标识，不重建登记或收件人意图。有效任务保持已领取状态，内部邮件尝试在
+写入发送标记的事务中解析已捕获的收件人和版本，并复查预约、工作流和主持人文本策略。
 生产入口仍受硬关闭常量保护，不会捕获、调度、补唤醒或发送工作流，也未注册工作流后台任务。
 
 Shared mail admission now records workflow reservations in the existing notification ledger,
 using the owner-organization lock before the shared budget lock. Retry admission restamps the
 same charge after recounting capacity. Internal instance/owner sub-cap settings default to
 20/5 per sliding hour and are forwarded by Compose; neither setting enables workflows.
-The admission primitive is not yet wired to the dispatcher and makes no SMTP attempt.
+The internal attempt service commits the charge and dispatch marker together before contacting
+SMTP. It releases the shared budget lock at commit. An overlapping core reminder keeps the
+intent and consumes no workflow reservation.
 
 中文：共享邮件准入已将工作流预留写入现有通知账本，先锁定所属组织，再取得共享额度锁。
 重试会重新计算额度并更新时间戳，不增加账本记录。内部实例和组织每小时子额度默认为
-20 和 5，Compose 已转发配置；这些配置不会启用工作流。准入尚未接入调度器，也不进行 SMTP 发送。
+20 和 5，Compose 已转发配置；这些配置不会启用工作流。内部尝试在连接 SMTP 之前提交额度
+记录和发送标记，并在提交时释放共享额度锁。重叠的核心提醒保留发送意图，不占用工作流额度。
 
 ## Evidence and existing foundations
 
@@ -269,7 +273,7 @@ so installations may use custom text when supplied for the recipient's locale an
 text otherwise.
 Self-hosted open-signup operators should set the switch false to use built-ins only.
 The final workflow default flip does not change this independent switch or relax the
-Cloud requirement. The live switch recheck at dispatch follows in a later step.
+Cloud requirement.
 
 The internal shared renderer now bounds interpolation, escapes HTML and applies the
 host-text fallback before reading custom content. Save and ordinary updates enforce the

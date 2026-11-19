@@ -336,6 +336,13 @@ below with these internal choices; no transport is added.
   row stays until its purge instant, so a reused key is still refused. A linked booking is never deleted
   by poll deletion; deleting it first deletes the poll the same way. Booking deletion locks
   the booking and then the poll, and nothing locks a poll and then its booking before C2.
+  Booking cancellation and reschedule likewise lock the booking (and, for a reschedule, its
+  hosts) before the scheduled poll, and only for a booking whose chain an unlocked read found
+  poll-linked. Finalize locks a poll before the hosts in the opposite order, but only while
+  that poll is unscheduled (`booking_id` still null), and the lifecycle lookup matches only
+  scheduled polls joined on `booking_id`, so the two never wait on each other. A poll's
+  `booking_id` is written only by finalize, in the transaction that inserts the booking, and
+  is never re-pointed, which keeps that unlocked read sound.
 
 Privacy default is `private`: voters see only their own choices and the candidate list,
 not other names, email addresses, answers or totals. A host can choose `aggregate` at
@@ -679,6 +686,13 @@ attendees receive it through normal booking confirmation rather than a duplicate
 invite. Non-selected voters get plain informational mail, no ICS, join URL or manage link.
 Preserve ordinary conference gates. Invitations and pre-booking cancellations carry no ICS.
 
+The poll email worker delivers the committed outcome intents using each recipient's saved
+language and time zone. A finalized booking's reschedule or cancellation creates an update
+intent in the same transaction. The worker checks that the recipient is still eligible and
+uses the latest booking in the reschedule chain. A newer change supersedes older queued
+notices. Informational mail can go out while a conference is being created, and the ordinary
+booking mail continues to wait for conference readiness.
+
 Host mail: on deadline closure, enqueue one `deadline_closed` notice for the creator if
 still authorized; never fan out to all team admins or transfer it after departure. It
 contains title, deadline in the profile zone, response count and an authenticated results
@@ -689,7 +703,8 @@ confirmation/lifecycle mail, without an extra poll-selected host message. Delive
 supports a host recipient separately from a voter; dedupe host deadline mail once per poll.
 Use the shared locale registry in `packages/core/src/locales.ts`: invitation language
 chosen by host then instance fallback, subsequent poll mail in the voter's saved locale, and
-host mail in the creator's current profile locale. The reminder opt-out page asks the
+host mail in the creator's current profile locale. Outcome emails are translated into
+every shipped public locale. The reminder opt-out page asks the
 recipient to confirm before sending the credential to the public opt-out endpoint. Opening
 the link alone does not change the preference. The page removes the credential fragment
 from the address bar and does not require signing in.

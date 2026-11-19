@@ -61,6 +61,11 @@ import {
   selectLocationOption,
 } from './location-options.ts'
 import {
+  bookingMeetingPollLinked,
+  enqueueMeetingPollBookingUpdate,
+  meetingPollChainLinked,
+} from './meeting-poll-outcomes.ts'
+import {
   createNotificationSnapshot,
   type NotificationSnapshot,
   notificationSnapshot,
@@ -327,15 +332,27 @@ async function resolveManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget
  * hand-edited data from looping, and the id only orders such data's branches.
  */
 async function latestInChain(db: Db, id: string): Promise<string> {
-  const { rows } = await sql<{ id: string }>`
+  const row = await db.selectNoFrom(latestBookingId(id).as('id')).executeTakeFirst()
+  return row?.id ?? id
+}
+
+/** A scalar subquery, so callers can read the current booking in the same snapshot. */
+export function latestBookingId(id: string, organizationId?: string) {
+  return sql<string>`(SELECT id FROM ${latestBookingInChain(id, organizationId)} AS latest)`
+}
+
+export function latestBookingInChain(id: string, organizationId?: string) {
+  const scope =
+    organizationId === undefined ? sql`` : sql`WHERE b.organization_id = ${organizationId}`
+  return sql<{ id: string; depth: number }>`(
     WITH RECURSIVE chain (id, depth) AS (
       SELECT ${id}::uuid, 0
       UNION ALL
       SELECT b.id, c.depth + 1
         FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
+        ${scope}
     ) CYCLE id SET is_cycle USING path
-    SELECT id FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1`.execute(db)
-  return rows[0]?.id ?? id
+    SELECT id, depth FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1)`
 }
 
 /**
@@ -1125,6 +1142,8 @@ async function cancelLocked(
   notify: BookingNotifier | undefined,
   origin: BookingOrigin,
   actorUserId: string | null,
+  /** meetingPollChainLinked, read before the first lock; false skips the poll lookup. */
+  meetingPollLinked: boolean,
   /** Only the invitee's own link is limited by the booking's cancel deadline. */
   asInvitee = false,
 ): Promise<Booking> {
@@ -1170,6 +1189,8 @@ async function cancelLocked(
   await resolveRescheduleRequest(db, row.id, 'cancelled', now)
   await cancelBookingConference(db, row.id, now)
   await skipScheduledMessages(db, row.id, 'booking_cancelled')
+  if (meetingPollLinked && !seat?.group_slot_id)
+    await enqueueMeetingPollBookingUpdate(db, row.organization_id, row.id, 'cancelled', now)
   // In this transaction: the cancellation email exists exactly when the cancellation does.
   await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
   return loadBooking(db, row.id)
@@ -1576,12 +1597,11 @@ async function createBookingInTransaction(
   // The event type may have changed while we waited (duration, questions, rules), and
   // waiting took time: read both again now that the host is locked.
   const current = seriesOccurrence ? et : await resolve(trx, { lock: true })
-  if (
-    !current ||
-    current.id !== et.id ||
-    current.organizationId !== et.organizationId ||
-    current.schedulingType !== et.schedulingType
-  ) {
+  if (!current || current.id !== et.id || current.organizationId !== et.organizationId) {
+    throw bookingEventUnavailable(oneTimeLink !== undefined)
+  }
+  if (checkEvent) await checkEvent(current)
+  if (current.schedulingType !== et.schedulingType) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
   if (current.hostUserIds.join() !== et.hostUserIds.join()) {
@@ -1589,7 +1609,6 @@ async function createBookingInTransaction(
       throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
-  if (checkEvent) await checkEvent(current)
   if (guests.length > 0 && !current.allowGuests) {
     throw new DomainError('invalid', 'guests_not_allowed', 'This event type does not allow guests')
   }
@@ -1849,11 +1868,12 @@ export async function cancelManagedBooking(
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
     const target = await resolveManagedTarget(trx, hash)
+    // The poll link belongs to the whole chain: the booking the lock follows to shares it.
     const parent =
       target &&
       (await trx
         .selectFrom('bookings')
-        .select('organization_id')
+        .select(['organization_id', meetingPollChainLinked(target.id).as('meeting_poll_linked')])
         .where('id', '=', target.id)
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
@@ -1878,6 +1898,7 @@ export async function cancelManagedBooking(
       ctx.notify,
       origin,
       origin.actorUserId ?? null,
+      parent.meeting_poll_linked,
       true,
     )
   })
@@ -1920,11 +1941,12 @@ export async function rescheduleManagedBooking(
     )
     if (receiptReplay) return receiptReplay
     const target = await resolveManagedTarget(trx, hash)
+    // The poll link belongs to the whole chain: the booking the lock follows to shares it.
     const parent =
       target &&
       (await trx
         .selectFrom('bookings')
-        .select('organization_id')
+        .select(['organization_id', meetingPollChainLinked(target.id).as('meeting_poll_linked')])
         .where('id', '=', target.id)
         .executeTakeFirst())
     if (!parent || !target) throw bookingNotFound()
@@ -1963,6 +1985,7 @@ export async function rescheduleManagedBooking(
         kind: 'capability',
         hash: groupMoveCapabilityAuthority(hash, origin),
       },
+      parent.meeting_poll_linked,
     )
   })
 }
@@ -1977,6 +2000,8 @@ async function rescheduleLocked(
   carryManageToken = false,
   selectedDuration?: number | undefined,
   expectedGroupSlotId?: string | undefined,
+  /** meetingPollChainLinked, read before the first lock; false skips the poll lookup. */
+  meetingPollLinked = true,
 ): Promise<BookingWithToken> {
   await assertBookingLocallyManaged(trx, old.id)
   // The status cannot change while the row is locked; the time check waits for the locks.
@@ -2119,6 +2144,8 @@ async function rescheduleLocked(
     requestId: origin.requestId ?? ctx.requestId,
   })
   await prepareBookingConference(ctx, trx, id)
+  if (meetingPollLinked)
+    await enqueueMeetingPollBookingUpdate(trx, old.organization_id, id, 'confirmed', now)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
   return { booking: await loadBooking(trx, id), manageToken }
 }
@@ -2205,6 +2232,7 @@ async function replayableGroupMove(
   origin: BookingOrigin,
   carry: boolean,
   authority: { kind: string; hash: Buffer; sourceId?: string },
+  meetingPollLinked: boolean,
 ): Promise<BookingWithToken> {
   if (old.group_slot_id && input.idempotencyKey === undefined)
     throw new DomainError(
@@ -2222,6 +2250,7 @@ async function replayableGroupMove(
       carry,
       input.durationMinutes,
       input.expectedGroupSlotId,
+      meetingPollLinked,
     )
   if (!IDEMPOTENCY_KEY.test(input.idempotencyKey))
     throw new DomainError(
@@ -2263,6 +2292,7 @@ async function replayableGroupMove(
     carry,
     input.durationMinutes,
     input.expectedGroupSlotId,
+    meetingPollLinked,
   )
   const successor = await trx
     .selectFrom('bookings')
@@ -2502,6 +2532,7 @@ export async function rescheduleHostBooking(
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
+    const meetingPollLinked = await bookingMeetingPollLinked(trx, ctx.principal.organization.id, id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     await lockGroupBooking(trx, id, start, durationMinutes, ctx.principal.organization.id)
@@ -2559,6 +2590,7 @@ export async function rescheduleHostBooking(
         ),
         sourceId: id,
       },
+      meetingPollLinked,
     )
   })
 }
@@ -2573,6 +2605,7 @@ export async function cancelHostBooking(
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    const meetingPollLinked = await bookingMeetingPollLinked(trx, ctx.principal.organization.id, id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
     await lockGroupBooking(trx, id, undefined, undefined, ctx.principal.organization.id)
@@ -2607,6 +2640,7 @@ export async function cancelHostBooking(
         requestId: ctx.requestId,
       },
       ctx.principal.user.id,
+      meetingPollLinked,
     )
   })
 }
@@ -2627,6 +2661,11 @@ export async function cancelTeamBookingInTransaction(
     reason?: string | undefined
     notify?: BookingNotifier | undefined
     sessionId?: string | undefined
+    /**
+     * bookingMeetingPollLinked, read before the caller's write check takes its locks.
+     * Omitted, the poll lookup runs under the locks.
+     */
+    meetingPollLinked?: boolean | undefined
   } = {},
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
@@ -2654,6 +2693,7 @@ export async function cancelTeamBookingInTransaction(
       },
     },
     actor.userId,
+    options.meetingPollLinked ?? true,
   )
 }
 
@@ -3024,6 +3064,8 @@ export async function cancelOccurrenceSeatInTransaction(
       requestId: ctx.requestId,
     },
     ctx.principal.user.id,
+    // Occurrence seats are group seats, which polls never book.
+    false,
   )
 }
 

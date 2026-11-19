@@ -38,6 +38,7 @@ export {
   buildAvailabilityInput,
   type ExplainEventAvailabilityQuery,
   explainEventAvailability,
+  findPublicBookingPath,
   findSlots,
   getOneTimeBookingPage,
   getPublicEventType,
@@ -208,6 +209,7 @@ export {
   type MeetingPollCleanupResult,
 } from './meeting-poll-cleanup.ts'
 export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
+export { bookingMeetingPollLinked } from './meeting-poll-outcomes.ts'
 export { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
 export {

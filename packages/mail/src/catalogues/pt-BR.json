@@ -131,5 +131,11 @@
   "workflow.beforeStart.subject": "Lembrete: {event}",
   "workflow.beforeStart.body": "Olá, {recipient}!\nSua reunião “{event}” começa em breve.\n{start} – {end} ({zone})",
   "workflow.afterEnd.subject": "Acompanhamento da sua reunião: {event}",
-  "workflow.afterEnd.body": "Olá, {recipient}!\nO horário agendado para sua reunião “{event}” terminou.\n{start} – {end} ({zone})"
+  "workflow.afterEnd.body": "Olá, {recipient}!\nO horário agendado para sua reunião “{event}” terminou.\n{start} – {end} ({zone})",
+  "poll.outcome.selected.subject": "Horário escolhido para {poll}",
+  "poll.outcome.selected.body": "A pessoa responsável pela reunião escolheu o horário abaixo. Você não está na lista de participantes.",
+  "poll.outcome.rescheduled.subject": "Reunião reagendada: {poll}",
+  "poll.outcome.rescheduled.body": "A reunião foi reagendada para o horário abaixo. Você não está na lista de participantes.",
+  "poll.outcome.cancelled.subject": "Reunião cancelada: {poll}",
+  "poll.outcome.cancelled.body": "A reunião foi cancelada. O horário abaixo é o último que estava agendado."
 }
