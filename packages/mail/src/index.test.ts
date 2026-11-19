@@ -9,6 +9,7 @@ import {
   icsAttachment,
   MailRejectedError,
   magicLinkEmail,
+  sendWorkflowSmtpAttempt,
   smtpTransportOptions,
 } from './index.ts'
 import { emailButton, emailLayout } from './layout.ts'
@@ -749,6 +750,34 @@ describe('createSmtpMailer', () => {
       received.rcptReplies.clear()
       received.dataReply = undefined
     }
+  })
+
+  it('uses one SMTP exchange per workflow attempt even when SMTP_URL requests a pool', async () => {
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}?pool=true&maxConnections=1`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    const connections = received.connections
+    const messages = received.messages.length
+    const message = {
+      to: 'ada@example.com',
+      subject: 'Workflow fixture',
+      text: 'Workflow fixture',
+      messageId: '<workflow-fixture@example.com>',
+    }
+
+    await expect(sendWorkflowSmtpAttempt(mailer, message)).resolves.toBe('sent')
+    received.disconnectAfterData = true
+    try {
+      await expect(sendWorkflowSmtpAttempt(mailer, message)).resolves.toBe('delivery_unknown')
+    } finally {
+      received.disconnectAfterData = false
+    }
+    expect(received.connections - connections).toBe(2)
+    expect(received.messages.slice(messages)).toEqual([
+      expect.stringContaining('Message-ID: <workflow-fixture@example.com>'),
+      expect.stringContaining('Message-ID: <workflow-fixture@example.com>'),
+    ])
   })
 
   it('stops waiting for a stalled server when the signal aborts', async () => {

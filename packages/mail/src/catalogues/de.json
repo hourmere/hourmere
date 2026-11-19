@@ -121,5 +121,15 @@
   "poll.deadline.subject": "Die Terminabstimmung {poll} ist beendet",
   "poll.deadline.body": "Die Abstimmung für {poll} endete am {deadline}.",
   "poll.deadline.responses": "Die Anzahl der eingegangenen Antworten beträgt {count}.",
-  "poll.deadline.results": "Melden Sie sich an, um die Ergebnisse anzusehen."
+  "poll.deadline.results": "Melden Sie sich an, um die Ergebnisse anzusehen.",
+  "workflow.created.subject": "Termin bestätigt: {event}",
+  "workflow.created.body": "Hallo {recipient},\nIhr Termin „{event}“ ist bestätigt.\n{start} – {end} ({zone})",
+  "workflow.cancelled.subject": "Termin storniert: {event}",
+  "workflow.cancelled.body": "Hallo {recipient},\nIhr Termin „{event}“ wurde storniert.\n{start} – {end} ({zone})",
+  "workflow.rescheduled.subject": "Termin verschoben: {event}",
+  "workflow.rescheduled.body": "Hallo {recipient},\nIhr Termin „{event}“ wurde verschoben.\n{start} – {end} ({zone})",
+  "workflow.beforeStart.subject": "Erinnerung an Ihren Termin: {event}",
+  "workflow.beforeStart.body": "Hallo {recipient},\nIhr Termin „{event}“ beginnt bald.\n{start} – {end} ({zone})",
+  "workflow.afterEnd.subject": "Nachricht zu Ihrem Termin: {event}",
+  "workflow.afterEnd.body": "Hallo {recipient},\nder für Ihren Termin „{event}“ vorgesehene Zeitraum ist abgelaufen.\n{start} – {end} ({zone})"
 }

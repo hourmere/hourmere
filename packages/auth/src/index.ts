@@ -12,6 +12,7 @@ import pg from 'pg'
 import { parse } from 'pg-connection-string'
 import { API_KEY_RATE_LIMIT } from './api-keys.ts'
 import { authAuditRecords } from './audit.ts'
+import { AUTH_SESSION_LIFETIME_SECONDS } from './browser-session.ts'
 import type { Principal } from './caller.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { sanitizeInitialDisplayName } from './display-name.ts'
@@ -263,6 +264,7 @@ const MAGIC_LINK_MINUTES = 5
  * The server sets it from the TCP peer and trusted proxies and drops any value a client sends.
  */
 export const CLIENT_IP_HEADER = 'x-hourmere-client-ip'
+export { AUTH_SESSION_LIFETIME_SECONDS, createBrowserSession } from './browser-session.ts'
 
 export function createAuth({
   pool,
@@ -300,6 +302,7 @@ export function createAuth({
     ],
     baseURL,
     secret,
+    session: { expiresIn: AUTH_SESSION_LIFETIME_SECONDS },
     // The OAuth attack surface is the same for every NODE_ENV.
     ...(mcpOAuth ? { rateLimit: { enabled: true } } : {}),
     advanced: {

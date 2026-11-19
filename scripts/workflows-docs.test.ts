@@ -912,8 +912,12 @@ describe('workflow design numeric contracts', () => {
       'Step 13e says in the Zapier, n8n and Make guides that they do not offer the workflow kind',
     )
 
-    // Guides that say webhook management has no MCP/CLI operation are rewritten by step 13a,
-    // the first step that adds one.
+    // Step 13a adds the first webhook MCP/CLI operations and updates all three named guides.
+    const webhookGuides = [
+      'apps/site/src/content/docs/docs/n8n.md',
+      'apps/site/src/content/docs/docs/webhooks.md',
+      'tools/n8n-nodes-hourmere/README.md',
+    ]
     const restOnly = [
       'README.md',
       ...files('packages', /^README\.md$/),
@@ -924,12 +928,34 @@ describe('workflow design numeric contracts', () => {
       .filter((file) => file !== 'docs/workflows.md')
       .filter((file) => read(file).replace(/\s+/g, ' ').includes('Webhook management is REST-only'))
       .sort()
-    expect(restOnly.length).toBeGreaterThan(0)
+    expect(restOnly).toEqual([])
     expect([...step('13a').matchAll(/`([^`]+\.md)`/g)].map((match) => match[1]).sort()).toEqual(
-      restOnly,
+      webhookGuides,
     )
+    for (const guide of webhookGuides) {
+      expect(read(guide), guide).toContain('`list_webhooks`')
+      expect(read(guide), guide).toContain('`webhooks list`')
+    }
     expect(step('13a')).toContain('"Webhook management is REST-only" sentence')
   }, 30_000) // Reads every test and Markdown file it scans; a cold file cache can be slow.
+
+  it('documents webhook updates and deletion in the webhook, MCP and CLI guides', () => {
+    for (const guide of [
+      'apps/site/src/content/docs/docs/webhooks.md',
+      'apps/site/src/content/docs/docs/mcp.md',
+      'apps/site/src/content/docs/docs/cli.md',
+    ]) {
+      for (const name of [
+        'update_webhook',
+        'delete_webhook',
+        'webhooks update',
+        'webhooks delete',
+      ]) {
+        expect(read(guide), guide).toContain(`\`${name}\``)
+      }
+    }
+    expect(read('apps/site/src/content/docs/docs/cli.md')).toContain('--input - --yes --json')
+  })
 
   it('decides every BookingNotifier event kind on main for workflow capture', () => {
     const context = read('packages/scheduling/src/context.ts')

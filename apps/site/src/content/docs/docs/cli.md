@@ -91,6 +91,10 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `one-time-links create` | `create_one_time_link` | `eventTypeId`, retained random `idempotencyKey`; optional `expiresAt`, `prefill`; requires `bookings` or `full` |
 | `one-time-links list` | `list_one_time_links` | `eventTypeId`; optional `limit`, `after`; requires `read` or `full` |
 | `one-time-links revoke` | `revoke_one_time_link` | `eventTypeId`, `id`; requires `bookings` or `full` |
+| `webhooks list` | `list_webhooks` | Empty object `{}`. Requires `read` or `full`. |
+| `webhooks create` | `create_webhook` | `url`, `events` and optional `isActive`. Requires `full` and either `--output FILE` or `--json`. |
+| `webhooks update` | `update_webhook` | `id` and at least one of `events` and `isActive`. Requires `full`. |
+| `webhooks delete` | `delete_webhook` | `id`. Requires `full` and `--yes`. |
 | `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full`; not available yet (`workflows_disabled`) |
@@ -193,6 +197,55 @@ in the same organization that the caller also hosts, or null when none is availa
 returned even when the successor falls outside the current page or filters. Public/manage
 responses omit it. The predecessor's `status` remains `cancelled`; `rescheduledToId`
 distinguishes a reschedule, while `rescheduledFromId` points back to the predecessor.
+
+## Manage booking webhooks
+
+```sh
+hourmere webhooks list --json
+hourmere webhooks create --input webhook.json --output webhook-result.json
+printf '%s\n' '{"id":"WEBHOOK_UUID","isActive":false}' | hourmere webhooks update --input - --json
+printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks delete --input - --yes --json
+hourmere --help
+```
+
+The list command accepts a `read` or `full` API key and returns `{ data: [...] }` with
+endpoint metadata only. Creation, update and deletion require a `full` key. Use a key
+from the organization you want to manage, held by its verified personal owner or a
+current team owner/admin. Denials retain REST codes such as `insufficient_scope` and
+`insufficient_role`.
+
+Save the destination and subscriptions in a JSON file such as `webhook.json`, or
+pass the JSON on standard input with `--input -`.
+
+```json
+{
+  "url": "https://receiver.example.com/hourmere",
+  "events": ["booking.created", "booking.cancelled"]
+}
+```
+
+The server defaults `isActive` to `true`. Creation returns `{ webhook, secret }` once.
+`--output FILE` saves it to a new file with permissions `0600` and prints only
+`{"outputWritten":true}`. Use this mode in environments that capture terminal output.
+For a private pipe, explicit `--json` sends the complete creation response to stdout.
+Creation requires one of these options. Keep the response out of shell history and
+logs, and install the secret in the receiver's secret store. For a lost response,
+use the list to check whether the endpoint was created, then use REST to rotate its
+secret if needed. See [Booking webhooks](/docs/webhooks) for event kinds, destination
+policy and configuration.
+
+Update returns the changed endpoint metadata. Pass the fields you want to change, using
+`id` from the list. The endpoint URL is immutable. To pause after a destination's
+allowlist entry is removed, pass just `id` and `isActive: false`. Delete requires
+`--yes`, waits for any in-flight delivery attempt, and returns `{ "deleted": true }`
+after removing the endpoint and its retained deliveries. Missing and out-of-organization
+IDs return `webhook_not_found` for both commands.
+
+中文：`webhooks list` 使用 `read` 或 `full` 密钥。`webhooks create` 使用 `full`
+密钥，并要求 `--output` 或显式 `--json`。带日志采集的环境请使用 `--output`，它会把
+一次性签名密钥写入新建的私有文件，标准输出仅确认文件已写入。
+`webhooks update` 和 `webhooks delete` 均使用 `full` 密钥。更新可修改订阅事件和启用状态，
+目标 URL 固定。删除必须加 `--yes`，成功时会清除保留的投递记录。
 
 ## Draft open-time email snippets
 
@@ -353,10 +406,10 @@ JSON result with management tokens and API keys redacted, including copies in ne
 the CLI never prints booking management capabilities. Other returned information, such as attendee
 email addresses, remains private booking data: redirect it only to destinations you trust.
 
-`one-time-links create` is the exception to secret redaction: it prints its new private
-booking URL once to stdout so you can copy it. It refuses `--output` before contacting the
-server and never writes the URL to config, history or other files. Keep terminal capture
-and shell redirection private. The retained `idempotencyKey` prevents a retry from creating
+`one-time-links create` prints its new private booking URL once to stdout so you can
+copy it. It refuses `--output` before contacting the server and never writes the URL
+to config, history or other files. Keep terminal capture and shell redirection private.
+The retained `idempotencyKey` prevents a retry from creating
 another link, but no response cache can recover a lost URL. See
 [one-time booking links](/docs/one-time-links) for UI, REST, MCP and CLI examples.
 

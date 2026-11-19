@@ -592,6 +592,40 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     },
   )
 
+  it('returns not-found to a concurrent update when deletion locks the endpoint first', async () => {
+    const { ctx, webhook, delivery } = await captured()
+    const deleting = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const deletion = deleteWebhook(
+      {
+        ...ctx,
+        authorizeOrganizationWrite: async () => {
+          deleting.resolve()
+          await release.promise
+        },
+      },
+      webhook.id,
+    )
+    await Promise.race([deleting.promise, deletion])
+    const update = expect(
+      updateWebhook(ctx, webhook.id, { isActive: false }),
+    ).rejects.toMatchObject({ code: 'webhook_not_found' })
+    try {
+      await waitForBlocked('%from "webhooks"%for update%')
+    } finally {
+      release.resolve()
+      await Promise.all([deletion, update])
+    }
+    expect(await listWebhooks(ctx)).toEqual([])
+    expect(
+      await db
+        .selectFrom('webhook_deliveries')
+        .select('id')
+        .where('id', '=', delivery.id)
+        .executeTakeFirst(),
+    ).toBeUndefined()
+  })
+
   it('does not revive skipped deliveries when re-enabled or their subscription returns', async () => {
     const { delivery, webhook, ctx } = await captured()
     await updateWebhook(ctx, webhook.id, { events: ['booking.cancelled'] })

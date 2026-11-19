@@ -3,27 +3,47 @@ import type { Db } from '@hourmere/db'
 import {
   archiveRoutingForm,
   createRoutingForm,
+  getPublicRoutingForm,
   getRoutingForm,
   listRoutingForms,
+  previewRoutingForm,
   publishRoutingForm,
   type ServiceContext,
   updateRoutingForm,
 } from '@hourmere/scheduling'
 import {
+  PersonalRoutingFormAddress,
+  PublicRoutingForm,
+  TeamRoutingFormAddress,
+} from '../routes/public-routing-forms.ts'
+import {
   ArchiveRoutingForm,
   CreateRoutingForm,
+  PreviewRoutingForm,
   PublishRoutingForm,
+  ROUTING_FORM_PREVIEW_BEHAVIOR,
   ROUTING_FORM_PUBLICATION_BEHAVIOR,
   ROUTING_FORMS_DISABLED,
   RoutingFormId,
   RoutingFormList,
   RoutingFormListInput,
+  RoutingFormPreview,
   RoutingFormPublication,
   RoutingFormResponse,
   UpdateRoutingForm,
 } from '../routes/routing-forms.ts'
 import { routingFormTools } from '../routing-forms.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
+
+const PublicRoutingFormInput = z
+  .strictObject({
+    handle: PersonalRoutingFormAddress.shape.handle.optional(),
+    teamSlug: TeamRoutingFormAddress.shape.teamSlug.optional(),
+    slug: PersonalRoutingFormAddress.shape.slug,
+  })
+  .refine((input) => (input.handle === undefined) !== (input.teamSlug === undefined), {
+    message: 'Give exactly one of handle or teamSlug',
+  })
 
 export function routingFormConfigurationTools({
   db,
@@ -102,6 +122,30 @@ export function routingFormConfigurationTools({
       output: RoutingFormPublication,
       annotations: write,
       run: ({ id, ...args }, call) => publishRoutingForm(context(call.caller), id, args),
+    }),
+    defineTool({
+      name: 'preview_routing_form',
+      title: 'Preview a routing form draft',
+      description: `${ROUTING_FORMS_DISABLED} ${ROUTING_FORM_PREVIEW_BEHAVIOR}`,
+      input: PreviewRoutingForm.extend(RoutingFormId.shape),
+      output: RoutingFormPreview,
+      annotations: read,
+      privateDiagnostics: true,
+      run: ({ id, ...args }, call) => previewRoutingForm(context(call.caller), id, args),
+    }),
+    defineTool({
+      name: 'get_public_routing_form',
+      title: 'Read a public routing form',
+      description: `${ROUTING_FORMS_DISABLED} Supply the form slug and exactly one of handle (personal) or teamSlug (team). Returns the current version ID, form text and published questions, with IDs and labels for answer choices. Accepts read, bookings or full keys, or an authorized MCP OAuth connection.`,
+      input: PublicRoutingFormInput,
+      output: PublicRoutingForm,
+      annotations: read,
+      privateDiagnostics: true,
+      run: ({ handle, teamSlug, slug }) =>
+        getPublicRoutingForm(
+          db,
+          teamSlug === undefined ? { handle: handle as string, slug } : { teamSlug, slug },
+        ),
     }),
   ])
 }

@@ -54,6 +54,10 @@ const all = [
   'update_slack_destination',
   'delete_slack_destination',
   'test_slack_destination',
+  'list_webhooks',
+  'create_webhook',
+  'update_webhook',
+  'delete_webhook',
   'generate_open_time_snippet',
   'troubleshoot_availability',
   'list_calendar_connections',
@@ -85,6 +89,8 @@ const all = [
   'update_routing_form',
   'archive_routing_form',
   'publish_routing_form',
+  'preview_routing_form',
+  'get_public_routing_form',
 ]
 // Hidden catalog entries never reach handlers. Workflows check scope first; SSO
 // answers sso_disabled before scope or arguments while both protocols are hard-off.
@@ -117,6 +123,9 @@ const configurationWrites = new Set([
   'update_slack_destination',
   'delete_slack_destination',
   'test_slack_destination',
+  'create_webhook',
+  'update_webhook',
+  'delete_webhook',
   'duplicate_event_type',
   'create_event_type',
   'update_event_type',
@@ -154,6 +163,7 @@ const otherReads = new Set([
   'export_bookings',
   'get_booking_activity',
   'list_slack_destinations',
+  'list_webhooks',
   'list_schedules',
   'get_schedule',
   'get_schedule_availability',
@@ -167,8 +177,8 @@ const otherReads = new Set([
   'list_sso_providers',
   'get_sso_policy',
 ])
-// Read-only diagnostics that can reveal busy timings: full keys only.
-const fullOnlyReads = new Set(['troubleshoot_availability'])
+// Read-only diagnostics that can reveal busy timings or private drafts: full keys only.
+const fullOnlyReads = new Set(['troubleshoot_availability', 'preview_routing_form'])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
     scope === 'full'
@@ -529,6 +539,10 @@ describe('CLI scope parity', () => {
     ['one-time-links create', 'create_one_time_link'],
     ['one-time-links list', 'list_one_time_links'],
     ['one-time-links revoke', 'revoke_one_time_link'],
+    ['webhooks list', 'list_webhooks'],
+    ['webhooks create', 'create_webhook'],
+    ['webhooks update', 'update_webhook'],
+    ['webhooks delete', 'delete_webhook'],
     ['workflows update', 'update_workflow'],
     ['workflows delete', 'delete_workflow'],
     ['workflows create', 'create_workflow'],
@@ -542,6 +556,8 @@ describe('CLI scope parity', () => {
     ['routing-forms update', 'update_routing_form'],
     ['routing-forms archive', 'archive_routing_form'],
     ['routing-forms publish', 'publish_routing_form'],
+    ['routing-forms preview', 'preview_routing_form'],
+    ['routing-forms public', 'get_public_routing_form'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',
@@ -553,7 +569,13 @@ describe('CLI scope parity', () => {
         const fetcher = vi.fn<typeof fetch>(async (input, init) => target.request(input, init))
         const key = `hm_${scope}`
         const code = await runCli({
-          argv: [...command.split(' '), '--input', '-'],
+          argv: [
+            ...command.split(' '),
+            '--input',
+            '-',
+            ...(name === 'create_webhook' ? ['--json'] : []),
+            ...(name === 'delete_webhook' ? ['--yes'] : []),
+          ],
           env: { HOURMERE_URL: URL, HOURMERE_API_KEY: key },
           stdin: (async function* () {
             yield JSON.stringify({ idempotencyKey: 'scope-matrix-test' })

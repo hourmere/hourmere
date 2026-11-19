@@ -121,5 +121,15 @@
   "poll.deadline.subject": "{poll} 投票已截止",
   "poll.deadline.body": "{poll} 投票已于 {deadline} 截止。",
   "poll.deadline.responses": "共收到 {count} 份答复。",
-  "poll.deadline.results": "登录后查看投票结果。"
+  "poll.deadline.results": "登录后查看投票结果。",
+  "workflow.created.subject": "预约已确认：{event}",
+  "workflow.created.body": "{recipient}，您好：\n您的“{event}”预约已确认。\n{start} – {end}（{zone}）",
+  "workflow.cancelled.subject": "预约已取消：{event}",
+  "workflow.cancelled.body": "{recipient}，您好：\n您的“{event}”预约已取消。\n{start} – {end}（{zone}）",
+  "workflow.rescheduled.subject": "预约已改期：{event}",
+  "workflow.rescheduled.body": "{recipient}，您好：\n您的“{event}”预约已改期。\n{start} – {end}（{zone}）",
+  "workflow.beforeStart.subject": "预约即将开始：{event}",
+  "workflow.beforeStart.body": "{recipient}，您好：\n您的“{event}”预约即将开始。\n{start} – {end}（{zone}）",
+  "workflow.afterEnd.subject": "预约后续：{event}",
+  "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）"
 }

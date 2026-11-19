@@ -49,6 +49,51 @@ describe.skipIf(!serverUrl)('workflow updates', () => {
     await owned?.drop()
   })
   const context = (user: TestUser): WorkflowUpdateContext => ({ db, principal: user.principal })
+  it('enforces host text policy on edits and enables while preserving disable-only recovery', async () => {
+    const user = await createTestUser(db)
+    for (const recipient of ['booker', 'guests', 'hosts']) {
+      const actions = [
+        {
+          type: 'email',
+          recipients: [recipient],
+          content: { en: { subject: 'Hello', body: 'Body' } },
+        },
+      ]
+      const on = { ...context(user), followUpHostNotesEnabled: true }
+      const off = { ...context(user), followUpHostNotesEnabled: false }
+      const first = await createWorkflowDefinition(off, input(user))
+      await expect(
+        updateWorkflowDefinition(off, first.id, { expectedRevision: 1, actions }),
+      ).rejects.toMatchObject({ code: 'invalid_workflow' })
+      const custom = await updateWorkflowDefinition(on, first.id, { expectedRevision: 1, actions })
+      expect(custom).toMatchObject({ revision: 2, actions })
+      for (const patch of [{ name: 'Edited' }, { enabled: true }])
+        await expect(
+          updateWorkflowDefinition(off, first.id, { expectedRevision: 2, ...patch }),
+        ).rejects.toMatchObject({ code: 'invalid_workflow' })
+      expect(
+        await updateWorkflowDefinition(off, first.id, { expectedRevision: 2, enabled: false }),
+      ).toMatchObject({ revision: 2, enabled: false })
+      const builtinActions = [{ type: 'email', recipients: [recipient] }]
+      expect(
+        await updateWorkflowDefinition(off, first.id, {
+          expectedRevision: 2,
+          actions: builtinActions,
+        }),
+      ).toMatchObject({ revision: 3, actions: builtinActions })
+      expect(
+        await updateWorkflowDefinition(off, first.id, { expectedRevision: 3, enabled: true }),
+      ).toMatchObject({ revision: 3, enabled: true })
+      expect(
+        await db
+          .selectFrom('workflow_revisions')
+          .select('revision')
+          .where('workflow_id', '=', first.id)
+          .execute(),
+      ).toHaveLength(3)
+    }
+  })
+
   it('appends immutable revisions, rejects stale edits, and emits transactional update and toggle events', async () => {
     const user = await createTestUser(db),
       ctx = context(user)

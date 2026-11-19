@@ -153,6 +153,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/routing-forms/{id}` | Session or API key | `full` |
 | `DELETE /api/v1/routing-forms/{id}` | Session or API key | `full` |
 | `POST /api/v1/routing-forms/{id}/publish` | Session or API key | `full` |
+| `POST /api/v1/routing-forms/{id}/preview` | Session or API key | `full` |
 | `GET /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Browser session only | — |
@@ -234,6 +235,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/profile/name` | Session or API key | `full` |
 | `GET /api/v1/public/branding/{organizationId}/logo/{hash}` | Public; no key needed | `full, read, bookings` |
 | `GET /api/v1/public/{handle}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/public/-/routing/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
@@ -312,6 +315,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `update_routing_form` | — | `routing-forms update` | `full` |
 | `archive_routing_form` | — | `routing-forms archive` | `full` |
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
+| `preview_routing_form` | — | `routing-forms preview` | `full` |
+| `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
@@ -322,6 +327,10 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `update_slack_destination` | — | `slack update` | `full` |
 | `delete_slack_destination` | — | `slack delete` | `full` |
 | `test_slack_destination` | — | `slack test` | `full` |
+| `list_webhooks` | — | `webhooks list` | `full, read` |
+| `create_webhook` | — | `webhooks create` | `full` |
+| `update_webhook` | — | `webhooks update` | `full` |
+| `delete_webhook` | — | `webhooks delete` | `full` |
 | `whoami` | — | `whoami` | `full, read, bookings` |
 | `find_available_slots` | — | `slots` | `full, read, bookings` |
 | `find_available_slots` | `personal` | `slots` | `full, read, bookings` |

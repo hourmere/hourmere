@@ -163,12 +163,48 @@ describe('published API key scope tables', () => {
     },
   )
 
-  it.each(documents)('$path lists publication as full-scope only', ({ document, section }) => {
-    expect(document).toContain('| `publish_routing_form` | — | `routing-forms publish` | `full` |')
-    if (section === 'all')
+  it.each(documents)(
+    '$path lists publication and preview as full-scope only',
+    ({ document, section }) => {
+      for (const verb of ['publish', 'preview']) {
+        expect(document).toContain(
+          `| \`${verb}_routing_form\` | — | \`routing-forms ${verb}\` | \`full\` |`,
+        )
+        if (section === 'all')
+          expect(document).toContain(
+            `| \`POST /api/v1/routing-forms/{id}/${verb}\` | Session or API key | \`full\` |`,
+          )
+      }
+    },
+  )
+
+  it.each(documents)(
+    '$path lists optional-key public routing metadata',
+    ({ document, section }) => {
       expect(document).toContain(
-        '| `POST /api/v1/routing-forms/{id}/publish` | Session or API key | `full` |',
+        '| `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |',
       )
+      if (section === 'all') {
+        for (const path of ['{handle}/{slug}', 'teams/{teamSlug}/{slug}']) {
+          expect(document).toContain(
+            `| \`GET /api/v1/public/-/routing/${path}\` | Public or manage token; check a supplied key | \`full, read, bookings\` |`,
+          )
+        }
+      }
+    },
+  )
+
+  it.each(documents)('$path publishes webhook management scopes', ({ document, section }) => {
+    expect(document).toContain('| `list_webhooks` | — | `webhooks list` | `full, read` |')
+    expect(document).toContain('| `create_webhook` | — | `webhooks create` | `full` |')
+    expect(document).toContain('| `update_webhook` | — | `webhooks update` | `full` |')
+    expect(document).toContain('| `delete_webhook` | — | `webhooks delete` | `full` |')
+    if (section === 'all') {
+      expect(document).toContain('| `GET /api/v1/webhooks` | Session or API key | `full, read` |')
+      expect(document).toContain('| `POST /api/v1/webhooks` | Session or API key | `full` |')
+      expect(document).toContain('| `PATCH /api/v1/webhooks/{id}` | Session or API key | `full` |')
+      expect(document).toContain('| `DELETE /api/v1/webhooks/{id}` | Session or API key | `full` |')
+    }
   })
 
   it.each(documents)(

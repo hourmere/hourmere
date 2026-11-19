@@ -121,5 +121,15 @@
   "poll.deadline.subject": "Le sondage {poll} est clos",
   "poll.deadline.body": "Le vote pour le sondage {poll} a pris fin le {deadline}.",
   "poll.deadline.responses": "Le nombre total de réponses reçues est de {count}.",
-  "poll.deadline.results": "Connectez-vous pour consulter les résultats."
+  "poll.deadline.results": "Connectez-vous pour consulter les résultats.",
+  "workflow.created.subject": "Confirmation : {event}",
+  "workflow.created.body": "Bonjour {recipient},\nVotre réunion « {event} » est confirmée.\n{start} – {end} ({zone})",
+  "workflow.cancelled.subject": "Annulation : {event}",
+  "workflow.cancelled.body": "Bonjour {recipient},\nVotre réunion « {event} » a été annulée.\n{start} – {end} ({zone})",
+  "workflow.rescheduled.subject": "Replanification : {event}",
+  "workflow.rescheduled.body": "Bonjour {recipient},\nVotre réunion « {event} » a été replanifiée.\n{start} – {end} ({zone})",
+  "workflow.beforeStart.subject": "Rappel : {event}",
+  "workflow.beforeStart.body": "Bonjour {recipient},\nVotre réunion « {event} » commence bientôt.\n{start} – {end} ({zone})",
+  "workflow.afterEnd.subject": "Suivi de votre réunion : {event}",
+  "workflow.afterEnd.body": "Bonjour {recipient},\nLe créneau prévu pour votre réunion « {event} » est terminé.\n{start} – {end} ({zone})"
 }

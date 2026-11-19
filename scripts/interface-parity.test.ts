@@ -127,6 +127,7 @@ check(
         'group-attendees',
       ],
       ['getSsoPolicy', '/api/v1/team/sso/policy', 'get_sso_policy', 'sso policy'],
+      ['listWebhooks', '/api/v1/webhooks', 'list_webhooks', 'webhooks list'],
     ] as const) {
       const inventory: InterfaceInventory = {
         rest: [{ path, method: 'get', operationId }],

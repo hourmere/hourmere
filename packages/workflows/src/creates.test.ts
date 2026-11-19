@@ -103,6 +103,47 @@ describe.skipIf(!serverUrl)('workflow creation', () => {
     ).rejects.toMatchObject({ code: 'idempotency_key_reused' })
   })
 
+  it('enforces host text policy for every recipient on create and replay without writes', async () => {
+    const user = await createTestUser(db)
+    for (const recipient of ['booker', 'guests', 'hosts']) {
+      const request = input(user, {
+        actions: [
+          {
+            type: 'email',
+            recipients: [recipient],
+            content: { en: { subject: 'Hello', body: 'Body' } },
+          },
+        ],
+      })
+      const off = { ...context(user), followUpHostNotesEnabled: false }
+      await expect(createWorkflowDefinition(off, request)).rejects.toMatchObject({
+        code: 'invalid_workflow',
+      })
+      const created = await createWorkflowDefinition(
+        { ...context(user), followUpHostNotesEnabled: true },
+        request,
+      )
+      await expect(createWorkflowDefinition(off, request)).rejects.toMatchObject({
+        code: 'invalid_workflow',
+      })
+      expect(created.actions).toEqual(request.actions)
+      for (const followUpHostNotesEnabled of [true, false])
+        await expect(
+          createWorkflowDefinition(
+            { ...context(user), followUpHostNotesEnabled },
+            input(user, { actions: [{ type: 'email', recipients: [recipient] }] }),
+          ),
+        ).resolves.toHaveProperty('id')
+    }
+    expect(
+      await db
+        .selectFrom('workflow_definitions')
+        .select('id')
+        .where('organization_id', '=', user.principal.organization.id)
+        .execute(),
+    ).toHaveLength(9)
+  })
+
   it('retains replay across event deletion and tombstones without validating live references', async () => {
     const user = await createTestUser(db),
       ctx = context(user)
