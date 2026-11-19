@@ -78,6 +78,8 @@ const PACKAGE_EXPORTS = [
   'isWorkflowEventType',
   // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
   'listWorkflows',
+  // Read-only helper for the shared webhook worker, whose workflow branch is guarded.
+  'lockWorkflowWebhookRun',
   'ownsEventType',
   'ownsWebhook',
   'parseWorkflowDefinition',

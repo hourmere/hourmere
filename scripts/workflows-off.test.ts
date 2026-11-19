@@ -751,6 +751,11 @@ describe('booking workflows are off and expose only definition reads, creation, 
 
   it('lets the shared webhook worker reach workflow sends only through the hard-off guard', () => {
     const deliveryFile = 'packages/webhooks/src/delivery.ts'
+    const eligibilityModules = [
+      deliveryFile,
+      'packages/workflows/src/dispatcher.ts',
+      'packages/workflows/src/index.ts',
+    ]
     const service = readFileSync(new URL(deliveryFile, root), 'utf8')
     expect(service).toContain(
       'const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)',
@@ -760,6 +765,8 @@ describe('booking workflows are off and expose only definition reads, creation, 
       const source = readFileSync(new URL(file, root), 'utf8')
       expect(source, file).not.toContain('workflow-delivery-fixture')
       if (file !== deliveryFile) expect(source, file).not.toContain('deliverWorkflowWebhook')
+      if (!eligibilityModules.includes(file))
+        expect(source, file).not.toContain('lockWorkflowWebhookRun')
     }
   })
 
