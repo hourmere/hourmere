@@ -933,7 +933,7 @@ outage returns `unknown`, never a successful ownership proof. Pending claims do 
 names, and another team's verified or suspended claim remains exclusive until retirement.
 Deleting a claim retires its ID. These operations never create accounts or memberships,
 move personal spaces or enable a provider. Scheduled rechecks and operator retirement
-remain the separate Domain lifecycle step.
+follow the [domain lifecycle runbook](#domain-lifecycle-operations) below.
 
 域名挑战、验证与退役只允许浏览器会话调用，没有 MCP 工具或 CLI 命令。
 OIDC 和 SAML 仍在代码中关闭，三个接口均返回 `404 sso_disabled`。内部测试开启后，
@@ -1329,6 +1329,69 @@ unlink, link-retirement and delegation-revocation views and the trust-reducing s
 controls (provider deactivation and deletion, domain deletion, turning enforcement off).
 After a setting step the domain recheck worker keeps running even while the setting is
 off, so verification state stays current.
+
+## Domain lifecycle operations
+
+OIDC and SAML remain hard-off. No environment variable enables either protocol, and
+production does not schedule or execute domain rechecks. The internal test capability
+exercises renewal with synthetic DNS. Operator retirement is available in every state:
+it only removes an expired claim's authority. It is a server-container maintenance
+command, not a REST endpoint, MCP tool or product CLI command; interface inventories and
+scope counts do not change.
+
+A verified generation is checked daily. A positive result before its expiry renews the
+seven-day verification lifetime without changing its generation. Missing TXT proof is
+`failed`; resolver failures are `unknown`. Both freeze new trust immediately, preserve
+the existing expiry and retry after the daily interval. The remaining verification
+lifetime is the recovery window, not a new grace period starting with each failure.
+A positive result within that window clears the freeze. At the exact expiry boundary
+the claim becomes suspended and remains exclusive; neither a late DNS answer nor job
+replay revives it. Enforcement is never silently turned off. Automatic retirement and
+transfer are not supported. The original team must issue a new ordinary challenge after
+a lapse. Proof and delegation enforcement is implemented by its later rollout steps.
+
+### Retire an expired claim for another team
+
+Run maintenance only inside the server container against that instance's database and
+configured `PUBLIC_URL`. Use the immutable old claim ID, its expected generation and the
+requesting team's ID; never pass database credentials or TXT values on the command line.
+The operator must establish which team is requesting the domain outside this command.
+An unexpired claim, a changed generation, a personal organization or the same team cannot
+be retired through this procedure.
+
+1. Issue a fresh maintenance challenge:
+   `docker compose exec app node apps/server/src/sso-domain-retirement-cli.ts challenge OLD_CLAIM_ID EXPECTED_GENERATION REQUESTING_TEAM_ID`.
+   Give the requesting team's DNS administrator the returned TXT name/value privately.
+   The value is shown once; only its bound digest is stored. Do not put the output in
+   support logs. A lost or expired challenge requires a new challenge.
+2. After the administrator publishes the TXT record, run
+   `docker compose exec app node apps/server/src/sso-domain-retirement-cli.ts retire CHALLENGE_ID`.
+   The command uses the trusted resolver, checks the current expired generation under
+   the exact-domain lock, and atomically records retirement, both team IDs, proof times,
+   a system audit event and notices for the old team's owners. A concurrent renewal or
+   new generation prevents retirement. Replaying a completed challenge does not retire
+   another generation or duplicate its notices.
+3. If notice delivery fails, retry only delivery with
+   `docker compose exec app node apps/server/src/sso-domain-retirement-cli.ts notify CHALLENGE_ID`.
+   Configure SMTP for delivery. The command does not return recipient addresses.
+4. The requesting team must complete a new ordinary domain challenge and verification
+   when the protocol becomes available. Retirement transfers no provider, identity,
+   proof, delegation, membership or enforcement policy. Remove the maintenance TXT
+   record after the command completes.
+
+### 域名复查与退役
+
+OIDC 与 SAML 仍在代码中关闭，生产环境不调度或执行域名复查。运维退役命令仅移除
+过期声明的信任，因此在关闭状态下仍可使用；它不属于 REST、MCP 或产品 CLI。
+验证成功后每日复查，成功则续期七天；TXT 不匹配为 `failed`，DNS 故障为 `unknown`。
+两者立即冻结新增信任，保留原到期时间并每日重试，不会从每次失败起另加宽限期。
+到期前恢复可解除冻结；到期即暂停但仍独占域名，不会自动退役或关闭强制 SSO 策略。
+
+运维人员在服务器容器内按上述 `challenge`、`retire`、`notify` 命令操作：先确认请求
+团队身份，将一次性 TXT 挑战私下交给其 DNS 管理员，再由服务器解析并验证。命令锁定
+域名并核对旧声明代次和到期时间，在同一事务内保留两团队及证明时间、写入系统审计并
+为旧团队所有者保存通知。发送失败时只重试 `notify`；命令不显示收件人地址。
+退役不转移账号、身份、成员关系或策略。请求团队仍须在协议可用后完成普通域名验证。
 
 ## Implementation sequence
 
