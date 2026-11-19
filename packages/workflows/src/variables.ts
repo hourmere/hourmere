@@ -1,7 +1,7 @@
 // The template variable catalog (docs/workflows.md, "Email and webhook actions" and
 // "Permissions, persistence and audit"). Templates are plain text with `{{name}}` placeholders
 // from this typed allowlist; anything else is unknown and refused at save and preview. The
-// renderer that substitutes and escapes values belongs to a later step. No variable exposes
+// shared renderer in email.ts substitutes and escapes values. No variable exposes
 // another attendee's address, management tokens, private calendar contents, credentials, the
 // conference organizer, start or retry capabilities, meeting URLs, cancellation reasons,
 // free-text booking titles or attendee no-show markers.

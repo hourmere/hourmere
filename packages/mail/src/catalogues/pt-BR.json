@@ -121,5 +121,15 @@
   "poll.deadline.subject": "A votação de {poll} foi encerrada",
   "poll.deadline.body": "A votação de {poll} terminou em {deadline}.",
   "poll.deadline.responses": "O total de respostas recebidas foi de {count}.",
-  "poll.deadline.results": "Entre na sua conta para ver os resultados."
+  "poll.deadline.results": "Entre na sua conta para ver os resultados.",
+  "workflow.created.subject": "Reunião confirmada: {event}",
+  "workflow.created.body": "Olá, {recipient}!\nSua reunião “{event}” está confirmada.\n{start} – {end} ({zone})",
+  "workflow.cancelled.subject": "Reunião cancelada: {event}",
+  "workflow.cancelled.body": "Olá, {recipient}!\nSua reunião “{event}” foi cancelada.\n{start} – {end} ({zone})",
+  "workflow.rescheduled.subject": "Reunião reagendada: {event}",
+  "workflow.rescheduled.body": "Olá, {recipient}!\nSua reunião “{event}” foi reagendada.\n{start} – {end} ({zone})",
+  "workflow.beforeStart.subject": "Lembrete: {event}",
+  "workflow.beforeStart.body": "Olá, {recipient}!\nSua reunião “{event}” começa em breve.\n{start} – {end} ({zone})",
+  "workflow.afterEnd.subject": "Acompanhamento da sua reunião: {event}",
+  "workflow.afterEnd.body": "Olá, {recipient}!\nO horário agendado para sua reunião “{event}” terminou.\n{start} – {end} ({zone})"
 }

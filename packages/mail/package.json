@@ -4,7 +4,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./ics": "./src/ics.ts"
+    "./catalogue": "./src/catalogue.ts",
+    "./ics": "./src/ics.ts",
+    "./text": "./src/text.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

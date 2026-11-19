@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./sms-provider": "./src/sms-provider.ts",
-    "./sms": "./src/sms.ts"
+    "./sms": "./src/sms.ts",
+    "./workflow-mail": "./src/workflow-mail.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
