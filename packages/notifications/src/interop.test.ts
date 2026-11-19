@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { type InterfaceLanguage, localeRegistry } from '@hourmere/core/locales'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createSmtpMailer, type Mailer, type MailMessage } from '@hourmere/mail'
@@ -103,7 +105,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     return { host, ids, booking }
   }
 
-  function capture(email = senderEmail) {
+  function capture(email = senderEmail, stamp = now) {
     const sent: MailMessage[] = []
     const mailer: Mailer = {
       senderEmail: email,
@@ -120,7 +122,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
             mailer,
             secret: 'synthetic-notification-secret',
             publicUrl: 'https://scheduler.example.org',
-            now: () => now,
+            now: () => stamp,
           },
           bookingId,
           kind,
@@ -148,6 +150,75 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       .execute()
     return next
   }
+
+  // Fingerprint the full wire bytes, including folding and CRLF, of the host, booker and
+  // guest attachments across confirmation, reschedule and cancellation. Only normalize
+  // the fixture's generated booking ID. The English golden files also show the raw format.
+  const calendarsByLocale = {
+    en: 'd84b63abd807f4ee4934df019dba4814f759610f11af9f0ab965cd2116dab48e',
+    'zh-CN': 'faabd3e8c090f7543ed8420506a62a71e2731b46208774a832785e0e11bd9748',
+    de: 'd038e02adf80460d5b8c1c50bd08a631d5a581fbf70d97904b52b0b9c8a33bfa',
+    fr: '9c25c4b7bf9f6abe988696e3960f6a525f929b4c4aff4d8ae92a3fc7c4a92ebe',
+    es: 'e3a7aadf7fdf587ae5ce02465e81a0a1cb8345532b920aaaa458c04d9e5c352e',
+    'pt-BR': 'e98e7a6da2a850111c33548d3304a29bc57f8eb7c1af32dc0ae020f3efd894ec',
+  } satisfies Record<InterfaceLanguage, string>
+
+  it.each(Object.values(localeRegistry).map(({ code }) => code))(
+    'keeps the ordinary booking calendar bytes in %s',
+    async (locale) => {
+      const info = await setup()
+      await db
+        .updateTable('profiles')
+        .set({ locale })
+        .where('user_id', '=', info.host.userId)
+        .execute()
+      const guestEmail = 'charles@example.net'
+      const localize = async (bookingId: string) => {
+        await db
+          .updateTable('booking_attendees')
+          .set({ locale })
+          .where('booking_id', '=', bookingId)
+          .execute()
+        await db
+          .insertInto('booking_attendees')
+          .values({
+            booking_id: bookingId,
+            name: 'Charles Babbage',
+            email: guestEmail,
+            time_zone: 'UTC',
+            is_booker: false,
+          })
+          .execute()
+      }
+      const mail = capture(senderEmail, now.add({ milliseconds: 847 }))
+      await localize(info.booking)
+      await mail.send(info.booking, 'confirmed')
+      const next = await move(info)
+      await localize(next)
+      await mail.send(next, 'rescheduled')
+      await db
+        .updateTable('bookings')
+        .set({ status: 'cancelled', cancelled_at: '2026-10-19T12:00Z' })
+        .where('id', '=', next)
+        .execute()
+      await mail.send(next, 'cancelled')
+      expect(mail.sent.map(({ to }) => to)).toEqual(
+        Array.from({ length: 3 }, () => [hostEmail, 'ada@outlook.com', guestEmail]).flat(),
+      )
+      const digest = createHash('sha256')
+      for (const [index, message] of mail.sent.entries()) {
+        expect(message.html).toContain(`<html lang="${locale}">`)
+        const component = event(message)
+        expect(component.getFirstPropertyValue('sequence')).toBe(Math.floor(index / 3))
+        expect(component.getFirstPropertyValue('uid')).toBe(`${info.booking}@hourmere`)
+        expect(component.getFirstPropertyValue('dtstamp')?.toString()).toBe('2026-10-19T12:00:00Z')
+        const attachment = message.attachments?.[0]
+        if (!attachment) throw new Error('missing invitation')
+        digest.update(attachment.content.replaceAll(info.booking, 'ROOT-BOOKING'))
+      }
+      expect(digest.digest('hex')).toBe(calendarsByLocale[locale])
+    },
+  )
 
   it.each([false, true])(
     'matches golden new/move/cancel invitations for every recipient (multi=%s)',
