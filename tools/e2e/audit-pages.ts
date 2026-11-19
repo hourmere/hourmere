@@ -10,6 +10,13 @@ import {
   visualMaskText,
 } from './audit-data.ts'
 import type { FixtureApp } from './fixtures.ts'
+import {
+  isRoutingFormAuditPage,
+  leavePendingRoutingFormAudit,
+  openRoutingFormAuditPage,
+  type RoutingFormAuditPageId,
+  routingFormAuditPages,
+} from './routing-form-audit.ts'
 
 const pollAuditPages = [
   { id: 'poll-unavailable', title: 'Unavailable meeting poll' },
@@ -32,6 +39,7 @@ function isPollAuditPage(id: string): id is PollAuditPageId {
 
 export const auditPages = [
   ...pollAuditPages,
+  ...routingFormAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -202,13 +210,23 @@ export async function openAuditPage(
   { locale = 'en-US' }: { locale?: AuditLocale } = {},
 ): Promise<void> {
   try {
+    await leavePendingRoutingFormAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
-    if (isPollAuditPage(id)) {
+    if (isPollAuditPage(id) || isRoutingFormAuditPage(id)) {
       await app.auditSignIn(false, locale)
       await page.addInitScript(prepareAuditLocale, locale)
-      await openPollAuditPage(page, app, id)
+      if (isPollAuditPage(id)) await openPollAuditPage(page, app, id)
+      else {
+        const path = await openRoutingFormAuditPage(
+          page,
+          app.url,
+          id,
+          locale === 'zh-CN' ? locale : 'en',
+        )
+        verifyAuditPath(page.url(), path)
+      }
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.evaluate(settleAuditLayout)
       return
@@ -220,7 +238,7 @@ export async function openAuditPage(
       id === 'team-bookings' || id === 'team-booking-detail' ? 'team' : undefined,
     )
     await page.addInitScript(prepareAuditLocale, locale)
-    const paths: Record<Exclude<AuditPageId, PollAuditPageId>, string> = {
+    const paths: Record<Exclude<AuditPageId, PollAuditPageId | RoutingFormAuditPageId>, string> = {
       host: '/fixture-host',
       booking: fixture.bookingPath,
       'booking-form': fixture.bookingPath,

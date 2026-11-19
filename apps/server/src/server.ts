@@ -580,6 +580,7 @@ export function productionAppOptions({
     hstsMaxAge: config.HSTS_MAX_AGE,
     trustedProxies: config.trustedProxies,
     webDist: config.WEB_DIST,
+    routingFormsEnabled,
     waitlist,
     ssoMe: { capabilities: { ssoOidcEnabled, ssoSamlEnabled }, db },
     // Mounted in every state: while hard-off both endpoints answer 404 sso_disabled.
