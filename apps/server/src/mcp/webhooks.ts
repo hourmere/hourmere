@@ -2,14 +2,16 @@ import { z } from '@hono/zod-openapi'
 import {
   createWebhook,
   deleteWebhook,
+  listWebhookDeliveries,
   listWebhooks,
+  rotateWebhookSecret,
   updateWebhook,
   WebhookCreateInput,
   type WebhookSettings,
   WebhookUpdateInput,
 } from '@hourmere/webhooks'
 import { type ServiceDeps, serviceContext } from '../openapi.ts'
-import { Webhook, WebhookCreated } from '../routes/webhooks.ts'
+import { Webhook, WebhookCreated, WebhookDeliveryPage, WebhookSecret } from '../routes/webhooks.ts'
 import { defineTool, type Tool } from './tools.ts'
 
 export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
@@ -87,6 +89,44 @@ export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
       async run({ id }, call) {
         await deleteWebhook(serviceContext(deps, call.caller), id)
         return { deleted: true as const }
+      },
+    }),
+    defineTool({
+      name: 'rotate_webhook_secret',
+      title: 'Rotate a booking webhook signing secret',
+      description:
+        'Replace the signing secret for a webhook in the organization bound to this credential. Requires a current organization owner or admin and full API key scope. Store the new signing secret from this response securely; later reads never return it. Each successful call replaces the previous secret.',
+      input: z.strictObject({ id: z.string() }),
+      output: WebhookSecret,
+      privateDiagnostics: true,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      async run({ id }, call) {
+        return rotateWebhookSecret(serviceContext(deps, call.caller), deps, id)
+      },
+    }),
+    defineTool({
+      name: 'list_webhook_deliveries',
+      title: 'List booking webhook deliveries',
+      description:
+        'List at most 50 deliveries from the last 30 days for a webhook in the organization bound to this credential, newest first. Requires a current organization owner or admin and read or full API key scope. Supply the returned nextAfter value as after for the next page. Returns delivery metadata only.',
+      input: z.strictObject({ id: z.string(), after: z.string().optional() }),
+      output: WebhookDeliveryPage,
+      privateDiagnostics: true,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      async run({ id, after }, call) {
+        return WebhookDeliveryPage.parse(
+          await listWebhookDeliveries(serviceContext(deps, call.caller), id, after),
+        )
       },
     }),
   ]
