@@ -15,6 +15,7 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   getGroupOccurrenceAttendees: 'GET /api/v1/group-occurrences/{id}/attendees',
   getSsoPolicy: 'GET /api/v1/team/sso/policy',
   listWebhooks: 'GET /api/v1/webhooks',
+  listWebhookDeliveries: 'GET /api/v1/webhooks/{id}/deliveries',
   getPublicRoutingForm: 'GET /api/v1/public/-/routing/{handle}/{slug}',
   getPublicTeamRoutingForm: 'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
 }

@@ -1,5 +1,5 @@
 import { constants, readFileSync } from 'node:fs'
-import { mkdtemp, open, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,7 @@ const webhook = {
   updatedAt: '2026-11-19T10:00:00.000Z',
 }
 const reply = (result: object) => Response.json({ jsonrpc: '2.0', id: 1, result })
+const rotateInput = { id: webhook.id }
 
 async function run(
   argv: string[],
@@ -36,14 +37,17 @@ async function run(
 ) {
   let stdout = ''
   let stderr = ''
+  const rotation = argv[0] === 'webhooks' && argv[1] === 'rotate-secret'
   const fetcher = vi.fn<typeof fetch>(async () => {
-    return options.response ?? reply({ structuredContent: { webhook, secret } })
+    return (
+      options.response ?? reply({ structuredContent: rotation ? { secret } : { webhook, secret } })
+    )
   })
   const code = await (options.runner ?? runCli)({
     argv,
     env: { HOURMERE_URL: 'https://hourmere.example', HOURMERE_API_KEY: key },
     stdin: (async function* () {
-      yield JSON.stringify(options.input ?? input)
+      yield JSON.stringify(options.input ?? (rotation ? rotateInput : input))
     })(),
     stdout: async (text) => {
       await options.write?.(text)
@@ -60,9 +64,14 @@ async function run(
 }
 
 const create = ['webhooks', 'create', '--input', '-']
+const rotate = ['webhooks', 'rotate-secret', '--input', '-']
+const secretCommands = [
+  { action: 'create', argv: create },
+  { action: 'rotate-secret', argv: rotate },
+] as const
 
-async function verifyNoImplicitOutput(runner = runCli) {
-  const result = await run(create, { runner })
+async function verifyNoImplicitOutput(argv: string[], runner = runCli) {
+  const result = await run(argv, { runner })
   // Check the leak before exit status so the mutation demonstrates the privacy boundary.
   expect(result.stdout.includes(secret)).toBe(false)
   expect(result.stdout).toBe('')
@@ -71,12 +80,14 @@ async function verifyNoImplicitOutput(runner = runCli) {
   expect(result.fetcher).not.toHaveBeenCalled()
 }
 
-function cliSourceCopy(removeOutputGuard = false): typeof runCli {
+function cliSourceCopy(
+  removeOutputGuard?: (typeof secretCommands)[number]['action'],
+): typeof runCli {
   let source = readFileSync(new URL('./cli.ts', import.meta.url), 'utf8')
   if (removeOutputGuard) {
-    const anchor = "command === 'webhooks create' && !seen.has('--json') && !options.output"
+    const anchor = "['webhooks create', 'webhooks rotate-secret'].includes(command)"
     expect(source).toContain(anchor)
-    source = source.replace(anchor, 'false')
+    source = source.replace(anchor, anchor.replace(`'webhooks ${removeOutputGuard}'`, "''"))
   }
   source = stripTypeScriptTypes(source.replace(/^import\b[\s\S]*?from '[^']+'\n/gm, '')).replace(
     /\bexport /g,
@@ -96,6 +107,10 @@ describe('webhook CLI', () => {
     expect(result.stdout).toContain('webhooks create --input FILE|- (--json | --output FILE)')
     expect(result.stdout).toContain('webhooks update --input FILE|- [--json]')
     expect(result.stdout).toContain('webhooks delete --input FILE|- --yes [--json]')
+    expect(result.stdout).toContain(
+      'webhooks rotate-secret --input FILE|- (--json | --output FILE)',
+    )
+    expect(result.stdout).toContain('webhooks deliveries --input FILE|- [--json]')
     expect(result.stdout).toContain('booking.attendee_no_show_changed')
     expect(result.fetcher).not.toHaveBeenCalled()
   })
@@ -126,6 +141,55 @@ describe('webhook CLI', () => {
     expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
       name: 'create_webhook',
       arguments: input,
+    })
+  })
+
+  it('rotates once and returns only the new secret to explicitly requested JSON stdout', async () => {
+    const result = await run([...rotate, '--json'])
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(result.stdout.split(secret).length - 1).toBe(1)
+    const response = JSON.parse(result.stdout)
+    expect(Object.keys(response)).toEqual(['secret'])
+    expect(response.secret === secret).toBe(true)
+    expect(result.fetcher).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+      name: 'rotate_webhook_secret',
+      arguments: rotateInput,
+    })
+  })
+
+  it('forwards the delivery cursor and prints only the returned page of metadata', async () => {
+    const args = {
+      id: webhook.id,
+      after: '019a0000-0000-7000-8000-000000000003',
+    }
+    const delivery = {
+      id: '019a0000-0000-7000-8000-000000000004',
+      eventId: '019a0000-0000-7000-8000-000000000005',
+      eventType: 'booking.created',
+      bookingId: '019a0000-0000-7000-8000-000000000006',
+      status: 'delivered',
+      attempts: 1,
+      httpStatus: 200,
+      lastError: null,
+      createdAt: webhook.createdAt,
+      lastAttemptAt: webhook.createdAt,
+      deliveredAt: webhook.createdAt,
+    }
+    const page = { data: [delivery], nextAfter: null }
+    const result = await run(['webhooks', 'deliveries', '--input', '-', '--json'], {
+      input: args,
+      response: reply({ structuredContent: page }),
+    })
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(result.stdout.includes(secret)).toBe(false)
+    expect(JSON.parse(result.stdout)).toEqual(page)
+    expect(result.fetcher).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(result.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+      name: 'list_webhook_deliveries',
+      arguments: args,
     })
   })
 
@@ -170,70 +234,99 @@ describe('webhook CLI', () => {
     })
   })
 
-  it('writes the secret only to a new private file and refuses an existing file before creation', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-webhooks-cli-'))
-    try {
-      const existing = join(directory, 'existing.json')
-      await writeFile(existing, '{}', { mode: 0o600 })
-      const refused = await run([...create, '--output', existing])
-      expect(refused.code).toBe(1)
-      expect(JSON.parse(refused.stderr).error).toBe('file_error')
-      expect(refused.fetcher).not.toHaveBeenCalled()
-      expect(await readFile(existing, 'utf8')).toBe('{}')
+  it.each(secretCommands)(
+    'webhooks $action reserves a new private file before the request',
+    async ({ action, argv }) => {
+      const directory = await mkdtemp(join(tmpdir(), 'hourmere-webhooks-cli-'))
+      try {
+        const existing = join(directory, 'existing.json')
+        await writeFile(existing, '{}', { mode: 0o600 })
+        const refused = await run([...argv, '--output', existing])
+        expect(refused.code).toBe(1)
+        expect(JSON.parse(refused.stderr).error).toBe('file_error')
+        expect(refused.fetcher).not.toHaveBeenCalled()
+        expect(await readFile(existing, 'utf8')).toBe('{}')
 
-      const output = join(directory, 'created.json')
-      const result = await run([...create, '--output', output])
-      expect(result.code).toBe(0)
-      expect(result.stderr).toBe('')
-      expect(result.stdout.includes(secret)).toBe(false)
-      expect(JSON.parse(result.stdout)).toEqual({ outputWritten: true })
-      expect((await stat(output)).mode & 0o777).toBe(0o600)
-      const data = await readFile(output, 'utf8')
-      expect(data.split(secret).length - 1).toBe(1)
-      expect(JSON.parse(data).secret === secret).toBe(true)
-      expect(JSON.parse(data).webhook).toEqual(webhook)
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
+        const output = join(directory, 'result.json')
+        const link = join(directory, 'link.json')
+        await symlink(output, link)
+        const refusedLink = await run([...argv, '--output', link])
+        expect(refusedLink.code).toBe(1)
+        expect(JSON.parse(refusedLink.stderr).error).toBe('file_error')
+        expect(refusedLink.fetcher).not.toHaveBeenCalled()
+        await expect(stat(output)).rejects.toMatchObject({ code: 'ENOENT' })
 
-  it('requires an explicit creation output before making a request', () => verifyNoImplicitOutput())
+        const result = await run([...argv, '--output', output])
+        expect(result.code).toBe(0)
+        expect(result.fetcher).toHaveBeenCalledTimes(1)
+        expect(result.stderr).toBe('')
+        expect(result.stdout.includes(secret)).toBe(false)
+        expect(JSON.parse(result.stdout)).toEqual({ outputWritten: true })
+        expect((await stat(output)).mode & 0o777).toBe(0o600)
+        const data = await readFile(output, 'utf8')
+        expect(data.split(secret).length - 1).toBe(1)
+        const response = JSON.parse(data)
+        expect(response.secret === secret).toBe(true)
+        if (action === 'create') expect(response.webhook).toEqual(webhook)
+        else expect(Object.keys(response)).toEqual(['secret'])
+      } finally {
+        await rm(directory, { recursive: true, force: true })
+      }
+    },
+  )
 
-  it('detects default signing secret disclosure in a source copy with the output guard removed', async () => {
-    await verifyNoImplicitOutput(cliSourceCopy())
-    await expectKilled(cliSourceCopy(true), verifyNoImplicitOutput, {
-      outcome: { actual: true, expected: false },
-    })
-  })
+  it.each(secretCommands)(
+    'webhooks $action requires an explicit output before making a request',
+    ({ argv }) => verifyNoImplicitOutput(argv),
+  )
 
-  it('prints safe error codes and suppresses signing secrets in both tool and HTTP errors', async () => {
-    const toolError = (error: string) =>
-      reply({
-        isError: true,
-        content: [{ type: 'text', text: JSON.stringify({ error, message: secret }) }],
+  it.each(secretCommands)(
+    'detects default $action signing secret disclosure in a source copy with the output guard removed',
+    async ({ action, argv }) => {
+      await verifyNoImplicitOutput(argv, cliSourceCopy())
+      await expectKilled(cliSourceCopy(action), (runner) => verifyNoImplicitOutput(argv, runner), {
+        outcome: { actual: true, expected: false },
       })
-    for (const [response, expected] of [
-      [toolError('insufficient_scope'), 'insufficient_scope'],
-      [toolError(secret), 'tool_error'],
-      [Response.json({ error: secret }, { status: 503 }), 'http_error'],
-    ] as const) {
-      const result = await run([...create, '--json'], { response })
-      expect(result.code).not.toBe(0)
-      expect(result.stdout).toBe('')
-      expect(JSON.parse(result.stderr).error).toBe(expected)
-      expect(result.fetcher).toHaveBeenCalledTimes(1)
-    }
-  })
+    },
+  )
 
-  it('handles asynchronous stdout failure without logging the secret or repeating creation', async () => {
-    const result = await run([...create, '--json'], {
-      write: async () => {
-        throw new Error(secret)
-      },
-    })
-    expect(result.code).toBe(1)
-    expect(result.stdout).toBe('')
-    expect(JSON.parse(result.stderr)).toEqual({ error: 'output_failed', outcomeMayBeUnknown: true })
-    expect(result.fetcher).toHaveBeenCalledTimes(1)
-  })
+  it.each(secretCommands)(
+    'webhooks $action prints safe error codes and suppresses signing secrets in both tool and HTTP errors',
+    async ({ argv }) => {
+      const toolError = (error: string) =>
+        reply({
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ error, message: secret }) }],
+        })
+      for (const [response, expected] of [
+        [toolError('insufficient_scope'), 'insufficient_scope'],
+        [toolError(secret), 'tool_error'],
+        [Response.json({ error: secret }, { status: 503 }), 'http_error'],
+      ] as const) {
+        const result = await run([...argv, '--json'], { response })
+        expect(result.code).not.toBe(0)
+        expect(result.stdout).toBe('')
+        expect(JSON.parse(result.stderr).error).toBe(expected)
+        expect(result.fetcher).toHaveBeenCalledTimes(1)
+      }
+    },
+  )
+
+  it.each(secretCommands)(
+    'webhooks $action handles asynchronous stdout failure without logging the secret or repeating the request',
+    async ({ argv }) => {
+      const result = await run([...argv, '--json'], {
+        write: async () => {
+          throw new Error(secret)
+        },
+      })
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(JSON.parse(result.stderr)).toEqual({
+        error: 'output_failed',
+        outcomeMayBeUnknown: true,
+      })
+      expect(result.fetcher).toHaveBeenCalledTimes(1)
+    },
+  )
 })
