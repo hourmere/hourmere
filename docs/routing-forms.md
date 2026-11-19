@@ -122,8 +122,7 @@ unarchiving require READ COMMITTED isolation; other isolation modes fail closed 
 40001, and must restart at READ COMMITTED. Concurrent writers cannot exceed these quotas.
 These limits apply equally to self-hosted and Cloud installations. Public
 submissions and continuations use the named rate-limit buckets and admission ceilings in
-[Ownership, permissions and public security](#ownership-permissions-and-public-security);
-step c1 pins their values before any public routing write exists.
+[Ownership, permissions and public security](#ownership-permissions-and-public-security).
 
 ## Rules and versions
 
@@ -435,24 +434,30 @@ everywhere in this document and in the implementation:
 | Name | Kind | Applies to |
 |---|---|---|
 | `page` | Existing public request bucket (`PUBLIC_RATE_LIMITS`) | `GET` public form metadata |
-| `routingSubmission` | New public request bucket | `POST …/route` submissions |
-| `routingContinuation` | New public request bucket | Continuation resolve and slots |
+| `routingSubmission` | 10 requests per client per 60 seconds, per server process | `POST …/route` submissions |
+| `routingContinuation` | 120 requests per client per 60 seconds, per server process | Continuation resolve and slots |
 | `book` | Existing public request bucket | Continuation booking |
-| Form admission ceiling | New durable ceiling shared by all server processes | Unexpired, unconsumed receipts of one form at once |
-| Instance admission ceiling | New durable ceiling shared by all server processes | Unexpired, unconsumed receipts of the instance at once |
+| Form admission ceiling | 100 live receipts shared by all server processes | Unexpired, unconsumed receipts of one form at once |
+| Instance admission ceiling | 10,000 live receipts shared by all server processes | Unexpired, unconsumed receipts of the instance at once |
 
 A submission over either ceiling is refused with `429 rate_limited` and mints nothing. Both
 ceilings are counts of live receipts, not time windows. The submission transaction counts
 them with the partial indexes on unconsumed receipts (organization, form and expiry for the
 form ceiling; expiry for the instance ceiling), the form ceiling under the form row lock and
 the instance ceiling under one transaction-scoped advisory lock, so concurrent processes
-cannot overshoot. Expired receipts stop counting at expiry, before cleanup. Key the two new
+cannot overshoot. Both counts use the database's clock after acquiring the respective lock.
+Expired receipts stop counting at expiry, before cleanup. Key the two new
 request buckets with a dedicated HMAC purpose over the client key and retain no raw IP or
 answer values in routing rate accounting; the admission ceilings count per form and per
 instance only, and the existing `page` and `book` buckets keep their current keys.
 Rate-limit refused and invalid requests too. Repeated route submissions may mint separate
 receipts within those limits; booking replays cannot consume a receipt twice. Do not send
-email on submission.
+email on submission. The receipt service and bucket definitions are in place while routing
+remains hard-off. The public adapters will connect these request buckets in later steps.
+
+中文：提交每个客户端每 60 秒最多 10 次，继续预约每 60 秒最多 120 次，按服务进程分别计数。
+所有进程共享数据库中的凭据上限：每个表单 100 份，每个实例 10,000 份。只有未过期且未使用的
+凭据占用额度，达到任一上限时拒绝签发新凭据。凭据自签发起 30 分钟后失效。路由功能仍处于硬关闭状态。
 Public preview is forbidden. Unknown/archived forms share a neutral unavailable response;
 unknown, expired and invalid continuation tokens are indistinguishable. Reject excess
 input depth and unknown keys. Render author content as text, and do not fetch remote URLs.

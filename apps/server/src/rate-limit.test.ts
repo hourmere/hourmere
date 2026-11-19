@@ -91,6 +91,8 @@ describe('createRateLimiter', () => {
       slots: { limit: 120, windowSeconds: 60 },
       book: { limit: 10, windowSeconds: 60 },
       manage: { limit: 30, windowSeconds: 60 },
+      routingSubmission: { limit: 10, windowSeconds: 60 },
+      routingContinuation: { limit: 120, windowSeconds: 60 },
     })
   })
   it.each([true, false])(

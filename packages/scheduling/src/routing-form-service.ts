@@ -1,7 +1,7 @@
-// Routing-form configuration and publication services (docs/routing-forms.md, step a3): draft
+// Routing-form services (docs/routing-forms.md): draft
 // create/read/update/archive with optimistic revisions, atomic immutable publication with its
 // target dependencies, and a side-effect-free preview. Service entry points only: no transport
-// calls them while routing is hard-off. Only configuration operations are exported from the package.
+// calls submission while routing is hard-off.
 //
 // Lock order, the same in every write path: the organization boundary (a personal
 // organization's owner, the organization share lock, then the actor and member share locks),
@@ -10,7 +10,8 @@
 // row. Membership management locks the organization for update before member rows, and
 // event-type edits and public booking take the organization before the event type, so a
 // publication waits for either of them instead of deadlocking (docs/data-model.md, "Team
-// membership and host lock order"). Receipts (a later step) come after the form.
+// membership and host lock order"). Receipt admission takes the instance advisory lock after
+// the form row, then inserts the receipt in the same transaction.
 import { createHash } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
@@ -19,6 +20,7 @@ import { canonicalJson } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { SLUG_PATTERN } from './event-types.ts'
+import { lockOrganization } from './hosts.ts'
 import { isConstraintViolation, isUuid, jsonb, SQLSTATE } from './internal.ts'
 import {
   cleanRoutingText,
@@ -40,6 +42,11 @@ import {
   routingTargetProblem,
   validateRoutingTargets,
 } from './routing-form-targets.ts'
+import {
+  createRoutingToken,
+  routingTokenDigest,
+  sealRoutingAnswers,
+} from './routing-receipt-crypto.ts'
 
 /** Page size bounds of listRoutingForms. */
 export const ROUTING_FORM_PAGE = { default: 50, max: 100 } as const
@@ -439,8 +446,8 @@ async function lockFormAdmission(db: Db, organizationId: string) {
 /** Share-locks the organization's target event types in ID order. */
 async function lockTargetEvents(db: Db, organizationId: string, ids: readonly string[]) {
   const sorted = [...new Set(ids.filter(isUuid))].sort()
-  if (sorted.length === 0) return
-  await db
+  if (sorted.length === 0) return []
+  const rows = await db
     .selectFrom('event_types')
     .select('id')
     .where('organization_id', '=', organizationId)
@@ -448,6 +455,7 @@ async function lockTargetEvents(db: Db, organizationId: string, ids: readonly st
     .orderBy('id')
     .forShare()
     .execute()
+  return rows.map((row) => row.id)
 }
 
 // --- Idempotency ---------------------------------------------------------------------------
@@ -1283,5 +1291,188 @@ export async function previewRoutingForm(
         unavailableTargets,
         rules,
       }
+    })
+}
+
+export const ROUTING_RECEIPT_LIMITS = {
+  perForm: 100,
+  perInstance: 10_000,
+  lifetimeMinutes: 30,
+} as const
+
+/** The next submission can try again as soon as a live receipt expires or is consumed. */
+export class RoutingAdmissionError extends Error {
+  readonly code = 'rate_limited'
+
+  constructor() {
+    super('rate_limited')
+    this.name = 'RoutingAdmissionError'
+  }
+}
+
+export interface RoutingSubmissionContext {
+  db: Db
+  routingFormsEnabled?: boolean
+  /** BETTER_AUTH_SECRET, from trusted server configuration. */
+  routingSecret: string
+  /** Fixture clock. Production admission and issuance use the shared PostgreSQL clock. */
+  now?: () => Temporal.Instant
+}
+
+export type RoutingSubmissionResult =
+  | { kind: 'message'; message: string }
+  | { kind: 'continuation'; routeToken: string; expiresAt: string }
+
+const formChanged = () => new DomainError('conflict', 'routing_form_changed')
+const routingUnavailable = () => new DomainError('conflict', 'routing_unavailable')
+
+function liveReceipts(db: Db, now?: Temporal.Instant) {
+  // Stable within the count statement, fresh after any lock wait, and shared by all processes.
+  const checkedAt = now
+    ? sql<Date>`${new Date(now.epochMilliseconds)}::timestamptz`
+    : sql<Date>`statement_timestamp()`
+  return db
+    .selectFrom('routing_receipts')
+    .select([sql<number>`count(*)::integer`.as('count'), checkedAt.as('checkedAt')])
+    .where('consumed_booking_id', 'is', null)
+    .where('expires_at', '>', checkedAt)
+}
+
+/**
+ * Evaluates a published version and either returns its message or admits one continuation.
+ * The form locator comes from trusted form resolution. Request keys are limited to versionId
+ * and a flat map of answers. All validation precedes admission and receipt writes.
+ */
+export async function submitRoutingForm(
+  ctx: RoutingSubmissionContext,
+  locator: { organizationId: string; formId: string },
+  input: unknown,
+): Promise<RoutingSubmissionResult> {
+  if (ctx.routingFormsEnabled !== true) throw new DomainError('not_found', 'routing_forms_disabled')
+  const fields = fieldsOf(input, ['versionId', 'answers'])
+  if (!Object.hasOwn(fields, 'versionId') || !isUuid(fields.versionId))
+    throw invalidForm('versionId', 'must be a UUID')
+  const versionId = fields.versionId.toLowerCase()
+  const { organizationId, formId } = locator
+  if (!isUuid(organizationId) || !isUuid(formId)) throw formNotFound()
+
+  return ctx.db
+    .transaction()
+    .setIsolationLevel('read committed')
+    .execute(async (trx) => {
+      // A single snapshot reads the pointer and its immutable configuration. If publication
+      // moves it after this read, the form lock below detects the change before we issue.
+      const published = await trx
+        .selectFrom('routing_forms as f')
+        .innerJoin('routing_form_versions as v', (join) =>
+          join
+            .onRef('v.id', '=', 'f.published_version_id')
+            .onRef('v.form_id', '=', 'f.id')
+            .onRef('v.organization_id', '=', 'f.organization_id'),
+        )
+        .select([
+          'f.id as formId',
+          'f.organization_id as organizationId',
+          'v.id',
+          'questions',
+          'rules',
+          'fallback',
+        ])
+        .where('f.organization_id', '=', organizationId)
+        .where('f.id', '=', formId)
+        .where('f.archived_at', 'is', null)
+        .where('f.enabled', '=', true)
+        .executeTakeFirst()
+      if (!published) throw formNotFound()
+      if (published.id !== versionId) throw formChanged()
+
+      const config = validateRoutingFormConfig({
+        questions: published.questions,
+        rules: published.rules,
+        fallback: published.fallback,
+      })
+      const answers = validateRoutingAnswers(config.questions, fields.answers)
+      const { ruleId: matchedRuleId, target: matchedTarget } = evaluateRoutingForm(config, answers)
+      const candidates = [[matchedRuleId, matchedTarget] as const]
+      if (matchedTarget.kind === 'event' && matchedRuleId !== FALLBACK_RULE_ID)
+        candidates.push([FALLBACK_RULE_ID, config.fallback])
+
+      try {
+        await lockOrganization(trx, published.organizationId)
+      } catch (error) {
+        if (error instanceof DomainError && error.code === 'event_type_not_found')
+          throw formNotFound()
+        throw error
+      }
+      const lockedEvents = await lockTargetEvents(
+        trx,
+        published.organizationId,
+        candidates.flatMap(([, target]) => (target.kind === 'event' ? [target.eventTypeId] : [])),
+      )
+      const form = await findForm(trx, published.organizationId, published.formId, true)
+      if (!form.enabled || form.published_version_id === null) throw formNotFound()
+      if (form.published_version_id !== versionId) throw formChanged()
+
+      const events = await loadRoutingTargetEvents(trx, lockedEvents)
+      const resolved = candidates.find(
+        ([, target]) =>
+          target.kind === 'message' ||
+          routingTargetProblem(form.organization_id, events.get(target.eventTypeId)) === undefined,
+      )
+      if (!resolved) throw routingUnavailable()
+      const [resolvedRuleId, target] = resolved
+      if (target.kind === 'message') return { kind: 'message', message: target.message }
+
+      const formCount = await liveReceipts(trx, ctx.now?.())
+        .where('organization_id', '=', form.organization_id)
+        .where('form_id', '=', form.id)
+        .executeTakeFirstOrThrow()
+      if (formCount.count >= ROUTING_RECEIPT_LIMITS.perForm) throw new RoutingAdmissionError()
+
+      // The instance count is a separate statement after the wait, so it sees the previous
+      // holder's committed receipt. The form row still serializes the form count and write.
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended('hourmere.routing-receipt-admission', 0))`.execute(
+        trx,
+      )
+      const instanceCount = await liveReceipts(trx, ctx.now?.()).executeTakeFirstOrThrow()
+      if (instanceCount.count >= ROUTING_RECEIPT_LIMITS.perInstance)
+        throw new RoutingAdmissionError()
+
+      const createdAt = instanceCount.checkedAt
+      const expiresAt = Temporal.Instant.fromEpochMilliseconds(createdAt.getTime()).add({
+        minutes: ROUTING_RECEIPT_LIMITS.lifetimeMinutes,
+      })
+      const routeToken = createRoutingToken()
+      const { id: receiptId } = await trx
+        .selectNoFrom(sql<string>`uuidv7()`.as('id'))
+        .executeTakeFirstOrThrow()
+      const binding = {
+        organizationId: form.organization_id,
+        formId: form.id,
+        versionId,
+        receiptId,
+      }
+      await trx
+        .insertInto('routing_receipts')
+        .values({
+          id: binding.receiptId,
+          organization_id: binding.organizationId,
+          form_id: binding.formId,
+          version_id: versionId,
+          matched_rule_id: matchedRuleId,
+          resolved_rule_id: resolvedRuleId,
+          resolved_target: jsonb(target),
+          token_hash: routingTokenDigest(ctx.routingSecret, 'continuation', routeToken),
+          answers_ciphertext: sealRoutingAnswers(
+            ctx.routingSecret,
+            'continuation',
+            binding,
+            answers,
+          ),
+          created_at: createdAt,
+          expires_at: new Date(expiresAt.epochMilliseconds),
+        })
+        .execute()
+      return { kind: 'continuation', routeToken, expiresAt: expiresAt.toString() }
     })
 }

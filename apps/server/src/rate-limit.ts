@@ -20,6 +20,10 @@ export const PUBLIC_RATE_LIMITS = {
   book: { limit: 10, windowSeconds: 60 },
   /** Invitee manage links: show, cancel, reschedule. */
   manage: { limit: 30, windowSeconds: 60 },
+  /** Routing form submissions. */
+  routingSubmission: { limit: 10, windowSeconds: 60 },
+  /** Routing continuation resolution and slots. */
+  routingContinuation: { limit: 120, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimit>
 
 export interface RateLimiter {
