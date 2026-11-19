@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { Mailer, MailMessage } from '@hourmere/mail'
@@ -9,6 +9,7 @@ import {
 } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { createSeries } from '../../db/src/recurring-series-protections.ts'
 import {
   dispatchConferenceNotifications,
   type NotificationDeps,
@@ -354,5 +355,136 @@ describe.skipIf(!serverUrl)('durable notification mail limits (real PostgreSQL)'
     )
     expect(await ledger()).toHaveLength(0)
     expect((await purgeNotificationEmailSends(db)).numDeletedRows).toBe(0n)
+  })
+
+  it('purges recurring admissions strictly older than two days in bounded batches', async () => {
+    const { id, host } = await booked()
+    const booking = await db
+      .selectFrom('bookings')
+      .select('event_type_id')
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()
+    if (!booking.event_type_id) throw new Error('Synthetic booking needs an event type')
+    const oldestLocked = randomUUID()
+    const nextBatch = randomUUID()
+    const atCutoff = randomUUID()
+    const recent = randomUUID()
+    const cutoff = now.subtract({ hours: 48 }).epochMilliseconds
+    const admission = {
+      organization_id: host.organizationId,
+      event_type_id: booking.event_type_id,
+      actor_digest: createHash('sha256').update('synthetic-oauth-consent-id').digest(),
+    }
+    await db
+      .insertInto('booking_series_admissions')
+      .values([
+        { ...admission, id: oldestLocked, admitted_at: new Date(cutoff - 3) },
+        ...Array.from({ length: 500 }, () => ({ ...admission, admitted_at: new Date(cutoff - 2) })),
+        { ...admission, id: nextBatch, admitted_at: new Date(cutoff - 1) },
+        { ...admission, id: atCutoff, admitted_at: new Date(cutoff) },
+        { ...admission, id: recent, admitted_at: new Date(cutoff + 1) },
+      ])
+      .execute()
+
+    const job = notificationEmailCleanupJob({ db, now: () => now })
+    const runCleanup = () =>
+      job.handler({}, { id: 'synthetic-cleanup', attempt: 1, signal: new AbortController().signal })
+    const remainingAdmissions = async () =>
+      (
+        await db
+          .selectFrom('booking_series_admissions')
+          .select('id')
+          .where('event_type_id', '=', admission.event_type_id)
+          .orderBy('admitted_at')
+          .orderBy('id')
+          .execute()
+      ).map((row) => row.id)
+
+    await db.transaction().execute(async (tx) => {
+      await tx
+        .selectFrom('booking_series_admissions')
+        .select('id')
+        .where('id', '=', oldestLocked)
+        .forUpdate()
+        .executeTakeFirstOrThrow()
+      await runCleanup()
+    })
+    expect(await remainingAdmissions()).toEqual([oldestLocked, nextBatch, atCutoff, recent])
+
+    const { series, first, second } = await createSeries(owned.pool, {
+      organization: host.organizationId,
+      event: booking.event_type_id,
+    })
+    try {
+      const old = new Date(cutoff - 1)
+      const seriesIdentity = { organization_id: host.organizationId, series_id: series }
+      const replay = await db
+        .insertInto('booking_series_receipts')
+        .values({
+          ...seriesIdentity,
+          operation_kind: 'create',
+          authority_scope: createHash('sha256').update('synthetic-authority').digest(),
+          idempotency_key: createHash('sha256').update('synthetic-request-key').digest(),
+          fingerprint: createHash('sha256').update('synthetic-request').digest(),
+          affected_occurrence_ids: [first.occurrence, second.occurrence],
+          result_booking_ids: [first.root, second.root],
+          created_at: old,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('booking_series_notifications')
+        .values([
+          {
+            ...seriesIdentity,
+            row_type: 'receipt',
+            kind: 'confirmation',
+            sequence: 1,
+            recipient_role: 'host',
+            recipient_id: host.userId,
+            outcome: 'delivered',
+            sent_at: old,
+            reported_ordinals: [1, 2],
+            reported_link_states: ['no_conference', 'no_conference'],
+          },
+          {
+            ...seriesIdentity,
+            row_type: 'outbox',
+            kind: 'confirmation',
+            sequence: 1,
+            due_at: old,
+            attempts: 0,
+            outbox_state: 'done',
+          },
+        ])
+        .execute()
+
+      await runCleanup()
+      expect(await remainingAdmissions()).toEqual([atCutoff, recent])
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select('event_type_id')
+          .where('id', '=', id)
+          .executeTakeFirst(),
+      ).toEqual(booking)
+      expect(
+        await db
+          .selectFrom('booking_series_receipts')
+          .select('id')
+          .where('series_id', '=', series)
+          .execute(),
+      ).toEqual([replay])
+      expect(
+        await db
+          .selectFrom('booking_series_notifications')
+          .select('row_type')
+          .where('series_id', '=', series)
+          .orderBy('row_type')
+          .execute(),
+      ).toEqual([{ row_type: 'outbox' }, { row_type: 'receipt' }])
+    } finally {
+      await owned.pool.query('DELETE FROM auth.organization WHERE id = $1', [host.organizationId])
+    }
   })
 })

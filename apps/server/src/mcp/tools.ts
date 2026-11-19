@@ -146,6 +146,7 @@ const DOMAIN_KINDS: ReadonlySet<DomainErrorKind> = new Set([
   'forbidden',
   'not_found',
   'conflict',
+  'unavailable',
 ])
 
 /**

@@ -469,6 +469,7 @@ export interface Bookings {
   reschedule_cutoff_minutes: number | null;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
+  series_occurrence_id: string | null;
   sms_reminders_enabled: Generated<boolean>;
   source: string;
   start_at: Timestamp;
@@ -498,6 +499,82 @@ export interface BookingScheduledMessages {
   skip_reason: string | null;
   state: Generated<string>;
   updated_at: Generated<Timestamp>;
+}
+
+export interface BookingSeries {
+  created_at: Generated<Timestamp>;
+  duration_minutes: number;
+  event_type_id: string | null;
+  first_local_start: Timestamp;
+  host_policy_snapshot: Json;
+  id: Generated<string>;
+  manage_token_hash: Buffer | null;
+  notification_snapshot: Json;
+  organization_id: string;
+  original_event_type_id: string;
+  requested_count: number;
+  revision: Generated<Int8>;
+  rule_ordinal: number | null;
+  rule_pattern: string;
+  rule_version: Generated<number>;
+  rule_weekday: number | null;
+  time_zone: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface BookingSeriesAdmissions {
+  actor_digest: Buffer;
+  admitted_at: Generated<Timestamp>;
+  event_type_id: string;
+  id: Generated<string>;
+  organization_id: string;
+}
+
+export interface BookingSeriesNotifications {
+  attempts: number | null;
+  capability_scope: string | null;
+  due_at: Timestamp | null;
+  id: Generated<string>;
+  kind: string;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  manage_token_hash: Buffer | null;
+  organization_id: string;
+  outbox_state: string | null;
+  outcome: string | null;
+  recipient_id: string | null;
+  recipient_role: string | null;
+  reported_link_states: string[] | null;
+  reported_ordinals: number[] | null;
+  row_type: string;
+  sent_at: Timestamp | null;
+  sequence: Int8;
+  series_id: string;
+  suppression_reason: string | null;
+}
+
+export interface BookingSeriesOccurrences {
+  end_at: Timestamp;
+  id: Generated<string>;
+  ordinal: number;
+  organization_id: string;
+  original_local_start: Timestamp;
+  root_booking_id: string;
+  series_id: string;
+  start_at: Timestamp;
+}
+
+export interface BookingSeriesReceipts {
+  affected_occurrence_ids: Generated<string[]>;
+  authority_scope: Buffer;
+  created_at: Generated<Timestamp>;
+  fingerprint: Buffer;
+  id: Generated<string>;
+  idempotency_key: Buffer;
+  operation_kind: string;
+  organization_id: string;
+  result_booking_ids: Generated<string[]>;
+  series_id: string;
 }
 
 export interface CalendarBusy {
@@ -623,6 +700,8 @@ export interface EventTypes {
   owner_user_id: string | null;
   position: Generated<number>;
   questions: Generated<Json>;
+  recurrence: Json | null;
+  recurrence_revision: Generated<Int8>;
   reschedule_cutoff_minutes: number | null;
   scheduling_type: Generated<string>;
   slot_step_minutes: number | null;
@@ -1734,6 +1813,11 @@ export interface DB {
   booking_reschedule_requests: BookingRescheduleRequests;
   booking_routing: BookingRouting;
   booking_scheduled_messages: BookingScheduledMessages;
+  booking_series: BookingSeries;
+  booking_series_admissions: BookingSeriesAdmissions;
+  booking_series_notifications: BookingSeriesNotifications;
+  booking_series_occurrences: BookingSeriesOccurrences;
+  booking_series_receipts: BookingSeriesReceipts;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
   calendar_connections: CalendarConnections;

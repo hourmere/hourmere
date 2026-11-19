@@ -1,7 +1,12 @@
 # Data model
 
-[Recurring bookings design](recurring-bookings.md) proposes bounded series with ordinary
-booking rows per occurrence. It is not implemented and does not change the schema below.
+[Recurring bookings](recurring-bookings.md) have internal storage for bounded series with
+ordinary booking rows per occurrence. Admission remains hard-off. Replay receipts scope
+the request-key digest to the organization, authority digest and operation. Series
+notification receipts store the outcome and any capability digest, and the same table
+stores durable delivery intents. The hourly email cleanup deletes admission rows older
+than 48 hours in batches of up to 500. Admissions store an actor digest, including a
+server-keyed HMAC for a client's rate-limit address.
 
 Google synchronization also records `booking_calendar_targets`: one destination per
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
