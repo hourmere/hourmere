@@ -68,6 +68,12 @@ const classes = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/meeting-polls',
+    'POST /api/v1/meeting-polls/{id}/invitations',
+    'POST /api/v1/meeting-polls/{id}/invitations/{voterId}/resend',
+    'DELETE /api/v1/meeting-polls/{id}/voters/{voterId}',
+    'POST /api/v1/meeting-polls/{id}/remove-unverified',
+    'POST /api/v1/meeting-polls/{id}/rotate-link',
     'POST /api/v1/meeting-polls/{id}/close',
     'POST /api/v1/meeting-polls/{id}/cancel',
     'DELETE /api/v1/meeting-polls/{id}',
@@ -420,8 +426,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const start = `${date}T09:00:00Z`
       const end = `${date}T17:00:00Z`
       const nonce = `matrix-${++sequence}`
+      if (template === '/api/v1/meeting-polls' && method === 'POST') {
+        expectedStatus = 404
+        headers['idempotency-key'] = randomUUID()
+        payload = {
+          eventTypeId: randomUUID(),
+          candidateStarts: [start, end],
+          deadlineAt: `${date}T07:00:00Z`,
+          displayTimeZone: 'UTC',
+          admissionMode: 'public_link',
+        }
+      }
       if (template.startsWith('/api/v1/meeting-polls/{id}')) {
         id = randomUUID()
+        path = path.replace('{voterId}', randomUUID())
         expectedStatus = 404
         if (template.endsWith('/finalize')) {
           const voterId = randomUUID()
@@ -434,7 +452,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expectedBallotRevisions: { [voterId]: 1 },
             acknowledgeConditional: false,
           }
+        } else if (template.endsWith('/invitations')) {
+          headers['idempotency-key'] = randomUUID()
+          payload = { invitees: [{ name: 'Voter', email: 'voter@example.test' }] }
         } else if (method !== 'GET') {
+          if (template.endsWith('/resend') || template.endsWith('/rotate-link'))
+            headers['idempotency-key'] = randomUUID()
           payload = { expectedHostRevision: 1 }
         }
       }
@@ -967,14 +990,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 170-operation contract and all 510 scope combinations', () => {
+    it('covers the exact 176-operation contract and all 528 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(170)
-      expect(new Set(ids).size).toBe(170)
+      expect(ids).toHaveLength(176)
+      expect(new Set(ids).size).toBe(176)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(510)
+      expect(cases).toHaveLength(528)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -1034,6 +1057,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
           } else if (operation.includes(' /api/v1/workflows')) {
             expect(await response.json()).toEqual({ error: 'workflows_disabled' })
+          } else if (operation === 'POST /api/v1/meeting-polls') {
+            expect(await response.json()).toEqual({ error: 'event_type_not_found' })
           } else if (operation.includes('/meeting-polls/') && response.status === 404) {
             expect(await response.json()).toMatchObject({ error: 'poll_not_found' })
           } else if (response.status !== 204) {

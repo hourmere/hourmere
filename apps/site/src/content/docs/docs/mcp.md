@@ -78,6 +78,12 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 
 | MCP tool | Mode | CLI command | Allowed key scopes |
 | --- | --- | --- | --- |
+| `create_meeting_poll` | — | `polls create` | `full, bookings` |
+| `invite_meeting_poll_voters` | — | `polls invite` | `full, bookings` |
+| `resend_meeting_poll_invitation` | — | `polls resend-invitation` | `full, bookings` |
+| `remove_meeting_poll_voter` | — | `polls remove-voter` | `full, bookings` |
+| `remove_unverified_meeting_poll_voters` | — | `polls remove-unverified` | `full, bookings` |
+| `rotate_meeting_poll_link` | — | `polls rotate-link` | `full, bookings` |
 | `list_meeting_polls` | — | `polls list` | `full, read, bookings` |
 | `get_meeting_poll` | — | `polls get` | `full, read, bookings` |
 | `get_meeting_poll_results` | — | `polls results` | `full, read, bookings` |
@@ -1104,6 +1110,27 @@ not whether older retained history exists beyond that bound.
 
 中文：名单翻页最多到偏移量 10000；`hasMore` 表示还有可请求的下一页，
 不保证该范围之外没有保留的历史记录。
+
+## Create and manage meeting polls
+
+Call `create_meeting_poll` with the event type ID, offered candidate starts, deadline,
+display time zone, admission mode and an `idempotencyKey`. A `bookings` or `full` key
+requires personal event ownership or current team owner/admin access in its organization.
+The response gives a `publicLink` once for public-link polls. Invited polls return null.
+An exact create replay returns `poll_already_created` and the authorized `pollId`.
+
+Use `invite_meeting_poll_voters` with `id`, `invitees` and an `idempotencyKey`. Exact
+replays return current outcomes for the supplied mailboxes and queue no new mail.
+`resend_meeting_poll_invitation` and `remove_meeting_poll_voter` also take `voterId`
+and `expectedHostRevision`. Resend requires an idempotency key. Bulk
+`remove_unverified_meeting_poll_voters` preserves host invitations and takes the host
+revision. `rotate_meeting_poll_link` takes the host revision and a new key, immediately
+invalidates the old public link and discloses the replacement once.
+
+中文：个人活动所有者或当前团队所有者和管理员可使用 `bookings` 或 `full` 密钥
+创建投票、邀请、重发、移除投票者及轮换链接。请保留创建、邀请、重发和轮换使用的
+幂等键。邀请重试只返回本次提交的邮箱的当前状态。公开链接只在创建或轮换首次成功时
+返回，轮换后旧链接立即失效。受邀投票没有公开链接。
 
 ## Duplicate an event type
 
