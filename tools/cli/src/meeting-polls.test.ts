@@ -97,6 +97,31 @@ async function run(
   expect(stdout + stderr).not.toContain(TOKEN)
   return { status, stdout, stderr, fetcher }
 }
+
+it('shows host and public poll guidance in CLI help without credentials', async () => {
+  const stdout = vi.fn()
+  const stderr = vi.fn()
+  const fetcher = vi.fn<typeof fetch>()
+  const status = await runCli({
+    argv: ['--help'],
+    env: {},
+    stdin: (async function* () {})(),
+    stdout,
+    stderr,
+    fetch: fetcher,
+  })
+  expect(status).toBe(0)
+  expect(stderr).not.toHaveBeenCalled()
+  expect(fetcher).not.toHaveBeenCalled()
+  const help = stdout.mock.calls[0]?.[0]
+  expect(help).toContain('Every poll command requires JSON on stdin (--input -)')
+  expect(help).toContain('Writes require bookings or full')
+  expect(help).toContain('Use revisions from results')
+  expect(help).toContain('replay the exact input with the original key')
+  expect(help).toContain('Public commands act on existing polls')
+  expect(help).toContain('A host key cannot replace a voter’s token or consent')
+})
+
 describe('meeting poll CLI capabilities', () => {
   it.each(commands)(
     'dispatches polls %s from stdin and redacts echoed input secrets',
