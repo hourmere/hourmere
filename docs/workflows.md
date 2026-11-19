@@ -24,15 +24,34 @@ entry remains a no-op under the pinned hard-off constant. Cancellation and resch
 now retire predecessor work and use separate lifecycle identities. Successors retain captured
 timer revisions with recalculated anchors; delayed-created work never transfers. Request and
 request-expiry events leave workflow state untouched, and attendee no-show notifications have
-no workflow listener. No dispatcher,
-retention worker or web interface exists yet. Decisions below are Hourmere decisions unless explicitly
+no workflow listener. The internal dispatcher now claims bounded due batches with leased tokens,
+rechecks live eligibility after lock waits and records terminal skips. Repair queues wakes for
+existing run identities without recreating enrollments or recipient intents. Eligible runs remain
+claimed for the later delivery implementation; no email or webhook attempt is made. Dispatcher
+and repair entry points are no-ops while hard-off, and no workflow worker is registered in
+production. The wake port requires transactional enqueueing deduplicated by run ID; its production
+adapter belongs with later worker wiring. A ready result is not permission to send after releasing
+locks: the later attempt layer must recheck inside its own marker transaction. No retention
+worker or web interface exists yet. Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 中文：原生预约确认时的工作流登记、到期记录和收件人意图已在预约事务内实现，先记录核心
 通知；已有提醒优先，其次按工作流创建时间和 ID 排序。付款保留、导入及团体预约不登记。
 取消和改期使用各自的生命周期标识；改期保留原有定时工作流版本并重新计算到期时间，
 延迟的创建通知会终止，不会转移至后继预约。改期请求、请求到期及缺席标记不改变工作流状态。
-生产入口仍受硬关闭常量保护，不会捕获或发送工作流。
+内部调度器按有界批次领取到期任务，以租约令牌校验归属，并在等待锁后重新检查有效性；
+补唤醒仅复用已有任务标识，不重建登记或收件人意图。有效任务保持已领取状态，发送留待后续实现。
+生产入口仍受硬关闭常量保护，不会捕获、调度、补唤醒或发送工作流，也未注册工作流后台任务。
+
+Shared mail admission now records workflow reservations in the existing notification ledger,
+using the owner-organization lock before the shared budget lock. Retry admission restamps the
+same charge after recounting capacity. Internal instance/owner sub-cap settings default to
+20/5 per sliding hour and are forwarded by Compose; neither setting enables workflows.
+The admission primitive is not yet wired to the dispatcher and makes no SMTP attempt.
+
+中文：共享邮件准入已将工作流预留写入现有通知账本，先锁定所属组织，再取得共享额度锁。
+重试会重新计算额度并更新时间戳，不增加账本记录。内部实例和组织每小时子额度默认为
+20 和 5，Compose 已转发配置；这些配置不会启用工作流。准入尚未接入调度器，也不进行 SMTP 发送。
 
 ## Evidence and existing foundations
 

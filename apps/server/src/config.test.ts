@@ -120,13 +120,15 @@ describe('loadConfig', () => {
     ['INVITATION_TEAM_MAX_PER_HOUR', 50, 1],
     ['INVITATION_TEAM_MAX_PER_DAY', 200, 1],
     ['MAIL_MAX_PER_HOUR', 100, 0],
+    ['WORKFLOW_MAIL_MAX_PER_HOUR', 20, 0],
+    ['WORKFLOW_OWNER_MAIL_MAX_PER_HOUR', 5, 0],
   ] as const)('%s', (name, fallback, minimum) => {
     it('enables the default even when Compose passes an empty variable', () => {
       expect(loadConfig(base)[name]).toBe(fallback)
       expect(loadConfig({ ...base, [name]: '' })[name]).toBe(fallback)
     })
 
-    it('accepts bounded whole numbers, with zero only for rescheduling or the global cap', () => {
+    it('accepts bounded whole numbers at or above the setting minimum', () => {
       for (const value of [minimum, 7, 2147483647])
         expect(loadConfig({ ...base, [name]: String(value) })[name]).toBe(value)
     })

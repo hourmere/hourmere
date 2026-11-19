@@ -10,8 +10,9 @@ and replace ballots, withdraw, reactivate and reminder opt-out) by
 services (host results, voter removal and bulk removal of unverified enrollees) by
 `packages/scheduling/src/meeting-poll-results.ts`. Cleanup and deletion with receipt
 tombstones are implemented through migration `0088`; credential mail delivery and hourly
-capability ciphertext expiry are now implemented. Public REST/MCP/CLI transports are implemented. Host transports, reminder and
-outcome mail, and UI remain proposed. Competitor research was checked
+capability ciphertext expiry are implemented, as are public REST/MCP/CLI transports,
+deadline reminders, the browser reminder opt-out page and creator deadline notices.
+Host transports and outcome mail remain proposed. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -687,9 +688,11 @@ There are no per-vote host emails. A successful booking uses existing normal hos
 confirmation/lifecycle mail, without an extra poll-selected host message. Delivery storage
 supports a host recipient separately from a voter; dedupe host deadline mail once per poll.
 Use the shared locale registry in `packages/core/src/locales.ts`: invitation language
-chosen by host then instance fallback, subsequent poll mail in voter's saved locale, host
-mail in current profile locale. Add complete natural public translations in every shipped
-locale and en/zh-CN admin text in the later tasks; no new product strings in this task.
+chosen by host then instance fallback, subsequent poll mail in the voter's saved locale, and
+host mail in the creator's current profile locale. The reminder opt-out page asks the
+recipient to confirm before sending the credential to the public opt-out endpoint. Opening
+the link alone does not change the preference. The page removes the credential fragment
+from the address bar and does not require signing in.
 
 Store start/end/deadline as UTC `timestamptz`. Accept explicit offsets, normalize to database
 microseconds before fingerprints/comparisons, and return RFC 3339 Z timestamps. Reject
@@ -784,12 +787,13 @@ reservation's capacity, or extends credential validity. The schedule is:
 | Operation receipts | Keep minimal receipts while their poll is retained. On poll deletion erase poll/booking references (`poll_id` and `booking_id`); keep only pseudonymous replay digests for 90 days from deletion (the organization ID and an unkeyed digest of the acting user, API key or OAuth grant), then delete in the first hourly sweep at or after `purge_at`. Organization deletion cascades immediately. |
 | Recipient deliveries | Erase ciphertext immediately on sent/suppressed/skipped terminal transition. Retain the minimal terminal recipient receipt for the poll lifetime to prevent duplicate reminders/outcomes; voter/poll deletion cascades. Expired claims keep their attempt count; allow at most 5 attempts with a 5-minute lease, then terminally skip and clear ciphertext. |
 
-The A4b cleanup job deletes expired public pending voters, terminal polls past an
-installation retention and due replay tombstones (see the A4b choices above). It does not
-persist deadline closure (B4). The B1 `meeting-poll-capability-expiry-v1` job now clears
-expired capability ciphertext hourly using the `meeting_poll_capabilities_expiry` index,
-in bounded pages that skip locked polls and capabilities. Credential mail is dispatched
-by `meeting-poll-email-v1` every minute. A poll privacy deletion never deletes its booking.
+The hourly `meeting-poll-cleanup-v1` job persists deadline closure and queues the
+creator notice in the same transaction. It also deletes expired public pending voters,
+terminal polls past an installation retention and due replay tombstones.
+`meeting-poll-capability-expiry-v1` clears expired capability ciphertext hourly using the
+`meeting_poll_capabilities_expiry` index, in bounded pages that skip locked polls and
+capabilities. `meeting-poll-email-v1` checks for due reminders and dispatches poll mail
+every minute. A poll privacy deletion never deletes its booking.
 Deleting a linked booking deletes its poll history first, preserving the scheduled-pair invariant and clearing receipt references.
 Installation policies must delete poll history alongside due booking history rather than
 leave an indefinitely retained personal-data copy. Numeric cleanup and delivery bounds

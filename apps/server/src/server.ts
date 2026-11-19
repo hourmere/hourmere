@@ -158,6 +158,7 @@ import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
+import { SSO_DOMAIN_RECHECK_JOB, ssoDomainRecheckJob } from './sso-domain-recheck.ts'
 import {
   type MailboxProofQueue,
   mailboxProofJobs,
@@ -874,7 +875,13 @@ async function start(
   })
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
+    disabledSchedules: ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB],
     definitions: [
+      ssoDomainRecheckJob({
+        db,
+        publicUrl: config.PUBLIC_URL,
+        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+      }),
       ...waitlistMaintenanceJobs({
         scan: () => scanWaitlists(waitlistDeps),
         cleanup: () => cleanupWaitlist(waitlistDeps, { limit: 1000 }),

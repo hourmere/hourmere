@@ -1,5 +1,67 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'meetingPoll.title': 'Meeting poll',
+  'meetingPoll.unavailable': 'This poll is unavailable.',
+  'meetingPoll.unavailableHelp':
+    'Open the original link from your invitation or contact the organizer.',
+  'meetingPoll.loading': 'Loading poll…',
+  'meetingPoll.loadError': 'We couldn’t load this poll. Try again later.',
+  'meetingPoll.retry': 'Try again',
+  'meetingPoll.name': 'Your name',
+  'meetingPoll.email': 'Email address',
+  'meetingPoll.timeZone': 'Time zone',
+  'meetingPoll.enroll': 'Send verification email',
+  'meetingPoll.checkEmail': 'Check your email',
+  'meetingPoll.checkEmailHelp':
+    'If eligible, you’ll receive a link to continue. Check your inbox and spam folder.',
+  'meetingPoll.verify': 'Verify my email',
+  'meetingPoll.verifyHelp':
+    'Confirm your email to continue. Opening this page does not cast a vote.',
+  'meetingPoll.recover': 'Recover access',
+  'meetingPoll.pollId': 'Poll ID',
+  'meetingPoll.recoverSubmit': 'Send access email',
+  'meetingPoll.yes': 'Yes',
+  'meetingPoll.ifNeedBe': 'If need be',
+  'meetingPoll.no': 'No',
+  'meetingPoll.consent':
+    'I agree to join the meeting if selected and to share my answers with the organizer.',
+  'meetingPoll.selectionHelp':
+    'The organizer may select only some voters. The designated booker can manage the whole meeting, and the calendar invitation may reveal attendees to one another.',
+  'meetingPoll.save': 'Save ballot',
+  'meetingPoll.saving': 'Saving…',
+  'meetingPoll.saved': 'Your ballot is saved.',
+  'meetingPoll.changed': 'Your changes are saved.',
+  'meetingPoll.withdraw': 'Withdraw my ballot',
+  'meetingPoll.withdrawn':
+    'Your ballot is withdrawn. Your answers have been removed and poll emails have stopped.',
+  'meetingPoll.reactivate': 'Submit a new ballot',
+  'meetingPoll.private':
+    'Only the organizer and authorized managers can see your identity and answers. Other voters cannot see your ballot.',
+  'meetingPoll.aggregate':
+    'Verified voters can see totals for each option. In a small group, totals may reveal someone else’s choices. Your identity and answers are shown only to the organizer and authorized managers.',
+  'meetingPoll.deadline': 'Voting closes {date}',
+  'meetingPoll.closed': 'Voting is closed. You can view your previous answers.',
+  'meetingPoll.scheduled': 'A time has been selected. Voting is closed.',
+  'meetingPoll.canceled': 'This poll has ended. Voting is closed.',
+  'meetingPoll.chosen': 'Selected time',
+  'meetingPoll.rateLimited': 'Too many requests. Please wait before trying again.',
+  'meetingPoll.invalid': 'Check your entries and try again.',
+  'meetingPoll.full': 'This poll is full. You can still recover an existing link.',
+  'meetingPoll.stale': 'Your ballot changed elsewhere. Reload it and review before saving again.',
+  'meetingPoll.uncertain':
+    'We couldn’t confirm this change. Reload your ballot before trying again.',
+  'meetingPoll.reload': 'Reload ballot',
+  'meetingPoll.optOutTitle': 'Stop poll reminders',
+  'meetingPoll.optOutHelp':
+    'Confirm to stop reminders for this poll. This does not withdraw your ballot.',
+  'meetingPoll.optOut': 'Stop reminders',
+  'meetingPoll.optedOut': 'Reminders for this poll are stopped.',
+  'meetingPoll.optionsOne': '{count} time option',
+  'meetingPoll.optionsOther': '{count} time options',
+  'meetingPoll.countYes': 'Yes: {count}',
+  'meetingPoll.countIfNeedBe': 'If need be: {count}',
+  'meetingPoll.countNo': 'No: {count}',
+  'meetingPoll.required': 'Required',
   'No location has been specified. Contact the host for meeting details.':
     'No location has been specified. Contact the host for meeting details.',
   '{count} seat left': '{count} seat left',
@@ -482,4 +544,6 @@ export const common = {
   'Opens the host’s website in the parent page.': 'Opens the host’s website in the parent page.',
   'Opens the host’s website in a new tab.': 'Opens the host’s website in a new tab.',
   'Opens the host’s website in this tab.': 'Opens the host’s website in this tab.',
+  // Meeting poll reminder opt-out
+  'meetingPoll.optOutError': 'We couldn’t stop reminders. Try again.',
 } as const

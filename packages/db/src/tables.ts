@@ -1072,6 +1072,18 @@ export interface OrganizationOperations {
   target_user_id: string | null;
 }
 
+export interface PaymentCheckoutAttempts {
+  account_id: string;
+  amount_minor: number;
+  booking_id: string;
+  currency: string;
+  id: string;
+  idempotency_key: string;
+  mode: string;
+  session_id: string | null;
+  started_at: Timestamp | null;
+}
+
 export interface PersonalOrganizations {
   organization_id: string;
   user_id: string;
@@ -1343,6 +1355,27 @@ export interface SsoDelegationBindings {
   provider_id: string;
   trust_generation: number;
   user_id: string;
+}
+
+export interface SsoDomainRetirementNotifications {
+  delivered_at: Timestamp | null;
+  retirement_id: string;
+  user_id: string;
+}
+
+export interface SsoDomainRetirements {
+  challenge_digest: string;
+  created_at: Generated<Timestamp>;
+  domain_id: string;
+  expires_at: Timestamp;
+  generation: number;
+  id: Generated<string>;
+  old_expires_at: Timestamp | null;
+  old_organization_id: string;
+  old_verified_at: Timestamp | null;
+  proved_at: Timestamp | null;
+  requesting_organization_id: string;
+  retired_at: Timestamp | null;
 }
 
 export interface SsoDomains {
@@ -1777,6 +1810,7 @@ export interface DB {
   organization_brand_logos: OrganizationBrandLogos;
   organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
+  payment_checkout_attempts: PaymentCheckoutAttempts;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;
@@ -1800,6 +1834,8 @@ export interface DB {
   sso_attempts: SsoAttempts;
   sso_browser_proofs: SsoBrowserProofs;
   sso_delegation_bindings: SsoDelegationBindings;
+  sso_domain_retirement_notifications: SsoDomainRetirementNotifications;
+  sso_domain_retirements: SsoDomainRetirements;
   sso_domains: SsoDomains;
   sso_identity_links: SsoIdentityLinks;
   sso_mailbox_tokens: SsoMailboxTokens;

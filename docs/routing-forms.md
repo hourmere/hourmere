@@ -539,6 +539,13 @@ still succeeds. The export's `includeRoutingAnswers=true` returns the same error
 booking-read extensions keep returning stored routing provenance. See [Rollout
 gating](#rollout-gating).
 
+Publication returns `{ form, version }` over all three interfaces (HTTP 201 over REST).
+`form` reflects the current configuration, including its active version pointer and draft
+revision. `version` is the immutable snapshot created by the original request, even on a
+retry after a newer version has been published. Publication rechecks event targets and
+mappings against current data, returning `invalid_routing_target` for invalid mappings or
+unsupported targets such as group or payment-requiring events.
+
 Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or
 OAuth grant), so two credentials of one user never share a key. Publish/update/archive take

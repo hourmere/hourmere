@@ -45,6 +45,7 @@ export const auditDetails = {
   'scim_token.revoked': [],
   'scim_user.created': [],
   'scim_user.claimed': [],
+  'scim_user.updated': [],
   'webhook.created': ['events'],
   'webhook.updated': ['events'],
   'webhook.deleted': ['events'],

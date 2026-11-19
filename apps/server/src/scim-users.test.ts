@@ -37,7 +37,7 @@ const errorBody = (status: number, detail: string) => ({
 })
 const unavailable = errorBody(404, 'SCIM resources are not available yet.')
 
-async function sourceCopy<T>(file: string, ...mutations: [string, string][]): Promise<T> {
+function sourceCopyUrl(file: string, ...mutations: [string, string][]) {
   const location = new URL(file, import.meta.url)
   let source = readFileSync(location, 'utf8')
   for (const [from, to] of mutations) {
@@ -49,7 +49,11 @@ async function sourceCopy<T>(file: string, ...mutations: [string, string][]): Pr
     (_, prefix: string, specifier: string) =>
       `${prefix}'${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
+  return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+}
+
+async function sourceCopy<T>(file: string, ...mutations: [string, string][]): Promise<T> {
+  return import(sourceCopyUrl(file, ...mutations))
 }
 
 interface Fixture {
@@ -1285,12 +1289,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
         name: 'AssertionError',
       })
       // Creation: the organization's first binding instead of the token's own.
+      const write = sourceCopyUrl('./scim-user-write.ts', [
+        "    .where('token_id', '=', principal.tokenId)\n    .where('organization_id', '=', principal.organizationId)\n    .executeTakeFirst()\n  if (!organization",
+        "    .where('organization_id', '=', principal.organizationId)\n    .orderBy('connection_id', 'desc')\n    .executeTakeFirst()\n  if (!organization",
+      ])
       const creation = await sourceCopy<typeof import('./scim-user-create.ts')>(
         './scim-user-create.ts',
-        [
-          "          .where('token_id', '=', principal.tokenId)\n          .where('organization_id', '=', principal.organizationId)\n          .executeTakeFirst()\n        if (!organization",
-          "          .where('organization_id', '=', principal.organizationId)\n          .orderBy('connection_id', 'desc')\n          .executeTakeFirst()\n        if (!organization",
-        ],
+        ["from './scim-user-write.ts'", `from '${write}'`],
       )
       await expect(verifyConnections(scimUsers, creation.scimUserCreation)).rejects.toMatchObject({
         name: 'AssertionError',
