@@ -1064,11 +1064,9 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
         source.slice(source.indexOf(end))
     }
     if (mutation === 'lifecycle') {
-      const guard = "if (invitation.status !== 'pending') return invitation"
+      const guard = "if (invitation.status !== 'pending') {"
       expect(source.includes(guard), 'cancellation lifecycle mutation anchor').toBe(true)
-      source = source
-        .replace(guard, 'if (false) return invitation')
-        .replace(".where('status', '=', 'pending')", '')
+      source = source.replace(guard, 'if (false) {').replace(".where('status', '=', 'pending')", '')
     }
     // The hook answers any other error with its own 500 and drops it. Let an engine error
     // through to the guarded handler, so a broken copy is not read as a refused write.
@@ -1125,7 +1123,9 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     'detects removal of %s persistence protection through a real HTTP assertion',
     async (path) => {
       const branch =
-        path === 'create' ? 'ctx.path === createOrganization' : 'ctx.path === setActiveOrganization'
+        path === 'create'
+          ? 'ctx.path === createOrganization'
+          : 'ctx?.path === setActiveOrganization'
       await expectKilled(
         await policyCopy(branch, 'false'),
         (copy) => verifyContextPersistence(path, copy),

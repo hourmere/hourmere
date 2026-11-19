@@ -183,6 +183,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   let db: Db
   let authPool: ReturnType<typeof createAuthPool>
   let auth: ReturnType<typeof createAuth>
+  let oidcAuth: ReturnType<typeof createAuth>
   // Native acceptance with SCIM claim completion, as the resource test flag wires it.
   let scimAuth: ReturnType<typeof createAuth>
   let keys: Awaited<ReturnType<typeof generateKeyPair>>
@@ -197,22 +198,25 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'oidc_sign_in' })
     db = createDb(owned.pool)
     authPool = createAuthPool(owned.url, signup)
-    auth = createAuth({
+    const authOptions = {
       pool: authPool,
       db,
       baseURL: publicUrl,
       secret,
       signup,
-      leaveTeamMember: nativeTeamLeave(db, recordSsoAdmissionRemoval),
       mailer: { send: async () => expect.unreachable('OIDC sign-in must not send mail') },
+    }
+    const nativeTeamOptions = {
+      ...authOptions,
+      leaveTeamMember: nativeTeamLeave(db, recordSsoAdmissionRemoval),
+    }
+    auth = createAuth(nativeTeamOptions)
+    oidcAuth = createAuth({
+      ...nativeTeamOptions,
+      ssoCapabilities: { ssoOidcEnabled: true, ssoSamlEnabled: false },
     })
     scimAuth = createAuth({
-      pool: authPool,
-      db,
-      baseURL: publicUrl,
-      secret,
-      signup,
-      mailer: { send: async () => expect.unreachable('OIDC sign-in must not send mail') },
+      ...authOptions,
       scimClaims: scimClaimCompletion,
     })
     keys = await generateKeyPair('RS256')
@@ -249,15 +253,17 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     signupPolicy = signup,
     scimClaims = false,
     failRecoveryNotification = false,
+    nativeAuth,
   }: {
     enabled?: boolean
     expiresIn?: number
     signupPolicy?: SignupPolicy
     scimClaims?: boolean
     failRecoveryNotification?: boolean
+    nativeAuth?: typeof auth
   } = {}) {
     const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
-    const authentication = scimClaims ? scimAuth : auth
+    const authentication = nativeAuth ?? (scimClaims ? scimAuth : auth)
     return createApp({
       checkDb: async () => {},
       authHandler: authentication.handler,
@@ -2352,6 +2358,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   })
 
   it('keeps an existing team proof through another person’s invitation, JIT admission, role change and departure', async () => {
+    app = instance({ nativeAuth: oidcAuth })
     const f = await linked()
     await enforceSso()
     const eventId = await createFixtures(db).eventType(fixture.team, null, {
@@ -2402,7 +2409,10 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(admitted.status).toBe(302)
     await assertReadable()
 
-    const owner = await browserSession(fixture.owner)
+    const owner = await recoveryTarget(f, fixture.owner)
+    const ownerSignIn = await start(f.providerId)
+    const signedInOwner = await callback(ownerSignIn, idp.issue(ownerSignIn, owner.claims))
+    expect(signedInOwner.status).toBe(302)
     const postToTeam = (operation: string, cookie: string, input: Record<string, unknown>) =>
       post(
         { organizationId: fixture.team, ...input },
@@ -2413,7 +2423,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         },
         `/api/auth/organization/${operation}`,
       )
-    const changed = await postToTeam('update-member-role', owner.cookie, {
+    const changed = await postToTeam('update-member-role', sessionCookie(signedInOwner), {
       memberId: fixture.adminMember,
       role: 'member',
     })

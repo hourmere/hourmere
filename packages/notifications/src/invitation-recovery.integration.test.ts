@@ -358,12 +358,8 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   it('detects a removed preclaim authority check through real attempt and budget assertions', async () => {
     const copy = await sourceCopy(
       new URL('./invitation-sender.ts', import.meta.url),
-      `const authorized = await invitationAuthorizationIsCurrent(
-      trx,
-      invitation,
-      delivery.authorized_by_user_id ?? invitation.inviterId,
-    )`,
-      'const authorized = true',
+      '      (await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId)) &&\n',
+      '',
     )
     await expectKilled(copy, (module) =>
       verifyGenerationActorProof('before claim', module.deliverInvitationEmail),
