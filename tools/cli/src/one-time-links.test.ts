@@ -193,8 +193,8 @@ describe('one-time link CLI administration', () => {
     [
       'one-time URL output',
       [
-        'options.stdout(printable(result, [...secrets, token]))',
-        'options.stdout(printable({ saved: true }, [...secrets, token]))',
+        'options.stdout(printable(result, [...secrets, token], idempotencyKey))',
+        'options.stdout(printable({ saved: true }, [...secrets, token], idempotencyKey))',
       ],
       verifyCreate,
     ],

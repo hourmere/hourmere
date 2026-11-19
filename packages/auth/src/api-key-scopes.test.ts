@@ -45,6 +45,9 @@ const restContract = {
     'GET /api/v1/workflows/{id}',
   ],
   booking_read: [
+    'GET /api/v1/meeting-polls',
+    'GET /api/v1/meeting-polls/{id}',
+    'GET /api/v1/meeting-polls/{id}/results',
     'POST /api/v1/public/meeting-polls/read',
     'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
@@ -69,6 +72,18 @@ const restContract = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/meeting-polls',
+    'POST /api/v1/meeting-polls/{id}/invitations',
+    'POST /api/v1/meeting-polls/{id}/invitations/{voterId}/resend',
+    'DELETE /api/v1/meeting-polls/{id}/voters/{voterId}',
+    'POST /api/v1/meeting-polls/{id}/remove-unverified',
+    'POST /api/v1/meeting-polls/{id}/rotate-link',
+    'POST /api/v1/meeting-polls/{id}/close',
+    'POST /api/v1/meeting-polls/{id}/cancel',
+    'DELETE /api/v1/meeting-polls/{id}',
+    'POST /api/v1/meeting-polls/{id}/finalize',
+    'POST /api/v1/public/-/routing/{handle}/{slug}/route',
+    'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -299,6 +314,36 @@ function verifyOneTimeWrites(allows: Allows) {
   }
 }
 
+function verifyPollWriteScopes(allows: Allows) {
+  for (const id of [
+    'POST /api/v1/meeting-polls/{id}/finalize',
+    'mcp:finalize_meeting_poll',
+    'cli:polls finalize',
+    'POST /api/v1/meeting-polls',
+    'mcp:create_meeting_poll',
+    'cli:polls create',
+    'POST /api/v1/meeting-polls/{id}/invitations',
+    'mcp:invite_meeting_poll_voters',
+    'cli:polls invite',
+    'POST /api/v1/meeting-polls/{id}/invitations/{voterId}/resend',
+    'mcp:resend_meeting_poll_invitation',
+    'cli:polls resend-invitation',
+    'DELETE /api/v1/meeting-polls/{id}/voters/{voterId}',
+    'mcp:remove_meeting_poll_voter',
+    'cli:polls remove-voter',
+    'POST /api/v1/meeting-polls/{id}/remove-unverified',
+    'mcp:remove_unverified_meeting_poll_voters',
+    'cli:polls remove-unverified',
+    'POST /api/v1/meeting-polls/{id}/rotate-link',
+    'mcp:rotate_meeting_poll_link',
+    'cli:polls rotate-link',
+  ]) {
+    expect(allows({ kind: 'api_key', apiKeyScope: 'read' }, id), id).toBe(false)
+    for (const apiKeyScope of ['full', 'bookings'] as const)
+      expect(allows({ kind: 'api_key', apiKeyScope }, id), id).toBe(true)
+  }
+}
+
 function verifyOneTimeManagementScopes(operation: typeof apiKeyOperation) {
   for (const id of [
     'POST /api/v1/event-types/{eventTypeId}/one-time-links',
@@ -381,6 +426,20 @@ function verifyWaitlistScopes(operation: typeof apiKeyOperation) {
 }
 
 describe('shared API-key scope policy', () => {
+  it('detects reclassifying poll finalization as a booking read', () => {
+    verifyPollWriteScopes(apiKeyAllows)
+    const mutated = sourceCopyRegistry([
+      "rest('POST', '/api/v1/meeting-polls/{id}/finalize', 'booking_write', 'key')",
+      "rest('POST', '/api/v1/meeting-polls/{id}/finalize', 'booking_read', 'key')",
+    ])
+    expect(() => verifyPollWriteScopes(sourceCopyPolicy(undefined, mutated))).toThrow(
+      expect.objectContaining({
+        name: 'AssertionError',
+        message: expect.stringContaining('POST /api/v1/meeting-polls/{id}/finalize'),
+      }),
+    )
+  })
+
   for (const [operationClass, operations] of Object.entries(restContract)) {
     describe(operationClass, () => {
       it.each(operations)('%s follows the full/read/bookings contract', (id) => {
@@ -415,6 +474,7 @@ describe('shared API-key scope policy', () => {
         'publish_routing_form',
         'preview_routing_form',
         'get_public_routing_form',
+        'route_lead',
         'update_workflow',
         'create_workflow',
         'list_audit_events',
@@ -472,6 +532,19 @@ describe('shared API-key scope policy', () => {
         'remove_waitlist_entry',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_meeting_polls',
+        'get_meeting_poll',
+        'get_meeting_poll_results',
+        'close_meeting_poll',
+        'cancel_meeting_poll',
+        'delete_meeting_poll',
+        'finalize_meeting_poll',
+        'create_meeting_poll',
+        'invite_meeting_poll_voters',
+        'resend_meeting_poll_invitation',
+        'remove_meeting_poll_voter',
+        'remove_unverified_meeting_poll_voters',
+        'rotate_meeting_poll_link',
         'read_meeting_poll',
         'enroll_meeting_poll_voter',
         'recover_meeting_poll_voter',
@@ -486,6 +559,9 @@ describe('shared API-key scope policy', () => {
         'get_workflow',
       ],
       read: [
+        'list_meeting_polls',
+        'get_meeting_poll',
+        'get_meeting_poll_results',
         'read_meeting_poll',
         'get_public_routing_form',
         'list_routing_forms',
@@ -520,6 +596,7 @@ describe('shared API-key scope policy', () => {
       ],
       bookings: [
         'get_public_routing_form',
+        'route_lead',
         'create_one_time_link',
         'revoke_one_time_link',
         'whoami',
@@ -541,6 +618,19 @@ describe('shared API-key scope policy', () => {
         'get_event_type',
         'join_waitlist',
         'resend_waitlist_verification',
+        'list_meeting_polls',
+        'get_meeting_poll',
+        'get_meeting_poll_results',
+        'close_meeting_poll',
+        'cancel_meeting_poll',
+        'delete_meeting_poll',
+        'finalize_meeting_poll',
+        'create_meeting_poll',
+        'invite_meeting_poll_voters',
+        'resend_meeting_poll_invitation',
+        'remove_meeting_poll_voter',
+        'remove_unverified_meeting_poll_voters',
+        'rotate_meeting_poll_link',
         'read_meeting_poll',
         'enroll_meeting_poll_voter',
         'recover_meeting_poll_voter',

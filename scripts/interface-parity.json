@@ -47,6 +47,8 @@
   "previewRoutingForm": { "mcp": "preview_routing_form", "cli": "routing-forms preview" },
   "getPublicRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
+  "routeLead": { "mcp": "route_lead", "cli": "routing-forms route" },
+  "routeTeamLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "listWebhooks": { "mcp": "list_webhooks", "cli": "webhooks list" },
@@ -267,6 +269,58 @@
   "saveCalDavConnection": {
     "exemption": "browser-session-only",
     "reason": "Installing or replacing provider credentials requires the owner’s live browser session."
+  },
+  "createMeetingPoll": {
+    "mcp": "create_meeting_poll",
+    "cli": "polls create"
+  },
+  "inviteMeetingPollVoters": {
+    "mcp": "invite_meeting_poll_voters",
+    "cli": "polls invite"
+  },
+  "resendMeetingPollInvitation": {
+    "mcp": "resend_meeting_poll_invitation",
+    "cli": "polls resend-invitation"
+  },
+  "removeMeetingPollVoter": {
+    "mcp": "remove_meeting_poll_voter",
+    "cli": "polls remove-voter"
+  },
+  "removeUnverifiedMeetingPollVoters": {
+    "mcp": "remove_unverified_meeting_poll_voters",
+    "cli": "polls remove-unverified"
+  },
+  "rotateMeetingPollLink": {
+    "mcp": "rotate_meeting_poll_link",
+    "cli": "polls rotate-link"
+  },
+  "listMeetingPolls": {
+    "mcp": "list_meeting_polls",
+    "cli": "polls list"
+  },
+  "getMeetingPoll": {
+    "mcp": "get_meeting_poll",
+    "cli": "polls get"
+  },
+  "getMeetingPollResults": {
+    "mcp": "get_meeting_poll_results",
+    "cli": "polls results"
+  },
+  "closeMeetingPoll": {
+    "mcp": "close_meeting_poll",
+    "cli": "polls close"
+  },
+  "cancelMeetingPoll": {
+    "mcp": "cancel_meeting_poll",
+    "cli": "polls cancel"
+  },
+  "deleteMeetingPoll": {
+    "mcp": "delete_meeting_poll",
+    "cli": "polls delete"
+  },
+  "finalizeMeetingPoll": {
+    "mcp": "finalize_meeting_poll",
+    "cli": "polls finalize"
   },
   "readMeetingPoll": {
     "mcp": "read_meeting_poll",

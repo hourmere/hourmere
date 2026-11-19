@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url'
 import type { Principal } from '@hourmere/auth'
 import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { sql } from 'kysely'
+import { PostgresQueryCompiler, type QueryId, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as Ballots from './meeting-poll-ballots.ts'
 import * as Key from './meeting-poll-key.ts'
@@ -932,6 +932,7 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     ])
     for (const candidate of read.candidates)
       expect(Object.keys(candidate).sort(), 'candidate fields').toEqual([
+        'availability',
         'endAt',
         'id',
         'ifNeedBe',
@@ -1737,6 +1738,110 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
 
   it('lets managers and read keys read results; others get the usual refusals', async () => {
     await verifyResultsAuthority(REAL)
+  })
+
+  it('reports busy and unknown availability without changing the ballot snapshot', async () => {
+    const p = await open('invited')
+    const token = await invitee(REAL, p, 'availability@example.test')
+    await ballot(REAL, p, token, ['yes', 'if_need_be'], 0)
+    const initial = await results(REAL, p)
+    expect(initial.candidates.map((candidate) => candidate.availability)).toEqual([
+      'available',
+      'available',
+    ])
+
+    const candidate = initial.candidates[0]
+    if (!candidate) expect.unreachable('the first candidate is missing')
+    const { startAt, endAt } = candidate
+    await p.fixtures.calendarBusy(p.member.id, [[startAt, endAt]])
+    const busy = await results(REAL, p)
+    expect(busy.candidates).toEqual([
+      { ...initial.candidates[0], availability: 'unavailable' },
+      initial.candidates[1],
+    ])
+    const connection = await p.db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: p.member.id,
+        provider: 'google',
+        external_account_id: randomUUID(),
+        credentials: Buffer.from('synthetic-cache-only-credential'),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await p.db
+      .insertInto('calendars')
+      .values({
+        connection_id: connection.id,
+        external_id: randomUUID(),
+        name: 'Stale fixture',
+        check_conflicts: true,
+      })
+      .execute()
+    const stale = await results(REAL, p)
+    expect(stale).toEqual({
+      ...initial,
+      candidates: initial.candidates.map((candidate) => ({
+        ...candidate,
+        availability: 'unknown',
+      })),
+    })
+  })
+
+  async function verifyAvailabilityAfterCommit(service: typeof Results.getMeetingPollResults) {
+    const p = await open()
+    const calendarQueries = new WeakSet<QueryId>()
+    const stillLocked: boolean[] = []
+    const compiler = new PostgresQueryCompiler()
+    const observed = db.withPlugin({
+      transformQuery({ node, queryId }) {
+        const query = compiler.compileQuery(node, queryId)
+        if (query.sql.includes('"calendar_connections" as "cc"')) calendarQueries.add(queryId)
+        return node
+      },
+      async transformResult({ result, queryId }) {
+        if (calendarQueries.delete(queryId)) {
+          // Row lock on another connection: NOWAIT distinguishes a committed results
+          // read from an availability read performed while the poll is still shared-locked.
+          await sql`SELECT id FROM meeting_polls WHERE id = ${p.pollId} FOR UPDATE NOWAIT`
+            .execute(second)
+            .then(
+              () => stillLocked.push(false),
+              (error: { code?: string }) => {
+                if (error.code !== '55P03') throw error
+                stillLocked.push(true)
+              },
+            )
+        }
+        return result
+      },
+    })
+    await service({ ...p.ctx, db: observed }, p.pollId)
+    expect(new Set(stillLocked), 'calendar queries run after the poll lock is released').toEqual(
+      new Set([false]),
+    )
+  }
+
+  it('checks candidate availability after releasing the results lock', async () => {
+    await verifyAvailabilityAfterCommit(Results.getMeetingPollResults)
+    const mutated = await sourceCopy({
+      results: [
+        [
+          '    return {\n      poll: metadata,',
+          '    const lockedSnapshot = {\n      poll: metadata,',
+        ],
+        [
+          '  })\n  return { ...snapshot, candidates: await advisoryCandidates(ctx.db, snapshot) }',
+          '    return { ...lockedSnapshot, candidates: await advisoryCandidates(trx, lockedSnapshot) }\n  })\n  return snapshot',
+        ],
+      ],
+    })
+    await expect(
+      verifyAvailabilityAfterCommit(mutated.R.getMeetingPollResults),
+    ).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('calendar queries run after the poll lock is released'),
+    })
   })
 
   it('removes a voter behind a mailbox tombstone, keeping only the counter row', async () => {

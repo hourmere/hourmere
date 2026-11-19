@@ -3,7 +3,8 @@
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { languageChoice, resetLanguagePreference } from '../apps/web/src/i18n/store.ts'
 import { firstDayOfWeek } from '../apps/web/src/public/calendar.ts'
@@ -42,6 +43,16 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'poll-recover',
     'poll-opt-out',
     'poll-opted-out',
+    'routing-form',
+    'team-routing-form',
+    'routing-form-loading',
+    'routing-form-unavailable',
+    'routing-form-load-error',
+    'routing-form-invalid',
+    'routing-form-changed',
+    'routing-form-submitting',
+    'routing-form-submit-error',
+    'routing-form-message',
     'host',
     'booking',
     'booking-form',
@@ -164,6 +175,7 @@ it('masks private DOM values and links, including values absent from HTML attrib
 
 const dataSource = readFileSync('tools/e2e/audit-data.ts', 'utf8')
 const pagesSource = readFileSync('tools/e2e/audit-pages.ts', 'utf8')
+const routingAuditUrl = pathToFileURL(resolve('tools/e2e/routing-form-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -229,7 +241,10 @@ function sourceCopyResult(
   assertions = privacyAssertions,
 ) {
   writeFileSync(join(directory, 'audit-data.ts'), data)
-  writeFileSync(join(directory, 'audit-pages.ts'), pages)
+  writeFileSync(
+    join(directory, 'audit-pages.ts'),
+    pages.replace("'./routing-form-audit.ts'", JSON.stringify(routingAuditUrl)),
+  )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
   const runner = join(directory, 'privacy.mjs')
@@ -369,6 +384,16 @@ const expected={
   'poll-recover':{path:'/poll/recover',public:true,wait:'[data-poll-state="recover"]'},
   'poll-opt-out':{path:'/poll/reminder-opt-out',public:true,wait:'[data-poll-state="opt-out"]'},
   'poll-opted-out':{path:'/poll/reminder-opt-out',public:true,wait:'[data-poll-state="opted-out"]'},
+  'routing-form':{path:'/route/fixture-host/layout-audit',public:true,wait:'heading:Appointment questions'},
+  'team-routing-form':{path:'/route/team/fixture-host/layout-audit',public:true,wait:'heading:Appointment questions'},
+  'routing-form-loading':{path:'/route/fixture-host/layout-audit',public:true,wait:'Loading form…'},
+  'routing-form-unavailable':{path:'/route/fixture-host/layout-audit',public:true,wait:'This form is unavailable'},
+  'routing-form-load-error':{path:'/route/fixture-host/layout-audit',public:true,wait:'We couldn’t load this form.'},
+  'routing-form-invalid':{path:'/route/fixture-host/layout-audit',public:true,wait:'Review the highlighted answers.'},
+  'routing-form-changed':{path:'/route/fixture-host/layout-audit',public:true,wait:'This form has changed.'},
+  'routing-form-submitting':{path:'/route/fixture-host/layout-audit',public:true,wait:'Submitting…'},
+  'routing-form-submit-error':{path:'/route/fixture-host/layout-audit',public:true,wait:'We couldn’t submit your answers.'},
+  'routing-form-message':{path:'/route/fixture-host/layout-audit',public:true,wait:'Please contact our reception team.'},
   'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
   'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
   'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},
@@ -389,17 +414,19 @@ for(const [id,state] of Object.entries(expected)) {
   const locator=(selector)=>({
     waitFor:async()=>calls.push(['wait',selector]),
     first:()=>locator(selector),
-    filter:()=>locator(selector),
+    filter:({hasText}={})=>locator(hasText?selector+' '+hasText:selector),
     getByText:(text)=>locator(selector+' '+text),
-    getByRole:(role)=>locator(selector+' '+role),
+    getByRole:(role,options)=>locator(selector+' '+role+(options?.name ? ':'+options.name : '')),
+    getByLabel:(label)=>locator(selector+' label:'+label),
     click:async()=>{if(['button.day-available','.slots button'].includes(selector))throw new Error('Synthetic clipped pointer target');calls.push(['click',selector]);if(selector.includes('Continue'))path='/oauth/consent';if(selector==='.team-bookings-list button')path='/app/bookings/synthetic-team-booking'},
-    press:async(key)=>{calls.push(['press',selector,key]);if(selector.includes('Continue'))path='/oauth/consent';if(selector==='.team-bookings-list button')path='/app/bookings/synthetic-team-booking'},
+    press:async(key)=>{calls.push(['press',selector,key]);if(path.startsWith('/oauth/')&&selector.includes('Continue'))path='/oauth/consent';if(selector==='.team-bookings-list button')path='/app/bookings/synthetic-team-booking'},
     fill:async()=>calls.push(['fill',selector]),
     selectOption:async(value)=>calls.push(['select',selector,value]),
   })
   const page={
     clock:{setFixedTime:async(date)=>calls.push(['clock',date.toISOString()])},
     addInitScript:async()=>{},goto:async(url)=>{path=new URL(url).pathname;query=new URL(url).search;calls.push(['goto',path])},
+    route:async()=>{},unroute:async()=>{},waitForRequest:async()=>{},
     locator,getByRole:(role,options)=>locator(role+':'+(options?.name ?? '')),
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
     waitForFunction:async()=>{},evaluate:async(callback)=>{calls.push(['evaluate',callback.name]);if(callback.name==='expandEventSettings')callback()},url:()=> 'http://127.0.0.1:42421'+path,

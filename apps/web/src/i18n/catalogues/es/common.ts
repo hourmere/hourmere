@@ -553,4 +553,26 @@ export const common = {
   'Opens the host’s website in this tab.': 'Abre el sitio web del anfitrión en esta pestaña.',
   // Meeting poll reminder opt-out
   'meetingPoll.optOutError': 'No se pudieron desactivar los recordatorios. Inténtelo de nuevo.',
+  // Public routing form
+  'Loading form…': 'Cargando formulario…',
+  'This form is unavailable': 'Este formulario no está disponible',
+  'Check the link you were given.': 'Compruebe el enlace que recibió.',
+  'We couldn’t load this form. Try again.':
+    'No se pudo cargar este formulario. Inténtelo de nuevo.',
+  'This form has changed. Review your answers before continuing.':
+    'Este formulario se ha actualizado. Revise sus respuestas antes de continuar.',
+  'Select an option': 'Seleccione una opción',
+  'Enter an answer.': 'Introduzca una respuesta.',
+  'Enter a valid email address.': 'Introduzca una dirección de correo electrónico válida.',
+  'Enter {count} characters or fewer.': 'Use {count} caracteres como máximo.',
+  'Remove unsupported characters from your answer.':
+    'Elimine de su respuesta los caracteres no admitidos.',
+  'Choose one of the available options.': 'Elija una de las opciones disponibles.',
+  'Review the highlighted answers.': 'Revise las respuestas marcadas.',
+  'We couldn’t submit your answers. Try again.':
+    'No se pudieron enviar sus respuestas. Inténtelo de nuevo.',
+  'Submitting…': 'Enviando…',
+  Continue: 'Continuar',
+  'Thank you': 'Gracias',
+  Optional: 'Opcional',
 } as const

@@ -42,7 +42,7 @@ export interface PublicMeetingPoll {
   locations: PublicLocationOption[] | null
   allowGuests: boolean
   ownBallot: MeetingPollOwnBallot | null
-  /** Aggregate counts require both opt-in visibility and a verified voting credential. */
+  /** Aggregate counts require opt-in visibility and a verified, non-withdrawn voting credential. */
   counts: { slotId: string; yes: number; ifNeedBe: number; no: number }[] | null
 }
 
@@ -99,7 +99,12 @@ export async function readMeetingPoll(
       ? await trx
           .selectFrom('meeting_poll_capabilities as c')
           .innerJoin('meeting_poll_voters as v', 'v.id', 'c.voter_id')
-          .select(['v.id', 'c.purpose', sql<boolean>`v.verified_at IS NOT NULL`.as('verified')])
+          .select([
+            'v.id',
+            'c.purpose',
+            sql<boolean>`v.verified_at IS NOT NULL`.as('verified'),
+            sql<boolean>`v.withdrawn_at IS NULL`.as('active'),
+          ])
           .where('c.id', '=', credential.id)
           .where('c.poll_id', '=', poll.id)
           .where('c.revoked_at', 'is', null)
@@ -172,8 +177,13 @@ export async function readMeetingPoll(
       locations: publicLocationOptions((snapshot.locations ?? null) as LocationOption[] | null),
       allowGuests: snapshot.allowGuests === true,
       ownBallot: voter?.purpose === 'voting' ? await ownBallot(trx, poll, voter.id) : null,
+      // Only a currently participating verified voter sees totals; a withdrawn voter, an
+      // unverified enrollee and a public-link reader get the same null as private polls.
       counts:
-        row.visibility === 'aggregate' && voter?.verified && voter.purpose === 'voting'
+        row.visibility === 'aggregate' &&
+        voter?.verified &&
+        voter.purpose === 'voting' &&
+        voter.active
           ? await counts(trx, poll.id, candidates)
           : null,
     }
