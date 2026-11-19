@@ -25,7 +25,15 @@ import { defineTool, type Tool } from './tools.ts'
  * catalog: while workflows are off, tools/list omits them and a direct call answers
  * `workflows_disabled` after the scope check (workflowFeatureTools).
  */
-export function workflowTools({ db, audit }: { db: Db; audit?: WorkflowAuditPort }): Tool[] {
+export function workflowTools({
+  db,
+  audit,
+  followUpHostNotesEnabled,
+}: {
+  db: Db
+  audit?: WorkflowAuditPort
+  followUpHostNotesEnabled?: boolean | undefined
+}): Tool[] {
   const annotations = {
     readOnlyHint: true,
     destructiveHint: false,
@@ -41,7 +49,7 @@ export function workflowTools({ db, audit }: { db: Db; audit?: WorkflowAuditPort
       output: Workflow,
       annotations: { ...annotations, readOnlyHint: false },
       run(args, call) {
-        return createWorkflow({ db, audit, principal: call.caller }, args)
+        return createWorkflow({ db, audit, followUpHostNotesEnabled, principal: call.caller }, args)
       },
     }),
     defineTool({
@@ -52,7 +60,11 @@ export function workflowTools({ db, audit }: { db: Db; audit?: WorkflowAuditPort
       output: Workflow,
       annotations: { ...annotations, readOnlyHint: false, idempotentHint: false },
       run({ id, ...args }, call) {
-        return updateWorkflow({ db, audit, principal: call.caller }, id, args)
+        return updateWorkflow(
+          { db, audit, followUpHostNotesEnabled, principal: call.caller },
+          id,
+          args,
+        )
       },
     }),
     defineTool({

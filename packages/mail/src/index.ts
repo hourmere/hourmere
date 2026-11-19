@@ -2,6 +2,7 @@ import { domainToASCII } from 'node:url'
 import type { InterfaceLanguage } from '@hourmere/core/language'
 import nodemailer from 'nodemailer'
 import addressparser from 'nodemailer/lib/addressparser'
+import SMTPTransport from 'nodemailer/lib/smtp-transport'
 import { mailMessage } from './catalogue.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine } from './text.ts'
@@ -32,6 +33,8 @@ export interface MailMessage {
   to: string
   /** People a human email reply should reach; never overrides the configured From. */
   replyTo?: { name: string; email: string } | readonly { name: string; email: string }[] | undefined
+  /** An application-generated Message-ID, stable across attempts for the same intent. */
+  messageId?: string
   subject: string
   text: string
   html?: string
@@ -55,6 +58,22 @@ export interface Mailer {
   /** One configured SMTP sender mailbox, used to align iMIP's organizer and email From. */
   readonly senderEmail?: string | undefined
   send(message: MailMessage, options?: SendOptions): Promise<void>
+  /** One SMTP exchange, with no transport-level requeue. */
+  sendWorkflowAttempt?(message: MailMessage): Promise<WorkflowSmtpAttemptOutcome>
+}
+
+export type WorkflowSmtpAttemptOutcome = 'sent' | 'known_not_sent' | 'rejected' | 'delivery_unknown'
+
+/** Only an SMTP-aware mailer can report acceptance or positively classify a safe retry. */
+export async function sendWorkflowSmtpAttempt(
+  mailer: Mailer,
+  message: MailMessage,
+): Promise<WorkflowSmtpAttemptOutcome> {
+  try {
+    return (await mailer.sendWorkflowAttempt?.(message)) ?? 'delivery_unknown'
+  } catch {
+    return 'delivery_unknown'
+  }
 }
 
 export interface MailRefusal {
@@ -136,6 +155,46 @@ function refusal(err: unknown): MailRejectedError | undefined {
     enhancedCode,
     atRecipient,
   })
+}
+
+/** Use only positive pre-envelope evidence. Nodemailer also uses CONN for post-DATA errors. */
+function workflowSmtpFailure(err: unknown): Exclude<WorkflowSmtpAttemptOutcome, 'sent'> {
+  const { code, command, message, responseCode, syscall, timeoutType } = (
+    typeof err === 'object' && err !== null ? err : {}
+  ) as {
+    code?: unknown
+    command?: unknown
+    message?: unknown
+    responseCode?: unknown
+    syscall?: unknown
+    timeoutType?: unknown
+  }
+  if (
+    code === 'EAUTH' ||
+    (code === 'ECONNECTION' && command === 'EHLO') ||
+    (code === 'EPROTOCOL' && (command === 'HELO' || command === 'LHLO')) ||
+    (code === 'ETLS' && command === 'STARTTLS') ||
+    (command === 'CONN' &&
+      (code === 'EDNS' ||
+        ((code === 'ESOCKET' || code === 'ECONNECTION') && syscall === 'connect') ||
+        (code === 'ETIMEDOUT' &&
+          (timeoutType === 'CONNECT_TIMEOUT' ||
+            timeoutType === 'GREETING_TIMEOUT' ||
+            timeoutType === 'UPGRADE_TIMEOUT')) ||
+        (code === 'EPROTOCOL' &&
+          typeof message === 'string' &&
+          message.startsWith('Invalid greeting. response='))))
+  )
+    return 'known_not_sent'
+  if (
+    typeof responseCode === 'number' &&
+    responseCode >= 500 &&
+    responseCode < 600 &&
+    ((code === 'EENVELOPE' && (command === 'MAIL FROM' || command === 'RCPT TO')) ||
+      ((code === 'EENVELOPE' || code === 'EMESSAGE') && command === 'DATA'))
+  )
+    return 'rejected'
+  return 'delivery_unknown'
 }
 
 /** Settles like `promise`, or rejects with the signal's reason as soon as it is aborted. */
@@ -238,57 +297,83 @@ export function smtpTransportOptions(url: string) {
 export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
   const senderEmail = senderMailbox(from)
   const transport = nodemailer.createTransport(smtpTransportOptions(url), { from })
+  let workflowTransport: typeof transport | undefined
+  function sendSmtp(
+    smtp: typeof transport,
+    { to, replyTo, messageId, subject, text, html, attachments }: MailMessage,
+  ) {
+    // Reply-To is optional user input. A booking may accept an address SMTP cannot
+    // represent here; omit it rather than preventing every recipient's notification.
+    const safeReplyTo = (Array.isArray(replyTo) ? replyTo : replyTo ? [replyTo] : [])
+      .filter((person) => isMailbox(person.email))
+      .filter(
+        (person, index, people) =>
+          people.findIndex((p) => p.email.toLowerCase() === person.email.toLowerCase()) === index,
+      )
+      .map((person) => ({ name: singleLine(person.name), address: person.email }))
+    const calendar = attachments?.find((a) =>
+      /^text\/calendar; method=(REQUEST|CANCEL); charset=UTF-8$/.test(a.contentType),
+    )
+    const calendarMethod = calendar?.contentType.match(/method=(REQUEST|CANCEL);/)?.[1]
+    const files = attachments?.filter((a) => a !== calendar)
+    return smtp.sendMail({
+      // An address object is taken as one address; a string would be parsed as a list.
+      to: { name: '', address: to },
+      ...(safeReplyTo.length && { replyTo: safeReplyTo }),
+      ...(messageId !== undefined && { messageId }),
+      // nodemailer folds long headers but would keep a line break; a subject is one line.
+      subject: subject.replace(/[\r\n]+/g, ' '),
+      text,
+      ...(html !== undefined && { html }),
+      // iMIP clients need the calendar alternative. Nodemailer also emits an application/ics
+      // attachment for clients that import files, while retaining our text and HTML bodies.
+      ...(calendar && {
+        icalEvent: {
+          filename: calendar.filename,
+          content: calendar.content,
+          method: calendarMethod,
+        },
+      }),
+      ...(files?.length && {
+        attachments: files.map(({ filename, contentType, content, encoding, cid }) => ({
+          filename,
+          contentType,
+          content,
+          ...(encoding && { encoding }),
+          ...(cid && { cid }),
+        })),
+      }),
+    })
+  }
   return {
     senderEmail,
-    async send({ to, replyTo, subject, text, html, attachments }, { signal } = {}) {
+    async send(message, { signal } = {}) {
       signal?.throwIfAborted()
-      // Reply-To is optional user input. A booking may accept an address SMTP cannot
-      // represent here; omit it rather than preventing every recipient's notification.
-      const safeReplyTo = (Array.isArray(replyTo) ? replyTo : replyTo ? [replyTo] : [])
-        .filter((person) => isMailbox(person.email))
-        .filter(
-          (person, index, people) =>
-            people.findIndex((p) => p.email.toLowerCase() === person.email.toLowerCase()) === index,
-        )
-        .map((person) => ({ name: singleLine(person.name), address: person.email }))
-      const calendar = attachments?.find((a) =>
-        /^text\/calendar; method=(REQUEST|CANCEL); charset=UTF-8$/.test(a.contentType),
-      )
-      const calendarMethod = calendar?.contentType.match(/method=(REQUEST|CANCEL);/)?.[1]
-      const files = attachments?.filter((a) => a !== calendar)
-      const sending = transport.sendMail({
-        // An address object is taken as one address; a string would be parsed as a list.
-        to: { name: '', address: to },
-        ...(safeReplyTo.length && { replyTo: safeReplyTo }),
-        // nodemailer folds long headers but would keep a line break; a subject is one line.
-        subject: subject.replace(/[\r\n]+/g, ' '),
-        text,
-        ...(html !== undefined && { html }),
-        // iMIP clients need the calendar alternative. Nodemailer also emits an application/ics
-        // attachment for clients that import files, while retaining our text and HTML bodies.
-        ...(calendar && {
-          icalEvent: {
-            filename: calendar.filename,
-            content: calendar.content,
-            method: calendarMethod,
-          },
-        }),
-        ...(files?.length && {
-          attachments: files.map(({ filename, contentType, content, encoding, cid }) => ({
-            filename,
-            contentType,
-            content,
-            ...(encoding && { encoding }),
-            ...(cid && { cid }),
-          })),
-        }),
-      })
       await abortable(
-        sending.catch((err: unknown) => {
+        sendSmtp(transport, message).catch((err: unknown) => {
           throw refusal(err) ?? err
         }),
         signal,
       )
+    },
+    async sendWorkflowAttempt(message) {
+      try {
+        if (!workflowTransport) {
+          // SMTP_URL can request a pool that automatically requeues a disconnected send.
+          // Pick the single-exchange transport explicitly and keep protocol logs private.
+          const workflowUrl = new URL(url)
+          for (const key of ['logger', 'debug', 'transactionLog', 'lmtp'])
+            workflowUrl.searchParams.delete(key)
+          workflowTransport = nodemailer.createTransport(
+            new SMTPTransport(smtpTransportOptions(workflowUrl.toString())),
+            { from },
+          )
+        }
+        await sendSmtp(workflowTransport, message)
+        return 'sent'
+      } catch (err) {
+        return workflowSmtpFailure(err)
+      }
     },
   }
 }

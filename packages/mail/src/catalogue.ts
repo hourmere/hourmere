@@ -18,26 +18,34 @@ export const mailCatalogues: Readonly<Record<string, MailCatalogue>> = Object.fr
     ]),
 )
 
+/** Choose one language for all parts of a message. */
+export function mailMessageLocale(
+  language: InterfaceLanguage,
+  keys: readonly MailKey[],
+): InterfaceLanguage {
+  return (
+    localeFallbacks(language).find((candidate) =>
+      keys.every((key) => {
+        const template = mailCatalogues[candidate]?.[key]
+        return typeof template === 'string' && template !== ''
+      }),
+    ) ?? 'en'
+  )
+}
+
 /** Resolve each key separately; partial translations retain the complete English message. */
 export function mailMessage(
   language: InterfaceLanguage,
   key: MailKey,
   values: Record<string, string> = {},
 ): string {
-  for (const candidate of localeFallbacks(language)) {
-    const template = mailCatalogues[candidate]?.[key]
-    if (typeof template !== 'string' || template === '') continue
-    if (candidate === 'zh-CN') return formatChineseTemplate(template, values)
-    return template.replace(
-      /\{(\w+)\}/g,
-      (placeholder, name: string) => values[name] ?? placeholder,
-    )
-  }
+  const candidate = mailMessageLocale(language, [key])
   // English is statically imported as well as discovered, and is always the final fallback.
-  return english[key].replace(
-    /\{(\w+)\}/g,
-    (placeholder, name: string) => values[name] ?? placeholder,
-  )
+  const translation = mailCatalogues[candidate]?.[key]
+  const template =
+    typeof translation === 'string' && translation !== '' ? translation : english[key]
+  if (candidate === 'zh-CN') return formatChineseTemplate(template, values)
+  return template.replace(/\{(\w+)\}/g, (placeholder, name: string) => values[name] ?? placeholder)
 }
 
 /** Validate only translated keys: incomplete future catalogues are supported at runtime. */
