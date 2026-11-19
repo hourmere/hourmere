@@ -9,9 +9,18 @@ import {
   testContext,
 } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { captureWorkflowWebhook, WEBHOOK_DELIVERY_JOB, webhookDeliveryJob } from './delivery.ts'
+import {
+  captureWorkflowWebhook,
+  deliverWorkflowWebhook,
+  WEBHOOK_DELIVERY_JOB,
+  webhookDeliveryJob,
+} from './delivery.ts'
 import { createWebhook } from './service.ts'
 import type { WebhookRequest } from './transport.ts'
+import {
+  captureQueuedWorkflowWebhook,
+  seedWorkflowWebhookRun,
+} from './workflow-delivery-fixture.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const now = Temporal.Instant.from('2030-11-03T12:00Z')
@@ -30,12 +39,16 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       definitions: [webhookDeliveryJob({ db, ...settings })],
       work: false,
       migrate: true,
+      maxConnections: 2,
     })
     await jobs.start()
   })
   afterAll(async () => {
-    await jobs?.stop()
-    await owned?.drop()
+    try {
+      await jobs?.stop()
+    } finally {
+      await owned?.drop()
+    }
   })
 
   async function fixture(personal = true) {
@@ -60,6 +73,9 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       return result
     }
     const f = createFixtures(db)
+    const eventTypeId = await f.eventType(organizationId, personal ? user.id : null, {
+      hosts: [{ userId: user.id }],
+    })
     const previous = await f.booking(
       organizationId,
       [user.id],
@@ -72,7 +88,7 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       [user.id],
       '2030-11-03T09:00Z',
       '2030-11-03T09:30Z',
-      { attendee: { name: 'Private Invitee', email: 'private-invitee@example.com' } },
+      { eventTypeId, attendee: { name: 'Private Invitee', email: 'private-invitee@example.com' } },
     )
     await db
       .updateTable('bookings')
@@ -80,16 +96,17 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       .where('id', '=', bookingId)
       .execute()
     const { webhook, secret } = await endpoint('selected')
-    const input = {
-      webhookId: webhook.id,
-      organizationId,
-      bookingId,
-      workflowId: randomUUID(),
-      workflowRevision: 3,
-      trigger: 'after_end' as const,
-      workflowRunId: randomUUID(),
-    }
-    return { input, endpoint, webhook, secret, previous }
+    const seed = () =>
+      seedWorkflowWebhookRun(ctx, {
+        bookingId,
+        webhookId: webhook.id,
+        eventTypeId,
+        owner: personal ? { kind: 'personal', id: user.id } : { kind: 'team', id: organizationId },
+        trigger: { type: 'after_end', offsetMinutes: 150 },
+        capturedAt: now.subtract({ hours: 24 }),
+      })
+    const { capture: input } = await seed()
+    return { input, seed, endpoint, eventTypeId, webhook, secret, previous }
   }
 
   const deliveries = (bookingId: string) =>
@@ -106,11 +123,14 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
   it.each([true, false])(
     'captures distinct runs once each and signs the exact field allow-list (personal=%s)',
     async (personal) => {
-      const { input, endpoint, webhook, secret, previous } = await fixture(personal)
+      const { input, seed, endpoint, eventTypeId, webhook, secret, previous } =
+        await fixture(personal)
       await endpoint('also-subscribed')
-      const second = { ...input, workflowRunId: randomUUID() }
+      const { capture: second } = await seed()
       const capture = (event: typeof input) =>
-        db.transaction().execute((trx) => captureWorkflowWebhook(jobs, settings, trx, event, now))
+        db
+          .transaction()
+          .execute((trx) => captureQueuedWorkflowWebhook(jobs, settings, trx, event, now))
       await expect(Promise.all([capture(input), capture(input), capture(second)])).resolves.toEqual(
         [undefined, undefined, undefined],
       )
@@ -123,26 +143,32 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       )
 
       const requests: WebhookRequest[] = []
-      const receiver = webhookDeliveryJob({
+      const deps = {
         db,
         ...settings,
         now: () => now,
-        transport: async (request) => {
+        transport: async (request: WebhookRequest) => {
           requests.push(request)
           return 204
         },
-      })
+      }
       for (const row of rows) {
         expect(row.webhook_id).toBe(webhook.id)
         expect(row.request_id).toBeNull()
         expect(await queued(row.id)).toEqual([{ deliveryId: row.id }])
-        const context = { id: randomUUID(), attempt: 1, signal: new AbortController().signal }
-        await receiver.handler({ deliveryId: row.id }, context)
-        await receiver.handler({ deliveryId: row.id }, { ...context, attempt: 2 })
+        const signal = new AbortController().signal
+        await webhookDeliveryJob(deps).handler(
+          { deliveryId: row.id },
+          { id: randomUUID(), attempt: 1, signal },
+        )
+        expect(requests.filter(({ headers }) => headers['webhook-id'] === row.id)).toHaveLength(0)
+        await deliverWorkflowWebhook(deps, row.id, signal)
+        await deliverWorkflowWebhook(deps, row.id, signal, 2)
       }
       expect(requests).toHaveLength(2)
       for (const [index, request] of requests.entries()) {
         const row = rows[index]
+        const captured = row?.workflow_run_id === input.workflowRunId ? input : second
         expect(request.url).toBe(webhook.url)
         expect(request.headers['webhook-id']).toBe(row?.id)
         expect(request.headers['webhook-event-id']).toBe(row?.event_id)
@@ -160,13 +186,13 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
           data: {
             bookingId: input.bookingId,
             organizationId: input.organizationId,
-            eventTypeId: null,
+            eventTypeId,
             start: '2030-11-03T09:00:00.000Z',
             end: '2030-11-03T09:30:00.000Z',
             status: 'confirmed',
-            workflowId: input.workflowId,
-            workflowRevision: input.workflowRevision,
-            trigger: input.trigger,
+            workflowId: captured.workflowId,
+            workflowRevision: captured.workflowRevision,
+            trigger: captured.trigger,
             workflowRunId: row?.workflow_run_id,
             ...(personal ? { source: 'api', rescheduledFromId: previous } : {}),
           },

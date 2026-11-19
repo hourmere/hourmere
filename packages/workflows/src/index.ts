@@ -53,6 +53,7 @@ export {
 } from './deletes.ts'
 export {
   dispatchWorkflowRuns,
+  lockWorkflowWebhookRun,
   repairWorkflowWakes,
   type WorkflowDispatchContext,
   type WorkflowWakePort,
