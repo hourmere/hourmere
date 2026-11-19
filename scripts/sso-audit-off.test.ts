@@ -19,6 +19,8 @@ const AUDIT_LAYER = new Set([
   'packages/db/src/sso-audit-check-source.ts',
 ])
 const EMITTERS: Readonly<Record<string, readonly string[]>> = {
+  'apps/server/src/sso-domain-retirement.ts': ['sso_maintenance.domain_retired'],
+  'apps/server/src/sso-domain-recheck.ts': ['sso_domain.renewed', 'sso_domain.expired'],
   'apps/server/src/sso-domains.ts': [
     'sso_domain.challenged',
     'sso_domain.verified',

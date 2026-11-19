@@ -10,6 +10,8 @@ export const SSO_STORAGE_TABLES: ReadonlySet<string> = new Set([
   'sso_policies',
   'sso_providers',
   'sso_domains',
+  'sso_domain_retirements',
+  'sso_domain_retirement_notifications',
   'sso_provider_domains',
   'sso_recovery_nominations',
   'sso_recovery_owners',

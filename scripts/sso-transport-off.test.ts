@@ -1,6 +1,8 @@
-// The domain service uses the SSO transport profile for TXT proofs. Only the uncalled
-// OIDC JWKS module uses its HTTP transport. The configuration loader parses
-// `SSO_PRIVATE_TARGETS`, so the allowlist routes nothing while OIDC and SAML stay hard-off.
+// The SSO transport profile is called by domain services for TXT proofs and by the uncalled
+// OIDC JWKS module for HTTP. Interactive writes and rechecks are hard-off; offline retirement only
+// removes trust. Only the configuration loader parses `SSO_PRIVATE_TARGETS`, so the allowlist routes
+// nothing. OIDC and SAML stay hard-off (apps/server/src/sso.test.ts starts the server with both
+// settings and a populated allowlist), so the JWKS module has no production caller.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -62,7 +64,7 @@ const importsTargets = (file: string, source: string) =>
     (target) => target === TARGETS || target === '@hourmere/outbound/sso-private-targets',
   )
 
-describe('SSO transport stays behind the hard-off protocols', () => {
+describe('SSO transport permits only domain TXT callers and the uncalled OIDC JWKS module', () => {
   it('recognises every import form of the profile and nothing else', () => {
     const server = 'apps/server/src/example.ts'
     const outbound = 'packages/outbound/src/example.ts'
@@ -105,10 +107,17 @@ describe('SSO transport stays behind the hard-off protocols', () => {
     const callers = sources.filter((file) =>
       importsProfile(file, readFileSync(new URL(file, root), 'utf8')),
     )
-    expect(callers).toEqual(['apps/server/src/sso-domains.ts', OIDC_JWKS])
-    const domainSource = readFileSync(new URL('apps/server/src/sso-domains.ts', root), 'utf8')
-    expect(domainSource).toContain('resolveSsoDomainTxt')
-    expect(domainSource).not.toContain('sendSsoRequest')
+    expect(callers).toEqual([
+      'apps/server/src/sso-domain-recheck.ts',
+      'apps/server/src/sso-domain-retirement.ts',
+      'apps/server/src/sso-domains.ts',
+      OIDC_JWKS,
+    ])
+    for (const caller of callers.filter((file) => file !== OIDC_JWKS)) {
+      const domainSource = readFileSync(new URL(caller, root), 'utf8')
+      expect(domainSource).toContain('resolveSsoDomainTxt')
+      expect(domainSource).not.toContain('sendSsoRequest')
+    }
     expect(readFileSync(new URL(OIDC_JWKS, root), 'utf8')).toContain('sendSsoRequest')
   })
 

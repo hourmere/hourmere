@@ -139,3 +139,7 @@ export const ConnectedAppsPage = page(
   () => import('./pages/McpOAuth.tsx'),
   (m) => m.ConnectedAppsPage,
 )
+
+export const MeetingPollPage = lazy(() =>
+  import('./public/MeetingPollPage.tsx').then((module) => ({ default: module.MeetingPollPage })),
+)

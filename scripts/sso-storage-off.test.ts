@@ -28,6 +28,12 @@ const ERROR_RECOGNISER = 'apps/server/src/sso-storage-errors.ts'
 // The production modules that own SSO data access, each with the only tables it may name.
 const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
   'apps/server/src/sso-domains.ts': ['sso_domains'],
+  'apps/server/src/sso-domain-recheck.ts': ['sso_domains'],
+  'apps/server/src/sso-domain-retirement.ts': [
+    'sso_domains',
+    'sso_domain_retirements',
+    'sso_domain_retirement_notifications',
+  ],
   'apps/server/src/sso-drafts.ts': [
     'sso_providers',
     'sso_provider_domains',
@@ -49,6 +55,10 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
 // `listSsoProviders` is not one, and neither is an import of the error recogniser.
 const STORAGE_TABLE_NAMES = [
   // Configuration storage (0074).
+  'sso_domain_retirements',
+  'sso_domain_retirement_notifications',
+  'SsoDomainRetirements',
+  'SsoDomainRetirementNotifications',
   'sso_policies',
   'sso_providers',
   'sso_domains',
