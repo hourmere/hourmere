@@ -1,11 +1,11 @@
 // Shared pure rendering for execution and the later synthetic preview. No transport, database
-// lookup or user-supplied HTML enters this module. Catalog expansion is a separate step.
+// lookup or user-supplied HTML enters this module.
 import {
   formattingLocale,
   type InterfaceLanguage,
   interfaceLanguage,
-  localeFallbacks,
 } from '@hourmere/core/language'
+import { mailMessage, mailMessageLocale } from '@hourmere/mail/catalogue'
 import { escapeHtml, multiLine, subjectLine } from '@hourmere/mail/text'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { isMultiLineText, isSingleLineText } from '@hourmere/scheduling/text'
@@ -19,6 +19,7 @@ import {
   templatePlaceholders,
   templateVariableProblem,
   type WorkflowTemplateContext,
+  type WorkflowTemplateVariable,
 } from './variables.ts'
 
 export type WorkflowEmailAction = Extract<WorkflowAction, { type: 'email' }>
@@ -46,54 +47,23 @@ export interface RenderedWorkflowEmail {
   fallback: 'host_text_disabled' | 'missing_translation' | undefined
 }
 
-type Template = { subject: string; body: string }
-type BuiltIns = Record<WorkflowTriggerType, Template>
-const builtIns: Partial<Record<InterfaceLanguage, BuiltIns>> = {
-  en: {
-    'booking.created': {
-      subject: 'Booking confirmed: {{event_type.title}}',
-      body: 'Hello {{recipient.name}},\nYour booking for {{event_type.title}} is confirmed.\n{{booking.start}} – {{booking.end}} ({{recipient.time_zone}})',
-    },
-    'booking.cancelled': {
-      subject: 'Booking cancelled: {{event_type.title}}',
-      body: 'Hello {{recipient.name}},\nYour booking for {{event_type.title}} was cancelled.\n{{booking.start}} – {{booking.end}} ({{recipient.time_zone}})',
-    },
-    'booking.rescheduled': {
-      subject: 'Booking rescheduled: {{event_type.title}}',
-      body: 'Hello {{recipient.name}},\nYour booking for {{event_type.title}} was rescheduled.\n{{booking.start}} – {{booking.end}} ({{recipient.time_zone}})',
-    },
-    before_start: {
-      subject: 'Upcoming booking: {{event_type.title}}',
-      body: 'Hello {{recipient.name}},\nYour booking for {{event_type.title}} starts soon.\n{{booking.start}} – {{booking.end}} ({{recipient.time_zone}})',
-    },
-    after_end: {
-      subject: 'Booking follow-up: {{event_type.title}}',
-      body: 'Hello {{recipient.name}},\nThank you for your booking for {{event_type.title}}.\n{{booking.start}} – {{booking.end}} ({{recipient.time_zone}})',
-    },
-  },
-  'zh-CN': {
-    'booking.created': {
-      subject: '预约已确认：{{event_type.title}}',
-      body: '{{recipient.name}}，您好：\n您的{{event_type.title}}预约已确认。\n{{booking.start}} – {{booking.end}}（{{recipient.time_zone}}）',
-    },
-    'booking.cancelled': {
-      subject: '预约已取消：{{event_type.title}}',
-      body: '{{recipient.name}}，您好：\n您的{{event_type.title}}预约已取消。\n{{booking.start}} – {{booking.end}}（{{recipient.time_zone}}）',
-    },
-    'booking.rescheduled': {
-      subject: '预约已改期：{{event_type.title}}',
-      body: '{{recipient.name}}，您好：\n您的{{event_type.title}}预约已改期。\n{{booking.start}} – {{booking.end}}（{{recipient.time_zone}}）',
-    },
-    before_start: {
-      subject: '预约即将开始：{{event_type.title}}',
-      body: '{{recipient.name}}，您好：\n您的{{event_type.title}}预约即将开始。\n{{booking.start}} – {{booking.end}}（{{recipient.time_zone}}）',
-    },
-    after_end: {
-      subject: '预约后续：{{event_type.title}}',
-      body: '{{recipient.name}}，您好：\n感谢您预约{{event_type.title}}。\n{{booking.start}} – {{booking.end}}（{{recipient.time_zone}}）',
-    },
-  },
-}
+const builtInNames = {
+  'booking.created': 'created',
+  'booking.cancelled': 'cancelled',
+  'booking.rescheduled': 'rescheduled',
+  before_start: 'beforeStart',
+  after_end: 'afterEnd',
+} as const satisfies Record<WorkflowTriggerType, string>
+
+// Translate catalogue placeholders into workflow placeholders. Recipient data enters
+// only after the renderer has applied the same allowlist as it does for custom text.
+const builtInVariables = {
+  event: '{{event_type.title}}',
+  recipient: '{{recipient.name}}',
+  start: '{{booking.start}}',
+  end: '{{booking.end}}',
+  zone: '{{recipient.time_zone}}',
+} satisfies Record<string, `{{${WorkflowTemplateVariable}}}`>
 
 const invalid = () => new DomainError('invalid', 'invalid_workflow', 'Email template is invalid')
 const renderLimit = () =>
@@ -151,14 +121,25 @@ function expand(nodes: Node[], value: (name: string) => string, multiline: boole
 }
 
 export function renderWorkflowEmail(input: WorkflowEmailInput): RenderedWorkflowEmail {
-  const locale = interfaceLanguage(input.recipient.locale) ?? 'en'
+  const recipientLanguage = interfaceLanguage(input.recipient.locale)
+  const locale = recipientLanguage ?? 'en'
   const custom =
-    input.followUpHostNotesEnabled === false ? undefined : input.action.content?.[locale]
-  const templateLocale = custom
-    ? locale
-    : (localeFallbacks(locale).find((code) => builtIns[code]) ?? 'en')
-  const template = custom ?? builtIns[templateLocale]?.[input.trigger]
-  if (!template) throw invalid()
+    recipientLanguage && input.followUpHostNotesEnabled !== false
+      ? input.action.content?.[recipientLanguage]
+      : undefined
+  let templateLocale = locale
+  let template = custom
+  if (!template) {
+    const name = builtInNames[input.trigger]
+    if (typeof name !== 'string') throw invalid()
+    const subjectKey = `workflow.${name}.subject` as const
+    const bodyKey = `workflow.${name}.body` as const
+    templateLocale = mailMessageLocale(locale, [subjectKey, bodyKey])
+    template = {
+      subject: mailMessage(templateLocale, subjectKey, builtInVariables),
+      body: mailMessage(templateLocale, bodyKey, builtInVariables),
+    }
+  }
   const context = { ...input.context, recipients: input.action.recipients }
   const subjectNodes = parse(template.subject, false, context)
   const bodyNodes = parse(template.body, true, context)

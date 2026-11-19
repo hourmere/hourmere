@@ -115,5 +115,15 @@
   "poll.vote.body": "使用您的私人链接参与 {poll}。",
   "poll.expiry": "此链接有效期至 {expiry}。",
   "poll.confirm": "打开链接不会确认邮箱或提交投票。",
-  "poll.optout": "停止接收此投票的提醒邮件。"
+  "poll.optout": "停止接收此投票的提醒邮件。",
+  "workflow.created.subject": "预约已确认：{event}",
+  "workflow.created.body": "{recipient}，您好：\n您的“{event}”预约已确认。\n{start} – {end}（{zone}）",
+  "workflow.cancelled.subject": "预约已取消：{event}",
+  "workflow.cancelled.body": "{recipient}，您好：\n您的“{event}”预约已取消。\n{start} – {end}（{zone}）",
+  "workflow.rescheduled.subject": "预约已改期：{event}",
+  "workflow.rescheduled.body": "{recipient}，您好：\n您的“{event}”预约已改期。\n{start} – {end}（{zone}）",
+  "workflow.beforeStart.subject": "预约即将开始：{event}",
+  "workflow.beforeStart.body": "{recipient}，您好：\n您的“{event}”预约即将开始。\n{start} – {end}（{zone}）",
+  "workflow.afterEnd.subject": "预约后续：{event}",
+  "workflow.afterEnd.body": "{recipient}，您好：\n“{event}”的预约时段已结束。\n{start} – {end}（{zone}）"
 }

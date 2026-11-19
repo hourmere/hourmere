@@ -115,5 +115,15 @@
   "poll.vote.body": "Usa tu enlace privado para participar en {poll}.",
   "poll.expiry": "Este enlace es válido hasta {expiry}.",
   "poll.confirm": "Abrir este enlace no confirma tu correo ni envía un voto.",
-  "poll.optout": "Dejar de recibir recordatorios de esta encuesta."
+  "poll.optout": "Dejar de recibir recordatorios de esta encuesta.",
+  "workflow.created.subject": "Confirmación: {event}",
+  "workflow.created.body": "Hola, {recipient}:\nSu reunión «{event}» está confirmada.\n{start} – {end} ({zone})",
+  "workflow.cancelled.subject": "Cancelación: {event}",
+  "workflow.cancelled.body": "Hola, {recipient}:\nSu reunión «{event}» se ha cancelado.\n{start} – {end} ({zone})",
+  "workflow.rescheduled.subject": "Reprogramación: {event}",
+  "workflow.rescheduled.body": "Hola, {recipient}:\nSu reunión «{event}» se ha reprogramado.\n{start} – {end} ({zone})",
+  "workflow.beforeStart.subject": "Recordatorio: {event}",
+  "workflow.beforeStart.body": "Hola, {recipient}:\nSu reunión «{event}» se celebrará pronto.\n{start} – {end} ({zone})",
+  "workflow.afterEnd.subject": "Seguimiento de su reunión: {event}",
+  "workflow.afterEnd.body": "Hola, {recipient}:\nEl horario programado para su reunión «{event}» ha finalizado.\n{start} – {end} ({zone})"
 }

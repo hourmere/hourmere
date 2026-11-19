@@ -252,33 +252,38 @@ Host-written subject and body text use the same `FOLLOW_UP_HOST_NOTES_ENABLED` p
 follow-up notes, for every workflow recipient class. When false, save/update/preview reject
 custom subject/body with `invalid_workflow`; templates permit only built-in localized text
 and safe variables. Dispatch rechecks the switch and falls back to built-in text for an
-existing custom revision when it is off. Hourmere Cloud MUST keep it false until host
-eligibility, recipient consent and complaint controls are reviewed and implemented.
-Self-hosted defaults retain the existing true host-notes default; open-signup operators
-should set it false. The final workflow default flip does not change this independent
-switch or relax the Cloud requirement. Step 11a owns validation and the renderer's
-built-in fallback that dispatch uses; step 11b owns safe built-in catalogs, and step 12b
-integrates and tests the live switch recheck at dispatch.
+existing custom revision when it is off. Hourmere Cloud MUST keep it false and use
+built-in text until host eligibility, recipient consent and complaint controls are
+reviewed and implemented. Self-hosted defaults retain the existing true host-notes default,
+so installations may use custom text when supplied for the recipient's locale and built-in
+text otherwise.
+Self-hosted open-signup operators should set the switch false to use built-ins only.
+The final workflow default flip does not change this independent switch or relax the
+Cloud requirement. The live switch recheck at dispatch follows in a later step.
 
 The internal shared renderer now bounds interpolation, escapes HTML and applies the
 host-text fallback before reading custom content. Save and ordinary updates enforce the
 same switch for bookers, guests and hosts; disabling a stored definition remains possible.
-The renderer currently supplies English and zh-CN built-ins; the complete public-locale
-catalog, preview endpoint and live delivery integration follow in their planned steps.
-Workflows remain hard-off and no email is dispatched by this implementation.
+Confirmation, cancellation, rescheduling, before-start and after-end each have built-in
+subject and body text in every public locale. An unsupported locale uses the English
+built-in. If a built-in subject or body is unavailable in a supported locale, both use
+the next complete built-in in the mail locale fallback chain, ending in English.
+Workflows remain hard-off for self-hosted and Cloud deployments.
 
 中文：内部共享渲染器限制变量展开长度、转义 HTML，并在读取自定义内容前应用主持人文本
 开关。保存和普通更新对预约者、嘉宾及主持人统一执行该策略；仍可停用已有定义。
-当前内置英文及简体中文文本；完整公开语言目录、预览接口和实际投递将在后续步骤接入。
-工作流仍硬关闭，此实现不会发送邮件。
+预约确认、取消、改期、开始前提醒和结束后跟进均有覆盖所有公开语言的内置邮件主题和正文。
+不支持的语言使用英文内置模板；如果支持的语言缺少主题或正文，则两者一起回退到邮件语言
+回退链中下一个完整的内置模板，最终回退到英文。自托管默认允许使用收件人语言的自定义
+文本，未提供时采用内置模板。Hourmere Cloud 将主持人文本开关设为 false，始终使用内置
+模板。自托管与 Cloud 的工作流功能均仍处于硬关闭状态。
 
-Templates are plain text with a typed allowlist of variables. Built-in localized wrappers
-and templates cover every public locale in `packages/core/src/locales.ts`; administrator
+Templates are plain text with a typed allowlist of variables and use the notification
+mail catalogues for the public locales in `packages/core/src/locales.ts`. Administrator
 screens cover English and zh-CN. Use recipient profile locale for hosts and the saved
-booker locale for attendees, following current notification behavior, with the registry's
-fallback. Custom content is explicitly supplied per locale; a missing translation uses
-the localized built-in template, never silently inserts English custom text. Preview
-shows the selected locale and fallback. No automatic translation service is introduced.
+booker locale for attendees, following current notification behavior. When custom text
+is enabled, a missing custom translation uses the recipient locale's built-in template.
+Preview will show the selected locale and fallback.
 
 Common variables: recipient's own name, event-type title, scheduled start/end rendered
 in recipient's saved zone, zone label, and public booking path when still valid. Personal

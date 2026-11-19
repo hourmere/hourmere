@@ -115,5 +115,15 @@
   "poll.vote.body": "Use your private link to take part in {poll}.",
   "poll.expiry": "This link is valid until {expiry}.",
   "poll.confirm": "Opening this link does not confirm your email or submit a vote.",
-  "poll.optout": "Stop reminder emails for this poll."
+  "poll.optout": "Stop reminder emails for this poll.",
+  "workflow.created.subject": "Booking confirmed: {event}",
+  "workflow.created.body": "Hello {recipient},\nYour booking for {event} is confirmed.\n{start} – {end} ({zone})",
+  "workflow.cancelled.subject": "Booking cancelled: {event}",
+  "workflow.cancelled.body": "Hello {recipient},\nYour booking for {event} was cancelled.\n{start} – {end} ({zone})",
+  "workflow.rescheduled.subject": "Booking rescheduled: {event}",
+  "workflow.rescheduled.body": "Hello {recipient},\nYour booking for {event} was rescheduled.\n{start} – {end} ({zone})",
+  "workflow.beforeStart.subject": "Upcoming booking: {event}",
+  "workflow.beforeStart.body": "Hello {recipient},\nYour booking for {event} starts soon.\n{start} – {end} ({zone})",
+  "workflow.afterEnd.subject": "Booking follow-up: {event}",
+  "workflow.afterEnd.body": "Hello {recipient},\nThe scheduled time for “{event}” has ended.\n{start} – {end} ({zone})"
 }

@@ -115,5 +115,15 @@
   "poll.vote.body": "Utilisez votre lien privé pour participer à {poll}.",
   "poll.expiry": "Ce lien est valable jusqu’au {expiry}.",
   "poll.confirm": "Ouvrir ce lien ne confirme pas votre adresse e-mail et ne soumet aucun vote.",
-  "poll.optout": "Ne plus recevoir de rappels pour ce sondage."
+  "poll.optout": "Ne plus recevoir de rappels pour ce sondage.",
+  "workflow.created.subject": "Confirmation : {event}",
+  "workflow.created.body": "Bonjour {recipient},\nVotre réunion « {event} » est confirmée.\n{start} – {end} ({zone})",
+  "workflow.cancelled.subject": "Annulation : {event}",
+  "workflow.cancelled.body": "Bonjour {recipient},\nVotre réunion « {event} » a été annulée.\n{start} – {end} ({zone})",
+  "workflow.rescheduled.subject": "Replanification : {event}",
+  "workflow.rescheduled.body": "Bonjour {recipient},\nVotre réunion « {event} » a été replanifiée.\n{start} – {end} ({zone})",
+  "workflow.beforeStart.subject": "Rappel : {event}",
+  "workflow.beforeStart.body": "Bonjour {recipient},\nVotre réunion « {event} » commence bientôt.\n{start} – {end} ({zone})",
+  "workflow.afterEnd.subject": "Suivi de votre réunion : {event}",
+  "workflow.afterEnd.body": "Bonjour {recipient},\nLe créneau prévu pour votre réunion « {event} » est terminé.\n{start} – {end} ({zone})"
 }

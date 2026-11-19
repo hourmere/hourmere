@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./catalogue": "./src/catalogue.ts",
     "./ics": "./src/ics.ts",
     "./text": "./src/text.ts"
   },

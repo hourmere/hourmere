@@ -115,5 +115,15 @@
   "poll.vote.body": "Verwenden Sie Ihren privaten Link, um an {poll} teilzunehmen.",
   "poll.expiry": "Dieser Link ist bis {expiry} gültig.",
   "poll.confirm": "Das Öffnen dieses Links bestätigt weder Ihre E-Mail-Adresse noch gibt es eine Stimme ab.",
-  "poll.optout": "Erinnerungs-E-Mails für diese Abstimmung abbestellen."
+  "poll.optout": "Erinnerungs-E-Mails für diese Abstimmung abbestellen.",
+  "workflow.created.subject": "Termin bestätigt: {event}",
+  "workflow.created.body": "Hallo {recipient},\nIhr Termin „{event}“ ist bestätigt.\n{start} – {end} ({zone})",
+  "workflow.cancelled.subject": "Termin storniert: {event}",
+  "workflow.cancelled.body": "Hallo {recipient},\nIhr Termin „{event}“ wurde storniert.\n{start} – {end} ({zone})",
+  "workflow.rescheduled.subject": "Termin verschoben: {event}",
+  "workflow.rescheduled.body": "Hallo {recipient},\nIhr Termin „{event}“ wurde verschoben.\n{start} – {end} ({zone})",
+  "workflow.beforeStart.subject": "Erinnerung an Ihren Termin: {event}",
+  "workflow.beforeStart.body": "Hallo {recipient},\nIhr Termin „{event}“ beginnt bald.\n{start} – {end} ({zone})",
+  "workflow.afterEnd.subject": "Nachricht zu Ihrem Termin: {event}",
+  "workflow.afterEnd.body": "Hallo {recipient},\nder für Ihren Termin „{event}“ vorgesehene Zeitraum ist abgelaufen.\n{start} – {end} ({zone})"
 }
