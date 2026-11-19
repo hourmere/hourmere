@@ -52,6 +52,13 @@ export {
   type WorkflowDeleteContext,
 } from './deletes.ts'
 export {
+  dispatchWorkflowRuns,
+  repairWorkflowWakes,
+  type WorkflowDispatchContext,
+  type WorkflowWakePort,
+  workflowJobs,
+} from './dispatcher.ts'
+export {
   type RenderedWorkflowEmail,
   renderWorkflowEmail,
   type WorkflowEmailAction,

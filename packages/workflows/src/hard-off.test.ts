@@ -69,6 +69,7 @@ const PACKAGE_EXPORTS = [
   'captureWorkflowCreation',
   'createWorkflow',
   'deleteWorkflow',
+  'dispatchWorkflowRuns',
   'evaluateConditions',
   // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
   'getWorkflow',
@@ -82,6 +83,7 @@ const PACKAGE_EXPORTS = [
   'parseWorkflowDefinition',
   // Pure rendering has no delivery or other side effects.
   'renderWorkflowEmail',
+  'repairWorkflowWakes',
   'requireWorkflowsImplemented',
   'scopeSelectsEventType',
   'templatePlaceholders',
@@ -91,6 +93,7 @@ const PACKAGE_EXPORTS = [
   'workflowCapture',
   'workflowDispatchWindow',
   'workflowExecution',
+  'workflowJobs',
   'workflowMatches',
   'workflowOperation',
   'workflowOwnerSelector',
@@ -222,6 +225,33 @@ describe('workflow hard-off', () => {
         ),
       ).resolves.toBeUndefined()
     }
+  })
+
+  it('dispatches and repairs nothing through public entries or replayed job handlers', async () => {
+    const untouched = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('hard-off execution touched a dependency')
+        },
+      },
+    )
+    const ctx = untouched as Parameters<typeof workflows.dispatchWorkflowRuns>[0]
+    const port = untouched as Parameters<typeof workflows.repairWorkflowWakes>[1]
+    await expect(workflows.dispatchWorkflowRuns(ctx)).resolves.toBeUndefined()
+    await expect(workflows.repairWorkflowWakes(ctx, port)).resolves.toBeUndefined()
+    const jobs = workflows.workflowJobs(ctx, port)
+    expect(jobs.map(({ name }) => name)).toEqual(['workflow-dispatch-v1', 'workflow-repair-v1'])
+    const run = { id: 'off-job', attempt: 1, signal: new AbortController().signal }
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await expect(
+        jobs[0].handler({ runId: '10000000-0000-4000-8000-000000000001' }, { ...run, attempt }),
+      ).resolves.toBeUndefined()
+      await expect(jobs[1].handler({}, { ...run, attempt })).resolves.toBeUndefined()
+    }
+    expect(Object.keys(workflows)).not.toContain('claimDueWorkflowRuns')
+    expect(Object.keys(workflows)).not.toContain('dispatchClaimedWorkflowRun')
+    expect(Object.keys(workflows)).not.toContain('repairWorkflowRunWakes')
   })
 
   it('refuses at every guarded entry point', async () => {
@@ -440,6 +470,7 @@ describe('workflow hard-off', () => {
     const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
     const updateImports = new Set(['@hourmere/auth', 'kysely'])
     const deleteImports = new Set(['@hourmere/auth', 'kysely'])
+    const dispatcherImports = new Set(['node:crypto', 'kysely', '@hourmere/jobs'])
     const captureImports = new Set([
       'node:crypto',
       'kysely',
@@ -465,6 +496,9 @@ describe('workflow hard-off', () => {
             !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
             !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)) &&
             !(file === 'packages/workflows/src/capture.ts' && captureImports.has(specifier)) &&
+            !(
+              file === 'packages/workflows/src/dispatcher.ts' && dispatcherImports.has(specifier)
+            ) &&
             !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)) &&
             !(file === 'packages/workflows/src/email.ts' && specifier === '@hourmere/mail/text'),
         ),

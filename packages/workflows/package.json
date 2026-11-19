@@ -15,6 +15,7 @@
     "zod": "4.6.7",
     "@hourmere/auth": "*",
     "kysely": "0.29.7",
-    "@hourmere/mail": "*"
+    "@hourmere/mail": "*",
+    "@hourmere/jobs": "*"
   }
 }
