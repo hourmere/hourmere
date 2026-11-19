@@ -463,6 +463,7 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
       ['retry_conference', { bookingId }],
       ['retry_calendar_copy', { bookingId }],
       ['close_meeting_poll', { id: eventTypeId, expectedHostRevision: 1 }],
+      ['remove_unverified_meeting_poll_voters', { id: eventTypeId, expectedHostRevision: 1 }],
       ['update_event_type', { id: eventTypeId, title: 'Changed' }],
       ['set_event_type_waitlist', { id: eventTypeId, enabled: true }],
       ['revoke_one_time_link', { eventTypeId, id: eventTypeId }],

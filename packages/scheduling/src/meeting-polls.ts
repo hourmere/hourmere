@@ -241,7 +241,7 @@ export async function createMeetingPoll(
   requireWriteScope(ctx)
   const request = validCreateInput(input)
   const source = pollSource(ctx, options.source)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)
     const authority = await lockAuthority(trx, ctx)
     const named = await trx
@@ -515,7 +515,7 @@ export async function rotateMeetingPollLink(
   requireWriteScope(ctx)
   const request = validHostWrite(input)
   const key = validIdempotencyKey(input.idempotencyKey)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const poll = await lockManagedPoll(trx, ctx, request.id)
     const receipt = receiptIdentity(ctx, 'rotate_link', key, {
       pollId: poll.id.toLowerCase(),

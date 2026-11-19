@@ -4,11 +4,27 @@ import { runCli } from './cli.ts'
 const KEY = 'hm_synthetic_poll_key'
 const TOKEN = 'synthetic_poll_input_capability'
 const NEW_TOKEN = 'synthetic_poll_new_voting_capability'
-const IDEMPOTENCY_KEY = 'synthetic_poll_finalize_idempotency_key'
+const IDEMPOTENCY_KEY = 'synthetic_poll_idempotency_key'
 const ID = '824c120f-17fc-47d5-9de1-a438ffefada0'
 const SLOT_ID = '0771948d-5915-4576-8ede-4033b4d21a24'
 const VOTER_ID = 'd4bbd56f-227f-4d9e-920c-c5bd2cd06e9c'
 const hostWrite = { id: ID, expectedHostRevision: 3 }
+const create = {
+  eventTypeId: ID,
+  candidateStarts: ['2026-11-20T09:00:00Z', '2026-11-20T09:30:00Z'],
+  durationMinutes: 30,
+  deadlineAt: '2026-11-19T17:00:00Z',
+  displayTimeZone: 'UTC',
+  admissionMode: 'public_link',
+  visibility: 'private',
+  idempotencyKey: IDEMPOTENCY_KEY,
+}
+const invite = {
+  id: ID,
+  invitees: [{ name: 'Voter', email: 'voter@example.test', locale: 'en' }],
+  idempotencyKey: IDEMPOTENCY_KEY,
+}
+const rotate = { ...hostWrite, idempotencyKey: IDEMPOTENCY_KEY }
 const finalize = {
   id: ID,
   slotId: SLOT_ID,
@@ -20,9 +36,19 @@ const finalize = {
   idempotencyKey: IDEMPOTENCY_KEY,
 }
 const hostCommands = [
+  ['create', 'create_meeting_poll', create],
   ['list', 'list_meeting_polls', { limit: 10, after: 'opaque-next-page' }],
   ['get', 'get_meeting_poll', { id: ID }],
   ['results', 'get_meeting_poll_results', { id: ID }],
+  ['invite', 'invite_meeting_poll_voters', invite],
+  [
+    'resend-invitation',
+    'resend_meeting_poll_invitation',
+    { ...hostWrite, voterId: VOTER_ID, idempotencyKey: IDEMPOTENCY_KEY },
+  ],
+  ['remove-voter', 'remove_meeting_poll_voter', { ...hostWrite, voterId: VOTER_ID }],
+  ['remove-unverified', 'remove_unverified_meeting_poll_voters', hostWrite],
+  ['rotate-link', 'rotate_meeting_poll_link', rotate],
   ['close', 'close_meeting_poll', hostWrite],
   ['cancel', 'cancel_meeting_poll', hostWrite],
   ['delete', 'delete_meeting_poll', hostWrite],
@@ -148,13 +174,34 @@ describe('meeting poll CLI host commands', () => {
   )
 
   it.each([
-    [['--idempotency-key', IDEMPOTENCY_KEY], 'invalid_options'],
-    [['--input', IDEMPOTENCY_KEY], 'poll_stdin_required'],
-    [['--input', '-', '--output', '/unused/poll-result.json'], 'poll_stdin_required'],
-  ] as const)(
-    'refuses finalize secrets outside stdin and rejects output files',
-    async (flags, code) => {
-      const result = await run('finalize', [...flags], undefined, {}, finalize)
+    {
+      command: 'finalize',
+      input: finalize,
+      flags: ['--idempotency-key', IDEMPOTENCY_KEY],
+      code: 'invalid_options',
+    },
+    {
+      command: 'create',
+      input: create,
+      flags: ['--idempotency-key', IDEMPOTENCY_KEY],
+      code: 'invalid_options',
+    },
+    {
+      command: 'invite',
+      input: invite,
+      flags: ['--input', IDEMPOTENCY_KEY],
+      code: 'poll_stdin_required',
+    },
+    {
+      command: 'rotate-link',
+      input: rotate,
+      flags: ['--input', '-', '--output', '/unused/poll-result.json'],
+      code: 'poll_stdin_required',
+    },
+  ])(
+    'refuses $command secrets outside stdin and rejects output files',
+    async ({ command, input, flags, code }) => {
+      const result = await run(command, flags, undefined, {}, input)
       expect(result.status).toBe(1)
       expect(JSON.parse(result.stderr).error).toBe(code)
       expect(result.stderr.includes(IDEMPOTENCY_KEY)).toBe(false)
@@ -240,4 +287,84 @@ describe('meeting poll CLI host commands', () => {
       outcomeMayBeUnknown: true,
     })
   })
+
+  it.each([
+    ['create', create],
+    ['rotate-link', rotate],
+  ] as const)(
+    'prints a newly issued link once on %s and redacts the request key',
+    async (command, input) => {
+      const publicLink = `https://example.test/poll#${NEW_TOKEN}`
+      const result = await run(
+        command,
+        undefined,
+        undefined,
+        { publicLink, echoed: IDEMPOTENCY_KEY },
+        input,
+      )
+      expect(result.status).toBe(0)
+      expect(JSON.parse(result.stdout)).toEqual({ publicLink, echoed: '[redacted]' })
+      expect(result.stdout.split(NEW_TOKEN)).toHaveLength(2)
+      expect(result.stderr).toBe('')
+    },
+  )
+
+  it('passes invitation outcomes through without echoing an unexpected public link', async () => {
+    const entries = [
+      { email: 'voter@example.test', outcome: 'unchanged', voterId: VOTER_ID, status: 'invited' },
+    ]
+    const publicLink = `https://example.test/poll#${NEW_TOKEN}`
+    const result = await run(
+      'invite',
+      undefined,
+      undefined,
+      { entries, replayed: true, publicLink },
+      invite,
+    )
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual({ entries, replayed: true })
+  })
+
+  it.each([
+    { command: 'create', input: create, detail: { error: 'poll_already_created', pollId: ID } },
+    { command: 'create', input: create, detail: { error: 'poll_already_created', pollId: null } },
+    {
+      command: 'create',
+      input: create,
+      detail: { error: 'slot_unavailable', unavailableStarts: ['2026-11-20T09:00:00.123456Z'] },
+    },
+    { command: 'rotate-link', input: rotate, detail: { error: 'poll_link_already_rotated' } },
+    { command: 'rotate-link', input: rotate, detail: { error: 'poll_link_unavailable' } },
+    { command: 'invite', input: invite, detail: { error: 'rate_limited', retryAfterSeconds: 60 } },
+  ])(
+    'preserves safe details for $detail.error and discards secret diagnostics',
+    async ({ command, input, detail }) => {
+      const runner: typeof runCli = (options) =>
+        runCli({
+          ...options,
+          fetch: async () =>
+            Response.json({
+              jsonrpc: '2.0',
+              id: 1,
+              result: {
+                isError: true,
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      ...detail,
+                      message: IDEMPOTENCY_KEY,
+                      publicLink: NEW_TOKEN,
+                    }),
+                  },
+                ],
+              },
+            }),
+        })
+      const result = await run(command, undefined, runner, {}, input)
+      expect(result.status).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(JSON.parse(result.stderr)).toEqual({ ...detail, outcomeMayBeUnknown: true })
+    },
+  )
 })

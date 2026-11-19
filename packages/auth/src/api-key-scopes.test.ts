@@ -72,6 +72,12 @@ const restContract = {
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
+    'POST /api/v1/meeting-polls',
+    'POST /api/v1/meeting-polls/{id}/invitations',
+    'POST /api/v1/meeting-polls/{id}/invitations/{voterId}/resend',
+    'DELETE /api/v1/meeting-polls/{id}/voters/{voterId}',
+    'POST /api/v1/meeting-polls/{id}/remove-unverified',
+    'POST /api/v1/meeting-polls/{id}/rotate-link',
     'POST /api/v1/meeting-polls/{id}/close',
     'POST /api/v1/meeting-polls/{id}/cancel',
     'DELETE /api/v1/meeting-polls/{id}',
@@ -310,11 +316,29 @@ function verifyOneTimeWrites(allows: Allows) {
   }
 }
 
-function verifyPollFinalizationScope(allows: Allows) {
+function verifyPollWriteScopes(allows: Allows) {
   for (const id of [
     'POST /api/v1/meeting-polls/{id}/finalize',
     'mcp:finalize_meeting_poll',
     'cli:polls finalize',
+    'POST /api/v1/meeting-polls',
+    'mcp:create_meeting_poll',
+    'cli:polls create',
+    'POST /api/v1/meeting-polls/{id}/invitations',
+    'mcp:invite_meeting_poll_voters',
+    'cli:polls invite',
+    'POST /api/v1/meeting-polls/{id}/invitations/{voterId}/resend',
+    'mcp:resend_meeting_poll_invitation',
+    'cli:polls resend-invitation',
+    'DELETE /api/v1/meeting-polls/{id}/voters/{voterId}',
+    'mcp:remove_meeting_poll_voter',
+    'cli:polls remove-voter',
+    'POST /api/v1/meeting-polls/{id}/remove-unverified',
+    'mcp:remove_unverified_meeting_poll_voters',
+    'cli:polls remove-unverified',
+    'POST /api/v1/meeting-polls/{id}/rotate-link',
+    'mcp:rotate_meeting_poll_link',
+    'cli:polls rotate-link',
   ]) {
     expect(allows({ kind: 'api_key', apiKeyScope: 'read' }, id), id).toBe(false)
     for (const apiKeyScope of ['full', 'bookings'] as const)
@@ -405,12 +429,12 @@ function verifyWaitlistScopes(operation: typeof apiKeyOperation) {
 
 describe('shared API-key scope policy', () => {
   it('detects reclassifying poll finalization as a booking read', () => {
-    verifyPollFinalizationScope(apiKeyAllows)
+    verifyPollWriteScopes(apiKeyAllows)
     const mutated = sourceCopyRegistry([
       "rest('POST', '/api/v1/meeting-polls/{id}/finalize', 'booking_write', 'key')",
       "rest('POST', '/api/v1/meeting-polls/{id}/finalize', 'booking_read', 'key')",
     ])
-    expect(() => verifyPollFinalizationScope(sourceCopyPolicy(undefined, mutated))).toThrow(
+    expect(() => verifyPollWriteScopes(sourceCopyPolicy(undefined, mutated))).toThrow(
       expect.objectContaining({
         name: 'AssertionError',
         message: expect.stringContaining('POST /api/v1/meeting-polls/{id}/finalize'),
@@ -517,6 +541,12 @@ describe('shared API-key scope policy', () => {
         'cancel_meeting_poll',
         'delete_meeting_poll',
         'finalize_meeting_poll',
+        'create_meeting_poll',
+        'invite_meeting_poll_voters',
+        'resend_meeting_poll_invitation',
+        'remove_meeting_poll_voter',
+        'remove_unverified_meeting_poll_voters',
+        'rotate_meeting_poll_link',
         'read_meeting_poll',
         'enroll_meeting_poll_voter',
         'recover_meeting_poll_voter',
@@ -597,6 +627,12 @@ describe('shared API-key scope policy', () => {
         'cancel_meeting_poll',
         'delete_meeting_poll',
         'finalize_meeting_poll',
+        'create_meeting_poll',
+        'invite_meeting_poll_voters',
+        'resend_meeting_poll_invitation',
+        'remove_meeting_poll_voter',
+        'remove_unverified_meeting_poll_voters',
+        'rotate_meeting_poll_link',
         'read_meeting_poll',
         'enroll_meeting_poll_voter',
         'recover_meeting_poll_voter',

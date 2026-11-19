@@ -107,6 +107,42 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
 describe('published API key scope tables', () => {
   it.each(documents)('$path publishes the meeting poll host scopes', ({ document, section }) => {
     for (const [method, path, tool, command, scopes] of [
+      ['POST', '/meeting-polls', 'create_meeting_poll', 'create', 'full, bookings'],
+      [
+        'POST',
+        '/meeting-polls/{id}/invitations',
+        'invite_meeting_poll_voters',
+        'invite',
+        'full, bookings',
+      ],
+      [
+        'POST',
+        '/meeting-polls/{id}/invitations/{voterId}/resend',
+        'resend_meeting_poll_invitation',
+        'resend-invitation',
+        'full, bookings',
+      ],
+      [
+        'DELETE',
+        '/meeting-polls/{id}/voters/{voterId}',
+        'remove_meeting_poll_voter',
+        'remove-voter',
+        'full, bookings',
+      ],
+      [
+        'POST',
+        '/meeting-polls/{id}/remove-unverified',
+        'remove_unverified_meeting_poll_voters',
+        'remove-unverified',
+        'full, bookings',
+      ],
+      [
+        'POST',
+        '/meeting-polls/{id}/rotate-link',
+        'rotate_meeting_poll_link',
+        'rotate-link',
+        'full, bookings',
+      ],
       ['GET', '/meeting-polls', 'list_meeting_polls', 'list', 'full, read, bookings'],
       ['GET', '/meeting-polls/{id}', 'get_meeting_poll', 'get', 'full, read, bookings'],
       [

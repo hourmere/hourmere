@@ -20,54 +20,81 @@ const hostTools = [
   'cancel_meeting_poll',
   'delete_meeting_poll',
   'finalize_meeting_poll',
+  'create_meeting_poll',
+  'invite_meeting_poll_voters',
+  'resend_meeting_poll_invitation',
+  'remove_meeting_poll_voter',
+  'remove_unverified_meeting_poll_voters',
+  'rotate_meeting_poll_link',
 ]
 
-it('keeps invalid finalize input and unexpected failures out of MCP diagnostics', async () => {
-  const tool = meetingPollHostTools({ db: {} as Db }).find(
-    (entry) => entry.name === 'finalize_meeting_poll',
-  ) as Tool
-  const caller: McpCaller = {
-    kind: 'api_key',
-    apiKeyId: randomUUID(),
-    apiKeyScope: 'bookings',
-    user: { id: randomUUID(), name: 'Agent', email: 'agent@example.test' },
-    organization: { id: randomUUID(), name: 'Personal', slug: 'personal', personal: true },
-  }
-  const bookerVoterId = randomUUID()
-  const privateValue = 'synthetic-private-finalization-input'
-  const input = {
-    id: randomUUID(),
-    slotId: randomUUID(),
-    bookerVoterId,
-    attendeeVoterIds: [bookerVoterId],
-    expectedResultsRevision: 1,
-    expectedBallotRevisions: { [bookerVoterId]: 1 },
-    acknowledgeConditional: false,
-    idempotencyKey: privateValue,
-  }
-  const invoke = vi.fn(async () => {
-    throw Error(privateValue)
-  })
-  const log = vi.fn()
-  const call = (args: unknown) =>
-    runTool({ ...tool, run: invoke }, args, { caller, rateLimit: () => {} }, log)
-  const malformed = await call({ ...input, [privateValue]: true })
-  expect(malformed).toMatchObject({ isError: true })
-  expect(JSON.stringify(malformed)).not.toContain(privateValue)
-  expect(invoke).not.toHaveBeenCalled()
-  const failed = await call(input)
-  expect(failed).toMatchObject({ isError: true })
-  expect(invoke).toHaveBeenCalledOnce()
-  expect(log).toHaveBeenCalledOnce()
-  expect(JSON.stringify([failed, log.mock.calls])).not.toContain(privateValue)
+const privateKey = 'synthetic-private-meeting-poll-idempotency-key'
+const privateMailbox = 'synthetic-private-meeting-poll-mailbox@example.test'
+const bookerVoterId = randomUUID()
 
-  invoke.mockRejectedValueOnce(new InvalidApiKeyError())
-  expect(await call(input)).toMatchObject({
-    isError: true,
-    content: [{ type: 'text', text: JSON.stringify({ error: 'unauthorized' }) }],
-  })
-  expect(log).toHaveBeenCalledOnce()
-})
+it.each([
+  {
+    name: 'finalize_meeting_poll',
+    input: {
+      id: randomUUID(),
+      slotId: randomUUID(),
+      bookerVoterId,
+      attendeeVoterIds: [bookerVoterId],
+      expectedResultsRevision: 1,
+      expectedBallotRevisions: { [bookerVoterId]: 1 },
+      acknowledgeConditional: false,
+      idempotencyKey: privateKey,
+    },
+    privateValue: privateKey,
+  },
+  {
+    name: 'invite_meeting_poll_voters',
+    input: {
+      id: randomUUID(),
+      invitees: [{ name: 'Invitee', email: privateMailbox }],
+      idempotencyKey: privateKey,
+    },
+    privateValue: privateMailbox,
+  },
+])(
+  'redacts invalid input and unexpected failures for $name',
+  async ({ name, input, privateValue }) => {
+    const tool = meetingPollHostTools({ db: {} as Db, publicUrl: PUBLIC_URL }).find(
+      (entry) => entry.name === name,
+    ) as Tool
+    const caller: McpCaller = {
+      kind: 'api_key',
+      apiKeyId: randomUUID(),
+      apiKeyScope: 'bookings',
+      user: { id: randomUUID(), name: 'Agent', email: 'agent@example.test' },
+      organization: { id: randomUUID(), name: 'Personal', slug: 'personal', personal: true },
+    }
+    const invoke = vi.fn(async () => {
+      throw Error(`${privateValue} ${privateKey}`)
+    })
+    const log = vi.fn()
+    const call = (args: unknown) =>
+      runTool({ ...tool, run: invoke }, args, { caller, rateLimit: () => {} }, log)
+    const malformed = await call({ ...input, [privateValue]: true })
+    expect(malformed).toMatchObject({ isError: true })
+    expect(JSON.stringify(malformed)).not.toContain(privateValue)
+    expect(invoke).not.toHaveBeenCalled()
+    const failed = await call(input)
+    expect(failed).toMatchObject({ isError: true })
+    expect(invoke).toHaveBeenCalledOnce()
+    expect(log).toHaveBeenCalledOnce()
+    const diagnostic = JSON.stringify([failed, log.mock.calls])
+    expect(diagnostic).not.toContain(privateValue)
+    expect(diagnostic).not.toContain(privateKey)
+
+    invoke.mockRejectedValueOnce(new InvalidApiKeyError())
+    expect(await call(input)).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: JSON.stringify({ error: 'unauthorized' }) }],
+    })
+    expect(log).toHaveBeenCalledOnce()
+  },
+)
 
 describe.skipIf(!process.env.DATABASE_URL)('host meeting polls over MCP OAuth', () => {
   let database: TestDatabase
@@ -80,9 +107,9 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting polls over MCP OAuth', 
     await database?.drop()
   })
 
-  it('uses current team authority for reading and replay, and enqueues only one outcome', async () => {
+  async function setup() {
     const fixture = await createFinalizeFixture(db)
-    const { organizationId, poll, member, team } = fixture
+    const { organizationId, member, team } = fixture
     const role = (value: string) =>
       db
         .updateTable('auth.member')
@@ -110,6 +137,7 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting polls over MCP OAuth', 
           db,
           meetingPollSecret: fixture.ctx.meetingPollSecret,
           notify,
+          publicUrl: PUBLIC_URL,
         }),
         oauth: {
           resolve: async (request) =>
@@ -139,7 +167,12 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting polls over MCP OAuth', 
     }
     const call = async (name: string, args: unknown) =>
       result(await rpc('tools/call', { name, arguments: args }))
+    return { fixture, role, principal, notify, rpc, result, call }
+  }
 
+  it('uses current team authority for reading and replay, and enqueues only one outcome', async () => {
+    const { fixture, role, principal, notify, rpc, result, call } = await setup()
+    const { poll } = fixture
     expect((await result(await rpc('tools/list'))).tools.map((tool: Tool) => tool.name)).toEqual(
       hostTools,
     )
@@ -205,6 +238,68 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting polls over MCP OAuth', 
     for (const [name, input] of [
       ['get_meeting_poll_results', { id: poll.id }],
       ['finalize_meeting_poll', request],
+    ] as const) {
+      const denied = await call(name, input)
+      expect(denied.isError).toBe(true)
+      expect(JSON.parse(denied.content[0].text)).toEqual({ error: 'team_management_access_denied' })
+    }
+  })
+
+  it('creates as a team admin and rechecks authority before creation and invitation replays', async () => {
+    const { fixture, role, call } = await setup()
+    const request = {
+      eventTypeId: fixture.eventTypeId,
+      candidateStarts: fixture.poll.candidates.map((candidate) => candidate.startAt),
+      deadlineAt: fixture.poll.deadlineAt,
+      displayTimeZone: 'UTC',
+      admissionMode: 'public_link',
+      idempotencyKey: randomUUID(),
+    }
+    const created = await call('create_meeting_poll', request)
+    const { poll, publicLink } = created.structuredContent
+    expect(poll).toMatchObject({
+      eventTypeId: request.eventTypeId,
+      createdByUserId: fixture.member.id,
+      source: 'mcp',
+    })
+    expect(publicLink).toMatch(/^http:\/\/localhost:4187\/poll#[A-Za-z0-9_-]{43}$/)
+    expect(JSON.stringify(created)).not.toMatch(/publicToken|manageToken|manageUrl|idempotencyKey/)
+
+    const replay = await call('create_meeting_poll', request)
+    expect(replay.isError).toBe(true)
+    expect(JSON.parse(replay.content[0].text)).toEqual({
+      error: 'poll_already_created',
+      pollId: poll.id,
+    })
+    const invitation = {
+      id: poll.id,
+      invitees: [{ name: 'Invitee', email: privateMailbox, locale: 'zh-CN' }],
+      idempotencyKey: randomUUID(),
+    }
+    const invited = await call('invite_meeting_poll_voters', invitation)
+    expect(invited.structuredContent).toMatchObject({
+      entries: [{ email: privateMailbox, status: 'invited', outcome: 'invited' }],
+      replayed: false,
+    })
+    expect(JSON.stringify(invited)).not.toMatch(/publicLink|publicToken|votingToken|manageToken/i)
+    expect((await call('invite_meeting_poll_voters', invitation)).structuredContent).toMatchObject({
+      entries: [{ email: privateMailbox, status: 'invited', outcome: 'unchanged' }],
+      replayed: true,
+    })
+    expect(
+      await db
+        .selectFrom('meeting_poll_deliveries as delivery')
+        .innerJoin('meeting_poll_voters as voter', 'voter.id', 'delivery.voter_id')
+        .select(['voter.email', 'voter.locale'])
+        .where('delivery.poll_id', '=', poll.id)
+        .where('delivery.kind', '=', 'invitation')
+        .execute(),
+    ).toEqual([{ email: privateMailbox, locale: 'zh-CN' }])
+
+    await role('member')
+    for (const [name, input] of [
+      ['create_meeting_poll', request],
+      ['invite_meeting_poll_voters', invitation],
     ] as const) {
       const denied = await call(name, input)
       expect(denied.isError).toBe(true)

@@ -73,7 +73,11 @@ export const productRoutes = (db: Db) => [
   eventTypeRoutes({ db }),
   publicRoutes({ db }),
   meetingPollRoutes({ db, meetingPollSecret: 'synthetic-route-test-only' }),
-  meetingPollHostRoutes({ db, meetingPollSecret: 'synthetic-route-test-only' }),
+  meetingPollHostRoutes({
+    db,
+    publicUrl: PUBLIC_URL,
+    meetingPollSecret: 'synthetic-route-test-only',
+  }),
   oneTimeLinkRoutes({ db, publicUrl: PUBLIC_URL }),
   bookingRoutes({ db }),
   teamBookingRoutes({ db }),

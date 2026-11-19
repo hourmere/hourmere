@@ -200,8 +200,7 @@ function isWaitlistEntryPath(path: string): boolean {
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
-  if (c.req.path.toLowerCase().includes('/meeting-polls'))
-    return c.json({ error: 'invalid_request' }, 400)
+  if (isMeetingPollPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
@@ -331,7 +330,9 @@ const jsonTextGuard = createMiddleware(async (c, next) => {
       if (hasUnsafeJsonText(parsed)) {
         const message = 'Text in the request must not contain NUL characters or malformed Unicode'
         const field =
-          isOneTimeLinkPath(c.req.path) || isPublicRoutingFormPath(c.req.path)
+          isOneTimeLinkPath(c.req.path) ||
+          isMeetingPollPath(c.req.path) ||
+          isPublicRoutingFormPath(c.req.path)
             ? undefined
             : successRedirectUnsafeField(parsed, hasUnsafeJsonText)
         throw new HTTPException(400, {
@@ -372,6 +373,11 @@ function isWaitlistLinkPath(path: string): boolean {
   return /^\/(?:team\/[^/]+\/[^/]+|[^/]+\/[^/]+)\/waitlist\/[^/]+(?:\/|$)/i.test(decoded)
 }
 
+/** Poll requests may carry invitee mailboxes, idempotency keys and voting capabilities. */
+function isMeetingPollPath(path: string): boolean {
+  return path.toLowerCase().includes('/meeting-polls')
+}
+
 const requestLineLogger = logger((line, ...rest) =>
   console.log(escapeControlCharacters(line.replace(/\?\S*/, '').replace(COLORS, '')), ...rest),
 )
@@ -379,7 +385,7 @@ const requestLineLogger = logger((line, ...rest) =>
 // Use the decoded path to catch encoded route segments too. Confirmation transports
 // carry their capabilities in fragments/bodies; booking suggestions carry them here.
 const ordinaryRequestLogger = createMiddleware((c, next) =>
-  isWaitlistLinkPath(c.req.path) || c.req.path.toLowerCase().includes('/meeting-polls')
+  isWaitlistLinkPath(c.req.path) || isMeetingPollPath(c.req.path)
     ? next()
     : requestLineLogger(c, next),
 )
@@ -452,7 +458,7 @@ export function createApp({
       return
     }
     const ssoTrust = c.var.oidcInvitationAcceptance || isSsoTrustPath(c.req.path)
-    const text = c.req.path.toLowerCase().includes('/meeting-polls')
+    const text = isMeetingPollPath(c.req.path)
       ? 'private meeting poll request failed'
       : isCalDavConnectionPath(c.req.path)
         ? '[private CalDAV diagnostic omitted]'
@@ -463,7 +469,7 @@ export function createApp({
             : isWaitlistAdmissionPath(c.req.path) || isWaitlistEntryPath(c.req.path)
               ? 'private waitlist request failed'
               : detail()
-    const path = c.req.path.toLowerCase().includes('/meeting-polls')
+    const path = isMeetingPollPath(c.req.path)
       ? '/api/v1/meeting-polls/[redacted]'
       : isOneTimeCapabilityPath(c.req.path)
         ? '/book/[redacted]'
@@ -488,11 +494,10 @@ export function createApp({
   // A database error of the SSO storage tables keeps only its names: the row or key it
   // repeats holds mailboxes and IdP subjects.
   const logError = (c: Context, label: string, detail: unknown) =>
-    logLine(
-      c,
-      'ERROR',
-      () =>
-        `${label}${ssoStorageDiagnostic(detail) ?? inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+    logLine(c, 'ERROR', () =>
+      isSlackDestinationPath(c.req.path) || isMeetingPollPath(c.req.path)
+        ? ''
+        : `${label}${ssoStorageDiagnostic(detail) ?? inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
     )
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
@@ -518,7 +523,7 @@ export function createApp({
           !isOneTimeLinkPath(c.req.path) &&
           !isWaitlistAdmissionPath(c.req.path) &&
           !isPublicRoutingFormPath(c.req.path) &&
-          !c.req.path.toLowerCase().includes('/meeting-polls') &&
+          !isMeetingPollPath(c.req.path) &&
           !isSlackDestinationPath(c.req.path) &&
           !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
           ? { error, message: err.message }
@@ -568,7 +573,7 @@ export function createApp({
         isWaitlistAdmissionPath(c.req.path) ||
         isPublicRoutingFormPath(c.req.path) ||
         isSlackDestinationPath(c.req.path) ||
-        c.req.path.toLowerCase().includes('/meeting-polls')
+        isMeetingPollPath(c.req.path)
       )
         delete body.message
       return c.json(body, domainStatus[err.kind])

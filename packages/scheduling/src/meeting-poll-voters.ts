@@ -22,6 +22,7 @@ import {
 } from 'node:crypto'
 import { interfaceLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -553,7 +554,7 @@ export async function inviteMeetingPollVoters(
   requireWriteScope(ctx)
   const secret = requireSecret(ctx.meetingPollSecret)
   const request = validInvitation(input)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ensureMeetingPollKey(trx, secret)
     const locked = await lockManagedPoll(trx, ctx, request.id)
     const poll = hostPoll(locked)
@@ -681,7 +682,7 @@ export async function resendMeetingPollInvitation(
   const request = validHostWrite(input)
   const key = validIdempotencyKey(input.idempotencyKey)
   const voterId = input.voterId
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ensureMeetingPollKey(trx, secret)
     const locked = await lockManagedPoll(trx, ctx, request.id)
     const poll = hostPoll(locked)

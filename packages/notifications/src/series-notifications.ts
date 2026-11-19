@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import {
+  bookingHostName,
+  type IcsPerson,
   MailRejectedError,
   type SeriesEmailDetails,
   type SeriesEmailMember,
@@ -15,12 +17,18 @@ import {
   lockVerifiedHostAddress,
   sendAndRecordBookingEmail,
 } from './booking-email-send.ts'
-import { loadNotificationData, type NotificationDeps } from './index.ts'
+import {
+  invitationOrganizer,
+  loadNotificationData,
+  type NotificationDeps,
+  pinCalendarOrganizer,
+} from './index.ts'
 import {
   lockNotificationEmailBudget,
   notificationEmailBudget,
   notificationRecipientHash,
 } from './mail-limits.ts'
+import { type SeriesCalendarMember, seriesCalendarSnapshot } from './series-calendar.ts'
 
 const MAX_ATTEMPTS = 13
 const LEASE_MS = 600_000
@@ -62,13 +70,21 @@ function claimSeriesNotification(db: Db, now: Date, leaseId: string) {
   `.execute(db)
 }
 
-function currentSeriesMembers(db: Db, action: Action) {
+function currentSeriesMembers(db: Db, action: Action, hostId?: string) {
   return db
     .selectFrom('booking_series_occurrences as o')
     .innerJoin('bookings as b', (join) =>
       join
         .onRef('b.series_occurrence_id', '=', 'o.id')
         .onRef('b.organization_id', '=', 'o.organization_id'),
+    )
+    .innerJoin('bookings as root', (join) =>
+      join
+        .onRef('root.id', '=', 'o.root_booking_id')
+        .onRef('root.organization_id', '=', 'o.organization_id'),
+    )
+    .leftJoin('booking_conferences as c', (join) =>
+      join.onRef('c.booking_id', '=', 'b.id').onRef('c.organization_id', '=', 'o.organization_id'),
     )
     .select([
       'o.id as occurrenceId',
@@ -78,7 +94,41 @@ function currentSeriesMembers(db: Db, action: Action) {
       'b.start_at',
       'b.end_at',
       'b.status',
-      sql<string | null>`b.location ->> 'url'`.as('joinUrl'),
+      'root.ical_organizer_email as organizerEmail',
+      'root.ical_organizer_name as organizerName',
+      sql<number>`(
+        WITH RECURSIVE chain (parent_id, depth) AS (
+          SELECT b.rescheduled_from_id, 0
+          UNION ALL
+          SELECT parent.rescheduled_from_id, chain.depth + 1
+          FROM bookings parent JOIN chain ON parent.id = chain.parent_id
+          WHERE parent.series_occurrence_id = o.id AND parent.organization_id = o.organization_id
+            AND chain.depth < 1000
+        )
+        SELECT max(depth) FROM chain
+      )`.as('depth'),
+      sql<string | null>`CASE
+        WHEN b.location -> 'autoCreate' = 'true'::jsonb
+          AND NOT coalesce(c.state = 'ready' AND c.applied_revision = c.revision, false)
+        THEN NULL ELSE b.location ->> 'url' END`.as('joinUrl'),
+      sql<boolean | null>`b.location -> 'autoCreate' = 'true'::jsonb`.as('automaticConference'),
+      'c.state as conferenceState',
+      sql<boolean>`coalesce(
+        c.provider = 'google_meet' AND c.calendar_id IS NOT NULL
+          AND c.organizer_user_id = ${hostId ?? null}
+          AND CASE
+            WHEN b.status = 'cancelled' OR c.state = 'pending' THEN c.external_event_id IS NOT NULL
+            ELSE c.state = 'ready' AND c.applied_revision = c.revision
+          END,
+        false
+      ) OR EXISTS (
+        SELECT FROM booking_calendar_targets t
+        WHERE t.root_booking_id = o.root_booking_id AND t.user_id = ${hostId ?? null}
+      ) OR EXISTS (
+        SELECT FROM booking_conference_mirrors m
+        WHERE m.root_booking_id = o.root_booking_id AND m.user_id = ${hostId ?? null}
+          AND m.calendar_id IS NOT NULL
+      )`.as('hasProviderCopy'),
     ])
     .where('o.series_id', '=', action.series_id)
     .where('o.organization_id', '=', action.organization_id)
@@ -107,23 +157,111 @@ function describeMember(member: Member, now: Date, affected: boolean): SeriesEma
         ? 'started'
         : member.id !== member.rootId
           ? 'updated_separately'
-          : 'confirmed'
+          : member.status === 'confirmed'
+            ? 'confirmed'
+            : 'updated_separately'
+  const conference = member.joinUrl
+    ? { state: 'ready' as const, url: member.joinUrl }
+    : member.automaticConference
+      ? { state: member.conferenceState === 'failed' ? ('failed' as const) : ('pending' as const) }
+      : undefined
   return {
     start: at(member.start_at),
     end: at(member.end_at),
     state,
     affected,
-    ...(state === 'confirmed' &&
-      member.joinUrl && { conference: { state: 'ready', url: member.joinUrl } }),
+    ...(state === 'confirmed' && conference && { conference }),
   }
 }
 
 type Recipient = {
   id: string
+  name: string
   email: string
   timeZone: string
   locale: string | null
   role: 'booker' | 'guest' | 'host'
+}
+
+function pinnedOrganizer(member: Member): IcsPerson | undefined {
+  if (member.organizerEmail && member.organizerName)
+    return { name: member.organizerName, email: member.organizerEmail }
+}
+
+async function prepareSeriesOrganizers(
+  deps: NotificationDeps,
+  action: Action,
+  locale: string | null,
+  now: Date,
+  affected: ReadonlySet<string>,
+) {
+  const sender = deps.mailer.senderEmail
+  if (action.kind === 'cancellation' && sender) return
+  for (const member of await currentSeriesMembers(deps.db, action)) {
+    if (pinnedOrganizer(member)) continue
+    const needed =
+      action.kind === 'confirmation'
+        ? member.id === member.rootId && member.status === 'confirmed' && member.start_at > now
+        : member.status === 'cancelled' && affected.has(member.occurrenceId)
+    if (!needed) continue
+    const data = await loadNotificationData(deps.db, member.id)
+    if (!data) continue
+    const host = invitationOrganizer(data)
+    const name =
+      (data.collective ? data.hosts.find((h) => h.id === host?.id)?.displayName : host?.name) ||
+      bookingHostName(locale)
+    // The log mailer has no SMTP identity. Collective snapshots still keep host addresses private.
+    const email = sender || (!data.collective && host?.email) || 'calendar@hourmere.invalid'
+    await pinCalendarOrganizer(deps.db, member.rootId, { name, email })
+  }
+}
+
+async function deliveredSeriesCalendarOrdinals(db: Db, action: Action, recipient: Recipient) {
+  const series = await db
+    .selectFrom('booking_series_notifications')
+    .select('calendar_ordinals')
+    .where('organization_id', '=', action.organization_id)
+    .where('series_id', '=', action.series_id)
+    .where('row_type', '=', 'receipt')
+    .where('kind', 'in', ['confirmation', 'link_update'])
+    .where('outcome', '=', 'delivered')
+    .where('recipient_id', '=', recipient.id)
+    .where('recipient_role', '=', recipient.role)
+    .where('calendar_ordinals', 'is not', null)
+    .execute()
+  const perOccurrence = await db
+    .selectFrom('booking_series_occurrences as o')
+    .innerJoin('bookings as b', (join) =>
+      join
+        .onRef('b.series_occurrence_id', '=', 'o.id')
+        .onRef('b.organization_id', '=', 'o.organization_id'),
+    )
+    .innerJoin('booking_notifications as n', 'n.booking_id', 'b.id')
+    .select('o.ordinal')
+    .where('o.series_id', '=', action.series_id)
+    .where('o.organization_id', '=', action.organization_id)
+    .where('n.calendar_attached', '=', true)
+    .where('n.outcome', '=', 'sent')
+    .where('n.kind', 'in', ['confirmed', 'rescheduled'])
+    .where((eb) =>
+      recipient.role === 'host'
+        ? eb('n.recipient', '=', `host:${recipient.id}`)
+        : eb.exists(
+            eb
+              .selectFrom('booking_attendees as a')
+              .select('a.id')
+              .whereRef('a.booking_id', '=', 'b.id')
+              .where('a.is_booker', '=', recipient.role === 'booker')
+              .where(sql`lower(a.email)`, '=', recipient.email.toLowerCase())
+              .whereRef(sql`'attendee:' || a.id::text`, '=', 'n.recipient'),
+          ),
+    )
+    .distinct()
+    .execute()
+  return new Set([
+    ...series.flatMap((r) => r.calendar_ordinals ?? []),
+    ...perOccurrence.map((r) => r.ordinal),
+  ])
 }
 
 async function sendSeriesRecipient(
@@ -131,6 +269,7 @@ async function sendSeriesRecipient(
   action: Action,
   rootId: string,
   recipient: Recipient,
+  providerCopyHostId: string | undefined,
   details: Omit<SeriesEmailDetails, 'members'>,
   affected: ReadonlySet<string>,
   clock: () => Date,
@@ -170,7 +309,7 @@ async function sendSeriesRecipient(
     if (!lease) return { state: 'skipped' } as const
     // Read the latest members for each recipient, after waiting for the shared budget.
     // Keep booking/series lifecycle writes free to run while SMTP is in flight.
-    const rows = await currentSeriesMembers(trx, action)
+    const rows = await currentSeriesMembers(trx, action, providerCopyHostId)
     const now = clock()
     if (
       !rows.length ||
@@ -213,18 +352,48 @@ async function sendSeriesRecipient(
           }
         : { ...recipient, role: recipient.role, token: randomBytes(32).toString('base64url') }
     const token = 'token' in mailRecipient ? mailRecipient.token : undefined
-    const members = rows.map((row) => describeMember(row, now, affected.has(row.occurrenceId)))
+    const members: SeriesEmailMember[] = []
+    const calendarMembers: SeriesCalendarMember[] = []
+    for (const row of rows) {
+      const member = describeMember(row, now, affected.has(row.occurrenceId))
+      members.push(member)
+      const organizer = pinnedOrganizer(row)
+      if (organizer)
+        calendarMembers.push({
+          ...member,
+          ordinal: row.ordinal,
+          rootId: row.rootId,
+          depth: row.depth,
+          organizer,
+          hasProviderCopy: row.hasProviderCopy,
+        })
+    }
+    const kind = action.kind === 'confirmation' ? 'confirmed' : 'cancelled'
+    const { attachment, ordinals } = seriesCalendarSnapshot(
+      kind === 'cancelled'
+        ? {
+            kind,
+            previouslyDelivered: await deliveredSeriesCalendarOrdinals(trx, action, recipient),
+          }
+        : { kind },
+      calendarMembers,
+      {
+        ...recipient,
+        locale: recipient.role === 'host' ? recipient.locale : (details.locale ?? null),
+      },
+      details.eventName,
+      details.inviteeName,
+      now,
+    )
     const sentAt = await sendAndRecordBookingEmail(
       trx,
       deps.mailer,
       action.organization_id,
       inviteeFacing ? recipientHash : null,
-      () =>
-        seriesBookingEmail(
-          action.kind === 'confirmation' ? 'confirmed' : 'cancelled',
-          { ...details, members },
-          mailRecipient,
-        ),
+      () => ({
+        ...seriesBookingEmail(kind, { ...details, members }, mailRecipient),
+        ...(attachment && { attachments: [attachment] }),
+      }),
       clock,
       signal,
     )
@@ -232,6 +401,7 @@ async function sendSeriesRecipient(
       .set({
         outcome: 'delivered',
         sent_at: sentAt,
+        calendar_ordinals: ordinals,
         reported_ordinals: rows.map((row) => row.ordinal),
         reported_link_states: members.map((member) =>
           member.state === 'confirmed'
@@ -300,6 +470,7 @@ async function deliverSeriesNotification(
     publicUrl: new URL(deps.publicUrl).origin,
   }
   const affected = new Set(action.kind === 'cancellation' ? operation.affected_occurrence_ids : [])
+  await prepareSeriesOrganizers(deps, action, booker.locale, clock(), affected)
   const recipients: Recipient[] = [
     ...data.hosts.map((host) => ({ ...host, role: 'host' as const })),
     ...data.attendees.map((a) => ({
@@ -317,6 +488,10 @@ async function deliverSeriesNotification(
           action,
           operation.root_booking_id,
           recipient,
+          recipient.role === 'host'
+            ? recipient.id
+            : data.hosts.find((host) => host.email.toLowerCase() === recipient.email.toLowerCase())
+                ?.id,
           details,
           affected,
           clock,

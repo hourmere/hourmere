@@ -651,7 +651,9 @@ clears opt-out or resets the once-per-poll/mailbox reminder receipt.
 
 Host resend invitation is an explicit operation for a retained, nonremoved,
 nonwithdrawn invitee while open: at most one accepted resend per mailbox per 15 minutes
-and three per poll/mailbox, plus existing actor/organization/IP/recipient mail budgets.
+and three per poll/mailbox, plus the per-organization and per-IP request limits shared with
+create and invite, the instance outbound mail cap and per-recipient limits. There is no
+per-organization mail budget yet; one is required before open Cloud sign-up.
 Persist these counters across removal and re-invitation. It rotates the emailed capability,
 invalidates the old generation and queues a new durable intent without reacquiring capacity.
 A retained idempotency key makes retry mail-free. Requests beyond cooldown/budgets return
@@ -728,7 +730,8 @@ bounded payloads, enrollment and mail work. Reuse existing email budgets; do not
 arbitrary host HTML or reminders to unverified public-link enrollees. Configure shared rate-limit enforcement
 for multiple processes; per-process limits alone are insufficient. Additional mail budgets must be selected and documented before service admission using
 existing abuse-control policy. The storage cleanup schedule is specified below; it does
-not replace the existing recipient and organization mail budgets. Forwarded public links and
+not replace the existing per-recipient limits and instance outbound mail cap (there is no
+per-organization mail budget yet). Forwarded public links and
 mailbox aliases can still admit unwanted voters; invited mode is recommended for sensitive
 meetings. Email verification is not proof of a unique human.
 
@@ -744,6 +747,10 @@ most 3 concurrent unexpired public pending reservations per trusted IP per poll,
 atomically under the poll lock; 40 pending places therefore need at least 14 IP addresses.
 Reject excess with 429 `rate_limited`, without mail. Host invitations bypass this public
 pending-IP limit but count against 40 total places. Shared NATs may need host invitations.
+Host create, invite and resend share a separate 10-request-per-minute allowance per
+organization and per known trusted IP across REST, MCP and server processes. Exact
+retries also consume request allowance. Invitation delivery still uses the worker's
+instance and recipient mail budgets and the service's per-mailbox resend limits.
 Verification frees the pending-IP allowance: catch-all/distributed verified abuse remains
 possible, so this is not a unique-human guarantee. Because a known mailbox takes no place,
 one probe is inherent: from an IP with one pending allowance left, or with one place left,
@@ -819,9 +826,8 @@ are named in `MEETING_POLL_RETENTION` alongside the admission constants.
 
 ## REST, MCP and CLI contract
 
-Public capability operations and the host list, read, results, close, cancel, delete and
-finalize operations are available. The creation and roster operations in the table are
-planned for D2. `/api/v1` responses use camelCase, UUID IDs,
+Public capability operations and all host operations below are available without a
+feature flag. `/api/v1` responses use camelCase, UUID IDs,
 no-store, the existing `{error,message?,field?}` envelope and additive/open response schemas.
 Document stable errors in OpenAPI and regenerate clients; clients ignore unfamiliar fields
 and future response states. Services throw `DomainError`; no tool-specific business logic.
@@ -853,7 +859,10 @@ arguments or diagnostics. Classify every operation in the shared scope registry 
 MCP discovery, direct-call insufficient-scope behavior and CLI help in sync. Invitation
 and rotation replay receipts use the operation table; changed input conflicts and lost
 responses never resend mail or recover raw secrets. An exact invitation replay sends no mail
-and reports each entry's current roster state. Enrollment uses a uniform poll-level full response and otherwise uniform 202; recovery
+and reports each entry's current roster state. Create and rotate return `poll` and
+`publicLink`, an absolute URL with the public capability in its fragment. Invited create
+returns `publicLink: null`. Exact create replay includes `pollId` (null after deletion)
+with `poll_already_created`. Enrollment uses a uniform poll-level full response and otherwise uniform 202; recovery
 always returns uniform 202 while enforcing its per-mailbox cooldown/cap, and re-delivers only the active credential generation.
 
 | Status/code | Meaning |

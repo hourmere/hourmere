@@ -2,25 +2,40 @@ import { z } from '@hono/zod-openapi'
 import {
   cancelMeetingPoll,
   closeMeetingPoll,
+  createMeetingPoll,
   deleteMeetingPoll,
   finalizeMeetingPoll,
   getMeetingPoll,
   getMeetingPollResults,
+  inviteMeetingPollVoters,
   listMeetingPolls,
   type MeetingPollHostContext,
+  removeMeetingPollVoter,
+  removeUnverifiedMeetingPollVoters,
+  resendMeetingPollInvitation,
+  rotateMeetingPollLink,
 } from '@hourmere/scheduling'
 import {
+  CreateMeetingPollBody,
   FinalizeMeetingPollBody,
   FinalizeMeetingPollOutput,
+  InviteMeetingPollVotersBody,
+  InviteMeetingPollVotersOutput,
   ListMeetingPollsInput,
   MeetingPollHostId,
   MeetingPollHostOutput,
   MeetingPollHostRevision,
+  MeetingPollHostVoterId,
   MeetingPollIdempotencyKey,
+  MeetingPollLinkOutput,
   MeetingPollListOutput,
+  MeetingPollRemovalOutput,
   MeetingPollResultsOutput,
+  meetingPollLinkOutput,
+  ResendMeetingPollInvitationOutput,
 } from '../meeting-poll-host-schemas.ts'
-import { defineTool, type McpCaller, type Tool } from './tools.ts'
+import { enforceMeetingPollHostAdmission } from '../meeting-poll-rate-limit.ts'
+import { defineTool, type McpCaller, type Tool, type ToolCall } from './tools.ts'
 
 const read = {
   readOnlyHint: true,
@@ -29,6 +44,7 @@ const read = {
   openWorldHint: false,
 }
 const write = { ...read, readOnlyHint: false, destructiveHint: true }
+const invite = { ...read, readOnlyHint: false, openWorldHint: true }
 const privacy = {
   privateInput: () => true,
   privateDiagnostics: true,
@@ -38,19 +54,32 @@ const revisionInput = z.strictObject({
   ...MeetingPollHostId.shape,
   ...MeetingPollHostRevision.shape,
 })
+const voterRevisionInput = z.strictObject({
+  ...MeetingPollHostVoterId.shape,
+  ...MeetingPollHostRevision.shape,
+})
 
 type HostToolDeps = Pick<
   MeetingPollHostContext,
   'db' | 'notify' | 'automaticMeet' | 'automaticZoom' | 'smsRemindersAvailable'
-> & { meetingPollSecret?: string | undefined }
+> & { meetingPollSecret?: string | undefined; publicUrl: string }
 
-export function meetingPollHostTools({ meetingPollSecret = '', ...deps }: HostToolDeps): Tool[] {
+export function meetingPollHostTools({
+  meetingPollSecret = '',
+  publicUrl,
+  ...deps
+}: HostToolDeps): Tool[] {
   const context = (principal: McpCaller): MeetingPollHostContext => ({
     ...deps,
     meetingPollSecret,
     principal,
     now: () => Temporal.Now.instant(),
   })
+  async function admissionContext(call: ToolCall): Promise<MeetingPollHostContext> {
+    const ctx = context(call.caller)
+    await enforceMeetingPollHostAdmission(ctx, call.trustedIp)
+    return ctx
+  }
   return [
     defineTool({
       name: 'list_meeting_polls',
@@ -146,6 +175,101 @@ export function meetingPollHostTools({ meetingPollSecret = '', ...deps }: HostTo
       ...privacy,
       async run(args, call) {
         return finalizeMeetingPoll(context(call.caller), args, { source: 'mcp' })
+      },
+    }),
+    defineTool({
+      name: 'create_meeting_poll',
+      title: 'Create a meeting poll',
+      description:
+        'Create an open poll for an event type you manage, with candidate starts and a voting deadline. Retain the random idempotencyKey. A public_link poll returns its voting link once. Invited mode returns publicLink: null. An exact retry returns poll_already_created with the authorized poll ID. Requires full or bookings key scope.',
+      input: z.strictObject({
+        ...CreateMeetingPollBody.shape,
+        idempotencyKey: MeetingPollIdempotencyKey,
+      }),
+      output: MeetingPollLinkOutput,
+      annotations: { ...read, readOnlyHint: false },
+      ...privacy,
+      async run(args, call) {
+        const result = await createMeetingPoll(await admissionContext(call), args, {
+          source: 'mcp',
+        })
+        return meetingPollLinkOutput(result, publicUrl)
+      },
+    }),
+    defineTool({
+      name: 'invite_meeting_poll_voters',
+      title: 'Invite meeting poll voters',
+      description:
+        'Queue invitations for up to 40 supplied mailboxes while voting is open. Retain the random idempotencyKey. Returns an outcome for each supplied address. An exact retry reports current roster state and queues no mail. Requires full or bookings key scope.',
+      input: z.strictObject({
+        ...MeetingPollHostId.shape,
+        ...InviteMeetingPollVotersBody.shape,
+        idempotencyKey: MeetingPollIdempotencyKey,
+      }),
+      output: InviteMeetingPollVotersOutput,
+      annotations: invite,
+      ...privacy,
+      async run(args, call) {
+        return inviteMeetingPollVoters(await admissionContext(call), args)
+      },
+    }),
+    defineTool({
+      name: 'resend_meeting_poll_invitation',
+      title: 'Resend a meeting poll invitation',
+      description:
+        'Queue a fresh invitation for a retained invitee, revoking their previous voting credential. Use expectedHostRevision and retain a random idempotencyKey. Exact retries queue no mail. Cooldowns and send budgets apply. Requires full or bookings key scope.',
+      input: z.strictObject({
+        ...voterRevisionInput.shape,
+        idempotencyKey: MeetingPollIdempotencyKey,
+      }),
+      output: ResendMeetingPollInvitationOutput,
+      annotations: { ...invite, destructiveHint: true },
+      ...privacy,
+      async run(args, call) {
+        return resendMeetingPollInvitation(await admissionContext(call), args)
+      },
+    }),
+    defineTool({
+      name: 'remove_meeting_poll_voter',
+      title: 'Remove a meeting poll voter',
+      description:
+        'Remove a voter, their ballot and credentials using expectedHostRevision. Returns removed voter IDs and current revisions. Requires full or bookings key scope.',
+      input: voterRevisionInput,
+      output: MeetingPollRemovalOutput,
+      annotations: write,
+      ...privacy,
+      async run(args, call) {
+        return removeMeetingPollVoter(context(call.caller), args)
+      },
+    }),
+    defineTool({
+      name: 'remove_unverified_meeting_poll_voters',
+      title: 'Remove unverified public poll voters',
+      description:
+        'Remove unverified public-link enrollments using expectedHostRevision. Host invitations and abuse counters are preserved. Requires full or bookings key scope.',
+      input: revisionInput,
+      output: MeetingPollRemovalOutput,
+      annotations: write,
+      ...privacy,
+      async run(args, call) {
+        return removeUnverifiedMeetingPollVoters(context(call.caller), args)
+      },
+    }),
+    defineTool({
+      name: 'rotate_meeting_poll_link',
+      title: 'Rotate a meeting poll link',
+      description:
+        'Replace a public-link poll’s link using expectedHostRevision and a retained random idempotencyKey. The old link stops working immediately. Save the replacement link from this response. An exact retry returns poll_link_already_rotated. Invited polls return poll_link_unavailable. Requires full or bookings key scope.',
+      input: z.strictObject({
+        ...revisionInput.shape,
+        idempotencyKey: MeetingPollIdempotencyKey,
+      }),
+      output: MeetingPollLinkOutput,
+      annotations: write,
+      ...privacy,
+      async run(args, call) {
+        const result = await rotateMeetingPollLink(context(call.caller), args)
+        return meetingPollLinkOutput(result, publicUrl)
       },
     }),
   ]

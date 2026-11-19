@@ -8,6 +8,11 @@ stores durable delivery intents. The hourly email cleanup deletes admission rows
 than 48 hours in batches of up to 500. Admissions store an actor digest, including a
 server-keyed HMAC for a client's rate-limit address.
 
+Delivered series receipts record the exact ordinals in the calendar attachment.
+Ordinary invitations for series members record whether an attachment was delivered.
+Cancellations use that recipient's receipt evidence to choose which entries to attach.
+Dates with unknown attachment history on older receipts appear in the cancellation body.
+
 Single-occurrence moves retain the same `series_occurrence_id` on the successor.
 Member writes use the ordinary organization lock, then the series row and the booking
 row before the operation's existing host locks. Moves, cancellations and new or

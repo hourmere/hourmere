@@ -757,6 +757,21 @@ Zoom/Meet recurring meeting is introduced. Partial provider failure cannot roll 
 committed local series; show occurrence-specific repair/readiness state and use existing
 repair authorization without rebooking the successful occurrences.
 
+#### Synthetic calendar-client fixtures
+
+From the repository root after installing dependencies, run
+`node scripts/generate-series-calendar-fixtures.ts`. It prints the temporary directory
+containing the files. All addresses and links use a reserved `.invalid` domain.
+
+- In an empty test calendar, open `confirmation.ics`, `link-update.ics` and `single-move.ics`
+  in order. The confirmation contains 12 Mondays from January 7 through March 25, 2030,
+  from 10:00 to 10:30 UTC. January 14 and February 4 start with pending links. The update
+  adds those two links. The move shifts February 11 to 12:00–12:30 UTC.
+- In a second empty test calendar, open `tail-confirmation.ics`, then `tail-cancel.ics`.
+  The earlier snapshot has the first 11 Mondays. The cancellation affects March 11 and
+  March 18 in the calendar. The mail body in `tail-cancel.txt` also lists March 25 as
+  cancelled. March 25 should stay absent, and the first nine dates should stay unchanged.
+
 ## REST, MCP and CLI proposal
 
 All names below are proposed, not registered endpoints. Use `/api/v1`, shared scheduling

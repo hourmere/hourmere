@@ -3,9 +3,11 @@ import addressparser from 'nodemailer/lib/addressparser'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   brandEmail,
+  calendarSnapshotAttachment,
   createLogMailer,
   createSmtpMailer,
   escapeHtml,
+  type IcsEvent,
   icsAttachment,
   MailRejectedError,
   magicLinkEmail,
@@ -61,7 +63,7 @@ function mailboxHeader(raw: string, name: string) {
 
 const url = 'https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F'
 
-const invitation = icsAttachment({
+const invitationEvent: IcsEvent = {
   method: 'REQUEST',
   uid: 'booking-1@cal.example.com',
   sequence: 0,
@@ -71,7 +73,8 @@ const invitation = icsAttachment({
   summary: 'Intro call with Grace Hopper',
   organizer: { name: 'Grace Hopper', email: 'grace@example.com' },
   attendees: [{ name: 'Ada Lovelace', email: 'ada@example.com' }],
-})
+}
+const invitation = icsAttachment(invitationEvent)
 
 describe('magicLinkEmail', () => {
   it('widens Chinese instruction quotes without changing plain text or link attributes', () => {
@@ -561,6 +564,46 @@ describe('createSmtpMailer', () => {
       )
     },
   )
+
+  it('sends a calendar snapshot as a single file outside the body alternatives', async () => {
+    received.data = undefined
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    const { method: _, ...event } = invitationEvent
+    const attachment = calendarSnapshotAttachment([
+      { ...event, status: 'CONFIRMED' },
+      {
+        ...event,
+        uid: 'booking-2@cal.example.com',
+        start: event.start.add({ hours: 168 }),
+        end: event.end.add({ hours: 168 }),
+        status: 'CONFIRMED',
+      },
+    ])
+    await mailer.send({
+      to: 'ada@example.com',
+      subject: 'Confirmed series',
+      text: 'Booked two dates.',
+      html: '<p>Booked two dates.</p>',
+      attachments: [attachment],
+    })
+    const raw = received.data ?? ''
+    const message = mimePart(raw)
+    expect(message.type).toMatch(/^multipart\/mixed;/i)
+    expect(message.children).toHaveLength(2)
+    const [body, file] = message.children
+    expect(body?.type).toMatch(/^multipart\/alternative;/i)
+    expect(body?.children.map((part) => part.type.split(';')[0])).toEqual([
+      'text/plain',
+      'text/html',
+    ])
+    expect(file?.type).toMatch(/^text\/calendar;/i)
+    expect(file?.type).not.toMatch(/\bmethod=/i)
+    expect(file?.content.toString('utf8')).toBe(attachment.content)
+    expect(raw).toMatch(/Content-Disposition: attachment; filename=series\.ics/i)
+  })
 
   it.each([
     ['"Team, Calendar" <calendar@relay.selfhosted.example>', 'calendar@relay.selfhosted.example'],
