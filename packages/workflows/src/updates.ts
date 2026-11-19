@@ -101,6 +101,7 @@ export async function updateWorkflowDefinition(
       ? candidate
       : validateWorkflowDefinition(candidate, {
           owner,
+          followUpHostNotesEnabled: ctx.followUpHostNotesEnabled,
           webhooks: new Map(),
           eventTypes: new Map(
             events.map((event) => [

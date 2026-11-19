@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -16,6 +17,7 @@ import { type Config, loadConfig } from './config.ts'
 import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productionAppOptions, productionAuthOptions, productRoutes } from './server.ts'
 import { MAILBOX_PROOF_CONSUME_PATH, MAILBOX_PROOF_SEND_PATH } from './sso-mailbox-proof.ts'
+import { OIDC_CALLBACK_PATH, OIDC_SIGN_IN_PATH } from './sso-oidc-sign-in.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
@@ -76,13 +78,15 @@ function expectNoSsoRoutes(paths: string[]) {
 }
 
 // The SSO auth-protocol endpoints that are built and mounted while hard-off, because each must
-// answer `404 sso_disabled` itself (docs/sso.md, Hard-off behaviour): today only the Mailbox
-// proof pair. They are exempt by exact path from the production route inventory and the source
+// answer `404 sso_disabled` itself (docs/sso.md, Hard-off behaviour). The Mailbox proof and
+// OIDC sign-in paths are exempt by exact path from the production route inventory and the source
 // literals only, and only because the suite below proves that each answers
 // `404 {"error":"sso_disabled"}` in the app production assembles, before any other check.
 const GUARDED_SSO_AUTH_PATHS = [
   '/api/auth/sso/mailbox-proof/send',
   '/api/auth/sso/mailbox-proof/consume',
+  '/api/auth/sign-in/sso',
+  '/api/auth/sso/callback/:providerId',
 ] as const
 
 const GUARDED_SSO_READS = [
@@ -167,6 +171,8 @@ const productionEnv = {
   DATABASE_URL: 'postgres://catalogue@127.0.0.1:9/catalogue',
   SSO_OIDC_ENABLED: 'true',
   SSO_SAML_ENABLED: 'true',
+  SSO_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+  SSO_PRIVATE_TARGETS: 'idp.internal:8443',
   BETTER_AUTH_SECRET: 'catalogue-test-only-secret-at-least-32-characters',
   PUBLIC_URL: 'http://localhost',
   MCP_OAUTH_ENABLED: 'true',
@@ -534,13 +540,16 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     )
   })
 
-  it('exempts exactly the guarded mailbox proof endpoints and nothing else', () => {
+  it('exempts exactly the guarded SSO auth-protocol endpoints and nothing else', () => {
     const rejects = (check: () => void) =>
       expect(check).toThrow(expect.objectContaining({ name: 'AssertionError' }))
     // The exemption is the endpoints' own published paths, nothing broader.
-    expect([MAILBOX_PROOF_SEND_PATH, MAILBOX_PROOF_CONSUME_PATH]).toEqual([
-      ...GUARDED_SSO_AUTH_PATHS,
-    ])
+    expect([
+      MAILBOX_PROOF_SEND_PATH,
+      MAILBOX_PROOF_CONSUME_PATH,
+      OIDC_SIGN_IN_PATH,
+      OIDC_CALLBACK_PATH,
+    ]).toEqual([...GUARDED_SSO_AUTH_PATHS])
     expectNoUnguardedSsoRoutes([...GUARDED_SSO_AUTH_PATHS])
     // The ordinary rule is unchanged: the same paths fail every other check.
     for (const path of GUARDED_SSO_AUTH_PATHS) {
@@ -556,6 +565,11 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       '/api/auth/sso/mailbox-proof',
       '/api/auth/sso/mailbox-proof/*',
       '/api/auth/sso/mailbox-proof/resend',
+      '/api/auth/sign-in/sso/',
+      '/api/auth/sso/callback',
+      '/api/auth/sso/callback/*',
+      '/api/auth/sso/callback/:providerId/complete',
+      '/api/auth/sso/oidc/complete',
       '/api/auth/sso/*',
       '/api/v1/sso/mailbox-proof/send',
       '/sso/mailbox-proof/consume',
@@ -582,13 +596,19 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
             { origin: 'http://localhost', 'content-type': 'application/json' },
             { origin: 'https://attacker.example', authorization: 'Bearer hm_x', cookie: 'a=b' },
           ])
-            for (const attemptId of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id']) {
-              const response = await app.request(path, {
+            for (const id of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id']) {
+              const requestPath =
+                path === OIDC_CALLBACK_PATH
+                  ? `${path.replace(':providerId', id)}?state=synthetic&code=synthetic`
+                  : path
+              const body =
+                path === OIDC_SIGN_IN_PATH
+                  ? { providerId: id, intent: 'sign_in' }
+                  : { attemptId: id, token: 'synthetic' }
+              const response = await app.request(requestPath, {
                 method,
                 headers,
-                ...(method === 'GET'
-                  ? {}
-                  : { body: JSON.stringify({ attemptId, token: 'synthetic' }) }),
+                ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
               })
               expect(response.status, `${method} ${path}`).toBe(404)
               expect(await response.json()).toEqual({ error: 'sso_disabled' })

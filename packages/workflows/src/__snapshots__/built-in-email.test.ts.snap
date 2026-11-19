@@ -1,0 +1,301 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`workflow email built-ins (de) > renders the after_end subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hallo Ada Lovelace,<br>der für Ihren Termin „Planning &amp; Design“ vorgesehene Zeitraum ist abgelaufen.<br>20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Nachricht zu Ihrem Termin: Planning & Design",
+  "text": "Hallo Ada Lovelace,
+der für Ihren Termin „Planning & Design“ vorgesehene Zeitraum ist abgelaufen.
+20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (de) > renders the before_start subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hallo Ada Lovelace,<br>Ihr Termin „Planning &amp; Design“ beginnt bald.<br>20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Erinnerung an Ihren Termin: Planning & Design",
+  "text": "Hallo Ada Lovelace,
+Ihr Termin „Planning & Design“ beginnt bald.
+20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (de) > renders the booking.cancelled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hallo Ada Lovelace,<br>Ihr Termin „Planning &amp; Design“ wurde storniert.<br>20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Termin storniert: Planning & Design",
+  "text": "Hallo Ada Lovelace,
+Ihr Termin „Planning & Design“ wurde storniert.
+20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (de) > renders the booking.created subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hallo Ada Lovelace,<br>Ihr Termin „Planning &amp; Design“ ist bestätigt.<br>20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Termin bestätigt: Planning & Design",
+  "text": "Hallo Ada Lovelace,
+Ihr Termin „Planning & Design“ ist bestätigt.
+20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (de) > renders the booking.rescheduled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hallo Ada Lovelace,<br>Ihr Termin „Planning &amp; Design“ wurde verschoben.<br>20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Termin verschoben: Planning & Design",
+  "text": "Hallo Ada Lovelace,
+Ihr Termin „Planning & Design“ wurde verschoben.
+20.11.2026, 10:00 – 20.11.2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (en) > renders the after_end subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hello Ada Lovelace,<br>The scheduled time for “Planning &amp; Design” has ended.<br>Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)</p>",
+  "subject": "Booking follow-up: Planning & Design",
+  "text": "Hello Ada Lovelace,
+The scheduled time for “Planning & Design” has ended.
+Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (en) > renders the before_start subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hello Ada Lovelace,<br>Your booking for Planning &amp; Design starts soon.<br>Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)</p>",
+  "subject": "Upcoming booking: Planning & Design",
+  "text": "Hello Ada Lovelace,
+Your booking for Planning & Design starts soon.
+Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (en) > renders the booking.cancelled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hello Ada Lovelace,<br>Your booking for Planning &amp; Design was cancelled.<br>Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)</p>",
+  "subject": "Booking cancelled: Planning & Design",
+  "text": "Hello Ada Lovelace,
+Your booking for Planning & Design was cancelled.
+Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (en) > renders the booking.created subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hello Ada Lovelace,<br>Your booking for Planning &amp; Design is confirmed.<br>Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)</p>",
+  "subject": "Booking confirmed: Planning & Design",
+  "text": "Hello Ada Lovelace,
+Your booking for Planning & Design is confirmed.
+Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (en) > renders the booking.rescheduled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hello Ada Lovelace,<br>Your booking for Planning &amp; Design was rescheduled.<br>Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)</p>",
+  "subject": "Booking rescheduled: Planning & Design",
+  "text": "Hello Ada Lovelace,
+Your booking for Planning & Design was rescheduled.
+Nov 20, 2026, 10:00 AM – Nov 20, 2026, 10:30 AM (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (es) > renders the after_end subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hola, Ada Lovelace:<br>El horario programado para su reunión «Planning &amp; Design» ha finalizado.<br>20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Seguimiento de su reunión: Planning & Design",
+  "text": "Hola, Ada Lovelace:
+El horario programado para su reunión «Planning & Design» ha finalizado.
+20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (es) > renders the before_start subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hola, Ada Lovelace:<br>Su reunión «Planning &amp; Design» se celebrará pronto.<br>20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Recordatorio: Planning & Design",
+  "text": "Hola, Ada Lovelace:
+Su reunión «Planning & Design» se celebrará pronto.
+20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (es) > renders the booking.cancelled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hola, Ada Lovelace:<br>Su reunión «Planning &amp; Design» se ha cancelado.<br>20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Cancelación: Planning & Design",
+  "text": "Hola, Ada Lovelace:
+Su reunión «Planning & Design» se ha cancelado.
+20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (es) > renders the booking.created subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hola, Ada Lovelace:<br>Su reunión «Planning &amp; Design» está confirmada.<br>20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Confirmación: Planning & Design",
+  "text": "Hola, Ada Lovelace:
+Su reunión «Planning & Design» está confirmada.
+20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (es) > renders the booking.rescheduled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Hola, Ada Lovelace:<br>Su reunión «Planning &amp; Design» se ha reprogramado.<br>20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Reprogramación: Planning & Design",
+  "text": "Hola, Ada Lovelace:
+Su reunión «Planning & Design» se ha reprogramado.
+20 nov 2026, 10:00 – 20 nov 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (fr) > renders the after_end subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Bonjour Ada Lovelace,<br>Le créneau prévu pour votre réunion « Planning &amp; Design » est terminé.<br>20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Suivi de votre réunion : Planning & Design",
+  "text": "Bonjour Ada Lovelace,
+Le créneau prévu pour votre réunion « Planning & Design » est terminé.
+20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (fr) > renders the before_start subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Bonjour Ada Lovelace,<br>Votre réunion « Planning &amp; Design » commence bientôt.<br>20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Rappel : Planning & Design",
+  "text": "Bonjour Ada Lovelace,
+Votre réunion « Planning & Design » commence bientôt.
+20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (fr) > renders the booking.cancelled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Bonjour Ada Lovelace,<br>Votre réunion « Planning &amp; Design » a été annulée.<br>20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Annulation : Planning & Design",
+  "text": "Bonjour Ada Lovelace,
+Votre réunion « Planning & Design » a été annulée.
+20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (fr) > renders the booking.created subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Bonjour Ada Lovelace,<br>Votre réunion « Planning &amp; Design » est confirmée.<br>20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Confirmation : Planning & Design",
+  "text": "Bonjour Ada Lovelace,
+Votre réunion « Planning & Design » est confirmée.
+20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (fr) > renders the booking.rescheduled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Bonjour Ada Lovelace,<br>Votre réunion « Planning &amp; Design » a été replanifiée.<br>20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Replanification : Planning & Design",
+  "text": "Bonjour Ada Lovelace,
+Votre réunion « Planning & Design » a été replanifiée.
+20 nov. 2026, 10:00 – 20 nov. 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (pt-BR) > renders the after_end subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Olá, Ada Lovelace!<br>O horário agendado para sua reunião “Planning &amp; Design” terminou.<br>20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Acompanhamento da sua reunião: Planning & Design",
+  "text": "Olá, Ada Lovelace!
+O horário agendado para sua reunião “Planning & Design” terminou.
+20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (pt-BR) > renders the before_start subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Olá, Ada Lovelace!<br>Sua reunião “Planning &amp; Design” começa em breve.<br>20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Lembrete: Planning & Design",
+  "text": "Olá, Ada Lovelace!
+Sua reunião “Planning & Design” começa em breve.
+20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (pt-BR) > renders the booking.cancelled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Olá, Ada Lovelace!<br>Sua reunião “Planning &amp; Design” foi cancelada.<br>20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Reunião cancelada: Planning & Design",
+  "text": "Olá, Ada Lovelace!
+Sua reunião “Planning & Design” foi cancelada.
+20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (pt-BR) > renders the booking.created subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Olá, Ada Lovelace!<br>Sua reunião “Planning &amp; Design” está confirmada.<br>20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Reunião confirmada: Planning & Design",
+  "text": "Olá, Ada Lovelace!
+Sua reunião “Planning & Design” está confirmada.
+20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (pt-BR) > renders the booking.rescheduled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Olá, Ada Lovelace!<br>Sua reunião “Planning &amp; Design” foi reagendada.<br>20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)</p>",
+  "subject": "Reunião reagendada: Planning & Design",
+  "text": "Olá, Ada Lovelace!
+Sua reunião “Planning & Design” foi reagendada.
+20 de nov. de 2026, 10:00 – 20 de nov. de 2026, 10:30 (Europe/Berlin)",
+}
+`;
+
+exports[`workflow email built-ins (zh-CN) > renders the after_end subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Ada Lovelace，您好：<br>“Planning &amp; Design”的预约时段已结束。<br>2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）</p>",
+  "subject": "预约后续：Planning & Design",
+  "text": "Ada Lovelace，您好：
+“Planning & Design”的预约时段已结束。
+2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）",
+}
+`;
+
+exports[`workflow email built-ins (zh-CN) > renders the before_start subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Ada Lovelace，您好：<br>您的“Planning &amp; Design”预约即将开始。<br>2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）</p>",
+  "subject": "预约即将开始：Planning & Design",
+  "text": "Ada Lovelace，您好：
+您的“Planning & Design”预约即将开始。
+2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）",
+}
+`;
+
+exports[`workflow email built-ins (zh-CN) > renders the booking.cancelled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Ada Lovelace，您好：<br>您的“Planning &amp; Design”预约已取消。<br>2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）</p>",
+  "subject": "预约已取消：Planning & Design",
+  "text": "Ada Lovelace，您好：
+您的“Planning & Design”预约已取消。
+2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）",
+}
+`;
+
+exports[`workflow email built-ins (zh-CN) > renders the booking.created subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Ada Lovelace，您好：<br>您的“Planning &amp; Design”预约已确认。<br>2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）</p>",
+  "subject": "预约已确认：Planning & Design",
+  "text": "Ada Lovelace，您好：
+您的“Planning & Design”预约已确认。
+2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）",
+}
+`;
+
+exports[`workflow email built-ins (zh-CN) > renders the booking.rescheduled subject, plain text and HTML 1`] = `
+{
+  "html": "<p>Ada Lovelace，您好：<br>您的“Planning &amp; Design”预约已改期。<br>2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）</p>",
+  "subject": "预约已改期：Planning & Design",
+  "text": "Ada Lovelace，您好：
+您的“Planning & Design”预约已改期。
+2026年11月20日 10:00 – 2026年11月20日 10:30（Europe/Berlin）",
+}
+`;
