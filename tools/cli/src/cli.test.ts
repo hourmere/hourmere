@@ -819,6 +819,42 @@ describe('CLI transport and arguments', () => {
     },
   )
 
+  it.each([
+    ['stdin', false],
+    ['a file', true],
+  ] as const)('forwards a workflow preview body from %s', async (_source, file) => {
+    const input = {
+      owner: { kind: 'personal', id: '019a0000-0000-7000-8000-000000000001' },
+      name: 'Follow up',
+      scope: { type: 'all_event_types' },
+      trigger: { type: 'after_end', offsetMinutes: 10 },
+      actions: [{ type: 'email', recipients: ['booker'] }],
+      example: { locale: 'zh-CN' },
+    }
+    const path = file ? join(await dir(), 'workflow-preview.json') : '-'
+    if (file) await writeFile(path, JSON.stringify(input))
+
+    const preview = {
+      synthetic: true,
+      match: 'matched',
+      emails: [],
+      estimates: { emailRecipientClasses: 1, webhookDeliveriesPerMatch: 0 },
+    }
+    const fetcher = vi.fn<typeof fetch>(async () => response(preview))
+    const result = await run(['workflows', 'preview', '--input', path], file ? undefined : input, {
+      fetch: fetcher,
+    })
+
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(JSON.parse(result.stdout)).toEqual(preview)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+      name: 'preview_workflow',
+      arguments: input,
+    })
+  })
+
   it.each([[], ['--help']].map((argv) => ({ argv })))(
     'shows help without credentials or network',
     async ({ argv }) => {

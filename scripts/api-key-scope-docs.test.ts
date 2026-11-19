@@ -252,6 +252,14 @@ describe('published API key scope tables', () => {
     },
   )
 
+  it.each(documents)('$path lists workflow preview as full-scope only', ({ document, section }) => {
+    expect(document).toContain('| `preview_workflow` | — | `workflows preview` | `full` |')
+    if (section === 'all')
+      expect(document).toContain(
+        '| `POST /api/v1/workflows/preview` | Session or API key | `full` |',
+      )
+  })
+
   it.each(documents)(
     '$path lists optional-key public routing metadata and submission',
     ({ document, section }) => {

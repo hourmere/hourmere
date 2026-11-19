@@ -5361,6 +5361,26 @@ export interface paths {
         patch: operations["updateWorkflow"];
         trace?: never;
     };
+    "/api/v1/workflows/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a booking workflow with synthetic data
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
+         */
+        post: operations["previewWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8865,6 +8885,37 @@ export interface components {
             data: components["schemas"]["Workflow"][];
             /** @description Pass as `cursor`, with the same owner, for the next page; null on the last page */
             nextCursor: string | null;
+        };
+        WorkflowPreview: {
+            emails: {
+                /** @enum {string} */
+                contentSource: "custom" | "built_in";
+                /** @enum {string} */
+                fallback?: "host_text_disabled" | "missing_translation";
+                html: string;
+                locale: string;
+                /** @enum {string} */
+                recipientClass: "booker" | "guests" | "hosts";
+                subject: string;
+                templateLocale: string;
+                text: string;
+            }[];
+            estimates: {
+                emailRecipientClasses: number;
+                mailLimits?: {
+                    /** @description Published default workflow mail cap */
+                    defaultInstancePerHour: number;
+                    /** @description Published default per-owner mail cap */
+                    defaultOwnerPerHour: number;
+                    recipientPerDay: number;
+                    recipientPerHour: number;
+                };
+                webhookDeliveriesPerMatch: number;
+            };
+            /** @enum {string} */
+            match: "matched" | "scope_mismatch" | "condition_false";
+            /** @enum {boolean} */
+            synthetic: true;
         };
         /** @description One of the owner's event types, or all of its current and future event types */
         WorkflowScope: {
@@ -20019,6 +20070,220 @@ export interface operations {
                 };
             };
             /** @description workflow_revision_conflict, workflow_limit_reached or organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewWorkflow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for session requests: the organization where the action opened. Ignored for API keys. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    actions: ({
+                        content?: {
+                            de?: {
+                                body: string;
+                                subject: string;
+                            };
+                            en?: {
+                                body: string;
+                                subject: string;
+                            };
+                            es?: {
+                                body: string;
+                                subject: string;
+                            };
+                            fr?: {
+                                body: string;
+                                subject: string;
+                            };
+                            "pt-BR"?: {
+                                body: string;
+                                subject: string;
+                            };
+                            "zh-CN"?: {
+                                body: string;
+                                subject: string;
+                            };
+                        };
+                        recipients: ("booker" | "guests" | "hosts")[];
+                        /** @enum {string} */
+                        type: "email";
+                    } | {
+                        /** @enum {string} */
+                        type: "webhook";
+                        webhookId: string;
+                    })[];
+                    /** @default [] */
+                    conditions?: ({
+                        /** @enum {string} */
+                        field: "event_type";
+                        /** @enum {string} */
+                        operator: "equals";
+                        value: string;
+                    } | {
+                        /** @enum {string} */
+                        field: "booking_source";
+                        /** @enum {string} */
+                        operator: "equals";
+                        /** @enum {string} */
+                        value: "web" | "embed" | "api" | "mcp";
+                    } | {
+                        /** @enum {string} */
+                        field: "answer";
+                        /** @enum {string} */
+                        operator: "equals";
+                        questionId: string;
+                        value: string | boolean;
+                    } | {
+                        /** @enum {string} */
+                        field: "location_kind";
+                        /** @enum {string} */
+                        operator: "equals";
+                        /** @enum {string} */
+                        value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    } | {
+                        /** @enum {string} */
+                        field: "guest_count";
+                        /** @enum {string} */
+                        operator: "equals" | "at_least" | "at_most";
+                        value: number;
+                    })[];
+                    /** @default false */
+                    enabled?: boolean;
+                    /** @description Synthetic values used for matching and rendering */
+                    example?: {
+                        answers?: {
+                            [key: string]: string | boolean | number | null;
+                        };
+                        /** Format: date-time */
+                        end?: string;
+                        eventTitle?: string;
+                        /** @description Example event type identifier used only for matching */
+                        eventTypeId?: string;
+                        guestCount?: number;
+                        locale?: string;
+                        /** @enum {string|null} */
+                        locationKind?: "google_meet" | "zoom" | "phone" | "in_person" | "link" | null;
+                        publicPath?: string;
+                        recipientName?: string;
+                        /** @enum {string} */
+                        source?: "web" | "embed" | "api" | "mcp";
+                        /** Format: date-time */
+                        start?: string;
+                        timeZone?: string;
+                    };
+                    name: string;
+                    owner: {
+                        id: string;
+                        /** @enum {string} */
+                        kind: "personal" | "team";
+                    };
+                    scope: {
+                        /** @enum {string} */
+                        type: "all_event_types";
+                    } | {
+                        eventTypeId: string;
+                        /** @enum {string} */
+                        type: "event_type";
+                    };
+                    trigger: {
+                        /** @default 0 */
+                        delayMinutes?: number;
+                        /** @enum {string} */
+                        type: "booking.created";
+                    } | {
+                        /** @default 0 */
+                        delayMinutes?: number;
+                        /** @enum {string} */
+                        type: "booking.cancelled";
+                    } | {
+                        /** @default 0 */
+                        delayMinutes?: number;
+                        /** @enum {string} */
+                        type: "booking.rescheduled";
+                    } | {
+                        offsetMinutes: number;
+                        /** @enum {string} */
+                        type: "before_start";
+                    } | {
+                        offsetMinutes: number;
+                        /** @enum {string} */
+                        type: "after_end";
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Synthetic workflow preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowPreview"];
+                };
+            };
+            /** @description invalid_request, invalid_workflow or render_limit */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description insufficient_scope or cross-origin session write. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled or workflow_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
             409: {
                 headers: {
                     [name: string]: unknown;

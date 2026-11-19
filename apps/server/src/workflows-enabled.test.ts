@@ -33,7 +33,7 @@ import { mcpEndpoint } from './mcp/endpoint.ts'
 import { workflowTools } from './mcp/workflows.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
-import { Workflow, WorkflowPage, workflowRoutes } from './routes/workflows.ts'
+import { Workflow, WorkflowPage, WorkflowPreview, workflowRoutes } from './routes/workflows.ts'
 
 // The enabled build's guards, for this file only: every operation runs its service.
 vi.mock('../../../packages/workflows/src/hard-off.ts', () => ({
@@ -219,7 +219,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     ).toEqual({ details: { events } })
   })
 
-  it('forwards the host-text switch through REST and MCP create/update', async () => {
+  it('forwards the host-text switch through REST and MCP create, update and preview', async () => {
     const user = await createTestUser(db)
     const token = bearer(user, 'full')
     for (const followUpHostNotesEnabled of [true, false]) {
@@ -266,9 +266,19 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         body: JSON.stringify({ expectedRevision: 1, actions }),
       })
       expect(updated.status).toBe(followUpHostNotesEnabled ? 200 : 400)
+      const { idempotencyKey: _key, ...draft } = builtin
+      const previewed = await testApp.request('/api/v1/workflows/preview', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...draft, actions }),
+      })
+      expect(previewed.status).toBe(followUpHostNotesEnabled ? 200 : 400)
+      if (!followUpHostNotesEnabled)
+        expect(await previewed.json()).toMatchObject({ error: 'invalid_workflow' })
       for (const [name, args] of [
         ['create_workflow', { ...builtin, idempotencyKey: randomUUID(), actions }],
         ['update_workflow', { id, expectedRevision: followUpHostNotesEnabled ? 2 : 1, actions }],
+        ['preview_workflow', { ...draft, actions }],
       ] as const) {
         const response = await testApp.request('/mcp', {
           method: 'POST',
@@ -318,6 +328,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
               'create_workflow',
               'update_workflow',
               'delete_workflow',
+              'preview_workflow',
               'list_workflows',
               'get_workflow',
             ]
@@ -466,6 +477,78 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify(input),
     })
+
+  const previewInput = (selected = { kind: 'personal', id: owner.id }) => ({
+    owner: selected,
+    name: 'Example workflow',
+    scope: { type: 'all_event_types' },
+    trigger: { type: 'booking.created' },
+    actions: [
+      {
+        type: 'email',
+        recipients: ['booker'],
+        content: { en: { subject: 'Hello', body: '<Hi>' } },
+      },
+    ],
+  })
+  const preview = (token: string, input: object) =>
+    app.request('/api/v1/workflows/preview', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+  const previewTool = (token: string, input: object) =>
+    mcp(token, 'tools/call', { name: 'preview_workflow', arguments: input })
+
+  it('returns the same synthetic preview over REST, MCP and CLI for personal and team owners', async () => {
+    for (const [token, input] of [
+      [bearer(owner, 'full'), previewInput()],
+      [bearer(admin, 'full', team), previewInput({ kind: 'team', id: team.id })],
+    ] as const) {
+      const response = await preview(token, input)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      const body = await response.json()
+      expect(WorkflowPreview.parse(body)).toEqual(body)
+      expect(body).toMatchObject({
+        synthetic: true,
+        match: 'matched',
+        emails: [{ text: '<Hi>', html: '<p>&lt;Hi&gt;</p>' }],
+      })
+      const result = await previewTool(token, input)
+      expect(result.isError).not.toBe(true)
+      expect(result.structuredContent).toEqual(body)
+      const command = await cli(token, ['workflows', 'preview'], input)
+      expect(command.code).toBe(0)
+      expect(JSON.parse(command.stdout)).toEqual(body)
+    }
+  })
+
+  it('keeps scope, owner and booking-ID refusals consistent across preview transports', async () => {
+    const full = bearer(owner, 'full')
+    for (const [token, input, status, error] of [
+      [bearer(owner, 'read'), previewInput(), 403, 'insufficient_scope'],
+      [bearer(owner, 'bookings'), previewInput(), 403, 'insufficient_scope'],
+      [
+        bearer(member, 'full', team),
+        previewInput({ kind: 'team', id: team.id }),
+        404,
+        'workflow_not_found',
+      ],
+      [full, previewInput({ kind: 'team', id: team.id }), 404, 'workflow_not_found'],
+      [full, previewInput({ kind: 'personal', id: outsider.id }), 404, 'workflow_not_found'],
+      [full, { ...previewInput(), bookingId: randomUUID() }, 400, 'invalid_request'],
+      [full, { ...previewInput(), example: { bookingId: randomUUID() } }, 400, 'invalid_request'],
+    ] as const) {
+      const response = await preview(token, input)
+      expect(response.status).toBe(status)
+      expect(await response.json()).toMatchObject({ error })
+      expect(toolError(await previewTool(token, input))).toMatchObject({ error })
+      const command = await cli(token, ['workflows', 'preview'], input)
+      expect(command.code).toBe(1)
+      expect(JSON.parse(command.stderr)).toMatchObject({ error })
+    }
+  })
 
   it('creates and replays one definition over REST, MCP and CLI', async () => {
     const token = bearer(owner, 'full')
@@ -750,7 +833,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     expect(await db.selectFrom('workflow_definitions').select('id').execute()).toEqual(before)
   })
 
-  it('binds browser creation to its live session context while keeping owner refusals opaque', async () => {
+  it('binds browser workflow requests to the live session context with opaque owner refusals', async () => {
     async function session(user: TestUser, acting?: TestTeam) {
       const base = acting ? acting.as(user) : user.principal
       const token = randomUUID()
@@ -768,8 +851,13 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       tokens.set(token, { ...base, kind: 'session', sessionId: row.id })
       return { token, id: row.id }
     }
-    const browserPost = (token: string, input: object, expected?: string) =>
-      app.request('/api/v1/workflows', {
+    const browserPost = (
+      token: string,
+      input: object,
+      expected?: string,
+      path = '/api/v1/workflows',
+    ) =>
+      app.request(path, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${token}`,
@@ -780,9 +868,12 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         body: JSON.stringify(input),
       })
     const personal = await session(owner)
+    const browserPreview = (expected?: string) =>
+      browserPost(personal.token, previewInput(), expected, '/api/v1/workflows/preview')
     expect(
       (await browserPost(personal.token, createInput(), owner.principal.organization.id)).status,
     ).toBe(201)
+    expect((await browserPreview(owner.principal.organization.id)).status).toBe(200)
     for (const user of [owner, admin]) {
       const current = await session(user, team)
       const input = { ...createInput(), owner: { kind: 'team', id: team.id } }
@@ -835,6 +926,9 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     const stale = await browserPost(personal.token, createInput(), owner.principal.organization.id)
     expect(stale.status).toBe(409)
     expect(await stale.json()).toMatchObject({ error: 'organization_context_changed' })
+    const stalePreview = await browserPreview(owner.principal.organization.id)
+    expect(stalePreview.status).toBe(409)
+    expect(await stalePreview.json()).toMatchObject({ error: 'organization_context_changed' })
     const staleUpdate = await app.request(`/api/v1/workflows/${workflow.personal}`, {
       method: 'PATCH',
       headers: {

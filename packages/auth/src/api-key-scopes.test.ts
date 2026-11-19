@@ -168,6 +168,7 @@ const restContract = {
     'PATCH /api/v1/workflows/{id}',
     'DELETE /api/v1/workflows/{id}',
     'POST /api/v1/workflows',
+    'POST /api/v1/workflows/preview',
     'PUT /api/v1/audit-log/settings',
     'PATCH /api/v1/branding',
     'POST /api/v1/branding/logo',
@@ -468,6 +469,7 @@ describe('shared API-key scope policy', () => {
     const expected = {
       full: [
         'delete_workflow',
+        'preview_workflow',
         'list_routing_forms',
         'get_routing_form',
         'create_routing_form',

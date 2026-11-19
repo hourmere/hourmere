@@ -817,6 +817,26 @@ synthetic example values, returns rendered text and escaped HTML, matched/skippe
 and static budget estimates derived only from the candidate and published limits; never
 instance-wide or other-owner usage. It performs no email or webhook call. No write sends immediately.
 
+Step 15a accepts the candidate fields at the top level with `owner` and an optional strict
+`example` object. Use `eventTitle`, `publicPath`, `start` and `end` (ISO instants),
+`recipientName`, `locale` and `timeZone` to change rendering. Use `eventTypeId`, `source`,
+`locationKind`, `guestCount` and scalar `answers` to exercise predicates. The example ID is
+only a value for matching. The default uses the scoped event type or first event-type
+condition when supplied, with fixed sample text, English, UTC, a 30-minute appointment,
+web source, zero guests and empty answers.
+
+The response marks the sample `synthetic: true` and reports `matched`, `scope_mismatch`
+or `condition_false`. Email actions render one sample per recipient class, including when
+the example skips, and report the selected template locale and any fallback. Webhook
+actions return their per-match delivery estimate. Email estimates report the selected
+class count and published default mail caps. The only database reads authorize the owner
+and validate the candidate’s event-type and webhook configuration.
+
+中文：预览接收明确的 `owner`、候选定义字段和可选的 `example`。示例可替换预约时间、
+收件人名称、语言、时区和条件值。响应包含合成示例的匹配结果、每类收件人的纯文本与转义
+HTML、语言回退和静态额度估计。预览只读取权限及候选定义引用的配置。功能仍硬关闭，
+三个接口统一返回 `workflows_disabled`，MCP 工具列表隐藏预览。
+
 Step 4 settles the read representation and refusals. A definition reads as `id`, `owner`
 (`{kind, id}`: the user for a personal owner, the team organization for a team), the current
 `revision`, the live `enabled` flag, the current revision's `name`, `scope`, `trigger`,

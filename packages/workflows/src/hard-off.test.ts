@@ -15,6 +15,7 @@ import { hardOffWorkflowAuditPort } from './audit.ts'
 import { CreateWorkflowInputSchema, createWorkflow } from './creates.ts'
 import { DeleteWorkflowInputSchema, deleteWorkflow } from './deletes.ts'
 import * as hardOff from './hard-off.ts'
+import { PreviewWorkflowInputSchema, previewWorkflow, WorkflowPreviewSchema } from './preview.ts'
 import { UpdateWorkflowInputSchema, updateWorkflow } from './updates.ts'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
@@ -27,6 +28,7 @@ const PACKAGE_EXPORTS = [
   'CreateWorkflowInputSchema',
   'DeleteWorkflowInputSchema',
   'PERSONAL_ONLY_CONDITION_FIELDS',
+  'PreviewWorkflowInputSchema',
   'UpdateWorkflowInputSchema',
   'WORKFLOWS_IMPLEMENTED',
   'WORKFLOW_ANSWER_CONDITION_QUESTION_TYPES',
@@ -62,6 +64,7 @@ const PACKAGE_EXPORTS = [
   'WorkflowConditionsSchema',
   'WorkflowDefinitionSchema',
   'WorkflowOwnerSelectorSchema',
+  'WorkflowPreviewSchema',
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
   // Definition creation is workflowOperation-wrapped, so off while hard-off.
@@ -83,6 +86,7 @@ const PACKAGE_EXPORTS = [
   'ownsEventType',
   'ownsWebhook',
   'parseWorkflowDefinition',
+  'previewWorkflow',
   // Pure rendering has no delivery or other side effects.
   'renderWorkflowEmail',
   'repairWorkflowWakes',
@@ -288,6 +292,9 @@ describe('workflow hard-off', () => {
     expect(workflows.UpdateWorkflowInputSchema).toBe(UpdateWorkflowInputSchema)
     expect(workflows.deleteWorkflow).toBe(deleteWorkflow)
     expect(workflows.DeleteWorkflowInputSchema).toBe(DeleteWorkflowInputSchema)
+    expect(workflows.previewWorkflow).toBe(previewWorkflow)
+    expect(workflows.PreviewWorkflowInputSchema).toBe(PreviewWorkflowInputSchema)
+    expect(workflows.WorkflowPreviewSchema).toBe(WorkflowPreviewSchema)
   })
 
   it('exports the constant and its guards only, with no way to change them', () => {
@@ -471,6 +478,7 @@ describe('workflow hard-off', () => {
     // These imports stay confined to the writers; hard-off.ts keeps its existing pin.
     const writeImports = new Set(['@hourmere/auth', '@hourmere/db/team-write', 'kysely'])
     const creationImports = new Set(['node:crypto', ...writeImports])
+    const previewImports = new Set(['@hourmere/auth', '@hourmere/core'])
     const dispatcherImports = new Set(['node:crypto', 'kysely', '@hourmere/jobs'])
     // The renderer reads static notification catalogues and text helpers without the mailer.
     const emailImports = new Set(['@hourmere/mail/catalogue', '@hourmere/mail/text'])
@@ -509,6 +517,7 @@ describe('workflow hard-off', () => {
               file === 'packages/workflows/src/dispatcher.ts' && dispatcherImports.has(specifier)
             ) &&
             !(file === 'packages/workflows/src/deletes.ts' && writeImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/preview.ts' && previewImports.has(specifier)) &&
             !(file === 'packages/workflows/src/email.ts' && emailImports.has(specifier)) &&
             !(
               file === 'packages/workflows/src/email-attempt.ts' &&
