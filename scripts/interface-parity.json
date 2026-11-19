@@ -243,6 +243,14 @@
     "mcp": "test_slack_destination",
     "cli": "slack test"
   },
+  "discoverCalDavConnection": {
+    "exemption": "browser-session-only",
+    "reason": "Provider credential discovery requires the owner’s live browser session; agent tools never accept passwords."
+  },
+  "saveCalDavConnection": {
+    "exemption": "browser-session-only",
+    "reason": "Installing or replacing provider credentials requires the owner’s live browser session."
+  },
   "readMeetingPoll": {
     "mcp": "read_meeting_poll",
     "cli": "polls view"

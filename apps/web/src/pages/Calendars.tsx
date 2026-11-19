@@ -15,6 +15,7 @@ import { msg, type UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
 import { zoneName } from '../public/time.ts'
 import { leavesPage } from '../unsaved-changes.tsx'
+import { CalDavConnect } from './CalDavConnect.tsx'
 
 type Connection = Schemas['CalendarConnection']
 const load = async (signal: AbortSignal) => {
@@ -55,7 +56,11 @@ const outcomes = {
   session_required: 'Sign in again, then start a new calendar connection.',
 } as const
 const providerName = (connection: Connection) =>
-  connection.provider === 'microsoft' ? 'Microsoft' : 'Google'
+  connection.provider === 'caldav'
+    ? 'CalDAV'
+    : connection.provider === 'microsoft'
+      ? 'Microsoft'
+      : 'Google'
 const needsReconnect = (connection: Connection) =>
   connection.status !== 'active' ||
   connection.lastError === 'needs_reauth' ||
@@ -90,7 +95,10 @@ const syncSummary = (connection: Connection, googleEnabled: boolean): UiText => 
   if (connection.status !== 'active') return 'Paused until you reconnect this account.'
   if (!googleEnabled) return 'Unavailable on this instance.'
   const selected = connection.calendars.filter((calendar) => calendar.checkConflicts)
-  if (selected.some((calendar) => calendar.syncError))
+  if (
+    (connection.provider === 'caldav' && connection.lastError) ||
+    selected.some((calendar) => calendar.syncError || calendar.available === false)
+  )
     return 'Synchronization needs attention. Review the failed calendars below.'
   if (selected.some((calendar) => !calendar.lastSyncedAt))
     return 'Synchronization is not ready for selected calendars yet.'
@@ -115,6 +123,7 @@ export function CalendarsPage() {
   const [search, setSearch] = useSearchParams()
   const [notice, setNotice] = useState(() => noticeFor(search))
   const [error, setError] = useState<UiText | null>(null)
+  const [calDavForm, setCalDavForm] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const [recoveryAccountId, setRecoveryAccountId] = useState<string | null>(null)
   const recoveryAccount =
@@ -354,8 +363,19 @@ export function CalendarsPage() {
                     <Link className="button button-primary" to={PATHS.eventTypes}>
                       {t('Set up event types')}
                     </Link>
-                    {(state.data.googleEnabled || state.data.microsoftEnabled) && (
-                      <a className="button" href="#calendar-connection-options">
+                    {(state.data.googleEnabled ||
+                      state.data.microsoftEnabled ||
+                      state.data.caldavEnabled) && (
+                      <a
+                        className="button"
+                        href={
+                          state.data.googleEnabled
+                            ? '#calendar-connection-options'
+                            : state.data.microsoftEnabled
+                              ? '#microsoft-calendar-connection-options'
+                              : '#caldav-calendar-connection-options'
+                        }
+                      >
                         {t('Review calendar connection options')}
                       </a>
                     )}
@@ -375,10 +395,12 @@ export function CalendarsPage() {
               const permissionReview = needsPermissionReview(connection)
               const authorizationRequired = reconnect || syncPermission || permissionReview
               const providerEnabled =
-                connection.provider === 'google'
-                  ? state.data.googleEnabled
-                  : state.data.microsoftEnabled
-              const syncCapable = connection.provider === 'google' && connection.syncAuthorized
+                connection.provider === 'caldav'
+                  ? state.data.caldavEnabled
+                  : connection.provider === 'google'
+                    ? state.data.googleEnabled
+                    : state.data.microsoftEnabled
+              const syncCapable = connection.provider !== 'microsoft' && connection.syncAuthorized
               const conflictCount = connection.calendars.filter(
                 (calendar) => calendar.checkConflicts,
               ).length
@@ -389,8 +411,10 @@ export function CalendarsPage() {
                 destination &&
                 syncCapable &&
                 !reconnect &&
-                state.data.googleEnabled &&
-                destination.accessRole === 'owner'
+                destination.available !== false &&
+                providerEnabled &&
+                (destination.accessRole === 'owner' ||
+                  (connection.provider === 'caldav' && destination.accessRole === 'writer'))
               return (
                 <article className="panel stack calendar-account" key={connection.id}>
                   <header className="calendar-account-heading">
@@ -409,14 +433,16 @@ export function CalendarsPage() {
                     <span
                       className={`badge${reconnect || permissionReview ? ' badge-danger' : ''}`}
                     >
-                      {reconnect
-                        ? t('Reconnect required')
-                        : permissionReview
-                          ? t('Permissions required')
-                          : t('Connected')}
+                      {connection.provider === 'caldav' && (reconnect || connection.lastError)
+                        ? t('Needs attention')
+                        : reconnect
+                          ? t('Reconnect required')
+                          : permissionReview
+                            ? t('Permissions required')
+                            : t('Connected')}
                     </span>
                   </header>
-                  {reconnect && (
+                  {reconnect && connection.provider !== 'caldav' && (
                     <div className="alert alert-error">
                       <p role="alert">
                         {t('Access has expired or been removed. Connect this')}{' '}
@@ -440,7 +466,7 @@ export function CalendarsPage() {
                       )}
                     </p>
                   )}
-                  {authorizationRequired && (
+                  {authorizationRequired && connection.provider !== 'caldav' && (
                     <div className="stack">
                       <p>{ui(accountHint(connection))}</p>
                       {providerEnabled && (
@@ -467,7 +493,7 @@ export function CalendarsPage() {
                   <dl className="calendar-account-summary">
                     <div>
                       <dt>{t('Busy-time sync')}</dt>
-                      <dd>{ui(syncSummary(connection, state.data.googleEnabled))}</dd>
+                      <dd>{ui(syncSummary(connection, providerEnabled))}</dd>
                     </div>
                     <div>
                       <dt>{t('Conflict checks')}</dt>
@@ -577,7 +603,7 @@ export function CalendarsPage() {
                             ? t('Synchronizing busy times…')
                             : null}
                         </div>
-                        {connection.provider === 'google' &&
+                        {connection.provider !== 'microsoft' &&
                           (connection.syncAuthorized ||
                             calendar.checkConflicts ||
                             state.data.destinationCalendarId === calendar.id) && (
@@ -595,8 +621,9 @@ export function CalendarsPage() {
                                     pending !== null ||
                                     (!calendar.checkConflicts &&
                                       (calendar.accessRole === 'freeBusyReader' ||
+                                        calendar.available === false ||
                                         connection.status !== 'active' ||
-                                        !state.data.googleEnabled ||
+                                        !providerEnabled ||
                                         !connection.syncAuthorized))
                                   }
                                   onChange={(event) =>
@@ -608,7 +635,7 @@ export function CalendarsPage() {
                               {calendar.checkConflicts && (
                                 <>
                                   <p>
-                                    {calendar.syncError
+                                    {calendar.syncError || calendar.available === false
                                       ? t(
                                           'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
                                         )
@@ -628,7 +655,8 @@ export function CalendarsPage() {
                                     className="button button-small"
                                     disabled={
                                       connection.status !== 'active' ||
-                                      !state.data.googleEnabled ||
+                                      calendar.available === false ||
+                                      !providerEnabled ||
                                       !connection.syncAuthorized ||
                                       reconnect ||
                                       (connection.lastError === 'permissions_missing' &&
@@ -636,13 +664,15 @@ export function CalendarsPage() {
                                     }
                                     onClick={() => calendarAction(calendar.id, 'sync')}
                                   >
-                                    {calendar.syncError
+                                    {calendar.syncError || calendar.available === false
                                       ? t('Retry synchronization')
                                       : t('Sync now')}
                                   </button>
                                 </>
                               )}
                               {(calendar.accessRole === 'owner' ||
+                                (connection.provider === 'caldav' &&
+                                  calendar.accessRole === 'writer') ||
                                 state.data.destinationCalendarId === calendar.id) && (
                                 <button
                                   type="button"
@@ -656,8 +686,9 @@ export function CalendarsPage() {
                                   disabled={
                                     state.data.destinationCalendarId !== calendar.id &&
                                     (!state.data.hasProfile ||
+                                      calendar.available === false ||
                                       connection.status !== 'active' ||
-                                      !state.data.googleEnabled ||
+                                      !providerEnabled ||
                                       !connection.syncAuthorized)
                                   }
                                   onClick={() =>
@@ -683,31 +714,49 @@ export function CalendarsPage() {
                   )}
                   <fieldset className="form-fieldset" disabled={pending !== null}>
                     <div className="form-actions">
-                      {(connection.provider === 'google'
-                        ? state.data.googleEnabled
-                        : state.data.microsoftEnabled) && (
+                      {connection.provider === 'caldav' && (
                         <button
                           type="button"
                           className="button"
-                          disabled={pending !== null || connection.status !== 'active'}
-                          onClick={() => update(connection, false)}
+                          disabled={!providerEnabled}
+                          onClick={() => setCalDavForm(connection.id)}
                         >
-                          {t('Refresh calendar list')}
+                          {t('Reconnect CalDAV')}
                         </button>
                       )}
+                      {connection.provider !== 'caldav' &&
+                        (connection.provider === 'google'
+                          ? state.data.googleEnabled
+                          : state.data.microsoftEnabled) && (
+                          <button
+                            type="button"
+                            className="button"
+                            disabled={pending !== null || connection.status !== 'active'}
+                            onClick={() => update(connection, false)}
+                          >
+                            {t('Refresh calendar list')}
+                          </button>
+                        )}
                       <ConfirmAction
                         label={t('Disconnect')}
                         accessibleLabel={t('Disconnect {0}', {
                           '0': connection.accountEmail ?? `${providerName(connection)} account`,
                         })}
-                        prompt={t(
-                          'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.',
-                          {
-                            '0':
-                              connection.accountEmail ?? `this ${providerName(connection)} account`,
-                            '1': providerName(connection),
-                          },
-                        )}
+                        prompt={
+                          connection.provider === 'caldav'
+                            ? t(
+                                'Disconnect stops synchronization and booking updates, deletes stored credentials and local calendar data, and leaves existing events on the server. Revoke the app password with your provider separately.',
+                              )
+                            : t(
+                                'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.',
+                                {
+                                  '0':
+                                    connection.accountEmail ??
+                                    `this ${providerName(connection)} account`,
+                                  '1': providerName(connection),
+                                },
+                              )
+                        }
                         confirmLabel={t('Disconnect account')}
                         busyLabel={t('Disconnecting…')}
                         failure={t('Could not disconnect {0} Calendar.', {
@@ -722,6 +771,37 @@ export function CalendarsPage() {
             })}
           </section>
           <h2>{t('Calendar connection options')}</h2>
+          {state.data.caldavEnabled && (
+            <section
+              id="caldav-calendar-connection-options"
+              className="stack"
+              aria-label={t('Connect CalDAV')}
+            >
+              {calDavForm === null ? (
+                <button type="button" className="button" onClick={() => setCalDavForm('')}>
+                  {t('Connect CalDAV')}
+                </button>
+              ) : (
+                <CalDavConnect
+                  key={calDavForm}
+                  connectionId={calDavForm || undefined}
+                  profileState={
+                    state.data.profileUnavailable
+                      ? 'unknown'
+                      : state.data.hasProfile
+                        ? 'ready'
+                        : 'missing'
+                  }
+                  onClose={() => setCalDavForm(null)}
+                  onSaved={() => {
+                    setCalDavForm(null)
+                    setNotice('CalDAV connection saved. Selected calendars are synchronizing.')
+                    reload()
+                  }}
+                />
+              )}
+            </section>
+          )}
           {state.data.googleEnabled ? (
             <section
               id="calendar-connection-options"
