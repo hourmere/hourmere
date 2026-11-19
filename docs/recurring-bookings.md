@@ -60,7 +60,9 @@ It is not an ICS serialization promise.
 
 ### Proposed limits
 
-Rule expansion enforces the occurrence counts and local calendar horizon below.
+Rule expansion enforces the occurrence counts and local calendar horizon below. The internal
+cache-only availability checker enforces the host evaluation, database read, fact row and
+deadline limits against explicit starts.
 `scripts/recurring-bookings-docs.test.ts` compares those values with the runtime constants
 and pins the remaining design values. As each remaining value is enforced, a shared
 constant replaces the literal in the test. Raising a limit requires design review and new
