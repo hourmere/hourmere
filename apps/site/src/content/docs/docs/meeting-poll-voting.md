@@ -3,10 +3,8 @@ title: Voting in a meeting poll
 description: Verify your email, choose possible meeting times, and understand poll privacy.
 ---
 
-The public voting page is implemented, but **poll creation is not available yet** in
-Hourmere. There is no setting that enables creation. Until creation is released, links
-on a normal installation show the same unavailable page. This guide describes the voting
-flow for when a poll exists; it does not offer a way to create one.
+Open the public link shared by the host or the private voting link sent to your mailbox.
+Hosts can create and manage polls through [REST](/docs/rest#manage-meeting-polls), MCP and CLI.
 
 ## Open and verify your link
 
@@ -74,8 +72,8 @@ Português (Brasil).
 
 ## 中文说明
 
-公开投票页面已实现，但 **Hourmere 尚未提供创建会议投票的功能**，也没有可以开启创建的
-设置。在创建功能发布前，正常部署中的链接均显示统一的不可用页面。
+请打开主持人分享的公开链接，或发送到你邮箱的私密投票链接。主持人可通过
+[REST](/docs/rest#manage-meeting-polls)、MCP 和 CLI 创建并管理投票。
 
 投票不需要 Hourmere 账号。通过公开链接填写姓名、邮箱和时区后，页面会统一提示检查
 邮件，不透露该邮箱是否已登记，也不保证邮件送达。打开邮件链接不会自动验证或投票；

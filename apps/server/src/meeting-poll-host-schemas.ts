@@ -1,11 +1,12 @@
 import { z } from '@hono/zod-openapi'
-import { MEETING_POLL_PAGE_DEFAULT } from '@hourmere/scheduling'
+import { MEETING_POLL_PAGE_DEFAULT, type MeetingPollWithLink } from '@hourmere/scheduling'
 
 // Let services decide whether an ID or cursor is valid so REST and MCP keep the same codes.
 const PollId = z.string().openapi({ format: 'uuid' })
 const Instant = z.string().openapi({ format: 'date-time' })
 
 export const MeetingPollHostId = z.strictObject({ id: PollId })
+export const MeetingPollHostVoterId = MeetingPollHostId.extend({ voterId: PollId })
 export const ListMeetingPollsInput = z.strictObject({
   limit: z.number().optional().openapi({
     default: MEETING_POLL_PAGE_DEFAULT,
@@ -15,8 +16,28 @@ export const ListMeetingPollsInput = z.strictObject({
 })
 export const MeetingPollHostRevision = z.strictObject({ expectedHostRevision: z.number() })
 export const MeetingPollIdempotencyKey = z.string().openapi({
-  description:
-    'A retained random key for this finalization attempt (1–255 printable ASCII characters).',
+  description: 'A retained random key for this operation (1–255 printable ASCII characters).',
+})
+export const CreateMeetingPollBody = z.strictObject({
+  eventTypeId: PollId,
+  candidateStarts: z.array(Instant).openapi({ description: '2–20 distinct offered start times.' }),
+  durationMinutes: z.number().optional(),
+  deadlineAt: Instant,
+  displayTimeZone: z.string(),
+  admissionMode: z.enum(['public_link', 'invited']),
+  visibility: z.enum(['private', 'aggregate']).optional(),
+})
+export const InviteMeetingPollVotersBody = z.strictObject({
+  invitees: z
+    .array(
+      z.strictObject({
+        name: z.string(),
+        email: z.string().openapi({ format: 'email' }),
+        locale: z.string().optional(),
+        timeZone: z.string().optional(),
+      }),
+    )
+    .openapi({ description: 'Up to 40 host-supplied invitees.' }),
 })
 export const FinalizeMeetingPollBody = z.strictObject({
   slotId: PollId,
@@ -65,6 +86,52 @@ export const MeetingPollHostOutput = z
     candidates: z.array(Candidate),
   })
   .openapi('MeetingPollHost')
+
+export const MeetingPollLinkOutput = z
+  .object({
+    poll: MeetingPollHostOutput,
+    publicLink: z.url().nullable().openapi({
+      description: 'One-time disclosure of the public voting link. Null for invited polls.',
+    }),
+  })
+  .openapi('MeetingPollLink')
+
+export function meetingPollLinkOutput(
+  { poll, publicToken }: MeetingPollWithLink,
+  publicUrl: string,
+) {
+  return {
+    poll,
+    publicLink: publicToken === null ? null : new URL(`/poll#${publicToken}`, publicUrl).href,
+  }
+}
+
+export const InviteMeetingPollVotersOutput = z
+  .object({
+    poll: MeetingPollHostOutput,
+    replayed: z.boolean(),
+    entries: z.array(
+      z.object({
+        email: z.string(),
+        outcome: z.enum(['invited', 'upgraded', 'unchanged']),
+        voterId: PollId.nullable(),
+        status: z.enum(['pending', 'invited', 'verified', 'withdrawn', 'absent']),
+      }),
+    ),
+  })
+  .openapi('MeetingPollInvitation')
+
+export const ResendMeetingPollInvitationOutput = z
+  .object({ poll: MeetingPollHostOutput, voterId: PollId, replayed: z.boolean() })
+  .openapi('MeetingPollInvitationResend')
+
+export const MeetingPollRemovalOutput = z
+  .object({
+    poll: MeetingPollHostOutput,
+    resultsRevision: z.number().int(),
+    removedVoterIds: z.array(PollId),
+  })
+  .openapi('MeetingPollRemoval')
 
 export const MeetingPollListOutput = z
   .object({ data: z.array(MeetingPollHostOutput), nextAfter: z.string().nullable() })

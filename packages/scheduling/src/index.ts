@@ -216,28 +216,40 @@ export {
 export { ensureMeetingPollKey, MeetingPollKeyMismatchError } from './meeting-poll-key.ts'
 export { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
 export { type PublicMeetingPoll, readMeetingPoll } from './meeting-poll-public.ts'
-export { getMeetingPollResults, type MeetingPollResults } from './meeting-poll-results.ts'
+export {
+  getMeetingPollResults,
+  type MeetingPollResults,
+  removeMeetingPollVoter,
+  removeUnverifiedMeetingPollVoters,
+} from './meeting-poll-results.ts'
 export {
   type EnrollMeetingPollVoterInput,
   enrollMeetingPollVoter,
+  inviteMeetingPollVoters,
   type MeetingPollHostContext,
   type MeetingPollPublicContext,
   MeetingPollRateLimitError,
   type MeetingPollVoterState,
   meetingPollDerivedKey,
   recoverMeetingPollVoter,
+  resendMeetingPollInvitation,
   type VerifyMeetingPollVoterResult,
   verifyMeetingPollVoter,
 } from './meeting-poll-voters.ts'
 export {
   cancelMeetingPoll,
   closeMeetingPoll,
+  createMeetingPoll,
   deleteMeetingPoll,
   getMeetingPoll,
   listMeetingPolls,
   MEETING_POLL_PAGE_DEFAULT,
   MEETING_POLL_PAGE_MAX,
   type MeetingPoll,
+  MeetingPollAlreadyCreatedError,
+  MeetingPollSlotUnavailableError,
+  type MeetingPollWithLink,
+  rotateMeetingPollLink,
 } from './meeting-polls.ts'
 export {
   getTeamMemberDepartureImpact,

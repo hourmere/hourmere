@@ -350,6 +350,7 @@ export function productRoutes({
     meetingPollRoutes({ db, meetingPollSecret }),
     meetingPollHostRoutes({
       db,
+      publicUrl,
       meetingPollSecret,
       notify,
       automaticMeet,
@@ -486,6 +487,7 @@ export function productTools({
     ...meetingPollTools({ db, meetingPollSecret }),
     ...meetingPollHostTools({
       db,
+      publicUrl: publicUrl ?? 'http://localhost',
       meetingPollSecret,
       notify,
       automaticMeet,

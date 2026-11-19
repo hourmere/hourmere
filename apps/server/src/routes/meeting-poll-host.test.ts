@@ -21,15 +21,20 @@ const item = (id: string) => `${path}/${id}`
 const expectedOrganization = 'x-expected-organization-id'
 
 describe('host meeting poll OpenAPI', () => {
-  it('publishes only the seven D1 host operations with strict bodies and extensible responses', async () => {
+  it('publishes all 13 host operations with strict bodies and extensible responses', async () => {
     const doc = await openApiDocument(productApp({} as Db))
     const operations = {
-      [path]: ['get'],
+      [path]: ['get', 'post'],
       [item('{id}')]: ['get', 'delete'],
       [`${item('{id}')}/results`]: ['get'],
+      [`${item('{id}')}/invitations`]: ['post'],
+      [`${item('{id}')}/invitations/{voterId}/resend`]: ['post'],
+      [`${item('{id}')}/voters/{voterId}`]: ['delete'],
+      [`${item('{id}')}/remove-unverified`]: ['post'],
       [`${item('{id}')}/close`]: ['post'],
       [`${item('{id}')}/cancel`]: ['post'],
       [`${item('{id}')}/finalize`]: ['post'],
+      [`${item('{id}')}/rotate-link`]: ['post'],
     }
     expect(
       Object.keys(doc.paths)
@@ -52,9 +57,15 @@ describe('host meeting poll OpenAPI', () => {
     const finalize = doc.paths[`${item('{id}')}/finalize`]?.post
     expect(finalize?.responses).toHaveProperty('201')
     expect(finalize?.responses).toHaveProperty('200')
-    expect(finalize?.parameters).toContainEqual(
-      expect.objectContaining({ name: 'idempotency-key', in: 'header', required: true }),
-    )
+    for (const route of [
+      path,
+      ...['invitations', 'invitations/{voterId}/resend', 'finalize', 'rotate-link'].map(
+        (action) => `${item('{id}')}/${action}`,
+      ),
+    ])
+      expect(doc.paths[route]?.post?.parameters).toContainEqual(
+        expect.objectContaining({ name: 'idempotency-key', in: 'header', required: true }),
+      )
     expect(doc.paths[item('{id}')]?.delete?.responses['204']?.content).toBeUndefined()
   })
 })
@@ -74,7 +85,11 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting poll REST on Postgres',
     db = createDb(owned.pool)
     fixture = await createFinalizeFixture(db)
     app = productApp(db, principals, [
-      meetingPollHostRoutes({ db, meetingPollSecret: fixture.ctx.meetingPollSecret }),
+      meetingPollHostRoutes({
+        db,
+        publicUrl: PUBLIC_URL,
+        meetingPollSecret: fixture.ctx.meetingPollSecret,
+      }),
     ])
   })
   afterAll(async () => {
@@ -221,6 +236,38 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting poll REST on Postgres',
     expect(await send('POST', target, valid, revision)).toEqual(closed)
   })
 
+  it('binds new polls and invitations to a same-origin session and its expected space', async () => {
+    const { headers } = await browser()
+    const createHeaders = { ...headers, 'idempotency-key': randomUUID() }
+    const input = {
+      eventTypeId: fixture.eventTypeId,
+      candidateStarts: fixture.poll.candidates.map(({ startAt }) => startAt),
+      deadlineAt: fixture.poll.deadlineAt,
+      displayTimeZone: 'UTC',
+      admissionMode: 'invited',
+    }
+    expect(await send('POST', path, createHeaders, input)).toEqual({
+      status: 409,
+      body: { error: 'organization_context_changed' },
+    })
+    const expectedSpace = { [expectedOrganization]: fixture.organizationId }
+    const created = await send('POST', path, { ...createHeaders, ...expectedSpace }, input)
+    expect(created).toMatchObject({
+      status: 201,
+      body: { poll: { organizationId: fixture.organizationId, source: 'web' }, publicLink: null },
+    })
+    const url = `${item(created.body.poll.id)}/invitations`
+    const inviteHeaders = { ...headers, ...expectedSpace, 'idempotency-key': randomUUID() }
+    const batch = { invitees: [{ name: 'Invitee', email: 'session-invitee@example.test' }] }
+    expect(
+      await send('POST', url, { ...inviteHeaders, origin: 'https://other.example' }, batch),
+    ).toMatchObject({ status: 403, body: { error: 'forbidden' } })
+    expect(await send('POST', url, inviteHeaders, batch)).toMatchObject({
+      status: 202,
+      body: { entries: [{ email: 'session-invitee@example.test', outcome: 'invited' }] },
+    })
+  })
+
   it('denies invalid bearer and read-key writes before validation or tenant lookup', async () => {
     const { poll } = await createPoll()
     const read = await key('read')
@@ -232,6 +279,12 @@ describe.skipIf(!process.env.DATABASE_URL)('host meeting poll REST on Postgres',
     })
     const target = item(poll.id)
     for (const [method, url] of [
+      ['POST', path],
+      ['POST', `${target}/invitations`],
+      ['POST', `${target}/invitations/${randomUUID()}/resend`],
+      ['DELETE', `${target}/voters/${randomUUID()}`],
+      ['POST', `${target}/remove-unverified`],
+      ['POST', `${target}/rotate-link`],
       ['POST', `${target}/close`],
       ['POST', `${target}/cancel`],
       ['POST', `${target}/finalize`],
