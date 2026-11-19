@@ -92,6 +92,7 @@ export {
   type WorkflowWebhookFacts,
   workflowOwnerSelector,
 } from './ownership.ts'
+export { PreviewWorkflowInputSchema, previewWorkflow, WorkflowPreviewSchema } from './preview.ts'
 export {
   getWorkflow,
   listWorkflows,
