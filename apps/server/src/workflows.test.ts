@@ -57,6 +57,7 @@ const denial = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
 }
+const fullOnlyTools = ['create_workflow', 'update_workflow', 'delete_workflow', 'preview_workflow']
 
 /** An app whose database refuses every connection: a lookup would answer 500. */
 function appWith(tools?: readonly Tool[]) {
@@ -140,7 +141,7 @@ describe('workflow REST operations while off', () => {
   })
 })
 
-describe('workflow creation REST while off', () => {
+describe('workflow POST, PATCH and DELETE routes while off', () => {
   it('checks caller and write scope before the switch, and the switch before JSON validation', async () => {
     const { app, db } = appWith()
     try {
@@ -152,6 +153,7 @@ describe('workflow creation REST while off', () => {
       ] as const) {
         for (const [method, path] of [
           ['POST', '/api/v1/workflows'],
+          ['POST', '/api/v1/workflows/preview'],
           ['PATCH', '/api/v1/workflows/not-a-uuid'],
           ['DELETE', '/api/v1/workflows/not-a-uuid'],
         ] as const) {
@@ -165,7 +167,7 @@ describe('workflow creation REST while off', () => {
               headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
               body: input,
             })
-            expect(response.status).toBe(status)
+            expect(response.status, `${method} ${path}`).toBe(status)
             expect(await response.json()).toEqual(body)
           }
         }
@@ -183,6 +185,7 @@ describe('workflow MCP tools while off', () => {
       'create_workflow',
       'update_workflow',
       'delete_workflow',
+      'preview_workflow',
       'list_workflows',
       'get_workflow',
     ])
@@ -214,6 +217,7 @@ describe('workflow MCP tools while off', () => {
           ['create_workflow', {}],
           ['update_workflow', {}],
           ['delete_workflow', {}],
+          ['preview_workflow', { example: { bookingId: randomUUID() } }],
           ['list_workflows', {}],
           ['list_workflows', { owner: { kind: 'personal', id: user.id } }],
           ['list_workflows', 'not an object'],
@@ -231,21 +235,12 @@ describe('workflow MCP tools while off', () => {
           }
           expect(called.result.isError, `${authorization} ${name}`).toBe(true)
           expect(textOf(called.result)).toEqual(
-            ['create_workflow', 'update_workflow', 'delete_workflow'].includes(name) &&
-              authorization === 'Bearer hm_read'
-              ? denial
-              : disabled,
+            fullOnlyTools.includes(name) && authorization === 'Bearer hm_read' ? denial : disabled,
           )
         }
       }
       // The API-key scope check keeps its precedence.
-      for (const name of [
-        'create_workflow',
-        'update_workflow',
-        'delete_workflow',
-        'list_workflows',
-        'get_workflow',
-      ]) {
+      for (const name of [...fullOnlyTools, 'list_workflows', 'get_workflow']) {
         const called = await rpc(app, 'Bearer hm_bookings', {
           method: 'tools/call',
           params: { name, arguments: { id: 'x' } },
@@ -265,11 +260,7 @@ describe('workflow MCP tools while off', () => {
         const read = await runTool(tool, args, { caller: key('read'), rateLimit: () => {} }, () => {
           throw new Error('nothing is logged')
         })
-        expect(textOf(read as never)).toEqual(
-          ['create_workflow', 'update_workflow', 'delete_workflow'].includes(tool.name)
-            ? denial
-            : disabled,
-        )
+        expect(textOf(read as never)).toEqual(fullOnlyTools.includes(tool.name) ? denial : disabled)
         const bookings = await runTool(
           tool,
           args,
@@ -348,6 +339,7 @@ describe('workflow CLI commands while off', () => {
     ['create', 'create_workflow', {}],
     ['update', 'update_workflow', {}],
     ['delete', 'delete_workflow', {}],
+    ['preview', 'preview_workflow', {}],
   ] as const)(
     'workflows %s calls %s and reports workflows_disabled',
     async (command, tool, input) => {
