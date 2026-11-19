@@ -29,6 +29,7 @@ import {
 } from './workflow-storage-lock-order.ts'
 
 const serverUrl = process.env.DATABASE_URL
+type RaceOrder = 'reversed' | 'workflow-first' | 'competitor-first'
 
 /** Runs the production `lockNotificationEmailBudget` on a checked-out transaction. */
 async function productionBudgetLock(client: pg.PoolClient) {
@@ -83,26 +84,29 @@ describe.skipIf(!serverUrl)('workflow lock order', () => {
      * A workflow admission (first) charges a captured recipient, while invitation creation
      * (second) locks the team for management and then asks for the budget lock.
      */
-    const race = async (organizationFirst: boolean) => {
+    const race = async (order: RaceOrder) => {
       const { run, claim } = await f.capture()
       const reservation = randomUUID()
-      const steps: Step[] = [
-        [
-          'first',
-          async (db) => {
-            if (organizationFirst) await lockWorkflowOrganization(db, f.team)
-            await lockMailBudget(db)
-            await chargeWorkflowMail(db, reservation, randomBytes(32))
-          },
-        ],
-        ['second', (db) => lockTeamForManagement(db, f.team)],
-        [
-          'first',
-          (db) => reserveWorkflowMail(db, { reservation, organization: f.team, run, claim }),
-        ],
-        ['second', lockMailBudget],
+      const admit: Step = [
+        'first',
+        async (db) => {
+          if (order !== 'reversed') await lockWorkflowOrganization(db, f.team)
+          await lockMailBudget(db)
+          await chargeWorkflowMail(db, reservation, randomBytes(32))
+        },
       ]
-      const result = await interleave(f.pool, steps)
+      const reserve: Step = [
+        'first',
+        (db) => reserveWorkflowMail(db, { reservation, organization: f.team, run, claim }),
+      ]
+      const manageTeam: Step = ['second', (db) => lockTeamForManagement(db, f.team)]
+      const invitationBudget: Step = ['second', lockMailBudget]
+      const result = await interleave(
+        f.pool,
+        order === 'competitor-first'
+          ? [manageTeam, admit, invitationBudget, reserve]
+          : [admit, manageTeam, reserve, invitationBudget],
+      )
       const charged = await f.rows('workflow_mail_reservations', 'id=$1', [reservation])
       const ledger = await f.rows('notification_email_sends', 'workflow_reservation_id=$1', [
         reservation,
@@ -111,7 +115,7 @@ describe.skipIf(!serverUrl)('workflow lock order', () => {
     }
 
     // Budget, then the organization through the reservation's foreign key: a deadlock.
-    const reversed = await race(false)
+    const reversed = await race('reversed')
     // The reservation waits for the team; the outcome shows that the budget request closed the
     // cycle (whether the harness saw it wait depends on which side's deadlock check ran).
     expect(reversed.waited[0], 'the reservation waits for the team').toBe(2)
@@ -120,10 +124,17 @@ describe.skipIf(!serverUrl)('workflow lock order', () => {
       'committed',
     ])
     // The organization first: invitation creation waits for the admission, then both commit.
-    const documented = await race(true)
+    const documented = await race('workflow-first')
     expect(documented.waited, 'invitation creation waits for the organization').toEqual([1])
     expect(documented.outcome).toEqual({ first: 'committed', second: 'committed' })
     expect(documented.charges, 'the reservation and its ledger row').toEqual([1, 1])
+
+    const invitationFirst = await race('competitor-first')
+    expect(invitationFirst.waited, 'admission waits while the invitation takes the budget').toEqual(
+      [1],
+    )
+    expect(invitationFirst.outcome).toEqual({ first: 'committed', second: 'committed' })
+    expect(invitationFirst.charges).toEqual([1, 1])
     expect(owned.pool.totalCount).toBeLessThanOrEqual(4)
   }, 30_000)
 
@@ -133,33 +144,43 @@ describe.skipIf(!serverUrl)('workflow lock order', () => {
      * A reschedule (first) retires the predecessor's run and carries its timer to the
      * successor, while the workflow's deletion (second) tombstones it and retires its runs.
      */
-    const race = async (definitionFirst: boolean) => {
+    const race = async (order: RaceOrder) => {
       const predecessor = await f.capture()
       const successor = await f.booking()
       const { organization, workflow } = predecessor
-      const steps: Step[] = [
-        [
-          'first',
-          async (db) => {
-            await lockWorkflowOrganization(db, organization)
-            if (definitionFirst) await shareLiveDefinitions(db, organization, [workflow])
-            await retireBookingRuns(db, organization, predecessor.booking)
-          },
-        ],
-        [
-          'second',
-          async (db) => {
-            await lockWorkflowOrganization(db, organization)
-            await tombstoneWorkflow(db, organization, workflow)
-          },
-        ],
-        [
-          'first',
-          (db) => captureRun(db, { organization, booking: successor, workflow, revision: 1 }),
-        ],
-        ['second', (db) => retireWorkflowRuns(db, organization, workflow)],
+      let carryTimer = order === 'reversed'
+      const reschedule: Step = [
+        'first',
+        async (db) => {
+          await lockWorkflowOrganization(db, organization)
+          if (order !== 'reversed') {
+            const live = await shareLiveDefinitions(db, organization, [workflow])
+            carryTimer = live.includes(workflow)
+          }
+          await retireBookingRuns(db, organization, predecessor.booking)
+        },
       ]
-      const result = await interleave(f.pool, steps)
+      const carry: Step = [
+        'first',
+        async (db) => {
+          if (carryTimer)
+            await captureRun(db, { organization, booking: successor, workflow, revision: 1 })
+        },
+      ]
+      const tombstone: Step = [
+        'second',
+        async (db) => {
+          await lockWorkflowOrganization(db, organization)
+          await tombstoneWorkflow(db, organization, workflow)
+        },
+      ]
+      const retire: Step = ['second', (db) => retireWorkflowRuns(db, organization, workflow)]
+      const result = await interleave(
+        f.pool,
+        order === 'competitor-first'
+          ? [tombstone, reschedule, retire, carry]
+          : [reschedule, tombstone, carry, retire],
+      )
       const { rows: runs } = await f.pool.query<{ booking_id: string; state: string }>(
         `SELECT r.booking_id, r.state FROM workflow_runs r
         JOIN workflow_enrollments e ON e.id=r.enrollment_id
@@ -177,7 +198,7 @@ describe.skipIf(!serverUrl)('workflow lock order', () => {
     }
 
     // A run, then the definition through the carried enrollment's guard: a deadlock.
-    const reversed = await race(false)
+    const reversed = await race('reversed')
     // The carried enrollment waits for the tombstone; the outcome shows that the deletion's
     // retirement closed the cycle.
     expect(reversed.waited[0], 'the carry waits for the tombstone').toBe(2)
@@ -187,7 +208,7 @@ describe.skipIf(!serverUrl)('workflow lock order', () => {
     ])
     // The definition first: the tombstone waits for the reschedule, then both commit, and the
     // deletion, which runs after it, also retires the run carried to the successor.
-    const documented = await race(true)
+    const documented = await race('workflow-first')
     expect(documented.waited, 'the tombstone waits for the reschedule').toEqual([1])
     expect(documented.outcome).toEqual({ first: 'committed', second: 'committed' })
     expect(documented.tombstoned).toBe(true)
@@ -195,6 +216,12 @@ describe.skipIf(!serverUrl)('workflow lock order', () => {
       [documented.predecessor, 'retired'],
       [documented.successor, 'retired'],
     ])
+
+    const deletionFirst = await race('competitor-first')
+    expect(deletionFirst.waited, 'reschedule waits while deletion retires the run').toEqual([1])
+    expect(deletionFirst.outcome).toEqual({ first: 'committed', second: 'committed' })
+    expect(deletionFirst.tombstoned).toBe(true)
+    expect(deletionFirst.runs).toEqual([[deletionFirst.predecessor, 'retired']])
     expect(owned.pool.totalCount).toBeLessThanOrEqual(4)
   }, 30_000)
 })
