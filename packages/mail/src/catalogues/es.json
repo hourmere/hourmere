@@ -115,5 +115,11 @@
   "poll.vote.body": "Usa tu enlace privado para participar en {poll}.",
   "poll.expiry": "Este enlace es válido hasta {expiry}.",
   "poll.confirm": "Abrir este enlace no confirma tu correo ni envía un voto.",
-  "poll.optout": "Dejar de recibir recordatorios de esta encuesta."
+  "poll.optout": "Dejar de recibir recordatorios de esta encuesta.",
+  "poll.reminder.subject": "Recordatorio para votar en {poll}",
+  "poll.reminder.body": "La votación termina pronto. Usa tu enlace privado para votar en {poll}.",
+  "poll.deadline.subject": "La votación de {poll} ha terminado",
+  "poll.deadline.body": "La votación de {poll} terminó el {deadline}.",
+  "poll.deadline.responses": "El total de respuestas recibidas es de {count}.",
+  "poll.deadline.results": "Inicia sesión para ver los resultados."
 }

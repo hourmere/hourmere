@@ -522,4 +522,6 @@ export const common = {
   'Opens the host’s website in the parent page.': '将在上层页面中打开主办者的网站。',
   'Opens the host’s website in a new tab.': '将在新标签页中打开主办者的网站。',
   'Opens the host’s website in this tab.': '将在当前标签页中打开主办者的网站。',
+  // Meeting poll reminder opt-out
+  'meetingPoll.optOutError': '暂时无法关闭提醒，请重试。',
 } as const
