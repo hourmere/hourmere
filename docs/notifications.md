@@ -11,20 +11,3 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
-
-## Meeting poll deadlines
-
-When voting is still open, eligible nonresponders receive at most one reminder per poll
-and mailbox. It is due 24 hours before the deadline if the poll already existed at that
-time. The reminder includes their voting link and a separate link to stop reminders.
-The opt-out page requires confirmation and works without signing in. It does not change
-the recipient's ballot.
-
-The hourly cleanup records closure at the voting deadline and queues a notice for the
-creator if they still manage the event. The notice contains the deadline, response count
-and an authenticated results link. Closing a poll early does not send this notice.
-Both mail types use the shared instance and recipient mail budgets. The workers and
-opt-out page are available without a feature flag. Poll creation has yet to be exposed.
-
-See [Meeting polls](meeting-polls.md#notifications-abuse-and-time-zones) for the full
-eligibility and privacy rules.
