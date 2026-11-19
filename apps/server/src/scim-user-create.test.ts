@@ -1911,10 +1911,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       // A retired manager accepted or an inactive entry created.
       [
         'refusals',
-        [
-          "    .where('retired_at', 'is', null)\n    .executeTakeFirst()",
-          '    .executeTakeFirst()',
-        ],
+        ["    .where('retired_at', 'is', null)\n    .execute()", '    .execute()'],
         sharedSource,
       ],
       ['refusals', ["  if (method === 'POST' && active === false)", '  if (false)'], sharedSource],
@@ -1927,7 +1924,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         ["const work = emails.filter((email) => email.type === 'work')", 'const work = emails'],
         sharedSource,
       ],
-      ['emails', ['    work.find((email) => email.primary) ??\n', ''], sharedSource],
+      ['emails', ['    primaryWork ??\n', ''], sharedSource],
       ['emails', ['    untyped.find((email) => email.primary) ??\n', ''], sharedSource],
       ['emails', ['(emails.length === 1 ? untyped[0] : undefined)', 'undefined'], sharedSource],
       [
