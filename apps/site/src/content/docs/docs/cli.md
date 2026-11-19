@@ -100,6 +100,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full`; not available yet (`workflows_disabled`) |
+| `workflows preview` | `preview_workflow` | `owner`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`, synthetic `example`. Requires `full`. Returns `workflows_disabled` while hard-off. |
 | `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
 | `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
 
@@ -108,6 +109,13 @@ until they are enabled on the instance both exit `1` with `workflows_disabled` o
 (a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
 key acts as: your personal workflows from a personal key, or a team's from a team key held by a
 current owner or admin.
+
+`hourmere workflows preview --input candidate.json` reads the preview request from a file.
+Use `--input -` or pipe JSON on stdin to preview the same candidate. The response
+contains synthetic match reasons, email samples and static limits.
+
+中文：`workflows preview` 从 `--input FILE` 指定的文件或标准输入读取候选定义。
+结果仅包含合成示例的匹配状态、邮件样本和静态额度。功能仍硬关闭。
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team

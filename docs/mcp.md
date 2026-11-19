@@ -140,6 +140,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
 | `delete_workflow` | — | `workflows delete` | `full` |
+| `preview_workflow` | — | `workflows preview` | `full` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
 | `list_sso_providers` | — | `sso providers list` | `full, read` |
@@ -516,6 +517,18 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
+
+`preview_workflow` / `workflows preview` use the same body as `POST /api/v1/workflows/preview`.
+Supply `owner`, `name`, `scope`, `trigger` and `actions`, with optional `enabled`,
+`conditions` and synthetic `example` values. API keys need `full` scope and current
+personal owner or team owner/admin authority. Preview returns the example match result,
+rendered email samples and static estimates. While hard-off it returns `workflows_disabled`
+and MCP discovery hides the tool.
+
+中文：`preview_workflow`、`workflows preview` 和 `POST /api/v1/workflows/preview`
+使用相同的 JSON 输入，包括所有者、候选定义和可选的合成示例。密钥需要 `full` 权限，
+调用者须为当前个人所有者或团队所有者、管理员。结果包括匹配状态、邮件样本和静态额度
+估计。功能仍硬关闭，返回 `workflows_disabled`，MCP 工具列表隐藏预览。
 
 ## SMS reminders
 

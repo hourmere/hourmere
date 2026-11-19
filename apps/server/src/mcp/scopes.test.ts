@@ -81,6 +81,7 @@ const all = [
   'create_workflow',
   'update_workflow',
   'delete_workflow',
+  'preview_workflow',
   'list_workflows',
   'get_workflow',
   'list_sso_providers',
@@ -101,6 +102,7 @@ const unavailable = new Set([
   'create_workflow',
   'update_workflow',
   'delete_workflow',
+  'preview_workflow',
   'list_workflows',
   'get_workflow',
   ...ssoUnavailable,
@@ -181,8 +183,12 @@ const otherReads = new Set([
   'list_sso_providers',
   'get_sso_policy',
 ])
-// Read-only diagnostics that can reveal busy timings or private drafts: full keys only.
-const fullOnlyReads = new Set(['troubleshoot_availability', 'preview_routing_form'])
+// Read-only diagnostics and configuration previews require full keys.
+const fullOnlyReads = new Set([
+  'troubleshoot_availability',
+  'preview_routing_form',
+  'preview_workflow',
+])
 const expected = (scope: ApiKeyScope) =>
   all.filter((name) =>
     scope === 'full'
@@ -551,6 +557,7 @@ describe('CLI scope parity', () => {
     ['webhooks deliveries', 'list_webhook_deliveries'],
     ['workflows update', 'update_workflow'],
     ['workflows delete', 'delete_workflow'],
+    ['workflows preview', 'preview_workflow'],
     ['workflows create', 'create_workflow'],
     ['workflows list', 'list_workflows'],
     ['workflows get', 'get_workflow'],

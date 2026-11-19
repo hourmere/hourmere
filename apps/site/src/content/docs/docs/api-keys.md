@@ -286,6 +286,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `DELETE /api/v1/workflows/{id}` | Session or API key | `full` |
 | `PATCH /api/v1/workflows/{id}` | Session or API key | `full` |
 | `POST /api/v1/workflows` | Session or API key | `full` |
+| `POST /api/v1/workflows/preview` | Session or API key | `full` |
 | `GET /api/v1/workflows` | Session or API key | `full, read` |
 | `GET /api/v1/workflows/{id}` | Session or API key | `full, read` |
 | `POST /api/v1/team/sso/domains` | Browser session only | — |
@@ -388,6 +389,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
 | `delete_workflow` | — | `workflows delete` | `full` |
+| `preview_workflow` | — | `workflows preview` | `full` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
 | `list_sso_providers` | — | `sso providers list` | `full, read` |
@@ -424,6 +426,12 @@ Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id
 feature is available: until booking workflows are enabled they answer
 `404 workflows_disabled` to every key their scope allows, and `tools/list` omits the tools.
 A key whose scope does not allow them still gets `insufficient_scope` first.
+
+Synthetic preview (`POST /api/v1/workflows/preview`, `preview_workflow`, `workflows preview`)
+requires a `full` key and current owner/admin access. It follows the same hard-off behavior.
+
+中文：工作流合成预览需要 `full` 密钥及当前所有者或管理员权限。硬关闭时，允许的调用
+返回 `workflows_disabled`，MCP 工具列表不显示此工具。
 
 CSV export through API keys is limited to the owner's personal organization (`read` or
 `full`). Team-wide CSV exports retain the existing browser-session-only team-admin access

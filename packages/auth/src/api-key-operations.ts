@@ -272,6 +272,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('DELETE', '/api/v1/workflows/{id}', 'other_write', 'key'),
   rest('PATCH', '/api/v1/workflows/{id}', 'other_write', 'key'),
   rest('POST', '/api/v1/workflows', 'other_write', 'key'),
+  rest('POST', '/api/v1/workflows/preview', 'other_write', 'key'),
   rest('GET', '/api/v1/workflows', 'other_read', 'key'),
   rest('GET', '/api/v1/workflows/{id}', 'other_read', 'key'),
   rest('POST', '/api/v1/team/sso/domains', 'session_only', 'session_only'),
@@ -454,6 +455,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     ]
   }),
   mcp('delete_workflow', 'other_write', ['DELETE /api/v1/workflows/{id}']),
+  mcp('preview_workflow', 'other_write', ['POST /api/v1/workflows/preview']),
   mcp('update_workflow', 'other_write', ['PATCH /api/v1/workflows/{id}']),
   mcp('create_workflow', 'other_write', ['POST /api/v1/workflows']),
   mcp('list_sso_providers', 'other_read', ['GET /api/v1/team/sso/providers']),
@@ -547,6 +549,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('one-time-links list', 'list_one_time_links'),
   cli('one-time-links revoke', 'revoke_one_time_link'),
   cli('workflows delete', 'delete_workflow'),
+  cli('workflows preview', 'preview_workflow'),
   cli('workflows update', 'update_workflow'),
   cli('workflows create', 'create_workflow'),
   cli('sso providers list', 'list_sso_providers'),

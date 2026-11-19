@@ -85,6 +85,7 @@ export const COMMANDS = {
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
   'workflows delete': 'delete_workflow',
+  'workflows preview': 'preview_workflow',
   'workflows update': 'update_workflow',
   'workflows create': 'create_workflow',
   'workflows list': 'list_workflows',
@@ -102,7 +103,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
-       hourmere workflows list|get|create|update|delete [--input FILE|-] [--url ORIGIN]
+       hourmere workflows list|get|create|update|delete|preview [--input FILE|-] [--url ORIGIN]
        hourmere webhooks list [--json]
        hourmere webhooks create --input FILE|- (--json | --output FILE)
        hourmere webhooks update --input FILE|- [--json]
@@ -156,8 +157,9 @@ Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows 
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
            workflows update (id, expectedRevision, and changed definition fields).
            workflows delete (id, expectedRevision); authorized repeats are safe.
-           Read or full scope for reads; full scope for create/update/delete. All answer workflows_disabled until booking
-           workflows are enabled on the instance.
+           workflows preview (owner, definition fields, optional synthetic example) accepts JSON from stdin or a file.
+           Read or full scope for list/get; full scope for create/update/delete/preview.
+           All answer workflows_disabled until booking workflows are enabled on the instance.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention
            ({"retention":"instance"|"forever"} or {"retention":"days","retentionDays":30–3650}).
