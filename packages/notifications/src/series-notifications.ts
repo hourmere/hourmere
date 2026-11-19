@@ -10,7 +10,7 @@ import {
   type SeriesEmailRecipient,
   seriesBookingEmail,
 } from '@hourmere/mail'
-import { seriesConfirmationDeadline } from '@hourmere/scheduling'
+import { seriesConfirmationDeadline } from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {

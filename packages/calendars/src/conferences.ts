@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { type Db, importedBookingCondition, isImportedBooking } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
-import { recordSeriesConferenceDeadline, type ServiceContext } from '@hourmere/scheduling'
+import type { ServiceContext } from '@hourmere/scheduling'
 import { conferenceJoinUrl, zoomMeetingId } from '@hourmere/scheduling/conference-url'
 import {
   type ConferenceResult,
@@ -9,6 +9,7 @@ import {
   conferenceRoot,
 } from '@hourmere/scheduling/conferences'
 import { DomainError } from '@hourmere/scheduling/errors'
+import { recordSeriesConferenceDeadline } from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { GoogleCalendarError } from './google.ts'
