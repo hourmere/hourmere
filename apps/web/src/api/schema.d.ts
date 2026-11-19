@@ -2103,7 +2103,7 @@ export interface paths {
         };
         /**
          * Read the private attendee list for a group occurrence
-         * @description Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Includes cancelled seats. Invitee manage tokens grant no access.
+         * @description Booked host or browser-session team owner/admin only. API keys and MCP OAuth are host-only. Missing and unauthorized occurrences return the same denial. Defaults to active seats; cancelled seats require an explicit filter. Pages contain at most 100 seats. Invitee manage tokens grant no access.
          */
         get: operations["getGroupOccurrenceAttendees"];
         put?: never;
@@ -6286,6 +6286,11 @@ export interface components {
             eventTypeId: string | null;
             /** Format: uuid */
             id: string;
+            pagination: {
+                hasMore: boolean;
+                limit: number;
+                offset: number;
+            };
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -11592,7 +11597,12 @@ export interface operations {
     };
     getGroupOccurrenceAttendees: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number | null;
+                /** @description Active seats by default; request cancelled or all seats explicitly. */
+                status?: "active" | "cancelled" | "all";
+            };
             header?: never;
             path: {
                 id: string;

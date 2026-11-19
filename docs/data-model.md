@@ -2311,7 +2311,10 @@ location, buffers, calendar destination and notification policy. Each seat is a 
 `bookings` row with `group_slot_id`, one booker and private answers, management capability,
 idempotency scope and reschedule chain. Guests and multiple-seat purchases are unsupported.
 Group mode and capacity are configurable in the admin editor and REST/MCP/CLI.
-Occurrence attendee reads are authenticated and retain the existing host-only API-key/OAuth
+Occurrence attendee reads use a repeatable-read snapshot for membership authorization,
+occurrence counts and bounded status-filtered rows, without exclusive host or slot locks.
+They default to confirmed seats; cancelled history must be requested explicitly.
+They are authenticated and retain the existing host-only API-key/OAuth
 boundary; current team owners/admins may also read through a browser session. Public and
 invitee-managed projections never include sibling seats. See [group events](https://hourmere.com/docs/group-events).
 
