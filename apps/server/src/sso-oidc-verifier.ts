@@ -47,6 +47,9 @@ export async function verifyOidcIdToken(
       },
     )
     const { sub, aud, azp, iat, exp, nbf, nonce, auth_time: authTime } = payload
+    // OIDC does not define a standard session deadline. When supplied, this signed
+    // claim caps the browser proof independently of the ID token's callback window.
+    const sessionDeadline = payload.session_expires_at
     const audiences = Array.isArray(aud) ? aud : [aud]
     if (
       audiences.some(
@@ -65,6 +68,11 @@ export async function verifyOidcIdToken(
       !Number.isFinite(exp) ||
       (nbf !== undefined && !Number.isFinite(nbf)) ||
       nonce !== expectedNonce ||
+      (sessionDeadline !== undefined &&
+        (typeof sessionDeadline !== 'number' ||
+          !Number.isFinite(sessionDeadline) ||
+          sessionDeadline < 0 ||
+          sessionDeadline > 253402300799)) ||
       (authTime !== undefined &&
         (typeof authTime !== 'number' ||
           !Number.isFinite(authTime) ||
@@ -72,7 +80,15 @@ export async function verifyOidcIdToken(
     )
       throw invalid()
 
-    return { issuer: provider.issuer, subject: sub, authTime }
+    return {
+      issuer: provider.issuer,
+      subject: sub,
+      authTime,
+      ...(typeof payload.email === 'string' && { email: payload.email }),
+      ...(typeof sessionDeadline === 'number' && {
+        sessionDeadline: new Date(sessionDeadline * 1000),
+      }),
+    }
   } catch {
     // JOSE and the key resolver can include claims or remote data in errors. Keep no cause.
     throw invalid()

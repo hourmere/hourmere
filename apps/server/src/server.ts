@@ -164,6 +164,7 @@ import {
   mailboxProofJobs,
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
+import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -520,6 +521,9 @@ export function productionAppOptions({
     publicUrl: config.PUBLIC_URL,
     allowIpHosts: config.SUCCESS_REDIRECT_ALLOW_IP_HOSTS,
   }
+  const ssoConfigurationKey = config.SSO_ENCRYPTION_KEY
+    ? Buffer.from(config.SSO_ENCRYPTION_KEY, 'base64')
+    : undefined
   return {
     checkDb,
     scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
@@ -538,11 +542,16 @@ export function productionAppOptions({
       db,
       queue: mailboxProofQueue,
     }),
+    ssoOidcSignIn: oidcSignInRoutes({
+      capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+      db,
+      configurationKey: ssoConfigurationKey,
+      privateTargets: config.SSO_PRIVATE_TARGETS,
+      session: { secret: config.BETTER_AUTH_SECRET },
+    }),
     // db is closed by the caller.
     routes: productRoutes({
-      ssoConfigurationKey: config.SSO_ENCRYPTION_KEY
-        ? Buffer.from(config.SSO_ENCRYPTION_KEY, 'base64')
-        : undefined,
+      ssoConfigurationKey,
       scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
       mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
       publicUrl: config.PUBLIC_URL,

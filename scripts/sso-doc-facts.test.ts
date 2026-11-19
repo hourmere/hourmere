@@ -5,6 +5,7 @@ import {
   authenticationAttemptLifetime,
   jwksCacheMaximum,
   oidcClockSkew,
+  ssoProofLifetime,
 } from '../apps/server/src/sso-oidc-limits.ts'
 import { SSO_AUDIT_LIMITS } from '../packages/db/src/sso-audit.ts'
 import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
@@ -15,7 +16,7 @@ const limits = {
   oidcClockSkew,
   authenticationAttemptLifetime,
   maximumSamlAssertionLifetime: 600,
-  ssoProofLifetime: 28800,
+  ssoProofLifetime,
   ssoDelegationLifetime: 2592000,
   freshAdministrationProof: 300,
   ssoRecoveryNominationLifetime: 259200,
