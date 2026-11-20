@@ -70,6 +70,10 @@ export const MeetingPollsPage = page(
   () => import('./pages/meeting-polls/MeetingPolls.tsx'),
   (m) => m.MeetingPollsPage,
 )
+export const MeetingPollCreatePage = page(
+  () => import('./pages/meeting-polls/MeetingPollCreate.tsx'),
+  (m) => m.MeetingPollCreatePage,
+)
 export const HostMeetingPollRoute = page(
   () => import('./pages/meeting-polls/HostMeetingPollRoute.tsx'),
   (m) => m.HostMeetingPollRoute,

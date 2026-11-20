@@ -5,7 +5,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { PollCandidate, PollResults } from './poll-results-api.ts'
 import { pollTimeRange } from './poll-time.ts'
 
-const VOTER_STATUS = {
+export const VOTER_STATUS = {
   pending: 'Verification pending',
   invited: 'Invited to vote',
   verified: 'Verified voter',

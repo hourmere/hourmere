@@ -2,6 +2,7 @@ import type { components } from '../../../apps/web/src/api/schema.d.ts'
 import { admin as english } from '../../../apps/web/src/i18n/catalogues/en/admin.ts'
 import { admin as chinese } from '../../../apps/web/src/i18n/catalogues/zh-CN/admin.ts'
 import { meetingPollPath, PATHS } from '../../../apps/web/src/paths.ts'
+import { AUDIT_HOST_TIME_ZONE } from '../audit-data.ts'
 import { openAuditPage } from '../audit-pages.ts'
 import { expect, test } from '../fixtures.ts'
 
@@ -93,4 +94,60 @@ test('manages a poll created through REST using the real host page', async ({ pa
   await page.getByRole('button', { name: 'Delete poll…', exact: true }).press('Enter')
   await page.getByRole('button', { name: 'Delete poll', exact: true }).press('Enter')
   await expect(page.getByText('No meeting polls yet.')).toBeVisible()
+})
+
+test('creates, invites and removes a voter from the host app', async ({ page, app, isMobile }) => {
+  const copy = isMobile ? chinese : english
+  const fixture = await app.auditState()
+  await app.auditSignIn(true, isMobile ? 'zh-CN' : 'en')
+  if (isMobile) await page.setViewportSize({ width: 320, height: 844 })
+  const now = Temporal.Now.instant()
+  const start = now.add({ hours: 48 })
+  const range = new URLSearchParams({
+    start: start.toString(),
+    end: start.add({ hours: 168 }).toString(),
+  })
+  const offered = await page.request.get(
+    `${app.url}/api/v1/public${fixture.bookingPath}/slots?${range}`,
+  )
+  expect(offered.status()).toBe(200)
+  const { data } = (await offered.json()) as { data: { start: string }[] }
+  const dates = data.map(({ start }) =>
+    Temporal.Instant.from(start).toZonedDateTimeISO(AUDIT_HOST_TIME_ZONE).toPlainDate().toString(),
+  )
+  const candidateDate = dates.find((date, index) => date === dates[index + 1])
+  if (!candidateDate) throw new Error('The fixture must offer two slots on the same day')
+
+  await page.goto(app.url + PATHS.meetingPolls)
+  await page.getByRole('link', { name: copy['Create meeting poll'], exact: true }).press('Enter')
+  const form = page.getByTestId('meeting-poll-create')
+  await form.locator('#poll-create-event').selectOption(fixture.eventTypeId)
+  await form.locator('#poll-create-date').fill(candidateDate)
+  const choices = form.locator('#poll-create-candidates').getByRole('checkbox')
+  await choices.first().check()
+  await choices.nth(1).check()
+  const deadline = now.add({ hours: 12 }).toZonedDateTimeISO(AUDIT_HOST_TIME_ZONE)
+  await form
+    .locator('#poll-create-deadline')
+    .fill(deadline.toPlainDateTime().toString({ smallestUnit: 'minute' }))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await form.getByRole('button', { name: copy['Create meeting poll'], exact: true }).press('Enter')
+  await expect(page.getByTestId('meeting-poll-created')).toBeVisible()
+  await expect(page.getByTestId('meeting-poll-public-link')).toHaveCount(0)
+  await page.getByRole('link', { name: copy['Open meeting poll'], exact: true }).press('Enter')
+
+  const roster = page.getByTestId('meeting-poll-roster')
+  await roster.getByTestId('meeting-poll-invite-open').press('Enter')
+  const invite = roster.getByTestId('meeting-poll-invite-form')
+  await invite.locator('input:not([type="email"])').first().fill('Synthetic poll invitee')
+  await invite.locator('input[type="email"]').fill('synthetic-poll-invitee@hourmere.invalid')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await invite.getByRole('button', { name: copy['Send invitations'], exact: true }).press('Enter')
+  await expect(roster.getByTestId('meeting-poll-roster-notice')).toBeVisible()
+  const remove = roster.getByTestId('meeting-poll-remove-voter')
+  await remove.press('Enter')
+  const confirmation = roster.getByTestId('meeting-poll-roster-confirmation')
+  await expect(confirmation).toBeVisible()
+  await confirmation.getByTestId('meeting-poll-roster-confirm').press('Enter')
+  await expect(roster.getByText(copy['There are no voters on this poll yet.'])).toBeVisible()
 })
