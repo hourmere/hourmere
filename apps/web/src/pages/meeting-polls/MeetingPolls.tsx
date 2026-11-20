@@ -8,7 +8,7 @@ import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
-import { meetingPollPath } from '../../paths.ts'
+import { meetingPollPath, PATHS } from '../../paths.ts'
 import { useMe } from '../../session.tsx'
 import { POLL_STATUS } from './poll-results-api.ts'
 
@@ -99,6 +99,11 @@ function MeetingPollListPage({
   const { data, nextAfter } = state.data
   return (
     <>
+      <div className="form-actions">
+        <Link className="button button-primary" to={PATHS.newMeetingPoll}>
+          {t('Create meeting poll')}
+        </Link>
+      </div>
       {data.length ? (
         <ul className="card-list plain-list meeting-poll-list">
           {data.map((poll) => {

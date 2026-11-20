@@ -5,8 +5,14 @@ import { admin as chinese } from '../../apps/web/src/i18n/catalogues/zh-CN/admin
 import { meetingPollPath, PATHS } from '../../apps/web/src/paths.ts'
 import { AUDIT_EMAIL, AUDIT_GUEST_NAME, AUDIT_NOW, AUDIT_TITLE } from './audit-data.ts'
 import type { FixtureApp } from './fixtures.ts'
+import {
+  hostPollCreateAuditPages,
+  isHostPollCreateAuditPage,
+  openHostPollCreateAuditPage,
+} from './host-meeting-poll-create-audit.ts'
 
 export const hostPollAuditPages = [
+  ...hostPollCreateAuditPages,
   { id: 'host-poll-list', title: 'Host meeting poll list' },
   { id: 'host-poll-list-empty', title: 'Empty host meeting poll list' },
   { id: 'host-poll-list-loading', title: 'Loading host meeting poll list' },
@@ -28,6 +34,21 @@ export const hostPollAuditPages = [
   { id: 'host-poll-closed', title: 'Closed meeting poll results' },
   { id: 'host-poll-canceled', title: 'Canceled meeting poll results' },
   { id: 'host-poll-scheduled', title: 'Scheduled meeting poll with booking link' },
+  { id: 'host-poll-roster-empty', title: 'Meeting poll with an empty invitation roster' },
+  { id: 'host-poll-roster-invite', title: 'Meeting poll invitation form' },
+  { id: 'host-poll-roster-queued', title: 'Meeting poll invitations queued' },
+  { id: 'host-poll-roster-full', title: 'Meeting poll invitation batch exceeds remaining places' },
+  { id: 'host-poll-roster-limited', title: 'Meeting poll resend rate limit' },
+  { id: 'host-poll-roster-stale', title: 'Stale meeting poll invitation roster' },
+  { id: 'host-poll-roster-retry', title: 'Unconfirmed meeting poll invitation request' },
+  { id: 'host-poll-roster-remove', title: 'Confirm removing a meeting poll voter' },
+  {
+    id: 'host-poll-roster-remove-unverified',
+    title: 'Confirm removing unverified public sign-ups',
+  },
+  { id: 'host-poll-roster-rotate', title: 'Confirm replacing a public meeting poll link' },
+  { id: 'host-poll-roster-link', title: 'One-time replacement meeting poll link' },
+  { id: 'host-poll-roster-rotated', title: 'Recover an unconfirmed public poll link replacement' },
 ] as const
 
 export type HostPollAuditPageId = (typeof hostPollAuditPages)[number]['id']
@@ -51,6 +72,8 @@ const bookerId = '72200000-0000-4000-8000-000000000002'
 const guestId = '72200000-0000-4000-8000-000000000003'
 const availableSlotId = '72200000-0000-4000-8000-000000000004'
 const busySlotId = '72200000-0000-4000-8000-000000000005'
+const pendingVoterId = '72200000-0000-4000-8000-000000000006'
+const newVoterId = '72200000-0000-4000-8000-000000000007'
 const deadline = '2030-01-08T14:00:00Z'
 const candidates = [
   {
@@ -82,6 +105,11 @@ export async function openHostPollAuditPage(
   id: HostPollAuditPageId,
   locale: 'en' | 'zh-CN',
 ) {
+  if (isHostPollCreateAuditPage(id)) {
+    return openHostPollCreateAuditPage(page, app, id, locale, (release) => {
+      pending.set(page, release)
+    })
+  }
   const fixture = await app.auditState()
   const copy = (key: keyof typeof english & keyof typeof chinese) =>
     locale === 'zh-CN' ? chinese[key] : english[key]
@@ -91,11 +119,14 @@ export async function openHostPollAuditPage(
   const canceled = id === 'host-poll-canceled'
   const closed = id === 'host-poll-closed'
   const otherSpace = id === 'host-poll-other-space'
+  const roster = id.startsWith('host-poll-roster')
   const path = list
     ? PATHS.meetingPolls
     : meetingPollPath(pollId, otherSpace ? fixture.teamOrganizationId : fixture.organizationId)
   const requestUrl = `${app.url}/api/v1/meeting-polls${list ? '' : `/${pollId}/results`}`
   const finalizeUrl = `${app.url}/api/v1/meeting-polls/${pollId}/finalize`
+  const rosterUrl = `${app.url}/api/v1/meeting-polls/${pollId}`
+  let rotationAttempts = 0
   const poll: components['schemas']['MeetingPollHost'] = {
     id: pollId,
     organizationId: fixture.organizationId,
@@ -103,7 +134,7 @@ export async function openHostPollAuditPage(
     title: AUDIT_TITLE,
     durationMinutes: 30,
     displayTimeZone: 'America/New_York',
-    admissionMode: 'invited',
+    admissionMode: roster ? 'public_link' : 'invited',
     visibility: 'aggregate',
     deadlineAt: deadline,
     status: scheduled ? 'scheduled' : canceled ? 'canceled' : closed ? 'closed' : 'open',
@@ -137,6 +168,7 @@ export async function openHostPollAuditPage(
         voterId: bookerId,
         name: AUDIT_GUEST_NAME,
         email: AUDIT_EMAIL,
+        invitedAt: roster ? AUDIT_NOW : null,
         votes: [
           { slotId: availableSlotId, value: 'if_need_be' },
           { slotId: busySlotId, value: 'no' },
@@ -154,6 +186,29 @@ export async function openHostPollAuditPage(
       },
     ],
   }
+  if (id === 'host-poll-roster-empty') {
+    results.roster = []
+    results.countedBallots = 0
+    results.candidates = results.candidates.map((candidate) => ({
+      ...candidate,
+      yes: 0,
+      ifNeedBe: 0,
+      no: 0,
+    }))
+  } else if (roster)
+    results.roster.push({
+      ...voter,
+      voterId: pendingVoterId,
+      name: 'Synthetic public sign-up / 公开报名者',
+      email: 'pending-poll-guest@hourmere.invalid',
+      status: 'pending',
+      ballotRevision: 0,
+      verifiedAt: null,
+      submittedAt: null,
+      consentedAt: null,
+      pendingExpiresAt: '2030-01-07T11:00:00Z',
+      votes: [],
+    })
   const read = async (route: Route) => {
     if (loading) return
     if (id.endsWith('-forbidden'))
@@ -170,14 +225,79 @@ export async function openHostPollAuditPage(
     id === 'host-poll-stale'
       ? route.fulfill({ status: 409, json: { error: 'poll_changed' } })
       : route.abort()
+  const invitation = (route: Route) => {
+    if (id === 'host-poll-roster-retry') return route.abort()
+    if (id === 'host-poll-roster-full')
+      return route.fulfill({ status: 409, json: { error: 'poll_full' } })
+    poll.hostRevision++
+    results.resultsRevision++
+    results.roster.push({
+      ...voter,
+      voterId: newVoterId,
+      name: 'Synthetic new invitee / 新受邀者',
+      email: 'new-poll-guest@hourmere.invalid',
+      status: 'invited',
+      ballotRevision: 0,
+      invitedAt: AUDIT_NOW,
+      verifiedAt: null,
+      submittedAt: null,
+      consentedAt: null,
+      votes: [],
+    })
+    return route.fulfill({
+      status: 202,
+      json: {
+        poll,
+        replayed: false,
+        entries: [
+          {
+            email: 'new-poll-guest@hourmere.invalid',
+            voterId: newVoterId,
+            status: 'invited',
+            outcome: 'invited',
+          },
+        ],
+      },
+    })
+  }
+  const resend = (route: Route) =>
+    id === 'host-poll-roster-stale'
+      ? route.fulfill({ status: 409, json: { error: 'poll_changed' } })
+      : route.fulfill({
+          status: 429,
+          json: { error: 'rate_limited' },
+          headers: { 'Retry-After': '20' },
+        })
+  const rotate = (route: Route) => {
+    if (id === 'host-poll-roster-rotated') {
+      if (++rotationAttempts === 1) return route.abort()
+      return route.fulfill({ status: 409, json: { error: 'poll_link_already_rotated' } })
+    }
+    return route.fulfill({
+      json: {
+        poll,
+        publicLink: `https://hourmere.invalid/poll#${'synthetic-replacement-vote'.repeat(3)}`,
+      },
+    })
+  }
   const release = async () => {
     await page.unroute(requestUrl, read)
     await page.unroute(finalizeUrl, submit)
+    if (roster) {
+      await page.unroute(`${rosterUrl}/invitations`, invitation)
+      await page.unroute(`${rosterUrl}/invitations/${bookerId}/resend`, resend)
+      await page.unroute(`${rosterUrl}/rotate-link`, rotate)
+    }
   }
 
   try {
     await page.route(requestUrl, read)
     await page.route(finalizeUrl, submit)
+    if (roster) {
+      await page.route(`${rosterUrl}/invitations`, invitation)
+      await page.route(`${rosterUrl}/invitations/${bookerId}/resend`, resend)
+      await page.route(`${rosterUrl}/rotate-link`, rotate)
+    }
     await page.goto(app.url + path)
     const main = page.getByRole('main')
     if (otherSpace) {
@@ -211,6 +331,7 @@ export async function openHostPollAuditPage(
       else await main.getByRole('link', { name: AUDIT_TITLE }).waitFor()
     } else {
       await main.getByTestId('meeting-poll-matrix').waitFor()
+      if (roster) await openRosterState(page, id, copy)
       if (scheduled) await main.getByTestId('meeting-poll-booking-link').waitFor()
       if (id === 'host-poll-no-available-times')
         await main.getByText(copy('No candidate time can be selected right now.')).waitFor()
@@ -261,4 +382,64 @@ export async function openHostPollAuditPage(
   } finally {
     if (!pending.has(page)) await release()
   }
+}
+
+async function openRosterState(
+  page: Page,
+  id: HostPollAuditPageId,
+  copy: (key: keyof typeof english & keyof typeof chinese) => string,
+) {
+  const roster = page.getByTestId('meeting-poll-roster')
+  await roster.waitFor()
+  if (id === 'host-poll-roster-empty') {
+    await roster.getByText(copy('There are no voters on this poll yet.')).waitFor()
+    return
+  }
+  if (id === 'host-poll-roster-limited' || id === 'host-poll-roster-stale') {
+    await roster.getByTestId('meeting-poll-resend-invitation').first().press('Enter')
+    await roster.getByTestId('meeting-poll-roster-error').waitFor()
+    return
+  }
+  const control =
+    id === 'host-poll-roster-remove'
+      ? 'meeting-poll-remove-voter'
+      : id === 'host-poll-roster-remove-unverified'
+        ? 'meeting-poll-remove-unverified'
+        : id === 'host-poll-roster-rotate' ||
+            id === 'host-poll-roster-link' ||
+            id === 'host-poll-roster-rotated'
+          ? 'meeting-poll-rotate-link'
+          : undefined
+  if (control) {
+    await roster.getByTestId(control).first().press('Enter')
+    await roster.getByTestId('meeting-poll-roster-confirmation').waitFor()
+    if (id === 'host-poll-roster-link' || id === 'host-poll-roster-rotated') {
+      await roster.getByTestId('meeting-poll-roster-confirm').press('Enter')
+      if (id === 'host-poll-roster-link')
+        await roster.getByTestId('meeting-poll-public-link').waitFor()
+      else {
+        await roster.getByTestId('meeting-poll-roster-retry').press('Enter')
+        await roster.getByTestId('meeting-poll-roster-refresh').waitFor()
+      }
+    }
+    return
+  }
+  await roster.getByTestId('meeting-poll-invite-open').press('Enter')
+  const form = roster.getByTestId('meeting-poll-invite-form')
+  await form.waitFor()
+  await form.locator('input[type="email"]').first().fill('new-poll-guest@hourmere.invalid')
+  await form.locator('input:not([type="email"])').first().fill(AUDIT_GUEST_NAME)
+  if (id === 'host-poll-roster-invite') {
+    await form
+      .getByRole('button', { name: copy('Add another invitee'), exact: true })
+      .press('Enter')
+    await form.locator('input[type="email"]').nth(1).waitFor()
+    return
+  }
+  await form.getByRole('button', { name: copy('Send invitations'), exact: true }).press('Enter')
+  await roster
+    .getByTestId(
+      id === 'host-poll-roster-queued' ? 'meeting-poll-roster-notice' : 'meeting-poll-roster-error',
+    )
+    .waitFor()
 }
