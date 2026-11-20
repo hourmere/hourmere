@@ -167,6 +167,7 @@ import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
@@ -297,7 +298,12 @@ export function productRoutes({
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 } & RecurringBookingAdmissionDeps): RouteModule[] {
   return [
-    mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
+    mcpOAuthRoutes({
+      auth: mcpAuth,
+      db,
+      publicUrl,
+      ssoCapabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
     instanceRoutes({
       publicUrl,
       socialProviders,
@@ -354,6 +360,12 @@ export function productRoutes({
       publicUrl,
       capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
       notificationQueue: ssoLinkRemovalQueue,
+    }),
+    ssoDelegationRoutes({
+      db,
+      publicUrl,
+      configurationKey: ssoConfigurationKey,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
     }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({

@@ -2,10 +2,13 @@ import { createHash } from 'node:crypto'
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   type Auth,
+  liveSsoDelegationSummaries,
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
   mcpOAuthUrls,
   type Principal,
+  ssoHardOff,
+  type TeamSsoCapabilities,
   withMcpOAuthIntent,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
@@ -50,7 +53,12 @@ const Info = z.object({
 })
 const Redirect = z.object({ redirectUrl: z.string() })
 
-type Deps = { auth?: Pick<Auth, 'handler'> | undefined; db: Db; publicUrl: string }
+type Deps = {
+  auth?: Pick<Auth, 'handler'> | undefined
+  db: Db
+  publicUrl: string
+  ssoCapabilities?: TeamSsoCapabilities
+}
 type Session = Extract<Principal, { kind: 'session' }>
 function session(principal: Principal): Session {
   if (principal.kind !== 'session') throw new DomainError('forbidden', 'session_required')
@@ -74,7 +82,7 @@ async function recordConsent(db: Db, clientId: string) {
     .execute()
 }
 
-export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
+export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardOff }: Deps) {
   const origin = new URL(publicUrl).origin
   const { resource } = mcpOAuthUrls(publicUrl)
   async function native(path: string, body: object, headers: Headers, clientIp?: string) {
@@ -367,14 +375,36 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
         .where('g.user_id', '=', p.user.id)
         .whereRef('c.userId', '=', 'g.user_id')
         .whereRef('c.clientId', '=', 'g.client_id')
+        .$if(ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled, (query) =>
+          query.select(
+            sql<string | null>`CASE WHEN EXISTS (
+              SELECT FROM auth.member m
+              WHERE m."userId" = g.user_id AND m."organizationId" = g.organization_id
+            ) AND NOT EXISTS (
+              SELECT FROM personal_organizations po WHERE po.organization_id = g.organization_id
+            ) THEN g.id END`.as('credentialId'),
+          ),
+        )
         .orderBy('c.createdAt', 'desc')
         .execute()
+      const summaries = await liveSsoDelegationSummaries(
+        db,
+        ssoCapabilities,
+        p.user.id,
+        'oauth_grant',
+        rows.flatMap((r) => (r.credentialId ? [r.credentialId] : [])),
+      )
       return {
-        data: rows.map((r) => ({
-          ...r,
-          clientName: r.clientName?.slice(0, 200) ?? r.clientId.slice(0, 200),
-          createdAt: new Date(r.createdAt).toISOString(),
-        })),
+        data: rows.map(({ credentialId, ...r }) => {
+          const ssoDelegation = credentialId ? summaries.get(credentialId) : undefined
+          return {
+            ...r,
+            clientName: r.clientName?.slice(0, 200) ?? r.clientId.slice(0, 200),
+            createdAt: new Date(r.createdAt).toISOString(),
+            ...(credentialId ? { credentialId } : {}),
+            ...(ssoDelegation ? { ssoDelegation } : {}),
+          }
+        }),
       }
     },
     async revoke(principal: Principal, id: string) {
@@ -531,6 +561,8 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
                 clientId: z.string(),
                 organizationName: z.string(),
                 createdAt: z.iso.datetime(),
+                credentialId: z.uuid().optional(),
+                ssoDelegation: z.object({ id: z.uuid(), expiresAt: z.iso.datetime() }).optional(),
               }),
             ),
           }),

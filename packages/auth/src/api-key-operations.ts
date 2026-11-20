@@ -311,6 +311,8 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
     'session_only',
     'session_only',
   ),
+  rest('POST', '/api/v1/team/sso/delegations', 'session_only', 'session_only'),
+  rest('DELETE', '/api/v1/team/sso/delegations/{bindingId}', 'session_only', 'session_only'),
   rest('GET', '/api/v1/team/sso/providers', 'other_read', 'key'),
   rest('GET', '/api/v1/team/sso/policy', 'other_read', 'key'),
   rest('GET', '/api/v1/openapi.json', 'public_metadata', 'public_metadata'),

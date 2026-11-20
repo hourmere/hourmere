@@ -100,6 +100,23 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_browser_proofs',
     'sso_delegation_bindings',
   ],
+  'apps/server/src/sso-delegation.ts': [
+    'sso_attempts',
+    'sso_delegation_bindings',
+    'sso_domains',
+    'sso_identity_links',
+    'sso_policies',
+    'sso_provider_domains',
+    'sso_providers',
+  ],
+  'packages/auth/src/sso-delegation-summaries.ts': [
+    'sso_delegation_bindings',
+    'sso_domains',
+    'sso_identity_links',
+    'sso_policies',
+    'sso_provider_domains',
+    'sso_providers',
+  ],
   'apps/server/src/sso-oidc-test-receipts.ts': ['sso_providers'],
   'apps/server/src/sso-reads.ts': [
     'sso_providers',

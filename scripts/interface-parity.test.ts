@@ -730,6 +730,8 @@ describe('REST, MCP and CLI write parity', () => {
       ['linkSsoAccount', 'post', '/api/v1/team/sso/providers/{providerId}/link'],
       ['unlinkSsoAccount', 'delete', '/api/v1/team/sso/providers/{providerId}/link'],
       ['removeSsoIdentityLink', 'delete', '/api/v1/team/sso/providers/{providerId}/links/{linkId}'],
+      ['bindSsoDelegation', 'post', '/api/v1/team/sso/delegations'],
+      ['revokeSsoDelegation', 'delete', '/api/v1/team/sso/delegations/{bindingId}'],
     ]) {
       expect(
         inventory.rest.find((operation) => operation.operationId === operationId),
@@ -752,6 +754,8 @@ describe('REST, MCP and CLI write parity', () => {
       'create_sso_domain_challenge',
       'verify_sso_domain',
       'delete_sso_domain',
+      'bind_sso_delegation',
+      'revoke_sso_delegation',
     ]) {
       expect(inventory.mcp).not.toContain(tool)
       expect(Object.values(inventory.cli)).not.toContain(tool)

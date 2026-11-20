@@ -1086,12 +1086,22 @@ follows the same acceptance ceremony. `useSsoRecovery` takes `{expectedRevision,
 proofAttemptId?}` and fresh mailbox proof. Recovery authority expires with the
 fresh-administration window and is single-use: each repair write consumes it, and
 a retry requires a new ceremony. These proofs
-are distinct from IdP authentication. Delegation binding takes `{credentialKind,
-credentialId, expectedTrustGeneration, proofAttemptId?}`, verifies ownership and current team binding,
-and returns redacted metadata/expiry; revoke accepts only an owned binding and needs no
-fresh proof, because it only withdraws authority. Existing
-key/OAuth inventory responses gain additive binding summaries for the owner's UI.
-A key/grant cannot be rebound to a different organization by this operation.
+are distinct from IdP authentication.
+
+`bindSsoDelegation` takes `{credentialKind, credentialId, expectedTrustGeneration,
+proofAttemptId?}`, verifies that the current team member owns the credential and
+that it belongs to the current team, and returns `201` with `{id, expiresAt}`.
+`revokeSsoDelegation` accepts an owned binding ID and returns `204` without a
+response body. A current team browser session can withdraw its own delegation
+without a live SSO browser proof or a fresh proof challenge. Both writes require
+the exact origin and `X-Expected-Organization-Id` for the current team.
+
+The owner's API-key list (`GET /api/auth/api-key/list`) and OAuth connection list
+(`GET /api/v1/mcp-oauth/connections`) can include `ssoDelegation: {id, expiresAt}`
+on a credential with a live binding. Eligible team OAuth connection summaries also
+include `credentialId`, the grant ID to use for binding. While both protocols are
+hard-off, the lists omit these fields and both delegation writes return `404 sso_disabled`.
+
 Both link-retirement operations take `{expectedLinkGeneration, proofAttemptId?}`.
 Self-unlink also takes `linkId` from `/me`; administrator removal takes `linkId` from
 the path. The OIDC recovery endpoints use the caller's active team membership. The ID
