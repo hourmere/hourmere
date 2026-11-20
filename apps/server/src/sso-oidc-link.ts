@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent, writeSsoSecurityFailure } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import type { SsoProviderRevision } from './sso-configuration.ts'
@@ -48,6 +49,7 @@ export async function lockOidcLinkActor(trx: Db, organizationId: string, actor: 
     .select('id')
     .where('organizationId', '=', organizationId)
     .where('userId', '=', user.id)
+    .where((eb) => eb.not(scimSuspended(organizationId, user.id)))
     .forShare()
     .executeTakeFirst()
   if (!member) throw new OidcAttemptRefused()

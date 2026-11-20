@@ -12,6 +12,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
@@ -21,6 +22,7 @@ import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { isMember } from '../../../packages/auth/src/organizations.ts'
 import { encryptWebhookSecret, newWebhookSecret } from '../../../packages/webhooks/src/crypto.ts'
 import { createApp } from './app.ts'
 import {
@@ -68,7 +70,7 @@ function routeCopy(
   const shared = mutations.auth
     ? sourceCopy<Record<string, unknown>>(
         'packages/auth/src/team-management.ts',
-        { sql },
+        { sql, isMember, scimSuspended },
         '({ checkTeamManagementAccess, TeamManagementError })',
         mutations.auth,
       )

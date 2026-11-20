@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
 import type { Auth } from './index.ts'
@@ -141,6 +142,7 @@ export function createCallerResolver({
       )
       .where('m.userId', '=', userId)
       .where('m.organizationId', '=', organizationId)
+      .where((eb) => eb.not(scimSuspended(organizationId, userId)))
       .executeTakeFirst()
     if (!row) return undefined
     const metadata =
@@ -234,7 +236,7 @@ export function createCallerResolver({
       typeof session.session.activeOrganizationId === 'string'
         ? session.session.activeOrganizationId
         : undefined
-    // A session whose active organization is gone (or was never set) acts in the personal one.
+    // A session without effective membership in its active organization acts in the personal one.
     const membership =
       (active ? await inOrganization(userId, active) : undefined) ??
       (await inOrganization(userId, await ensurePersonalOrganization(db, userId)))

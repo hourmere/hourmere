@@ -11,7 +11,7 @@ import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
-import { productRoutes } from './server.ts'
+import { productionAppOptions } from './server.ts'
 
 const origin = 'http://localhost'
 const signingSecret = 'synthetic-scim-http-cookie-signing-secret'
@@ -390,25 +390,62 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
       expect(response.status).toBe(404)
       expect(response.headers.get('content-type')).toContain('application/scim+json')
     }
-    const application = createApp({
-      checkDb: async () => {},
-      authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
-      publicUrl: origin,
-      routes: productRoutes({
+  })
+  it('keeps SCIM resources unavailable in the production app with provisioning enabled', async () => {
+    const unavailable = async (): Promise<never> => expect.unreachable('Unexpected dependency')
+    const application = createApp(
+      productionAppOptions({
+        config: loadConfig({
+          DATABASE_URL: owned.url,
+          BETTER_AUTH_SECRET: signingSecret,
+          PUBLIC_URL: origin,
+          SCIM_PROVISIONING_ENABLED: 'true',
+        }),
         db,
-        socialProviders: {},
+        auth,
+        resolveCaller: createCallerResolver({ auth, db }),
+        resolveMcpOAuth: unavailable,
+        checkDb: unavailable,
+        waitlist: { verify: unavailable, remove: unavailable },
         invitationMailLimits: { secret: signingSecret },
-        scimProvisioningEnabled: true,
+        webhookSettings: { enabled: false },
+        webhookQueue: { enqueue: unavailable },
+        notify: unavailable,
+        notifyAttendeeNoShow: unavailable,
+        googleCalendar: undefined,
+        microsoftCalendar: undefined,
+        zoomConference: undefined,
+        enqueueCalendarSync: unavailable,
+        enqueueCalendarWritebackRecovery: unavailable,
+        mailboxProofQueue: { enqueue: unavailable },
       }),
-    })
+    )
     expect(await (await application.request('/api/v1/instance')).json()).toHaveProperty(
       'scimProvisioningEnabled',
       true,
     )
-    expect((await request(application, path(), 'POST', { name: 'Production wiring' })).status).toBe(
-      201,
-    )
+    const issued = await issue(application)
+    const resourceId = '00000000-0000-4000-8000-000000000001'
+    for (const [method, resource] of [
+      ['GET', 'ServiceProviderConfig'],
+      ['GET', 'ResourceTypes'],
+      ['GET', 'Schemas'],
+      ['GET', 'Users'],
+      ['GET', 'Groups'],
+      ['POST', 'Users'],
+      ['POST', 'Groups'],
+      ['PUT', `Users/${resourceId}`],
+      ['PATCH', `Users/${resourceId}`],
+      ['DELETE', `Users/${resourceId}`],
+    ]) {
+      const response = await application.request(`/scim/v2/${organizationId}/${resource}`, {
+        method,
+        headers: { authorization: `Bearer ${issued.secret}` },
+      })
+      expect(response.status).toBe(404)
+      expect(response.headers.get('content-type')).toContain('application/scim+json')
+      expect(await response.json()).toMatchObject({ status: '404' })
+    }
   })
   it('redacts credential-shaped validation input and unexpected driver failures', async () => {
     const issued = await issue()

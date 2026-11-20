@@ -11,6 +11,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { suspendScimMember } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
   type IdentityFixture,
   identityFixture,
@@ -292,5 +293,43 @@ describe.skipIf(!databaseUrl)('browser proof on team reads', () => {
     const fallback = await get('event-types')
     expect(fallback.status).toBe(200)
     expect(await fallback.json()).toEqual({ data: [] })
+  })
+
+  it('refuses a cached browser proof when suspension commits after caller resolution', async () => {
+    await expectTeamRead()
+    const personal = await ensurePersonalOrganization(db, fixture.member)
+    const personalEvent = await createFixtures(db).eventType(personal, fixture.member)
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: fixture.otherTeam,
+        userId: fixture.member,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    const otherActor = await browser(fixture.otherTeam)
+    const otherEvent = await createFixtures(db).eventType(fixture.otherTeam, null, {
+      hosts: [{ userId: fixture.otherOwner }],
+    })
+
+    afterResolution = () => suspendScimMember(db, fixture.team, fixture.member)
+    const inFlight = await get('event-types')
+    expect(inFlight.status).toBe(403)
+    expect(await inFlight.json()).toEqual({ error: 'team_management_access_denied' })
+
+    const fallback = await get('event-types')
+    expect(fallback.status).toBe(200)
+    expect(await fallback.json()).toMatchObject({ data: [{ id: personalEvent }] })
+    const otherTeam = await get('event-types', otherActor.cookie)
+    expect(otherTeam.status).toBe(200)
+    expect(await otherTeam.json()).toMatchObject({ data: [{ id: otherEvent }] })
+    expect(
+      await db
+        .selectFrom('sso_browser_proofs')
+        .select('session_id')
+        .where('session_id', '=', actor.id)
+        .executeTakeFirst(),
+    ).toEqual({ session_id: actor.id })
   })
 })

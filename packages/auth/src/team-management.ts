@@ -1,6 +1,8 @@
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import type { Principal } from './caller.ts'
+import { isMember } from './organizations.ts'
 import { ssoRecoveryOwner } from './sso-recovery-membership.ts'
 
 export interface TeamManager {
@@ -138,16 +140,11 @@ export async function checkTeamManagementAccess(
 
   if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase()) {
     // The caller resolver falls back to the personal organization when the active team's
-    // membership has gone. Recompute that effective context from current database facts.
+    // membership is ineffective. Recompute that context from current database facts.
     const activeMembership =
       session.activeOrganizationId && uuid(session.activeOrganizationId)
-        ? await db
-            .selectFrom('auth.member')
-            .select('id')
-            .where('organizationId', '=', session.activeOrganizationId)
-            .where('userId', '=', principal.user.id)
-            .executeTakeFirst()
-        : undefined
+        ? await isMember(db, principal.user.id, session.activeOrganizationId)
+        : false
     if (activeMembership || !personal) {
       if (role === 'member' && !context.allowPersonal && !allowMemberRead) throw denied()
       throw contextChanged()
@@ -185,6 +182,7 @@ export async function checkTeamManagementMembership(
     .select('role')
     .where('userId', '=', userId)
     .where('organizationId', '=', teamId)
+    .where((eb) => eb.not(scimSuspended(teamId, userId)))
   if (lock) memberQuery = memberQuery.forShare()
   const member = await memberQuery
     .$if(includeRecoveryOwner, (query) => query.select(ssoRecoveryOwner))

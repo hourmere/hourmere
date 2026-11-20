@@ -14,6 +14,7 @@ import { DomainError } from '@hourmere/scheduling'
 export type { TeamReadPolicy } from '@hourmere/auth'
 export interface TeamReadAccess {
   allowed: boolean
+  suspended?: true
   /** A machine decision carries only the authorization result. Fetch policy fields on demand. */
   policy: TeamReadPolicy | null | undefined
 }
@@ -72,6 +73,7 @@ export function teamReadAccess(deps: SsoTeamReadDeps, principal: Principal) {
 export type TeamReadCheck = ReturnType<typeof teamReadAccess>
 
 export function requireTeamRead(access: TeamReadAccess): void {
+  if (access.suspended) throw new DomainError('forbidden', 'team_management_access_denied')
   if (!access.allowed) missingProof()
 }
 
