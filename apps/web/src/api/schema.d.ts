@@ -5021,7 +5021,11 @@ export interface paths {
          * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. SSO is being built and is not available yet.
          */
         get: operations["getSsoPolicy"];
-        put?: never;
+        /**
+         * Set the current team SSO policy
+         * @description Requires a verified team owner or administrator browser session and fresh administration proof. Only owners can change enforcement. SSO remains unavailable.
+         */
+        put: operations["setSsoPolicy"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5065,7 +5069,7 @@ export interface paths {
         post?: never;
         /**
          * Retire an SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An authorized repeat retirement is idempotent. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. SSO remains unavailable.
          */
         delete: operations["deleteSsoProvider"];
         options?: never;
@@ -19246,6 +19250,94 @@ export interface operations {
             };
         };
     };
+    setSsoPolicy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    admission: "invitation_only" | "jit";
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                    requireSso: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The updated team policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoPolicy"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, sso_configuration_changed, sso_domain_unverified, sso_test_required or sso_recovery_required */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listSsoProviders: {
         parameters: {
             query?: {
@@ -19496,7 +19588,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description organization_context_changed or sso_configuration_changed */
+            /** @description organization_context_changed, sso_configuration_changed or sso_last_provider */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -871,7 +871,7 @@ The stable domain codes are exactly:
 | `sso_configuration_changed` | 409 | An expected provider revision, `policyRevision`, domain generation, link generation or `trustGeneration` no longer matches |
 | `sso_domain_unverified` | 409 | A new link, JIT admission, provider activation or enforcement needs a domain whose verification is unexpired and whose latest recheck was positive (a failed or unknown recheck freezes them) |
 | `sso_test_required` | 409 | Activation or enforcement needs a passed test for the exact current provider revision (an owner's, for enforcement) |
-| `sso_last_provider` | 409 | Disabling the last usable provider is refused while the team enforces SSO |
+| `sso_last_provider` | 409 | Disabling or retiring the last usable provider is refused while the team enforces SSO |
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), the last recovery owner tries to leave, be removed or lose the owner role, or the account affected by a link retirement lacks a verified login mailbox |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
@@ -1106,7 +1106,23 @@ OIDC 自助绑定适用于当前团队中已启用的提供商。成员使用现
 OIDC 仍在代码中关闭，绑定接口返回 `404 sso_disabled`。
 
 Policy takes `{expectedRevision, requireSso, admission, proofAttemptId?}` with
-`admission` restricted to `invitation_only` or `jit`. Recovery enrollment takes
+`admission` restricted to `invitation_only` or `jit`. `PUT /api/v1/team/sso/policy`
+returns the resulting policy on success. Owners can change enforcement, and owners and
+administrators can change admission. Enabling requires an enabled provider of an available
+protocol with an owner test of its current revision, a positively rechecked and unexpired
+linked domain, and a current owner who accepted recovery enrollment. The write records
+`sso_enforcement.enabled`, `sso_enforcement.disabled` or `sso_enforcement.updated` with
+the resulting revision when policy values change. Deactivation and retirement share the
+same last-usable-provider guard. Both protocols remain hard-off and this route returns
+`404 sso_disabled`.
+
+策略写入成功后返回更新后的策略。只有所有者可以更改强制 SSO，所有者和管理员可以更改
+准入模式。开启强制 SSO 需要已启用且协议可用的提供商、该版本通过所有者测试的记录、最近
+一次复查通过且尚未过期的关联域名，以及已接受恢复登记的当前所有者。策略变更与版本审计
+同时提交。强制 SSO 期间，最后一个可用的提供商无法停用或退役。两种协议仍在代码中保持
+关闭，接口返回 `404 sso_disabled`。
+
+Recovery enrollment takes
 `{expectedRevision, ownerUserId, proofAttemptId?}`
 and creates a pending nomination, never an active recovery owner. Return an opaque
 enrollment ID and notify the nominated current owner with an inert app link. Only that
@@ -1194,9 +1210,9 @@ consumed. Recovery use and nominee acceptance need only `mailbox`: no SSO proof 
 prior recovery authority. Proof completion never executes an operation. MCP and CLI never receive this response, because
 no machine write changes SSO trust.
 
-The shared gate now lives in `apps/server/src/sso-fresh-proof.ts`. It registers no route,
-MCP tool or CLI command. A future browser-only write supplies its strict input schema,
-transaction-time authorization/revision check and mutation callback. The gate checks the
+The shared gate lives in `apps/server/src/sso-fresh-proof.ts`. Each browser-only write supplies
+its strict input schema, transaction-time authorization/revision check and mutation callback.
+The gate checks the
 switch, exact Origin and absence of Authorization, freezes the canonical validated input
 (excluding only the top-level `proofAttemptId`), and binds the attempt to the browser cookie,
 user, session, team and operation. A missing binding cookie is issued as HttpOnly with
@@ -1205,9 +1221,10 @@ must append that cookie and return the challenge as HTTP 403, after its attempt 
 Successful proof consumption and the protected mutation share one transaction; a failed
 mutation rolls back consumption. The database clock is read after the row locks, and an
 expired recorded mailbox proof requires a new attempt. Teams without enforcement need
-`mailbox`. `sso` is required for fresh administration only when OIDC is available and the
-team has both `requireSso` and an enabled OIDC provider. The gate rechecks the recorded
-result's deadline, provider, link and trust generation before consuming the attempt.
+`mailbox`. A stored enforcement policy requires OIDC step-up for fresh administration.
+Satisfying that proof requires an available OIDC protocol and an enabled provider where the
+caller has a live link. The gate rechecks the recorded result's deadline, provider, link and
+trust generation before consuming the attempt.
 Independent local proof still requires `mailbox`. Both protocols remain hard-off in production.
 
 Mailbox proof is an authentication protocol surface, outside `/api/v1` and the product

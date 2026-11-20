@@ -108,6 +108,12 @@ const GUARDED_SSO_READS = [
 // Session-only writes are registered and tested below for the hard-off response.
 const GUARDED_SSO_WRITES = [
   {
+    method: 'put',
+    path: '/api/v1/team/sso/policy',
+    runtimePath: '/api/v1/team/sso/policy',
+    operationId: 'setSsoPolicy',
+  },
+  {
     method: 'post',
     path: '/api/v1/team/sso/domains',
     runtimePath: '/api/v1/team/sso/domains',
@@ -782,9 +788,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
         expectNoSsoOperations({ paths: { [path]: { [method]: { operationId } } } })
       check(write.path, write.method, write.operationId)
       for (const [path, method, operationId] of [
-        [write.path, 'put', write.operationId],
+        [write.path, write.method === 'put' ? 'post' : 'put', write.operationId],
         [`${write.path}/`, write.method, write.operationId],
-        [write.path, write.method, 'setSsoPolicy'],
+        [write.path, write.method, 'setSsoUnexpectedPolicy'],
       ])
         expect(() => check(path as string, method as string, operationId as string)).toThrow(
           expect.objectContaining({ name: 'AssertionError' }),

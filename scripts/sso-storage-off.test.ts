@@ -50,6 +50,12 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_domains',
     'sso_policies',
   ],
+  'apps/server/src/sso-policy.ts': [
+    'sso_policies',
+    'sso_providers',
+    'sso_domains',
+    'sso_provider_domains',
+  ],
   'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
   'apps/server/src/sso-me.ts': ['sso_attempts', 'sso_identity_links', 'sso_providers'],
   'packages/auth/src/team-sso.ts': [

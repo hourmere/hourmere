@@ -37,6 +37,10 @@
     "exemption": "browser-session-only",
     "reason": "Changing which providers can authenticate a team requires fresh interactive owner proof."
   },
+  "setSsoPolicy": {
+    "exemption": "browser-session-only",
+    "reason": "Changing SSO policy requires fresh interactive proof and owner authority for enforcement changes."
+  },
   "linkSsoAccount": {
     "exemption": "browser-session-only",
     "reason": "Explicit self-linking requires independent local proof and a browser-bound IdP ceremony."

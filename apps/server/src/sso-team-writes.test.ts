@@ -286,14 +286,25 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
       expect(transaction.some((statement) => statement.startsWith('update "event_types"'))).toBe(
         true,
       )
-      return { transaction, policyLookups: statements.filter((s) => s.includes('sso_policies')) }
+      return { transaction, statements: [...statements] }
     }
 
     const legacy = await trace(false, 'First update')
     const protectedWrite = await trace(true, 'Second update')
     expect(protectedWrite.transaction).toEqual(legacy.transaction)
-    expect(protectedWrite.policyLookups).toHaveLength(1)
-    expect(await currentTitle()).toBe('Second update')
+    expect(protectedWrite.statements.filter((s) => s.includes('sso_policies'))).toHaveLength(1)
+
+    // Main already locks the stored policy at commit, even when enforcement is off.
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: false })
+      .execute()
+    const unenforced = await trace(true, 'Third update')
+    expect(unenforced.statements.filter((s) => s.includes('sso_policies'))).toHaveLength(2)
+    expect(unenforced.statements.filter((s) => !s.includes('sso_policies'))).toEqual(
+      protectedWrite.statements.filter((s) => !s.includes('sso_policies')),
+    )
+    expect(await currentTitle()).toBe('Third update')
   })
 
   it('lets a member with live proof leave the team and revoke that proof atomically', async () => {

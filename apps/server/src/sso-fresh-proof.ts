@@ -32,7 +32,7 @@ export interface FreshProofRequest {
   sessionId: string
   organizationId: string
   operation: string
-  /** Administration always requires SSO when the stored policy is enforced. */
+  /** Defaults to administration. Mailbox-only proof on an enforced team is for independent local proof. */
   proofMode?: 'mailbox' | 'sso' | 'administration'
   input: unknown
   /** The operation's input without proofAttemptId. Unknown properties are always refused. */
@@ -156,7 +156,8 @@ export async function runWithFreshProof<T>(
       await sql`SELECT id FROM auth.session WHERE id = ${request.sessionId}::uuid FOR SHARE`.execute(
         trx,
       )
-      await sql`SELECT organization_id FROM sso_policies
+      const { rows: policies } = await sql<{ require_sso: boolean; trust_generation: number }>`
+      SELECT require_sso, trust_generation FROM sso_policies
       WHERE organization_id = ${request.organizationId}::uuid FOR SHARE`.execute(trx)
       if (proofAttemptId)
         await sql`SELECT id FROM sso_attempts WHERE id = ${proofAttemptId}::uuid FOR UPDATE`.execute(
@@ -171,22 +172,10 @@ export async function runWithFreshProof<T>(
       if (!mailbox) throw new HTTPException(403, { message: 'forbidden' })
       const independentMailbox = request.proofMode === 'mailbox'
       const delegatedSso = request.proofMode === 'sso'
-      const administration = request.proofMode === 'administration'
-      const policy =
-        administration || (deps.capabilities.ssoOidcEnabled && !independentMailbox)
-          ? await sql<{ trust_generation: number }>`SELECT coalesce((
-            SELECT trust_generation FROM sso_policies
-            WHERE organization_id = ${request.organizationId}::uuid
-              AND (${delegatedSso} OR require_sso)
-          ), CASE WHEN ${delegatedSso} THEN 1 END) AS trust_generation
-          WHERE ${administration} OR EXISTS (
-              SELECT 1 FROM sso_providers
-              WHERE organization_id = ${request.organizationId}::uuid
-                AND protocol = 'oidc' AND enabled AND retired_at IS NULL
-            )`.execute(trx)
-          : undefined
-      const trustGeneration = policy?.rows[0]?.trust_generation ?? null
-      const needsSso = delegatedSso || trustGeneration !== null
+      const policy = policies[0]
+      const needsSso = delegatedSso || (!independentMailbox && policy?.require_sso === true)
+      const trustGeneration = needsSso ? (policy?.trust_generation ?? 1) : null
+      if (needsSso) requireSsoEnabled(deps.capabilities, 'oidc')
       const needsMailbox = !needsSso
       if (proofAttemptId) {
         const { rows } = await sql<{
