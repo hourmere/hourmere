@@ -357,10 +357,9 @@ leaves the receipt unconsumed. Reschedule/cancel do not revive it or send new ro
 The internal booking service takes the ordinary organization, host, event and assignment
 locks before locking the form and receipt. It rechecks expiry after those locks and stores
 the pinned routing labels and answers separately from the invitee's final booking responses.
-At creation it omits the after-booking redirect snapshot. A keyed booking stores an indexed
-replay fingerprint on its provenance row. It binds the receipt digest, final request, key
-and credential scope, so an exact replay can find its booking while routing is off without
-reading a receipt.
+At creation it omits the after-booking redirect snapshot. A keyed booking indexes the
+fingerprint of the receipt digest and final request on its provenance row. Replay matches
+it against the booking's idempotency key and credential scope without reading a receipt.
 
 Unbooked receipts are inaccessible to form administrators and have no response list/export.
 Erase encrypted answers at expiry, with the bounded cleanup grace above; expired receipts

@@ -20,11 +20,29 @@ export function routingBookingTokenDigest(secret: string | undefined, token: str
     return routingTokenDigest(secret, 'continuation', token)
 }
 
-export function findRoutingBookingReplayEvidence(db: Db, replayFingerprint: Buffer) {
+export function findRoutingBookingReplayEvidence(
+  db: Db,
+  request: {
+    fingerprint: Buffer
+    key: string
+    apiKeyId: string | null
+    oauthConsentId?: string | null | undefined
+  },
+) {
   return db
-    .selectFrom('booking_routing')
-    .select(['booking_id', 'organization_id'])
-    .where('replay_fingerprint', '=', replayFingerprint)
+    .selectFrom('booking_routing as r')
+    .innerJoin('bookings as b', (join) =>
+      join.onRef('b.id', '=', 'r.booking_id').onRef('b.organization_id', '=', 'r.organization_id'),
+    )
+    .select(['r.booking_id', 'r.organization_id'])
+    .where('r.replay_fingerprint', '=', request.fingerprint)
+    .where('b.idempotency_key', '=', request.key)
+    .where('b.api_key_id', request.apiKeyId === null ? 'is' : '=', request.apiKeyId)
+    .where(
+      'b.oauth_consent_id',
+      request.oauthConsentId == null ? 'is' : '=',
+      request.oauthConsentId ?? null,
+    )
     .executeTakeFirst()
 }
 

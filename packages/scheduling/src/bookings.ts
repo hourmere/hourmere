@@ -1434,23 +1434,8 @@ export async function createRoutedBooking(
           routingReceiptDigest: tokenDigest,
         })
       : undefined
-  // A globally unique, indexed proof of the exact request locates its booking even if
-  // the feature is off. It cannot locate the booking by receipt digest or key alone.
-  const replayFingerprint =
-    request &&
-    sha256(
-      canonicalJson([
-        'routing-booking-replay',
-        request.apiKeyId,
-        request.oauthConsentId,
-        request.key,
-        request.fingerprint.toString('hex'),
-      ]),
-    )
-  const replayCommitted = async () =>
-    request && replayFingerprint
-      ? findRoutedBookingReplay(ctx.db, request, replayFingerprint)
-      : undefined
+  // The indexed booking snapshot identifies the request without opening its receipt.
+  const replayCommitted = () => (request ? findRoutedBookingReplay(ctx.db, request) : undefined)
   const replay = await replayCommitted()
   if (replay) return replay
   if (ctx.routingFormsEnabled !== true) throw new DomainError('not_found', 'routing_forms_disabled')
@@ -1474,7 +1459,12 @@ export async function createRoutedBooking(
         resolve: (db, options) => findRoutingBookingEvent(db, receipt, options),
         attendees,
         scope: request && { ...request, organizationId: et.organizationId },
-        routing: { receipt, secret, receiptNow: ctx.receiptNow, replayFingerprint },
+        routing: {
+          receipt,
+          secret,
+          receiptNow: ctx.receiptNow,
+          replayFingerprint: request?.fingerprint,
+        },
       })
     })
   } catch (error) {
@@ -1495,9 +1485,8 @@ export async function createRoutedBooking(
 async function findRoutedBookingReplay(
   db: Db,
   request: IdempotentBookingRequest,
-  replayFingerprint: Buffer,
 ): Promise<CreateBookingResult | undefined> {
-  const evidence = await findRoutingBookingReplayEvidence(db, replayFingerprint)
+  const evidence = await findRoutingBookingReplayEvidence(db, request)
   if (!evidence) return undefined
   const result = await findReplay(
     db,
@@ -1792,8 +1781,8 @@ async function createBookingInTransaction(
   }
   // A concurrent request with the same key may have committed while we waited.
   if (scope) {
-    const replay = routing?.replayFingerprint
-      ? await findRoutedBookingReplay(trx, scope, routing.replayFingerprint)
+    const replay = routing
+      ? await findRoutedBookingReplay(trx, scope)
       : await findReplay(trx, scope)
     if (replay) return { ...replay, replayed: true }
   }

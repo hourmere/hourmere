@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createDb, type Database, type Db } from '@hourmere/db'
+import { auditActor } from '@hourmere/db/audit'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import { bookingNotificationJob, bookingNotifier } from '@hourmere/notifications'
@@ -445,12 +446,28 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     })
   })
 
-  it('allows only exact authority-scoped committed replays while off, without a receipt read', async () => {
+  it.each([
+    { authority: 'API key', apiKeyId: randomUUID(), oauthConsentId: null },
+    { authority: 'OAuth grant', apiKeyId: null, oauthConsentId: randomUUID() },
+  ])('allows only exact $authority replays while off, without a receipt read', async (scope) => {
     const f = await fixture()
     const input = await f.issue()
     const pending = await f.issue()
     const before = await receipt(pending.routeToken)
-    const origin = { source: 'mcp', apiKeyId: randomUUID() } as const
+    const { apiKeyId, oauthConsentId } = scope
+    const origin = {
+      source: 'mcp',
+      apiKeyId,
+      oauthConsentId,
+      audit: oauthConsentId
+        ? auditActor({
+            user: f.author.principal.user,
+            kind: 'oauth',
+            oauthConsentId,
+            clientId: 'https://client.test/metadata.json',
+          })
+        : undefined,
+    } as const
     const queries: CompiledQuery[] = []
     const observed = trackQueries(queries)
     const skipped = vi.fn(async () => {})
@@ -481,9 +498,10 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     ]) {
       await expect(createRoutedBooking(off, changed, origin)).rejects.toMatchObject(disabled)
     }
-    await expect(
-      createRoutedBooking(off, input, { ...origin, apiKeyId: randomUUID() }),
-    ).rejects.toMatchObject(disabled)
+    const otherOrigin = apiKeyId
+      ? { ...origin, apiKeyId: randomUUID() }
+      : { ...origin, oauthConsentId: randomUUID() }
+    await expect(createRoutedBooking(off, input, otherOrigin)).rejects.toMatchObject(disabled)
     await expect(createRoutedBooking(off, input)).rejects.toMatchObject(disabled)
     expect(queries.some(({ sql: statement }) => statement.includes('"routing_receipts"'))).toBe(
       false,
