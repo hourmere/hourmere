@@ -732,7 +732,9 @@ describe('booking workflows are off and expose the shipped operations', () => {
 
   it('wires only guarded lifecycle capture after core intents in the production notifier', () => {
     const server = readFileSync(new URL('apps/server/src/server.ts', root), 'utf8')
-    expect(server).toContain("import { captureWorkflowBooking } from '@hourmere/workflows'")
+    expect(server).toContain(
+      "import { captureWorkflowBooking, workflowDefinitionAuditPort } from '@hourmere/workflows'",
+    )
     expect(server).toContain(
       'const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)',
     )
