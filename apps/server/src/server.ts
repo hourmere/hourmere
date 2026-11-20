@@ -1223,23 +1223,28 @@ async function start(
       webhookDeliveryJob({ db, ...webhookSettings }),
       webhookCleanupJob(db),
       ...(runWorkflowJobs
-        ? workflowJobs(workflowWorker, workflowWakePort, (claim) =>
-            executeWorkflowClaim(
-              {
-                ...workflowWorker,
-                mailer,
-                budget: {
-                  secret: config.BETTER_AUTH_SECRET,
-                  mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
-                  workflowMailMaxPerHour: config.WORKFLOW_MAIL_MAX_PER_HOUR,
-                  workflowOwnerMailMaxPerHour: config.WORKFLOW_OWNER_MAIL_MAX_PER_HOUR,
+        ? workflowJobs(
+            workflowWorker,
+            workflowWakePort,
+            (): Promise<string | null> =>
+              jobs.enqueue('workflow-retention-v1', {}, { singletonKey: 'retention' }),
+            (claim) =>
+              executeWorkflowClaim(
+                {
+                  ...workflowWorker,
+                  mailer,
+                  budget: {
+                    secret: config.BETTER_AUTH_SECRET,
+                    mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
+                    workflowMailMaxPerHour: config.WORKFLOW_MAIL_MAX_PER_HOUR,
+                    workflowOwnerMailMaxPerHour: config.WORKFLOW_OWNER_MAIL_MAX_PER_HOUR,
+                  },
+                  followUpHostNotesEnabled: () => config.FOLLOW_UP_HOST_NOTES_ENABLED,
+                  captureWebhook: (trx, input, now): Promise<boolean> =>
+                    captureWorkflowWebhook(jobs, webhookSettings, trx, input, now),
                 },
-                followUpHostNotesEnabled: () => config.FOLLOW_UP_HOST_NOTES_ENABLED,
-                captureWebhook: (trx, input, now): Promise<boolean> =>
-                  captureWorkflowWebhook(jobs, webhookSettings, trx, input, now),
-              },
-              claim,
-            ),
+                claim,
+              ),
           )
         : []),
       ...(caldavSyncDeps && caldavWriteDeps

@@ -456,6 +456,7 @@ describe('workflow implementation flag', () => {
             !(file === 'packages/workflows/src/deletes.ts' && writeImports.has(specifier)) &&
             !(file === 'packages/workflows/src/preview.ts' && previewImports.has(specifier)) &&
             !(file === 'packages/workflows/src/reads.ts' && readImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/retention.ts' && specifier === 'kysely') &&
             !(file === 'packages/workflows/src/execution.ts' && executionImports.has(specifier)) &&
             !(file === 'packages/workflows/src/email.ts' && emailImports.has(specifier)) &&
             !(

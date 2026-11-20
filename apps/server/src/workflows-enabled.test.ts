@@ -13,7 +13,7 @@ import {
 } from '@hourmere/scheduling/testing'
 import { WEBHOOK_EVENTS } from '@hourmere/webhooks'
 import { Kysely, PostgresDialect } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   captureWorkflowBooking,
   createWorkflow,
@@ -1668,10 +1668,12 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         wakes.add(id)
       },
     }
-    const offJobs = workflowJobs({ db, now: () => now, ...off }, port)
-    const onJobs = workflowJobs({ db, now: () => now, ...on }, port)
+    const enqueueRetention = vi.fn(async () => {})
+    const offJobs = workflowJobs({ db, now: () => now, ...off }, port, enqueueRetention)
+    const onJobs = workflowJobs({ db, now: () => now, ...on }, port, enqueueRetention)
     const job = { id: randomUUID(), attempt: 1, signal: new AbortController().signal }
     await offJobs[1].handler({}, job)
+    expect(enqueueRetention).toHaveBeenCalledOnce()
     expect(wakes.has(due.id)).toBe(true)
     expect(wakes.has(future.id)).toBe(false)
     await offJobs[0].handler({ runId: future.id }, job)

@@ -109,6 +109,7 @@ const DATA_ACCESS = [
   'packages/workflows/src/deletes.ts',
   'packages/workflows/src/capture.ts',
   'packages/workflows/src/dispatcher.ts',
+  'packages/workflows/src/retention.ts',
   'packages/workflows/src/email-attempt.ts',
   'packages/workflows/src/execution.ts',
   'packages/notifications/src/workflow-mail.ts',
@@ -419,7 +420,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     for (const { method, path, operationId } of shipped) {
       const operation = paths[path]?.[method.toLowerCase()] as Record<string, unknown>
       expect(operation?.operationId, operationId).toBe(operationId)
-      // Each says it is not available yet, as the design requires of every listed interface.
+      expect(String(operation?.description)).toContain('WORKFLOWS_ENABLED=true')
       expect(String(operation?.description)).toContain('404 workflows_disabled')
     }
     for (const { method, path, operationId } of absent) {
@@ -701,6 +702,11 @@ describe('booking workflows are off and expose the shipped operations', () => {
           expect(source).toContain(table)
         for (const table of ['workflow_mail_reservations', 'workflow_creation_keys'])
           expect(source).not.toContain(table)
+      } else if (file === 'packages/workflows/src/retention.ts') {
+        const tables = ['workflow_runs', 'workflow_recipient_claims', 'workflow_run_history']
+        for (const table of tables) expect(source).toContain(table)
+        for (const table of STORAGE_TABLES.filter((name) => !tables.includes(name)))
+          expect(source).not.toContain(table)
       } else if (file === 'packages/notifications/src/workflow-mail.ts') {
         expect(source).toContain('workflow_mail_reservations')
         for (const table of STORAGE_TABLES.filter((name) => name !== 'workflow_mail_reservations'))
@@ -722,7 +728,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     const loaders = sources.filter((file) => {
       const source = readFileSync(new URL(file, root), 'utf8')
       return (
-        /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher|email-attempt)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|preview|capture|dispatcher|email-attempt))(?:\.ts)?['"`]/.test(
+        /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher|retention|email-attempt)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|preview|capture|dispatcher|retention|email-attempt))(?:\.ts)?['"`]/.test(
           source,
         ) ||
         (file.startsWith('packages/workflows/src/') && /['"`]\.\/preview\.ts['"`]/.test(source))
@@ -731,10 +737,12 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(loaders).toEqual([
       'packages/workflows/src/creates.ts',
       'packages/workflows/src/deletes.ts',
+      'packages/workflows/src/dispatcher.ts',
       'packages/workflows/src/email-attempt.ts',
       'packages/workflows/src/execution.ts',
       'packages/workflows/src/index.ts',
       'packages/workflows/src/preview.ts',
+      'packages/workflows/src/reads.ts',
       'packages/workflows/src/updates.ts',
     ])
   })
@@ -812,7 +820,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(service).toMatch(/function guardedCapture\([^)]*\)\s*{\s*return workflowCapture\(/)
   })
 
-  it('keeps dispatcher and repair handlers guarded and limits production registration', () => {
+  it('keeps dispatch, repair and retention handlers guarded and limits production registration', () => {
     const service = readFileSync(new URL('packages/workflows/src/dispatcher.ts', root), 'utf8')
     expect(service).toContain('export const dispatchWorkflowRuns = workflowExecution(')
     expect(service).toContain(
@@ -822,10 +830,13 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(service).toContain(
       'repairWorkflowRunWakes({ ...ctx, audit: workflowAuditPort }, port, limit)',
     )
+    expect(service).toMatch(
+      /name: 'workflow-retention-v1',[\s\S]*handler: workflowExecution\(async \(_, \{ signal \}\) => \{\s*if \(!signal\.aborted\) await purgeWorkflowHistory\(ctx\.db\)/,
+    )
     const registrations = productionSources()
       .filter((file) => !file.startsWith('packages/workflows/src/'))
       .filter((file) =>
-        /\bworkflowJobs\b|workflow-dispatch-v1|workflow-repair-v1/.test(
+        /\bworkflowJobs\b|workflow-(?:dispatch|repair|retention)-v1/.test(
           readFileSync(new URL(file, root), 'utf8'),
         ),
       )

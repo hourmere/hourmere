@@ -185,6 +185,13 @@ describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
       expect(
         (await owned.pool.query("SELECT name FROM pgboss.job WHERE name LIKE 'workflow-%'")).rows,
       ).toEqual([])
+      expect(
+        (
+          await owned.pool.query(
+            "SELECT name FROM pgboss.queue WHERE name = 'workflow-retention-v1'",
+          )
+        ).rows,
+      ).toEqual([])
       expect(workflowEmails()).toEqual([])
       expect(requests).toEqual([])
       await worker.close()
@@ -206,6 +213,13 @@ describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
       worker = await startServer({ ...enabledEnv, HOURMERE_ROLE: 'worker' })
       await vi.waitFor(
         async () => {
+          expect(
+            (
+              await owned.pool.query(
+                "SELECT 1 FROM pgboss.job WHERE name = 'workflow-retention-v1' AND state = 'completed' LIMIT 1",
+              )
+            ).rowCount,
+          ).toBe(1)
           expect(
             await db
               .selectFrom('webhook_deliveries')

@@ -135,7 +135,7 @@ sub-caps below, rather than unchangeable product capacity limits.
 | `WORKFLOW_OWNER_MAIL_MAX_PER_HOUR` | 5 | Default workflow email attempts per personal owner or team in a sliding hour, across all its event types and workflows. |
 | `WORKFLOW_RECIPIENT_EMAILS_PER_HOUR` | 1 | Workflow email attempts per normalized address across the instance in a sliding hour, including hosts. |
 | `WORKFLOW_RECIPIENT_EMAILS_PER_DAY` | 3 | Workflow email attempts per normalized address across the instance in a sliding 24 hours, including hosts. |
-| `WORKFLOW_HISTORY_DAYS` | 30 | Visible run history and scheduled metadata retention after terminal state. |
+| `WORKFLOW_HISTORY_DAYS` | 30 | Window for visible history, measured from finish time. Older history and eligible terminal runs are removed in background batches. |
 
 ## Triggers, conditions and snapshots
 
@@ -705,16 +705,22 @@ adds `webhook_deliveries.workflow_run_id` (step 14a), nullable and without a for
 Use organization-scoped FKs and unique occurrence/
 revision/action/recipient identities, with bounded indexes for pending due work and
 retention. Deleting a workflow tombstones its identity and disables pending work while
-retaining safe history for the stated window. Purging history must not erase replay
-protection while a booking, snapshot or job can still reference it: retain minimal
-non-content terminal identity tombstones until all such references are retired. The execution
-rows are those tombstones: they name the workflow and revision without a foreign key to the
-definition and hold no content, so purging a tombstoned definition with its revisions keeps
-them until their booking or organization goes, and a purge is refused while the workflow has
-an unfinished run. History retention deletes only the history records. No replay
-endpoint exists. Booking deletion removes private snapshots and safely retires ID-only
-jobs. Never store rendered mail bodies, plaintext endpoint secrets or answer snapshots
-in audit/history merely for diagnostics.
+retaining safe history for the stated window. When workflow jobs are installed, startup and
+minute repair queue a retention job. Each invocation deletes up to 100 run history records
+and up to 100 completed, skipped or retired execution rows whose `finished_at` is more than
+30 elapsed days ago, taking the oldest unlocked rows first in each table. A run deletion
+cascades to its recipient claims, which contain attendee or host identities and address
+digests. A run with a `dispatching` claim or pending webhook delivery waits for that work to
+resolve so the worker can still record its outcome. Pending and claimed runs and their
+recipient intents stay in place.
+
+Enrollments remain until booking or organization deletion. Their unique booking, occurrence
+and workflow keys prevent capture replay from creating a replacement run, and a stale wake
+for a removed run has no work to claim. Retention also leaves definitions, revisions, creation
+keys, budget charges, webhook deliveries and audit events to their own lifecycles. Purging a
+tombstoned definition is refused while the workflow has an unfinished run. No replay endpoint
+exists. Booking deletion removes private snapshots and safely retires ID-only jobs. Never
+store rendered mail bodies, plaintext endpoint secrets or answer snapshots in audit/history.
 
 Audit log PR [#246](https://github.com/hourmere/hourmere/pull/246) is open as of the
 research date and may merge before or after any workflow step; this design does not assume
@@ -1056,7 +1062,9 @@ disable-only updates and deletion remain available for recovery. MCP discovery w
 omits workflow tools. `GET /api/v1/instance` reports the effective setting as `workflowsEnabled`.
 
 While off, booking changes make no workflow queries and capture no runs. Workflow email
-and webhook sends stop. A fresh default install starts no workflow wake loop. Pending runs
+and webhook sends stop. A fresh default install starts no workflow wake loop or retention job.
+A paused worker that starts with unfinished runs or interrupted email attempts installs the
+workflow jobs for recovery, including retention. Pending runs
 become terminally skipped as `instance_disabled` only when they are claimed while off; future
 runs are not eagerly swept. Runs that were not claimed while off remain eligible within their
 delivery windows after re-enabling. Disabling one definition is lazy in the same way, with
@@ -1072,7 +1080,11 @@ above.
 只接受 `true`、`false` 和空值，未设置或留空时默认关闭，其他值会导致启动失败。
 关停时可读取定义和历史、仅停用或删除工作流，创建、预览、启用及其他编辑均会被拒绝。
 MCP 工具不会出现在发现列表中。关闭时，预约变更不会查询工作流数据或创建执行任务，
-工作流邮件和 webhook 均停止发送。关停期间领取的到期任务会以 `instance_disabled`
+工作流邮件和 webhook 均停止发送。默认关闭的全新实例不会启动工作流调度或清理任务。
+如果暂停的实例启动时还有未结束的执行或中断的邮件尝试，后台会安装恢复和清理任务。
+清理按结束时间处理超过 30 天的历史及已结束的执行，每次各最多 100 条。删除执行时会一并删除收件人声明，
+中断的邮件尝试和待处理的 webhook 投递结束后才会清理其执行。预约登记和审计事件按各自的规则保留。
+关停期间领取的到期任务会以 `instance_disabled`
 终止，尚未到期的任务仍可在恢复后执行。单个工作流停用的历史原因是
 `workflow_disabled`。
 

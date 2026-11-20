@@ -10,6 +10,7 @@ import { WORKFLOWS_IMPLEMENTED, workflowExecution } from './hard-off.ts'
 import { WORKFLOW_MAX_LATE_MINUTES } from './limits.ts'
 import { type WorkflowSettings, workflowsEnabled } from './operator-settings.ts'
 import type { WorkflowOwner } from './ownership.ts'
+import { purgeWorkflowHistory } from './retention.ts'
 import { workflowDispatchWindow, workflowTimerDueAt } from './timers.ts'
 
 export const WORKFLOW_DISPATCH_PAGE = 100
@@ -655,6 +656,7 @@ export const repairWorkflowWakes = workflowExecution(
 export function workflowJobs(
   ctx: WorkflowWorkerContext,
   port: WorkflowWakePort,
+  enqueueRetention: () => Promise<unknown>,
   execute?: (claim: WorkflowRunClaim) => Promise<void>,
 ) {
   return [
@@ -675,9 +677,21 @@ export function workflowJobs(
       retry: { limit: 0 },
       expireInSeconds: 55,
       schedule: { cron: '* * * * *', payload: {} },
-      handler: async () => {
+      handler: async (_, { signal }) => {
         await repairWorkflowWakes(ctx, port)
+        // Reuse the repair schedule; a disabled install has no retention cron to remove.
+        if (WORKFLOWS_IMPLEMENTED && !signal.aborted) await enqueueRetention()
       },
+    }),
+    defineJob({
+      name: 'workflow-retention-v1',
+      payload: z.strictObject({}),
+      policy: 'exclusive',
+      retry: { limit: 0 },
+      expireInSeconds: 55,
+      handler: workflowExecution(async (_, { signal }) => {
+        if (!signal.aborted) await purgeWorkflowHistory(ctx.db)
+      }),
     }),
   ] as const
 }
