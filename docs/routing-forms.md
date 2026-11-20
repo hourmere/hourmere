@@ -587,6 +587,22 @@ UUID。未回答的选填题可省略或传 `null`。预览返回匹配规则、
 只在内存中处理答案。功能目前处于硬关闭状态，调用返回 `routing_forms_disabled`，MCP 工具
 列表不显示预览工具。
 
+In the web editor, save a new form to open its rules and fallback. Use the move buttons to
+set rule order with a keyboard. Each rule requires all its conditions to match. You can
+choose eligible event types from the current space, including hidden events and team events
+configured with a single member as host. Answer mappings use the selected event's current
+booking fields. For a single-choice question, choose a booking option for every routing
+option. Save your changes before running a preview with sample answers. The result shows
+the first rule that matched and which destination the server used. Preview is available in
+enabled test fixtures while production routing remains hard-off.
+
+中文：在网页上保存新表单后，即可编辑分流规则和备用安排。可以用键盘操作移动按钮来调整
+规则顺序。规则的所有条件都须满足才会匹配。去向可选择当前空间内符合条件的活动类型，
+包括隐藏活动以及由一位成员主持的团队活动。答案映射使用所选活动当前的预约字段。
+如果映射的是单选题，须为分流表单中的每个选项指定一个预约选项。请先保存更改，再填写
+示例答案运行预览。预览会显示第一条匹配的规则和服务器实际采用的去向。生产环境中的分流
+功能仍处于硬关闭状态，预览仅在启用了此功能的测试环境中可用。
+
 The public metadata endpoints read an enabled form's current publication and return
 `versionId`, the form's current `title` and optional `description`, and the published
 `questions` in order. Each question includes its ID, type, label and required flag. Select

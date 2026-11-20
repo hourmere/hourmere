@@ -1,3 +1,7 @@
+import {
+  RoutingValidationError,
+  validateRoutingFormConfig,
+} from '@hourmere/scheduling/routing-form-config'
 import { type FormEvent, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import type { Schemas } from '../../api/client.ts'
@@ -11,7 +15,9 @@ import type { MessageKey } from '../../i18n/translate.ts'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { randomKey } from '../../public/api.ts'
 import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { RoutingFormPreview } from './RoutingFormPreview.tsx'
 import { RoutingQuestionsEditor } from './RoutingQuestionsEditor.tsx'
+import { RoutingRulesEditor } from './RoutingRulesEditor.tsx'
 import {
   archiveRoutingForm,
   createRoutingForm,
@@ -19,6 +25,8 @@ import {
   type RoutingForm,
   saveRoutingForm,
 } from './routing-form-api.ts'
+import { useRoutingTargetEvents } from './routing-target-events.ts'
+import { routingEventMappingErrors } from './routing-target-mappings.ts'
 
 const titleField = 'routing-form-title'
 const slugField = 'routing-form-slug'
@@ -33,8 +41,23 @@ const deniedMessage = "You don't have permission to do that."
 const saveFailure = 'Could not save the routing form.'
 const archiveFailure = 'Could not archive the routing form.'
 
-function fieldsFrom(form?: RoutingForm): RoutingDraft {
-  if (!form) return { title: '', slug: '', description: '', questions: [] }
+function targetFields(target: RoutingForm['fallback']): RoutingForm['fallback'] {
+  if (target.kind === 'message') return { kind: target.kind, message: target.message }
+  return {
+    kind: target.kind,
+    eventTypeId: target.eventTypeId,
+    mappings: target.mappings.map(({ questionId, destination, options }) => ({
+      questionId,
+      destination:
+        destination.kind === 'question'
+          ? { kind: destination.kind, questionId: destination.questionId }
+          : { kind: destination.kind },
+      ...(options === undefined ? {} : { options }),
+    })),
+  }
+}
+
+function fieldsFrom(form: RoutingForm): RoutingDraft {
   return {
     title: form.title,
     slug: form.slug,
@@ -47,6 +70,17 @@ function fieldsFrom(form?: RoutingForm): RoutingDraft {
         ? { ...fields, type, options: question.options.map(({ id, label }) => ({ id, label })) }
         : { ...fields, type }
     }),
+    rules: form.rules.map(({ id, conditions, target }) => ({
+      id,
+      conditions: conditions.map((condition) => {
+        const { questionId, operator } = condition
+        return operator === 'equals'
+          ? { questionId, operator, value: condition.value }
+          : { questionId, operator, values: condition.values }
+      }),
+      target: targetFields(target),
+    })),
+    fallback: targetFields(form.fallback),
   }
 }
 
@@ -70,6 +104,25 @@ function validate(draft: RoutingDraft): FieldErrors {
   return errors
 }
 
+function configErrorMessage(error: RoutingValidationError): MessageKey {
+  switch (error.reason) {
+    case 'invalid_message':
+      return 'Enter a message using supported text.'
+    case 'not_found':
+      return 'Choose an event type.'
+    case 'invalid_mapping':
+      if (error.field?.endsWith('.options')) return 'Map every answer option to a booking option.'
+      if (error.field?.endsWith('.questionId')) return 'Choose a question from this form.'
+      return 'Check the answer mapping and choose a unique booking field.'
+  }
+  if (error.field?.endsWith('.questionId')) return 'Choose a question from this form.'
+  if (error.field?.endsWith('.conditions')) return 'Add at least one condition.'
+  if (error.field?.endsWith('.value') || error.field?.endsWith('.values'))
+    return 'Enter or select a valid answer to match.'
+  if (error.field?.startsWith('questions.')) return 'Enter a label using supported text.'
+  return 'Check the routing rule or fallback.'
+}
+
 type WriteIssue =
   | { context: unknown }
   | { message: MessageKey; reload?: boolean; blocked?: boolean }
@@ -91,10 +144,12 @@ function writeIssue(error: unknown, fallback: MessageKey): WriteIssue {
 export function RoutingFormEditor({
   form,
   organizationId,
+  personalOwnerId,
   reload,
 }: {
   form?: RoutingForm
   organizationId: string
+  personalOwnerId: string | null
   reload?: () => void
 }) {
   const { t } = useI18n()
@@ -102,9 +157,24 @@ export function RoutingFormEditor({
   const mounted = useMounted()
   const confirmLeave = useConfirmLeave()
   const inFlight = useRef(false)
+  const defaultFallback = {
+    kind: 'message' as const,
+    message: t('No appointment is available for these answers.'),
+  }
   const [busy, setBusy] = useState<'save' | 'archive' | null>(null)
   const [current, setCurrent] = useState(form)
-  const [draft, setDraft] = useState(() => fieldsFrom(form))
+  const [draft, setDraft] = useState<RoutingDraft>(() =>
+    form
+      ? fieldsFrom(form)
+      : {
+          title: '',
+          slug: '',
+          description: '',
+          questions: [],
+          rules: [],
+          fallback: defaultFallback,
+        },
+  )
   const [baseline, setBaseline] = useState(draft)
   const [errors, setErrors] = useState<FieldErrors>({})
   const [issue, setIssue] = useState<WriteIssue | null>(null)
@@ -112,7 +182,17 @@ export function RoutingFormEditor({
   const [saved, setSaved] = useState(false)
   const [pending, setPending] = useState<Schemas['CreateRoutingForm'] | null>(null)
   const blocked = Boolean(issue && ('context' in issue || issue.reload || issue.blocked))
-  useUnsavedChanges(JSON.stringify(draft) !== JSON.stringify(baseline))
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline)
+  useUnsavedChanges(dirty)
+  const targets = [
+    ...draft.rules.map((rule, index) => ({ path: `rules.${index}.target`, target: rule.target })),
+    { path: 'fallback', target: draft.fallback },
+  ]
+  const events = useRoutingTargetEvents(
+    organizationId,
+    personalOwnerId,
+    targets.map(({ target }) => target),
+  )
 
   function change(patch: Partial<RoutingDraft>) {
     setDraft((value) => ({ ...value, ...patch }))
@@ -128,19 +208,29 @@ export function RoutingFormEditor({
     setIssue(null)
     setSaved(false)
     const problems = validate(draft)
+    const { questions, rules } = draft
+    const fallback = current ? draft.fallback : defaultFallback
+    if (!Object.keys(problems).length) {
+      try {
+        validateRoutingFormConfig({ questions, rules, fallback })
+        Object.assign(problems, routingEventMappingErrors(events, questions, targets))
+      } catch (error) {
+        if (!(error instanceof RoutingValidationError)) throw error
+        problems[error.field ?? 'rules'] = configErrorMessage(error)
+      }
+    }
     setErrors(problems)
     if (Object.keys(problems).length) return
 
-    const fields = { ...draft, slug: draft.slug.trim() }
+    const fields = { ...draft, fallback, slug: draft.slug.trim() }
     const create = current
       ? null
       : (pending ?? {
-          ...fields,
-          // The required message is reviewed with the routing rules before publication.
-          fallback: {
-            kind: 'message' as const,
-            message: t('No appointment is available for these answers.'),
-          },
+          title: fields.title,
+          slug: fields.slug,
+          description: fields.description,
+          questions: fields.questions,
+          fallback: fields.fallback,
           requestId: randomKey(),
         })
     inFlight.current = true
@@ -276,6 +366,19 @@ export function RoutingFormEditor({
               onChange={(questions) => change({ questions })}
             />
           </div>
+          {current && (
+            <div className="panel">
+              <RoutingRulesEditor
+                questions={draft.questions}
+                rules={draft.rules}
+                fallback={draft.fallback}
+                onRulesChange={(rules) => change({ rules })}
+                onFallbackChange={(fallback) => change({ fallback })}
+                errors={errors}
+                events={events}
+              />
+            </div>
+          )}
         </fieldset>
         <div className="form-actions">
           <button type="submit" className="button button-primary" disabled={!!busy || blocked}>
@@ -284,6 +387,17 @@ export function RoutingFormEditor({
           {saved && <span role="status">{t('Draft saved.')}</span>}
         </div>
       </form>
+      {current && (
+        <RoutingFormPreview
+          key={current.draftRevision}
+          form={current}
+          organizationId={organizationId}
+          dirty={dirty}
+          disabled={!!busy || blocked}
+          eventTitle={events.eventTitle}
+          reload={reload}
+        />
+      )}
       {current && (
         <fieldset
           className="form-fieldset"

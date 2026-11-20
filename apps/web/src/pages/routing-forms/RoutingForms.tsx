@@ -44,6 +44,7 @@ export function NewRoutingFormPage() {
         <RoutingFormEditor
           key={`${me.user.id}:${me.organization.id}`}
           organizationId={me.organization.id}
+          personalOwnerId={me.organization.personal ? me.user.id : null}
         />
       </ManagerAccess>
     </div>
@@ -69,6 +70,7 @@ export function EditRoutingFormPage() {
             key={`${me.user.id}:${organizationId}:${id}`}
             id={id}
             organizationId={organizationId}
+            personalOwnerId={me.organization.personal ? me.user.id : null}
           />
         ) : (
           <UnavailableForm />
@@ -201,7 +203,15 @@ function RoutingFormList({ organizationId }: { organizationId: string }) {
   )
 }
 
-function RoutingFormEdit({ organizationId, id }: { organizationId: string; id: string }) {
+function RoutingFormEdit({
+  organizationId,
+  id,
+  personalOwnerId,
+}: {
+  organizationId: string
+  id: string
+  personalOwnerId: string | null
+}) {
   const load = useCallback(
     (signal: AbortSignal) => loadResult(getRoutingForm(organizationId, id, signal)),
     [organizationId, id],
@@ -219,6 +229,7 @@ function RoutingFormEdit({ organizationId, id }: { organizationId: string; id: s
     <RoutingFormEditor
       key={form.draftRevision}
       organizationId={organizationId}
+      personalOwnerId={personalOwnerId}
       form={form}
       reload={reload}
     />

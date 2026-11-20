@@ -140,6 +140,15 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'routing-manager-archive-confirm',
     'routing-manager-archiving',
     'routing-manager-archive-error',
+    'routing-manager-rules',
+    'routing-manager-rules-targets-loading',
+    'routing-manager-rules-targets-denied',
+    'routing-manager-rules-targets-error',
+    'routing-manager-rules-targets-empty',
+    'routing-manager-rules-fields-loading',
+    'routing-manager-rules-fields-denied',
+    'routing-manager-rules-fields-error',
+    'routing-manager-rules-invalid-mapping',
     'host',
     'booking',
     'booking-form',
@@ -466,6 +475,7 @@ const {auditPages,openAuditPage}=await import('./audit-pages.ts')
 const data=await import('./audit-data.ts')
 assert.notEqual(data.AUDIT_CONFIRMATION_EMAIL,data.AUDIT_EMAIL,'Confirmation email must not duplicate the admin-list fixture')
 assert.match(data.AUDIT_CONFIRMATION_EMAIL,/^[a-z.]+[a-z]@hourmere[.]invalid$/,'Confirmation email must pass real form validation')
+const routingEditorPath='/app/routing-forms/72100000-0000-4000-8000-000000000001'
 const expected={
   'poll-unavailable':{path:'/poll',public:true,wait:'[data-poll-state="unavailable"]'},
   'poll-enroll':{path:'/poll',public:true,wait:'[data-poll-state="enroll"]'},
@@ -524,6 +534,15 @@ const expected={
   'routing-manager-archive-confirm':{path:'/app/routing-forms/72100000-0000-4000-8000-000000000001',public:false,wait:'button:Archive form'},
   'routing-manager-archiving':{path:'/app/routing-forms/72100000-0000-4000-8000-000000000001',public:false,wait:'button:Archiving…'},
   'routing-manager-archive-error':{path:'/app/routing-forms/72100000-0000-4000-8000-000000000001',public:false,wait:'Could not archive the routing form.'},
+  'routing-manager-rules':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-answer-mappings',preview:'result'},
+  'routing-manager-rules-targets-loading':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-event-types-loading',preview:'loading'},
+  'routing-manager-rules-targets-denied':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-event-types-denied',preview:'denied'},
+  'routing-manager-rules-targets-error':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-event-types-error',preview:'error'},
+  'routing-manager-rules-targets-empty':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-event-types-empty',preview:'result'},
+  'routing-manager-rules-fields-loading':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-booking-fields-loading'},
+  'routing-manager-rules-fields-denied':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-booking-fields-denied'},
+  'routing-manager-rules-fields-error':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-booking-fields-error',preview:'stale'},
+  'routing-manager-rules-invalid-mapping':{path:routingEditorPath,public:false,space:'team',wait:'rules.0.target.mappings.0.options-error'},
   'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
   'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
   'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},
@@ -563,7 +582,7 @@ for(const [id,state] of Object.entries(expected)) {
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
     waitForFunction:async()=>{},evaluate:async(callback,value)=>{calls.push(['evaluate',callback.name]);if(callback.name==='expandEventSettings')callback();if(value?.path==='/route/continue')path=value.path},url:()=> 'http://127.0.0.1:42421'+path,
   }
-  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditPollState:async()=>({publicToken:'synthetic-public',voterToken:'synthetic-voter',optOutToken:'synthetic-opt-out'}),auditState:async()=>({organizationId:'synthetic-org',eventTypeId:'synthetic-event',teamBookingId:'synthetic-team-booking',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
+  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditPollState:async()=>({publicToken:'synthetic-public',voterToken:'synthetic-voter',optOutToken:'synthetic-opt-out'}),auditState:async()=>({organizationId:'synthetic-org',teamOrganizationId:'synthetic-team-org',eventTypeId:'synthetic-event',teamBookingId:'synthetic-team-booking',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value,locale,selectedSpace)=>{signedIn=value;space=selectedSpace},auditOAuthQuery:async()=>'?signed=fixture'}
   await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
   assert.deepEqual(calls[0],['clock',data.AUDIT_NOW],'Audit browser clock must be fixed before navigation: '+id)
   assert.deepEqual(calls.at(-1),['evaluate','settleAuditLayout'],'Audit layout must settle after content verification: '+id)
@@ -573,6 +592,12 @@ for(const [id,state] of Object.entries(expected)) {
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
   assert.equal(space,state.space,'Wrong organization space: '+id)
   assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes(state.wait)),'Missing content verification: '+id)
+  if(id.startsWith('routing-manager-rules'))
+    assert.equal(new URLSearchParams(query).get('organizationId'),'synthetic-team-org','Editor must be pinned to the team space')
+  if(state.preview) {
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1].includes('Run preview')&&call[2]==='Enter'),'Preview must submit answers with the keyboard')
+    assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes('testid:routing-preview-'+state.preview)),'Missing preview state: '+id)
+  }
   if(id==='booking-form'||id==='booking-confirmation') {
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='button.day-available'&&call[2]==='Enter'),'Booking state must choose a day')
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.slots button'&&call[2]==='Enter'),'Booking state must choose a time')

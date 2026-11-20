@@ -9,8 +9,8 @@ import { describe, expect, it } from 'vitest'
 import { isRoutingName } from '../../../scripts/routing-forms-names.ts'
 import { appRoutes } from './App.tsx'
 import { RequireRoutingForms } from './lazy-pages.tsx'
-import { PATHS } from './paths.ts'
-import { fakeApi, json, later, renderApp, signedIn } from './test/fake-api.tsx'
+import { PATHS, routingFormPath } from './paths.ts'
+import { fakeApi, json, later, ME, renderApp, signedIn } from './test/fake-api.tsx'
 
 type Route = (typeof appRoutes)[number]
 
@@ -19,11 +19,8 @@ type Route = (typeof appRoutes)[number]
 const PUBLIC_ROUTING_PAGES = ['/route/ada/intro', '/route/team/alpha/intro', '/route/continue']
 const MANAGER_PATHS = ['routing-forms', 'routing-forms/new', 'routing-forms/:id']
 const GATED_FORM_PATHS = ['/route/:handle/:slug', '/route/team/:teamSlug/:slug', ...MANAGER_PATHS]
-const managerAddresses = [
-  PATHS.routingForms,
-  PATHS.newRoutingForm,
-  `${PATHS.routingForms}/72100000-0000-4000-8000-000000000001`,
-]
+const editorAddress = routingFormPath('72100000-0000-4000-8000-000000000001', ME.organization.id)
+const managerAddresses = [PATHS.routingForms, PATHS.newRoutingForm, editorAddress]
 
 function routePaths(routes: Route[], parent = ''): string[] {
   return routes.flatMap((route) => {
@@ -200,6 +197,13 @@ const routingNav = () =>
     name: 'Routing forms',
   })
 
+function expectEditorControlsHidden() {
+  expect(screen.queryByText('Routing rules', { exact: true })).toBeNull()
+  expect(screen.queryByText('Fallback', { exact: true })).toBeNull()
+  expect(screen.queryByText('Answer mappings', { exact: true })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Run preview' })).toBeNull()
+}
+
 describe('routing manager capability', () => {
   it.each(managerAddresses)(
     'shows the ordinary not-found page while off at %s',
@@ -212,10 +216,31 @@ describe('routing manager capability', () => {
       await screen.findByRole('heading', { name: 'Page not found' })
       expect(screen.getByText('There is nothing at this address.')).toBeDefined()
       expect(routingNav()).toBeNull()
+      expectEditorControlsHidden()
       expect(api.to('GET /api/v1/instance')).toHaveLength(1)
       expect(api.calls.filter(({ path }) => isRoutingName(path))).toEqual([])
+      expect(api.to('GET /api/v1/event-types')).toHaveLength(0)
     },
   )
+
+  it('keeps the direct rule editor gated before discovery confirms routing is off', async () => {
+    const instance = later()
+    const api = fakeApi({
+      ...signedIn,
+      'GET /api/v1/instance': () => instance.response,
+    })
+    renderApp(editorAddress)
+    await screen.findByRole('navigation', { name: 'Main' })
+    expectEditorControlsHidden()
+    expect(api.calls.filter(({ path }) => isRoutingName(path))).toEqual([])
+    expect(api.to('GET /api/v1/event-types')).toHaveLength(0)
+
+    await instance.answer(json(200, { routingFormsEnabled: false }))
+    await screen.findByRole('heading', { name: 'Page not found' })
+    expectEditorControlsHidden()
+    expect(api.calls.filter(({ path }) => isRoutingName(path))).toEqual([])
+    expect(api.to('GET /api/v1/event-types')).toHaveLength(0)
+  })
 
   it('waits for instance discovery without mounting the list or showing a navigation link', async () => {
     const instance = later()

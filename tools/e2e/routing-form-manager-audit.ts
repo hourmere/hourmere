@@ -35,12 +35,37 @@ export const routingFormManagerAuditPages = [
   { id: 'routing-manager-archive-confirm', title: 'Confirm routing form archive' },
   { id: 'routing-manager-archiving', title: 'Routing form archive in progress' },
   { id: 'routing-manager-archive-error', title: 'Routing form archive error' },
+  { id: 'routing-manager-rules', title: 'Team routing rules, hidden event mappings and preview' },
+  { id: 'routing-manager-rules-targets-loading', title: 'Routing event types and preview loading' },
+  {
+    id: 'routing-manager-rules-targets-denied',
+    title: 'Routing event types and preview without permission',
+  },
+  {
+    id: 'routing-manager-rules-targets-error',
+    title: 'Routing event types and preview request errors',
+  },
+  {
+    id: 'routing-manager-rules-targets-empty',
+    title: 'No eligible event types and preview fallback',
+  },
+  { id: 'routing-manager-rules-fields-loading', title: 'Routing booking fields loading' },
+  { id: 'routing-manager-rules-fields-denied', title: 'Routing booking fields without permission' },
+  {
+    id: 'routing-manager-rules-fields-error',
+    title: 'Routing booking field error and stale preview',
+  },
+  { id: 'routing-manager-rules-invalid-mapping', title: 'Routing answer mapping validation error' },
 ] as const
 
 export type RoutingFormManagerAuditPageId = (typeof routingFormManagerAuditPages)[number]['id']
 
 export function isRoutingFormManagerAuditPage(id: string): id is RoutingFormManagerAuditPageId {
   return routingFormManagerAuditPages.some((entry) => entry.id === id)
+}
+
+export function usesTeamRoutingFormManagerAuditSpace(id: RoutingFormManagerAuditPageId) {
+  return id === 'routing-manager-team-list' || id.startsWith('routing-manager-rules')
 }
 
 const activeMocks = new WeakMap<Page, () => Promise<void>>()
@@ -73,22 +98,32 @@ const summary = {
   updatedAt: AUDIT_NOW,
   health: null,
 } satisfies components['schemas']['RoutingFormList']['data'][number]
+const topicQuestionId = '72100000-0000-4000-8000-000000000002'
+const newProjectId = '72100000-0000-4000-8000-000000000003'
+const existingProjectId = '72100000-0000-4000-8000-000000000004'
+const contactQuestionId = '72100000-0000-4000-8000-000000000005'
+const firstRuleId = '72100000-0000-4000-8000-000000000006'
+const secondRuleId = '72100000-0000-4000-8000-000000000007'
+const hiddenEventId = '72100000-0000-4000-8000-000000000008'
+const listedEventId = '72100000-0000-4000-8000-000000000009'
+const topicQuestionLabel = 'What would you like to discuss? / 你希望讨论什么？'
+
 const draft: components['schemas']['RoutingForm'] = {
   ...summary,
   description: 'Tell us what you would like to discuss. / 请告诉我们你希望讨论什么。',
   questions: [
     {
-      id: '72100000-0000-4000-8000-000000000002',
+      id: topicQuestionId,
       type: 'select',
-      label: 'What would you like to discuss? / 你希望讨论什么？',
+      label: topicQuestionLabel,
       required: true,
       options: [
-        { id: '72100000-0000-4000-8000-000000000003', label: 'New project / 新项目' },
-        { id: '72100000-0000-4000-8000-000000000004', label: 'Existing project / 现有项目' },
+        { id: newProjectId, label: 'New project / 新项目' },
+        { id: existingProjectId, label: 'Existing project / 现有项目' },
       ],
     },
     {
-      id: '72100000-0000-4000-8000-000000000005',
+      id: contactQuestionId,
       type: 'email',
       label: 'Contact email / 联系邮箱',
       required: false,
@@ -96,6 +131,135 @@ const draft: components['schemas']['RoutingForm'] = {
   ],
   rules: [],
   fallback: { kind: 'message', message: 'Please contact the office. / 请联系办公室。' },
+}
+
+function rulesDraft(id: RoutingFormManagerAuditPageId): components['schemas']['RoutingForm'] {
+  const firstRule: components['schemas']['RoutingForm']['rules'][number] = {
+    id: firstRuleId,
+    conditions: [{ questionId: topicQuestionId, operator: 'equals', value: newProjectId }],
+    target: {
+      kind: 'event',
+      eventTypeId: hiddenEventId,
+      mappings: [
+        {
+          questionId: topicQuestionId,
+          destination: { kind: 'question', questionId: 'project-topic' },
+          options: {
+            [newProjectId]:
+              id === 'routing-manager-rules-invalid-mapping' ? 'Old category' : 'Discovery',
+            [existingProjectId]: 'Support',
+          },
+        },
+        { questionId: contactQuestionId, destination: { kind: 'inviteeEmail' } },
+      ],
+    },
+  }
+  return {
+    ...draft,
+    rules:
+      id === 'routing-manager-rules'
+        ? [
+            firstRule,
+            {
+              id: secondRuleId,
+              conditions: [
+                {
+                  questionId: topicQuestionId,
+                  operator: 'one_of',
+                  values: [newProjectId, existingProjectId],
+                },
+              ],
+              target: { kind: 'message', message: 'The team will be in touch. / 团队会与你联系。' },
+            },
+          ]
+        : [firstRule],
+  }
+}
+
+function auditEventTypes(organizationId: string): components['schemas']['EventType'][] {
+  const hidden: components['schemas']['EventType'] = {
+    id: hiddenEventId,
+    organizationId,
+    ownerUserId: null,
+    title: 'Discovery with the project lead / 与项目负责人交流',
+    slug: 'lead-discovery',
+    description: null,
+    bookingMode: 'individual',
+    groupCapacity: null,
+    schedulingType: 'individual',
+    hosts: [{ userId: '72100000-0000-4000-8000-000000000010' }],
+    allowedDurationsMinutes: [30],
+    durationMinutes: 30,
+    slotStepMinutes: null,
+    bookingWindowDays: null,
+    bufferAfterMinutes: 0,
+    bufferBeforeMinutes: 0,
+    cancelCutoffMinutes: null,
+    conferenceOrganizer: null,
+    isActive: true,
+    isHidden: true,
+    allowGuests: false,
+    smsRemindersEnabled: false,
+    location: null,
+    locations: null,
+    maxBookingsPerDay: null,
+    maxBookingsPerWeek: null,
+    maxBookingsPerMonth: null,
+    minimumNoticeMinutes: 0,
+    notifications: { reminders: [], followUps: [] },
+    position: 0,
+    questions: [
+      {
+        id: 'project-topic',
+        type: 'select',
+        label: 'Project category / 项目类别',
+        required: true,
+        options: ['Discovery', 'Support'],
+      },
+    ],
+    rescheduleCutoffMinutes: null,
+    roundRobinActive: false,
+    scheduleId: null,
+    waitlist: { enabled: false },
+    createdAt: AUDIT_NOW,
+    updatedAt: AUDIT_NOW,
+  }
+  return [
+    hidden,
+    {
+      ...hidden,
+      id: listedEventId,
+      title: 'Support with the coordinator / 由协调员提供支持',
+      slug: 'coordinator-support',
+      hosts: [{ userId: '72100000-0000-4000-8000-000000000011' }],
+      isHidden: false,
+      position: 1,
+      questions: [],
+    },
+  ]
+}
+
+function previewResult(
+  id: RoutingFormManagerAuditPageId,
+  record: components['schemas']['RoutingForm'],
+): components['schemas']['RoutingFormPreview'] {
+  const fallback = id === 'routing-manager-rules-targets-empty'
+  const matched = record.rules.find(({ id }) => id === firstRuleId)
+  if (!matched) throw new Error('Missing synthetic rule for preview')
+  return {
+    draftRevision: record.draftRevision + Number(id === 'routing-manager-rules-fields-error'),
+    matchedRuleId: firstRuleId,
+    resolvedRuleId: fallback ? 'fallback' : firstRuleId,
+    target: fallback ? record.fallback : matched.target,
+    rules: [
+      {
+        ruleId: firstRuleId,
+        matched: true,
+        conditions: [{ questionId: topicQuestionId, matched: true }],
+      },
+    ],
+    unavailableTargets: fallback ? [{ ruleId: firstRuleId, reason: 'not_found' }] : [],
+  }
 }
 
 export async function openRoutingFormManagerAuditPage(
@@ -107,23 +271,28 @@ export async function openRoutingFormManagerAuditPage(
   const t = (key: keyof typeof english & keyof typeof chinese) =>
     locale === 'zh-CN' ? chinese[key] : english[key]
   const fixture = await app.auditState()
+  const rules = id.startsWith('routing-manager-rules')
+  const record = rules ? rulesDraft(id) : draft
   const list = id.includes('-list') || id === 'routing-manager-off'
   const creating = id === 'routing-manager-new' || id === 'routing-manager-creation-retry'
-  const loading = id.endsWith('-loading')
+  const loading = !rules && id.endsWith('-loading')
   const pending = loading || id === 'routing-manager-saving' || id === 'routing-manager-archiving'
+  const pendingRules = rules && id.endsWith('-loading')
   const dirty = id === 'routing-manager-invalid' || id === 'routing-manager-creation-retry'
   const path = list
     ? PATHS.routingForms
     : creating
       ? PATHS.newRoutingForm
-      : routingFormPath(draft.id, fixture.organizationId)
-  const apiPath = `/api/v1/routing-forms${list || creating ? '' : `/${draft.id}`}`
+      : routingFormPath(record.id, rules ? fixture.teamOrganizationId : fixture.organizationId)
+  const apiPath = `/api/v1/routing-forms${list || creating ? '' : `/${record.id}`}`
   const matchesDraft = (url: URL) => url.origin === app.url && url.pathname === apiPath
+  const matchesPreview = (url: URL) =>
+    url.origin === app.url && url.pathname === `${apiPath}/preview`
   const handleDraft = async (route: Route) => {
     const method = route.request().method()
     if (method === 'GET') {
       if (loading) return
-      if (id.endsWith('-denied'))
+      if (!rules && id.endsWith('-denied'))
         return route.fulfill({ status: 403, json: { error: 'team_management_access_denied' } })
       if (id.endsWith('-missing'))
         return route.fulfill({ status: 404, json: { error: 'routing_form_not_found' } })
@@ -132,15 +301,44 @@ export async function openRoutingFormManagerAuditPage(
       if (id.endsWith('-error') && (id.includes('-list') || id.includes('-edit')))
         return route.abort()
       return route.fulfill({
-        json: list ? { data: id.endsWith('-empty') ? [] : [summary], nextCursor: null } : draft,
+        json: list ? { data: id.endsWith('-empty') ? [] : [summary], nextCursor: null } : record,
       })
     }
     if (pending) return
     if (id === 'routing-manager-saved')
-      return route.fulfill({ json: { ...draft, draftRevision: draft.draftRevision + 1 } })
+      return route.fulfill({ json: { ...record, draftRevision: record.draftRevision + 1 } })
     if (id === 'routing-manager-stale')
       return route.fulfill({ status: 409, json: { error: 'routing_revision_conflict' } })
     return route.abort()
+  }
+  const events = rules ? auditEventTypes(fixture.teamOrganizationId) : []
+  const eventListUrl = `${app.url}/api/v1/event-types`
+  const matchesEventDetail = (url: URL) =>
+    url.origin === app.url &&
+    events.some((event) => url.pathname === `/api/v1/event-types/${event.id}`)
+  const denied = (route: Route) =>
+    route.fulfill({ status: 403, json: { error: 'team_management_access_denied' } })
+  const handleEventList = async (route: Route) => {
+    if (id === 'routing-manager-rules-targets-loading') return
+    if (id === 'routing-manager-rules-targets-denied') return denied(route)
+    if (id === 'routing-manager-rules-targets-error') return route.abort()
+    return route.fulfill({
+      json: { data: id === 'routing-manager-rules-targets-empty' ? [] : events },
+    })
+  }
+  const handleEventDetail = async (route: Route) => {
+    if (id === 'routing-manager-rules-fields-loading') return
+    if (id === 'routing-manager-rules-fields-denied') return denied(route)
+    if (id === 'routing-manager-rules-fields-error') return route.abort()
+    return route.fulfill({
+      json: events.find((event) => new URL(route.request().url()).pathname.endsWith(event.id)),
+    })
+  }
+  const handlePreview = async (route: Route) => {
+    if (id === 'routing-manager-rules-targets-loading') return
+    if (id === 'routing-manager-rules-targets-denied') return denied(route)
+    if (id === 'routing-manager-rules-targets-error') return route.abort()
+    return route.fulfill({ json: previewResult(id, record) })
   }
   const instanceUrl = `${app.url}/api/v1/instance`
   const handleInstance = (route: Route) =>
@@ -155,12 +353,22 @@ export async function openRoutingFormManagerAuditPage(
   const release = async () => {
     await page.unroute(instanceUrl, handleInstance)
     await page.unroute(matchesDraft, handleDraft)
+    if (rules) {
+      await page.unroute(eventListUrl, handleEventList)
+      await page.unroute(matchesEventDetail, handleEventDetail)
+      await page.unroute(matchesPreview, handlePreview)
+    }
   }
 
   try {
     await page.route(instanceUrl, handleInstance)
     await page.route(matchesDraft, handleDraft)
-    if (pending || dirty) activeMocks.set(page, release)
+    if (rules) {
+      await page.route(eventListUrl, handleEventList)
+      await page.route(matchesEventDetail, handleEventDetail)
+      await page.route(matchesPreview, handlePreview)
+    }
+    if (pending || dirty || pendingRules) activeMocks.set(page, release)
     await Promise.all([
       loading && page.waitForRequest((request) => matchesDraft(new URL(request.url()))),
       page.goto(app.url + path),
@@ -177,7 +385,33 @@ export async function openRoutingFormManagerAuditPage(
       const editor = main.getByTestId('routing-form-editor')
       await editor.waitFor()
       const save = editor.getByRole('button', { name: t('Save draft'), exact: true })
-      if (id === 'routing-manager-invalid') {
+      if (rules) {
+        if (id.includes('-targets-')) {
+          await editor.getByTestId(`routing-event-types-${id.split('-').at(-1)}`).waitFor()
+        } else if (id.includes('-fields-')) {
+          await editor.getByTestId(`routing-booking-fields-${id.split('-').at(-1)}`).waitFor()
+        } else {
+          await editor.getByTestId('routing-answer-mappings').waitFor()
+        }
+
+        if (id === 'routing-manager-rules-invalid-mapping') {
+          await save.press('Enter')
+          await editor.locator('[id="rules.0.target.mappings.0.options-error"]').waitFor()
+        } else if (
+          id !== 'routing-manager-rules-fields-loading' &&
+          id !== 'routing-manager-rules-fields-denied'
+        ) {
+          await main.getByLabel(topicQuestionLabel, { exact: true }).selectOption(newProjectId)
+          await main.getByRole('button', { name: t('Run preview'), exact: true }).press('Enter')
+          const status =
+            id === 'routing-manager-rules' || id === 'routing-manager-rules-targets-empty'
+              ? 'result'
+              : id === 'routing-manager-rules-fields-error'
+                ? 'stale'
+                : id.split('-').at(-1)
+          await main.getByTestId(`routing-preview-${status}`).waitFor()
+        }
+      } else if (id === 'routing-manager-invalid') {
         await editor.getByLabel(t('Title'), { exact: true }).fill('')
         await save.press('Enter')
         await editor

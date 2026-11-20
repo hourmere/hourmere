@@ -103,6 +103,8 @@ describe('Routing form management', () => {
       slug: form.slug,
       description: '',
       questions: [{ ...created.questions?.[0], label: 'Organization' }],
+      rules: [],
+      fallback: form.fallback,
       expectedRevision: 1,
     })
 

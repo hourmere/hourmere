@@ -271,7 +271,7 @@ function QuestionOptions({
   )
 }
 
-function ReorderButtons<T extends { id: string }>({
+export function ReorderButtons<T extends { id: string }>({
   id,
   name,
   items,

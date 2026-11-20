@@ -30,6 +30,7 @@ import {
   openRoutingFormManagerAuditPage,
   type RoutingFormManagerAuditPageId,
   routingFormManagerAuditPages,
+  usesTeamRoutingFormManagerAuditSpace,
 } from './routing-form-manager-audit.ts'
 
 const pollAuditPages = [
@@ -233,7 +234,11 @@ export async function openAuditPage(
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
     if (isRoutingFormManagerAuditPage(id)) {
-      await app.auditSignIn(true, locale, id === 'routing-manager-team-list' ? 'team' : undefined)
+      await app.auditSignIn(
+        true,
+        locale,
+        usesTeamRoutingFormManagerAuditSpace(id) ? 'team' : undefined,
+      )
       await page.addInitScript(prepareAuditLocale, locale)
       const path = await openRoutingFormManagerAuditPage(
         page,

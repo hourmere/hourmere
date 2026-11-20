@@ -1,7 +1,10 @@
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 
 export type RoutingForm = Schemas['RoutingForm']
-export type RoutingDraft = Pick<RoutingForm, 'title' | 'slug' | 'description' | 'questions'>
+export type RoutingDraft = Pick<
+  RoutingForm,
+  'title' | 'slug' | 'description' | 'questions' | 'rules' | 'fallback'
+>
 
 const collection = '/api/v1/routing-forms'
 const record = '/api/v1/routing-forms/{id}'
@@ -55,6 +58,22 @@ export function saveRoutingForm(
       cache: 'no-store',
       params: { header: organizationHeader(organizationId), path: { id } },
       body: { ...draft, expectedRevision },
+    }),
+  )
+}
+
+export function previewRoutingForm(
+  organizationId: string,
+  id: string,
+  answers: Schemas['PreviewRoutingForm']['answers'],
+  signal: AbortSignal,
+) {
+  return unwrap(
+    api.POST('/api/v1/routing-forms/{id}/preview', {
+      cache: 'no-store',
+      signal,
+      params: { header: organizationHeader(organizationId), path: { id } },
+      body: { answers },
     }),
   )
 }
