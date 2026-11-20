@@ -1057,6 +1057,9 @@ pending challenges never reserve the name.
 Browser-only recovery enrollment binds the nomination and acceptance to their own proof
 attempts and advances `policy_revision` under the organization write lock. Membership
 changes use that same lock when removing accepted recovery status.
+Browser-only policy writes share the organization write lock. Enabling enforcement checks
+the enabled provider's current owner test receipt, its verified domain and an accepted
+current recovery owner. The policy and its audit event commit together.
 OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 

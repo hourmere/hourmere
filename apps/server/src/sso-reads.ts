@@ -53,6 +53,10 @@ export async function getSsoPolicy(
           .where('organization_id', '=', principal.organization.id)
           .executeTakeFirst()
       : checkedPolicy
+  return ssoPolicySummary(policy)
+}
+
+export function ssoPolicySummary(policy: TeamReadPolicy | null | undefined) {
   return {
     requireSso: policy?.require_sso ?? false,
     admission: policy?.admission ?? 'invitation_only',

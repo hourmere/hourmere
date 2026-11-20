@@ -7,13 +7,19 @@ import { lockOidcTestActor, OidcAttemptRefused, type OidcTestActor } from './sso
 const action = 'sso_provider.tested'
 
 /** A receipt only applies to the revision whose sealed configuration was tested. */
-export const currentSsoProviderTestStatus = sql<string>`coalesce((
-  SELECT details->>'outcome' FROM audit_events
-  WHERE organization_id = sso_providers.organization_id
-    AND action = ${action} AND target_id = sso_providers.id::text
-    AND details->'revision' = to_jsonb(sso_providers.revision)
-  ORDER BY occurred_at DESC, id DESC LIMIT 1
-), 'unknown')`
+function providerTestStatus(ownerOnly: boolean) {
+  return sql<string>`coalesce((
+    SELECT details->>'outcome' FROM audit_events
+    WHERE organization_id = sso_providers.organization_id
+      AND action = ${action} AND target_id = sso_providers.id::text
+      AND details->'revision' = to_jsonb(sso_providers.revision)
+      ${ownerOnly ? sql`AND target_type = 'sso_provider_owner_test'` : sql``}
+    ORDER BY occurred_at DESC, id DESC LIMIT 1
+  ), 'unknown')`
+}
+
+export const currentSsoProviderTestStatus = providerTestStatus(false)
+export const currentSsoProviderOwnerTestStatus = providerTestStatus(true)
 
 export async function recordOidcProviderTest(
   db: Db,
