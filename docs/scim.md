@@ -336,9 +336,11 @@ a previously issued token or cached proof must not keep granting access.
 
 Authorization uses the live SCIM suspension for the account and team. Existing team API
 keys, SSO delegation and MCP OAuth tokens lose authorization for that team. REST and
-MCP check the blocker again when using a previously resolved team credential. SSO JIT
-admission checks live blockers for the proven mailbox under the team lock. Authorization
-and credential revocation are separate steps in the implementation plan below.
+MCP check the blocker when resolving the caller. A credential resolved before suspension
+can finish a read. Team writes in SCIM-managed organizations take the team lock and
+check suspension on the committing connection. SSO JIT admission checks live blockers
+for the proven mailbox under the team lock. Authorization and credential revocation are
+separate steps in the implementation plan below.
 
 The shared suspension write takes the team lock and records the blocker in the same
 transaction as two bulk deletes. It deletes the account's sessions whose active

@@ -322,21 +322,24 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         },
         {
           name: 'API key',
+          extraQueries: 0,
           request: (app: App) => rest(app, '/event-types', teamKey),
           example: eventTypeId,
         },
         {
           name: 'MCP API key',
+          extraQueries: 0,
           request: (app: App) => mcpCall(app, teamKey),
           example: bookingId,
         },
         {
           name: 'MCP OAuth',
+          extraQueries: 0,
           request: (app: App) => mcpCall(app, oauth),
           example: bookingId,
         },
       ]
-      for (const { name, request, example } of routes) {
+      for (const { name, request, example, extraQueries = 1 } of routes) {
         statements.length = 0
         const before = await capture(await request(legacy))
         const previousQueryCount = statements.length
@@ -346,7 +349,7 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         expect(new TextDecoder().decode(after.bytes), name).toContain(example)
         expect(after, name).toEqual(before)
         expect(policyStatements(), name).toHaveLength(1)
-        expect(statements, name).toHaveLength(previousQueryCount + 1)
+        expect(statements, name).toHaveLength(previousQueryCount + extraQueries)
         expect(
           statements.some((statement) => statement.includes('sso_delegation_bindings')),
           name,

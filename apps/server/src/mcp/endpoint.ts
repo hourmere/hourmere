@@ -118,22 +118,22 @@ function toAuthInfo(
   trustedIp: string | undefined,
   ssoTeamReads: SsoTeamReadDeps | undefined,
 ): AuthInfo {
-  // A legacy batch can dispatch several calls with this same transport principal.
-  // Each tool establishes live team reliance independently.
+  // The transport principal is shared by every call in this HTTP request.
+  // Writes still recheck authorization in their own transactions.
+  const check = ssoTeamReads && teamReadAccess(ssoTeamReads, caller)
   const checkTeamRead: ToolCall['checkTeamRead'] =
-    ssoTeamReads &&
+    check &&
     (async (toolName) => {
       if (!teamReadTool(toolName)) return
-      const access = await teamReadAccess(ssoTeamReads, caller)()
+      const access = await check()
       requireTeamRead(access)
       return access
     })
   const runTeamWrite: ToolCall['runTeamWrite'] =
     ssoTeamReads &&
+    check &&
     ((tool, mode, run) =>
-      teamWriteTool(tool, mode)
-        ? withTeamWriteAccess(ssoTeamReads, caller, teamReadAccess(ssoTeamReads, caller), run)
-        : run())
+      teamWriteTool(tool, mode) ? withTeamWriteAccess(ssoTeamReads, caller, check, run) : run())
   return {
     token: '',
     clientId: caller.kind === 'api_key' ? caller.apiKeyId : caller.clientId,

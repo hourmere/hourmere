@@ -86,6 +86,13 @@ export async function suspendScimMembership(
   return block
 }
 
+/** Project whether the team already has SCIM storage without a separate lookup. */
+export function scimProvisioned(organizationId: Expression<string>) {
+  return sql<boolean>`EXISTS (
+    SELECT 1 FROM scim_connections WHERE organization_id = ${organizationId}::uuid
+  )`
+}
+
 /** Embed the account's live team suspension in an existing authorization statement. */
 export function scimSuspended(
   organizationId: Expression<string> | string,

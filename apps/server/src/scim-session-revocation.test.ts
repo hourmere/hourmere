@@ -354,7 +354,7 @@ describe.skipIf(!databaseUrl)('SCIM session authorization revocation', () => {
   it('refuses browser proof issuance waiting behind the suspension', async () => {
     const inputs = await oidcInputs()
     const { second } = await race(await suspension(), () => issue(inputs))
-    expect('reason' in second ? second.reason : undefined).toBe('mailbox_unproven')
+    expect('reason' in second ? second.reason : undefined).toBe('scim_suspended')
     expect(await teamProofs()).toEqual([])
   })
 

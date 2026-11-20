@@ -1817,6 +1817,9 @@ The phases within that organization boundary are:
   transaction advisory lock after the organization lock so suspensions across teams
   serialize when the same sessions carry proofs for both teams. Native team selection
   and OIDC proof issuance take the organization lock before checking suspension.
+  Team writes that need a commit-time check hold the same organization row with at
+  least key-share strength and read the blocker in a fresh READ COMMITTED statement
+  after acquiring the lock.
   Session refresh only updates existing rows and serializes with their deletion through
   the session row lock.
 - Invitation acceptance takes the recipient's `auth.user` share lock, the organization update

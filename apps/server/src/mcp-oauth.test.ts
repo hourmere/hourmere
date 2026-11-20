@@ -578,7 +578,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       }),
     )
 
-  it('keeps existing refresh query counts and checks live suspension at MCP team reliance', async () => {
+  it('keeps existing refresh and MCP caller query counts', async () => {
     const s = await session(),
       team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
       tokens = await connected(s, team.id)
@@ -599,7 +599,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     const mcp = await app().request(mcpRequest(next.access_token))
     expect(mcp.status).toBe(200)
     expect(await mcp.text()).toContain('"kind":"oauth"')
-    expect(statements).toHaveLength(3)
+    expect(statements).toHaveLength(2)
   })
 
   it.each([false, true])(
@@ -657,7 +657,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       }
       const inFlight = await pending
       expect(inFlight.status).toBe(200)
-      expect(await inFlight.text()).toContain('team_management_access_denied')
+      expect(await inFlight.text()).toContain(team.id)
       const denied = await whoami(teamToken)
       expect(denied.status).toBe(401)
       expect(await denied.json()).toEqual({ error: 'invalid_token' })
@@ -832,6 +832,9 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       await withConnection(async (writer) => {
         await writer.query('BEGIN')
         try {
+          const { rows: blocker } = await writer.query<{ pid: number }>(
+            'SELECT pg_backend_pid() AS pid',
+          )
           await writer.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [team.id])
           await writer.query('UPDATE sso_providers SET enabled = false WHERE id = $1', [
             reliance.provider_id,
@@ -845,7 +848,8 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
             async () => {
               const { rows } = await owned.pool.query(
                 `SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
-               AND wait_event_type = 'Lock' AND query ILIKE '%auth%organization%for share%'`,
+                 AND $1 = ANY(pg_blocking_pids(pid)) AND query ILIKE '%auth%organization%'`,
+                [blocker[0]?.pid],
               )
               expect(rows).toHaveLength(1)
             },

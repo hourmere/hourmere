@@ -182,7 +182,7 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
       .toBe(true)
   }
 
-  it('keeps successful response bytes with one live check at team-key reliance', async () => {
+  it('keeps successful response bytes and two caller queries for team keys', async () => {
     const credential = await key()
     async function outcome(app: ReturnType<typeof instance>) {
       statements.length = 0
@@ -194,17 +194,16 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
     expect(previous.status).toBe(200)
     // Persisted key metadata and member/key/organization lookup, with no SSO round-trip.
     expect(previous.queries).toBe(2)
-    const checked = { ...previous, queries: previous.queries + 1 }
-    expect(await outcome(instance(disabled))).toEqual(checked)
-    expect(await outcome(instance())).toEqual(checked)
+    expect(await outcome(instance(disabled))).toEqual(previous)
+    expect(await outcome(instance())).toEqual(previous)
     await policy(false)
-    expect(await outcome(instance())).toEqual(checked)
+    expect(await outcome(instance())).toEqual(previous)
 
     statements.length = 0
     const mcp = await mcpWhoami(instance(), credential.headers)
     expect(mcp.status).toBe(200)
     expect(await mcp.text()).toContain(fixture.team)
-    expect(statements).toHaveLength(3)
+    expect(statements).toHaveLength(2)
   })
 
   it('keeps browser session authorization within its existing membership and team policy queries', async () => {
@@ -291,10 +290,10 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
       release.resolve()
     }
     const [inFlightRest, inFlightMcp] = await Promise.all([pendingRest, pendingMcp])
-    expect(inFlightRest.status).toBe(403)
-    expect(await inFlightRest.json()).toEqual({ error: 'team_management_access_denied' })
+    expect(inFlightRest.status).toBe(200)
+    expect(await inFlightRest.json()).toMatchObject({ organization: { id: fixture.team } })
     expect(inFlightMcp.status).toBe(200)
-    expect(await inFlightMcp.text()).toContain('team_management_access_denied')
+    expect(await inFlightMcp.text()).toContain(fixture.team)
     const rest = await me(app, credential.headers)
     expect(rest.status).toBe(401)
     expect(await rest.json()).toEqual({ error: 'unauthorized' })
