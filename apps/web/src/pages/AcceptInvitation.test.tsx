@@ -337,7 +337,7 @@ describe('accept invitation entry', () => {
     const source = readFileSync('apps/web/src/App.tsx', 'utf8')
     const routes = source.slice(
       source.indexOf('export const appRoutes'),
-      source.indexOf('function RouteLoadingStatus'),
+      source.indexOf('const routingFormRoutes'),
     )
     const dependencies = {
       createRoutesFromElements,

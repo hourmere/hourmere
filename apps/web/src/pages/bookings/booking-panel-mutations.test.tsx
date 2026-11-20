@@ -64,8 +64,10 @@ function Empty() {
 }
 const appSource = readFileSync('apps/web/src/App.tsx', 'utf8')
 function appCopy(source: string) {
+  const start = source.indexOf('function AppRoutes(')
+  expect(start).toBeGreaterThanOrEqual(0)
   return compile(
-    `${source.slice(source.indexOf('function AppRoutes()'))}\nreturn AppRoutes`,
+    `${source.slice(start)}\nreturn () => <AppRoutes initialContinuation={undefined} />`,
     'apps/web/src/App.tsx',
     {
       React,
@@ -82,10 +84,13 @@ function appCopy(source: string) {
         { path: '/route/:handle/:slug' },
         { path: '/route/team/:teamSlug/:slug' },
       ],
+      continuationParams: () => undefined,
+      takeRoutingContinuation: () => undefined,
       RoutingFormGate: Empty,
       BookingPanelContext,
       bookingPath: (id: string) => `/app/bookings/${id}`,
-      useI18n: () => ({ t: (text: string) => text }),
+      PageDescription: Empty,
+      MemoryLanguage: Child,
       RouteErrorBoundary: Child,
       AdminLoading: Empty,
       RouteLoadingStatus: Empty,

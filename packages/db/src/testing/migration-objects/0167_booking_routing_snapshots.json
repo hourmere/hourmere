@@ -1,0 +1,7 @@
+{
+  "migration": "0167_booking_routing_snapshots.sql",
+  "objects": {
+    "not_null public.bookings.has_routing_snapshot": "NOT NULL DEFAULT false",
+    "trigger public.booking_routing.booking_routing_mark_snapshot": "CREATE TRIGGER booking_routing_mark_snapshot AFTER INSERT ON public.booking_routing FOR EACH ROW EXECUTE FUNCTION mark_booking_routing_snapshot() -- function SET search_path=public, pg_temp md5 21fc650194139871e619b92367ed43fc"
+  }
+}

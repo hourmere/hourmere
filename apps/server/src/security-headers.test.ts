@@ -291,15 +291,27 @@ describe('security headers', () => {
     }
     for (const path of [
       '/route',
-      '/route/continue',
       '/route/legacy',
       '/team/route/legacy',
       '/route%2Fteam/alpha/intro',
       '/%2572oute/ada/intro',
+      '/route%2Fcontinue',
     ]) {
       const response = await enabled.request(path)
       expect(response.headers.get('cache-control'), path).toBe('no-cache')
       expect(securityHeadersOf(response)).toEqual(APP_PAGE)
+    }
+  })
+
+  it('keeps continuation link documents private even while routing is disabled', async () => {
+    const enabled = createApp(deps({ webDist: dist, routingFormsEnabled: true }))
+    for (const server of [app, enabled]) {
+      for (const path of ['/route/continue', '/%72oute/contin%75e/', '/ROUTE/CONTINUE']) {
+        const response = await server.request(path)
+        expect(response.status, path).toBe(200)
+        expect(response.headers.get('cache-control'), path).toBe('no-store')
+        expect(securityHeadersOf(response), path).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
+      }
     }
   })
 

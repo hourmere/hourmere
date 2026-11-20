@@ -23,6 +23,7 @@ import {
   submitRoutingForm,
   updateRoutingForm,
 } from '../../../packages/scheduling/src/routing-form-service.ts'
+import { routingTokenDigest } from '../../../packages/scheduling/src/routing-receipt-crypto.ts'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import type { paths } from '../../web/src/api/schema.d.ts'
 import { createApp } from './app.ts'
@@ -540,16 +541,18 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       status: 401,
       body: { error: 'unauthorized' },
     })
-    const oneTimeInput = { ...input, oneTimeToken: 'a'.repeat(43) }
-    expect(await rest(enabled, oneTimeInput)).toEqual({
-      status: 400,
-      body: { error: 'invalid_request' },
-    })
     const mcp = (application: ReturnType<typeof app>, arguments_: object) =>
       rpc(application, key, 'tools/call', { name: 'create_booking', arguments: arguments_ })
-    const invalidMcp = await mcp(enabled, { ...oneTimeInput, idempotencyKey })
-    expect(invalidMcp.isError).toBe(true)
-    expect(JSON.parse(invalidMcp.content[0].text)).toMatchObject({ error: 'invalid_request' })
+    for (const field of ['oneTimeToken', 'waitlistToken']) {
+      const mixed = { ...input, [field]: 'a'.repeat(43) }
+      expect(await rest(enabled, mixed)).toEqual({
+        status: 400,
+        body: { error: 'invalid_request' },
+      })
+      const invalidMcp = await mcp(enabled, { ...mixed, idempotencyKey })
+      expect(invalidMcp.isError).toBe(true)
+      expect(JSON.parse(invalidMcp.content[0].text)).toMatchObject({ error: 'invalid_request' })
+    }
 
     const { body, status } = await rest(enabled)
     expect(status).toBe(201)
@@ -595,6 +598,72 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
         .execute(),
     ).toHaveLength(1)
   })
+
+  it.each(['group', 'paid'] as const)(
+    'refuses booking a target that becomes %s after issuing its receipt',
+    async (mode) => {
+      const fixtures = createFixtures(db)
+      const scheduleId = await fixtures.schedule(owner.id, { timeZone: 'UTC', isDefault: false })
+      const eventTypeId = await fixtures.eventType(owner.principal.organization.id, owner.id, {
+        hosts: [{ userId: owner.id, scheduleId }],
+      })
+      const { routeToken } = await bookingReceipt(eventTypeId)
+      const receipt = () =>
+        db
+          .selectFrom('routing_receipts')
+          .selectAll()
+          .where('token_hash', '=', routingTokenDigest(routingSecret, 'continuation', routeToken))
+          .executeTakeFirstOrThrow()
+      const bookings = () =>
+        db
+          .selectFrom('bookings')
+          .select(['status', 'payment_hold_expires_at', 'group_slot_id'])
+          .where('event_type_id', '=', eventTypeId)
+          .execute()
+      const before = await receipt()
+      const application = app()
+      const request = () =>
+        application.request(routedBookingPath, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            routeToken,
+            start: bookingStart(mode === 'group' ? '13:00' : '14:00'),
+            invitee: { name: 'Routed invitee', email: 'routed@example.test', timeZone: 'UTC' },
+          }),
+        })
+      const changeMode = (group: boolean) =>
+        db
+          .updateTable('event_types')
+          .set({ booking_mode: group ? 'group' : 'individual', group_capacity: group ? 4 : null })
+          .where('id', '=', eventTypeId)
+          .execute()
+      if (mode === 'group') await changeMode(true)
+      else paymentRequired.add(eventTypeId)
+      try {
+        const response = await request()
+        expect(response.status).toBe(409)
+        expect(await response.json()).toEqual({ error: 'routing_unavailable' })
+        expect(await bookings()).toEqual([])
+        expect(await receipt()).toEqual(before)
+      } finally {
+        paymentRequired.delete(eventTypeId)
+      }
+      if (mode === 'group') await changeMode(false)
+      const restored = await request()
+      expect({ status: restored.status, body: await restored.json() }).toMatchObject({
+        status: 201,
+        body: { booking: { status: 'confirmed' } },
+      })
+      expect(await bookings()).toEqual([
+        {
+          status: 'confirmed',
+          payment_hold_expires_at: null,
+          group_slot_id: null,
+        },
+      ])
+    },
+  )
 
   it('accepts the fully escaped maximum legal routed booking and rejects one byte over 2 MiB', async () => {
     const fixtures = createFixtures(db)

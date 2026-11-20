@@ -193,3 +193,33 @@ export async function consumeRoutingBookingReceipt(
     .values({ ...snapshot, booking_id: bookingId })
     .execute()
 }
+
+/** Copy provenance within the move; the original booking keeps the receipt and replay. */
+export async function copyBookingRoutingSnapshot(
+  db: Db,
+  previous: { id: string; organization_id: string },
+  bookingId: string,
+) {
+  const attribution = [
+    'organization_id',
+    'form_id',
+    'version_id',
+    'version_number',
+    'matched_rule_id',
+    'resolved_rule_id',
+    'questions',
+    'answers',
+  ] as const
+  await db
+    .insertInto('booking_routing')
+    .columns(['booking_id', ...attribution])
+    .expression((eb) =>
+      eb
+        .selectFrom('booking_routing')
+        .select([sql<string>`${bookingId}::uuid`.as('booking_id'), ...attribution])
+        .where('booking_id', '=', previous.id)
+        .where('organization_id', '=', previous.organization_id),
+    )
+    .returning('booking_id')
+    .executeTakeFirstOrThrow()
+}

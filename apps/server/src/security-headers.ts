@@ -6,7 +6,11 @@ import { embedParent } from '@hourmere/core/embed'
 import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { isOneTimeLinkPath } from './one-time-link-privacy.ts'
-import { isPublicRoutingFormPage, isPublicRoutingFormPath } from './routing-form-privacy.ts'
+import {
+  isPublicRoutingContinuationPage,
+  isPublicRoutingFormPage,
+  isPublicRoutingFormPath,
+} from './routing-form-privacy.ts'
 
 /**
  * The web app's Content-Security-Policy, for HTML pages that bring no policy of their own.
@@ -114,7 +118,8 @@ export function securityHeaders({
     }
     setDefault('X-Frame-Options', 'DENY')
     if (HTML.test(headers.get('content-type') ?? '')) {
-      const parent = embedParent(new URL(c.req.url), embedOrigins)
+      const url = new URL(c.req.url)
+      const parent = embedParent(url, embedOrigins)
       if (parent) {
         headers.delete('X-Frame-Options')
         headers.set(
@@ -125,7 +130,10 @@ export function securityHeaders({
       } else setDefault('Content-Security-Policy', APP_CSP)
       setDefault('Cross-Origin-Opener-Policy', 'same-origin')
       if (NO_REFERRER_PAGES.test(c.req.path)) setDefault('Referrer-Policy', 'no-referrer')
-      if (routingFormsEnabled && isPublicRoutingFormPage(new URL(c.req.url).pathname)) {
+      if (
+        isPublicRoutingContinuationPage(url.pathname) ||
+        (routingFormsEnabled && isPublicRoutingFormPage(url.pathname))
+      ) {
         headers.set('Referrer-Policy', 'no-referrer')
         headers.set('Cache-Control', 'no-store')
       }

@@ -6,9 +6,16 @@ import { createJobs } from '@hourmere/jobs'
 import { bookingNotificationJob, bookingNotifier } from '@hourmere/notifications'
 import { type CompiledQuery, Kysely, PostgresDialect, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cancelManagedBooking, createPublicTeamBooking, createRoutedBooking } from './bookings.ts'
+import { getPublicEventType, listPublicTeamSlots } from './availability.ts'
+import {
+  cancelManagedBooking,
+  createPublicBooking,
+  createPublicTeamBooking,
+  createRoutedBooking,
+} from './bookings.ts'
 import type { BookingNotifier } from './context.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
+import { listRoutingContinuationSlots, resolveRoutingContinuation } from './routing-continuation.ts'
 import type { RoutingQuestion } from './routing-form-config.ts'
 import {
   archiveRoutingForm,
@@ -19,6 +26,7 @@ import {
 } from './routing-form-service.ts'
 import { routingTokenDigest } from './routing-receipt-crypto.ts'
 import { createFixtures, createTestTeam, createTestUser, testContext } from './testing.ts'
+import { joinWaitlist, openWaitlistVerificationOutbox, verifyWaitlist } from './waitlist.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const now = Temporal.Instant.from('2030-10-07T08:00:00Z')
@@ -79,9 +87,13 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     }
   }
 
-  async function fixture(roundRobin = false) {
+  async function fixture(
+    mode: 'individual' | 'round_robin' | 'collective' = 'individual',
+    at = now,
+  ) {
     const owner = await createTestUser(db, 'Routing test host')
-    const member = roundRobin ? await createTestUser(db, 'Second routing test host') : undefined
+    const member =
+      mode !== 'individual' ? await createTestUser(db, 'Second routing test host') : undefined
     const team = member
       ? await createTestTeam(db, [
           { user: owner, role: 'owner' },
@@ -92,10 +104,11 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     const author = testContext(
       db,
       { kind: 'session', sessionId: randomUUID(), user, organization },
-      () => now,
+      () => at,
     )
     const hosts = member ? [owner.id, member.id].sort() : [owner.id]
     const create = createFixtures(db)
+    const handle = `host-${owner.id.slice(0, 8)}`
     for (const userId of hosts) {
       await db
         .insertInto('profiles')
@@ -110,12 +123,12 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
       isHidden: true,
       successRedirect: { url: redirect },
       questions: [{ id: 'details', label: 'Booking details', type: 'short_text', required: true }],
-      ...(member && {
-        schedulingType: 'round_robin',
+      ...(mode !== 'individual' && {
+        schedulingType: mode,
         hosts: [...hosts].reverse().map((userId) => ({ userId })),
       }),
     })
-    if (member) await activateRoundRobin(author, event.id)
+    if (mode === 'round_robin') await activateRoundRobin(author, event.id)
 
     const noteId = randomUUID()
     const selectId = randomUUID()
@@ -138,13 +151,14 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
       mappings: [{ questionId: noteId, destination: { kind: 'question', questionId: 'details' } }],
     }
     // The round-robin case records both a matching rule and a different resolved fallback.
-    const retiring = member
-      ? await createEventType(author, {
-          title: 'Retired target',
-          slug: 'retired',
-          durationMinutes: 30,
-        })
-      : undefined
+    const retiring =
+      mode === 'round_robin'
+        ? await createEventType(author, {
+            title: 'Retired target',
+            slug: 'retired',
+            durationMinutes: 30,
+          })
+        : undefined
     const { id } = await createRoutingForm(author, {
       slug: 'qualification',
       title: 'Synthetic qualification',
@@ -174,7 +188,7 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
 
     async function issue() {
       const outcome = await submitRoutingForm(
-        context(),
+        context(db, at),
         { organizationId: organization.id, formId: id },
         {
           versionId: publication.version.id,
@@ -192,6 +206,7 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     }
     return {
       author,
+      handle,
       organization,
       event,
       form,
@@ -246,9 +261,31 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     return rows.map(({ data }) => data)
   }
 
+  async function assignment(eventTypeId: string) {
+    return {
+      state: await db
+        .selectFrom('round_robin_state')
+        .select('next_sequence')
+        .where('event_type_id', '=', eventTypeId)
+        .executeTakeFirstOrThrow(),
+      hosts: await db
+        .selectFrom('event_type_hosts')
+        .select(['user_id', 'last_assigned_sequence'])
+        .where('event_type_id', '=', eventTypeId)
+        .orderBy('user_id')
+        .execute(),
+    }
+  }
+
   it('writes the pinned labels and final booking separately under the ordinary locks, with no redirect snapshot', async () => {
-    const f = await fixture(true)
+    const f = await fixture('round_robin')
+    const unassigned = {
+      state: { next_sequence: '0' },
+      hosts: f.hosts.map((user_id) => ({ user_id, last_assigned_sequence: '0' })),
+    }
+    expect(await assignment(f.event.id)).toEqual(unassigned)
     const input = await f.issue()
+    expect(await assignment(f.event.id)).toEqual(unassigned)
     const revised = await updateRoutingForm(f.author, f.form.id, {
       expectedRevision: f.form.draftRevision,
       questions: f.questions.map((question) => ({ ...question, label: `New ${question.label}` })),
@@ -258,6 +295,22 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     const routedQueries: CompiledQuery[] = []
     const routed = await createRoutedBooking(context(trackQueries(routedQueries)), input)
     const bookingId = routed.booking.id
+    const assigned = {
+      state: { next_sequence: '1' },
+      hosts: f.hosts.map((user_id, index) => ({
+        user_id,
+        last_assigned_sequence: index === 0 ? '1' : '0',
+      })),
+    }
+    expect(await assignment(f.event.id)).toEqual(assigned)
+    const replayQueries: CompiledQuery[] = []
+    expect(await createRoutedBooking(context(trackQueries(replayQueries)), input)).toEqual({
+      booking: routed.booking,
+      manageToken: null,
+      replayed: true,
+    })
+    expect(replayQueries.some(({ sql }) => sql.includes('round_robin_state'))).toBe(false)
+    expect(await assignment(f.event.id)).toEqual(assigned)
     expect(routed.booking).toMatchObject({
       eventTypeId: f.event.id,
       status: 'confirmed',
@@ -294,7 +347,13 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
       .selectAll()
       .where('id', '=', bookingId)
       .executeTakeFirstOrThrow()
-    expect(row.success_redirect).toBeNull()
+    expect(row).toMatchObject({
+      success_redirect: null,
+      status: 'confirmed',
+      payment_hold_expires_at: null,
+      payment_reference: null,
+      required_host_user_ids: [f.hosts[0]],
+    })
     for (const privateValue of [input.routeToken, originalAnswer]) {
       expect(JSON.stringify(row).includes(privateValue)).toBe(false)
     }
@@ -310,6 +369,13 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
     })
     expect(ordinary.booking.responses).toEqual(routed.booking.responses)
     expect(ordinary.successRedirect).toMatchObject({ url: redirect })
+    expect(await queued(ordinary.booking.id)).toEqual([
+      { bookingId: ordinary.booking.id, kind: 'confirmed' },
+    ])
+    expect(ordinaryQueries.every(({ sql }) => !/booking_routing|routing_receipts/.test(sql))).toBe(
+      true,
+    )
+    expect(ordinaryQueries).toHaveLength(53)
     const routedLocks = locks(routedQueries)
     expect(routedLocks.filter(([name]) => name !== 'form' && name !== 'receipt')).toEqual(
       locks(ordinaryQueries),
@@ -324,6 +390,172 @@ describe.skipIf(!serverUrl)('routed booking creation', () => {
       ['form'],
       ['receipt'],
     ])
+  })
+
+  it('keeps every collective host and applies the ordinary DST, duration, and notice rules', async () => {
+    const at = Temporal.Instant.from('2030-11-03T03:30:00Z')
+    const f = await fixture('collective', at)
+    const [eastern, utc] = f.hosts as [string, string]
+    await db
+      .updateTable('schedules')
+      .set({
+        time_zone: 'America/New_York',
+        weekly_hours: JSON.stringify({ sunday: [{ start: '00:00', end: '04:00' }] }),
+      })
+      .where('user_id', '=', eastern)
+      .execute()
+    await db
+      .updateTable('schedules')
+      .set({ weekly_hours: JSON.stringify({ sunday: [{ start: '04:00', end: '07:00' }] }) })
+      .where('user_id', '=', utc)
+      .execute()
+    await db
+      .updateTable('event_types')
+      .set({ allowed_durations_minutes: [30, 60], minimum_notice_minutes: 60 })
+      .where('id', '=', f.event.id)
+      .execute()
+    const input = await f.issue()
+    const before = await receipt(input.routeToken)
+    const ctx = context(db, at)
+    const midnight = Temporal.Instant.from('2030-11-03T00:00:00-04:00')
+    const firstOneAm = Temporal.Instant.from('2030-11-03T01:00:00-04:00')
+    const secondOneAm = Temporal.Instant.from('2030-11-03T01:00:00-05:00')
+    const range = { start: midnight, end: secondOneAm.add({ hours: 2 }), durationMinutes: 60 }
+    const slots = await listRoutingContinuationSlots(ctx, {
+      ...range,
+      routeToken: input.routeToken,
+    })
+    expect(slots).toEqual(
+      await listPublicTeamSlots(ctx, { ...range, handle: f.organization.slug, slug: f.event.slug }),
+    )
+    expect(slots).toEqual([{ start: '2030-11-03T05:00:00.000Z', end: '2030-11-03T06:00:00.000Z' }])
+    for (const [start, durationMinutes, code] of [
+      [midnight, 60, 'slot_unavailable'],
+      [firstOneAm, 45, 'invalid_duration'],
+      [secondOneAm, 60, 'slot_unavailable'],
+      [secondOneAm.add({ hours: 1 }), 60, 'slot_unavailable'],
+    ] as const) {
+      await expect(
+        createRoutedBooking(ctx, { ...input, start, durationMinutes }),
+      ).rejects.toMatchObject({ code })
+    }
+    expect(await receipt(input.routeToken)).toEqual(before)
+
+    const booked = await createRoutedBooking(ctx, {
+      ...input,
+      start: firstOneAm,
+      durationMinutes: 60,
+    })
+    expect(booked.booking).toMatchObject({ status: 'confirmed', ...slots[0] })
+    expect(booked.booking.assignedHost).toBeUndefined()
+    expect(
+      await db
+        .selectFrom('booking_hosts')
+        .select('user_id')
+        .where('booking_id', '=', booked.booking.id)
+        .orderBy('user_id')
+        .execute(),
+    ).toEqual(f.hosts.map((user_id) => ({ user_id })))
+  })
+
+  it('omits waitlist controls for an empty continuation while the direct waitlist uses its own consent and details', async () => {
+    const f = await fixture()
+    const input = await f.issue()
+    const before = await receipt(input.routeToken)
+    const [host] = f.hosts as [string]
+    const originalSchedule = await db
+      .selectFrom('schedules')
+      .select(['id', 'weekly_hours'])
+      .where('user_id', '=', host)
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('schedules')
+      .set({ weekly_hours: '{}' })
+      .where('id', '=', originalSchedule.id)
+      .execute()
+    await db
+      .updateTable('event_types')
+      .set({ waitlist_enabled: true })
+      .where('id', '=', f.event.id)
+      .execute()
+    const direct = { handle: f.handle, slug: f.event.slug }
+    const ctx = { ...context(), smtpConfigured: true, waitlistSecret: routingSecret }
+    const range = { start, end: start.add({ hours: 1 }) }
+    expect((await getPublicEventType(ctx, direct)).waitlist).toEqual({ enabled: true })
+    const continuation = await resolveRoutingContinuation(ctx, input.routeToken)
+    expect(continuation.eventType).not.toHaveProperty('waitlist')
+    expect(continuation.eventType).not.toHaveProperty('slug')
+    expect(continuation.prefill.responses).toEqual({ details: originalAnswer })
+    expect(
+      await listRoutingContinuationSlots(ctx, { ...range, routeToken: input.routeToken }),
+    ).toEqual([])
+    await expect(createRoutedBooking(ctx, input)).rejects.toMatchObject({
+      code: 'slot_unavailable',
+    })
+    const entries = db
+      .selectFrom('waitlist_entries')
+      .selectAll()
+      .where('event_type_id', '=', f.event.id)
+    expect(await entries.execute()).toEqual([])
+
+    const waitlist = {
+      ...ctx,
+      secret: routingSecret,
+      publicUrl: 'https://schedule.example',
+      trustedIp: '192.0.2.1',
+    }
+    const join = {
+      ...direct,
+      email: invitee.email,
+      name: 'Direct waitlist invitee',
+      consent: true as const,
+      preferredWindow: { start: start.toString(), end: range.end.toString(), timeZone: 'UTC' },
+    }
+    expect(await joinWaitlist(waitlist, join)).toEqual({ accepted: true })
+    const pending = await entries.executeTakeFirstOrThrow()
+    expect(pending).toMatchObject({
+      email: invitee.email,
+      name: join.name,
+      consent_version: 'waitlist-v1',
+      status: 'pending_verification',
+    })
+    const outbox = await db
+      .selectFrom('waitlist_verification_outbox')
+      .selectAll()
+      .where('entry_id', '=', pending.id)
+      .executeTakeFirstOrThrow()
+    const message = openWaitlistVerificationOutbox(waitlist, outbox)
+    if (!message) throw new Error('Expected the direct waitlist verification message')
+    for (const privateValue of [originalAnswer, input.routeToken]) {
+      expect(JSON.stringify([pending, message])).not.toContain(privateValue)
+    }
+    expect(await verifyWaitlist(waitlist, { token: message.verificationToken })).toEqual({
+      verified: true,
+    })
+    const verified = await entries.execute()
+    expect(verified).toEqual([expect.objectContaining({ id: pending.id, status: 'active' })])
+
+    await db
+      .updateTable('schedules')
+      .set({ weekly_hours: JSON.stringify(originalSchedule.weekly_hours) })
+      .where('id', '=', originalSchedule.id)
+      .execute()
+    const ordinaryQueries: CompiledQuery[] = []
+    const ordinary = await createPublicBooking(
+      { ...ctx, db: trackQueries(ordinaryQueries) },
+      { ...direct, start, invitee, responses },
+    )
+    expect(ordinary.booking.responses).toEqual(responses)
+    expect(ordinary.booking).not.toHaveProperty('routing')
+    expect(await queued(ordinary.booking.id)).toEqual([
+      { bookingId: ordinary.booking.id, kind: 'confirmed' },
+    ])
+    expect(ordinaryQueries.every(({ sql }) => !/booking_routing|routing_receipts/.test(sql))).toBe(
+      true,
+    )
+    expect(ordinaryQueries).toHaveLength(34)
+    expect(await entries.execute()).toEqual(verified)
+    expect(await receipt(input.routeToken)).toEqual(before)
   })
 
   it('commits only one booking when concurrent transactions use one receipt for two available times', async () => {
