@@ -83,6 +83,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_identity_links',
     'sso_policies',
     'sso_providers',
+    'sso_recovery_owners',
   ],
   'apps/server/src/sso-oidc-completion.ts': ['sso_attempts', 'sso_identity_links'],
   'apps/server/src/sso-oidc-link.ts': [
@@ -111,6 +112,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_recovery_nominations',
     'sso_recovery_owners',
   ],
+  'apps/server/src/sso-recovery-use.ts': ['sso_attempts', 'sso_policies', 'sso_recovery_owners'],
   'packages/auth/src/sso-recovery-membership.ts': ['sso_policies', 'sso_recovery_owners'],
   'apps/server/src/sso-delegation.ts': [
     'sso_attempts',

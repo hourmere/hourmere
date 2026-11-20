@@ -25,7 +25,7 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { withClientIpHeader } from './client-ip.ts'
 import { createRateLimiter, type RateLimiter, rateLimitKey } from './rate-limit.ts'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoEnabled, type SsoCapabilities, USE_SSO_RECOVERY } from './sso.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 
 /** The auth-protocol endpoints (outside /api/v1 and the interface-parity inventory). */
@@ -110,6 +110,15 @@ export function bindingCookieName(publicUrl: string) {
   return new URL(publicUrl).protocol === 'https:'
     ? `__Host-${BROWSER_BINDING_COOKIE}`
     : BROWSER_BINDING_COOKIE
+}
+
+export function readBindingCookie(headers: Headers, name: string) {
+  return headers
+    .get('cookie')
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1)
 }
 
 function sameDigest(a: string | null, b: string | null): boolean {
@@ -345,8 +354,8 @@ export async function consumeMailboxProof(
 }
 
 /**
- * Deletes at most `limit` attempts that are consumed or expired at the database clock, sign-in
- * attempts included; their mailbox tokens go with them (foreign key cascade). Returns how many.
+ * Deletes at most `limit` expired or spent attempts and cascades their mailbox tokens.
+ * Completed recovery attempts remain until the mailbox deadline or a repair spends them.
  */
 export async function cleanupSsoAttempts(
   db: Db,
@@ -356,7 +365,10 @@ export async function cleanupSsoAttempts(
     WITH gone AS (
       DELETE FROM sso_attempts WHERE id IN (
         SELECT id FROM sso_attempts
-        WHERE consumed_at IS NOT NULL OR expires_at <= clock_timestamp()
+        WHERE expires_at <= clock_timestamp() OR (consumed_at IS NOT NULL AND (
+          operation IS DISTINCT FROM ${USE_SSO_RECOVERY}
+          OR mailbox_proof_expires_at <= clock_timestamp()
+        ))
         ORDER BY expires_at
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED)

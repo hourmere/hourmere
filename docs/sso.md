@@ -411,11 +411,14 @@ Slack 测试投递会在发送前复查发起者的会话。预约提醒、邮�
 候补名单继续按各自的生命周期规则处理。
 
 Enabling enforcement requires a verified domain, an enabled tested provider of a protocol
-that is currently on, a successful owner SSO test against the exact current revision, and
-at least one usable recovery owner: a current owner with accepted recovery status. A
-pending nomination does not count. Only an owner can change enforcement/recovery
-or retire the last usable provider while enforcement is active; admins can prepare
-replacements. Policy, provider, recovery and membership changes serialize under the
+that is currently on and supports step-up, a successful owner SSO test against the exact
+current revision, and at least one usable recovery owner: a current owner with accepted
+recovery status. Until SAML step-up ships, only OIDC qualifies. A pending nomination does
+not count. An owner can enable enforcement before any owner or admin has linked an SSO
+identity. The independent linking flow remains available, and an accepted recovery owner
+can turn enforcement off if nobody can finish linking. Only an owner can change
+enforcement or recovery. Owners and admins can prepare replacements, and an enforced team
+must retain a usable provider. Policy, provider, recovery and membership changes serialize under the
 organization lock, and already-running writes recheck authority in their committing
 transaction. Two counters keep that serialization separate from proof validity:
 
@@ -428,6 +431,10 @@ transaction. Two counters keep that serialization separate from proof validity:
   configuration (secret, certificates, endpoints, algorithms) changes, or a provider is
   disabled or deleted. Turning enforcement on does not increment it: proofs and bindings
   from an unchanged provider already meet what enforcement requires.
+
+中文：启用强制 SSO 需要已验证域名、支持重新认证的已启用提供者、所有者通过当前版本的测试，
+以及至少一名已接受提名的现任恢复所有者。SAML 重新认证上线前，只有 OIDC 提供者符合条件。
+团队可在所有者或管理员关联身份前启用强制 SSO。独立关联流程仍可使用，恢复所有者也可关闭强制要求。
 
 Membership changes (invitations, JIT admissions, other members' departures, role
 changes), admission-mode changes, recovery-owner changes and successful domain renewals
@@ -1000,12 +1007,13 @@ Provider activation takes `{expectedRevision, enabled, proofAttemptId?}` and ret
 same safe `{provider}` summary. A verified current team owner must use a browser session
 with the exact Origin, expected organization header and fresh administration proof.
 A team without enforcement uses mailbox proof. An enforcing team requires SSO step-up,
-with mailbox proof as well if the IdP cannot prove a fresh sign-in. Activation uses the
-ordinary owner proof flow until recovery repair ships. Enabling requires a
+with mailbox proof as well if the IdP cannot prove a fresh sign-in. An enrolled recovery
+owner can spend one browser recovery grant to satisfy fresh administration. Enabling requires a
 passed test for the exact current revision and at least one associated, unexpired verified
 domain with a positive latest recheck. Disabling the last usable provider while enforcing
 SSO returns `409 sso_last_provider`. Another enabled, non-retired provider can satisfy the
-guard if its protocol is on and it has an unexpired verified domain. A failed recheck freezes
+guard if its protocol is on, it supports step-up, and it has an unexpired verified domain.
+Until SAML step-up ships, only OIDC providers count. A failed recheck freezes
 new activation while the existing provider can still serve that domain until verification expires.
 Changing activation state keeps the provider revision and records an audit event.
 Disabling also increments `trustGeneration`. An authorized request to enable an already
@@ -1014,7 +1022,8 @@ Both protocols remain hard-off, and the operation returns `404 sso_disabled` in 
 
 提供者启停仅限当前团队中邮箱已验证的所有者使用浏览器会话发起，须提供同源请求、预期团队、
 预期提供者版本和操作绑定的新鲜证明。未强制 SSO 的团队使用邮箱证明；已强制的团队需要 SSO
-重新认证，身份提供方无法证明本次认证足够新时，还须提供邮箱证明。启用前，当前版本必须通过测试，
+重新认证，身份提供方无法证明本次认证足够新时，还须提供邮箱证明。已登记的恢复所有者也可以
+使用一次浏览器恢复授权完成新鲜管理验证。启用前，当前版本必须通过测试，
 且至少一个关联域名的验证仍有效、最近一次复查通过。已强制 SSO 的团队停用最后一个可用提供者时，
 会收到 `409 sso_last_provider`。启停变更保留提供者版本并写入审计日志，停用还会递增信任代次。
 两种协议仍在代码中保持关闭，生产环境返回 `404 sso_disabled`。
@@ -1054,7 +1063,9 @@ OIDC 和 SAML 仍在代码中关闭，三个接口均返回 `404 sso_disabled`�
 退役保留声明 ID，域名验证不会创建账号、加入团队、移动个人空间或启用提供者。
 定期复查与运营者退役命令仍属于后续的域名生命周期工作。
 
-The OIDC test takes `{expectedRevision, proofAttemptId?}` and applies to a disabled draft.
+The OIDC test takes `{expectedRevision, proofAttemptId?}` and applies to a disabled draft
+under ordinary fresh administration. On an enforced team a recovery owner can spend a
+grant to test the current revision of an enabled provider as well.
 A verified current team owner or administrator
 submits the exact Origin and `X-Expected-Organization-Id`, completes fresh administration
 proof, and repeats the same revision and input with `proofAttemptId`. For a team without
@@ -1063,17 +1074,21 @@ retry returns `{url, attemptId}`. Open the URL in the initiating browser and kee
 original Hourmere session. The shared OIDC callback uses the same PKCE, state and ID-token
 verification as sign-in, then returns to `/app/settings`. Follow provider inventory to
 read the result. The callback requires the same verified administrator, session, browser
-and draft revision even if the provider authenticated a different person. It records
+and provider revision even if the provider authenticated a different person. A recovery
+test also binds the provider's activation state, the recovery enrollment and its deadline.
+The callback completes only that test intent. It records
 `sso_provider.tested` with the attempt ID and the safe result. The receipt preserves
 whether the tester held the owner role at completion. A revision change ends in-flight
 tests and invalidates earlier receipts for that provider. Both protocols stay hard-off
 and the REST operation returns `404 sso_disabled`.
 
-OIDC 测试仅适用于禁用的草稿。当前团队中已验证的所有者或管理员须提供同源请求和预期
+使用常规新鲜管理验证时，OIDC 测试仅适用于禁用的草稿。已强制 SSO 的团队中，恢复所有者可
+使用一次恢复授权测试已启用提供者的当前版本。当前团队中已验证的所有者或管理员须提供同源请求和预期
 团队，完成新鲜管理证明后，以相同版本及输入携带 `proofAttemptId` 重试。未启用强制
 SSO 的团队使用管理员自己的 Hourmere 邮箱完成证明。重试成功后，在原浏览器和原会话
 中打开返回的 `url`。回调验证 OIDC 响应，返回设置页，并记录当前版本的测试结果；所有者
-的测试记录会保留其当时的角色。测试状态可在提供者列表查看。任何版本变更都会使之前的
+的测试记录会保留其当时的角色。恢复测试还绑定启停状态、恢复登记和授权期限，回调只可完成
+该次测试。测试状态可在提供者列表查看。任何版本变更都会使之前的
 测试收据失效。测试不会创建账号、身份关联、团队成员或登录会话。两种协议仍在代码中保持
 关闭，接口返回 `404 sso_disabled`。
 
@@ -1155,6 +1170,28 @@ If another policy or recovery change intervenes, a stale revision returns
 打开链接不会接受提名。受邀者须在自己的浏览器会话中验证邮箱，并提交接受请求。成功后返回
 204，不返回团队数据，并通知提名人与受邀者。两个操作均更新策略版本。OIDC 和 SAML 都关闭时，
 两个接口均返回 `404 sso_disabled`。
+
+An accepted recovery owner starts browser recovery with `POST /api/v1/team/sso/recovery/use`.
+Send the current `expectedRevision` and `X-Expected-Organization-Id` from the instance origin.
+Complete the mailbox challenge and retry with `proofAttemptId`. A successful `204` grants
+authority to that browser and session for the remainder of the mailbox proof window. It
+records `sso_recovery.used` and queues a notice for the team's owners. The same proof can
+start recovery once. Provider and policy reads leave the grant available and return only SSO
+configuration when recovery supplies access. On an enforced team, an owner can spend one
+grant to create, update, test or activate a provider, or to turn off enforcement with
+`PUT /api/v1/team/sso/policy` and `requireSso: false`. Each successful write spends the
+grant in its transaction. Updating, testing and re-activating a provider takes three
+mailbox ceremonies. The grant ends at the mailbox proof deadline or when the browser loses its session or
+current recovery ownership. Both protocols remain hard-off and the new route returns
+`404 sso_disabled`.
+
+已接受提名的恢复所有者可在当前团队的浏览器会话中启动恢复。请求需带上团队和策略版本，
+并在验证自己的邮箱后使用同一个证明重试。成功返回 `204`，记录审计事件并通知团队所有者。
+恢复授权随邮箱证明一起到期，可反复查看 SSO 配置。在强制 SSO 的团队，可使用一次授权来
+创建、更新、测试或启停提供者，或关闭强制单点登录。每项成功写入均在同一事务中消耗授权，
+因此更新、测试和重新启用同一个提供者需要三次邮箱验证。
+授权不能用于启用即时入组或访问其他团队数据。OIDC 和 SAML 均关闭时，接口返回
+`404 sso_disabled`。
 
 `bindSsoDelegation` takes `{credentialKind, credentialId, expectedTrustGeneration,
 proofAttemptId?}`, verifies that the current team member owns the credential and
@@ -1623,7 +1660,8 @@ flip, or `false`). Operations that add trust through that protocol return
 `404 sso_disabled`: sign-in initiation, callbacks, ACS, metadata and completion; provider
 create, update, test and `activateSsoProvider` with `enabled: true`; linking, step-up and
 delegation binding. `setSsoPolicy` with `requireSso: true` is refused with
-`sso_disabled` unless the team has an enabled, tested provider of a protocol that is on.
+`sso_disabled` unless the team has an enabled, tested provider of a protocol that is on
+and supports step-up.
 While no protocol is on, domain challenge and verification, `setSsoPolicy` with
 `admission: "jit"`, and recovery nomination and acceptance are refused too. That
 protocol's pending attempts cannot complete. Its browser proofs and delegations are
@@ -1635,8 +1673,9 @@ proof: reads, `useSsoRecovery`, `setSsoPolicy` with `requireSso: false`,
 `activateSsoProvider` with `enabled: false`, `deleteSsoProvider`, `deleteSsoDomain`,
 `unlinkSsoAccount`, `removeSsoIdentityLink`, `revokeSsoDelegation` and the operator
 commands. Mailbox proof stays available for the attempts of these operations. SSO
-step-up through that protocol is unavailable, so on an enforced team the owner first
-uses recovery to read the configuration and turn enforcement off; the team's remaining
+step-up through that protocol is unavailable. On an enforced team without available step-up,
+administrative trust-reducing writes that need it return `403 sso_required`. An enrolled owner
+can use recovery to read the configuration and turn enforcement off. The team's remaining
 writes then use mailbox fresh administration. `GET /api/v1/instance` reports the
 protocol as `false`; `/me` keeps the caller's own link and proof summary; the web hides
 that protocol's sign-in, link, step-up and binding controls and its trust-adding setup
@@ -1762,7 +1801,7 @@ behaviour keeps available stay available.
 | Delegation enforcement | API key checks on `/api/v1` (which also serve the CLI), OAuth consent/token/refresh and MCP authorization checks using the binding service; no new operations | Delegation binding | OIDC hard-off; SAML hard-off | Seeded enforcement: unbound keys denied; OAuth resume; refresh never extends delegation; 30-day expiry, removal, domain deletion and provider trust-change races; other members' changes leave leases intact; stable `sso_required` without redirects. Off: without a stored policy key/OAuth behavior unchanged |
 | Recovery enrollment | `configureSsoRecovery`, `acceptSsoRecoveryEnrollment`; no MCP/CLI writes; recovery-record deletion and the last-recovery-owner guard on leave, removal and role change | Delegation enforcement | OIDC hard-off; SAML hard-off | Nominee accepts with own mailbox proof; acceptance adds and never replaces; wrong owner/session/revision; 72-hour expiry boundary and consumption races; expiry adds nobody and a new nomination replaces the pending one; a recovery owner's unlink or link removal leaves recovery ownership intact; leaving, removal or demotion of a non-last recovery owner deletes the record in the same transaction with an audit event, and re-joining or re-promotion does not restore it; on a team without enforcement the only recovery owner may be demoted; on a seeded enforced team nominee acceptance works without a live proof and exposes no team data; on a seeded enforced team the last recovery owner cannot leave, be removed or be demoted (`sso_recovery_required`); audit/notify both owners. Off: `sso_disabled` |
 | Provider activation | `activateSsoProvider`; no MCP/CLI writes; owner checks without recovery bypass yet | Recovery enrollment | OIDC hard-off; SAML hard-off | Activation needs a passed test of the exact revision and a verified domain; refused with `sso_domain_unverified` after a failed recheck or expiry; last-provider guard while a seeded enforcement policy is active; disabling increments `trustGeneration`; mailbox fresh administration on a team without enforcement; audit events. Off: `sso_disabled` |
-| Enforcement policy | `setSsoPolicy`; no MCP/CLI writes; owner checks without recovery bypass yet | Provider activation | OIDC hard-off; SAML hard-off | Enforcement needs a verified domain, an enabled tested provider of a protocol that is on (only a seeded SAML provider while SAML is hard-off is refused with `sso_disabled`), an owner test of the exact revision and a usable recovery owner; a pending nomination, a demoted former recovery owner and a demoted-then-re-promoted owner without a new acceptance each leave enforcement refused with `sso_recovery_required`; refused with `sso_domain_unverified` after a failed recheck or expiry; `trustGeneration` increments on enforcement off, never on enforcement on, admission or membership changes, so a binding made before enforcement keeps working; once enforced, every fresh-administration write requires OIDC step-up; audit events. Off: `sso_disabled` |
+| Enforcement policy | `setSsoPolicy`; no MCP/CLI writes; owner checks without recovery bypass yet | Provider activation | OIDC hard-off; SAML hard-off | Enforcement needs a verified domain, an enabled tested OIDC provider (a seeded SAML-only provider is refused with `sso_disabled` even if SAML is enabled), an owner test of the exact revision and a usable recovery owner; a pending nomination, a demoted former recovery owner and a demoted-then-re-promoted owner without a new acceptance each leave enforcement refused with `sso_recovery_required`; refused with `sso_domain_unverified` after a failed recheck or expiry; `trustGeneration` increments on enforcement off, never on enforcement on, admission or membership changes, so a binding made before enforcement keeps working; once enforced, every fresh-administration write requires OIDC step-up; audit events. Off: `sso_disabled` |
 | Recovery use | `useSsoRecovery`; recovery-authority checks on `listSsoProviders`, `getSsoPolicy` and `setSsoPolicy` with `requireSso: false`; no MCP/CLI writes | Enforcement policy | OIDC hard-off; SAML hard-off | Fresh mailbox proof by a usable recovery owner; single-use race; reads do not consume authority and observe expiry; `setSsoPolicy {requireSso: false}` consumes it; cannot enable JIT, alter membership, bind delegations, change recovery owners or read team data; expired, non-owner, demoted and non-recovery-owner refusal. Off: `sso_disabled` |
 | Recovery repair | Recovery-authority checks on `createSsoProvider`, `updateSsoProvider`, `testSsoProvider` and `activateSsoProvider`; no MCP/CLI writes | Recovery use | OIDC hard-off; SAML hard-off | Update, test and re-activation of a broken provider take three ceremonies; `createSsoProvider` consumes one; a test callback finishes only its bound intent; each write still checks owner, session, Origin and expected team; a second write on one ceremony refused. Off: `sso_disabled` |
 | Operator recovery | Offline recovery maintenance command that turns one team's enforcement off, and its runbook; no product operations | Recovery repair | OIDC hard-off; SAML hard-off | Runs only in the server container against the instance database; unknown team refused; changes only `requireSso`, increments `trustGeneration`, writes a `system` audit event and notifies owners; idempotent; race with concurrent `setSsoPolicy`. Off: only removes trust, so it runs in every state |

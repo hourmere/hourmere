@@ -69,6 +69,10 @@
     "exemption": "browser-session-only",
     "reason": "The nominee must independently prove their mailbox and explicitly accept."
   },
+  "useSsoRecovery": {
+    "exemption": "browser-session-only",
+    "reason": "An enrolled recovery owner must independently prove their mailbox in the active browser session."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "previewWorkflow": { "mcp": "preview_workflow", "cli": "workflows preview" },
   "listWorkflowRuns": { "mcp": "list_workflow_runs", "cli": "workflows runs" },

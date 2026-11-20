@@ -95,6 +95,14 @@ export function featureGate(check: () => void): MiddlewareHandler {
 // operational metadata. A new unclassified product route never inherits an exemption.
 const nativeProtocols = new Set(API_KEY_NATIVE_REST_BOUNDARIES)
 const restPolicies = new Map(API_KEY_REST_OPERATIONS.map((operation) => [operation.id, operation]))
+// These browser-only routes recheck and consume recovery authority inside their write transaction.
+const recoveryWrites = new Set([
+  'PUT /api/v1/team/sso/policy',
+  'POST /api/v1/team/sso/providers',
+  'PATCH /api/v1/team/sso/providers/{providerId}',
+  'POST /api/v1/team/sso/providers/{providerId}/test',
+  'POST /api/v1/team/sso/providers/{providerId}/activation',
+])
 
 async function checkBearer(
   c: Context,
@@ -143,7 +151,7 @@ export function installRestApiKeyScopes(
   app: OpenAPIHono,
   resolveCaller: CallerResolver,
   notFoundHandler: Handler,
-  ssoTeamReads?: SsoTeamReadDeps,
+  ssoTeamReads?: SsoTeamReadDeps & { publicUrl: string },
 ) {
   const boundHandlers = new WeakSet()
   const register = app.openapi
@@ -217,7 +225,14 @@ export function installRestApiKeyScopes(
           ...(ssoTeamReads && protectedRead
             ? [teamReadMiddleware(ssoTeamReads, protectedRead)]
             : []),
-          ...(ssoTeamReads && protectedWrite ? [teamWriteMiddleware(ssoTeamReads)] : []),
+          ...(ssoTeamReads && protectedWrite
+            ? [
+                teamWriteMiddleware(
+                  ssoTeamReads,
+                  recoveryWrites.has(operationId) ? ssoTeamReads.publicUrl : undefined,
+                ),
+              ]
+            : []),
         ],
         responses: {
           ...route.responses,
