@@ -605,7 +605,7 @@ export async function runCli(options: {
     }
     if (output) {
       await output.writeFile(
-        printable(result, [key, oneTimeToken, waitlistToken, slackUrl, routeToken]),
+        printable(result, [key, oneTimeToken, waitlistToken, slackUrl].concat(routeToken)),
       )
       await output.sync()
       await options.stdout('{"outputWritten":true}\n')
