@@ -14,6 +14,7 @@ import { apiBodyLimit } from './body-limit.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { openSsoProviderConfiguration } from './sso-configuration.ts'
+import { delegationProofCookie, sealDelegationProof } from './sso-delegation-proof.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import {
   bindingCookieName,
@@ -709,14 +710,27 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         if (testActor) return finishTest(testActor)
         try {
           if (attempt.stepUp) {
-            const failure = await recordOidcStepUp(
+            const browserBinding = getCookie(c, cookie)
+            const result = await recordOidcStepUp(
               db,
-              { ...provider, browserBinding: getCookie(c, cookie) },
+              { ...provider, browserBinding },
               attempt.stepUp,
               attempt.createdAt,
               identity,
             )
-            return failure ? fail(failure) : c.redirect(attempt.returnPath)
+            if (result.failure) return fail(result.failure)
+            if (result.delegation) {
+              const digest = browserBindingDigest(browserBinding)
+              if (!digest) throw new OidcAttemptRefused()
+              const { attemptId, linkGeneration, expiresAt } = result.delegation
+              const { name, options } = delegationProofCookie(publicUrl, attemptId)
+              const envelope = sealDelegationProof(configurationKey, provider, attemptId, digest, {
+                linkGeneration,
+                sessionDeadline: identity.sessionDeadline?.toISOString(),
+              })
+              setCookie(c, name, envelope, { ...options, expires: expiresAt })
+            }
+            return c.redirect(attempt.returnPath)
           }
           if (attempt.link) {
             const pending = await stageOidcLink(

@@ -97,6 +97,7 @@ export interface ApiKey {
   lastRequest: string | null
   /** Organization binding and scope. The migration gives legacy keys full; no UI fallback. */
   metadata: { organizationId?: string; scope?: ApiKeyScope } | null
+  ssoDelegation?: { id: string; expiresAt: string }
 }
 
 /** A key just created: the only time its secret is returned. */

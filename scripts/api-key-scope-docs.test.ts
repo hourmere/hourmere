@@ -204,6 +204,8 @@ describe('published API key scope tables', () => {
         'POST /api/v1/team/sso/providers/{providerId}/link',
         'DELETE /api/v1/team/sso/providers/{providerId}/link',
         'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
+        'POST /api/v1/team/sso/delegations',
+        'DELETE /api/v1/team/sso/delegations/{bindingId}',
       ])
         expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
     }
@@ -218,6 +220,8 @@ describe('published API key scope tables', () => {
       'create_sso_domain_challenge',
       'verify_sso_domain',
       'delete_sso_domain',
+      'bind_sso_delegation',
+      'revoke_sso_delegation',
     ])
       expect(API_KEY_MCP_OPERATIONS.some((operation) => operation.tool === tool)).toBe(false)
   })

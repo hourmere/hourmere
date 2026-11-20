@@ -32,8 +32,8 @@ export interface FreshProofRequest {
   sessionId: string
   organizationId: string
   operation: string
-  /** Independent local proof is required even on teams with SSO enforcement. */
-  proofMode?: 'mailbox'
+  /** Force one method regardless of whether the team requires SSO. */
+  proofMode?: 'mailbox' | 'sso'
   input: unknown
   /** The operation's input without proofAttemptId. Unknown properties are always refused. */
   schema: z.ZodObject
@@ -170,18 +170,22 @@ export async function runWithFreshProof<T>(
       const mailbox = session.rows[0]?.mailbox
       if (!mailbox) throw new HTTPException(403, { message: 'forbidden' })
       const independentMailbox = request.proofMode === 'mailbox'
+      const delegatedSso = request.proofMode === 'sso'
       const policy =
         deps.capabilities.ssoOidcEnabled && !independentMailbox
-          ? await sql<{ trust_generation: number }>`SELECT trust_generation FROM sso_policies
-          WHERE organization_id = ${request.organizationId}::uuid AND require_sso
-            AND EXISTS (
+          ? await sql<{ trust_generation: number }>`SELECT coalesce((
+            SELECT trust_generation FROM sso_policies
+            WHERE organization_id = ${request.organizationId}::uuid
+              AND (${delegatedSso} OR require_sso)
+          ), CASE WHEN ${delegatedSso} THEN 1 END) AS trust_generation
+          WHERE EXISTS (
               SELECT 1 FROM sso_providers
               WHERE organization_id = ${request.organizationId}::uuid
                 AND protocol = 'oidc' AND enabled AND retired_at IS NULL
             )`.execute(trx)
           : undefined
       const trustGeneration = policy?.rows[0]?.trust_generation ?? null
-      const needsSso = trustGeneration !== null
+      const needsSso = delegatedSso || trustGeneration !== null
       const needsMailbox = !needsSso
       if (proofAttemptId) {
         const { rows } = await sql<{
