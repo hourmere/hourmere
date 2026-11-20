@@ -2400,6 +2400,13 @@ export const admin = {
   'This team must retain at least one recovery owner while SSO is enforced.':
     '团队启用强制单点登录时，必须保留至少一位恢复所有者。',
 
+  // SSO provider activation
+  'Test this single sign-on provider’s current configuration before enabling it.':
+    '启用此单点登录提供者前，请测试其当前配置。',
+  'Verify a domain linked to this single sign-on provider and try again.':
+    '请验证与此单点登录提供者关联的域名后重试。',
+  'This team must keep at least one usable provider while single sign-on is enforced.':
+    '团队启用强制单点登录时，必须保留至少一个可用的提供者。',
   // Booking workflows
   'Loading workflows…': '正在加载工作流…',
   'No workflows yet.': '暂无工作流。',
