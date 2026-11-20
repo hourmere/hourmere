@@ -21,6 +21,7 @@ export const AUDIT_HOST_NOTE =
 
 export interface AuditFixtureState {
   organizationId: string
+  teamOrganizationId: string
   eventTypeId: string
   scheduleId: string
   bookingId: string

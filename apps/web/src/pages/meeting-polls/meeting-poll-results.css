@@ -1,0 +1,69 @@
+.meeting-poll-results .panel {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.meeting-poll-results .button {
+  max-inline-size: 100%;
+  white-space: normal;
+}
+
+.button.meeting-poll-space-switch {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.meeting-poll-matrix {
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+
+.meeting-poll-matrix table {
+  min-inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.meeting-poll-matrix caption {
+  padding-block: var(--space-2);
+  text-align: start;
+  font-weight: 600;
+}
+
+.meeting-poll-matrix th,
+.meeting-poll-matrix td {
+  min-inline-size: 8rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.meeting-poll-matrix th:first-child {
+  min-inline-size: 8rem;
+  max-inline-size: 13rem;
+}
+
+.meeting-poll-cell-detail {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: normal;
+  color: var(--muted);
+}
+
+.meeting-poll-attendees > legend {
+  padding: 0;
+  font-weight: 600;
+}
+
+.meeting-poll-voter-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--space-3);
+}
+
+.meeting-poll-results select {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}

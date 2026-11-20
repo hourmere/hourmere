@@ -34,6 +34,7 @@ export interface MeetingPollReminderEmailOptions extends MeetingPollVotingLinkOp
 
 export interface MeetingPollDeadlineEmailOptions extends MeetingPollEmailOptions {
   publicUrl: string
+  organizationId: string
   pollId: string
   deadlineAt: Date
   responseCount: number
@@ -142,9 +143,9 @@ export function meetingPollReminderEmail(options: MeetingPollReminderEmailOption
 
 export function meetingPollDeadlineEmail(options: MeetingPollDeadlineEmailOptions): MailMessage {
   const origin = pollOrigin(options.publicUrl)
-  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(options.pollId)) {
-    throw new Error('Invalid meeting poll ID')
-  }
+  const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
+  if (!uuid.test(options.pollId)) throw new Error('Invalid meeting poll ID')
+  if (!uuid.test(options.organizationId)) throw new Error('Invalid meeting poll organization ID')
   const language = mailLanguage(options)
   const values = {
     poll: singleLine(options.pollTitle),
@@ -157,7 +158,7 @@ export function meetingPollDeadlineEmail(options: MeetingPollDeadlineEmailOption
     { text: t('poll.deadline.responses') },
     {
       text: t('poll.deadline.results'),
-      url: `${origin}/api/v1/meeting-polls/${options.pollId}/results`,
+      url: `${origin}/app/meeting-polls/${options.pollId}?organizationId=${options.organizationId}`,
     },
   ])
 }

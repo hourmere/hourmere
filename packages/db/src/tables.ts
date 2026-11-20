@@ -532,6 +532,7 @@ export interface BookingSeriesAdmissions {
 }
 
 export interface BookingSeriesNotifications {
+  after_action_revision: Int8 | null;
   attempts: number | null;
   calendar_ordinals: number[] | null;
   capability_scope: string | null;
@@ -553,6 +554,7 @@ export interface BookingSeriesNotifications {
   sequence: Int8;
   series_id: string;
   suppression_reason: string | null;
+  waiting_for_earlier: Generated<boolean>;
 }
 
 export interface BookingSeriesOccurrences {

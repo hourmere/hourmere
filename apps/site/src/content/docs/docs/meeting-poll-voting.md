@@ -5,6 +5,11 @@ description: Verify your email, choose possible meeting times, and understand po
 
 Open the public link shared by the host or the private voting link sent to your mailbox.
 Hosts can create and manage polls through [REST](/docs/rest#manage-meeting-polls), MCP and CLI.
+In the dashboard, **Meeting polls** shows completed and active polls in your current space.
+Open a poll to review ballots and advisory availability, choose a time and attendees,
+or close, cancel or delete the poll. The deadline email links to the poll's results.
+Sign in and switch to its space if prompted. After scheduling, open the resulting booking
+from the results page. Deleting the poll preserves the booking.
 
 ## Open and verify your link
 
@@ -74,6 +79,9 @@ Português (Brasil).
 
 请打开主持人分享的公开链接，或发送到你邮箱的私密投票链接。主持人可通过
 [REST](/docs/rest#manage-meeting-polls)、MCP 和 CLI 创建并管理投票。
+在管理端打开**会议投票**，即可查看当前空间的投票。打开投票后，可以查看选票和参考
+可用性、选择时段及参会者，或结束、取消或删除投票。截止通知会链接到结果页，必要时
+请先登录并切换到投票所属空间。排定后可从结果页打开预约，删除投票不会取消预约。
 
 投票不需要 Hourmere 账号。通过公开链接填写姓名、邮箱和时区后，页面会统一提示检查
 邮件，不透露该邮箱是否已登记，也不保证邮件送达。打开邮件链接不会自动验证或投票；

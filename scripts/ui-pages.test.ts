@@ -43,6 +43,27 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'poll-recover',
     'poll-opt-out',
     'poll-opted-out',
+    'host-poll-list',
+    'host-poll-list-empty',
+    'host-poll-list-loading',
+    'host-poll-list-forbidden',
+    'host-poll-list-error',
+    'host-poll-results',
+    'host-poll-results-loading',
+    'host-poll-results-forbidden',
+    'host-poll-results-error',
+    'host-poll-results-missing',
+    'host-poll-other-space',
+    'host-poll-no-available-times',
+    'host-poll-conditional',
+    'host-poll-stale',
+    'host-poll-retry',
+    'host-poll-close-confirm',
+    'host-poll-cancel-confirm',
+    'host-poll-delete-confirm',
+    'host-poll-closed',
+    'host-poll-canceled',
+    'host-poll-scheduled',
     'routing-form',
     'team-routing-form',
     'routing-form-loading',
@@ -176,6 +197,7 @@ it('masks private DOM values and links, including values absent from HTML attrib
 const dataSource = readFileSync('tools/e2e/audit-data.ts', 'utf8')
 const pagesSource = readFileSync('tools/e2e/audit-pages.ts', 'utf8')
 const routingAuditUrl = pathToFileURL(resolve('tools/e2e/routing-form-audit.ts')).href
+const hostPollAuditUrl = pathToFileURL(resolve('tools/e2e/host-meeting-poll-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -243,7 +265,9 @@ function sourceCopyResult(
   writeFileSync(join(directory, 'audit-data.ts'), data)
   writeFileSync(
     join(directory, 'audit-pages.ts'),
-    pages.replace("'./routing-form-audit.ts'", JSON.stringify(routingAuditUrl)),
+    pages
+      .replace("'./routing-form-audit.ts'", JSON.stringify(routingAuditUrl))
+      .replace("'./host-meeting-poll-audit.ts'", JSON.stringify(hostPollAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)

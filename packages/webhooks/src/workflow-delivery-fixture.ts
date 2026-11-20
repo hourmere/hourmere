@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { createFixtures, createTestUser, testContext } from '@hourmere/scheduling/testing'
-import { type WorkflowTrigger, workflowRunTiming } from '@hourmere/workflows'
+import {
+  type WorkflowAuditPort,
+  type WorkflowTrigger,
+  workflowRunTiming,
+} from '@hourmere/workflows'
 import { createWorkflowDefinition } from '../../workflows/src/creates.ts'
 import { captureWorkflowWebhook, type WebhookQueue } from './delivery.ts'
 import { createWebhook, type WebhookSettings } from './service.ts'
@@ -91,6 +95,7 @@ export async function captureQueuedWorkflowWebhook(
   trx: Db,
   input: Awaited<ReturnType<typeof seedWorkflowWebhookRun>>['capture'],
   now: Temporal.Instant,
+  audit?: WorkflowAuditPort,
 ) {
   // The outbox handoff finishes dispatch. Delivery and retries then belong to its queued job.
   await trx
@@ -99,7 +104,7 @@ export async function captureQueuedWorkflowWebhook(
     .where('id', '=', input.workflowRunId)
     .where('state', '=', 'pending')
     .execute()
-  await captureWorkflowWebhook(queue, settings, trx, input, now)
+  await captureWorkflowWebhook(queue, settings, trx, input, now, audit)
 }
 
 export async function workflowDeliveryFixture(

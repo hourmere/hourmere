@@ -3,10 +3,13 @@ import { validateTimeZone } from '@hourmere/core'
 import { LOCATION_KINDS, MAX_ANSWER_LENGTH, MAX_GUESTS, MAX_QUESTIONS } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
+import { hardOffWorkflowAuditPort } from './audit.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import {
   validateWorkflowDefinition,
+  type WorkflowDefinition,
   WorkflowDefinitionSchema,
+  type WorkflowValidationContext,
   workflowMatches,
 } from './definition.ts'
 import { renderWorkflowEmail } from './email.ts'
@@ -94,7 +97,7 @@ const invalid = (message: string) => new DomainError('invalid', 'invalid_workflo
 
 /** Authorize and validate the candidate using live configuration, then render only fixture data. */
 export async function previewWorkflowCandidate(
-  ctx: Omit<WorkflowCreateContext, 'audit'>,
+  ctx: WorkflowCreateContext & { now?: () => Temporal.Instant },
   input: unknown,
 ): Promise<z.output<typeof WorkflowPreviewSchema>> {
   if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full')
@@ -102,14 +105,38 @@ export async function previewWorkflowCandidate(
   const parsed = PreviewWorkflowInputSchema.safeParse(input)
   if (!parsed.success) throw invalid('Invalid workflow preview')
   const { owner: selector, example = {}, ...candidate } = parsed.data
-  const { db, followUpHostNotesEnabled } = ctx
-  const { definition, facts } = await db.transaction().execute(async (trx) => {
+  const { db, followUpHostNotesEnabled, principal } = ctx
+  return db.transaction().execute(async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     const owner = await writableOwner(trx, ctx, selector)
     const facts = await loadWorkflowDefinitionFacts(trx, candidate, owner, followUpHostNotesEnabled)
-    return { definition: validateWorkflowDefinition(candidate, facts), facts }
+    const definition = validateWorkflowDefinition(candidate, facts)
+    const preview = renderPreview(definition, facts, example, followUpHostNotesEnabled)
+    await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+      event: 'workflow.previewed',
+      occurredAt: ctx.now?.() ?? Temporal.Now.instant(),
+      owner,
+      workflowId: null,
+      revision: null,
+      trigger: definition.trigger.type,
+      reason: preview.match === 'condition_false' ? 'condition_false' : undefined,
+      actor:
+        principal.kind === 'api_key'
+          ? { kind: principal.kind, userId: principal.user.id, apiKeyId: principal.apiKeyId }
+          : principal.kind === 'oauth'
+            ? { kind: principal.kind, userId: principal.user.id, clientId: principal.clientId }
+            : { kind: principal.kind, userId: principal.user.id },
+    })
+    return preview
   })
+}
 
+function renderPreview(
+  definition: WorkflowDefinition,
+  facts: WorkflowValidationContext,
+  example: z.output<typeof Example>,
+  followUpHostNotesEnabled: boolean | undefined,
+): z.output<typeof WorkflowPreviewSchema> {
   let start: Temporal.Instant
   let end: Temporal.Instant
   try {
