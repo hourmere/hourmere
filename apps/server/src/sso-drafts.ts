@@ -1,13 +1,15 @@
-import type { Principal } from '@hourmere/auth'
+import { type Principal, teamRoles } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled } from './sso.ts'
+import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { openSsoProviderConfiguration, sealSsoProviderConfiguration } from './sso-configuration.ts'
+import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
+import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
 
@@ -51,6 +53,10 @@ const update = z.strictObject({
   oidc: oidc.partial().optional(),
 })
 const remove = z.strictObject({ expectedRevision: z.number().int().min(1).max(2147483646) })
+const activation = z.strictObject({
+  expectedRevision: z.int().positive().max(2_147_483_647),
+  enabled: z.boolean(),
+})
 const proof = { proofAttemptId: z.uuid().optional() }
 export const CreateSsoProviderInput = create.extend({
   ...proof,
@@ -60,6 +66,7 @@ export const CreateSsoProviderInput = create.extend({
 })
 export const UpdateSsoProviderInput = update.extend({ ...proof, saml: z.unknown().optional() })
 export const DeleteSsoProviderInput = remove.extend(proof)
+export const ActivateSsoProviderInput = activation.extend(proof)
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 function uniformDenial(error: unknown): never {
   if (error instanceof HTTPException && error.status === 403) throw denied()
@@ -163,6 +170,8 @@ async function audit(
   action:
     | 'sso_provider.created'
     | 'sso_provider.updated'
+    | 'sso_provider.enabled'
+    | 'sso_provider.disabled'
     | 'sso_provider.deleted'
     | 'sso_provider.secret_rotated',
 ) {
@@ -234,6 +243,147 @@ function boundInput(input: unknown, providerId: string) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || 'providerId' in input)
     throw new DomainError('invalid', 'invalid_request')
   return { ...input, providerId }
+}
+
+function providerDomains(db: Db, organizationId: string) {
+  return db
+    .selectFrom('sso_provider_domains as pd')
+    .innerJoin('sso_domains as d', (join) =>
+      join.onRef('d.id', '=', 'pd.domain_id').onRef('d.organization_id', '=', 'pd.organization_id'),
+    )
+    .where('pd.organization_id', '=', organizationId)
+    .where('d.retired_at', 'is', null)
+}
+
+async function checkActivation(
+  db: Db,
+  capabilities: SsoCapabilities,
+  row: Provider,
+  enable: boolean,
+  testStatus: string,
+) {
+  const domains = providerDomains(db, row.organization_id)
+    .where('d.verified_at', 'is not', null)
+    .where('d.verification_expires_at', '>', sql<Date>`clock_timestamp()`)
+  if (enable) {
+    if (testStatus !== 'passed') throw new DomainError('conflict', 'sso_test_required')
+    const verified = await domains
+      .select('d.id')
+      .where('pd.provider_id', '=', row.id)
+      .where('d.last_check_outcome', '=', 'positive')
+      .limit(1)
+      .executeTakeFirst()
+    if (!verified) throw new DomainError('conflict', 'sso_domain_unverified')
+    return
+  }
+
+  if (!row.enabled) return
+  const enforced = await db
+    .selectFrom('sso_policies')
+    .select('organization_id')
+    .where('organization_id', '=', row.organization_id)
+    .where('require_sso', '=', true)
+    .executeTakeFirst()
+  if (!enforced) return
+
+  // A failed recheck freezes new activation but does not end existing sign-ins before expiry.
+  const alternative = await domains
+    .innerJoin('sso_providers as p', (join) =>
+      join
+        .onRef('p.id', '=', 'pd.provider_id')
+        .onRef('p.organization_id', '=', 'pd.organization_id'),
+    )
+    .select('p.id')
+    .where('p.id', '!=', row.id)
+    .where('p.enabled', '=', true)
+    .where('p.retired_at', 'is', null)
+    .where('p.protocol', 'in', capabilities.ssoSamlEnabled ? ['oidc', 'saml'] : ['oidc'])
+    .limit(1)
+    .executeTakeFirst()
+  if (!alternative) throw new DomainError('conflict', 'sso_last_provider')
+}
+
+export async function activateSsoProvider(
+  deps: SsoDraftDeps,
+  principal: Principal,
+  headers: Headers,
+  providerId: string,
+  input: z.infer<typeof ActivateSsoProviderInput>,
+) {
+  const p = enabled(deps, principal, input)
+  const organizationId = p.organization.id
+  let target: { row: Provider; testStatus: string }
+  return runWithFreshProof(
+    deps,
+    {
+      headers,
+      userId: p.user.id,
+      sessionId: p.sessionId,
+      organizationId,
+      operation: 'activateSsoProvider',
+      proofMode: 'administration',
+      input: boundInput(input, providerId),
+      schema: activation.extend({ providerId: z.uuid() }),
+    },
+    {
+      changesAuthority: !input.enabled,
+      authorize: async (db) => {
+        await authorize(deps, db, p, headers)
+        const member = await db
+          .selectFrom('auth.member')
+          .select('role')
+          .where('organizationId', '=', organizationId)
+          .where('userId', '=', p.user.id)
+          .executeTakeFirst()
+        if (!member || !teamRoles(member.role).includes('owner')) throw denied()
+
+        const row = await provider(db, organizationId, providerId)
+        if (row.retired_at) throw missing()
+        if (row.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
+        if (row.revision !== input.expectedRevision) throw changed()
+        const { testStatus } = await db
+          .selectFrom('sso_providers')
+          .select(currentSsoProviderTestStatus.as('testStatus'))
+          .where('id', '=', row.id)
+          .where('organization_id', '=', organizationId)
+          .executeTakeFirstOrThrow()
+
+        if (input.enabled) {
+          // Rechecks take the same lock before looking up DNS. Read the claims after waiting.
+          const linked = await providerDomains(db, organizationId)
+            .select('d.name')
+            .where('pd.provider_id', '=', row.id)
+            .orderBy('d.name')
+            .execute()
+          for (const { name } of linked) await lockSsoDomain(db, name)
+        }
+        await checkActivation(db, deps.capabilities, row, input.enabled, testStatus)
+        target = { row, testStatus }
+      },
+      mutate: async (db) => {
+        const { row, testStatus } = target
+        // A verification can expire while the fresh browser proof is being checked.
+        await checkActivation(db, deps.capabilities, row, input.enabled, testStatus)
+        if (row.enabled === input.enabled) return { provider: { ...summary(row), testStatus } }
+
+        const updated = await db
+          .updateTable('sso_providers')
+          .set({ enabled: input.enabled })
+          .where('organization_id', '=', organizationId)
+          .where('id', '=', row.id)
+          .returningAll()
+          .executeTakeFirstOrThrow()
+        if (!input.enabled) await changeTrust(db, organizationId)
+        await audit(
+          db,
+          p,
+          updated,
+          input.enabled ? 'sso_provider.enabled' : 'sso_provider.disabled',
+        )
+        return { provider: { ...summary(updated), testStatus } }
+      },
+    },
+  ).catch(uniformDenial)
 }
 
 export async function updateSsoProvider(

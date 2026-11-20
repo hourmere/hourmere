@@ -33,6 +33,10 @@
     "exemption": "browser-session-only",
     "reason": "Testing a provider binds the current administrator and browser to a configuration revision."
   },
+  "activateSsoProvider": {
+    "exemption": "browser-session-only",
+    "reason": "Changing which providers can authenticate a team requires fresh interactive owner proof."
+  },
   "linkSsoAccount": {
     "exemption": "browser-session-only",
     "reason": "Explicit self-linking requires independent local proof and a browser-bound IdP ceremony."

@@ -2518,6 +2518,13 @@ export const admin = {
   'This team must retain at least one recovery owner while SSO is enforced.':
     'This team must retain at least one recovery owner while SSO is enforced.',
 
+  // SSO provider activation
+  'Test this single sign-on provider’s current configuration before enabling it.':
+    'Test this single sign-on provider’s current configuration before enabling it.',
+  'Verify a domain linked to this single sign-on provider and try again.':
+    'Verify a domain linked to this single sign-on provider and try again.',
+  'This team must keep at least one usable provider while single sign-on is enforced.':
+    'This team must keep at least one usable provider while single sign-on is enforced.',
   // Booking workflows
   'Loading workflows…': 'Loading workflows…',
   'No workflows yet.': 'No workflows yet.',
