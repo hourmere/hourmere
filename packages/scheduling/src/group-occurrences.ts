@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { type BookingOrigin, cancelOccurrenceSeatInTransaction, lockHosts } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -123,7 +124,7 @@ export async function cancelGroupOccurrence(
   options: { reason?: string | undefined } = {},
   origin?: BookingOrigin,
 ) {
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const authorized = await authorizeOccurrence(trx, ctx, id)

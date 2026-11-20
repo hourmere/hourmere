@@ -43,6 +43,7 @@ const restContract = {
     'GET /api/v1/webhooks/{id}/deliveries',
     'GET /api/v1/workflows',
     'GET /api/v1/workflows/{id}',
+    'GET /api/v1/workflows/{id}/runs',
   ],
   booking_read: [
     'GET /api/v1/meeting-polls',
@@ -123,6 +124,8 @@ const restContract = {
     'POST /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
+    'POST /api/v1/team/sso/delegations',
+    'DELETE /api/v1/team/sso/delegations/{bindingId}',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -565,6 +568,7 @@ describe('shared API-key scope policy', () => {
         'get_sso_policy',
         'list_workflows',
         'get_workflow',
+        'list_workflow_runs',
       ],
       read: [
         'list_meeting_polls',
@@ -601,6 +605,7 @@ describe('shared API-key scope policy', () => {
         'get_sso_policy',
         'list_workflows',
         'get_workflow',
+        'list_workflow_runs',
       ],
       bookings: [
         'get_public_routing_form',

@@ -168,6 +168,7 @@ import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
@@ -244,6 +245,7 @@ export function productRoutes({
   waitlistSecret,
   meetingPollSecret,
   routingSecret,
+  workflowRunCursorSecret,
   smtpConfigured,
   recurringBookingsEnabled,
   auditLogRetentionDays = null,
@@ -279,6 +281,7 @@ export function productRoutes({
   waitlistSecret?: string | undefined
   meetingPollSecret?: string | undefined
   routingSecret?: string | undefined
+  workflowRunCursorSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
@@ -298,7 +301,12 @@ export function productRoutes({
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 } & RecurringBookingAdmissionDeps): RouteModule[] {
   return [
-    mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
+    mcpOAuthRoutes({
+      auth: mcpAuth,
+      db,
+      publicUrl,
+      ssoCapabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
     instanceRoutes({
       publicUrl,
       socialProviders,
@@ -355,6 +363,12 @@ export function productRoutes({
       publicUrl,
       capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
       notificationQueue: ssoLinkRemovalQueue,
+    }),
+    ssoDelegationRoutes({
+      db,
+      publicUrl,
+      configurationKey: ssoConfigurationKey,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
     }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({
@@ -434,7 +448,7 @@ export function productRoutes({
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
     // Registered while hard-off: every operation answers 404 workflows_disabled.
-    workflowRoutes({ db, followUpHostNotesEnabled }),
+    workflowRoutes({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
   ]
 }
 
@@ -451,6 +465,7 @@ export function productTools({
   slotSnippetsEnabled = false,
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
   followUpHostNotesEnabled,
+  workflowRunCursorSecret,
   smsRemindersAvailable = false,
   successRedirectPolicy,
   notify,
@@ -477,6 +492,7 @@ export function productTools({
   publicUrl?: string | undefined
   smsRemindersAvailable?: boolean | undefined
   followUpHostNotesEnabled?: boolean | undefined
+  workflowRunCursorSecret?: string | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   notify?: BookingNotifier | undefined
@@ -534,7 +550,7 @@ export function productTools({
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
-    ...workflowTools({ db, followUpHostNotesEnabled }),
+    ...workflowTools({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
     ...routingFormConfigurationTools({
       db,
@@ -628,7 +644,7 @@ export function productionAppOptions({
     webDist: config.WEB_DIST,
     routingFormsEnabled,
     waitlist,
-    ssoMe: { capabilities: { ssoOidcEnabled, ssoSamlEnabled }, db },
+    ssoTeamReads: { capabilities: { ssoOidcEnabled, ssoSamlEnabled }, db },
     // Mounted in every state: while hard-off both endpoints answer 404 sso_disabled.
     ssoMailboxProof: mailboxProofRoutes({
       capabilities: { ssoOidcEnabled, ssoSamlEnabled },
@@ -691,6 +707,7 @@ export function productionAppOptions({
       enqueueCalendarSync,
       enqueueCalendarWritebackRecovery,
       routingSecret: config.BETTER_AUTH_SECRET,
+      workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
     }),
     mcp: mcpEndpoint({
       ...(config.MCP_OAUTH_ENABLED
@@ -723,6 +740,7 @@ export function productionAppOptions({
         webhooks: webhookSettings,
         webhookQueue,
         routingSecret: config.BETTER_AUTH_SECRET,
+        workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
       }),
     }),
   }
@@ -762,6 +780,7 @@ export function productionAuthOptions({
     db,
     leaveTeamMember: nativeTeamLeave(db, recordAdmissionRemoval),
     recordAdmissionRemoval,
+    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,
@@ -953,6 +972,7 @@ async function start(
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
+    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
   }
   const calendarDeps: CalendarDeps = {
     db,
@@ -975,6 +995,7 @@ async function start(
   // Background jobs: every role queues them, `all` and `worker` run them.
   const notificationDeps = {
     db,
+    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
     followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
     mailer,
     publicUrl: config.PUBLIC_URL,

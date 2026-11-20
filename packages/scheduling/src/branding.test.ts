@@ -5,6 +5,7 @@ import { crc32 } from 'node:zlib'
 import { brandContrast } from '@hourmere/core'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import sharp from 'sharp'
@@ -572,6 +573,7 @@ function serviceCopy(replacement?: readonly [string, string]) {
     'DomainError',
     'auditActor',
     'writeAuditEvent',
+    'teamWriteTransaction',
     `${script}; return {normalizeBrandLogo,getBranding,setBranding,uploadBrandLogo,getBrandLogo,getPublicBranding,getPublicBrandLogo,getEmailBranding}`,
   )(
     createHash,
@@ -581,6 +583,7 @@ function serviceCopy(replacement?: readonly [string, string]) {
     DomainError,
     auditActor,
     writeAuditEvent,
+    teamWriteTransaction,
   ) as typeof import('./branding.ts')
 }
 describe('logo source-copy mutations', () => {

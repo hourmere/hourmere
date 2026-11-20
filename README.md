@@ -87,8 +87,9 @@ Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/ap
 Public meeting-poll pages live at `/poll` and `/poll/voter`, with private credentials
 in URL fragments and POST bodies. They support verification, voting and read-only closed
 ballots without login. Personal event owners and current team owners or admins can
-create and manage polls through [REST](https://hourmere.com/docs/rest#manage-meeting-polls),
-MCP and CLI. See the [voter guide](https://hourmere.com/docs/meeting-poll-voting) for
+create and manage polls in [Meeting polls](docs/meeting-polls.md#create-and-manage-a-poll-in-the-app)
+or through [REST](https://hourmere.com/docs/rest#manage-meeting-polls), MCP and CLI.
+See the [voter guide](https://hourmere.com/docs/meeting-poll-voting) for
 recovery, withdrawal, reminder opt-out and privacy.
 
 One-time booking links open `/book/{token}`. They offer the usual booking form,

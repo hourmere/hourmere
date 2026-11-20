@@ -13,6 +13,8 @@ import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
 import { isUuid, personalOwner } from './organizations.ts'
 import { fixedTeamRole, teamRoleDenied } from './team-role-policy.ts'
+import { ssoHardOff } from './team-sso.ts'
+import { nativeTeamSso, trustedAddMember } from './team-sso-native.ts'
 
 /** Request fields that Better Auth looks up in uuid columns. */
 const ID_FIELDS = ['id', 'userId', 'organizationId', 'memberId', 'invitationId', 'keyId']
@@ -123,6 +125,8 @@ export function beforeHook(
   teamRolePolicy: (ctx: AuthMiddlewareContext) => Promise<void>,
   reserveInvitationEmail?: ReserveInvitationEmail,
   enqueueInvitationEmail?: EnqueueInvitationEmail,
+  ssoCapabilities = ssoHardOff,
+  teamSso = nativeTeamSso(db, ssoCapabilities).before,
 ) {
   return createAuthMiddleware(async (ctx) => {
     apiKeyCredentialBoundary(ctx)
@@ -139,26 +143,39 @@ export function beforeHook(
     // Better Auth intentionally exposes addMember only as a trusted server API. Its
     // pathless operation still must not create elevated memberships in existing teams.
     if (
-      (ctx as { operationId?: string }).operationId === 'addOrganizationMember' &&
+      trustedAddMember(ctx as { operationId?: string }) &&
       fixedTeamRole(isRecord(ctx.body) ? ctx.body.role : undefined) !== 'member'
     ) {
       throw teamRoleDenied()
     }
+    const filter = checkListQuery(ctx.path, ctx.query)
+    const scoped = await teamSso(ctx)
     const invitation = await invitationRules(
       ctx,
       db,
       reserveInvitationEmail,
       enqueueInvitationEmail,
+      ssoCapabilities,
     )
     if (invitation) return invitation
     await organizationContext(ctx, db)
-    const cancellation = await invitationCancellationRules(ctx, db)
+    const cancellation = await invitationCancellationRules(ctx, db, ssoCapabilities)
     if (cancellation) return cancellation
     await teamRolePolicy(ctx)
-    const filter = checkListQuery(ctx.path, ctx.query)
-    const empty = await emptyMemberList(ctx, db, filter)
-    if (empty) return empty
+    if (!scoped?.deferred) {
+      const empty = await emptyMemberList(
+        scoped?.context ? { ...ctx, query: scoped.context.query } : ctx,
+        db,
+        filter,
+      )
+      if (empty) return empty
+    }
     await personalOwnerStays(ctx, db)
-    return defaultMagicLinkErrorRedirect(ctx) ?? displayNameRules(ctx) ?? apiKeyRules(ctx, db)
+    return (
+      (scoped?.context && { context: scoped.context }) ??
+      defaultMagicLinkErrorRedirect(ctx) ??
+      displayNameRules(ctx) ??
+      apiKeyRules(ctx, db)
+    )
   })
 }

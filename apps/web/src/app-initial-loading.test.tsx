@@ -30,6 +30,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'HostPage',
     'ManageBookingPage',
     'McpAuthorizePage',
+    'MeetingPollCreatePage',
     'MeetingPollPage',
     'MeetingPollsPage',
     'OneTimeBookingPage',
@@ -52,6 +53,7 @@ describe('before route chunks are available', () => {
     '/app/settings',
     '/app/team/bookings',
     '/app/meeting-polls',
+    '/app/meeting-polls/new',
     '/app/meeting-polls/poll-id',
     '/',
   ])('shows the admin shell immediately at %s', async (path) => {

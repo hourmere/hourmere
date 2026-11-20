@@ -1,0 +1,27 @@
+.meeting-poll-create-fields,
+.meeting-poll-create-selected {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.meeting-poll-create-fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+}
+
+.meeting-poll-create .field {
+  min-width: 0;
+}
+
+.meeting-poll-create input[type="date"],
+.meeting-poll-create input[type="datetime-local"] {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.meeting-poll-create-selected > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}

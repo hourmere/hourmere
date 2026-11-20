@@ -854,8 +854,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
     const location = new URL('./server.ts', import.meta.url)
     const source = readFileSync(location, 'utf8')
     const property = '    followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,\n'
-    const anchor = `  const notificationDeps = {\n    db,\n${property}`
-    expect(source.includes(anchor), 'mutation matches the worker dependency wiring').toBe(true)
+    const anchor = source.match(/^ {2}const notificationDeps = \{\n[\s\S]*?^ {2}\}$/m)?.[0] ?? ''
+    expect(anchor, 'mutation matches the worker dependency wiring').toContain(property)
     // Compile an isolated source copy: no tracked file or concurrently loaded module changes.
     const javascript = stripTypeScriptTypes(
       source.replace(anchor, anchor.replace(property, '')),

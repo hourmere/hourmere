@@ -198,7 +198,7 @@ exports[`event-type notification OpenAPI contract > publishes additive open resp
             },
           },
         },
-        "description": "insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation.",
+        "description": "insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof.",
       },
       "404": {
         "content": {

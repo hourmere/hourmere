@@ -256,6 +256,7 @@ export async function updateSsoProvider(
       schema: update.extend({ providerId: z.uuid() }),
     },
     {
+      changesAuthority: true,
       authorize: async (db) => {
         await authorize(deps, db, p, headers)
         const row = await provider(db, p.organization.id, providerId)
@@ -341,6 +342,7 @@ export async function deleteSsoProvider(
       schema: remove.extend({ providerId: z.uuid() }),
     },
     {
+      changesAuthority: true,
       authorize: async (db) => {
         await authorize(deps, db, p, headers)
         const row = await provider(db, p.organization.id, providerId)

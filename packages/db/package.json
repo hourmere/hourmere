@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
     "./test-database-registry": "./src/test-database-registry.ts",
-    "./audit": "./src/audit.ts"
+    "./audit": "./src/audit.ts",
+    "./team-write": "./src/team-write.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

@@ -11,6 +11,7 @@ import {
   type Json,
 } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql, type Transaction } from 'kysely'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
@@ -2712,7 +2713,7 @@ export async function rescheduleHostBooking(
   origin?: BookingOrigin,
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     // Series occurrence (null for ordinary bookings) and poll link: one read before any lock.
     const { seriesOccurrenceId: member, meetingPollLinked } = await bookingPreLockLinks(
       trx,
@@ -2791,7 +2792,7 @@ export async function cancelHostBooking(
 ): Promise<Booking> {
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     // Series occurrence (null for ordinary bookings) and poll link: one read before any lock.
     const { seriesOccurrenceId: member, meetingPollLinked } = await bookingPreLockLinks(
       trx,
@@ -3084,7 +3085,7 @@ export async function requestReschedule(
             },
           ],
         })?.followUps[0]?.hostNote ?? null)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     // Series occurrence of a member, or null; read before any lock.
     const member = await bookingSeriesOccurrence(trx, id, ctx.principal.organization.id)
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)

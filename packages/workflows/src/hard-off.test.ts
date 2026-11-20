@@ -55,6 +55,7 @@ const PACKAGE_EXPORTS = [
   'WORKFLOW_RECIPIENT_EMAILS_PER_DAY',
   'WORKFLOW_RECIPIENT_EMAILS_PER_HOUR',
   'WORKFLOW_RENDERED_MAX_BYTES',
+  'WORKFLOW_RUN_PAGE',
   'WORKFLOW_SCALAR_QUESTION_TYPES',
   'WORKFLOW_SKIP_REASONS',
   'WORKFLOW_SUBJECT_MAX_BYTES',
@@ -65,6 +66,7 @@ const PACKAGE_EXPORTS = [
   'WorkflowDefinitionSchema',
   'WorkflowOwnerSelectorSchema',
   'WorkflowPreviewSchema',
+  'WorkflowRunHistoryEntrySchema',
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
   // Definition creation is workflowOperation-wrapped, so off while hard-off.
@@ -79,7 +81,8 @@ const PACKAGE_EXPORTS = [
   'hardOffWorkflowAuditPort',
   'isWorkflowBooking',
   'isWorkflowEventType',
-  // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
+  // Definition and history reads are workflowOperation-wrapped.
+  'listWorkflowRuns',
   'listWorkflows',
   // Read-only helper for the shared webhook worker, whose workflow branch is guarded.
   'lockWorkflowWebhookRun',
@@ -476,12 +479,12 @@ describe('workflow hard-off', () => {
       '@hourmere/scheduling/errors',
       '@hourmere/scheduling/text',
     ])
-    // Creation adds hashing, scope enforcement and SQL; these dependencies are confined to
-    // that service, while hard-off.ts and the other modules keep the existing import pin.
-    const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
-    const updateImports = new Set(['@hourmere/auth', 'kysely'])
-    const deleteImports = new Set(['@hourmere/auth', 'kysely'])
+    // Authoring uses scope enforcement, SQL and the shared committing transaction.
+    // These imports stay confined to the writers; hard-off.ts keeps its existing pin.
+    const writeImports = new Set(['@hourmere/auth', '@hourmere/db/team-write', 'kysely'])
+    const creationImports = new Set(['node:crypto', ...writeImports])
     const previewImports = new Set(['@hourmere/auth', '@hourmere/core'])
+    const readImports = new Set(['@hourmere/scheduling/sealed-secret', 'kysely'])
     const dispatcherImports = new Set(['node:crypto', 'kysely', '@hourmere/jobs'])
     // The renderer reads static notification catalogues and text helpers without the mailer.
     const emailImports = new Set(['@hourmere/mail/catalogue', '@hourmere/mail/text'])
@@ -514,13 +517,14 @@ describe('workflow hard-off', () => {
             !specifier.startsWith('./') &&
             !allowed.has(specifier) &&
             !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
-            !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/updates.ts' && writeImports.has(specifier)) &&
             !(file === 'packages/workflows/src/capture.ts' && captureImports.has(specifier)) &&
             !(
               file === 'packages/workflows/src/dispatcher.ts' && dispatcherImports.has(specifier)
             ) &&
-            !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/deletes.ts' && writeImports.has(specifier)) &&
             !(file === 'packages/workflows/src/preview.ts' && previewImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/reads.ts' && readImports.has(specifier)) &&
             !(file === 'packages/workflows/src/email.ts' && emailImports.has(specifier)) &&
             !(
               file === 'packages/workflows/src/email-attempt.ts' &&

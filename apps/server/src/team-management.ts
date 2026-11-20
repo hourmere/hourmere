@@ -5,6 +5,7 @@ import {
   type TeamManager,
 } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createMiddleware } from 'hono/factory'
 import { sql, type Transaction } from 'kysely'
@@ -339,10 +340,9 @@ export function teamManagementAccess(
       operation: (trx: Transaction<Database>, actor: TeamManager) => Promise<T>,
       options?: { expectedOrganizationId: string },
     ): Promise<T> {
-      return db
-        .transaction()
-        .setIsolationLevel('read committed')
-        .execute(async (trx) => {
+      return teamWriteTransaction(
+        db.transaction().setIsolationLevel('read committed'),
+        async (trx) => {
           const actor = await check(
             trx,
             principal,
@@ -355,7 +355,8 @@ export function teamManagementAccess(
           )
           if (actor.role === 'member') throw denied()
           return operation(trx, { ...actor, role: actor.role })
-        })
+        },
+      )
     },
   }
 }

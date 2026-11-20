@@ -68,6 +68,13 @@ describe('Meeting polls in the admin app', () => {
       const heading = await screen.findByRole('heading', { name: title, level: 1 })
       const content = within(screen.getByRole('main'))
       expect(screen.getByRole('link', { name: title }).getAttribute('aria-current')).toBe('page')
+      expect(
+        (
+          await content.findByRole('link', {
+            name: locale === 'en' ? 'Create meeting poll' : '创建会议投票',
+          })
+        ).getAttribute('href'),
+      ).toBe(PATHS.newMeetingPoll)
       expect((await content.findByRole('link', { name: poll.title })).getAttribute('href')).toBe(
         meetingPollPath(poll.id, poll.organizationId),
       )
@@ -97,6 +104,7 @@ describe('Meeting polls in the admin app', () => {
     renderApp(PATHS.meetingPolls)
     expect(await screen.findByRole('status', { name: 'Loading meeting polls…' })).toBeTruthy()
     expect(screen.queryByText('No meeting polls yet.')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Create meeting poll' })).toBeNull()
     await pending.answer(json(403, { error: 'team_management_access_denied' }))
     expect((await screen.findByRole('alert')).textContent).toBe(
       'Only team owners and admins can manage meeting polls in this space.',

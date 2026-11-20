@@ -5,8 +5,9 @@ import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { type SsoProviderRevision, ssoProviderConfigurationAad } from './sso-configuration.ts'
-import { browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
-import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
+import { BIND_SSO_DELEGATION } from './sso-delegation-proof.ts'
+import { browserBindingDigest, MAILBOX_PROOF_LIMITS, sha256 } from './sso-mailbox-proof.ts'
+import { authenticationAttemptLifetime, oidcClockSkew } from './sso-oidc-limits.ts'
 
 export const TEST_SSO_PROVIDER = 'testSsoProvider'
 export const LINK_SSO_ACCOUNT = 'linkSsoAccount'
@@ -26,12 +27,19 @@ export const oidcLinkBinding = z.strictObject({
   provenAt: z.string(),
   proofExpiresAt: z.string(),
 })
+const oidcStepUpBinding = z.strictObject({
+  attemptId: uuid,
+  linkId: uuid,
+  linkGeneration: z.int().positive(),
+  trustGeneration: z.int().positive(),
+})
+type StepUpBinding = z.infer<typeof oidcStepUpBinding>
 const statePayload = z.tuple([
   secret,
   secret,
   z.string(),
   z.hex().length(64).optional(),
-  oidcLinkBinding.optional(),
+  z.union([oidcLinkBinding, oidcStepUpBinding]).optional(),
 ])
 export class OidcAttemptRefused extends Error {
   constructor() {
@@ -62,12 +70,20 @@ type Ceremony =
   | { kind: 'sign_in' }
   | { kind: 'test'; actor: OidcTestActor }
   | { kind: 'link'; actor: OidcTestActor; binding: z.infer<typeof oidcLinkBinding> }
+  | { kind: 'step_up'; actor: OidcTestActor; attemptId: string }
+
+type BoundStepUp = { kind: 'step_up'; actor: OidcTestActor; binding: StepUpBinding }
 
 const operations = {
   sign_in: signInOperation,
   test: TEST_SSO_PROVIDER,
   link: LINK_SSO_ACCOUNT,
+  step_up: 'oidcStepUp',
 }
+
+// The stored link kind provides the authenticated ceremony shape. The operation
+// and authenticated state distinguish step-up from every self-linking path.
+const storedKind = (kind: Ceremony['kind']) => (kind === 'step_up' ? 'link' : kind)
 
 /** A canonical, same-origin destination under /app, or undefined for unsafe input. */
 export function oidcReturnDestination(raw: string): string | undefined {
@@ -175,6 +191,171 @@ export async function lockOidcTestActor(
   }
 }
 
+async function lockOidcStepUpTarget(
+  trx: Db,
+  provider: OriginatingBrowser,
+  actor: OidcTestActor,
+  attemptId: string,
+) {
+  // Use the same person -> team -> session -> attempt order as the protected write.
+  const user = await trx
+    .selectFrom('auth.user')
+    .select('email')
+    .where('id', '=', actor.userId)
+    .where('emailVerified', '=', true)
+    .forShare()
+    .executeTakeFirst()
+  if (!user) throw refused()
+  const { issuer } = await lockOidcProvider(trx, provider)
+  const session = await trx
+    .selectFrom('auth.session')
+    .select('expiresAt')
+    .where('id', '=', actor.id)
+    .where('userId', '=', actor.userId)
+    .where(sql<string>`lower("activeOrganizationId")`, '=', provider.organizationId)
+    .forShare()
+    .executeTakeFirst()
+  if (!session) throw refused()
+  const attempt = await trx
+    .selectFrom('sso_attempts')
+    .select(['id', 'created_at', 'expires_at', 'mailbox', 'operation'])
+    .where('id', '=', attemptId)
+    .where('kind', '=', 'fresh_proof')
+    .where('organization_id', '=', provider.organizationId)
+    .where('user_id', '=', actor.userId)
+    .where('session_id', '=', actor.id)
+    .where('browser_binding_digest', '=', bindingDigest(provider))
+    .where('requires_sso', '=', true)
+    .where('consumed_at', 'is', null)
+    .where('step_up_link_id', 'is', null)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!attempt) throw refused()
+  const policy = await trx
+    .selectFrom('sso_policies')
+    .select(['trust_generation', 'require_sso'])
+    .where('organization_id', '=', provider.organizationId)
+    .forShare()
+    .executeTakeFirst()
+  const link = await trx
+    .selectFrom('sso_identity_links as l')
+    .innerJoin('auth.member as m', (join) =>
+      join.onRef('m.userId', '=', 'l.user_id').onRef('m.organizationId', '=', 'l.organization_id'),
+    )
+    .select(['l.id', 'l.subject', 'l.generation'])
+    .where('l.organization_id', '=', provider.organizationId)
+    .where('l.provider_id', '=', provider.providerId)
+    .where('l.issuer', '=', issuer)
+    .where('l.user_id', '=', actor.userId)
+    .where('l.retired_at', 'is', null)
+    .forShare()
+    .executeTakeFirst()
+  const { now } = await trx
+    .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
+    .executeTakeFirstOrThrow()
+  if (
+    (!policy?.require_sso && attempt.operation !== BIND_SSO_DELEGATION) ||
+    !link ||
+    session.expiresAt <= now ||
+    attempt.expires_at <= now
+  )
+    throw refused()
+  return {
+    attempt,
+    link,
+    issuer,
+    now,
+    mailbox: user.email.trim().toLowerCase(),
+    binding: {
+      attemptId: attempt.id,
+      linkId: link.id,
+      linkGeneration: link.generation,
+      trustGeneration: policy?.trust_generation ?? 1,
+    },
+  }
+}
+
+async function lockBoundStepUp(trx: Db, provider: OriginatingBrowser, stepUp: BoundStepUp) {
+  const target = await lockOidcStepUpTarget(trx, provider, stepUp.actor, stepUp.binding.attemptId)
+  if (
+    target.binding.linkId !== stepUp.binding.linkId ||
+    target.binding.linkGeneration !== stepUp.binding.linkGeneration ||
+    target.binding.trustGeneration !== stepUp.binding.trustGeneration
+  )
+    throw refused()
+  return target
+}
+
+/** Record identity and freshness on the original write challenge after verified token exchange. */
+export async function recordOidcStepUp(
+  db: Db,
+  provider: OriginatingBrowser,
+  stepUp: BoundStepUp,
+  ceremonyCreatedAt: Date,
+  identity: {
+    issuer: string
+    subject: string
+    authTime: number | undefined
+    sessionDeadline?: Date | undefined
+  },
+) {
+  return db.transaction().execute(async (trx) => {
+    const { attempt, binding, issuer, link, mailbox, now } = await lockBoundStepUp(
+      trx,
+      provider,
+      stepUp,
+    )
+    if (identity.issuer !== issuer || identity.subject !== link.subject) throw refused()
+
+    const lifetime = MAILBOX_PROOF_LIMITS.tokenLifetimeSeconds * 1000
+    const skew = oidcClockSkew * 1000
+    const authTime = identity.authTime === undefined ? undefined : identity.authTime * 1000
+    const needsMailbox = authTime === undefined
+    if (
+      identity.sessionDeadline &&
+      identity.sessionDeadline <= now &&
+      attempt.operation === BIND_SSO_DELEGATION
+    )
+      return { failure: 'timing_invalid' } as const
+    if (
+      authTime !== undefined &&
+      (authTime < Math.max(attempt.created_at.getTime(), ceremonyCreatedAt.getTime()) - skew ||
+        authTime > now.getTime() + skew ||
+        authTime + lifetime <= now.getTime())
+    )
+      return { failure: 'authentication_stale' } as const
+    if (needsMailbox && attempt.mailbox !== mailbox) throw refused()
+
+    // A missing claim proves identity only. Receipt time bounds that identity result
+    // while the same attempt still requires a fresh proof of its frozen mailbox.
+    const authenticatedAt = authTime ?? now.getTime()
+    const expiresAt = Math.min(authenticatedAt + lifetime, attempt.expires_at.getTime())
+    if (expiresAt <= authenticatedAt || expiresAt <= now.getTime()) throw refused()
+    await trx
+      .updateTable('sso_attempts')
+      .set({
+        ...(needsMailbox && { requires_mailbox: true }),
+        step_up_provider_id: provider.providerId,
+        step_up_link_id: link.id,
+        step_up_authenticated_at: new Date(authenticatedAt),
+        step_up_proof_expires_at: new Date(expiresAt),
+        step_up_trust_generation: binding.trustGeneration,
+      })
+      .where('id', '=', attempt.id)
+      .execute()
+    return {
+      delegation:
+        attempt.operation === BIND_SSO_DELEGATION
+          ? {
+              attemptId: attempt.id,
+              linkGeneration: binding.linkGeneration,
+              expiresAt: new Date(expiresAt),
+            }
+          : undefined,
+    }
+  })
+}
+
 /** Builds authorization parameters for a fresh browser-bound OIDC attempt. */
 export async function startOidcAttempt(
   { db, configurationKey }: AttemptDependencies,
@@ -187,7 +368,11 @@ export async function startOidcAttempt(
   const codeVerifier = randomBytes(32).toString('base64url')
   const nonce = randomBytes(32).toString('base64url')
   const write = async (trx: Db) => {
-    await lockOidcProvider(trx, browser, ceremony.kind !== 'test')
+    const stepUp =
+      ceremony.kind === 'step_up'
+        ? await lockOidcStepUpTarget(trx, browser, ceremony.actor, ceremony.attemptId)
+        : undefined
+    if (!stepUp) await lockOidcProvider(trx, browser, ceremony.kind !== 'test')
     const { id, now } = await trx
       .selectNoFrom([
         sql<string>`uuidv7()`.as('id'),
@@ -202,6 +387,10 @@ export async function startOidcAttempt(
       if (!browser.endpointsDigest) throw refused()
       payload.push(ceremony.binding)
     }
+    if (stepUp) {
+      if (!browser.endpointsDigest) throw refused()
+      payload.push(stepUp.binding)
+    }
     const envelope = encryptCredential(
       configurationKey,
       stateAad(browser, id, binding),
@@ -212,7 +401,7 @@ export async function startOidcAttempt(
       .insertInto('sso_attempts')
       .values({
         id,
-        kind: ceremony.kind,
+        kind: storedKind(ceremony.kind),
         organization_id: browser.organizationId,
         provider_id: browser.providerId,
         provider_revision: browser.revision,
@@ -226,7 +415,7 @@ export async function startOidcAttempt(
         created_at: now,
         expires_at: sql`least(
           ${now}::timestamptz + make_interval(secs => ${authenticationAttemptLifetime}),
-          ${ceremony.kind === 'link' ? ceremony.binding.proofExpiresAt : null}::timestamptz
+          ${stepUp?.attempt.expires_at ?? (ceremony.kind === 'link' ? ceremony.binding.proofExpiresAt : null)}::timestamptz
         )`,
       })
       .execute()
@@ -245,12 +434,12 @@ export async function startOidcAttempt(
 function openState(configurationKey: Buffer, aad: string, envelope: string) {
   try {
     const plaintext = decryptCredential(configurationKey, aad, Buffer.from(envelope, 'base64url'))
-    const [codeVerifier, nonce, returnPath, endpointsDigest, linkBinding] = statePayload.parse(
+    const [codeVerifier, nonce, returnPath, endpointsDigest, ceremonyBinding] = statePayload.parse(
       JSON.parse(plaintext),
     )
     const destination = oidcReturnDestination(returnPath)
     if (!destination) throw refused()
-    return { codeVerifier, nonce, returnPath: destination, endpointsDigest, linkBinding }
+    return { codeVerifier, nonce, returnPath: destination, endpointsDigest, ceremonyBinding }
   } catch {
     throw refused()
   }
@@ -264,7 +453,7 @@ export async function consumeOidcAttempt(
   { db, configurationKey }: AttemptDependencies,
   browser: OriginatingBrowser & { state: string | null },
   test: Extract<Ceremony, { kind: 'test' }> | undefined = undefined,
-  readLinkActor?: () => Promise<OidcTestActor | null | undefined>,
+  readActor?: () => Promise<OidcTestActor | null | undefined>,
 ) {
   const binding = bindingDigest(browser)
   const state = browser.state
@@ -274,21 +463,26 @@ export async function consumeOidcAttempt(
   const envelope = match?.[2]
   if (!id || !envelope) throw refused()
   const material = openState(configurationKey, stateAad(browser, id, binding), envelope)
-  let ceremony: Ceremony = test ?? { kind: 'sign_in' }
-  if (material.linkBinding) {
-    const actor = !test && (await readLinkActor?.())
+  let ceremony: Exclude<Ceremony, { kind: 'step_up' }> | BoundStepUp = test ?? { kind: 'sign_in' }
+  if (material.ceremonyBinding) {
+    const actor = !test && (await readActor?.())
     if (!actor) throw refused()
-    ceremony = { kind: 'link', actor, binding: material.linkBinding }
+    const binding = material.ceremonyBinding
+    ceremony =
+      'attemptId' in binding
+        ? { kind: 'step_up', actor, binding }
+        : { kind: 'link', actor, binding }
   }
 
   const attempt = await db.transaction().execute(async (trx) => {
     if (ceremony.kind === 'test') await lockOidcTestActor(trx, browser, ceremony.actor)
+    else if (ceremony.kind === 'step_up') await lockBoundStepUp(trx, browser, ceremony)
     else await lockOidcProvider(trx, browser)
     const query = trx
       .selectFrom('sso_attempts')
       .select(['id', 'consumed_at'])
       .where('id', '=', id)
-      .where('kind', '=', ceremony.kind)
+      .where('kind', '=', storedKind(ceremony.kind))
       .where('operation', '=', operations[ceremony.kind])
       .where('organization_id', '=', browser.organizationId)
       .where('provider_id', '=', browser.providerId)
@@ -333,5 +527,6 @@ export async function consumeOidcAttempt(
     createdAt: attempt.created_at,
     expiresAt: attempt.expires_at,
     link: ceremony.kind === 'link' ? ceremony : undefined,
+    stepUp: ceremony.kind === 'step_up' ? ceremony : undefined,
   }
 }

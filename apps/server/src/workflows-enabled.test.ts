@@ -6,15 +6,17 @@
 import { randomUUID } from 'node:crypto'
 import '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Database, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
+  createFixtures,
   createTestTeam,
   createTestUser,
   type TestTeam,
   type TestUser,
 } from '@hourmere/scheduling/testing'
 import { WEBHOOK_EVENTS } from '@hourmere/webhooks'
+import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   validateWorkflowDefinition,
@@ -46,6 +48,7 @@ vi.mock('../../../packages/workflows/src/hard-off.ts', () => ({
 
 const serverUrl = process.env.DATABASE_URL
 const URL = 'http://localhost:4188'
+const workflowRunCursorSecret = 'synthetic-test-workflow-cursor-sealing-key'
 
 describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', () => {
   let owned: TestDatabase
@@ -112,6 +115,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     app.request(path, { headers: { authorization: `Bearer ${token}` } })
   const listPath = (kind: string, id: string, extra = '') =>
     `/api/v1/workflows?ownerKind=${kind}&ownerId=${id}${extra}`
+  const runPath = (id: string, query = '') => `/api/v1/workflows/${id}/runs${query}`
 
   async function mcp(token: string, method: string, params: object = {}) {
     const res = await app.request('/mcp', {
@@ -169,19 +173,44 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     await define('foreign', outsider.principal.organization.id, outsider.id)
     await define('team', team.id, null)
     await define('otherTeam', other.id, null)
-    app = createApp({
+    app = build(db)
+  })
+
+  /** The workflow transports over `routesDb`, with the team SSO read gate when `ssoDb` is set. */
+  function build(routesDb: Db, ssoDb?: Db) {
+    return createApp({
       publicUrl: URL,
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller,
       routes: [
-        workflowRoutes({ db, audit: { record: async () => {} } }),
+        workflowRoutes({
+          db: routesDb,
+          workflowRunCursorSecret,
+          audit: { record: async () => {} },
+        }),
         instanceRoutes({ publicUrl: URL, socialProviders: {} }),
-        webhookRoutes({ db, enabled: true, encryptionKey: Buffer.alloc(32, 4).toString('base64') }),
+        webhookRoutes({
+          db: routesDb,
+          enabled: true,
+          encryptionKey: Buffer.alloc(32, 4).toString('base64'),
+        }),
       ],
-      mcp: mcpEndpoint({ tools: workflowTools({ db, audit: { record: async () => {} } }) }),
+      mcp: mcpEndpoint({
+        tools: workflowTools({
+          db: routesDb,
+          workflowRunCursorSecret,
+          audit: { record: async () => {} },
+        }),
+      }),
+      ...(ssoDb && {
+        ssoTeamReads: {
+          db: ssoDb,
+          capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false },
+        },
+      }),
     })
-  })
+  }
   afterAll(async () => {
     await owned?.drop()
   })
@@ -303,6 +332,360 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     expect(WORKFLOWS_IMPLEMENTED).toBe(true)
   })
 
+  it('returns only safe history metadata for personal and team runs and preserves webhook booking IDs', async () => {
+    const now = new Date()
+    const due = new Date(now.getTime() - 1000)
+    const attendee = { name: 'Private Invitee', email: 'private-invitee@example.test' }
+    const answer = 'Private answer'
+    const url = 'https://private.example.test/meeting'
+    for (const [id, organizationId, actor, acting] of [
+      [workflow.personal, owner.principal.organization.id, owner, undefined],
+      [workflow.team, team.id, admin, team],
+    ] as const) {
+      if (!id) throw new Error('Expected a workflow history fixture')
+      const bookingId = await createFixtures(db).booking(
+        organizationId,
+        [acting ? member.id : owner.id],
+        new Date(now.getTime() + 3600_000).toISOString(),
+        new Date(now.getTime() + 5400_000).toISOString(),
+        { attendee },
+      )
+      await db
+        .updateTable('bookings')
+        .set({
+          responses: JSON.stringify({ notes: answer }),
+          location: JSON.stringify({ kind: 'custom', value: url }),
+        })
+        .where('id', '=', bookingId)
+        .execute()
+      const run = await db.transaction().execute(async (trx) => {
+        const { id: enrollmentId } = await trx
+          .insertInto('workflow_enrollments')
+          .values({
+            organization_id: organizationId,
+            booking_id: bookingId,
+            workflow_id: id,
+            revision: 1,
+            trigger: 'before_start',
+            occurrence: 'created',
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        const run = await trx
+          .insertInto('workflow_runs')
+          .values({
+            organization_id: organizationId,
+            booking_id: bookingId,
+            enrollment_id: enrollmentId,
+            due_at: due,
+            expires_at: new Date(now.getTime() + 60000),
+            finished_at: now,
+            state: 'skipped',
+            skip_reason: 'workflow_disabled',
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        await trx
+          .insertInto('workflow_run_history')
+          .values({
+            run_id: run.id,
+            organization_id: organizationId,
+            workflow_id: id,
+            revision: 1,
+            trigger: 'before_start',
+            due_at: due,
+            finished_at: now,
+            outcome: 'skipped',
+            reason: 'workflow_disabled',
+            skipped: 1,
+          })
+          .execute()
+        return run
+      })
+      const token = bearer(actor, 'read', acting)
+      const iso = (date: Date) => date.toISOString().replace('Z', '000Z')
+      const expected = {
+        data: [
+          {
+            workflowId: id,
+            revision: 1,
+            trigger: 'before_start',
+            dueAt: iso(due),
+            finishedAt: iso(now),
+            outcome: 'skipped',
+            reason: 'workflow_disabled',
+            sent: 0,
+            rejected: 0,
+            deliveryUnknown: 0,
+            skipped: 1,
+          },
+        ],
+        nextCursor: null,
+      }
+      const response = await rest(token, runPath(id))
+      expect(response.status).toBe(200)
+      const responseText = await response.text()
+      for (const privateValue of [bookingId, run.id, attendee.name, attendee.email, answer, url])
+        expect(responseText).not.toContain(privateValue)
+      expect(JSON.parse(responseText)).toEqual(expected)
+      const called = await mcp(token, 'tools/call', {
+        name: 'list_workflow_runs',
+        arguments: { id },
+      })
+      expect(called.structuredContent).toEqual(expected)
+      const command = await cli(token, ['workflows', 'runs'], { id })
+      expect(command.code).toBe(0)
+      expect(JSON.parse(command.stdout)).toEqual(expected)
+
+      const endpoint = await app.request('/api/v1/webhooks', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${bearer(actor, 'full', acting)}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ url: 'https://hooks.example.com/', events: ['booking.created'] }),
+      })
+      expect(endpoint.status).toBe(201)
+      const { webhook } = (await endpoint.json()) as { webhook: { id: string } }
+      await db
+        .insertInto('webhook_deliveries')
+        .values({
+          webhook_id: webhook.id,
+          organization_id: organizationId,
+          booking_id: bookingId,
+          event_id: randomUUID(),
+          event_type: 'booking.created',
+          payload: JSON.stringify({ name: attendee.name, email: attendee.email, answer, url }),
+        })
+        .execute()
+      const deliveries = await rest(token, `/api/v1/webhooks/${webhook.id}/deliveries`)
+      expect(deliveries.status).toBe(200)
+      expect(await deliveries.json()).toMatchObject({ data: [{ bookingId }] })
+
+      const before = await db
+        .selectFrom('workflow_runs')
+        .selectAll()
+        .where('id', '=', run.id)
+        .executeTakeFirstOrThrow()
+      await db.deleteFrom('workflow_run_history').where('run_id', '=', run.id).execute()
+      const retained = await rest(token, runPath(id))
+      expect(await retained.json()).toEqual({ data: [], nextCursor: null })
+      expect(
+        await db
+          .selectFrom('workflow_runs')
+          .selectAll()
+          .where('id', '=', run.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual(before)
+      expect(
+        await db
+          .selectFrom('workflow_enrollments')
+          .select('id')
+          .where('id', '=', before.enrollment_id)
+          .executeTakeFirst(),
+      ).toEqual({ id: before.enrollment_id })
+    }
+  })
+
+  it('refuses team run history without a current SSO proof on REST and MCP, with one policy lookup', async () => {
+    const statements: string[] = []
+    const logged = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
+    const policyStatements = () =>
+      statements.filter((statement) =>
+        /\b(?:from|join)\s+(?:"?public"?\.)?"?sso_policies\b/i.test(statement),
+      )
+    const legacy = build(logged)
+    const gated = build(logged, logged)
+    const enforced = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    await define('enforcedTeam', enforced.id, null)
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: enforced.id, require_sso: true })
+      .execute()
+    const call = (target: typeof app, token: string, id: string) =>
+      target.request('/mcp', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'list_workflow_runs', arguments: { id } },
+        }),
+      })
+    const result = async (response: Response) => {
+      const text = await response.text()
+      const data = text.split('\n').find((line) => line.startsWith('data: '))
+      return JSON.parse(data ? data.slice(6) : text).result
+    }
+
+    // An enforced team without a fresh proof gets the stable refusal on both transports.
+    const enforcedToken = bearer(owner, 'read', enforced)
+    statements.length = 0
+    const refused = await gated.request(runPath(workflow.enforcedTeam as string), {
+      headers: { authorization: `Bearer ${enforcedToken}` },
+    })
+    expect(refused.status).toBe(403)
+    expect(refused.headers.get('location')).toBeNull()
+    expect(await refused.json()).toEqual({ error: 'sso_required' })
+    expect(policyStatements()).toHaveLength(1)
+    expect(statements.some((statement) => statement.includes('workflow_'))).toBe(false)
+    statements.length = 0
+    expect(
+      toolError(await result(await call(gated, enforcedToken, workflow.enforcedTeam as string))),
+    ).toEqual({ error: 'sso_required' })
+    expect(policyStatements()).toHaveLength(1)
+    expect(statements.some((statement) => statement.includes('workflow_'))).toBe(false)
+
+    // A team without a policy answers as before, adding only the one policy lookup.
+    const plainToken = bearer(owner, 'read', team)
+    for (const send of [
+      (target: typeof app) =>
+        target.request(runPath(workflow.team as string), {
+          headers: { authorization: `Bearer ${plainToken}` },
+        }),
+      (target: typeof app) => call(target, plainToken, workflow.team as string),
+    ]) {
+      statements.length = 0
+      const before = await (await send(legacy)).text()
+      const legacyStatements = [...statements]
+      statements.length = 0
+      const after = await (await send(gated)).text()
+      expect(policyStatements()).toHaveLength(1)
+      expect(statements.filter((statement) => !policyStatements().includes(statement))).toEqual(
+        legacyStatements,
+      )
+      // Sealed cursors carry a fresh nonce; everything else is byte-identical.
+      const sealed = (text: string) => text.replace(/"nextCursor":"[^"]*"/g, '"nextCursor":"…"')
+      expect(sealed(after)).toBe(sealed(before))
+      expect(after).toContain('"data":')
+    }
+
+    // Personal history needs no policy lookup.
+    statements.length = 0
+    const personal = await gated.request(runPath(workflow.personal as string), {
+      headers: { authorization: `Bearer ${bearer(owner, 'read')}` },
+    })
+    expect(personal.status).toBe(200)
+    expect(policyStatements()).toHaveLength(0)
+  })
+
+  it('pages history with exact timestamp and run ordering, rejects tampering and conceals foreign workflows', async () => {
+    const reader = await createTestUser(db)
+    const organizationId = reader.principal.organization.id
+    await define('paged', organizationId, reader.id)
+    await define('emptyRuns', organizationId, reader.id)
+    const id = workflow.paged as string
+    const token = bearer(reader, 'read')
+    const now = Temporal.Now.instant()
+      .subtract({ minutes: 1 })
+      .round({ smallestUnit: 'second', roundingMode: 'floor' })
+    const exact = (microseconds: number) =>
+      now.add({ microseconds }).toString({ smallestUnit: 'microsecond' })
+    const runId = (n: number) => `10000000-0000-4000-8000-00000000000${n}`
+    const row = (n: number, finishedAt: string) => ({
+      run_id: runId(n),
+      organization_id: organizationId,
+      workflow_id: id,
+      revision: 1,
+      trigger: 'before_start',
+      due_at: exact(0),
+      finished_at: finishedAt,
+      outcome: 'completed',
+      sent: n,
+    })
+    await db
+      .insertInto('workflow_run_history')
+      .values([
+        row(1, exact(2)),
+        row(3, exact(1)),
+        row(2, exact(1)),
+        row(4, now.subtract({ hours: 24 * 31 }).toString()),
+      ])
+      .execute()
+    const read = async (extra = '') => {
+      const response = await rest(token, runPath(id, extra))
+      expect(response.status).toBe(200)
+      return (await response.json()) as { data: { sent: number }[]; nextCursor: string | null }
+    }
+    expect((await read()).data.map(({ sent }) => sent)).toEqual([1, 3, 2])
+    const first = await read('?limit=1')
+    expect(first.data.map(({ sent }) => sent)).toEqual([1])
+    const cursor = first.nextCursor as string
+    expect(cursor).toBeTruthy()
+
+    const ciphertext = Buffer.from(cursor, 'base64url')
+    const lastByte = ciphertext.length - 1
+    ciphertext[lastByte] = (ciphertext[lastByte] as number) ^ 1
+    const tampered = ciphertext.toString('base64url')
+    const bad = await rest(token, runPath(id, `?cursor=${tampered}`))
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toMatchObject({ error: 'invalid_cursor' })
+    const crossWorkflow = await rest(
+      token,
+      runPath(workflow.emptyRuns as string, `?cursor=${cursor}`),
+    )
+    expect(crossWorkflow.status).toBe(400)
+    expect(await crossWorkflow.json()).toMatchObject({ error: 'invalid_cursor' })
+    for (const query of ['?limit=0', '?limit=101', '?limit=1.5', '?extra=1']) {
+      expect((await rest(token, runPath(id, query))).status).toBe(400)
+    }
+
+    // A newer completion and the disappearance of the page's anchor do not move its boundary.
+    await db
+      .insertInto('workflow_run_history')
+      .values(row(5, exact(3)))
+      .execute()
+    await db.deleteFrom('workflow_run_history').where('run_id', '=', runId(1)).execute()
+    const second = await mcp(token, 'tools/call', {
+      name: 'list_workflow_runs',
+      arguments: { id, limit: 1, cursor },
+    })
+    expect(second.structuredContent.data.map(({ sent }: { sent: number }) => sent)).toEqual([3])
+    expect(await read(`?cursor=${second.structuredContent.nextCursor}&limit=1`)).toMatchObject({
+      data: [{ sent: 2 }],
+      nextCursor: null,
+    })
+    expect(
+      await db
+        .selectFrom('workflow_run_history')
+        .select('run_id')
+        .where('run_id', '=', runId(4))
+        .executeTakeFirst(),
+    ).toEqual({ run_id: runId(4) })
+
+    const missing = { error: 'workflow_not_found', message: 'No such workflow' }
+    for (const [credential, inaccessible] of [
+      [token, 'malformed'],
+      [token, randomUUID()],
+      [token, workflow.foreign as string],
+      [bearer(owner, 'full', team), id],
+      [bearer(member, 'full', team), workflow.team as string],
+      [bearer(owner, 'full', team), workflow.otherTeam as string],
+    ] as const) {
+      const response = await rest(credential, runPath(inaccessible, '?cursor=bad'))
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual(missing)
+      const called = await mcp(credential, 'tools/call', {
+        name: 'list_workflow_runs',
+        arguments: { id: inaccessible },
+      })
+      expect(toolError(called)).toEqual(missing)
+    }
+    const denied = await rest(bearer(reader, 'bookings'), runPath(id))
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toMatchObject({ error: 'insufficient_scope' })
+  })
+
   it('serves the same definitions over REST, MCP and the CLI to full and read keys', async () => {
     for (const scope of ['full', 'read'] as const) {
       const token = bearer(owner, scope)
@@ -331,8 +714,9 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
               'preview_workflow',
               'list_workflows',
               'get_workflow',
+              'list_workflow_runs',
             ]
-          : ['list_workflows', 'get_workflow'],
+          : ['list_workflows', 'get_workflow', 'list_workflow_runs'],
       )
       const called = await mcp(token, 'tools/call', {
         name: 'list_workflows',

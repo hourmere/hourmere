@@ -284,6 +284,11 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(false)
     await testDb.pool.query('UPDATE pgboss.job SET data=$2::jsonb WHERE id=$1', [
       id,
+      JSON.stringify({ ...payload, actor: { userId: randomUUID(), sessionId: randomUUID() } }),
+    ])
+    expect(await jobs.hasLiveInvitationEmailJob(identity)).toBe(true)
+    await testDb.pool.query('UPDATE pgboss.job SET data=$2::jsonb WHERE id=$1', [
+      id,
       JSON.stringify(payload),
     ])
 
@@ -556,7 +561,7 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     },
     {
       name: 'exact payload protection',
-      before: "AND singleton_key = $1 AND data = $2::jsonb AND policy = 'exclusive'",
+      before: "AND singleton_key = $1 AND data - 'actor' = $2::jsonb AND policy = 'exclusive'",
       after: "AND singleton_key = $1 AND $2::jsonb IS NOT NULL AND policy = 'exclusive'",
       expired: true,
       mismatched: true,
