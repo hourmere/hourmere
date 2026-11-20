@@ -73,6 +73,8 @@
   "ssoRecovery.nominated.message": "Ein Teaminhaber hat Sie für die Wiederherstellung der Single-Sign-on-Anmeldung nominiert. Öffnen Sie Hourmere innerhalb von 72 Stunden, um die Nominierung einzusehen. Für die Annahme ist eine separate Bestätigung über Ihr eigenes E-Mail-Postfach erforderlich.",
   "ssoRecovery.enrolled.subject": "Nominierung für die Single-Sign-on-Wiederherstellung angenommen",
   "ssoRecovery.enrolled.message": "Ein Teaminhaber hat eine Nominierung für die Single-Sign-on-Wiederherstellung angenommen. Wenden Sie sich an Ihre Teamadministration, wenn Sie diese Änderung nicht erwartet haben.",
+  "ssoRecovery.used.subject": "Die Wiederherstellung der Single-Sign-on-Anmeldung wurde verwendet",
+  "ssoRecovery.used.message": "Ein Teaminhaber hat sein Postfach bestätigt und die Wiederherstellung der Single-Sign-on-Anmeldung gestartet. Wenden Sie sich an Ihre Teamadministration, falls Sie diese Aktivität nicht erwartet haben.",
   "teamInvitation.defaultTeam": "Ihr Team",
   "teamInvitation.defaultInviter": "Ein Teammitglied",
   "teamInvitation.subject": "Einladung zum Team {team}",

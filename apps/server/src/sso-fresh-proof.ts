@@ -1,7 +1,11 @@
 /** Shared, session-only SSO write gate. No route enables this while protocols are off. */
 import { randomBytes } from 'node:crypto'
 import type { Db } from '@hourmere/db'
-import { checkTeamWriteBeforeAuthorityChange, teamWriteTransaction } from '@hourmere/db/team-write'
+import {
+  checkTeamWriteBeforeAuthorityChange,
+  checkTeamWriteDeadline,
+  teamWriteTransaction,
+} from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
@@ -12,6 +16,7 @@ import {
   browserBindingDigest,
   databaseClock,
   type MailboxProofClock,
+  readBindingCookie,
   sha256,
 } from './sso-mailbox-proof.ts'
 
@@ -99,6 +104,12 @@ export async function runWithFreshProof<T>(
     authorize: (trx: Db) => Promise<void>
     /** The operation can revoke the acting session's team proof in this transaction. */
     changesAuthority?: boolean
+    /** Only a recovery-enabled operation supplies this and consumes authority under the team lock. */
+    consumeRecovery?: (
+      trx: Db,
+      binding: string,
+      now: string,
+    ) => Promise<{ id: string; deadline: string } | undefined>
     /** Optional I/O after preflight, outside the transaction. Authority is checked again. */
     prepare?: () => Promise<void>
     mutate: (
@@ -123,14 +134,7 @@ export async function runWithFreshProof<T>(
   const { proofAttemptId, ...input } = parsed.data
   const inputDigest = sha256(canonical(input))
   const cookieName = bindingCookieName(deps.publicUrl)
-  const cookieValue =
-    request.headers
-      .get('cookie')
-      ?.split(';')
-      .map((part) => part.trim())
-      .find((part) => part.startsWith(`${cookieName}=`))
-      ?.slice(cookieName.length + 1) ?? ''
-  let browserBinding = cookieValue
+  let browserBinding = readBindingCookie(request.headers, cookieName) ?? ''
   let binding = browserBindingDigest(browserBinding)
   let setCookie: string | undefined
   if (binding === null) {
@@ -170,6 +174,16 @@ export async function runWithFreshProof<T>(
         AND s."expiresAt" > ${now}::timestamptz`.execute(trx)
       const mailbox = session.rows[0]?.mailbox
       if (!mailbox) throw new HTTPException(403, { message: 'forbidden' })
+      const recovery = await callbacks.consumeRecovery?.(trx, binding, now)
+      if (recovery) {
+        const checked = await checkTeamWriteBeforeAuthorityChange(trx, recovery)
+        const value = await callbacks.mutate(trx, input, browserBinding, undefined, recovery.id)
+        if (checked === undefined)
+          await checkTeamWriteDeadline(trx, recovery.deadline, () => {
+            throw new DomainError('forbidden', 'sso_required')
+          })
+        return { status: 'complete', value, ...cookie }
+      }
       const independentMailbox = request.proofMode === 'mailbox'
       const delegatedSso = request.proofMode === 'sso'
       const policy = policies[0]

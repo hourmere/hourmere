@@ -1173,6 +1173,11 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   what it relied on is unchanged: its provider still at the frozen revision and not retired
   (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
   trust generation current. Logging out deletes the session's attempts.
+  A consumed mailbox attempt for `useSsoRecovery` grants recovery to that session, team
+  and browser binding, while the mailbox and accepted recovery ownership are still
+  current. Cleanup keeps it until the mailbox proof expires. An enforcement-disable
+  write spends the grant by deleting that attempt in the same transaction as the policy
+  update. A later ceremony supersedes the session's previous grant for the team.
   The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
   the state digest and browser-binding digest. The authenticated state envelope carries the
   nonce, PKCE verifier and return path, bound to the attempt and its provider revision.

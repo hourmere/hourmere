@@ -80,10 +80,14 @@ export function teamWriteTransaction<T>(
 }
 
 /** Use after the service's authorization locks and immediately before changing its own proof. */
-export async function checkTeamWriteBeforeAuthorityChange(trx: TeamTransaction) {
+export async function checkTeamWriteBeforeAuthorityChange(
+  trx: TeamTransaction,
+  lockedRecovery?: { deadline: string },
+) {
   const check = activeCheck.getStore()
   if (!check) return
-  const deadline = await check.lockProof(trx)
+  // A consumed recovery grant was verified under the same write locks as the policy change.
+  const deadline = lockedRecovery?.deadline ?? (await check.lockProof(trx))
   checkedBeforeChange.set(trx, { deadline })
   return deadline
 }

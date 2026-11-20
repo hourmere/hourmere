@@ -2,8 +2,9 @@ import { advanceSsoRecoveryRevision, type Principal, teamRoles } from '@hourmere
 import { localeCodes, resolveAdminLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
-import { type Mailer, ssoRecoveryEnrollmentEmail } from '@hourmere/mail'
+import { type Mailer, ssoRecoveryEnrollmentEmail, ssoRecoveryUseEmail } from '@hourmere/mail'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
@@ -37,6 +38,7 @@ const payload = z.discriminatedUnion('kind', [
     revision: z.int().positive().max(2_147_483_647),
   }),
   z.strictObject({ ...recipient, kind: z.literal('enrolled') }),
+  z.strictObject({ ...recipient, kind: z.literal('used'), organizationId: z.uuid() }),
 ])
 type Notice = z.infer<typeof payload>
 
@@ -91,7 +93,17 @@ export function ssoRecoveryEnrollmentEmailJob({
             expectedRevision: String(notice.revision),
           }).toString()
         }
-        await mailer.send(ssoRecoveryEnrollmentEmail(user.email, notice.language, link), { signal })
+        if (notice.kind === 'used') {
+          const owner = await teamOwnerIds(db, notice.organizationId)
+            .where('userId', '=', notice.userId)
+            .executeTakeFirst()
+          if (!owner) return
+          await mailer.send(ssoRecoveryUseEmail(user.email, notice.language), { signal })
+        } else {
+          await mailer.send(ssoRecoveryEnrollmentEmail(user.email, notice.language, link), {
+            signal,
+          })
+        }
       } catch {
         throw new Error('SSO recovery enrollment email could not be sent')
       }
@@ -129,6 +141,33 @@ async function currentOwner(trx: Db, organizationId: string, userId: string) {
 async function notify(deps: SsoRecoveryEnrollmentDeps, trx: Db, notice: Notice) {
   const id = await deps.notificationQueue?.enqueue(jobName, notice, { transaction: trx })
   if (!id) throw new Error('SSO recovery enrollment email could not be queued')
+}
+
+function teamOwnerIds(db: Db, organizationId: string) {
+  return db
+    .selectFrom('auth.member')
+    .select('userId')
+    .where('organizationId', '=', organizationId)
+    .where((eb) => eb.not(scimSuspended(organizationId, eb.ref('userId'))))
+    .where(sql<boolean>`EXISTS (
+      SELECT 1 FROM unnest(string_to_array(role, ',')) AS roles(token)
+      WHERE btrim(token) = 'owner'
+    )`)
+}
+
+export async function notifySsoRecoveryUse(
+  deps: SsoRecoveryEnrollmentDeps,
+  trx: Db,
+  organizationId: string,
+  headers: Headers,
+) {
+  const language = resolveAdminLanguage({
+    cookie: headers.get('cookie') ?? undefined,
+    acceptLanguage: headers.get('accept-language') ?? undefined,
+  })
+  const owners = await teamOwnerIds(trx, organizationId).execute()
+  for (const { userId } of owners)
+    await notify(deps, trx, { kind: 'used', userId, organizationId, language })
 }
 
 type EnrollmentActor = {
@@ -333,6 +372,7 @@ export function acceptSsoRecoveryEnrollment(
           user_id: userId,
           member_id: memberId,
           nominated_by_user_id: nominatorId,
+          accepted_at: await databaseClock(trx),
         })
         .onConflict((conflict) => conflict.columns(['organization_id', 'user_id']).doNothing())
         .returning('user_id')
