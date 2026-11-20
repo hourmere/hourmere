@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import {
   type Auth,
@@ -458,6 +458,33 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
       structuredContent: { data: [] },
     })
     expect(policyStatements()).toHaveLength(1)
+  })
+
+  it('answers workflows_disabled before the team proof check on workflow reads', async () => {
+    const { teamId, teamKey } = await seedTeam()
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: teamId, require_sso: true })
+      .execute()
+    const id = randomUUID()
+    for (const path of [`/workflows/${id}`, `/workflows/${id}/runs`]) {
+      statements.length = 0
+      const response = await app.request(`/api/v1${path}`, { headers: teamKey })
+      expect(response.status, path).toBe(404)
+      expect(await response.json(), path).toMatchObject({ error: 'workflows_disabled' })
+      // The only match is the API-key lookup, which carries the delegation status;
+      // no separate team proof lookup runs before workflows_disabled.
+      expect(policyStatements(), path).toHaveLength(1)
+    }
+    for (const tool of ['get_workflow', 'list_workflow_runs']) {
+      statements.length = 0
+      const response = await mcpCall(app, teamKey, tool, { id })
+      expect(mcpResult(await response.text()), tool).toMatchObject({
+        isError: true,
+        content: [{ type: 'text', text: expect.stringContaining('"workflows_disabled"') }],
+      })
+      expect(policyStatements(), tool).toHaveLength(1)
+    }
   })
 
   it('refuses host and configuration MCP writes from unbound credentials', async () => {

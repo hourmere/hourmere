@@ -4,6 +4,7 @@ import {
   createWorkflow,
   deleteWorkflow,
   getWorkflow,
+  listWorkflowRuns,
   listWorkflows,
   PreviewWorkflowInputSchema,
   previewWorkflow,
@@ -13,6 +14,7 @@ import {
 import {
   CreateWorkflowInput,
   DeleteWorkflowInput,
+  ListWorkflowRunsInput,
   ListWorkflowsInput,
   UpdateWorkflowInput,
   WORKFLOW_PREVIEW_DESCRIPTION,
@@ -20,6 +22,7 @@ import {
   Workflow,
   WorkflowPage,
   WorkflowPreview,
+  WorkflowRunHistoryPage,
 } from '../routes/workflows.ts'
 import { workflowFeatureTools } from '../workflows.ts'
 import { defineTool, type Tool } from './tools.ts'
@@ -33,10 +36,12 @@ export function workflowTools({
   db,
   audit,
   followUpHostNotesEnabled,
+  workflowRunCursorSecret,
 }: {
   db: Db
   audit?: WorkflowAuditPort
   followUpHostNotesEnabled?: boolean | undefined
+  workflowRunCursorSecret?: string | undefined
 }): Tool[] {
   const annotations = {
     readOnlyHint: true,
@@ -118,6 +123,17 @@ export function workflowTools({
       annotations,
       run(args, call) {
         return getWorkflow({ db, principal: call.caller }, args.id)
+      },
+    }),
+    defineTool({
+      name: 'list_workflow_runs',
+      title: 'List booking workflow runs',
+      description: `${WORKFLOWS_NOT_AVAILABLE} Lists retained terminal runs of a workflow you own or administer in the current organization. Requires read or full API key scope. Returns timestamps in UTC and fixed outcomes and counts, with no booking IDs or private booking details. Pass nextCursor as cursor with the same workflow ID for the next page.`,
+      input: ListWorkflowRunsInput,
+      output: WorkflowRunHistoryPage,
+      annotations,
+      run({ id, ...args }, call) {
+        return listWorkflowRuns({ db, principal: call.caller, workflowRunCursorSecret }, id, args)
       },
     }),
   ])

@@ -39,6 +39,13 @@ it('attaches the team proof middleware to every private team read in the server 
       privateReads.add(id)
   }
   expect(new Set(teamReadRoutes)).toEqual(privateReads)
+  // Workflow run history is a team read like the other workflow reads.
+  for (const read of [
+    'GET /api/v1/workflows',
+    'GET /api/v1/workflows/:id',
+    'GET /api/v1/workflows/:id/runs',
+  ])
+    expect(teamReadRoutes).toContain(read)
 })
 
 it('attaches the team proof middleware to every private team write in the server inventory', async () => {

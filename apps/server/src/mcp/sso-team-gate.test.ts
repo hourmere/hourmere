@@ -115,6 +115,8 @@ it('classifies every registered MCP tool and mode as gated or as a listed except
   // Preview authorizes like a write (writable owner, full scope) and reads live team
   // configuration, but persists nothing: it stays behind the write admission check.
   expect(all.find((unit) => unit.id === 'mcp:preview_workflow')?.gate).toBe('write')
+  // Run history reads a team workflow's retained runs (CLI `workflows runs` calls this tool).
+  expect(all.find((unit) => unit.id === 'mcp:list_workflow_runs')?.gate).toBe('read')
 })
 
 function mcpCall(app: App, key: string, name: string, args: Record<string, unknown>) {

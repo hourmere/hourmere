@@ -9,6 +9,7 @@ import {
   DeleteWorkflowInputSchema,
   deleteWorkflow,
   getWorkflow,
+  listWorkflowRuns,
   listWorkflows,
   PreviewWorkflowInputSchema,
   previewWorkflow,
@@ -18,8 +19,10 @@ import {
   WORKFLOW_CONTENT_LOCALES,
   WORKFLOW_PAGE,
   WORKFLOW_RECIPIENT_CLASSES,
+  WORKFLOW_RUN_PAGE,
   type WorkflowAuditPort,
   WorkflowPreviewSchema,
+  WorkflowRunHistoryEntrySchema,
   WorkflowTriggerSchema,
 } from '@hourmere/workflows'
 import {
@@ -168,6 +171,42 @@ export const WorkflowPage = z
   })
   .openapi('WorkflowPage')
 
+export const WorkflowRunHistoryPage = z
+  .object({
+    data: z.array(
+      WorkflowRunHistoryEntrySchema.openapi('WorkflowRunHistoryEntry', {
+        description: 'A finished run with fixed outcome codes and aggregate recipient counts',
+      }),
+    ),
+    nextCursor: z.string().nullable().openapi({
+      description: 'Pass as `cursor` for the same workflow; null on the last page',
+    }),
+  })
+  .openapi('WorkflowRunHistoryPage')
+
+const workflowRunLimit = z.number().int().min(1).max(WORKFLOW_RUN_PAGE.max).optional()
+const workflowRunCursor = z.string().max(WORKFLOW_RUN_PAGE.cursorMaxLength).optional()
+const workflowRunLimitDescription = {
+  description: `Page size, 1–${WORKFLOW_RUN_PAGE.max} (default ${WORKFLOW_RUN_PAGE.default})`,
+}
+const ListWorkflowRunsQuery = z.strictObject({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(WORKFLOW_RUN_PAGE.max)
+    .optional()
+    .openapi(workflowRunLimitDescription),
+  cursor: workflowRunCursor,
+})
+
+/** list_workflow_runs and `workflows runs`: workflow ID and paging, as JSON. */
+export const ListWorkflowRunsInput = z.strictObject({
+  id: z.string(),
+  limit: workflowRunLimit.openapi(workflowRunLimitDescription),
+  cursor: workflowRunCursor,
+})
+
 const limit = {
   description: `Page size, 1–${WORKFLOW_PAGE.max} (default ${WORKFLOW_PAGE.default})`,
 }
@@ -224,10 +263,12 @@ export function workflowRoutes({
   db,
   audit,
   followUpHostNotesEnabled,
+  workflowRunCursorSecret,
 }: {
   db: Db
   audit?: WorkflowAuditPort
   followUpHostNotesEnabled?: boolean | undefined
+  workflowRunCursorSecret?: string | undefined
 }): RouteModule {
   const contextAccess =
     (
@@ -473,6 +514,37 @@ export function workflowRoutes({
       }),
       async (c) =>
         c.json(await getWorkflow({ db, principal: c.var.principal }, c.req.valid('param').id), 200),
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/workflows/{id}/runs',
+        tags: ['Workflows'],
+        operationId: 'listWorkflowRuns',
+        summary: 'List finished runs of a booking workflow',
+        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.`,
+        security: authenticated,
+        middleware,
+        request: { params: z.object({ id: z.string() }), query: ListWorkflowRunsQuery },
+        responses: {
+          200: {
+            description: 'The workflow’s finished runs',
+            content: json(WorkflowRunHistoryPage),
+          },
+          ...errorResponses({ 400: 'invalid_request or invalid_cursor' }),
+          ...errors.get,
+        },
+      }),
+      async (c) =>
+        c.json(
+          await listWorkflowRuns(
+            { db, principal: c.var.principal, workflowRunCursorSecret },
+            c.req.valid('param').id,
+            c.req.valid('query'),
+          ),
+          200,
+        ),
     )
   }
 }

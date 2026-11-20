@@ -129,6 +129,7 @@ const classes = {
     'GET /api/v1/webhooks/{id}/deliveries',
     'GET /api/v1/workflows',
     'GET /api/v1/workflows/{id}',
+    'GET /api/v1/workflows/{id}/runs',
     'GET /api/v1/team/sso/providers',
     'GET /api/v1/team/sso/policy',
   ],
@@ -999,14 +1000,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 182-operation contract and all 546 scope combinations', () => {
+    it('covers the exact 183-operation contract and all 549 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(182)
-      expect(new Set(ids).size).toBe(182)
+      expect(ids).toHaveLength(183)
+      expect(new Set(ids).size).toBe(183)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(546)
+      expect(cases).toHaveLength(549)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

@@ -53,6 +53,21 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/me" \
 Use `/api/v1/openapi.json` on your instance as the full request/response reference. Strict
 request schemas reject unknown fields. Errors use `{ "error": "stable_code", "message": "…" }`.
 
+## Read workflow run history
+
+`GET /api/v1/workflows/{id}/runs` returns `{data, nextCursor}` to the personal owner or
+current team owner/admin in their acting organization. API keys need `read` or `full`.
+Missing and inaccessible workflows share `404 workflow_not_found`. Set `limit` to 1–100
+(default 50) and reuse the returned `nextCursor` as `cursor` for the same workflow. Finished
+runs appear newest first with fixed outcomes, timestamps and aggregate recipient counts.
+History omits booking IDs, names, email addresses, answers and URLs. Workflows are currently
+unavailable, so callers with allowed credentials receive `404 workflows_disabled`.
+
+中文：个人所有者和当前团队所有者、管理员可在当前组织读取工作流执行历史，需要
+`read` 或 `full` 密钥。历史记录按完成时间从新到旧排列，默认 50 条，最多 100 条。
+用返回的 `nextCursor` 继续读取同一工作流。结果不含预约 ID、姓名、邮箱、回答或链接。
+功能仍硬关闭，允许调用的身份收到 `404 workflows_disabled`。
+
 ## Manage meeting polls
 
 Read managed polls at `GET /api/v1/meeting-polls`, `/{id}` and `/{id}/results` under the

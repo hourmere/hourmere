@@ -304,6 +304,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/workflows/preview` | Session or API key | `full` |
 | `GET /api/v1/workflows` | Session or API key | `full, read` |
 | `GET /api/v1/workflows/{id}` | Session or API key | `full, read` |
+| `GET /api/v1/workflows/{id}/runs` | Session or API key | `full, read` |
 | `POST /api/v1/team/sso/domains` | Browser session only | — |
 | `POST /api/v1/team/sso/domains/{domainId}/verify` | Browser session only | — |
 | `DELETE /api/v1/team/sso/domains/{domainId}` | Browser session only | — |
@@ -431,6 +432,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `get_sso_policy` | — | `sso policy` | `full, read` |
 | `list_workflows` | — | `workflows list` | `full, read` |
 | `get_workflow` | — | `workflows get` | `full, read` |
+| `list_workflow_runs` | — | `workflows runs` | `full, read` |
 
 ### Native protocol boundaries
 
@@ -461,6 +463,11 @@ Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id
 feature is available: until booking workflows are enabled they answer
 `404 workflows_disabled` to every key their scope allows, and `tools/list` omits the tools.
 A key whose scope does not allow them still gets `insufficient_scope` first.
+
+Workflow history (`GET /api/v1/workflows/{id}/runs`, `list_workflow_runs`, `workflows runs`)
+follows the same hard-off behavior and requires a `read` or `full` key.
+
+中文：工作流执行历史需要 `read` 或 `full` 密钥，功能硬关闭时返回 `workflows_disabled`。
 
 Synthetic preview (`POST /api/v1/workflows/preview`, `preview_workflow`, `workflows preview`)
 requires a `full` key and current owner/admin access. It follows the same hard-off behavior.

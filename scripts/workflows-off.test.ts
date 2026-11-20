@@ -46,6 +46,7 @@ const SHIPPED = [
   'updateWorkflow',
   'deleteWorkflow',
   'previewWorkflow',
+  'listWorkflowRuns',
 ]
 const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
 const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
@@ -95,7 +96,7 @@ const STORAGE_NAMES = new RegExp(
   `workflow-storage|(?<![A-Za-z0-9_])(?:${[...STORAGE_TABLES, ...STORAGE_TABLES.map(rowType)].join('|')})(?![A-Za-z0-9_])`,
   'i',
 )
-// The modules that own workflow data access: guarded definitions and creation capture.
+// The modules that own workflow data access, including guarded definition and history reads.
 // Deletion retires pending runs; capture writes enrollments, runs, claims and skip history.
 const DATA_ACCESS = [
   'packages/workflows/src/reads.ts',
@@ -351,7 +352,7 @@ const toolError = (message: Awaited<ReturnType<typeof mcp>>) => {
   return JSON.parse(message.result?.content?.[0]?.text ?? '{}')
 }
 
-describe('booking workflows are off and expose the shipped definition and preview operations', () => {
+describe('booking workflows are off and expose the shipped operations', () => {
   it('reads every documented workflow operation from the design', () => {
     expect(operations.map(({ operationId }) => operationId)).toEqual([
       'listWorkflows',
@@ -372,6 +373,7 @@ describe('booking workflows are off and expose the shipped definition and previe
       'PATCH /api/v1/workflows/{id}',
       'DELETE /api/v1/workflows/{id}',
       'POST /api/v1/workflows/preview',
+      'GET /api/v1/workflows/{id}/runs',
     ])
   })
 
@@ -400,8 +402,10 @@ describe('booking workflows are off and expose the shipped definition and previe
       '/api/v1/workflows',
       '/api/v1/workflows/preview',
       '/api/v1/workflows/{id}',
+      '/api/v1/workflows/{id}/runs',
     ])
     expect(Object.keys(paths['/api/v1/workflows/preview'] ?? {})).toEqual(['post'])
+    expect(Object.keys(paths['/api/v1/workflows/{id}/runs'] ?? {})).toEqual(['get'])
     for (const path of ['/api/v1/workflows', '/api/v1/workflows/{id}'])
       expect(Object.keys(paths[path] ?? {}).sort(), path).toEqual(
         path === '/api/v1/workflows' ? ['get', 'post'] : ['delete', 'get', 'patch'],
@@ -604,7 +608,7 @@ describe('booking workflows are off and expose the shipped definition and previe
       .filter((file) => !isStorageLayer(file) && !DATA_ACCESS.includes(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
     expect(referencing).toEqual([])
-    // Deletion and capture name only the execution tables needed by each operation.
+    // Each operation names only the execution tables it needs.
     const executionNames = new RegExp(
       `(?<![A-Za-z0-9_])(?:${STORAGE_TABLES.filter((table) => !DEFINITION_TABLES.includes(table))
         .flatMap((table) => [table, rowType(table)])
@@ -614,7 +618,13 @@ describe('booking workflows are off and expose the shipped definition and previe
     expect(executionNames.test('selectFrom("workflow_runs")')).toBe(true)
     for (const file of DATA_ACCESS) {
       const source = readFileSync(new URL(file, root), 'utf8')
-      if (file === 'packages/workflows/src/deletes.ts') {
+      if (file === 'packages/workflows/src/reads.ts') {
+        expect(source).toContain('workflow_run_history')
+        for (const table of STORAGE_TABLES.filter(
+          (table) => ![...DEFINITION_TABLES, 'workflow_run_history'].includes(table),
+        ))
+          expect(source).not.toMatch(new RegExp(`\\b(?:${table}|${rowType(table)})\\b`, 'i'))
+      } else if (file === 'packages/workflows/src/deletes.ts') {
         for (const table of ['workflow_runs', 'workflow_enrollments'])
           expect(source).toContain(table)
         const forbidden = STORAGE_TABLES.filter(
@@ -848,6 +858,7 @@ describe('booking workflows are off and expose the shipped definition and previe
       'createWorkflow',
       'deleteWorkflow',
       'getWorkflow',
+      'listWorkflowRuns',
       'listWorkflows',
       'previewWorkflow',
       'updateWorkflow',
@@ -863,6 +874,12 @@ describe('booking workflows are off and expose the shipped definition and previe
     for (const read of [
       () => workflows.listWorkflows(untouchable, { owner: { kind: 'team', id: randomUUID() } }),
       () => workflows.getWorkflow(untouchable, randomUUID()),
+      () =>
+        workflows.listWorkflowRuns(
+          untouchable as Parameters<typeof workflows.listWorkflowRuns>[0],
+          randomUUID(),
+          {},
+        ),
       () => workflows.createWorkflow(untouchable, {} as never),
       () => workflows.updateWorkflow(untouchable, randomUUID(), {} as never),
       () => workflows.deleteWorkflow(untouchable, randomUUID(), {} as never),
