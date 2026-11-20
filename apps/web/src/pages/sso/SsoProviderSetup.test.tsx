@@ -75,7 +75,9 @@ describe('SSO provider setup', () => {
     })
     const user = userEvent.setup()
     renderApp(PATHS.sso)
-    await user.click(await screen.findByRole('button', { name: 'Add provider' }))
+    // Wait for the signed-in frame and the lazy setup route on the initial visit.
+    const add = await screen.findByRole('button', { name: 'Add provider' }, { timeout: 3000 })
+    await user.click(add)
     const form = within(screen.getByRole('form', { name: 'Add OIDC provider' }))
     await user.type(form.getByLabelText('Display name'), created.displayName)
     await user.type(form.getByLabelText('Issuer URL'), created.issuer)
