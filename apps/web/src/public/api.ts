@@ -14,6 +14,9 @@ export type ManagedBooking = Schemas['ManagedBooking']
 export type BookingWithToken = Schemas['BookingWithToken']
 export type PublicBookingResult = Schemas['PublicBookingResult']
 export type CreateBooking = Schemas['CreateBooking']
+export type RoutingContinuation = Schemas['RoutingContinuation']
+export type RoutedBookingInput = Schemas['RoutedBookingInput']
+export type RoutedBookingResult = Schemas['RoutedBookingResult']
 export type OneTimeBookingPage = Schemas['OneTimeBookingPage']
 export type JoinWaitlist = Schemas['JoinWaitlist']
 
@@ -77,6 +80,8 @@ export function failureMessage(err: unknown): UiText {
         })
       : 'Too many requests from your network. Wait a minute and try again.'
   }
+  if (err instanceof PublicRequestError && err.message === 'That did not work. Try again.')
+    return 'That did not work. Try again.'
   return errorMessage(err)
 }
 
@@ -129,6 +134,62 @@ export async function submitRoutingForm(
     true,
   )
   return data
+}
+
+export async function resolveRoutingContinuation(
+  routeToken: string,
+  signal: AbortSignal,
+): Promise<RoutingContinuation> {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/routing-continuations/resolve', {
+        ...privateRoutingRequest,
+        body: { routeToken },
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return data
+}
+
+export function routingContinuationSlots(
+  routeToken: string,
+  durationMinutes: number,
+  locationOptionId: string | undefined,
+): SlotLoader {
+  return async (start, end, signal) => {
+    const { data } = await call(
+      () =>
+        api.POST('/api/v1/routing-continuations/slots', {
+          ...privateRoutingRequest,
+          body: { routeToken, start, end, durationMinutes, locationOptionId },
+          signal,
+        }),
+      signal,
+      true,
+    )
+    return data.slots
+  }
+}
+
+export async function createRoutedBooking(
+  body: RoutedBookingInput,
+  idempotencyKey: string,
+  signal: AbortSignal,
+): Promise<{ result: RoutedBookingResult; replayed: boolean }> {
+  const { data, status } = await call(
+    () =>
+      api.POST('/api/v1/routing-continuations/bookings', {
+        ...privateRoutingRequest,
+        params: { header: { 'idempotency-key': idempotencyKey } },
+        body,
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return { result: data, replayed: status === 200 }
 }
 
 export async function getHost(handle: string, signal: AbortSignal): Promise<PublicHost> {

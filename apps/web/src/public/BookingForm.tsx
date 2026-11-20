@@ -42,6 +42,7 @@ export interface BookingFormValues {
 interface BookingFormProps {
   locations?: readonly BookingLocationOption[] | null
   smsRemindersEnabled?: boolean
+  privateDetails?: boolean
   allowGuests: boolean
   questions: readonly Question[]
   values: BookingFormValues
@@ -95,6 +96,7 @@ export function validateBookingForm(
  */
 export function BookingForm({
   smsRemindersEnabled,
+  privateDetails = false,
   allowGuests,
   locations: locationOptions,
   questions,
@@ -202,7 +204,7 @@ export function BookingForm({
         id={fieldId(field)}
         data-field={field}
         type={options.type ?? 'text'}
-        autoComplete={options.autoComplete}
+        autoComplete={privateDetails ? 'off' : options.autoComplete}
         value={value}
         aria-invalid={errors[field] ? true : undefined}
         aria-describedby={describedBy(field, options.hint ? `${fieldId(field)}-hint` : undefined)}
@@ -219,7 +221,14 @@ export function BookingForm({
   )
 
   return (
-    <form ref={form} className="stack booking-form" noValidate onSubmit={submit}>
+    <form
+      ref={form}
+      className="stack booking-form"
+      autoComplete={privateDetails ? 'off' : undefined}
+      method={privateDetails ? 'post' : undefined}
+      noValidate
+      onSubmit={submit}
+    >
       <ErrorSummary errors={summaryErrors} message={formError} attempt={attempt} />
       {locations.length > 1 && (
         <fieldset
@@ -285,6 +294,7 @@ export function BookingForm({
           value={values.answers[q.id]}
           onChange={(answer) => setAnswer(q.id, answer)}
           error={errors[`q-${q.id}`]}
+          privateDetails={privateDetails}
         />
       ))}
 
@@ -371,9 +381,18 @@ interface QuestionFieldProps {
   value: Answer | undefined
   onChange: (value: Answer | undefined) => void
   error: UiText | undefined
+  privateDetails: boolean
 }
 
-function QuestionField({ question: q, id, field, value, onChange, error }: QuestionFieldProps) {
+function QuestionField({
+  question: q,
+  id,
+  field,
+  value,
+  onChange,
+  error,
+  privateDetails,
+}: QuestionFieldProps) {
   const { t, ui } = useI18n()
 
   const errorId = `${id}-error`
@@ -403,7 +422,7 @@ function QuestionField({ question: q, id, field, value, onChange, error }: Quest
             id={id}
             data-field={field}
             type={q.type === 'phone' ? 'tel' : 'text'}
-            autoComplete={q.type === 'phone' ? 'tel' : 'off'}
+            autoComplete={!privateDetails && q.type === 'phone' ? 'tel' : 'off'}
             value={typeof value === 'string' ? value : ''}
             aria-required={q.required}
             onChange={(e) => onChange(e.target.value)}

@@ -693,6 +693,17 @@ unavailable, the page asks the invitee to check the link. Routing is currently h
 单选题还须保留原选项。受邀人检查新版表单后可再次提交。提交成功后，页面会显示主持人设定的留言，
 或打开服务器返回的后续链接。表单不可用时，页面会请受邀人检查链接。功能目前处于硬关闭状态。
 
+The continuation link opens a booking page for the selected event. Invitees choose an
+available time, review or edit the prefilled details and confirm the booking. The flow
+ends at the booking confirmation. The page removes the token from the address and keeps
+the token and draft in memory. To resume after a reload, reopen the original continuation
+link while it is still valid. Expired and used links show the same recovery page, which
+asks the invitee to open the original form for a new link.
+
+中文：后续链接会打开所选活动的预约页面。受邀人可以选择可用时段，检查或修改预填信息，然后确认预约。
+流程在预约确认页结束。页面会从地址中移除令牌，仅在内存中保留令牌和预约草稿。刷新页面后，可在原后续链接
+仍有效时重新打开该链接。已过期和已使用的链接显示相同的提示，请受邀人打开原表单获取新链接。
+
 Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or
 OAuth grant), so two credentials of one user never share a key. Publish/update/archive take
