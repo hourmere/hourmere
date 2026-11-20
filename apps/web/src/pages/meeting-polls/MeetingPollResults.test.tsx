@@ -214,7 +214,7 @@ describe('meeting poll results', () => {
       time: '会议时间',
       booker: '预约人',
       schedule: '安排会议',
-      acknowledge: '我确认所选参会者中有人仅在有需要时可以参会。',
+      acknowledge: '我确认所选参会者中有人只是必要时可以参会。',
       unavailable: '当前不可用',
       inference:
         '已验证的投票人可以查看票数。在参与人数较少的投票中，扣除自己的一票后，可能推断出他人的选择。',

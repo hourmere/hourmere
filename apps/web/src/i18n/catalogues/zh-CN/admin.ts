@@ -2235,7 +2235,7 @@ export const admin = {
   'Invited to vote': '已邀请投票',
   'Verified voter': '已验证',
   'Withdrawn voter': '已撤回',
-  'If need be': '有需要时可以',
+  'If need be': '必要时可以',
   'Currently available': '当前可用',
   'Currently unavailable': '当前不可用',
   'Availability unknown': '暂无法确认',
@@ -2266,7 +2266,7 @@ export const admin = {
   'Choose up to {count} additional attendees.': '最多可选{count}位其他参会者。',
   'Attendee limit reached ({count} including the booker).':
     '已达到参会人数上限（含预约人共{count}位）。',
-  'I acknowledge the selected conditional votes.': '我确认所选参会者中有人仅在有需要时可以参会。',
+  'I acknowledge the selected conditional votes.': '我确认所选参会者中有人只是必要时可以参会。',
   'Scheduling…': '正在安排…',
   'Close voting…': '结束投票…',
   'Close voting now? Voters can no longer change their votes. You can still schedule the meeting.':
