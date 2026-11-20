@@ -10,6 +10,7 @@ import {
   type Principal,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
@@ -17,6 +18,7 @@ import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { isMember } from '../../../packages/auth/src/organizations.ts'
 import { createApp } from './app.ts'
 import { requireCaller } from './caller.ts'
 import type { RouteModule } from './openapi.ts'
@@ -50,7 +52,7 @@ function accessCopy(sharedMutation?: [string, string], serverMutation?: [string,
   }
   const shared = copy(
     'packages/auth/src/team-management.ts',
-    { sql },
+    { sql, isMember, scimSuspended },
     '({ checkTeamManagementAccess, TeamManagementError })',
     sharedMutation,
   )

@@ -7,6 +7,7 @@ import {
 } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { suspendScimMember } from '../../../../packages/db/src/scim-suspension-fixtures.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -185,5 +186,24 @@ describe.skipIf(!serverUrl)('booking space resolution', () => {
     } finally {
       await createFixtures(test.db).member(host.id, teamId)
     }
+  })
+
+  it('keeps a suspended team booking private when reached from personal space', async () => {
+    const client = test.as(await session(host))
+    const teamPath = `/api/v1/bookings/${bookingId}/organization`
+    expect(await client.get(teamPath)).toEqual({
+      status: 200,
+      body: { organizationId: teamId, access: 'host' },
+    })
+
+    await suspendScimMember(test.db, teamId, host.id)
+    expect(await client.get(teamPath)).toEqual({
+      status: 404,
+      body: { error: 'booking_not_found', message: 'Booking not found' },
+    })
+    expect(await client.get(`/api/v1/bookings/${personalBookingId}/organization`)).toEqual({
+      status: 200,
+      body: { organizationId: host.principal.organization.id, access: 'host' },
+    })
   })
 })

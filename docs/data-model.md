@@ -95,9 +95,10 @@ shared SSO/SCIM admission checks described in [the SCIM design](scim.md); the ca
 decision is frozen, cleared at most once, undeletable while its organization exists and
 unique per organization, mailbox, authority and kind. A blocker whose mailbox cannot be
 stored, or whose decision is already a live tombstone, is dropped so that account deletion
-is never refused. These tables provide storage
-for later claim and authorization work; this migration does not enforce new admission,
-suspension or revocation behavior in application services. Users, Groups and discovery
+is never refused. The live `(organization_id, user_id, source, kind)` index serves
+the existing membership and team-proof queries. An uncleared SCIM suspension denies
+authorization for that account's team. Admission checks also use the proven mailbox
+to respect tombstones retained after account deletion. Users, Groups and discovery
 handlers remain unregistered in production. The User creation handler, which only test
 harnesses register, writes a resource and, for its work address, one pending claim whose
 `invitation_id` names the invitation it issued or reused, or is null when the address

@@ -1,6 +1,8 @@
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { teamWriteCheckFor } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
+import { jsonObjectFrom } from 'kysely/helpers/postgres'
 
 export interface TeamSsoCapabilities {
   readonly ssoOidcEnabled: boolean
@@ -29,6 +31,7 @@ export interface TeamReadPolicy {
 export interface TeamReadAccess {
   allowed: boolean
   policy: TeamReadPolicy | null
+  suspended?: true
 }
 
 /** Shared by enforcement and the caller's own proof summary. */
@@ -53,6 +56,7 @@ export function liveBrowserProofQuery(
       AND pd.domain_id = b.domain_id AND pd.provider_id = b.provider_id
     WHERE b.session_id = ${identity.sessionId}::uuid AND b.user_id = ${identity.userId}::uuid
       AND b.organization_id = ${organizationId}::uuid AND b.trust_generation = ${trustGeneration}
+      AND NOT (${scimSuspended(organizationId, identity.userId)})
       AND b.expires_at > statement_timestamp() AND s."expiresAt" > statement_timestamp()
       AND l.retired_at IS NULL AND p.enabled AND p.retired_at IS NULL
       AND ((${ssoOidcEnabled} AND p.protocol = 'oidc') OR (${ssoSamlEnabled} AND p.protocol = 'saml'))
@@ -70,13 +74,21 @@ export async function teamSsoAccess(
     identity && (capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)
       ? sql<boolean>`EXISTS (${liveBrowserProofQuery(identity, organizationId, sql<number>`policy.trust_generation`, capabilities)})`
       : sql<boolean>`false`
-  const policy = await db
+  const policy = db
     .selectFrom('sso_policies as policy')
     .select(['require_sso', 'admission', 'policy_revision', 'trust_generation'])
     .select(sql<boolean>`CASE WHEN require_sso THEN ${hasProof} ELSE true END`.as('allowed'))
     .where('policy.organization_id', '=', organizationId)
-    .executeTakeFirst()
-  return { allowed: policy?.allowed ?? true, policy: policy ?? null }
+  const access = await db
+    .selectNoFrom([
+      jsonObjectFrom(policy).as('policy'),
+      (identity ? scimSuspended(organizationId, identity.userId) : sql<boolean>`false`).as(
+        'suspended',
+      ),
+    ])
+    .executeTakeFirstOrThrow()
+  if (access.suspended) return { allowed: false, policy: access.policy, suspended: true }
+  return { allowed: access.policy?.allowed ?? true, policy: access.policy }
 }
 
 export function memoizeTeamSsoAccess(deps: TeamSsoDeps, identity: TeamSsoSession | null) {
@@ -100,12 +112,20 @@ export async function lockTeamSsoProof(
   organizationId: string,
   denied: () => never,
 ): Promise<string | undefined> {
-  const policy = await db
+  const lockedPolicy = db
     .selectFrom('sso_policies')
     .select(['require_sso', 'trust_generation'])
     .where('organization_id', '=', organizationId)
     .forShare()
-    .executeTakeFirst()
+  const { policy, suspended } = await db
+    .selectNoFrom([
+      jsonObjectFrom(lockedPolicy).as('policy'),
+      (identity ? scimSuspended(organizationId, identity.userId) : sql<boolean>`false`).as(
+        'suspended',
+      ),
+    ])
+    .executeTakeFirstOrThrow()
+  if (suspended) denied()
   if (!policy?.require_sso) return
   if (!identity || !(capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)) denied()
   // Management can remove a membership before updating the session. Follow its

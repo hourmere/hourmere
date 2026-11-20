@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { type Expression, sql } from 'kysely'
 import { MCP_OAUTH_CONSENT_LIFETIME_MS, MCP_OAUTH_SCOPE } from './mcp-oauth.ts'
 import type { TeamSsoCapabilities } from './team-sso.ts'
@@ -55,6 +56,7 @@ export function liveSsoDelegations(
     `,
     live: sql`
       ${expiry} > statement_timestamp()
+      AND NOT (${scimSuspended(sql.ref('lease_binding.organization_id'), sql.ref('lease_binding.user_id'))})
       AND lease_link.retired_at IS NULL AND lease_provider.enabled AND lease_provider.retired_at IS NULL
       AND ((${ssoOidcEnabled} AND lease_provider.protocol = 'oidc') OR (${ssoSamlEnabled} AND lease_provider.protocol = 'saml'))
       AND lease_domain.retired_at IS NULL AND lease_domain.verified_at IS NOT NULL

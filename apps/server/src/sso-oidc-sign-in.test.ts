@@ -20,6 +20,7 @@ import { createFixtures } from '@hourmere/scheduling/testing'
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from 'jose'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { suspendScimMember } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
   at,
   claimedDomainValues,
@@ -2483,7 +2484,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect((await audit()).some(({ action }) => action === signInAction)).toBe(false)
   })
 
-  it.each(['membership', 'link', 'domain'] as const)(
+  it.each(['membership', 'SCIM suspension', 'link', 'domain'] as const)(
     'rechecks the %s at commit time before creating a session',
     async (authority) => {
       const f = await linked()
@@ -2493,6 +2494,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         switch (authority) {
           case 'membership':
             await db.deleteFrom('auth.member').where('id', '=', fixture.memberMember).execute()
+            break
+          case 'SCIM suspension':
+            await suspendScimMember(db, fixture.team, fixture.member)
             break
           case 'link':
             await db
@@ -2811,6 +2815,30 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     ).toEqual([])
     expect((await attemptRow(pending)).consumed_at).toBeNull()
     expect(idp.exchange).toHaveBeenCalledOnce()
+  })
+
+  it('refuses JIT admission for a mailbox with a retained SCIM suspension', async () => {
+    const f = await enrollment()
+    await selectJit()
+    const { pending } = await pendingAdmission(f)
+    await proveMailbox(pending)
+    const block = await suspendScimMember(db, fixture.team, fixture.member)
+    await db.deleteFrom('auth.user').where('id', '=', fixture.member).execute()
+    expect(
+      await db
+        .selectFrom('scim_membership_blocks')
+        .select(['user_id', 'identity_email', 'cleared_at'])
+        .where('id', '=', block.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ user_id: null, identity_email: f.email, cleared_at: null })
+
+    const before = await effects()
+    const denied = await complete(pending)
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toEqual({ error: 'team_management_access_denied' })
+    expect(denied.headers.getSetCookie()).toEqual([])
+    expect(await effects()).toEqual(before)
+    expect((await attemptRow(pending)).consumed_at).toBeNull()
   })
 
   it('rechecks JIT domain verification and limits concurrent admissions to the final slot', async () => {
@@ -3712,18 +3740,23 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(await effects()).toEqual(before)
   })
 
-  it('refuses link completion after the local account changes its frozen mailbox', async () => {
-    const f = await enrollment()
-    const pending = await prepareLink(f)
-    const before = await effects()
-    await db
-      .updateTable('auth.user')
-      .set({ email: `different@${f.claim.name}` })
-      .where('id', '=', fixture.member)
-      .execute()
-    await expectCompletionRefused(await complete(pending))
-    expect(await effects()).toEqual(before)
-  })
+  it.each(['its frozen mailbox changes', 'its team membership is suspended by SCIM'] as const)(
+    'refuses link completion after %s',
+    async (change) => {
+      const f = await enrollment()
+      const pending = await prepareLink(f)
+      const before = await effects()
+      if (change === 'its frozen mailbox changes') {
+        await db
+          .updateTable('auth.user')
+          .set({ email: `different@${f.claim.name}` })
+          .where('id', '=', fixture.member)
+          .execute()
+      } else await suspendScimMember(db, fixture.team, fixture.member)
+      await expectCompletionRefused(await complete(pending))
+      expect(await effects()).toEqual(before)
+    },
+  )
 
   it('refuses a subject bound to another user before completion and preserves their link', async () => {
     const f = await enrollment()
