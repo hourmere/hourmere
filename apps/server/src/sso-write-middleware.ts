@@ -43,14 +43,17 @@ export function teamWriteMiddleware(deps: SsoTeamReadDeps, recoveryPublicUrl?: s
   const middleware = createMiddleware<CallerEnv>(async (c, next) => {
     const principal = c.var.principal
     const check = teamReadAccess(deps, principal)
-    if (
-      recoveryPublicUrl !== undefined &&
-      !(await check()).allowed &&
-      (await hasSsoRecoveryAuthority(deps.db, principal, c.req.raw.headers, recoveryPublicUrl))
-    ) {
-      // The policy service must consume the grant under lock before executing the write.
-      recoveryWrites.add(c)
-      return next()
+    if (recoveryPublicUrl !== undefined) {
+      const access = await check()
+      if (
+        !access.allowed &&
+        !access.suspended &&
+        (await hasSsoRecoveryAuthority(deps.db, principal, c.req.raw.headers, recoveryPublicUrl))
+      ) {
+        // The policy service must consume the grant under lock before executing the write.
+        recoveryWrites.add(c)
+        return next()
+      }
     }
     await withTeamWriteAccess(deps, principal, check, next)
   })

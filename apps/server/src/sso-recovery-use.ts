@@ -1,6 +1,7 @@
 import { currentSsoRecoveryOwner, type Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
@@ -107,6 +108,7 @@ async function liveRecoveryAuthority(db: Db, principal: Browser, binding: string
       AND a.consumed_at IS NOT NULL AND r.accepted_at <= a.consumed_at
       AND a.browser_binding_digest = ${binding} AND a.mailbox = lower(btrim(u.email))
       AND u."emailVerified" AND lower(s."activeOrganizationId") = a.organization_id::text
+      AND NOT ${scimSuspended(sql.ref('a.organization_id'), sql.ref('a.user_id'))}
       AND a.mailbox_proof_expires_at > ${observedAt} AND a.expires_at > ${observedAt}
       AND s."expiresAt" > ${observedAt}
       AND EXISTS (SELECT FROM unnest(string_to_array(m.role, ',')) AS roles(token)

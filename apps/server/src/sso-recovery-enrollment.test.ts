@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
+  type CallerResolver,
   createAuth,
   createAuthPool,
   createBrowserSession,
@@ -13,6 +14,7 @@ import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { Kysely, PostgresDialect, sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { suspendScimMember } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
   apiKey,
   type IdentityFixture,
@@ -101,7 +103,10 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     }
   })
 
-  function instance(enabled = true) {
+  function instance(
+    enabled = true,
+    resolveCaller: CallerResolver = createCallerResolver({ auth, db }),
+  ) {
     const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     const notices: Notice[] = []
     const proofJobs: MailboxProofEmailPayload[] = []
@@ -111,7 +116,7 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     const app = createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller,
       publicUrl,
       routes: [
         ssoRoutes({ db, capabilities }),
@@ -692,6 +697,36 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
       expect(statements.some((statement) => statement.includes('sso_recovery_owners'))).toBe(false)
     }
     expect(counts).toEqual({ [providersPath]: 11, [policyPath]: 10, 'policy fresh proof': 21 })
+  })
+
+  it('refuses recovery if the owner is suspended after caller resolution', async () => {
+    const h = instance()
+    await enforceSso()
+    const proof = await recover(h, (await browser(fixture.owner)).cookie)
+    const resolved = await createCallerResolver({ auth, db })(new Headers({ cookie: proof.cookie }))
+    expect(resolved).toMatchObject({ ok: true, principal: { organization: { id: fixture.team } } })
+    await suspendScimMember(db, fixture.team, fixture.owner)
+    const stale = instance(true, async () => resolved)
+    for (const path of [policyPath, providersPath])
+      await checkError(await read(stale, path, proof.cookie), 403, 'team_management_access_denied')
+    await checkError(
+      await write(
+        stale,
+        policyPath,
+        proof.cookie,
+        {
+          expectedRevision: recoveryRevision,
+          requireSso: false,
+          admission: 'invitation_only',
+        },
+        {},
+        'PUT',
+      ),
+      403,
+      'team_management_access_denied',
+    )
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: expect.anything() })
+    expect(await policy()).toMatchObject({ require_sso: true, policy_revision: recoveryRevision })
   })
 
   it('permits only enforcement disable and consumes authority with that policy write', async () => {

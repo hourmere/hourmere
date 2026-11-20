@@ -84,6 +84,7 @@ export function teamReadMiddleware(
       const access = await check()
       if (
         !access.allowed &&
+        !access.suspended &&
         (await hasSsoRecoveryAuthority(deps.db, principal, c.req.raw.headers, deps.publicUrl))
       )
         recoveryReads.add(c)

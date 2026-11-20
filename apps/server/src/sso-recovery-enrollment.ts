@@ -2,6 +2,7 @@ import { advanceSsoRecoveryRevision, type Principal, teamRoles } from '@hourmere
 import { localeCodes, resolveAdminLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import { type Mailer, ssoRecoveryEnrollmentEmail, ssoRecoveryUseEmail } from '@hourmere/mail'
 import { DomainError } from '@hourmere/scheduling'
@@ -147,6 +148,7 @@ function teamOwnerIds(db: Db, organizationId: string) {
     .selectFrom('auth.member')
     .select('userId')
     .where('organizationId', '=', organizationId)
+    .where((eb) => eb.not(scimSuspended(organizationId, eb.ref('userId'))))
     .where(sql<boolean>`EXISTS (
       SELECT 1 FROM unnest(string_to_array(role, ',')) AS roles(token)
       WHERE btrim(token) = 'owner'
