@@ -970,10 +970,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedStatus = 204
         }
       } else if (template.startsWith('/api/v1/workflows')) {
-        // Booking workflows are hard-off: an allowed key gets 404 workflows_disabled.
-        if (template === '/api/v1/workflows') path += `?ownerKind=team&ownerId=${teamId}`
-        id = randomUUID()
-        expectedStatus = 404
+        // Operator-off permits authorized recovery and rejects creation, preview and edits.
+        if (operation === 'GET /api/v1/workflows') {
+          path += `?ownerKind=team&ownerId=${teamId}`
+        } else {
+          id = randomUUID()
+          expectedStatus = 404
+          if (method === 'DELETE') payload = { expectedRevision: 1 }
+        }
       } else if (operation === 'GET /api/v1/analytics/bookings')
         path += `?startDate=${date}&endDate=${date}&timeZone=UTC`
       else if (operation === 'PUT /api/v1/profile')
@@ -1107,8 +1111,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
           } else if (operation === 'GET /api/v1/bookings/export.csv') {
             expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
+          } else if (operation === 'GET /api/v1/workflows') {
+            expect(await response.json()).toEqual({ data: [], nextCursor: null })
           } else if (operation.includes(' /api/v1/workflows')) {
-            expect(await response.json()).toEqual({ error: 'workflows_disabled' })
+            const error =
+              fixture.method === 'GET' || fixture.method === 'DELETE'
+                ? 'workflow_not_found'
+                : 'workflows_disabled'
+            expect(await response.json()).toMatchObject({ error })
           } else if (operation === 'POST /api/v1/meeting-polls') {
             expect(await response.json()).toEqual({ error: 'event_type_not_found' })
           } else if (operation.includes('/meeting-polls/') && response.status === 404) {

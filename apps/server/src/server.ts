@@ -105,6 +105,7 @@ import {
   verifyWaitlist,
 } from '@hourmere/scheduling'
 import {
+  captureWorkflowWebhook,
   type WebhookQueue,
   type WebhookSettings,
   webhookAttendeeNoShowNotifier,
@@ -112,7 +113,14 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
-import { captureWorkflowBooking, type WorkflowSettings } from '@hourmere/workflows'
+import {
+  captureWorkflowBooking,
+  executeWorkflowClaim,
+  shouldRunWorkflowJobs,
+  type WorkflowSettings,
+  type WorkflowWakePort,
+  workflowJobs,
+} from '@hourmere/workflows'
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -472,7 +480,7 @@ export function productRoutes({
     }),
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
-    // Registered while hard-off: every operation answers 404 workflows_disabled.
+    // Recovery operations stay available when the operator pauses workflows.
     workflowRoutes({
       db,
       followUpHostNotesEnabled,
@@ -606,7 +614,7 @@ export function productTools({
 }
 
 /** What the running server's app options need beyond the configuration. */
-export interface ProductionAppDeps extends RecurringBookingAdmissionDeps, WorkflowSettings {
+export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   config: Config
   db: Db
   /** Better Auth session reads are used by the provider-test callback. */
@@ -664,8 +672,8 @@ export function productionAppOptions({
   ssoLinkRemovalQueue,
   ssoRecoveryEnrollmentQueue,
   recurringBookingsEnabled,
-  workflowsEnabled,
 }: ProductionAppDeps): AppDeps {
+  const workflowsEnabled = config.WORKFLOWS_ENABLED
   // All configuration transports and public booking routes share the instance policy.
   const successRedirectPolicy = {
     publicUrl: config.PUBLIC_URL,
@@ -857,7 +865,7 @@ export interface RunningServer {
 /** Starts Hourmere from environment variables (see .env.example) and optional test dependencies. */
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
-  options: RecurringBookingAdmissionDeps & WorkflowSettings = {},
+  options: RecurringBookingAdmissionDeps = {},
 ): Promise<RunningServer> {
   // First, before anything can log: one line per console call, control characters escaped.
   const restoreConsole = installOneLineConsole()
@@ -871,10 +879,12 @@ export async function startServer(
 
 async function start(
   env: NodeJS.ProcessEnv,
-  options: RecurringBookingAdmissionDeps & WorkflowSettings,
+  options: RecurringBookingAdmissionDeps,
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
+  const workflowsEnabled = config.WORKFLOWS_ENABLED
+  const role = config.HOURMERE_ROLE
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
@@ -888,9 +898,13 @@ async function start(
     if (applied.length) console.log(`migrations applied: ${applied.join(', ')}`)
   }
 
+  let runWorkflowJobs = false
   try {
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
     await db.transaction().execute((trx) => ensureMeetingPollKey(trx, config.BETTER_AUTH_SECRET))
+    // A paused worker still skips due runs from an earlier opt-in. A fresh default
+    // install has no workflow schedule or worker, and web roles never consume wakes.
+    runWorkflowJobs = role !== 'web' && (await shouldRunWorkflowJobs(db, { workflowsEnabled }))
   } catch (error) {
     await db.destroy()
     throw error
@@ -929,7 +943,6 @@ async function start(
     },
   }
 
-  const role = config.HOURMERE_ROLE
   // A worker serves only /api/health, for the container health check: no sign-in, no API.
   const authPool =
     role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup, poolOptions)
@@ -1017,7 +1030,7 @@ async function start(
   const webhookSettings = {
     publicUrl: config.PUBLIC_URL,
     enabled: config.WEBHOOKS_ENABLED,
-    workflowsEnabled: options.workflowsEnabled,
+    workflowsEnabled,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
     ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
@@ -1094,9 +1107,22 @@ async function start(
     smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
     log: (line) => console.info(line),
   })
+  const workflowWorker = { db, now: () => Temporal.Now.instant(), workflowsEnabled }
+  const workflowWakePort: WorkflowWakePort = {
+    async ensureWake(trx, runId) {
+      await jobs.enqueue(
+        'workflow-dispatch-v1',
+        { runId },
+        { singletonKey: runId, transaction: trx },
+      )
+    },
+  }
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
-    disabledSchedules: ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB],
+    disabledSchedules: [
+      ...(ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB]),
+      ...(role !== 'web' && !runWorkflowJobs ? ['workflow-repair-v1'] : []),
+    ],
     definitions: [
       ssoDomainRecheckJob({
         db,
@@ -1196,6 +1222,26 @@ async function start(
       conferenceMirrorDispatchJob(calendarDeps, (id) => enqueueBookingCalendar(id)),
       webhookDeliveryJob({ db, ...webhookSettings }),
       webhookCleanupJob(db),
+      ...(runWorkflowJobs
+        ? workflowJobs(workflowWorker, workflowWakePort, (claim) =>
+            executeWorkflowClaim(
+              {
+                ...workflowWorker,
+                mailer,
+                budget: {
+                  secret: config.BETTER_AUTH_SECRET,
+                  mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
+                  workflowMailMaxPerHour: config.WORKFLOW_MAIL_MAX_PER_HOUR,
+                  workflowOwnerMailMaxPerHour: config.WORKFLOW_OWNER_MAIL_MAX_PER_HOUR,
+                },
+                followUpHostNotesEnabled: () => config.FOLLOW_UP_HOST_NOTES_ENABLED,
+                captureWebhook: (trx, input, now): Promise<boolean> =>
+                  captureWorkflowWebhook(jobs, webhookSettings, trx, input, now),
+              },
+              claim,
+            ),
+          )
+        : []),
       ...(caldavSyncDeps && caldavWriteDeps
         ? [
             calDavSyncJob(caldavSyncDeps),
@@ -1262,6 +1308,13 @@ async function start(
     throw err
   }
   if (role !== 'web') {
+    if (runWorkflowJobs) {
+      try {
+        await jobs.enqueue('workflow-repair-v1', {}, { singletonKey: 'startup' })
+      } catch {
+        console.error('ERROR workflow-repair: startup_repair_unavailable')
+      }
+    }
     try {
       await scanWaitlists(waitlistDeps)
       await jobs.enqueue('waitlist-email-v1', {}, { singletonKey: 'delivery' })
@@ -1305,9 +1358,7 @@ async function start(
       if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
       await webhookNotifier(trx, event, now)
       // Core notification intents precede workflow capture in the booking's transaction.
-      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, {
-        workflowsEnabled: options.workflowsEnabled,
-      })
+      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, { workflowsEnabled })
     }
     const auth = createAuth(
       productionAuthOptions({
@@ -1325,7 +1376,6 @@ async function start(
       productionAppOptions({
         config,
         recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
-        workflowsEnabled: options.workflowsEnabled,
         db,
         auth,
         resolveCaller: createCallerResolver({

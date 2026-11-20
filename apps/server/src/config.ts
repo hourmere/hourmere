@@ -248,6 +248,9 @@ const schema = z
     SLOT_SNIPPETS_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),
+    WORKFLOWS_ENABLED: optional(
+      z.enum(['true', 'false'], { error: 'WORKFLOWS_ENABLED must be true, false or empty' }),
+    ).transform((value) => value === 'true'),
     FOLLOW_UP_HOST_NOTES_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value !== 'false',
     ),

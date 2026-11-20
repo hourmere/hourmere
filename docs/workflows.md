@@ -2,13 +2,17 @@
 
 Booking workflows attach one conditional email or signed webhook action to a booking
 change or a timer. The app's list, lifecycle actions, editor, preview and run history are
-implemented, and the REST, MCP and CLI operations are published. **Workflows remain
-hard-off on both self-hosted instances and Hourmere Cloud.** `GET /api/v1/instance`
-reports `workflowsEnabled: false`, the app hides the workflow pages, and authorized
-calls return `workflows_disabled`. Operator settings and opt-in arrive in step 19b.
+implemented, and the REST, MCP and CLI operations are published. **Workflows are
+available and off by default.** Set `WORKFLOWS_ENABLED=true` to opt in. When off,
+`GET /api/v1/instance` reports `workflowsEnabled: false`, the app hides the workflow
+pages, and authorized callers can use the direct recovery operations described below.
 
 ## Operating guide
 
+- Set the same `WORKFLOWS_ENABLED` value for all web processes, workers and schedulers.
+  Recreate them together after changing the setting. Leave the setting empty to use the
+  server default. Use the [configuration reference](../apps/site/src/content/docs/docs/configuration.md#email-and-registration)
+  for the two workflow mail caps.
 - In the app, [open Workflows in the current space](#manage-existing-workflows-in-the-app),
   [create or preview a definition](#create-edit-and-preview-workflows-in-the-app), and
   [review finished runs](#view-workflow-run-history-in-the-app). Personal owners manage
@@ -26,8 +30,9 @@ calls return `workflows_disabled`. Operator settings and opt-in arrive in step 1
   off and uses the [built-in templates](#email-and-webhook-actions) in every public locale.
 
 中文：工作流列表、启用与禁用、删除、编辑、预览和执行历史已实现，REST、MCP 与 CLI
-接口也已发布。目前自托管实例和 Hourmere Cloud 均硬关闭工作流。应用隐藏相关页面，
-有权限的调用返回 `workflows_disabled`。运营者配置和手动启用将在第 19b 步提供。
+接口也已发布。工作流默认关闭，自托管无需付费即可启用。设置 `WORKFLOWS_ENABLED=true` 后，
+统一重建 Web、worker 和调度进程。关闭时，应用隐藏相关页面，有权限的调用者仍可直接使用
+恢复操作。
 改期请求及其到期不会改变现有执行计划。实际改期会用原有版本重新计算定时任务，
 并终止延期的创建通知。工作流邮件与核心邮件共用额度。全局上限大于零时，SMTP 容量按
 `1.2 × MAIL_MAX_PER_HOUR` 估算。Cloud 保持关闭主持人自定义文案，使用内置模板。
@@ -258,7 +263,6 @@ subject and body text in every public locale (`en`, `zh-CN`, `de`, `fr`, `es` an
 `pt-BR`). An unsupported locale uses the English built-in. If a built-in subject or
 body is unavailable in a supported locale, both use
 the next complete built-in in the mail locale fallback chain, ending in English.
-Workflows remain hard-off for self-hosted and Cloud deployments.
 
 中文：内部共享渲染器限制变量展开长度、转义 HTML，并在读取自定义内容前应用主持人文本
 开关。保存和普通更新对预约者、嘉宾及主持人统一执行该策略；仍可停用已有定义。
@@ -426,8 +430,7 @@ The workflow payload has the existing bounded booking ID/time/status projection 
 existing booking, request and attendance payloads stay unchanged.
 `WebhookDelivery.bookingId` remains a required UUID, never null or omitted, including team
 workflow deliveries. Workflow create/update validate that a referenced signed webhook belongs to
-the workflow's organization, is active, and subscribes to `workflow.executed`. Production
-workflow operations remain hard-off until step 19b.
+the workflow's organization, is active, and subscribes to `workflow.executed`.
 
 Use the current bounded identifier/time/status payload projection; no custom JSON templates,
 answers, names, addresses or location fields. Team workflow payloads also omit source and
@@ -480,11 +483,12 @@ Each retry still checks cancellation, disablement, authority and endpoint policy
 The shared webhook worker checks the booking, workflow and subscribed endpoint on every attempt.
 It records admission to the first guarded transport attempt durably before calling the transport.
 If the worker stops between admission and recording the result, the next attempt uses the same
-delivery ID. Pending deliveries use the existing bounded repair job. Workflow sends stay hard-off.
+delivery ID. Pending deliveries use the existing bounded repair job. Turning workflows off
+stops workflow sends.
 
 中文：共享 webhook worker 每次尝试前都会检查预约、工作流和已订阅的端点。首次尝试通过检查后，
 worker 先持久化准入时间，再调用受保护的传输层。如果在记录结果之前中断，重试沿用同一个投递 ID。
-待处理投递沿用现有的有界修复任务。工作流发送仍处于硬关闭状态。
+待处理投递沿用现有的有界修复任务。关闭工作流会停止工作流投递。
 
 Use durable definition revisions, booking associations, occurrences, per-action executions
 and per-recipient intents with database uniqueness; pg-boss jobs carry only opaque row IDs.
@@ -623,8 +627,8 @@ of the 950 demanded: owner 5/h across all workflows and event types of one perso
 or team, and recipient 1/h and 3/day per normalized address across the instance, including
 hosts who receive messages from multiple owners. The windows are sliding. Four owners can
 consume the default 20/hour instance sub-cap, so an owner's available capacity can be lower
-than 5. The instance and owner settings become
-operator controls in step 19b. A positive core budget still enforces the 20% workflow
+than 5. Operators can configure the instance and owner settings when workflows are enabled.
+A positive core budget still enforces the 20% workflow
 ceiling, and the fixed recipient caps apply independently of both settings.
 
 中文：每个个人所有者或团队的所有活动类型和工作流共享每小时默认 5 次的发送额度。
@@ -780,8 +784,9 @@ the same limit as creation: up to 5 matching enabled definitions per eligible ev
 combining all-event and event-specific scopes for the same personal owner or team.
 Create and update validate webhook actions against an active endpoint in the same
 organization subscribed to `workflow.executed`. Update, enable and disable transitions
-record a shared audit event. The production hard-off guard runs before any workflow
-transaction or audit write.
+record a shared audit event. The operator gate rejects creation, enabling and edits before
+any workflow transaction or audit write while workflows are off. Disable-only updates
+remain available.
 No separate enable or disable interface exists. Delete uses expected revision and
 is idempotent within retained identity. Its strict REST body is `{ "expectedRevision": 1 }`;
 MCP and CLI include `id` in the same input. REST returns `204` and MCP/CLI return
@@ -819,7 +824,7 @@ records a [workflow audit event](audit-log.md#workflow-actions) in that transact
 中文：预览接收明确的 `owner`、候选定义字段和可选的 `example`。示例可替换预约时间、
 收件人名称、语言、时区和条件值。响应包含合成示例的匹配结果、每类收件人的纯文本与转义
 HTML、语言回退和静态额度估计。预览只读取权限及候选定义引用的配置，成功时在同一事务中
-记录审计事件，仅包含已授权空间和固定的触发类型及原因代码等审计元数据。功能仍硬关闭，
+记录审计事件，仅包含已授权空间和固定的触发类型及原因代码等审计元数据。关闭工作流时，
 三个接口统一返回 `workflows_disabled`，MCP 工具列表隐藏预览。
 
 A definition reads as `id`, `owner`
@@ -832,15 +837,13 @@ team. REST names the list owner as `ownerKind` and `ownerId`, MCP and the CLI as
 Any other list owner, existing or not, gets the same `403 insufficient_role`; a missing,
 deleted, malformed, foreign or other-organization ID gets the same `404 workflow_not_found`.
 Lists are oldest first by time-ordered ID, with `limit` 1–100 (default 50) and an opaque
-`cursor` bound to the owner. While off, every transport answers after credential validation
-and the API-key scope check and before input validation or any lookup: REST through a route
-guard listed right after the caller, MCP through the tool's availability check
-(`Tool.requireAvailable`), which also keeps the tool out of `tools/list`.
+`cursor` bound to the owner. While workflows are off, authorized callers can use direct
+list and detail calls for recovery. MCP `tools/list` hides workflow tools while off.
 
 History uses the same owner and current team owner/admin checks as definition detail.
 Missing, malformed, deleted and inaccessible workflow IDs return `404 workflow_not_found`.
-API keys need `read` or `full`. While workflows are off, allowed callers receive
-`workflows_disabled` and MCP discovery hides the tool.
+API keys need `read` or `full`. Authorized direct calls remain available while workflows
+are off. MCP discovery hides the tool.
 
 Supply `limit` (1–100, default 50) and, for later pages, the previous `nextCursor` as `cursor`.
 Pages return `{data, nextCursor}`, newest finish time first with a stable tie-breaker.
@@ -857,8 +860,8 @@ deduplication identities in place.
 未知、已删除或无权访问的工作流返回 `workflow_not_found`。每页默认 50 条，最多 100 条，
 按完成时间从新到旧列出最近 30 天的记录。用上页的 `nextCursor` 继续读取同一工作流，改动游标会返回
 `invalid_cursor`。历史仅显示安全状态、时间和汇总计数，不含预约 ID、姓名、邮箱、回答或链接。
-Webhook 投递列表保留 `bookingId`，清理历史不会删除仍用于去重的记录。功能仍硬关闭，
-允许调用的身份收到 `workflows_disabled`，MCP 工具列表隐藏此工具。
+Webhook 投递列表保留 `bookingId`，清理历史不会删除仍用于去重的记录。关闭工作流时，
+有权限的调用者仍可直接读取历史，MCP 工具列表隐藏此工具。
 
 Keep OpenAPI operation IDs, generated web client types, API-key policy registry, MCP tool
 schemas, CLI help/JSON behavior and interface-parity mappings in the same change as each
@@ -874,7 +877,8 @@ continues to use the existing endpoint limits and route rate limits. See
 
 The web app reads the optional `workflowsEnabled` field from public
 `GET /api/v1/instance` and shows workflow navigation and routes only when it is true.
-The current hard-off release reports false. Clients treat an absent field as false.
+The response reflects `WORKFLOWS_ENABLED`, which defaults to false. Clients treat an absent
+field as false.
 The editor uses `followUpHostNotesEnabled` from the same response to decide whether to
 show custom subject and body fields.
 
@@ -908,7 +912,7 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/workflows/preview" \
 hourmere workflows preview --input candidate.json --json
 ```
 
-These requests show the published call shape. While workflows are hard-off, REST returns
+These requests show the published call shape. While workflows are off, REST returns
 404, a direct MCP call returns a tool error, and CLI exits 1, each with
 `workflows_disabled`. When available, the preview returns synthetic rendering and static
 limits. It does not save the candidate, send email or contact a webhook.
@@ -988,10 +992,9 @@ boundaries. Hard-off means behavior, not registration: every workflow operation 
 `404 workflows_disabled`, including reads, disable and delete, until step 19b. No environment
 value overrides it. Routes/OpenAPI, tool implementations, CLI commands, parity mappings and
 scope-registry rows ship in each operation's owning step. MCP `tools/list` omits workflow
-tools while off; direct known-tool calls return the same `404 workflows_disabled` domain
-error (MCP error result and CLI error output), rather than an unknown-tool protocol error.
-Production capture, dispatch and repair are inactive. Production registers no workflow
-execution or retention worker.
+tools while hard-off; direct known-tool calls return the same `404 workflows_disabled`
+domain error (MCP error result and CLI error output). Before step 19b, production capture,
+dispatch and repair are inactive, and no workflow execution or retention worker is registered.
 
 That MCP behavior differs from the slot-snippet precedent. When disabled, slot snippets
 leave their tools out of `productTools()`, so a direct call gets the SDK's "Tool … not found"
@@ -1042,34 +1045,34 @@ never `:-false` or a number, so that empty means the server default:
   default. It adds their `configuration.md` rows, which state that the mail settings apply
   only while workflows are enabled.
 
-Operator opt-in, mail sub-cap controls and recovery operations are unavailable in this
-release. Compose's internal mail forwards have no effect on the hard-off state.
-
-Only after the complete stack exists may step 19b set the constant true and introduce
-`WORKFLOWS_ENABLED` default false. Step 19a first implements the operator-off state behind
-the still-false constant, through an internal injected setting. Operator-off refuses
-creation, preview, enabling and all edits (including renames) with
-`404 workflows_disabled`, and stops new capture/dispatch. Definition/history reads,
+Step 19a first implemented the operator-off state behind the still-false constant through
+an internal injected setting. With creation, editing, disable and delete, both execution
+paths, history and audit binding in place, step 19b sets `WORKFLOWS_IMPLEMENTED = true` and
+reads the operator setting from `loadConfig` for all processes. `WORKFLOWS_ENABLED` accepts
+the exact strings `true` and `false`. Unset and empty values use the server default, false.
+Any other value fails startup. Operator-off refuses creation, preview, enabling and all
+other edits (including renames) with `404 workflows_disabled`. Definition and history reads,
 disable-only updates and deletion remain available for recovery. MCP discovery while off
-omits workflow tools; authorized direct recovery calls remain usable after step 19b only.
-During step 19a, production `GET /api/v1/instance` always reports
-`workflowsEnabled: false`. When tests simulate an implemented build, this field reports
-the injected operator setting.
-Pending runs become terminally skipped as `instance_disabled` only when they are claimed
-while off; future runs are not eagerly swept. Re-enabling never revives skipped work, but future
-not-yet-due rows remain eligible. Disabling one definition is lazy in the same way, with
+omits workflow tools. `GET /api/v1/instance` reports the effective setting as `workflowsEnabled`.
+
+While off, booking changes make no workflow queries and capture no runs. Workflow email
+and webhook sends stop. A fresh default install starts no workflow wake loop. Pending runs
+become terminally skipped as `instance_disabled` only when they are claimed while off; future
+runs are not eagerly swept. Runs that were not claimed while off remain eligible within their
+delivery windows after re-enabling. Disabling one definition is lazy in the same way, with
 `workflow_disabled`. Existing reminders continue. Step 19b rewrites the docs index
 known-limitation line to say workflows are available but off by default. Final acceptance
 (step 20) changes the default to true and updates that line again. Explicit false stays
 supported; an environment copied from step 19b, or a Compose install with the empty
 forward, picks up the flip. Cloud and self-hosting have an identical workflow feature set
 without paid gating. Hourmere Cloud runs the independent host-text switch off, as described
-above. After opt-in ships, operators can configure the instance and owner mail sub-caps.
+above.
 
-中文：19a 期间，生产环境的 `GET /api/v1/instance` 始终返回
-`workflowsEnabled: false`。测试模拟已实现的构建时，该字段反映注入的运营开关。
+中文：`GET /api/v1/instance` 的 `workflowsEnabled` 反映运营开关。`WORKFLOWS_ENABLED`
+只接受 `true`、`false` 和空值，未设置或留空时默认关闭，其他值会导致启动失败。
 关停时可读取定义和历史、仅停用或删除工作流，创建、预览、启用及其他编辑均会被拒绝。
-MCP 工具不会出现在发现列表中。关停期间领取的到期任务会以 `instance_disabled`
+MCP 工具不会出现在发现列表中。关闭时，预约变更不会查询工作流数据或创建执行任务，
+工作流邮件和 webhook 均停止发送。关停期间领取的到期任务会以 `instance_disabled`
 终止，尚未到期的任务仍可在恢复后执行。单个工作流停用的历史原因是
 `workflow_disabled`。
 
