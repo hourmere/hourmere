@@ -130,7 +130,9 @@ function claimLinkUpdate(db: Db, now: Date, leaseId: string, leaseMs: number, ma
       -- A live claim reserves a copy. An expired claim counts as an interruption.
       attempts = LEAST(link.attempts + CASE WHEN link.lease_id IS NULL THEN 0 ELSE 1 END,
         ${maxAttempts}),
-      after_action_revision = COALESCE(link.after_action_revision, next.revision),
+      -- Gate 1 covers every earlier copy, including actions committed after this copy
+      -- started waiting. GREATEST ignores NULL, so a legacy NULL takes the current revision.
+      after_action_revision = GREATEST(link.after_action_revision, next.revision),
       waiting_for_earlier = false,
       lease_id = ${leaseId}::uuid,
       lease_until = ${new Date(now.getTime() + leaseMs)}::timestamptz

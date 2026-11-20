@@ -1009,7 +1009,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       expect(message.text.split(meetJoinUrl).length - 1).toBe(12)
       expect(message.sensitive).toBe(true)
       const mime = decodeMime(required(wire[19 + index]))
-      expect(mime.decoded.includes(meetJoinUrl)).toBe(true)
+      expect(mime.decoded).toContain(meetJoinUrl)
       const confirmationIndex = confirmations.findIndex(({ to }) => to === message.to)
       const prior = required(confirmationMime[confirmationIndex])
       const previous = new ICAL.Component(ICAL.parse(required(prior.ics))).getAllSubcomponents(
@@ -1838,6 +1838,80 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
         attempts: 2,
       }),
     )
+  }, 20_000)
+
+  it('makes a waiting link update also wait for a partial cancellation retried after it was queued', async () => {
+    const f = await failedConferenceSeries(3)
+    const actions = async () =>
+      (await seriesOutbox(f.seriesId)).filter(({ kind }) => kind !== 'link_update')
+    const committed = now()
+    refuseAddress = booker.email
+    await dispatch()
+    clock = committed.add({ seconds: 10 })
+    await repairConference(f, 0)
+    await dispatch()
+    const waiting = await bookerLinkOutbox(f.seriesId)
+    expect(waiting).toMatchObject({
+      after_action_revision: '1',
+      waiting_for_earlier: true,
+      attempts: 0,
+    })
+
+    clock = committed.add({ seconds: 20 })
+    await cancelManagedBookingSeries(context(true), f.token, {
+      ...all(),
+      scope: 'following',
+      fromOrdinal: 3,
+    })
+    await dispatch()
+    expect(await actions()).toMatchObject([
+      { kind: 'confirmation', outbox_state: 'pending', attempts: 1 },
+      { kind: 'cancellation', outbox_state: 'pending', attempts: 1 },
+    ])
+    clock = committed.add({ seconds: 30 })
+    await repairConference(f, 1)
+    expect(await bookerLinkOutbox(f.seriesId)).toMatchObject({
+      id: waiting.id,
+      after_action_revision: '1',
+      waiting_for_earlier: true,
+    })
+
+    // The confirmation becomes final while the later cancellation copy is still retrying.
+    clock = committed.add({ seconds: 60 })
+    permanentRefusal = true
+    await dispatch()
+    permanentRefusal = false
+    clock = committed.add({ seconds: 70 })
+    await dispatch()
+    expect(await actions()).toMatchObject([
+      { kind: 'confirmation', outbox_state: 'done', attempts: 2 },
+      { kind: 'cancellation', outbox_state: 'pending', attempts: 1 },
+    ])
+    expect(bookerLinkAttempts()).toHaveLength(0)
+    expect(await bookerLinkOutbox(f.seriesId)).toMatchObject({
+      id: waiting.id,
+      after_action_revision: '2',
+      waiting_for_earlier: true,
+      attempts: 0,
+    })
+
+    clock = committed.add({ seconds: 90 })
+    await dispatch()
+    expect(await actions()).toContainEqual(
+      expect.objectContaining({ kind: 'cancellation', outbox_state: 'pending', attempts: 2 }),
+    )
+    expect(bookerLinkAttempts()).toHaveLength(0)
+
+    clock = committed.add({ minutes: 4 })
+    refuseAddress = undefined
+    await dispatch()
+    const bookerSent = sent.filter(({ to }) => to === booker.email)
+    expect(bookerSent.map(isLinkUpdate)).toEqual([false, true])
+    expect(bookerLinkAttempts()).toHaveLength(1)
+    expect(await actions()).toContainEqual(
+      expect.objectContaining({ kind: 'cancellation', outbox_state: 'done', attempts: 3 }),
+    )
+    expectLinkUpdateDates(f, required(bookerSent[1]), [1, 2])
   }, 20_000)
 
   it('does not send a queued link update to a host whose team membership was removed', async () => {
