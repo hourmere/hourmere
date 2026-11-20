@@ -279,6 +279,9 @@ Reason codes: `attempt_invalid`, `attempt_expired`, `browser_mismatch`, `provide
 `configuration_changed`, `provider_disabled`, `domain_unverified`, `mailbox_unproven`,
 `jit_disabled`, `unclassified`.
 
+`sso_authentication.failed` also records `scim_suspended` when SCIM has suspended the
+linked member's team access.
+
 Security failures (`sso_authentication.failed`, `sso_authentication.replay_rejected`,
 `sso_jit.refused` and `sso_link.conflicted`) have no business transaction, so
 `writeSsoSecurityFailure` writes each in a short transaction of its own, with the provider as

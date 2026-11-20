@@ -19,11 +19,12 @@ export async function withTeamWriteAccess<T>(
 ): Promise<T> {
   const access = await check()
   requireTeamRead(access)
-  const machineWithPolicy =
-    principal.kind !== 'session' &&
-    principal.ssoDelegationStatus !== undefined &&
-    principal.ssoDelegationStatus !== null
-  return access.policy || machineWithPolicy
+  const machineWithPolicy = principal.kind !== 'session' && principal.ssoDelegationStatus != null
+  // An enabled resource handler can provision and suspend during the request,
+  // even when resolution found no existing SCIM connection.
+  const scimTeam =
+    !principal.organization.personal && (principal.scimProvisioned || deps.scimResourcesEnabled)
+  return access.policy || machineWithPolicy || scimTeam
     ? withTeamWriteCheck(teamWriteCheck(deps, principal), write)
     : write()
 }

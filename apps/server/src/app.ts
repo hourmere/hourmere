@@ -428,9 +428,13 @@ export function createApp({
   waitlist,
   ssoMailboxProof,
   ssoOidcSignIn,
-  ssoTeamReads,
+  ssoTeamReads: ssoTeamReadOptions,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
+  const ssoTeamReads = ssoTeamReadOptions && {
+    ...ssoTeamReadOptions,
+    scimResourcesEnabled: Boolean(scim?.enabled && scim.resources),
+  }
   // Generate correlation IDs locally; caller headers may contain private or forged values.
   app.use('*', async (_c, next) => withAuditRequest(randomUUID(), next))
   app.use('/api/v1/public/meeting-polls/*', async (c, next) => {

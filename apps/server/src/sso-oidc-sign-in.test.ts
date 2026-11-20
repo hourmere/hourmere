@@ -2810,7 +2810,18 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       const after = await effects()
       expect(after.sessions).toBe(before.sessions)
       expect(after.proofs).toBe(before.proofs)
-      expect((await audit()).map(({ action }) => action)).toEqual([failureAction])
+      const reason = {
+        membership: 'mailbox_unproven',
+        'SCIM suspension': 'scim_suspended',
+        link: 'mailbox_unproven',
+        domain: 'domain_unverified',
+      }[authority]
+      expect(await audit()).toEqual([
+        expect.objectContaining({
+          action: failureAction,
+          details: expect.objectContaining({ reason }),
+        }),
+      ])
     },
   )
 

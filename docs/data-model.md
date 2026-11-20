@@ -1826,6 +1826,17 @@ The phases within that organization boundary are:
   share lock, and the live resource update lock. It holds the organization lock through
   any claim invalidation and the audit write, so invitation acceptance cannot hold a claim
   lock while competing with that replacement for the resource.
+- The internal SCIM suspension write holds the organization update lock through the
+  blocker insert and bulk deletion of active-team sessions and remaining team browser
+  proofs for that account. It takes the `hourmere.scim-session-revocation:<userId>`
+  transaction advisory lock after the organization lock so suspensions across teams
+  serialize when the same sessions carry proofs for both teams. Native team selection
+  and OIDC proof issuance take the organization lock before checking suspension.
+  Team writes that need a commit-time check hold the same organization row with at
+  least key-share strength and read the blocker in a fresh READ COMMITTED statement
+  after acquiring the lock.
+  Session refresh only updates existing rows and serializes with their deletion through
+  the session row lock.
 - Invitation acceptance takes the recipient's `auth.user` share lock, the organization update
   lock, its session no-key-update lock and the invitation update lock. When SCIM claim
   completion is wired, it then locks the claim bound to that invitation and that claim's
