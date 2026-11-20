@@ -112,7 +112,7 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
-import { captureWorkflowBooking } from '@hourmere/workflows'
+import { captureWorkflowBooking, type WorkflowSettings } from '@hourmere/workflows'
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -255,6 +255,7 @@ export function productRoutes({
   routingSecret,
   routingBookingReceiptNow,
   workflowRunCursorSecret,
+  workflowsEnabled,
   smtpConfigured,
   recurringBookingsEnabled,
   auditLogRetentionDays = null,
@@ -310,7 +311,8 @@ export function productRoutes({
   zoomWebhookClientId?: string | undefined
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
-} & RecurringBookingAdmissionDeps): RouteModule[] {
+} & RecurringBookingAdmissionDeps &
+  WorkflowSettings): RouteModule[] {
   return [
     mcpOAuthRoutes({
       auth: mcpAuth,
@@ -334,6 +336,7 @@ export function productRoutes({
       ssoOidcEnabled: oidcEnabled,
       ssoSamlEnabled: samlEnabled,
       routingFormsEnabled: routingEnabled,
+      workflowsEnabled,
     }),
     calendarRoutes({
       db,
@@ -353,7 +356,7 @@ export function productRoutes({
     provisioningTokenRoutes({ db, enabled: scimProvisioningEnabled }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
-    webhookRoutes({ db, ...webhooks }),
+    webhookRoutes({ db, ...webhooks, workflowsEnabled }),
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
@@ -475,6 +478,7 @@ export function productRoutes({
       db,
       followUpHostNotesEnabled,
       workflowRunCursorSecret,
+      workflowsEnabled,
     }),
   ]
 }
@@ -494,6 +498,7 @@ export function productTools({
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
+  workflowsEnabled,
   smsRemindersAvailable = false,
   successRedirectPolicy,
   notify,
@@ -531,7 +536,7 @@ export function productTools({
   googleCalendar?: CalendarDeps['google']
   caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
-}): Tool[] {
+} & WorkflowSettings): Tool[] {
   return [
     whoamiTool,
     ...bookingTools({
@@ -561,7 +566,7 @@ export function productTools({
     }),
     ...oneTimeLinkTools({ db, publicUrl }),
     ...slackDestinationTools({ db, ...webhooks, queue: webhookQueue }),
-    ...webhookTools({ db, ...webhooks }),
+    ...webhookTools({ db, ...webhooks, workflowsEnabled }),
     ...(slotSnippetsEnabled
       ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
       : []),
@@ -581,11 +586,12 @@ export function productTools({
       smsRemindersAvailable,
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
-    // Always in the catalog; hidden from tools/list and refused while workflows are off.
+    // Known workflow tools stay callable for recovery when hidden by operator-off.
     ...workflowTools({
       db,
       followUpHostNotesEnabled,
       workflowRunCursorSecret,
+      workflowsEnabled,
     }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
     ...routingFormConfigurationTools({
@@ -601,7 +607,7 @@ export function productTools({
 }
 
 /** What the running server's app options need beyond the configuration. */
-export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
+export interface ProductionAppDeps extends RecurringBookingAdmissionDeps, WorkflowSettings {
   config: Config
   db: Db
   /** Better Auth session reads are used by the provider-test callback. */
@@ -659,6 +665,7 @@ export function productionAppOptions({
   ssoLinkRemovalQueue,
   ssoRecoveryEnrollmentQueue,
   recurringBookingsEnabled,
+  workflowsEnabled,
 }: ProductionAppDeps): AppDeps {
   // All configuration transports and public booking routes share the instance policy.
   const successRedirectPolicy = {
@@ -747,6 +754,7 @@ export function productionAppOptions({
       enqueueCalendarWritebackRecovery,
       routingSecret: config.BETTER_AUTH_SECRET,
       workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
+      workflowsEnabled,
     }),
     mcp: mcpEndpoint({
       ...(config.MCP_OAUTH_ENABLED
@@ -780,6 +788,7 @@ export function productionAppOptions({
         webhookQueue,
         routingSecret: config.BETTER_AUTH_SECRET,
         workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
+        workflowsEnabled,
       }),
     }),
   }
@@ -849,7 +858,7 @@ export interface RunningServer {
 /** Starts Hourmere from environment variables (see .env.example) and optional test dependencies. */
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
-  options: RecurringBookingAdmissionDeps = {},
+  options: RecurringBookingAdmissionDeps & WorkflowSettings = {},
 ): Promise<RunningServer> {
   // First, before anything can log: one line per console call, control characters escaped.
   const restoreConsole = installOneLineConsole()
@@ -863,7 +872,7 @@ export async function startServer(
 
 async function start(
   env: NodeJS.ProcessEnv,
-  options: RecurringBookingAdmissionDeps,
+  options: RecurringBookingAdmissionDeps & WorkflowSettings,
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
@@ -1009,6 +1018,7 @@ async function start(
   const webhookSettings = {
     publicUrl: config.PUBLIC_URL,
     enabled: config.WEBHOOKS_ENABLED,
+    workflowsEnabled: options.workflowsEnabled,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
     ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
@@ -1297,7 +1307,9 @@ async function start(
       if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
       await webhookNotifier(trx, event, now)
       // Core notification intents precede workflow capture in the booking's transaction.
-      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET)
+      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, {
+        workflowsEnabled: options.workflowsEnabled,
+      })
     }
     const auth = createAuth(
       productionAuthOptions({
@@ -1315,6 +1327,7 @@ async function start(
       productionAppOptions({
         config,
         recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
+        workflowsEnabled: options.workflowsEnabled,
         db,
         auth,
         resolveCaller: createCallerResolver({

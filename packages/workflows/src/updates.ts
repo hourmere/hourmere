@@ -7,8 +7,8 @@ import { workflowAuditActor, workflowAuditPort } from './audit.ts'
 import { WorkflowConditionsSchema } from './conditions.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import { WorkflowDefinitionSchema } from './definition.ts'
-import { workflowOperation } from './hard-off.ts'
 import { WORKFLOW_MAX_ENABLED_PER_EVENT } from './limits.ts'
+import { requireWorkflowUpdateAllowed } from './operator-settings.ts'
 import { uuidSchema } from './ownership.ts'
 import { type WorkflowView, workflowView } from './reads.ts'
 import { validateWorkflowWriteDefinition } from './write-definition.ts'
@@ -152,7 +152,11 @@ export async function updateWorkflowDefinition(
     return workflowView(owner, { ...row, definition: revision })
   })
 }
-export const updateWorkflow = workflowOperation(
-  (ctx: Omit<WorkflowUpdateContext, 'audit'>, id: string, input: unknown) =>
-    updateWorkflowDefinition({ ...ctx, audit: workflowAuditPort }, id, input),
-)
+export async function updateWorkflow(
+  ctx: Omit<WorkflowUpdateContext, 'audit'>,
+  id: string,
+  input: unknown,
+) {
+  requireWorkflowUpdateAllowed(ctx, input)
+  return updateWorkflowDefinition({ ...ctx, audit: workflowAuditPort }, id, input)
+}

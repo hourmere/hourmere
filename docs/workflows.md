@@ -1,63 +1,36 @@
-# Booking workflows design
+# Booking workflows
 
-Status: proposed design, not a shipped feature. Step 1 of the plan has added the pure
-definition contract in `packages/workflows` behind the hard-off constant, step 2 the
-definition and revision tables (migration 0076) and step 3 the execution tables (migration
-0079), and the creation key table that step 5 needs is in place (migration 0087). Step 4 has
-added the definition reads (`listWorkflows`/`getWorkflow`,
-`list_workflows`/`get_workflow`, `workflows list`/`workflows get`) and `/instance`
-`workflowsEnabled`; while hard-off every read answers `404 workflows_disabled`, tools/list omits
-the tools and `workflowsEnabled` is false. Step 5 adds creation (`createWorkflow`,
-`create_workflow`, `workflows create`) over the retained keys from step 5a; its interfaces
-also answer `404 workflows_disabled` after the full-scope check. The guarded creation
-service writes definitions, revisions and creation keys. Step 6 adds editing, enabling
-and disabling (`updateWorkflow`, `update_workflow`, `workflows update`) behind the same
-hard-off guard. Content edits append immutable revisions; enable/disable changes only the
-definition row. Neither operation rewrites enrollments or execution rows. Step 7 adds deletion
-(`deleteWorkflow`, `delete_workflow`, `workflows delete`) behind the same hard-off guard.
-It checks the expected revision, tombstones the definition and retires every pending run
-in one transaction, retaining creation keys and execution identities. Creation capture now
-uses the pure timer rules to enroll original confirmed native bookings and record due runs
-and recipient intents in the booking transaction, after core notifications. Existing reminders
-win overlapping intents; workflows then win by creation time and ID. The production capture
-entry remains a no-op under the pinned hard-off constant. Cancellation and reschedule capture
-now retire predecessor work and use separate lifecycle identities. Successors retain captured
-timer revisions with recalculated anchors; delayed-created work never transfers. Request and
-request-expiry events leave workflow state untouched, and attendee no-show notifications have
-no workflow listener. The internal dispatcher now claims bounded due batches with leased tokens,
-rechecks live eligibility after lock waits and records terminal skips. Repair queues wakes for
-existing run identities without recreating enrollments or recipient intents. Eligible runs remain
-claimed for the internal attempt service. The email attempt resolves the captured recipient and
-revision under the marker transaction, rechecks live booking and workflow eligibility and
-resolves the current host-text policy. Dispatcher and repair entry points are no-ops while
-hard-off, and production registers no workflow worker. The wake port requires transactional
-enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. No retention
-worker or web interface exists yet. Step 16a adds the guarded workflow run history reads.
-Definition changes and previews use the shared audit journal inside their transactions.
-Decisions below are Hourmere decisions unless explicitly
-attributed to another product. Existing reminders and follow-ups remain available.
+Booking workflows attach one conditional email or signed webhook action to a booking
+change or a timer. The app's list, lifecycle actions, editor, preview and run history are
+implemented, and the REST, MCP and CLI operations are published. **Workflows remain
+hard-off on both self-hosted instances and Hourmere Cloud.** `GET /api/v1/instance`
+reports `workflowsEnabled: false`, the app hides the workflow pages, and authorized
+calls return `workflows_disabled`. Operator settings and opt-in arrive in step 19b.
 
-中文：原生预约确认时的工作流登记、到期记录和收件人意图已在预约事务内实现，先记录核心
-通知；已有提醒优先，其次按工作流创建时间和 ID 排序。付款保留、导入及团体预约不登记。
-取消和改期使用各自的生命周期标识；改期保留原有定时工作流版本并重新计算到期时间，
-延迟的创建通知会终止，不会转移至后继预约。改期请求、请求到期及缺席标记不改变工作流状态。
-内部调度器按有界批次领取到期任务，以租约令牌校验归属，并在等待锁后重新检查有效性；
-补唤醒仅复用已有任务标识，不重建登记或收件人意图。有效任务保持已领取状态，内部邮件尝试在
-写入发送标记的事务中解析已捕获的收件人和版本，并复查预约、工作流和主持人文本策略。
-生产入口仍受硬关闭常量保护，不会捕获、调度、补唤醒或发送工作流，也未注册工作流后台任务。
+## Operating guide
 
-Shared mail admission now records workflow reservations in the existing notification ledger,
-using the owner-organization lock before the shared budget lock. Retry admission restamps the
-same charge after recounting capacity. Internal instance/owner sub-cap settings default to
-20/5 per sliding hour and are forwarded by Compose; neither setting enables workflows.
-The internal attempt service commits the charge and dispatch marker together before contacting
-SMTP. It releases the shared budget lock at commit. An overlapping core reminder keeps the
-intent and consumes no workflow reservation.
+- In the app, [open Workflows in the current space](#manage-existing-workflows-in-the-app),
+  [create or preview a definition](#create-edit-and-preview-workflows-in-the-app), and
+  [review finished runs](#view-workflow-run-history-in-the-app). Personal owners manage
+  their own workflows. Team management requires a current team owner or admin.
+- For automation, use the [REST, MCP and CLI operation table](#rest-mcp-and-cli-operations)
+  and [synthetic preview example](#preview-the-same-candidate-over-rest-mcp-or-cli).
+  API keys need `read` or `full` for definitions and history, or `full` for preview and writes.
+- Before enabling a workflow, check the [existing reminder rules](#relationship-with-reminders-and-follow-ups),
+  [reschedule behavior](#triggers-conditions-and-snapshots) and
+  [delivery limits](#mail-budget-and-capacity). A matching core reminder or follow-up
+  takes precedence. A reschedule request or its expiry leaves scheduled work alone.
+  A committed reschedule recalculates captured timers and retires delayed-created work.
+- Workflow email shares the core SMTP budget. Size the provider for
+  `1.2 × MAIL_MAX_PER_HOUR` at a positive cap. Hourmere Cloud keeps host-written text
+  off and uses the [built-in templates](#email-and-webhook-actions) in every public locale.
 
-中文：共享邮件准入已将工作流预留写入现有通知账本，先锁定所属组织，再取得共享额度锁。
-重试会重新计算额度并更新时间戳，不增加账本记录。内部实例和组织每小时子额度默认为
-20 和 5，Compose 已转发配置；这些配置不会启用工作流。内部尝试在连接 SMTP 之前提交额度
-记录和发送标记，并在提交时释放共享额度锁。重叠的核心提醒保留发送意图，不占用工作流额度。
+中文：工作流列表、启用与禁用、删除、编辑、预览和执行历史已实现，REST、MCP 与 CLI
+接口也已发布。目前自托管实例和 Hourmere Cloud 均硬关闭工作流。应用隐藏相关页面，
+有权限的调用返回 `workflows_disabled`。运营者配置和手动启用将在第 19b 步提供。
+改期请求及其到期不会改变现有执行计划。实际改期会用原有版本重新计算定时任务，
+并终止延期的创建通知。工作流邮件与核心邮件共用额度。全局上限大于零时，SMTP 容量按
+`1.2 × MAIL_MAX_PER_HOUR` 估算。Cloud 保持关闭主持人自定义文案，使用内置模板。
 
 ## Evidence and existing foundations
 
@@ -125,12 +98,12 @@ A definition has immutable identity and owner, a revision, name, enabled flag, s
 trigger, optional lifecycle delay, AND conditions, and one email or webhook action.
 Creation defaults to disabled. A scope selects one event type or all current and future
 event types of the same personal owner or team. Personal scopes never cover team event
-types merely because the person hosts them. An all-event workflow and event-specific
-workflows count together toward the enabled-per-event limit; enforce it under an owner
-lock on workflow changes and event-type creation. Take the organization lock first, then
-an exclusive per-owner lock, before checking the combined cap or writing a definition;
-event-type creation takes the same owner lock after its organization lock. Disabled drafts
-do not execute.
+types merely because the person hosts them. Each personal owner or team can keep up to 100
+non-deleted definitions across all scopes, including disabled drafts. Each eligible event
+type can have up to 5 matching enabled definitions from that owner, counting all-event and
+event-specific scopes together. Workflow writes take the organization lock and then the
+owner lock before checking capacity. Event-type creation uses the same order. Disabled
+drafts do not execute.
 
 The following limits are source constants in `packages/workflows/src/limits.ts`, and the
 document test binds each number here to its constant. The definition contract enforces the
@@ -141,8 +114,8 @@ sub-caps below, rather than unchangeable product capacity limits.
 
 | Identifier | Value | Meaning |
 | --- | ---: | --- |
-| `WORKFLOW_MAX_ENABLED_PER_EVENT` | 5 | Matching enabled definitions, including all-event definitions. |
-| `WORKFLOW_MAX_DEFINITIONS_PER_OWNER` | 100 | All retained definitions, including disabled drafts; deletion releases definition capacity. |
+| `WORKFLOW_MAX_ENABLED_PER_EVENT` | 5 | Matching enabled definitions per eligible event type, combining the owner's all-event and event-specific scopes. |
+| `WORKFLOW_MAX_DEFINITIONS_PER_OWNER` | 100 | Non-deleted definitions per personal owner or team across all scopes, including disabled drafts. |
 | `WORKFLOW_NAME_MAX_BYTES` | 200 | UTF-8 name size after normalization. |
 | `WORKFLOW_SUBJECT_MAX_BYTES` | 200 | UTF-8 custom subject limit. |
 | `WORKFLOW_BODY_MAX_BYTES` | 8000 | UTF-8 custom body limit per locale. |
@@ -154,9 +127,9 @@ sub-caps below, rather than unchangeable product capacity limits.
 | `WORKFLOW_MAX_LATE_MINUTES` | 60 | Strict upper bound on catch-up lateness. |
 | `WORKFLOW_MAIL_MAX_PER_HOUR` | 20 | Default WORKFLOW_MAIL_MAX_PER_HOUR before the shared-budget reserve. |
 | `WORKFLOW_INSTANCE_MAIL_CAP_DIVISOR` | 5 | Scale positive core caps down before applying the workflow ceiling. |
-| `WORKFLOW_OWNER_MAIL_MAX_PER_HOUR` | 5 | Default WORKFLOW_OWNER_MAIL_MAX_PER_HOUR for each personal owner or team. |
-| `WORKFLOW_RECIPIENT_EMAILS_PER_HOUR` | 1 | Dedicated normalized-address allowance, including hosts. |
-| `WORKFLOW_RECIPIENT_EMAILS_PER_DAY` | 3 | Dedicated normalized-address allowance, including hosts. |
+| `WORKFLOW_OWNER_MAIL_MAX_PER_HOUR` | 5 | Default workflow email attempts per personal owner or team in a sliding hour, across all its event types and workflows. |
+| `WORKFLOW_RECIPIENT_EMAILS_PER_HOUR` | 1 | Workflow email attempts per normalized address across the instance in a sliding hour, including hosts. |
+| `WORKFLOW_RECIPIENT_EMAILS_PER_DAY` | 3 | Workflow email attempts per normalized address across the instance in a sliding 24 hours, including hosts. |
 | `WORKFLOW_HISTORY_DAYS` | 30 | Visible run history and scheduled metadata retention after terminal state. |
 
 ## Triggers, conditions and snapshots
@@ -281,8 +254,9 @@ The internal shared renderer now bounds interpolation, escapes HTML and applies 
 host-text fallback before reading custom content. Save and ordinary updates enforce the
 same switch for bookers, guests and hosts; disabling a stored definition remains possible.
 Confirmation, cancellation, rescheduling, before-start and after-end each have built-in
-subject and body text in every public locale. An unsupported locale uses the English
-built-in. If a built-in subject or body is unavailable in a supported locale, both use
+subject and body text in every public locale (`en`, `zh-CN`, `de`, `fr`, `es` and
+`pt-BR`). An unsupported locale uses the English built-in. If a built-in subject or
+body is unavailable in a supported locale, both use
 the next complete built-in in the mail locale fallback chain, ending in English.
 Workflows remain hard-off for self-hosted and Cloud deployments.
 
@@ -299,7 +273,7 @@ mail catalogues for the public locales in `packages/core/src/locales.ts`. Admini
 screens cover English and zh-CN. Use recipient profile locale for hosts and the saved
 booker locale for attendees, following current notification behavior. When custom text
 is enabled, a missing custom translation uses the recipient locale's built-in template.
-Preview will show the selected locale and fallback.
+Preview shows the selected locale and fallback.
 
 Common variables: recipient's own name, event-type title, scheduled start/end rendered
 in recipient's saved zone, zone label, and public booking path when still valid. Personal
@@ -567,8 +541,8 @@ completion. Mail can still arrive out of order at a provider; no delivery-order 
 ## Mail budget and capacity
 
 The source-derived defaults below must stay bound to runtime behavior and `.env.example`
-by the document test. Host mail is exempt from booking-recipient limits; sign-in uses a
-separate purpose hash, but shares the global ledger and host reserve. Current recipient
+by the document test. Core host mail is exempt from core booking-recipient limits.
+Sign-in uses a separate purpose hash and shares the global ledger and host reserve. Current recipient
 windows are sliding windows; the global host/sign-in ceiling is `floor(MAIL_MAX_PER_HOUR * 1.2)`.
 
 | Identifier | Value | Kind | Source meaning |
@@ -620,8 +594,8 @@ core inserts are unchanged, and the existing two-day purge still applies. The un
 queries therefore count workflow rows in the global hour. Booking and sign-in recipient
 counts filter by their own purpose hash, so workflow rows never consume those per-address
 allowances. The workflow instance count is the rows with `workflow_reservation_id` set in
-the same sliding hour. The owner count joins the reservations, and the workflow recipient
-counts use the workflow-purpose hash.
+the same sliding hour. The owner count joins the reservations by organization. The workflow
+recipient count uses the workflow-purpose hash across all organizations and recipient classes.
 
 Step 10 introduces nonnegative integer settings `WORKFLOW_MAIL_MAX_PER_HOUR` (default 20)
 and `WORKFLOW_OWNER_MAIL_MAX_PER_HOUR` (default 5). Zero disables workflow email for that
@@ -645,13 +619,18 @@ and host and sign-in mail when it reaches 120. So each workflow row takes one of
 100 slots, at most 20 such rows exist in any sliding hour, and no row of any kind is admitted
 at or beyond 120. The documented sizing rule
 `1.2 × MAIL_MAX_PER_HOUR` remains valid. The busy owner gets at most 5 workflow attempts/hour
-of the 950 demanded: owner 5/h, recipient 1/h and 3/day, including repeated hosts. Four owners
-can consume the default 20/hour instance sub-cap; no per-owner slot is guaranteed. These
-conservative defaults contain optional-message abuse during rollout; operators of larger
-instances can raise the instance and owner settings independently, but a positive core
-budget still enforces the 20% workflow ceiling. Recipient caps do not scale with either
-setting; their deliberately low host-mail consequence must be visible in configuration
-and owner previews. A higher workflow share requires a separate reviewed reserve policy.
+of the 950 demanded: owner 5/h across all workflows and event types of one personal owner
+or team, and recipient 1/h and 3/day per normalized address across the instance, including
+hosts who receive messages from multiple owners. The windows are sliding. Four owners can
+consume the default 20/hour instance sub-cap, so an owner's available capacity can be lower
+than 5. The instance and owner settings become
+operator controls in step 19b. A positive core budget still enforces the 20% workflow
+ceiling, and the fixed recipient caps apply independently of both settings.
+
+中文：每个个人所有者或团队的所有活动类型和工作流共享每小时默认 5 次的发送额度。
+同一归一化地址在整个实例内每小时最多 1 次、每 24 小时最多 3 次，主持人也计入，
+所有额度均按滑动窗口计算。SMTP 中断超过 60 分钟时，在中断期间耗尽可发送窗口的待发
+工作流邮件会过期。
 
 Use oldest-due-first admission, a bounded workflow queue/pool and SMTP connection slots
 reserved for core workers. Workflow acquisitions of the common budget lock cover only short admission transactions,
@@ -672,8 +651,8 @@ out of the sliding hour before it reaches SMTP, and the sizing rule holds up to 
 admission-to-SMTP latency.
 
 Workflow email has no long retry. An SMTP outage longer than the 60-minute late bound
-(`WORKFLOW_MAX_LATE_MINUTES`) ends every workflow email whose window closes during the
-outage as `expired`. Core booking-notification mail retries 12 times, from one minute,
+(`WORKFLOW_MAX_LATE_MINUTES`) marks pending workflow email as `expired` when its delivery
+window closes during the outage. Core booking-notification mail retries 12 times, from one minute,
 doubling, capped at one hour: about seven hours in total. This is a listed limitation.
 
 ## Permissions, persistence and audit
@@ -760,7 +739,7 @@ transactions; replay cannot duplicate terminal records. No bodies, answers, addr
 raw URLs or secrets. Retention/access follow the accepted audit policy separately from
 workflow history, without widening team data access.
 
-## REST, MCP and CLI contract sketch
+## REST, MCP and CLI operations
 
 All paths below start with `/api/v1`; request schemas are strict and responses open for
 additive v1 evolution. Responses use existing envelope/error conventions and cursor lists.
@@ -797,10 +776,12 @@ cannot change. Fields supplied in a patch replace that whole field, so `conditio
 without a write. Content changes append a revision; an enable/disable-only patch retains the
 current content revision and changes only the live definition row. Existing captured revisions,
 enrollments and execution rows remain untouched, including on re-enable. Enablement checks
-the combined all-event/per-event cap under the same owner lock as creation. Updates reject
-webhook actions until subscription support is implemented, and record update, enable
-and disable transitions through the injected audit port. The production hard-off guard
-runs before any workflow transaction or audit write.
+the same limit as creation: up to 5 matching enabled definitions per eligible event type,
+combining all-event and event-specific scopes for the same personal owner or team.
+Create and update validate webhook actions against an active endpoint in the same
+organization subscribed to `workflow.executed`. Update, enable and disable transitions
+record a shared audit event. The production hard-off guard runs before any workflow
+transaction or audit write.
 No separate enable or disable interface exists. Delete uses expected revision and
 is idempotent within retained identity. Its strict REST body is `{ "expectedRevision": 1 }`;
 MCP and CLI include `id` in the same input. REST returns `204` and MCP/CLI return
@@ -814,12 +795,12 @@ Replays do not rewrite the tombstone or emit another `workflow.deleted` audit ev
 Existing minimal history, enrollments, recipient claims and mail charges keep their own
 retention rules. The creation key stays with the tombstone: a matching create retry returns
 the retained disabled definition without restoring it; changed input still conflicts.
-No retention worker or execution-history writer is registered by this operation. Preview accepts a candidate definition plus
+Preview accepts a candidate definition plus
 synthetic example values, returns rendered text and escaped HTML, matched/skipped reasons
 and static budget estimates derived only from the candidate and published limits; never
 instance-wide or other-owner usage. It performs no email or webhook call. No write sends immediately.
 
-Step 15a accepts the candidate fields at the top level with `owner` and an optional strict
+Send the candidate fields at the top level with `owner` and an optional strict
 `example` object. Use `eventTitle`, `publicPath`, `start` and `end` (ISO instants),
 `recipientName`, `locale` and `timeZone` to change rendering. Use `eventTypeId`, `source`,
 `locationKind`, `guestCount` and scalar `answers` to exercise predicates. The example ID is
@@ -841,7 +822,7 @@ HTML、语言回退和静态额度估计。预览只读取权限及候选定义�
 记录审计事件，仅包含已授权空间和固定的触发类型及原因代码等审计元数据。功能仍硬关闭，
 三个接口统一返回 `workflows_disabled`，MCP 工具列表隐藏预览。
 
-Step 4 settles the read representation and refusals. A definition reads as `id`, `owner`
+A definition reads as `id`, `owner`
 (`{kind, id}`: the user for a personal owner, the team organization for a team), the current
 `revision`, the live `enabled` flag, the current revision's `name`, `scope`, `trigger`,
 `conditions` and `actions` (the contract's canonical form), and `createdAt`/`updatedAt`. Reads
@@ -856,7 +837,6 @@ and the API-key scope check and before input validation or any lookup: REST thro
 guard listed right after the caller, MCP through the tool's availability check
 (`Tool.requireAvailable`), which also keeps the tool out of `tools/list`.
 
-Step 16a adds `GET /api/v1/workflows/{id}/runs`, `list_workflow_runs` and `workflows runs`.
 History uses the same owner and current team owner/admin checks as definition detail.
 Missing, malformed, deleted and inaccessible workflow IDs return `404 workflow_not_found`.
 API keys need `read` or `full`. While workflows are off, allowed callers receive
@@ -886,24 +866,118 @@ operation. [The parity script](../scripts/interface-parity.ts) covers **every** 
 POST/PUT/PATCH/DELETE, including public and preview endpoints. Its browser exemption
 requires exactly one security requirement with only `session: []`; these workflow
 operations support agents and do not qualify. No new parity gap entry is acceptable.
-The web app calls only the generated `/api/v1` client, never a service import, native
-side-channel or undocumented endpoint. UI work starts after its operations exist.
+The web app uses the generated `/api/v1` client for these operations.
 
-Existing webhook endpoint create/update/delete/rotate writes gain MCP/CLI parity before
-workflow webhook actions can be configured through every supported interface. Preserve
-the existing endpoint limits and existing route rate-limit middleware; no bypass or
-higher request allowance is introduced for workflows.
+Existing webhook endpoint management is available through all three interfaces and
+continues to use the existing endpoint limits and route rate limits. See
+[webhook management](../apps/site/src/content/docs/docs/webhooks.md).
 
-The web app learns availability from instance discovery. Step 4 adds an optional boolean
-`workflowsEnabled` to the existing public `GET /api/v1/instance` response, next to
-`followUpHostNotesEnabled` and `slotSnippetsEnabled`, and documents it as false until
-workflows are enabled. It reports the constant and the operator switch together: false
-while hard-off, then the value of `WORKFLOWS_ENABLED` from step 19b. Step 19a computes it
-from the injected operator state. Clients treat an absent field as false. The web app
-(steps 17a and 17b) shows workflow navigation and the editor only when it is true. Its
-editor hides custom subject/body fields when `followUpHostNotesEnabled` is false. Under operator-off, recovery
-reads, disable and delete stay available through REST, MCP and CLI; the web app offers no
-separate recovery view in v1.
+The web app reads the optional `workflowsEnabled` field from public
+`GET /api/v1/instance` and shows workflow navigation and routes only when it is true.
+The current hard-off release reports false. Clients treat an absent field as false.
+The editor uses `followUpHostNotesEnabled` from the same response to decide whether to
+show custom subject and body fields.
+
+### Preview the same candidate over REST, MCP or CLI
+
+With a `full` API key for your personal space, save this candidate as `candidate.json`.
+Replace the sample owner ID with your user ID. For a team preview, use `"kind": "team"`
+and the team's organization ID with a key for that space held by a current owner or admin.
+The example previews the built-in French reminder to the booker 24 hours before the start.
+
+```json
+{
+  "owner": { "kind": "personal", "id": "019a0000-0000-7000-8000-000000000001" },
+  "name": "One-day reminder",
+  "scope": { "type": "all_event_types" },
+  "trigger": { "type": "before_start", "offsetMinutes": 1440 },
+  "actions": [{ "type": "email", "recipients": ["booker"] }],
+  "example": { "locale": "fr", "recipientName": "Camille" }
+}
+```
+
+Set `HOURMERE_URL` to the instance origin and `HOURMERE_API_KEY` privately. Send the same
+JSON as the REST body, as the arguments to MCP `preview_workflow`, or as CLI input.
+
+```sh
+curl --fail-with-body "$HOURMERE_URL/api/v1/workflows/preview" \
+  -H "Authorization: Bearer $HOURMERE_API_KEY" --json @candidate.json
+```
+
+```sh
+hourmere workflows preview --input candidate.json --json
+```
+
+These requests show the published call shape. While workflows are hard-off, REST returns
+404, a direct MCP call returns a tool error, and CLI exits 1, each with
+`workflows_disabled`. When available, the preview returns synthetic rendering and static
+limits. It does not save the candidate, send email or contact a webhook.
+
+### Manage existing workflows in the app
+
+When the feature is available, choose your personal or team space and open **Workflows**.
+The list shows the workflows and their status for that space. You can manage your personal
+workflows. Only current team owners and admins can manage their team's workflows.
+
+Use **Enable workflow** or **Disable workflow** to change its status. Runs picked up while
+the workflow is disabled end as `workflow_disabled`. Re-enabling the workflow leaves
+unclaimed runs eligible within their original windows. Skipped runs are final.
+Confirm **Delete workflow** to remove it and retire pending runs. Deletion cannot be undone.
+If the workflow or your space changes while you have an action open, review the current
+state before trying again.
+
+中文：功能开放后，切换到个人或团队空间，再打开 **工作流**。列表显示当前空间的工作流及其状态。
+你可以管理自己的工作流。团队工作流仅限当前团队所有者和管理员管理。
+
+选择 **启用工作流** 或 **禁用工作流** 可更改状态。禁用期间，系统领取的待执行任务会以
+`workflow_disabled` 跳过。重新启用后，尚未领取且仍在有效窗口内的任务可继续执行。
+已跳过的任务不会补跑。确认 **删除工作流** 后，工作流将被移除，待执行任务也会终止。删除无法撤销。
+如果操作期间工作流或当前空间发生变化，请核对最新状态后再试。
+
+### Create, edit and preview workflows in the app
+
+When workflows are available, create a workflow from the list or open one for editing.
+Choose all event types in the current space or a single eligible event type. Set the
+booking change or timing that triggers it, and add conditions that must all match.
+Choose email recipients or select an existing webhook endpoint in the same space.
+
+Where the instance allows host-written text, add a subject and body for each language
+you want to customize. Other languages use the built-in message. Preview uses a
+synthetic booking to show the rendered email, why the example would be skipped, and
+when it uses a fallback template. Change the preview language or event type to check
+another example. Preview leaves the saved workflow as it was.
+New workflows start disabled. If another edit changes the saved revision, review the
+current version before trying to save again.
+
+中文：功能开放后，可在工作流列表中新建工作流，也可打开已有工作流进行编辑。选择当前空间中的
+全部活动类型或一个符合条件的活动类型，再设置触发工作流的预约变更或时间，以及必须同时满足的
+条件。最后选择邮件收件人，或选择当前空间中已有的 webhook 端点。
+
+实例允许主持人自定义文案时，可为需要自定义的语言分别填写邮件主题和正文。其他语言使用内置文案。
+预览使用合成预约展示邮件内容、示例被跳过的原因，以及何时使用备用模板。可切换预览语言或活动类型来检查
+其他示例。预览只展示结果，不会保存更改。
+新建的工作流默认禁用。如果其他编辑已更新版本，请先核对最新版本再尝试保存。
+
+### View workflow run history in the app
+
+When workflows are available, choose **Run history** next to a workflow in the current
+space. Personal workflows are visible to their owner, and team history is available to
+current team owners and admins. History lists runs finished in the past 30 days, newest
+first. Use **Next page** or **Previous page** to browse older or newer records.
+
+Each entry shows the trigger, workflow revision, scheduled and finish times, run outcome
+and any recorded reason, such as the mail budget limit. Email counts report SMTP
+acceptance, rejection, unknown outcome and skipped recipients. History cannot confirm
+arrival in an inbox and contains no booking IDs or private booking details.
+
+中文：功能开放后，可在当前空间的工作流列表中选择 **执行历史**。个人工作流仅限所有者查看，
+团队工作流的执行历史仅限当前团队所有者和管理员查看。历史按结束时间从新到旧列出最近 30 天内
+已结束的执行，可用 **下一页** 或 **上一页** 浏览。
+
+每条记录显示触发时机、工作流版本、计划执行时间、结束时间和执行结果。如果记录了原因，
+例如达到邮件发送额度上限，页面也会显示。邮件统计按已发送、被拒绝、已尝试发送但结果未知，
+以及已跳过的收件人分类计数。已发送表示 SMTP 接受，无法确认邮件已进入收件箱。
+执行历史不含预约 ID 或预约隐私信息。
 
 ## Rollout and limitations
 
@@ -916,6 +990,8 @@ value overrides it. Routes/OpenAPI, tool implementations, CLI commands, parity m
 scope-registry rows ship in each operation's owning step. MCP `tools/list` omits workflow
 tools while off; direct known-tool calls return the same `404 workflows_disabled` domain
 error (MCP error result and CLI error output), rather than an unknown-tool protocol error.
+Production capture, dispatch and repair are inactive. Production registers no workflow
+execution or retention worker.
 
 That MCP behavior differs from the slot-snippet precedent. When disabled, slot snippets
 leave their tools out of `productTools()`, so a direct call gets the SDK's "Tool … not found"
@@ -966,6 +1042,9 @@ never `:-false` or a number, so that empty means the server default:
   default. It adds their `configuration.md` rows, which state that the mail settings apply
   only while workflows are enabled.
 
+Operator opt-in, mail sub-cap controls and recovery operations are unavailable in this
+release. Compose's internal mail forwards have no effect on the hard-off state.
+
 Only after the complete stack exists may step 19b set the constant true and introduce
 `WORKFLOWS_ENABLED` default false. Step 19a first implements the operator-off state behind
 the still-false constant, through an internal injected setting. Operator-off refuses
@@ -973,6 +1052,9 @@ creation, preview, enabling and all edits (including renames) with
 `404 workflows_disabled`, and stops new capture/dispatch. Definition/history reads,
 disable-only updates and deletion remain available for recovery. MCP discovery while off
 omits workflow tools; authorized direct recovery calls remain usable after step 19b only.
+During step 19a, production `GET /api/v1/instance` always reports
+`workflowsEnabled: false`. When tests simulate an implemented build, this field reports
+the injected operator setting.
 Pending runs become terminally skipped as `instance_disabled` only when they are claimed
 while off; future runs are not eagerly swept. Re-enabling never revives skipped work, but future
 not-yet-due rows remain eligible. Disabling one definition is lazy in the same way, with
@@ -982,7 +1064,14 @@ known-limitation line to say workflows are available but off by default. Final a
 supported; an environment copied from step 19b, or a Compose install with the empty
 forward, picks up the flip. Cloud and self-hosting have an identical workflow feature set
 without paid gating. Hourmere Cloud runs the independent host-text switch off, as described
-above, and each operator configures the mail sub-caps.
+above. After opt-in ships, operators can configure the instance and owner mail sub-caps.
+
+中文：19a 期间，生产环境的 `GET /api/v1/instance` 始终返回
+`workflowsEnabled: false`。测试模拟已实现的构建时，该字段反映注入的运营开关。
+关停时可读取定义和历史、仅停用或删除工作流，创建、预览、启用及其他编辑均会被拒绝。
+MCP 工具不会出现在发现列表中。关停期间领取的到期任务会以 `instance_disabled`
+终止，尚未到期的任务仍可在恢复后执行。单个工作流停用的历史原因是
+`workflow_disabled`。
 
 Out of scope: SMS, WhatsApp, AI calls, arbitrary HTTP methods/bodies, attachments, billing,
 marketing campaigns, arbitrary recipient lists, OR/path builders, loops, multiple action
@@ -992,9 +1081,10 @@ changes, and workflow triggers in Zapier, n8n or Make. Delayed-created
 messages are retired on reschedule, unlike the cited Cal.com example.
 Custom subject/body text is unavailable while host notes are disabled. SMTP can lose an
 ambiguous message under the chosen at-most-once potentially accepted attempt policy; webhook
-receivers must deduplicate. An SMTP outage longer than 60 minutes expires the workflow
-email due in it, while core mail retries for about seven hours. Shared SMTP-provider quotas
-remain an operator concern. Limits can suppress optional messages on busy event types.
+receivers must deduplicate. An SMTP outage longer than 60 minutes expires pending workflow
+email whose delivery window closes during the outage, while core mail retries for about
+seven hours. Shared SMTP-provider quotas remain an operator concern. Limits can suppress
+optional messages on busy event types.
 History is metadata only, and team workflows intentionally support fewer conditions and
 variables. Under operator-off, recovery uses REST, MCP or CLI rather than the web app.
 

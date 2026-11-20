@@ -30,8 +30,13 @@ export function LegalLinks({ privacyPolicyUrl, termsUrl }: PolicyUrls) {
 
 const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 
+export function useInstance() {
+  const [instance] = useLoad(loadInstance)
+  return instance
+}
+
 /** For frames that do not otherwise need instance discovery. */
 export function InstanceLegalLinks() {
-  const [instance] = useLoad(loadInstance)
+  const instance = useInstance()
   return instance.status === 'ready' ? <LegalLinks {...instance.data} /> : null
 }

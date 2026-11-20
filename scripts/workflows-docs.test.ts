@@ -1045,7 +1045,7 @@ describe('workflow design numeric contracts', () => {
       `An SMTP outage longer than the ${number('WORKFLOW_MAX_LATE_MINUTES')}-minute late bound`,
     )
     expect(text).toContain(
-      `An SMTP outage longer than ${number('WORKFLOW_MAX_LATE_MINUTES')} minutes expires the workflow email due in it, while core mail retries for about ${hours} hours`,
+      `An SMTP outage longer than ${number('WORKFLOW_MAX_LATE_MINUTES')} minutes expires pending workflow email whose delivery window closes during the outage, while core mail retries for about ${hours} hours`,
     )
   })
 
