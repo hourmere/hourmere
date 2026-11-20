@@ -440,6 +440,15 @@ describe('matrix-derived report completeness', () => {
       expectedFromPlaywrightList({ suites: [], errors: [{}] }, 'layout', new Map()),
     ).toThrow()
     expect(() => expectedFromPlaywrightList({ suites: [] }, 'layout', new Map())).toThrow()
+    // A selected shard may hold only preparation tests; failures and duplicates still throw.
+    expect(
+      expectedFromPlaywrightList({ suites: [] }, 'layout', new Map(), { allowEmpty: true }),
+    ).toEqual([])
+    expect(() =>
+      expectedFromPlaywrightList({ suites: [], errors: [{}] }, 'layout', new Map(), {
+        allowEmpty: true,
+      }),
+    ).toThrow()
     expect(() =>
       expectedFromPlaywrightList(
         {
@@ -463,8 +472,9 @@ describe('matrix-derived report completeness', () => {
 
   it('partitions actual Playwright-selected shards without running browsers', async () => {
     const matrices: Awaited<ReturnType<typeof loadExpectedReports>>[] = []
-    for (let shard = 1; shard <= 4; shard++)
-      matrices.push(await loadExpectedReports('layout', `${shard}/4`))
+    // Mirrors the e2e-layout matrix in .github/workflows/ui-checks.yml.
+    for (let shard = 1; shard <= 8; shard++)
+      matrices.push(await loadExpectedReports('layout', `${shard}/8`))
     const allExpected = matrices[0]?.allExpected ?? []
     const selected = matrices.flatMap((matrix) => matrix.expected)
     const reportsPerViewportAndTheme = auditPages.reduce(
