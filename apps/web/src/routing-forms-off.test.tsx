@@ -1,20 +1,29 @@
-// Keep routing addresses out of the ordinary route table. Only the two gated public
-// form pages are declared. public/routes.test.tsx exercises the capability at runtime.
+// Inventory routing addresses and require the manager branch to go through its gate.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { parse } from '@babel/parser'
+import { screen, within } from '@testing-library/react'
+import { isValidElement } from 'react'
 import { matchRoutes } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { isRoutingName } from '../../../scripts/routing-forms-names.ts'
 import { appRoutes } from './App.tsx'
+import { RequireRoutingForms } from './lazy-pages.tsx'
 import { PATHS } from './paths.ts'
+import { fakeApi, json, later, renderApp, signedIn } from './test/fake-api.tsx'
 
 type Route = (typeof appRoutes)[number]
 
 // Routing-form names are matched token by token (`isRoutingName`): `route`, `routing` or
 // `routed` as a whole path segment or identifier word; `/routes/:id` or `/app/router` is not one.
 const PUBLIC_ROUTING_PAGES = ['/route/ada/intro', '/route/team/alpha/intro', '/route/continue']
-const GATED_FORM_PATHS = ['/route/:handle/:slug', '/route/team/:teamSlug/:slug']
+const MANAGER_PATHS = ['routing-forms', 'routing-forms/new', 'routing-forms/:id']
+const GATED_FORM_PATHS = ['/route/:handle/:slug', '/route/team/:teamSlug/:slug', ...MANAGER_PATHS]
+const managerAddresses = [
+  PATHS.routingForms,
+  PATHS.newRoutingForm,
+  `${PATHS.routingForms}/72100000-0000-4000-8000-000000000001`,
+]
 
 function routePaths(routes: Route[], parent = ''): string[] {
   return routes.flatMap((route) => {
@@ -125,18 +134,22 @@ function routePathsIn(file: string, source: string): string[] {
   return paths
 }
 
-describe('routing forms stay outside the ordinary web routes', () => {
-  it('keeps routing routes out of appRoutes and PATHS', () => {
+describe('only gated routing pages are declared', () => {
+  it('keeps only the gated manager paths in appRoutes and PATHS', () => {
     const paths = routePaths(appRoutes)
     expect(paths).toContain('/app/event-types')
     expect(paths).toContain('/:handle/:slug')
-    expect(paths.filter(isRoutingName)).toEqual([])
-    const names = [...Object.keys(PATHS), ...Object.values(PATHS)]
-    expect(names).toContain('/app/event-types')
-    expect(names.filter(isRoutingName)).toEqual([])
+    expect(paths.filter(isRoutingName)).toEqual(MANAGER_PATHS.map((path) => `/app/${path}`))
+    expect(Object.keys(PATHS).filter(isRoutingName)).toEqual(['routingForms', 'newRoutingForm'])
+    expect(Object.values(PATHS).filter(isRoutingName)).toEqual(managerAddresses.slice(0, 2))
+    for (const address of managerAddresses) {
+      const matches = matchRoutes(appRoutes, address)
+      const parent = matches?.at(-2)?.route.element
+      expect(isValidElement(parent) && parent.type).toBe(RequireRoutingForms)
+    }
   })
 
-  it('declares only the two gated form routes in the web source', () => {
+  it('declares only the known routing paths in the web source', () => {
     const sources = webSources()
     expect(sources.map(([file]) => file)).toEqual(
       expect.arrayContaining(['main.tsx', 'App.tsx', 'pages/NotFound.tsx']),
@@ -146,7 +159,7 @@ describe('routing forms stay outside the ordinary web routes', () => {
     expect(paths).toEqual(
       expect.arrayContaining(['*', '/:handle/:slug', 'event-types', 'PATHS.join']),
     )
-    expect(paths.filter(isRoutingName)).toEqual(GATED_FORM_PATHS.toReversed())
+    expect(paths.filter(isRoutingName).sort()).toEqual(GATED_FORM_PATHS.toSorted())
   }, 30_000)
 
   it.each([
@@ -163,8 +176,8 @@ describe('routing forms stay outside the ordinary web routes', () => {
     ['App.tsx', `<Route path={\`\${APP_BASE}/routing-forms\`} element={<Page />} />`],
   ])('sees a routing route added to %s: %s', (file, added) => {
     const source = readFileSync(join(sourceRoot, file), 'utf8')
-    const existing = file === 'App.tsx' ? GATED_FORM_PATHS.toReversed() : []
-    expect(routePathsIn(file, source).filter(isRoutingName)).toEqual(existing)
+    const existing = file === 'App.tsx' ? GATED_FORM_PATHS.toSorted() : []
+    expect(routePathsIn(file, source).filter(isRoutingName).sort()).toEqual(existing)
     expect(routePathsIn(file, `${source}\n${added}\n`).filter(isRoutingName)).toHaveLength(
       existing.length + 1,
     )
@@ -180,4 +193,58 @@ describe('routing forms stay outside the ordinary web routes', () => {
     expect(matched.length).toBeGreaterThan(0)
     expect(matched.filter(isRoutingName)).toEqual([])
   })
+})
+
+const routingNav = () =>
+  within(screen.getByRole('navigation', { name: 'Main' })).queryByRole('link', {
+    name: 'Routing forms',
+  })
+
+describe('routing manager capability', () => {
+  it.each(managerAddresses)(
+    'shows the ordinary not-found page while off at %s',
+    async (address) => {
+      const api = fakeApi({
+        ...signedIn,
+        'GET /api/v1/instance': () => json(200, { routingFormsEnabled: false }),
+      })
+      renderApp(address)
+      await screen.findByRole('heading', { name: 'Page not found' })
+      expect(screen.getByText('There is nothing at this address.')).toBeDefined()
+      expect(routingNav()).toBeNull()
+      expect(api.to('GET /api/v1/instance')).toHaveLength(1)
+      expect(api.calls.filter(({ path }) => isRoutingName(path))).toEqual([])
+    },
+  )
+
+  it('waits for instance discovery without mounting the list or showing a navigation link', async () => {
+    const instance = later()
+    const api = fakeApi({
+      ...signedIn,
+      'GET /api/v1/instance': () => instance.response,
+      'GET /api/v1/routing-forms': () => json(200, { data: [], nextCursor: null }),
+    })
+    renderApp(PATHS.routingForms)
+    await screen.findByRole('navigation', { name: 'Main' })
+    expect(routingNav()).toBeNull()
+    expect(api.to('GET /api/v1/routing-forms')).toHaveLength(0)
+    await instance.answer(
+      json(200, { routingFormsEnabled: true, privacyPolicyUrl: 'https://example.test/privacy' }),
+    )
+    await screen.findByText('No routing forms yet.')
+    expect(routingNav()?.getAttribute('href')).toBe(PATHS.routingForms)
+    expect(screen.getByRole('link', { name: 'Privacy policy' })).toBeDefined()
+    expect(api.to('GET /api/v1/instance')).toHaveLength(1)
+  })
+
+  it.each([json(200, {}), json(503, { error: 'unavailable' })])(
+    'fails closed without a confirmed capability (instance HTTP $status)',
+    async (response) => {
+      const api = fakeApi({ ...signedIn, 'GET /api/v1/instance': () => response })
+      renderApp(PATHS.routingForms)
+      await screen.findByRole('heading', { name: 'Page not found' })
+      expect(routingNav()).toBeNull()
+      expect(api.calls.filter(({ path }) => isRoutingName(path))).toEqual([])
+    },
+  )
 })

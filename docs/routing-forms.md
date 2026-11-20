@@ -766,6 +766,27 @@ existing codes. Unknown calendar readiness keeps the scheduling service's existi
 `409 calendar_sync_unavailable`; never pretend it was an empty schedule or absent
 configuration. Public errors omit rule/target diagnostics.
 
+## Managing drafts in the web app
+
+When routing is enabled, open **Routing forms** in the current space to list or create
+forms. A personal space's owner and a team's current owners and admins can manage its
+forms. New forms are disabled drafts with a default fallback message in the creator's
+interface language. Set the title, description and questions in the draft editor. Move
+questions and options with the **Move up** and **Move down** buttons, including by keyboard.
+Renaming and moving questions or options preserves their IDs.
+
+To remove a form from the list, open it, select **Archive routing form**, then confirm.
+Archiving stops new submissions and preserves historical booking snapshots. The address
+stays reserved in that space. When routing is off, the navigation entry is hidden and
+the manager addresses show the ordinary not-found page.
+
+中文：功能开启后，可在当前空间的「分流表单」页面查看或新建表单。个人空间所有者以及团队当前的所有者和管理员可以管理相应空间的表单。
+新表单是未启用的草稿，默认备用提示采用创建时的界面语言。你可以在草稿编辑器中设置标题、说明和问题，并用「上移」和「下移」按钮调整问题与选项的顺序，也可以用键盘操作这些按钮。
+重命名或移动问题和选项时，原有标识保持不变。
+
+如需从列表中移除表单，请打开该表单，选择「归档分流表单」，然后确认。归档后，表单停止接收新提交，既有预约快照会保留，表单地址在该空间内仍被占用。
+功能关闭时，导航栏隐藏该入口，直接访问管理地址会显示普通的页面未找到提示。
+
 ## Implementation plan
 
 The later project plan is rescheduled into the named steps below, each budgeted at about one

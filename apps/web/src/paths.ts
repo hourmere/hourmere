@@ -15,6 +15,8 @@ export const PATHS = {
   bookings: `${APP_BASE}/bookings`,
   meetingPolls: `${APP_BASE}/meeting-polls`,
   newMeetingPoll: `${APP_BASE}/meeting-polls/new`,
+  routingForms: `${APP_BASE}/routing-forms`,
+  newRoutingForm: `${APP_BASE}/routing-forms/new`,
   teamBookings: `${APP_BASE}/team/bookings`,
   analytics: `${APP_BASE}/analytics`,
   conferences: `${APP_BASE}/conferences`,
@@ -32,6 +34,8 @@ export const schedulePath = (id: string) => `${PATHS.availability}/${encodeURICo
 export const bookingPath = (id: string) => `${PATHS.bookings}/${encodeURIComponent(id)}`
 export const meetingPollPath = (id: string, organizationId: string) =>
   `${PATHS.meetingPolls}/${encodeURIComponent(id)}?${new URLSearchParams({ organizationId })}`
+export const routingFormPath = (id: string, organizationId: string) =>
+  `${PATHS.routingForms}/${encodeURIComponent(id)}?${new URLSearchParams({ organizationId })}`
 
 /** The public booking page of a personal event type, as a full URL to share. */
 export const publicPageUrl = (handle: string, slug: string) =>

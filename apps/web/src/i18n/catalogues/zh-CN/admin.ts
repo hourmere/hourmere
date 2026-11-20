@@ -2397,4 +2397,45 @@ export const admin = {
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':
     '团队启用强制单点登录时，必须保留至少一位恢复所有者。',
+
+  // Routing forms
+  'Routing forms': '分流表单',
+  'New routing form': '新建分流表单',
+  'Edit routing form': '编辑分流表单',
+  'Back to routing forms': '返回分流表单',
+  'Loading routing forms…': '正在加载分流表单列表…',
+  'Loading routing form…': '正在加载分流表单…',
+  'Could not load routing forms.': '无法加载分流表单列表。',
+  'Could not load this routing form.': '无法加载此分流表单。',
+  'Only team owners and admins can manage routing forms in this space.':
+    '只有团队所有者和管理员可以管理此空间的分流表单。',
+  'No routing forms yet.': '还没有分流表单。',
+  'This routing form is unavailable.': '此分流表单暂不可用。',
+  'Form address': '表单地址',
+  'Use 1–64 lowercase letters, numbers, or hyphens. Start and end with a letter or number.':
+    '请输入 1 至 64 个小写字母、数字或连字符，首尾须为字母或数字。',
+  'This address is already in use.': '此地址已被使用。',
+  'Enter a title.': '请输入标题。',
+  'Enter a question label.': '请输入问题内容。',
+  'Enter an option label.': '请输入选项内容。',
+  'Use a different label for each option.': '各选项的内容不能重复。',
+  'Save draft': '保存草稿',
+  'Draft saved.': '草稿已保存。',
+  'Could not save the routing form.': '无法保存分流表单。',
+  'This routing form changed elsewhere. Reload it and review your edits before trying again.':
+    '此分流表单已在别处更改。请重新加载表单，核对改动后再试。',
+  'This draft has rules or a fallback that reference a changed question or option.':
+    '草稿中有规则或备用安排引用了已更改的问题或选项。',
+  'No appointment is available for these answers.': '根据你的回答，暂时没有合适的预约。',
+  'Archive routing form': '归档分流表单',
+  'Archive this routing form? Its public link will stop accepting submissions, and unsaved edits will be lost.':
+    '要归档此分流表单吗？归档后，公开链接将停止接收提交，未保存的修改也会丢失。',
+  'Archive form': '归档表单',
+  'Archiving…': '正在归档…',
+  'Could not archive the routing form.': '无法归档分流表单。',
+  'Question {number}': '第{number}题',
+  'No questions yet.': '还没有问题。',
+  'Remove option': '移除选项',
+  'Could not confirm creation. Try again to recover this draft.':
+    '无法确认是否已创建表单。请重试以找回草稿。',
 } as const

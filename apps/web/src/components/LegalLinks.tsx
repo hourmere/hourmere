@@ -1,4 +1,4 @@
-import { api, unwrap } from '../api/client.ts'
+import { loadInstance } from '../api/resources.ts'
 import { useLoad } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import './LegalLinks.css'
@@ -27,8 +27,6 @@ export function LegalLinks({ privacyPolicyUrl, termsUrl }: PolicyUrls) {
     </div>
   )
 }
-
-const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 
 /** For frames that do not otherwise need instance discovery. */
 export function InstanceLegalLinks() {

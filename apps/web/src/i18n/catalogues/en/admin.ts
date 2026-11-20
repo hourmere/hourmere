@@ -2515,4 +2515,46 @@ export const admin = {
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':
     'This team must retain at least one recovery owner while SSO is enforced.',
+
+  // Routing forms
+  'Routing forms': 'Routing forms',
+  'New routing form': 'New routing form',
+  'Edit routing form': 'Edit routing form',
+  'Back to routing forms': 'Back to routing forms',
+  'Loading routing forms…': 'Loading routing forms…',
+  'Loading routing form…': 'Loading routing form…',
+  'Could not load routing forms.': 'Could not load routing forms.',
+  'Could not load this routing form.': 'Could not load this routing form.',
+  'Only team owners and admins can manage routing forms in this space.':
+    'Only team owners and admins can manage routing forms in this space.',
+  'No routing forms yet.': 'No routing forms yet.',
+  'This routing form is unavailable.': 'This routing form is unavailable.',
+  'Form address': 'Form address',
+  'Use 1–64 lowercase letters, numbers, or hyphens. Start and end with a letter or number.':
+    'Use 1–64 lowercase letters, numbers, or hyphens. Start and end with a letter or number.',
+  'This address is already in use.': 'This address is already in use.',
+  'Enter a title.': 'Enter a title.',
+  'Enter a question label.': 'Enter a question label.',
+  'Enter an option label.': 'Enter an option label.',
+  'Use a different label for each option.': 'Use a different label for each option.',
+  'Save draft': 'Save draft',
+  'Draft saved.': 'Draft saved.',
+  'Could not save the routing form.': 'Could not save the routing form.',
+  'This routing form changed elsewhere. Reload it and review your edits before trying again.':
+    'This routing form changed elsewhere. Reload it and review your edits before trying again.',
+  'This draft has rules or a fallback that reference a changed question or option.':
+    'This draft has rules or a fallback that reference a changed question or option.',
+  'No appointment is available for these answers.':
+    'No appointment is available for these answers.',
+  'Archive routing form': 'Archive routing form',
+  'Archive this routing form? Its public link will stop accepting submissions, and unsaved edits will be lost.':
+    'Archive this routing form? Its public link will stop accepting submissions, and unsaved edits will be lost.',
+  'Archive form': 'Archive form',
+  'Archiving…': 'Archiving…',
+  'Could not archive the routing form.': 'Could not archive the routing form.',
+  'Question {number}': 'Question {number}',
+  'No questions yet.': 'No questions yet.',
+  'Remove option': 'Remove option',
+  'Could not confirm creation. Try again to recover this draft.':
+    'Could not confirm creation. Try again to recover this draft.',
 } as const
