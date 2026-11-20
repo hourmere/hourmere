@@ -2296,6 +2296,9 @@ export const admin = {
     'Team event types are not listed: only team owners and admins can see why their times are unavailable.',
   'Another scheduling rule applies.': 'Another scheduling rule applies.',
 
+  // Native team SSO
+  'Sign in with this team’s SSO to continue.': 'Sign in with this team’s SSO to continue.',
+
   // Host meeting polls
   'Meeting polls': 'Meeting polls',
   'Loading meeting polls…': 'Loading meeting polls…',
@@ -2508,9 +2511,6 @@ export const admin = {
     'Could not update the invitation roster. Try again.',
   'This poll has 40 places.': 'This poll has 40 places.',
   'Remove time {time}': 'Remove time {time}',
-
-  // Native team SSO
-  'Sign in with this team’s SSO to continue.': 'Sign in with this team’s SSO to continue.',
 
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':

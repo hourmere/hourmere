@@ -23,10 +23,7 @@ it('attaches the team proof middleware to every private team read in the server 
     'GET /api/v1/instance/embed',
     'GET /api/v1/mcp-oauth/connections',
   ])
-  const privateReads = new Set([
-    'POST /api/v1/routing-forms/:id/preview',
-    'POST /api/v1/workflows/preview',
-  ])
+  const privateReads = new Set(['POST /api/v1/routing-forms/:id/preview'])
   for (const operation of API_KEY_REST_OPERATIONS) {
     const id = honoId(operation.id)
     if (
@@ -57,7 +54,6 @@ it('attaches the team proof middleware to every private team write in the server
     'ALL /api/v1/public/meeting-polls/*',
     // These POSTs only read data.
     'POST /api/v1/routing-forms/:id/preview',
-    'POST /api/v1/workflows/preview',
     'POST /api/v1/mcp-oauth/request',
     // These write a caller-owned profile, availability schedule or integration.
     'PATCH /api/v1/profile/name',
@@ -172,6 +168,8 @@ it('attaches the team proof middleware to every private team write in the server
       'POST /api/v1/workflows',
       'PATCH /api/v1/workflows/:id',
       'DELETE /api/v1/workflows/:id',
+      // Authorizes as a write and reads live team configuration, but persists nothing.
+      'POST /api/v1/workflows/preview',
     ]),
   )
 
