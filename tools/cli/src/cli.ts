@@ -44,6 +44,8 @@ export const COMMANDS = {
   'routing-forms preview': 'preview_routing_form',
   'routing-forms public': 'get_public_routing_form',
   'routing-forms route': 'route_lead',
+  'routing-forms resolve': 'resolve_routing_continuation',
+  'routing-forms slots': 'find_routed_slots',
 
   'audit-log list': 'list_audit_events',
   'audit-log settings': 'get_audit_log_settings',
@@ -121,6 +123,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms route --input FILE|- [--output FILE] [--url ORIGIN]
+       hourmere routing-forms resolve|slots --input FILE|- [--output FILE] [--url ORIGIN]
        hourmere workflows list|get|runs|create|update|delete|preview [--input FILE|-] [--url ORIGIN]
        hourmere webhooks list [--json]
        hourmere webhooks create --input FILE|- (--json | --output FILE)
@@ -196,7 +199,14 @@ Pass slug, exactly one of handle or teamSlug, versionId from public, and answers
 as JSON to routing-forms route. Requires bookings or full scope. If the form changed, fetch public metadata again.
 Stdout redacts routeToken and continuationUrl. Use --output FILE to save them in a new 0600 JSON file.
 Existing files and symlinks are refused.
-Routing form commands return routing_forms_disabled until routing forms are enabled on the instance.
+Pass routeToken in private JSON to routing-forms resolve to read current booking fields and prefill.
+For routing-forms slots, also pass start and end as UTC timestamps, and optionally durationMinutes
+and locationOptionId. Both commands require bookings or full scope and leave the receipt usable
+until its original expiry. The input token is redacted from stdout, output files and errors.
+For routed bookings, pass routeToken to book in private JSON instead of handle/teamSlug/slug or
+oneTimeToken. Use bookings or full scope. The input token is redacted from stdout, output files and errors.
+While routing forms are off, these calls return routing_forms_disabled. An exact committed booking
+can still be replayed with the same input, idempotency key and API key.
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows runs (id; optional limit 1–100, cursor) returns run history. Pass nextCursor as cursor.
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
@@ -474,6 +484,14 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    const routeTokenPattern = /^[A-Za-z0-9_-]{43}$/
+    const routeToken =
+      ['book', 'routing-forms resolve', 'routing-forms slots'].includes(args.command) &&
+      typeof input.routeToken === 'string' &&
+      routeTokenPattern.test(input.routeToken)
+        ? input.routeToken
+        : ''
+    if (routeToken) secrets.push(routeToken)
     if (args.command.startsWith('polls ')) {
       for (const field of ['token', 'publicToken']) {
         const value = input[field]
@@ -509,6 +527,16 @@ export async function runCli(options: {
     }
     // Webhook arguments go to the shared strict schema after the server scope check.
     const checkBookingTokens = !args.command.startsWith('webhooks ')
+    if (
+      args.command === 'book' &&
+      Object.hasOwn(input, 'routeToken') &&
+      (typeof input.routeToken !== 'string' ||
+        !routeTokenPattern.test(input.routeToken) ||
+        ['handle', 'teamSlug', 'slug', 'oneTimeToken', 'waitlistToken', 'expectedGroupSlotId'].some(
+          (field) => Object.hasOwn(input, field),
+        ))
+    )
+      throw new CliError('invalid_request')
     if (checkBookingTokens && Object.hasOwn(input, 'oneTimeToken')) {
       if (
         args.command !== 'book' ||
@@ -592,7 +620,9 @@ export async function runCli(options: {
       )
     }
     if (output) {
-      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken, slackUrl]))
+      await output.writeFile(
+        printable(result, [key, oneTimeToken, waitlistToken, slackUrl].concat(routeToken)),
+      )
       await output.sync()
       await options.stdout('{"outputWritten":true}\n')
     } else {

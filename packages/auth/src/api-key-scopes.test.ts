@@ -85,6 +85,9 @@ const restContract = {
     'POST /api/v1/meeting-polls/{id}/finalize',
     'POST /api/v1/public/-/routing/{handle}/{slug}/route',
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
+    'POST /api/v1/routing-continuations/resolve',
+    'POST /api/v1/routing-continuations/slots',
+    'POST /api/v1/routing-continuations/bookings',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -124,6 +127,8 @@ const restContract = {
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
     'POST /api/v1/team/sso/delegations',
     'DELETE /api/v1/team/sso/delegations/{bindingId}',
+    'POST /api/v1/team/sso/recovery',
+    'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -320,6 +325,16 @@ function verifyOneTimeWrites(allows: Allows) {
   }
 }
 
+it('authorizes routed booking over REST, MCP and CLI with full or bookings keys', () => {
+  const rest = 'POST /api/v1/routing-continuations/bookings'
+  expect(apiKeyOperation(rest)).toMatchObject({ authentication: 'optional_key' })
+  for (const id of [rest, 'mcp:create_booking:routed', 'cli:book']) {
+    expect(apiKeyAllows({ kind: 'api_key', apiKeyScope: 'read' }, id), id).toBe(false)
+    for (const apiKeyScope of ['full', 'bookings'] as const)
+      expect(apiKeyAllows({ kind: 'api_key', apiKeyScope }, id), id).toBe(true)
+  }
+})
+
 function verifyPollWriteScopes(allows: Allows) {
   for (const id of [
     'POST /api/v1/meeting-polls/{id}/finalize',
@@ -482,6 +497,8 @@ describe('shared API-key scope policy', () => {
         'preview_routing_form',
         'get_public_routing_form',
         'route_lead',
+        'resolve_routing_continuation',
+        'find_routed_slots',
         'update_workflow',
         'create_workflow',
         'list_audit_events',
@@ -606,6 +623,8 @@ describe('shared API-key scope policy', () => {
       bookings: [
         'get_public_routing_form',
         'route_lead',
+        'resolve_routing_continuation',
+        'find_routed_slots',
         'create_one_time_link',
         'revoke_one_time_link',
         'whoami',

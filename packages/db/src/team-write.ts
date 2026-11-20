@@ -25,11 +25,12 @@ export function teamWriteCheckFor(
   organizationId: string,
   identity: TeamWriteCheck['identity'],
 ): TeamWriteCheck | undefined {
+  if (!identity) return undefined
   const check = activeCheck.getStore()
   if (
     check?.organizationId.toLowerCase() === organizationId.toLowerCase() &&
-    check.identity?.sessionId === identity?.sessionId &&
-    check.identity?.userId === identity?.userId
+    check.identity?.sessionId === identity.sessionId &&
+    check.identity.userId === identity.userId
   )
     return check
   return undefined

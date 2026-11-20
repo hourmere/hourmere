@@ -250,6 +250,9 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/public/-/routing/{handle}/{slug}/route` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/routing-continuations/resolve` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/routing-continuations/slots` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/routing-continuations/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
@@ -314,6 +317,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}` | Browser session only | — |
 | `POST /api/v1/team/sso/delegations` | Browser session only | — |
 | `DELETE /api/v1/team/sso/delegations/{bindingId}` | Browser session only | — |
+| `POST /api/v1/team/sso/recovery` | Browser session only | — |
+| `POST /api/v1/team/sso/recovery/{enrollmentId}/accept` | Browser session only | — |
 | `GET /api/v1/team/sso/providers` | Session or API key | `full, read` |
 | `GET /api/v1/team/sso/policy` | Session or API key | `full, read` |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
@@ -351,6 +356,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
+| `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
+| `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
@@ -375,6 +382,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `create_booking` | `routed` | `book` | `full, bookings` |
 | `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |

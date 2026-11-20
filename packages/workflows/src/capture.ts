@@ -9,7 +9,7 @@ import {
   type NotificationSnapshot,
 } from '@hourmere/scheduling/notification-settings'
 import { sql } from 'kysely'
-import { hardOffWorkflowAuditPort, type WorkflowAuditPort } from './audit.ts'
+import { type WorkflowAuditPort, workflowAuditPort } from './audit.ts'
 import { evaluateConditions } from './conditions.ts'
 import { WorkflowDefinitionSchema, type WorkflowTriggerType } from './definition.ts'
 import { workflowCapture } from './hard-off.ts'
@@ -75,7 +75,7 @@ export async function captureBookingWorkflows(
   event: BookingEvent,
   now: Temporal.Instant,
   secret: string,
-  audit: WorkflowAuditPort = hardOffWorkflowAuditPort(),
+  audit: WorkflowAuditPort = workflowAuditPort,
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Workflow capture needs the booking transaction')
   if (event.type !== 'created' && event.type !== 'rescheduled' && event.type !== 'cancelled') return
@@ -411,5 +411,11 @@ export async function captureCreatedWorkflows(
   await captureBookingWorkflows(trx, event, now, secret, audit)
 }
 
-export const captureWorkflowCreation = workflowCapture(captureCreatedWorkflows)
-export const captureWorkflowBooking = workflowCapture(captureBookingWorkflows)
+type CaptureArgs = [trx: Db, event: BookingEvent, now: Temporal.Instant, secret: string]
+
+export const captureWorkflowCreation = workflowCapture((...args: CaptureArgs) =>
+  captureCreatedWorkflows(...args, workflowAuditPort),
+)
+export const captureWorkflowBooking = workflowCapture((...args: CaptureArgs) =>
+  captureBookingWorkflows(...args, workflowAuditPort),
+)

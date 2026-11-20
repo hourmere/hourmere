@@ -11,6 +11,7 @@ import {
   MemberDepartureOwnerRequiredError,
   recordSsoAdmissionRemoval,
   removeTeamMember,
+  SsoRecoveryRequiredError,
   TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
@@ -1327,6 +1328,7 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
       removeTeamMember,
       TeamManagementError,
       MemberDepartureOwnerRequiredError,
+      SsoRecoveryRequiredError,
       getLatestTeamMemberRemovalHandling,
       getTeamMemberRemovalHandling,
       MemberDepartureBookingSchema,

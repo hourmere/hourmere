@@ -22,7 +22,11 @@ import {
   dispatchDueWorkflowRuns,
   repairWorkflowRunWakes,
 } from './dispatcher.ts'
-import { createRecordingWorkflowAudit, expectWorkflowAuditRedacted } from './testing.ts'
+import {
+  expectWorkflowAuditRedacted,
+  workflowExecutionAuditRow,
+  workflowJournal,
+} from './testing.ts'
 import { updateWorkflowDefinition } from './updates.ts'
 
 const NOW = Temporal.Instant.from('2030-01-07T08:00:00Z')
@@ -234,8 +238,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow dispatcher and repair', () 
 
   it('skips a wake claimed while disabled and never revives it after re-enabling', async () => {
     const s = await setup()
-    const audit = await createRecordingWorkflowAudit(db)
-    const execution = { ...s.execution(1), audit: audit.port }
+    const execution = s.execution(1)
     await updateWorkflowDefinition(s.context(), s.workflow.id, {
       expectedRevision: 1,
       enabled: false,
@@ -251,24 +254,23 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow dispatcher and repair', () 
     })
     expect(await claimDueWorkflowRuns(execution, { runId: s.run.id })).toEqual([])
     expect(await history(s.run.id)).toMatchObject([{ reason: 'workflow_disabled' }])
-    const records = await audit.read()
+    const organizationId = s.user.principal.organization.id
+    const records = await workflowJournal(db, organizationId)
+      .where('action', '=', 'workflow.run_skipped')
+      .execute()
     expect(records).toEqual([
-      {
-        event: 'workflow.run_skipped',
-        actor: { kind: 'background', job: 'dispatch' },
-        owner: {
-          kind: 'personal',
-          userId: s.user.id,
-          organizationId: s.user.principal.organization.id,
-        },
-        workflowId: s.workflow.id,
+      workflowExecutionAuditRow(organizationId, s.workflow.id, 'workflow.run_skipped', 'dispatch', {
         revision: 1,
         trigger: 'booking.created',
         reason: 'workflow_disabled',
-        occurredAt: s.clock.now,
-      },
+      }),
     ])
-    expectWorkflowAuditRedacted(records, ['booker@example.com', 'synthetic-dispatcher-secret'])
+    expectWorkflowAuditRedacted(records, [
+      s.bookingId,
+      s.run.id,
+      'booker@example.com',
+      'synthetic-dispatcher-secret',
+    ])
   })
 
   it('keeps an unclaimed due run eligible when re-enabled before its wake within the late bound', async () => {

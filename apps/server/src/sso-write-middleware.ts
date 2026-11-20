@@ -17,7 +17,13 @@ export async function withTeamWriteAccess<T>(
 ): Promise<T> {
   const access = await check()
   requireTeamRead(access)
-  return access.policy ? withTeamWriteCheck(teamWriteCheck(deps, principal), write) : write()
+  const machineWithPolicy =
+    principal.kind !== 'session' &&
+    principal.ssoDelegationStatus !== undefined &&
+    principal.ssoDelegationStatus !== null
+  return access.policy || machineWithPolicy
+    ? withTeamWriteCheck(teamWriteCheck(deps, principal), write)
+    : write()
 }
 
 const registered = new WeakSet<object>()

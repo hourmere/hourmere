@@ -22,6 +22,7 @@ import {
   createRoutingForm,
   getScheduleAvailability,
   publishRoutingForm,
+  submitRoutingForm,
   updateRoutingForm,
 } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
@@ -80,6 +81,9 @@ const classes = {
     'POST /api/v1/meeting-polls/{id}/finalize',
     'POST /api/v1/public/-/routing/{handle}/{slug}/route',
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
+    'POST /api/v1/routing-continuations/resolve',
+    'POST /api/v1/routing-continuations/slots',
+    'POST /api/v1/routing-continuations/bookings',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -190,6 +194,8 @@ const classes = {
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
     'POST /api/v1/team/sso/delegations',
     'DELETE /api/v1/team/sso/delegations/{bindingId}',
+    'POST /api/v1/team/sso/recovery',
+    'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -276,6 +282,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let fullPrincipal: Principal
     let app: ReturnType<typeof createApp>
     let date: string
+    let routeToken: string
+    let routingForm: { id: string; versionId: string }
     let sequence = 0
     const keys = new Map<ApiKeyScope, string>()
     const personalKeys = new Map<ApiKeyScope, string>()
@@ -298,7 +306,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
         slug: 'intro',
         hosts: [{ userId: owner.user.id }],
       })
-      await f.eventType(owner.organization.id, owner.user.id, { slug: 'intro' })
+      const personalEvent = await f.eventType(owner.organization.id, owner.user.id, {
+        slug: 'intro',
+      })
       const today = Temporal.Now.plainDateISO('UTC')
       date = today.add({ days: 7 + ((8 - today.dayOfWeek) % 7) }).toString()
       const signup = { mode: 'closed', allowedDomains: [] } as const
@@ -348,7 +358,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
         const form = await createRoutingForm(context, {
           slug: 'scope-matrix',
           title: 'Public routing scope matrix',
-          fallback: { kind: 'message', message: 'Thanks' },
+          fallback: principal.organization.personal
+            ? { kind: 'event', eventTypeId: personalEvent }
+            : { kind: 'message', message: 'Thanks' },
         })
         const publication = await publishRoutingForm(context, form.id, {
           expectedRevision: form.draftRevision,
@@ -357,6 +369,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedRevision: publication.form.draftRevision,
           enabled: true,
         })
+        if (principal.organization.personal) {
+          routingForm = { id: form.id, versionId: publication.version.id }
+          const outcome = await submitRoutingForm(
+            { db, routingFormsEnabled: true, routingSecret: secret },
+            { formId: form.id, organizationId: principal.organization.id },
+            { versionId: publication.version.id, answers: {} },
+          )
+          if (outcome.kind !== 'continuation') throw Error('Fixture must issue a continuation')
+          routeToken = outcome.routeToken
+        }
       }
       mainWebhook = (
         await createWebhook(
@@ -417,7 +439,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await database?.drop()
     })
 
-    async function prepare(operation: string, kind: Class) {
+    async function prepare(operation: string, kind: Class, scope: ApiKeyScope) {
       const [method, template] = operation.split(' ') as [string, string]
       let path = template
       let id = mainEvent
@@ -490,6 +512,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{providerId}', randomUUID())
           .replaceAll('{linkId}', randomUUID())
           .replaceAll('{bindingId}', randomUUID())
+          .replaceAll('{enrollmentId}', randomUUID())
           .replaceAll('{invitationId}', randomUUID())
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
@@ -652,6 +675,21 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }
           expectedStatus = 201
         }
+      } else if (template === '/api/v1/routing-continuations/bookings') {
+        const outcome = await submitRoutingForm(
+          { db, routingFormsEnabled: true, routingSecret: secret },
+          { formId: routingForm.id, organizationId: owner.organization.id },
+          { versionId: routingForm.versionId, answers: {} },
+        )
+        if (outcome.kind !== 'continuation') throw Error('Fixture must issue a continuation')
+        payload = {
+          routeToken: outcome.routeToken,
+          start: `${date}T${scope === 'bookings' ? '11:30' : '11:00'}:00Z`,
+          invitee: { name: 'Matrix invitee', email: 'matrix@example.test', timeZone: 'UTC' },
+        }
+        expectedStatus = 201
+      } else if (template.startsWith('/api/v1/routing-continuations/')) {
+        payload = { routeToken, ...(template.endsWith('/slots') && { start, end }) }
       } else if (template.startsWith('/api/v1/public/-/routing/')) {
         path = path
           .replace('{handle}', 'rest-scoped-host')
@@ -997,18 +1035,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 181-operation contract and all 543 scope combinations', () => {
+    it('covers the exact 186-operation contract and all 558 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(181)
-      expect(new Set(ids).size).toBe(181)
+      expect(ids).toHaveLength(186)
+      expect(new Set(ids).size).toBe(186)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(543)
+      expect(cases).toHaveLength(558)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
-      const fixture = await prepare(operation, kind)
+      const fixture = await prepare(operation, kind, scope)
       const beforeProvider = google.calls.length
       try {
         const response = await app.request(

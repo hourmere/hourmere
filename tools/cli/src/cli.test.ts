@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
-import { runCli } from './cli.ts'
+import { HELP, runCli } from './cli.ts'
 import * as client from './client.ts'
 import { CliError, callTool, endpoint, MAX_INPUT_BYTES } from './client.ts'
 
@@ -215,6 +215,103 @@ describe('CLI transport and arguments', () => {
     ],
   ])('kills removed one-time %s with a real assertion failure', async (_name, change, verify) => {
     await expect(verify(sourceCopy(change))).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  const routeToken = 'r'.repeat(43)
+  const routedBookingInput = {
+    routeToken,
+    idempotencyKey: 'routed-booking-test-key',
+    start: '2026-11-20T10:00:00Z',
+    invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+  }
+
+  async function verifyRouteTokenPrivacy(runner = runCli) {
+    const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+      const sent = JSON.parse(String(init?.body)).params
+      expect(sent.name).toBe('create_booking')
+      expect(sent.arguments.routeToken === routeToken).toBe(true)
+      expect(sent.arguments.idempotencyKey).toBe(routedBookingInput.idempotencyKey)
+      return response({ replayed: true, nested: { [routeToken]: `echo ${routeToken}` } })
+    })
+    const args = ['book', '--input', '-']
+    const result = await run(args, routedBookingInput, { runner, fetch: fetcher })
+    expect(result.code).toBe(0)
+    expect(result.stdout.includes(routeToken)).toBe(false)
+    const redacted = { replayed: true, nested: { '[redacted]': 'echo [redacted]' } }
+    expect(JSON.parse(result.stdout)).toEqual(redacted)
+
+    const path = join(await dir(), 'routed-booking.json')
+    const output = await run([...args, '--output', path], routedBookingInput, {
+      runner,
+      fetch: fetcher,
+    })
+    expect(output.code).toBe(0)
+    expect(JSON.parse(output.stdout)).toEqual({ outputWritten: true })
+    const saved = await readFile(path, 'utf8')
+    expect(saved.includes(routeToken)).toBe(false)
+    expect(JSON.parse(saved)).toEqual(redacted)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+
+    const error = await run(args, routedBookingInput, {
+      runner,
+      fetch: async () => Response.json({ error: `echo_${routeToken}` }, { status: 400 }),
+    })
+    expect(error.code).toBe(1)
+    expect(error.stderr.includes(routeToken)).toBe(false)
+    expect(JSON.parse(error.stderr)).toEqual({
+      error: 'echo_[redacted]',
+      status: 400,
+      outcomeMayBeUnknown: true,
+    })
+  }
+
+  it('books with the route capability and redacts it from stdout, files and errors', () =>
+    verifyRouteTokenPrivacy())
+
+  it('kills removed routed booking token redaction with a real assertion failure', async () => {
+    const copy = guardCopy(
+      sourceCopy([
+        "['book', 'routing-forms resolve', 'routing-forms slots'].includes(args.command)",
+        "['routing-forms resolve', 'routing-forms slots'].includes(args.command)",
+      ]),
+    )
+    await verifyRouteTokenPrivacy(sourceCopy())
+    await expectKilled(copy, verifyRouteTokenPrivacy, {
+      outcome: { actual: true, expected: false },
+    })
+  })
+
+  it.each([
+    { handle: 'host' },
+    { teamSlug: 'team' },
+    { slug: 'event' },
+    { oneTimeToken },
+    { waitlistToken },
+    { expectedGroupSlotId: '019a0000-0000-7000-8000-000000000001' },
+  ])('rejects routed booking combined with %j', async (extra) => {
+    const result = await run(['book', '--input', '-'], { ...routedBookingInput, ...extra })
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+    expect(JSON.parse(result.stderr)).toEqual({ error: 'invalid_request' })
+  })
+
+  it('documents private routed booking JSON and refuses the route token as a flag', async () => {
+    expect(HELP).toContain('pass routeToken to book in private JSON')
+    const result = await run(['book', '--route-token', routeToken])
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+    expect(result.stderr.includes(routeToken)).toBe(false)
+  })
+
+  it('refuses malformed routed booking credentials before sending them', async () => {
+    const result = await run(['book', '--input', '-'], {
+      ...routedBookingInput,
+      routeToken: `https://example.test/route/continue#token=${routeToken}`,
+    })
+    expect(result.code).toBe(1)
+    expect(result.fetcher).not.toHaveBeenCalled()
+    expect(result.stderr.includes(routeToken)).toBe(false)
+    expect(JSON.parse(result.stderr)).toEqual({ error: 'invalid_request' })
   })
 
   async function verifyEventTypeWrite(runner: typeof runCli, update: boolean) {

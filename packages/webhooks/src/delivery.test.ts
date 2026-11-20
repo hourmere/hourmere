@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Database, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import {
@@ -15,6 +15,7 @@ import {
   createTestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
+import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { webhookSignature } from './crypto.ts'
 import {
@@ -329,6 +330,149 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
           .executeTakeFirstOrThrow()
       ).payload,
     ).toBe(delivery.payload)
+  })
+
+  it('keeps ordinary capture and delivery on their existing SQL and transaction paths', async () => {
+    const { bookingId, ctx, webhook, secret } = await fixture()
+    await db
+      .updateTable('webhooks')
+      .set({ events: ['booking.created', 'workflow.executed'] })
+      .where('id', '=', webhook.id)
+      .execute()
+
+    const queries: string[] = []
+    const compact = (statement: string) => statement.trim().replace(/\s+/g, ' ')
+    const traced = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: testDb.pool }),
+      log(event) {
+        if (event.level === 'query') queries.push(compact(event.query.sql))
+      },
+    })
+    const capture = () =>
+      traced.transaction().execute((trx) =>
+        webhookBookingNotifier(jobs, settings)(
+          trx,
+          {
+            type: 'created',
+            bookingId,
+            start: Temporal.Instant.from('2026-11-03T09:00Z'),
+          },
+          NOW,
+        ),
+      )
+    const importProbe = compact(`
+      WITH RECURSIVE connected(seed_id,booking_id) AS (
+        SELECT id,id FROM bookings WHERE id = ANY($1::uuid[])
+          AND EXISTS (SELECT 1 FROM bookings WHERE source = 'import')
+        UNION
+        SELECT c.seed_id,n.id FROM connected c
+          JOIN bookings b ON b.id = c.booking_id
+          JOIN LATERAL (
+            SELECT id FROM bookings WHERE id = b.rescheduled_from_id
+            UNION
+            SELECT id FROM bookings WHERE rescheduled_from_id = b.id
+          ) n ON true
+      )
+      SELECT DISTINCT c.seed_id AS id FROM connected c
+        JOIN bookings b ON b.id = c.booking_id WHERE b.source = 'import'
+    `)
+    const captureQueries = [
+      'begin',
+      importProbe,
+      compact(`
+        select "id", "organization_id", "event_type_id", "start_at", "end_at", "status",
+          "source", "rescheduled_from_id" from "bookings" where "id" = $1
+      `),
+      compact(`
+        select "id", "destination_kind" from "webhooks"
+          where ("destination_kind" = $1 or "destination_kind" = $2)
+          and ("event_type_id" is null or "event_type_id" = $3)
+          and "organization_id" = $4 and "is_active" = $5 and $6 = ANY(events)
+          order by "id" limit $7 for share
+      `),
+      compact(`
+        insert into "webhook_deliveries" ("webhook_id", "organization_id", "booking_id", "event_id", "event_type", "request_id", "payload", "created_at")
+          values ($1, $2, $3, $4, $5, $6, $7, $8)
+          on conflict ("webhook_id", "booking_id", "event_type", "request_id", "workflow_run_id") do nothing returning "id"
+      `),
+    ]
+    await capture()
+    expect(queries.splice(0)).toEqual([
+      ...captureQueries,
+      expect.stringMatching(/\bINSERT INTO pgboss\.job(?:_common)? \(/),
+      'commit',
+    ])
+    await capture()
+    expect(queries.splice(0)).toEqual([...captureQueries, 'commit'])
+
+    const delivery = await db
+      .selectFrom('webhook_deliveries')
+      .selectAll()
+      .where('booking_id', '=', bookingId)
+      .executeTakeFirstOrThrow()
+    expect(delivery).toMatchObject({ status: 'pending', workflow_run_id: null, request_id: null })
+    const requests: WebhookRequest[] = []
+    const send = () =>
+      deliverWebhook(
+        {
+          ...deps(async (request) => {
+            requests.push(request)
+            return 204
+          }),
+          db: traced,
+        },
+        delivery.id,
+        signal(),
+      )
+    const deliveryQueries = [
+      'select "webhook_id", "destination_kind" from "webhook_deliveries" inner join "webhooks" on "webhooks"."id" = "webhook_deliveries"."webhook_id" where "webhook_deliveries"."id" = $1',
+      'begin',
+      'select * from "webhooks" where "id" = $1 for share',
+      'select * from "webhook_deliveries" where "id" = $1 for update',
+    ]
+    await send()
+    expect(queries.splice(0)).toEqual([
+      ...deliveryQueries,
+      importProbe,
+      'update "webhook_deliveries" set "attempts" = $1, "last_attempt_at" = $2, "http_status" = $3, "last_error" = $4, "status" = $5, "delivered_at" = $6 where "id" = $7',
+      'commit',
+    ])
+    await send()
+    expect(queries.splice(0)).toEqual([...deliveryQueries, 'commit'])
+
+    const timestamp = String(Math.floor(NOW.epochMilliseconds / 1000))
+    expect(requests).toEqual([
+      expect.objectContaining({
+        url: webhook.url,
+        body: delivery.payload,
+        headers: {
+          'webhook-id': delivery.id,
+          'webhook-event-id': delivery.event_id,
+          'webhook-timestamp': timestamp,
+          'webhook-signature': webhookSignature(secret, timestamp, delivery.payload),
+        },
+      }),
+    ])
+    const persisted = await db
+      .selectFrom('webhook_deliveries')
+      .selectAll()
+      .where('id', '=', delivery.id)
+      .executeTakeFirstOrThrow()
+    const attemptAt = new Date(NOW.epochMilliseconds)
+    expect(persisted).toEqual({
+      ...delivery,
+      status: 'delivered',
+      attempts: 1,
+      http_status: 204,
+      last_attempt_at: attemptAt,
+      delivered_at: attemptAt,
+    })
+    const journal = await db
+      .selectFrom('audit_events')
+      .select('action')
+      .where('organization_id', '=', ctx.principal.organization.id)
+      .execute()
+    expect(journal).toEqual([{ action: 'webhook.created' }])
   })
 
   it('rolls capture and jobs back together and captures nothing while disabled', async () => {

@@ -108,6 +108,8 @@ const all = [
   'preview_routing_form',
   'get_public_routing_form',
   'route_lead',
+  'resolve_routing_continuation',
+  'find_routed_slots',
 ]
 // Hidden catalog entries never reach handlers. Workflows check scope first; SSO
 // answers sso_disabled before scope or arguments while both protocols are hard-off.
@@ -172,6 +174,8 @@ const writes = new Set([
   'rotate_meeting_poll_link',
   ...configurationWrites,
   'route_lead',
+  'resolve_routing_continuation',
+  'find_routed_slots',
   'create_booking',
   'reschedule_booking',
   'request_reschedule',
@@ -432,7 +436,17 @@ describe('MCP scoped discovery and dispatch', () => {
     '%s protects direct runTool calls for every tool and explicit dispatch mode',
     async (scope) => {
       for (const original of catalog) {
-        for (const args of [{}, { teamSlug: 'team' }, { bookingId: randomUUID() }]) {
+        const inputs: Record<string, unknown>[] = [
+          {},
+          { teamSlug: 'team' },
+          { bookingId: randomUUID() },
+        ]
+        if (original.name === 'create_booking') {
+          const routed = { routeToken: 'x'.repeat(43) }
+          expect(original.scopeMode?.(routed)).toBe('routed')
+          inputs.push(routed)
+        }
+        for (const args of inputs) {
           const tool = probe(original)
           const result = await runTool(
             tool,
@@ -612,6 +626,8 @@ describe('CLI scope parity', () => {
     ['routing-forms preview', 'preview_routing_form'],
     ['routing-forms public', 'get_public_routing_form'],
     ['routing-forms route', 'route_lead'],
+    ['routing-forms resolve', 'resolve_routing_continuation'],
+    ['routing-forms slots', 'find_routed_slots'],
   ] as const
   it.each(scopes)(
     '%s follows every network alias and never retries a scope denial',

@@ -66,11 +66,12 @@ Branding updates allow only `logo` (`uploaded`, `selected` or `removed`) and
 `primaryColor` (`set` or `cleared`), at least one of them; the database also checks
 these values. Attendee no-show changes require exactly `attendeeId` (the attendee's
 stored ID, a lowercase UUID) and `noShow` (`marked` or `unmarked`); the database checks
-both values. Every other action, including the SCIM provisioning token and User actions,
-requires an empty object. No key or token names, webhook or Slack URLs, secrets,
+both values. Actions without an allow-list require an empty object. No key or token
+names, webhook or Slack URLs, secrets,
 images, logo hashes, colours, attendee names, email addresses or free text are
 recorded. New detail keys require deliberate schema and documentation review. The
-[SSO actions](#sso-actions) have their own allow-lists and value checks.
+[SSO actions](#sso-actions) and [workflow actions](#workflow-actions) have their own
+allow-lists and value checks.
 
 | Area | Actions |
 | --- | --- |
@@ -85,6 +86,8 @@ recorded. New detail keys require deliberate schema and documentation review. Th
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
+| Workflow definitions | `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`, `workflow.deleted`, `workflow.previewed` |
+| Workflow execution | `workflow.run_scheduled`, `workflow.run_cancelled`, `workflow.run_skipped`, `workflow.email_attempted`, `workflow.email_sent`, `workflow.email_rejected`, `workflow.email_delivery_unknown`, `workflow.webhook_queued`, `workflow.webhook_completed`, `workflow.webhook_failed` |
 | Audit log | `audit_log.retention_updated` |
 
 `organization.ownership_transferred` and `api_key.rotated` are reserved action
@@ -197,6 +200,32 @@ configuration. Target IDs identify the affected entity by its stored ID, whateve
 spelling the request used; removal events preserve those IDs after the entity
 disappears.
 
+## Workflow actions
+
+[Booking workflow](workflows.md) definition changes and successful synthetic previews
+use the shared journal in the transaction that authorizes and performs the operation.
+The resolved personal or team organization owns the row. The actor and credential follow
+the journal's normal rules. A definition event targets the stored workflow ID and records
+its revision and trigger type, with only the revision on deletion. A candidate preview
+targets the current organization as `workflow_preview` and records the trigger type and
+`condition_false` when the synthetic example fails a condition. Workflow names,
+configuration, recipients, example values and rendered content stay out of the journal.
+
+Creation and deletion replays, repeats of the current enabled state, and stale updates
+emit no additional event. Each successful preview request is a separate audited operation.
+Run scheduling, cancellation and skips, email attempts and outcomes, and webhook queuing
+and terminal outcomes use the same writer. The event is written in the transaction that
+changes the run, recipient claim or delivery. Replays use the existing transition fences,
+so repeated work does not duplicate an already committed event. The system actor is
+`workflow-capture`, `workflow-dispatch` or `workflow-repair`, with credential `none`.
+Execution events target the workflow ID and carry its revision and trigger type. A skipped
+run records its fixed reason, and an expired workflow webhook may record `expired`.
+The journal uses its database insertion timestamp and excludes booking IDs, recipient
+details, bodies, answers, URLs and secrets.
+
+Workflow events use the space's existing audit permissions and retention. Workflows remain
+hard-off.
+
 ## SSO actions
 
 The [organization SSO](sso.md) actions are defined, with their detail allow-lists in the
@@ -234,11 +263,14 @@ body is recorded.
 | `sso_provider.created`, `sso_provider.updated`, `sso_provider.enabled`, `sso_provider.disabled`, `sso_provider.deleted`, `sso_provider.secret_rotated`, `sso_provider.certificate_rotated`, `sso_maintenance.key_rotated` | `method`, `providerId`, `revision` | | |
 | `sso_provider.tested` | `method`, `providerId`, `revision`, `outcome` | `reason`, `correlationId` | `passed`, `failed` |
 | `sso_domain.renewed` | `outcome` | | `passed`, `failed`, `unknown` |
-| `sso_link.linked`, `sso_link.unlinked`, `sso_link.conflicted`, `sso_authentication.succeeded`, `sso_authentication.replay_rejected`, `sso_jit.admitted`, `sso_delegation.bound`, `sso_delegation.revoked`, `sso_proof.revoked` | `method`, `providerId` | `revision`, `correlationId` | |
+| `sso_link.linked`, `sso_link.unlinked`, `sso_link.conflicted`, `sso_authentication.succeeded`, `sso_authentication.replay_rejected`, `sso_jit.admitted`, `sso_delegation.bound`, `sso_proof.revoked` | `method`, `providerId` | `revision`, `correlationId` | |
 | `sso_authentication.failed`, `sso_jit.refused` | `method`, `providerId`, `reason` | `revision`, `correlationId` | |
 | `sso_enforcement.enabled`, `sso_enforcement.disabled`, `sso_enforcement.updated`, `sso_maintenance.enforcement_disabled` | `revision` | | |
+| `sso_delegation.revoked` | `method`, `providerId` | `revision`, `correlationId`, `reason` | |
 | `sso_recovery.used` | | `correlationId` | |
-| `sso_domain.challenged`, `sso_domain.verified`, `sso_domain.expired`, `sso_domain.released`, `sso_maintenance.domain_retired`, `sso_recovery.nominated`, `sso_recovery.enrolled`, `sso_member.suspended`, `sso_member.reinstated`, `sso_member.scim_suspended`, `sso_member.scim_reinstated` | | | |
+| `sso_domain.challenged`, `sso_domain.verified`, `sso_domain.expired`, `sso_domain.released`, `sso_maintenance.domain_retired`, `sso_recovery.nominated`, `sso_recovery.enrolled`, `sso_recovery.removed`, `sso_member.suspended`, `sso_member.reinstated`, `sso_member.scim_suspended`, `sso_member.scim_reinstated` | | | |
+
+`sso_delegation.revoked` uses `key_moved_team` when an API key moves to another team.
 
 Reason codes: `attempt_invalid`, `attempt_expired`, `browser_mismatch`, `provider_error`,
 `provider_unreachable`, `token_exchange_failed`, `response_malformed`, `signature_invalid`,

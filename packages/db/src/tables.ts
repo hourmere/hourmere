@@ -428,6 +428,7 @@ export interface BookingRouting {
   matched_rule_id: string;
   organization_id: string;
   questions: Json;
+  replay_fingerprint: Buffer | null;
   resolved_rule_id: string;
   version_id: string;
   version_number: number;

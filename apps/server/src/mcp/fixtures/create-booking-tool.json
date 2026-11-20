@@ -1,0 +1,138 @@
+{
+  "description": "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Choose locationOptionId from the event locations; askInvitee phone options require inviteePhone normalized to E.164 (common phone separators are removed). Use the same locationOptionId for slot lookup and booking. location_unavailable means the chosen option cannot be used by the assigned host. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice. For a one-time link, provide only oneTimeToken instead of handle/teamSlug/slug; it is consumed atomically with the booking. Unavailable links return the same one_time_link_not_found error; reschedule the resulting booking with its manageToken.",
+  "inputSchema": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "handle": {
+        "type": "string",
+        "description": "The host's handle: the first path segment of their booking link https://<host>/<handle>/<slug>",
+        "examples": ["ada"]
+      },
+      "teamSlug": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "description": "Exact-case team organization slug from /team/{teamSlug}/{slug}; give exactly one of handle or teamSlug"
+      },
+      "slug": {
+        "type": "string",
+        "description": "The event type: the second path segment of the booking link",
+        "examples": ["intro-call"]
+      },
+      "oneTimeToken": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "description": "Secret token from the path of /book/{token}. Give this instead of handle, teamSlug and slug to consume a one-time link; keep it private. Prefilled name/email are editable and do not prove identity."
+      },
+      "start": {
+        "type": "string",
+        "format": "date-time",
+        "description": "The exact `start` of a slot from find_available_slots, unchanged",
+        "examples": ["2026-11-02T09:00:00.000Z"]
+      },
+      "durationMinutes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1440,
+        "description": "Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling."
+      },
+      "locationOptionId": {
+        "type": "string",
+        "description": "An id from the public event locations. Omission selects the default or first option."
+      },
+      "smsConsent": {
+        "type": "boolean",
+        "description": "Explicit invitee consent to SMS booking reminders. Requires inviteePhone."
+      },
+      "inviteePhone": {
+        "type": "string",
+        "description": "Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation."
+      },
+      "invitee": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email"
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "IANA time zone"
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 35,
+            "description": "BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone."
+          }
+        },
+        "required": ["name", "email", "timeZone"],
+        "additionalProperties": false
+      },
+      "guests": {
+        "maxItems": 10,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "email": {
+              "type": "string",
+              "maxLength": 254,
+              "format": "email"
+            }
+          },
+          "required": ["name", "email"],
+          "additionalProperties": false
+        },
+        "description": "Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed"
+      },
+      "responses": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "description": "Answers to the event type's questions, keyed by question id: text for short_text, long_text and phone; one option for select; a list of options for multi_select; true or false for checkbox"
+      },
+      "waitlistToken": {
+        "type": "string",
+        "maxLength": 256,
+        "description": "Optional waitlist attribution capability; grants no booking priority or permission"
+      },
+      "idempotencyKey": {
+        "type": "string",
+        "description": "Makes retries safe: a retry with the same key and the same arguments returns the original booking (replayed: true, manageToken null) instead of booking again; the same key with different arguments fails with idempotency_key_reused. Use a new random value (e.g. a UUIDv4) per booking; 1–255 printable ASCII characters. Keys are scoped to your API key."
+      }
+    },
+    "required": ["start", "invitee"],
+    "additionalProperties": false
+  }
+}

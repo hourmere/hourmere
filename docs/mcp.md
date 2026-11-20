@@ -85,6 +85,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
+| `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
+| `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |
@@ -109,6 +111,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `create_booking` | `routed` | `book` | `full, bookings` |
 | `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |

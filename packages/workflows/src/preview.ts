@@ -1,9 +1,10 @@
 import { ApiKeyScopeError } from '@hourmere/auth'
 import { validateTimeZone } from '@hourmere/core'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { LOCATION_KINDS, MAX_ANSWER_LENGTH, MAX_GUESTS, MAX_QUESTIONS } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort } from './audit.ts'
+import { workflowAuditActor, workflowAuditPort } from './audit.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import {
   validateWorkflowDefinition,
@@ -106,13 +107,13 @@ export async function previewWorkflowCandidate(
   if (!parsed.success) throw invalid('Invalid workflow preview')
   const { owner: selector, example = {}, ...candidate } = parsed.data
   const { db, followUpHostNotesEnabled, principal } = ctx
-  return db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     const owner = await writableOwner(trx, ctx, selector)
     const facts = await loadWorkflowDefinitionFacts(trx, candidate, owner, followUpHostNotesEnabled)
     const definition = validateWorkflowDefinition(candidate, facts)
     const preview = renderPreview(definition, facts, example, followUpHostNotesEnabled)
-    await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+    await (ctx.audit ?? workflowAuditPort).record(trx, {
       event: 'workflow.previewed',
       occurredAt: ctx.now?.() ?? Temporal.Now.instant(),
       owner,
@@ -120,12 +121,7 @@ export async function previewWorkflowCandidate(
       revision: null,
       trigger: definition.trigger.type,
       reason: preview.match === 'condition_false' ? 'condition_false' : undefined,
-      actor:
-        principal.kind === 'api_key'
-          ? { kind: principal.kind, userId: principal.user.id, apiKeyId: principal.apiKeyId }
-          : principal.kind === 'oauth'
-            ? { kind: principal.kind, userId: principal.user.id, clientId: principal.clientId }
-            : { kind: principal.kind, userId: principal.user.id },
+      actor: workflowAuditActor(principal),
     })
     return preview
   })
@@ -228,4 +224,7 @@ function renderPreview(
   }
 }
 
-export const previewWorkflow = workflowOperation(previewWorkflowCandidate)
+export const previewWorkflow = workflowOperation(
+  (ctx: Omit<Parameters<typeof previewWorkflowCandidate>[0], 'audit'>, input: unknown) =>
+    previewWorkflowCandidate({ ...ctx, audit: workflowAuditPort }, input),
+)

@@ -86,11 +86,13 @@ export {
   type CreateBookingInput,
   type CreateBookingResult,
   type CreateOneTimeBookingInput,
+  type CreateRoutedBookingInput,
   cancelHostBooking,
   cancelManagedBooking,
   createOneTimeBooking,
   createPublicBooking,
   createPublicTeamBooking,
+  createRoutedBooking,
   DEFAULT_PAGE_SIZE,
   expireRescheduleRequest,
   getHostBooking,
@@ -409,6 +411,12 @@ export {
   type RecurringOccurrence,
   type RecurringRule,
 } from './recurring-rules.ts'
+export {
+  listRoutingContinuationSlots,
+  type RoutingContinuationContext,
+  type RoutingContinuationEventType,
+  resolveRoutingContinuation,
+} from './routing-continuation.ts'
 export {
   archiveRoutingForm,
   createRoutingForm,

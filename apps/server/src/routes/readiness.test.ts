@@ -12,6 +12,8 @@ import {
   ensurePersonalOrganization,
   type Principal,
   parsePersistedApiKeyMetadata,
+  ssoDelegationStatus,
+  ssoHardOff,
   type TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
@@ -360,6 +362,8 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
           parsePersistedApiKeyMetadata,
           isUuid: (id: string) => z.uuid().safeParse(id).success,
           sql,
+          ssoDelegationStatus,
+          ssoHardOff,
         },
         'createCallerResolver',
         mutation,
