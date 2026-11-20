@@ -26,6 +26,8 @@ export interface FreshProofRequest {
   headers: Headers
   /** Resolved cookie-session principal; the gate rechecks its stored lifetime and person. */
   userId: string
+  /** An affected account whose login mailbox must stay stable through the write. */
+  affectedUserId?: string | undefined
   sessionId: string
   organizationId: string
   operation: string
@@ -101,6 +103,7 @@ export async function runWithFreshProof<T>(
       input: Record<string, unknown>,
       browserBinding: string,
       mailboxProof: FreshMailboxProof | undefined,
+      attemptId: string,
     ) => Promise<T>
   },
 ): Promise<FreshProofResult<T>> {
@@ -138,9 +141,9 @@ export async function runWithFreshProof<T>(
   const run = (prepared: boolean) =>
     deps.db.transaction().execute(async (trx): Promise<FreshProofResult<T> | typeof prepare> => {
       // Follow the shared team-write lock order: person, organization, then session/attempt.
-      await sql`SELECT id FROM auth."user" WHERE id = ${request.userId}::uuid FOR SHARE`.execute(
-        trx,
-      )
+      await sql`SELECT id FROM auth."user"
+      WHERE id IN (${request.userId}::uuid, ${request.affectedUserId ?? request.userId}::uuid)
+      ORDER BY id FOR SHARE`.execute(trx)
       // All team authority changes use the organization parent as their serialization point.
       const organization = await sql`SELECT id FROM auth.organization
       WHERE id = ${request.organizationId}::uuid FOR UPDATE`.execute(trx)
@@ -222,6 +225,7 @@ export async function runWithFreshProof<T>(
               attempt.proven_at && attempt.proof_expires_at
                 ? { mailbox, provenAt: attempt.proven_at, expiresAt: attempt.proof_expires_at }
                 : undefined,
+              attempt.id,
             ),
             ...cookie,
           }

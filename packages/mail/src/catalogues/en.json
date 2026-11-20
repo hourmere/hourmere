@@ -67,6 +67,8 @@
   "mailboxProof.expiry": "The link expires in {minutes} minutes and works once, in the browser where the confirmation was requested. If you did not ask for this, you can ignore this email.",
   "mailboxProof.fallback": "If the button does not work, copy this link into your browser:",
   "mailboxProof.footer": "You received this email because someone asked Hourmere to confirm this email address.",
+  "ssoLinkRemoval.subject": "A single sign-on link was removed",
+  "ssoLinkRemoval.message": "A single sign-on link on your Hourmere account was removed. You can still sign in using your email. If you didn’t expect this change, contact your team administrator.",
   "teamInvitation.defaultTeam": "Your team",
   "teamInvitation.defaultInviter": "A team member",
   "teamInvitation.subject": "Invitation to join {team}",
