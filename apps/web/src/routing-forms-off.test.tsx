@@ -202,6 +202,13 @@ function expectEditorControlsHidden() {
   expect(screen.queryByText('Fallback', { exact: true })).toBeNull()
   expect(screen.queryByText('Answer mappings', { exact: true })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Run preview' })).toBeNull()
+  expect(screen.queryByRole('region', { name: 'Publication' })).toBeNull()
+  expect(screen.queryByRole('region', { name: 'Published target health' })).toBeNull()
+  expect(
+    screen.queryByRole('button', {
+      name: /^(Review publication|Publish version|Disable routing form|Re-enable routing form|Repair )/,
+    }),
+  ).toBeNull()
 }
 
 describe('routing manager capability', () => {
