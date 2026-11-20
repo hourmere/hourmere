@@ -600,6 +600,7 @@ exits `1` with `workflows_disabled` on stderr.
 ## Manage meeting polls
 
 Use `hourmere polls <command> --input -` with a key for the poll's organization.
+`hourmere --help` separates host management from public voting commands.
 Personal event owners and current team owners or admins can manage polls. Reads allow
 `full`, `read` or `bookings`. Writes require `full` or `bookings`. Each command takes
 its JSON from stdin and rejects `--output`. Keep idempotency keys and invitation
@@ -642,6 +643,7 @@ When a different key returns `poll_already_scheduled`, the JSON error includes t
 poll ID, booking ID, chosen slot ID, status and host revision.
 
 中文：使用 `hourmere polls <command> --input -` 管理会议投票。
+`hourmere --help` 分别列出主持人管理命令和公开投票命令。
 需要投票所在组织的密钥，权限限个人活动所有者及团队当前所有者或管理员。读取允许 `full`、`read`
 或 `bookings`，写入需要 `full` 或 `bookings`。JSON 从标准输入读取，幂等键请勿放入命令参数或历史。
 公开投票创建或轮换仅在成功写入时返回一次 `publicLink`。轮换会立即使旧链接失效。仅限邀请的投票不支持
@@ -660,8 +662,10 @@ All poll JSON input must come from stdin; input files, capability flags and `--o
 are refused. Never paste capabilities into shell arguments or command history. `view`
 needs a `read`, `bookings` or `full` API key; writes need `bookings` or `full`.
 The CLI uses authenticated MCP. The public REST endpoints also permit no-login access.
+Public commands act on existing polls. A host key cannot replace a voter's own token or consent.
 
-`view` and `verify` use `{ "token": "…" }`; `join` uses `publicToken`, `name`, `email`,
+`view` accepts a public-link, verification or voting token in `{ "token": "…" }`.
+`verify` takes the emailed token. `join` uses `publicToken`, `name`, `email`,
 `timeZone` and optional `locale`. `recover` needs only `pollId` and `email`, without a
 valid token, and returns the same accepted response for unknown mailboxes. `vote` takes
 the voting token, complete `votes` with `slotId`/`value`, `consent: true`, optional
@@ -675,6 +679,8 @@ diagnostics are redacted. Calls never retry automatically; read and reconcile af
 所有 JSON 参数只能从标准输入读取，拒绝文件输入、令牌命令行参数和 `--output`。
 不要把令牌放入 shell 参数或历史。读取需要 `read`、`bookings` 或 `full` 密钥，
 写入需要 `bookings` 或 `full`。CLI 使用已认证的 MCP；公开 REST 也支持免登录。
+公开命令仅用于现有投票。密钥不能替代投票者的专用令牌或本人同意。
+`view` 接受公开链接、验证或投票令牌，`verify` 使用邮件中的令牌。
 找回只需投票 ID 与邮箱，无需有效令牌；验证首次返回的新投票令牌须保密，邮件也会发送。
 只提交投票者明确同意的完整选择和当前选票版本，遇到 `poll_changed` 应重新读取核对，
 不要自动重试。目前无功能开关。

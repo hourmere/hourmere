@@ -10,6 +10,7 @@ import {
   type SeriesEmailRecipient,
   seriesBookingEmail,
 } from '@hourmere/mail'
+import { seriesConfirmationDeadline } from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -29,6 +30,12 @@ import {
   notificationRecipientHash,
 } from './mail-limits.ts'
 import { type SeriesCalendarMember, seriesCalendarSnapshot } from './series-calendar.ts'
+import {
+  deliveredSeriesReports,
+  dispatchSeriesLinkUpdates,
+  type RenderSeriesLinkUpdate,
+  wakeSeriesLinkUpdates,
+} from './series-link-notifications.ts'
 
 const MAX_ATTEMPTS = 13
 const LEASE_MS = 600_000
@@ -44,33 +51,49 @@ interface Action {
   kind: 'confirmation' | 'cancellation'
   sequence: string
   attempts: number
-  lease_id: string | null
+  lease_id: string
+  expired: boolean
 }
+
+type Series = Pick<Action, 'organization_id' | 'series_id'>
 
 function claimSeriesNotification(db: Db, now: Date, leaseId: string) {
   // Claim only the intent. Recipient transactions and SMTP run after this commits.
   // An expired final lease is terminal even if its worker crashed.
+  const conferenceDeadline = seriesConfirmationDeadline(
+    sql.ref('intent.organization_id'),
+    sql.ref('intent.series_id'),
+    sql.ref('s.created_at'),
+    now,
+  )
   return sql<Action>`
     WITH next AS (
-      SELECT id FROM booking_series_notifications
-      WHERE row_type = 'outbox' AND kind IN ('confirmation', 'cancellation')
-        AND outbox_state = 'pending' AND due_at <= ${now}
-        AND (lease_until IS NULL OR lease_until <= ${now})
-      ORDER BY due_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
+      SELECT intent.id, intent.attempts FROM booking_series_notifications intent
+      JOIN booking_series s ON (s.organization_id, s.id) = (intent.organization_id, intent.series_id)
+      WHERE intent.row_type = 'outbox' AND intent.kind IN ('confirmation', 'cancellation')
+        AND intent.outbox_state = 'pending'
+        AND (intent.lease_until IS NULL OR intent.lease_until <= ${now})
+        AND (
+          intent.due_at <= ${now}
+          OR (
+            intent.kind = 'confirmation' AND intent.attempts = 0 AND s.created_at <= ${now}
+            AND COALESCE(${conferenceDeadline} <= ${now}, true)
+          )
+        )
+      ORDER BY intent.due_at, intent.id LIMIT 1 FOR UPDATE OF intent SKIP LOCKED
     )
     UPDATE booking_series_notifications n SET
-      outbox_state = CASE WHEN n.attempts >= ${MAX_ATTEMPTS} THEN 'exhausted' ELSE 'pending' END,
       attempts = LEAST(n.attempts + 1, ${MAX_ATTEMPTS}),
-      lease_id = CASE WHEN n.attempts < ${MAX_ATTEMPTS} THEN ${leaseId}::uuid END,
-      lease_until = CASE WHEN n.attempts < ${MAX_ATTEMPTS}
-        THEN ${new Date(now.getTime() + LEASE_MS)}::timestamptz END,
+      lease_id = ${leaseId}::uuid,
+      lease_until = ${new Date(now.getTime() + LEASE_MS)}::timestamptz,
       due_at = ${now}
     FROM next WHERE n.id = next.id
-    RETURNING n.id, n.organization_id, n.series_id, n.kind, n.sequence, n.attempts, n.lease_id
+    RETURNING n.id, n.organization_id, n.series_id, n.kind, n.sequence, n.attempts, n.lease_id,
+      next.attempts >= ${MAX_ATTEMPTS} AS expired
   `.execute(db)
 }
 
-function currentSeriesMembers(db: Db, action: Action, hostId?: string) {
+function currentSeriesMembers(db: Db, series: Series, hostId?: string) {
   return db
     .selectFrom('booking_series_occurrences as o')
     .innerJoin('bookings as b', (join) =>
@@ -130,8 +153,8 @@ function currentSeriesMembers(db: Db, action: Action, hostId?: string) {
           AND m.calendar_id IS NOT NULL
       )`.as('hasProviderCopy'),
     ])
-    .where('o.series_id', '=', action.series_id)
-    .where('o.organization_id', '=', action.organization_id)
+    .where('o.series_id', '=', series.series_id)
+    .where('o.organization_id', '=', series.organization_id)
     .where(({ not, exists, selectFrom }) =>
       not(
         exists(
@@ -183,6 +206,29 @@ type Recipient = {
   role: 'booker' | 'guest' | 'host'
 }
 
+type NotificationData = NonNullable<Awaited<ReturnType<typeof loadNotificationData>>>
+
+function providerCopyHost(data: NotificationData, recipient: Recipient) {
+  return recipient.role === 'host'
+    ? recipient.id
+    : data.hosts.find((host) => host.email.toLowerCase() === recipient.email.toLowerCase())?.id
+}
+
+function seriesMailDetails(
+  data: NotificationData,
+  booker: Pick<Recipient, 'name' | 'locale'>,
+  publicUrl: string,
+): Omit<SeriesEmailDetails, 'members'> {
+  return {
+    eventName: data.booking.eventName,
+    hostName: data.hosts[0]?.displayName ?? '',
+    ...(data.collective && { hostNames: data.hosts.map((host) => host.displayName) }),
+    inviteeName: booker.name,
+    locale: booker.locale,
+    publicUrl: new URL(publicUrl).origin,
+  }
+}
+
 function pinnedOrganizer(member: Member): IcsPerson | undefined {
   if (member.organizerEmail && member.organizerName)
     return { name: member.organizerName, email: member.organizerEmail }
@@ -191,7 +237,7 @@ function pinnedOrganizer(member: Member): IcsPerson | undefined {
 async function prepareSeriesOrganizers(
   deps: NotificationDeps,
   action: Action,
-  locale: string | null,
+  locale: string | null | undefined,
   now: Date,
   affected: ReadonlySet<string>,
 ) {
@@ -209,7 +255,9 @@ async function prepareSeriesOrganizers(
     const host = invitationOrganizer(data)
     const name =
       (data.collective ? data.hosts.find((h) => h.id === host?.id)?.displayName : host?.name) ||
-      bookingHostName(locale)
+      bookingHostName(
+        locale === undefined ? data.attendees.find((a) => a.isBooker)?.locale : locale,
+      )
     // The log mailer has no SMTP identity. Collective snapshots still keep host addresses private.
     const email = sender || (!data.collective && host?.email) || 'calendar@hourmere.invalid'
     await pinCalendarOrganizer(deps.db, member.rootId, { name, email })
@@ -217,16 +265,8 @@ async function prepareSeriesOrganizers(
 }
 
 async function deliveredSeriesCalendarOrdinals(db: Db, action: Action, recipient: Recipient) {
-  const series = await db
-    .selectFrom('booking_series_notifications')
+  const series = await deliveredSeriesReports(db, action, recipient)
     .select('calendar_ordinals')
-    .where('organization_id', '=', action.organization_id)
-    .where('series_id', '=', action.series_id)
-    .where('row_type', '=', 'receipt')
-    .where('kind', 'in', ['confirmation', 'link_update'])
-    .where('outcome', '=', 'delivered')
-    .where('recipient_id', '=', recipient.id)
-    .where('recipient_role', '=', recipient.role)
     .where('calendar_ordinals', 'is not', null)
     .execute()
   const perOccurrence = await db
@@ -262,6 +302,121 @@ async function deliveredSeriesCalendarOrdinals(db: Db, action: Action, recipient
     ...series.flatMap((r) => r.calendar_ordinals ?? []),
     ...perOccurrence.map((r) => r.ordinal),
   ])
+}
+
+function seriesRecipientCopy(
+  series: Series,
+  action: Parameters<typeof seriesCalendarSnapshot>[0],
+  recipient: Recipient,
+  details: Omit<SeriesEmailDetails, 'members'>,
+  entries: readonly { row: Member; member: SeriesEmailMember }[],
+  now: Date,
+) {
+  const mailRecipient: SeriesEmailRecipient =
+    recipient.role === 'host'
+      ? {
+          ...recipient,
+          role: 'host',
+          seriesUrl: new URL(`/app/booking-series/${series.series_id}`, details.publicUrl).href,
+        }
+      : { ...recipient, role: recipient.role, token: randomBytes(32).toString('base64url') }
+  const token = 'token' in mailRecipient ? mailRecipient.token : undefined
+  const calendarMembers: SeriesCalendarMember[] = []
+  for (const { row, member } of entries) {
+    const organizer = pinnedOrganizer(row)
+    if (organizer)
+      calendarMembers.push({
+        ...member,
+        ordinal: row.ordinal,
+        rootId: row.rootId,
+        depth: row.depth,
+        organizer,
+        hasProviderCopy: row.hasProviderCopy,
+      })
+  }
+  const { attachment, ordinals } = seriesCalendarSnapshot(
+    action,
+    calendarMembers,
+    {
+      ...recipient,
+      locale: recipient.role === 'host' ? recipient.locale : (details.locale ?? null),
+    },
+    details.eventName,
+    details.inviteeName,
+    now,
+  )
+  const members = entries.map(({ member }) => member)
+  return {
+    message: () => ({
+      ...seriesBookingEmail(action.kind, { ...details, members }, mailRecipient),
+      ...(attachment && { attachments: [attachment] }),
+    }),
+    report: {
+      calendar_ordinals: ordinals,
+      reported_ordinals: entries.map(({ row }) => row.ordinal),
+      reported_link_states: members.map((member) =>
+        member.state === 'confirmed'
+          ? (action.kind !== 'cancelled' && member.conference?.state) || 'no_conference'
+          : member.state,
+      ),
+      manage_token_hash: token ? createHash('sha256').update(token, 'utf8').digest() : null,
+      capability_scope: token ? (recipient.role === 'booker' ? 'manage' : 'read') : null,
+    },
+  } as const
+}
+
+function renderSeriesLinkUpdate(deps: NotificationDeps): RenderSeriesLinkUpdate {
+  return async (trx, link, identity, clock) => {
+    const data = await loadNotificationData(trx, link.root_booking_id)
+    const booker = data?.attendees.find((a) => a.isBooker)
+    if (!data || !booker) return
+    const target =
+      identity.role === 'host'
+        ? data.hosts.find((host) => host.id === identity.id)
+        : data.attendees.find((attendee) => attendee.id === identity.id)
+    if (!target) return
+    const recipient = { ...target, ...identity }
+    const reports = await deliveredSeriesReports(trx, link, recipient)
+      .select(['kind', 'sent_at', 'calendar_ordinals', 'reported_ordinals', 'reported_link_states'])
+      .orderBy('kind') // The confirmation is first, followed by link updates in outbox order.
+      .orderBy('sequence')
+      .execute()
+    const lastState = new Map<number, string>()
+    let previousReportAt: Date | null = null
+    for (const report of reports) {
+      for (const [index, ordinal] of (report.reported_ordinals ?? []).entries()) {
+        const state = report.reported_link_states?.[index]
+        if (state) lastState.set(ordinal, state)
+      }
+      if (report.calendar_ordinals?.length && report.sent_at) {
+        // A prior update may have advanced DTSTAMP beyond its send second.
+        const minimum: number = previousReportAt
+          ? (Math.floor(previousReportAt.getTime() / 1000) + 1) * 1000
+          : report.sent_at.getTime()
+        previousReportAt = new Date(Math.max(minimum, report.sent_at.getTime()))
+      }
+    }
+    const rows = await currentSeriesMembers(trx, link, providerCopyHost(data, recipient))
+    const now = clock()
+    const entries = rows
+      .map((row) => ({ row, member: describeMember(row, now, false) }))
+      .filter(({ row, member }) => {
+        const state = member.conference?.state
+        return (
+          (state === 'ready' || (state === 'failed' && recipient.role !== 'guest')) &&
+          state !== lastState.get(row.ordinal)
+        )
+      })
+    if (!entries.length) return
+    return seriesRecipientCopy(
+      link,
+      { kind: 'link_update', previousReportAt },
+      recipient,
+      seriesMailDetails(data, booker, deps.publicUrl),
+      entries,
+      now,
+    )
+  }
 }
 
 async function sendSeriesRecipient(
@@ -328,7 +483,7 @@ async function sendSeriesRecipient(
         sequence: action.sequence,
         recipient_role: recipient.role,
         recipient_id: recipient.id,
-        // A provisional receipt claims the identity. Only delivery or suppression commits.
+        // A provisional receipt claims the identity. Temporary failures roll it back.
         outcome: 'rejected',
       })
       .onConflict((oc) => oc.constraint('booking_series_notifications_identity_key').doNothing())
@@ -340,80 +495,47 @@ async function sendSeriesRecipient(
     const reason = await notificationEmailBudget(trx, deps, recipientHash, inviteeFacing, now)
     if (reason) {
       await updateReceipt().set({ outcome: 'suppressed', suppression_reason: reason }).execute()
+      await wakeSeriesLinkUpdates(trx, action, clock(), recipient)
       return { state: 'done', reason } as const
     }
 
-    const mailRecipient: SeriesEmailRecipient =
-      recipient.role === 'host'
+    const copy = seriesRecipientCopy(
+      action,
+      action.kind === 'cancellation'
         ? {
-            ...recipient,
-            role: 'host',
-            seriesUrl: new URL(`/app/booking-series/${action.series_id}`, details.publicUrl).href,
-          }
-        : { ...recipient, role: recipient.role, token: randomBytes(32).toString('base64url') }
-    const token = 'token' in mailRecipient ? mailRecipient.token : undefined
-    const members: SeriesEmailMember[] = []
-    const calendarMembers: SeriesCalendarMember[] = []
-    for (const row of rows) {
-      const member = describeMember(row, now, affected.has(row.occurrenceId))
-      members.push(member)
-      const organizer = pinnedOrganizer(row)
-      if (organizer)
-        calendarMembers.push({
-          ...member,
-          ordinal: row.ordinal,
-          rootId: row.rootId,
-          depth: row.depth,
-          organizer,
-          hasProviderCopy: row.hasProviderCopy,
-        })
-    }
-    const kind = action.kind === 'confirmation' ? 'confirmed' : 'cancelled'
-    const { attachment, ordinals } = seriesCalendarSnapshot(
-      kind === 'cancelled'
-        ? {
-            kind,
+            kind: 'cancelled',
             previouslyDelivered: await deliveredSeriesCalendarOrdinals(trx, action, recipient),
           }
-        : { kind },
-      calendarMembers,
-      {
-        ...recipient,
-        locale: recipient.role === 'host' ? recipient.locale : (details.locale ?? null),
-      },
-      details.eventName,
-      details.inviteeName,
+        : { kind: 'confirmed' },
+      recipient,
+      details,
+      rows.map((row) => ({
+        row,
+        member: describeMember(row, now, affected.has(row.occurrenceId)),
+      })),
       now,
     )
-    const sentAt = await sendAndRecordBookingEmail(
-      trx,
-      deps.mailer,
-      action.organization_id,
-      inviteeFacing ? recipientHash : null,
-      () => ({
-        ...seriesBookingEmail(kind, { ...details, members }, mailRecipient),
-        ...(attachment && { attachments: [attachment] }),
-      }),
-      clock,
-      signal,
-    )
+    let sentAt: Date
+    try {
+      sentAt = await sendAndRecordBookingEmail(
+        trx,
+        deps.mailer,
+        action.organization_id,
+        inviteeFacing ? recipientHash : null,
+        copy.message,
+        clock,
+        signal,
+      )
+    } catch (error) {
+      if (!(error instanceof MailRejectedError && error.permanent)) throw error
+      // A permanent recipient refusal commits the provisional rejected receipt.
+      await wakeSeriesLinkUpdates(trx, action, clock(), recipient)
+      return { state: 'done' } as const
+    }
     await updateReceipt()
-      .set({
-        outcome: 'delivered',
-        sent_at: sentAt,
-        calendar_ordinals: ordinals,
-        reported_ordinals: rows.map((row) => row.ordinal),
-        reported_link_states: members.map((member) =>
-          member.state === 'confirmed'
-            ? action.kind === 'confirmation'
-              ? (member.conference?.state ?? 'no_conference')
-              : 'no_conference'
-            : member.state,
-        ),
-        manage_token_hash: token ? createHash('sha256').update(token, 'utf8').digest() : null,
-        capability_scope: token ? (recipient.role === 'booker' ? 'manage' : 'read') : null,
-      })
+      .set({ outcome: 'delivered', sent_at: sentAt, ...copy.report })
       .execute()
+    await wakeSeriesLinkUpdates(trx, action, clock(), recipient)
     return { state: 'done' } as const
   })
   if (outcome.reason) {
@@ -461,13 +583,8 @@ async function deliverSeriesNotification(
   const booker = data?.attendees.find((a) => a.isBooker)
   if (!data || !booker) return 'skipped'
   const details = {
-    eventName: data.booking.eventName,
-    hostName: data.hosts[0]?.displayName ?? '',
-    ...(data.collective && { hostNames: data.hosts.map((host) => host.displayName) }),
-    inviteeName: booker.name,
-    locale: booker.locale,
+    ...seriesMailDetails(data, booker, deps.publicUrl),
     cancelReason: operation.cancel_reason,
-    publicUrl: new URL(deps.publicUrl).origin,
   }
   const affected = new Set(action.kind === 'cancellation' ? operation.affected_occurrence_ids : [])
   await prepareSeriesOrganizers(deps, action, booker.locale, clock(), affected)
@@ -488,10 +605,7 @@ async function deliverSeriesNotification(
           action,
           operation.root_booking_id,
           recipient,
-          recipient.role === 'host'
-            ? recipient.id
-            : data.hosts.find((host) => host.email.toLowerCase() === recipient.email.toLowerCase())
-                ?.id,
+          providerCopyHost(data, recipient),
           details,
           affected,
           clock,
@@ -507,8 +621,11 @@ async function deliverSeriesNotification(
   return retry ? 'pending' : 'done'
 }
 
-async function dispatchSeriesNotifications(deps: NotificationDeps, signal: AbortSignal) {
-  const clock = () => new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+async function dispatchSeriesActions(
+  deps: NotificationDeps,
+  clock: () => Date,
+  signal: AbortSignal,
+) {
   const exhausted = (action: Action) =>
     (deps.log ?? console.warn)(
       JSON.stringify({
@@ -523,37 +640,47 @@ async function dispatchSeriesNotifications(deps: NotificationDeps, signal: Abort
       rows: [action],
     } = await claimSeriesNotification(deps.db, clock(), randomUUID())
     if (!action) return
-    if (!action.lease_id) {
-      exhausted(action)
-      continue
-    }
-    const timeout = AbortSignal.timeout(SEND_MS)
-    let state: 'pending' | 'done' | 'skipped' | 'exhausted' = 'pending'
-    try {
-      state = await deliverSeriesNotification(
-        deps,
-        action,
-        clock,
-        AbortSignal.any([signal, timeout]),
-      )
-    } catch {
-      // SMTP and rendering errors can contain the message or capability.
+    let state: 'pending' | 'done' | 'skipped' | 'exhausted' = action.expired
+      ? 'exhausted'
+      : 'pending'
+    if (!action.expired) {
+      const timeout = AbortSignal.timeout(SEND_MS)
+      try {
+        state = await deliverSeriesNotification(
+          deps,
+          action,
+          clock,
+          AbortSignal.any([signal, timeout]),
+        )
+      } catch {
+        // SMTP and rendering errors can contain the message or capability.
+      }
     }
     if (state === 'pending' && action.attempts >= MAX_ATTEMPTS) state = 'exhausted'
-    const now = clock()
-    const finished = await deps.db
-      .updateTable('booking_series_notifications')
-      .set({
-        outbox_state: state,
-        due_at: state === 'pending' ? new Date(now.getTime() + retryDelay(action.attempts)) : now,
-        lease_id: null,
-        lease_until: null,
-      })
-      .where('id', '=', action.id)
-      .where('lease_id', '=', action.lease_id)
-      .where('lease_until', '>', now)
-      .returning('id')
-      .executeTakeFirst()
+    if (state === 'exhausted' && action.kind === 'confirmation') {
+      // A worker can lose its final confirmation lease before it pins the organizers.
+      // Later link updates still need stable calendar identities, even without a confirmation.
+      await prepareSeriesOrganizers(deps, action, undefined, clock(), new Set())
+    }
+    const finished = await deps.db.transaction().execute(async (trx) => {
+      if (state !== 'pending') await lockNotificationEmailBudget(trx)
+      const now = clock()
+      const updated = await trx
+        .updateTable('booking_series_notifications')
+        .set({
+          outbox_state: state,
+          due_at: state === 'pending' ? new Date(now.getTime() + retryDelay(action.attempts)) : now,
+          lease_id: null,
+          lease_until: null,
+        })
+        .where('id', '=', action.id)
+        .where('lease_id', '=', action.lease_id)
+        .where('lease_until', '>', now)
+        .returning('id')
+        .executeTakeFirst()
+      if (updated && state !== 'pending') await wakeSeriesLinkUpdates(trx, action, now)
+      return updated
+    })
     if (finished && state === 'exhausted') exhausted(action)
   }
 }
@@ -568,6 +695,22 @@ export function seriesNotificationDispatchJob(deps: NotificationDeps) {
     schedule: { cron: '* * * * *', payload: {} },
     expireInSeconds: 300,
     retry: { limit: 12, delaySeconds: 30, backoff: true, maxDelaySeconds: 3600 },
-    handler: (_payload, { signal }) => dispatchSeriesNotifications(deps, signal),
+    handler: async (_payload, { signal }) => {
+      const clock = () => new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+      await dispatchSeriesActions(deps, clock, signal)
+      await dispatchSeriesLinkUpdates(
+        deps,
+        clock,
+        signal,
+        {
+          batchSize: BATCH_SIZE,
+          leaseMs: LEASE_MS,
+          sendMs: SEND_MS,
+          maxAttempts: MAX_ATTEMPTS,
+          retryDelay,
+        },
+        renderSeriesLinkUpdate(deps),
+      )
+    },
   })
 }

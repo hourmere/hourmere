@@ -20,7 +20,12 @@ import {
   prepareBookingAttendees,
   sha256,
 } from './bookings.ts'
-import { automaticConference } from './conferences.ts'
+import {
+  automaticConference,
+  automaticMeet,
+  eligibleMeetHosts,
+  withLocationAvailability,
+} from './conferences.ts'
 import type { BookingNotifier, PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { lockOrganization } from './hosts.ts'
@@ -76,6 +81,10 @@ export interface CreateBookingSeriesOptions extends RecurringBookingAdmissionDep
   notifyWebhook?: BookingNotifier | undefined
   /** The transaction-bound email notifier for each member's reminders and follow-ups. */
   notifyMemberEmail?: BookingNotifier | undefined
+  /** The existing transaction-bound provider calendar notifier for each member. */
+  notifyMemberCalendar?: BookingNotifier | undefined
+  /** The existing transaction-bound automatic conference notifier for each member. */
+  notifyMemberConference?: BookingNotifier | undefined
 }
 
 interface SeriesBooking {
@@ -218,8 +227,14 @@ async function createBookingSeries(
 
       const checked = await checkRecurringAvailability(trx, batch.availability)
       if (!checked.canBook) throw seriesUnavailable()
+      const candidates =
+        roundRobin && automaticMeet(batch.locationOption)
+          ? await withLocationAvailability(current.locations, input.locationOptionId, () =>
+              eligibleMeetHosts(trx, checked.hostUserIds, current.id, ctx.automaticMeet),
+            )
+          : checked.hostUserIds
       const hostUserIds = roundRobin
-        ? [await assignRoundRobinHost(trx, current.id, checked.hostUserIds)]
+        ? [await assignRoundRobinHost(trx, current.id, candidates)]
         : current.hostUserIds
 
       const { token, hash } = newManageToken()
@@ -241,6 +256,7 @@ async function createBookingSeries(
           first_local_start: batch.firstLocalStart,
           requested_count: request.rule.count,
           duration_minutes: batch.availability.durationMinutes,
+          created_at: now.toString(),
           notification_snapshot: jsonb(batch.notificationSnapshot),
           host_policy_snapshot: jsonb({ schedulingType: current.schedulingType, hostUserIds }),
           manage_token_hash: hash,
@@ -248,12 +264,15 @@ async function createBookingSeries(
         .returning(['id', 'revision'])
         .executeTakeFirstOrThrow()
 
-      // Roots use the explicitly supplied email and webhook hooks. The series
-      // outbox owns confirmation and provider calendar work has its own rollout.
+      // The series outbox owns confirmation. Provider jobs still reconcile each root.
       const bookingContext = {
         requestId: ctx.requestId,
+        automaticMeet: ctx.automaticMeet,
+        automaticZoom: ctx.automaticZoom,
         notify: (async (trx, event, now) => {
+          await options.notifyMemberConference?.(trx, event, now)
           await options.notifyMemberEmail?.(trx, event, now)
+          await options.notifyMemberCalendar?.(trx, event, now)
           await options.notifyWebhook?.(trx, event, now)
         }) satisfies BookingNotifier,
         now: ctx.now,
@@ -317,7 +336,10 @@ async function createBookingSeries(
           row_type: 'outbox',
           kind: 'confirmation',
           sequence: revision,
-          due_at: now.toString(),
+          due_at: (automaticConference(batch.locationOption)
+            ? now.add({ minutes: 30 })
+            : now
+          ).toString(),
           attempts: 0,
           outbox_state: 'pending',
         })
@@ -445,13 +467,7 @@ async function resolveBatch(
     .executeTakeFirst()
   if (!policy) throw eventTypeNotFound()
   if (policy.recurrence_revision !== request.preview.eventRevision) throw seriesChanged()
-  if (
-    !policy.recurrence ||
-    event.bookingMode === 'group' ||
-    automaticConference(event.location) ||
-    event.locations?.some(automaticConference)
-  )
-    throw recurrenceNotSupported()
+  if (!policy.recurrence || event.bookingMode === 'group') throw recurrenceNotSupported()
 
   const { timeZone, maxOccurrences, allowedPatterns } = policy.recurrence as {
     timeZone: string
@@ -464,7 +480,7 @@ async function resolveBatch(
   if (request.attendees.guests.length && !event.allowGuests)
     throw new DomainError('invalid', 'guests_not_allowed', 'This event type does not allow guests')
   validateResponses(event.questions, input.responses ?? {})
-  selectBookableLocationOption(event, input.locationOptionId)
+  const locationOption = selectBookableLocationOption(event, input.locationOptionId)
 
   const durationMinutes = selectDurationMinutes(event, input.durationMinutes)
   const expanded = expandRecurringRule({ ...input, timeZone, durationMinutes, now })
@@ -490,6 +506,7 @@ async function resolveBatch(
     timeZone,
     firstLocalStart: first.localStart,
     occurrences,
+    locationOption,
     notificationSnapshot: createNotificationSnapshot(policy.notifications),
     availability: {
       eventTypeId: event.id,

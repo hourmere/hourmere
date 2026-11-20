@@ -107,6 +107,8 @@ const PACKAGE_EXPORTS = [
   'workflowReferences',
   'workflowRunTiming',
   'workflowTimerDueAt',
+  // Read-only identity lookup for the shared webhook repair job's workflow rows.
+  'workflowWebhookAuditIdentities',
 ]
 
 async function disabled(run: () => Promise<unknown>) {

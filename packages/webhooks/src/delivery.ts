@@ -4,7 +4,7 @@ import { type Db, isImportedBooking, type WebhookDeliveries, type Webhooks } fro
 import { writeAuditEvent } from '@hourmere/db/audit'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { AttendeeNoShowNotifier, BookingEvent, BookingNotifier } from '@hourmere/scheduling'
-import type { WorkflowTriggerType } from '@hourmere/workflows'
+import type { WorkflowAuditPort, WorkflowTriggerType } from '@hourmere/workflows'
 import { workflowExecution } from '@hourmere/workflows/hard-off'
 import { type Insertable, type Selectable, sql } from 'kysely'
 import { z } from 'zod'
@@ -28,6 +28,7 @@ export interface WebhookQueue {
 export interface WebhookDeps extends WebhookSettings {
   db: Db
   now?: (() => Temporal.Instant) | undefined
+  workflowAudit?: WorkflowAuditPort | undefined
   /** Only isolated fixtures replace the built-in HTTP(S)/DNS transport. */
   transport?: WebhookTransport | undefined
   /** Only isolated fixtures shorten the Slack sender wait (SLACK_SENDER_WAIT_MS). */
@@ -76,6 +77,7 @@ export async function captureWorkflowWebhook(
   trx: Db,
   input: WorkflowWebhookCapture,
   now: Temporal.Instant,
+  audit?: WorkflowAuditPort,
 ): Promise<void> {
   if (!settings.enabled) return
   if (!trx.isTransaction) throw new Error('Webhook capture requires the workflow transaction')
@@ -115,7 +117,7 @@ export async function captureWorkflowWebhook(
   if (!endpoint) return
 
   const eventId = randomUUID()
-  await insertWebhookDelivery(queue, trx, {
+  const inserted = await insertWebhookDelivery(queue, trx, {
     webhook_id: endpoint.id,
     organization_id: booking.organization_id,
     booking_id: booking.id,
@@ -144,6 +146,23 @@ export async function captureWorkflowWebhook(
       },
     }),
     created_at: new Date(now.epochMilliseconds),
+  })
+  if (!inserted) return
+  const { hardOffWorkflowAuditPort } = await import('@hourmere/workflows')
+  await (audit ?? hardOffWorkflowAuditPort()).record(trx, {
+    event: 'workflow.webhook_queued',
+    occurredAt: now,
+    actor: { kind: 'background', job: 'dispatch' },
+    owner: booking.personal_owner_id
+      ? {
+          kind: 'personal',
+          userId: booking.personal_owner_id,
+          organizationId: booking.organization_id,
+        }
+      : { kind: 'team', organizationId: booking.organization_id },
+    workflowId: input.workflowId,
+    revision: input.workflowRevision,
+    trigger: input.trigger,
   })
 }
 
@@ -322,6 +341,7 @@ async function insertWebhookDelivery(
         singletonKey: delivery.id,
       },
     )
+  return delivery
 }
 
 export function webhookDeliveryJob(deps: WebhookDeps) {
@@ -353,18 +373,19 @@ export async function deliverWorkflowWebhook(
     .executeTakeFirst()
   if (!identity?.workflow_run_id) return
   // Keep workflow schema initialization out of ordinary webhook delivery.
-  const { lockWorkflowWebhookRun } = await import('@hourmere/workflows')
+  const { hardOffWorkflowAuditPort, lockWorkflowWebhookRun } = await import('@hourmere/workflows')
   const runId = identity.workflow_run_id
   const now = deps.now ?? (() => Temporal.Now.instant())
   const retry = await deps.db.transaction().execute(async (trx) => {
     // Match capture and lifecycle lock order. The endpoint and delivery lock order
     // remains the same as for booking webhooks.
-    const run = await lockWorkflowWebhookRun(trx, {
+    const locked = await lockWorkflowWebhookRun(trx, {
       runId,
       organizationId: identity.organization_id,
       bookingId: identity.booking_id,
       webhookId: identity.webhook_id,
     })
+    const run = locked?.eligibility
     const endpoint = await trx
       .selectFrom('webhooks')
       .selectAll()
@@ -428,18 +449,46 @@ export async function deliverWorkflowWebhook(
       .forUpdate()
       .executeTakeFirst()
     if (current?.status !== 'pending') return false
-    if (!eligible) return skipWebhookDelivery(trx, deliveryId, 'disabled')
     const attemptAt = now()
+    async function recordOutcome(outcome: 'delivered' | 'failed', reason?: 'expired') {
+      if (!locked) return
+      await (deps.workflowAudit ?? hardOffWorkflowAuditPort()).record(trx, {
+        ...locked.auditIdentity,
+        event: outcome === 'delivered' ? 'workflow.webhook_completed' : 'workflow.webhook_failed',
+        occurredAt: attemptAt,
+        actor: { kind: 'background', job: 'dispatch' },
+        ...(reason && { reason }),
+      })
+    }
+    if (!eligible) {
+      await skipWebhookDelivery(trx, deliveryId, 'disabled')
+      await recordOutcome('failed')
+      return false
+    }
     const firstAttempt = markedHere || current.last_attempt_at === null
     if (
       (firstAttempt && attemptAt.epochMilliseconds >= run.expiresAt) ||
       delivery.created_at.getTime() < attemptAt.subtract({ hours: 24 * 30 }).epochMilliseconds
-    )
-      return skipWebhookDelivery(trx, deliveryId, 'expired', markedHere)
+    ) {
+      await skipWebhookDelivery(trx, deliveryId, 'expired', markedHere)
+      await recordOutcome('failed', 'expired')
+      return false
+    }
     // This worker knows it has not yet entered the transport. A marker left by
     // a previous worker is ambiguous and must still allow a retry.
     if (markedHere && signal.aborted) current = { ...current, last_attempt_at: null }
-    return attemptWebhook(trx, deps, endpoint, current, signal, attemptAt, jobAttempt, credentials)
+    const { retry, outcome } = await attemptWebhook(
+      trx,
+      deps,
+      endpoint,
+      current,
+      signal,
+      attemptAt,
+      jobAttempt,
+      credentials,
+    )
+    if (outcome !== 'pending') await recordOutcome(outcome)
+    return retry
   })
   throwIfWebhookRetry(retry, signal)
 }
@@ -547,9 +596,13 @@ export async function deliverWebhook(
         actor ?? null,
         delivery.organization_id,
       )
-      if (!access.allowed) return skipWebhookDelivery(trx, deliveryId, 'disabled')
+      if (!access.allowed) {
+        await skipWebhookDelivery(trx, deliveryId, 'disabled')
+        return false
+      }
     }
-    return attemptWebhook(trx, deps, endpoint, delivery, signal, now, jobAttempt)
+    const { retry } = await attemptWebhook(trx, deps, endpoint, delivery, signal, now, jobAttempt)
+    return retry
   })
   if (retry === 'workflow') return guardedWorkflowWebhook(deps, deliveryId, signal, jobAttempt)
   throwIfWebhookRetry(retry, signal)
@@ -593,7 +646,7 @@ async function attemptWebhook(
   now: Temporal.Instant,
   jobAttempt: number,
   credentials = webhookCredentials(deps, endpoint),
-) {
+): Promise<{ retry: boolean; outcome: 'pending' | 'delivered' | 'failed' }> {
   const deliveryId = delivery.id
   // pg-boss also counts runs lost to a killed worker, whose transaction rolled back.
   const attempt = Math.min(13, Math.max(delivery.attempts + 1, jobAttempt))
@@ -655,6 +708,7 @@ async function attemptWebhook(
       details: { events: endpoint.events },
     })
   }
+  const outcome = error ? (slackRevoked || attempt === 13 ? 'failed' : 'pending') : 'delivered'
   await trx
     .updateTable('webhook_deliveries')
     .set({
@@ -665,12 +719,12 @@ async function attemptWebhook(
           : null,
       http_status: status,
       last_error: error,
-      status: error ? (slackRevoked || attempt === 13 ? 'failed' : 'pending') : 'delivered',
+      status: outcome,
       delivered_at: error ? null : new Date(now.epochMilliseconds),
     })
     .where('id', '=', deliveryId)
     .execute()
-  return error !== null && !slackRevoked
+  return { retry: error !== null && !slackRevoked, outcome }
 }
 
 async function skipWebhookDelivery(
@@ -684,7 +738,6 @@ async function skipWebhookDelivery(
     .set({ status: 'skipped', last_error: reason, ...(clearMarker && { last_attempt_at: null }) })
     .where('id', '=', deliveryId)
     .execute()
-  return false
 }
 
 function throwIfWebhookRetry(retry: boolean, signal: AbortSignal) {
@@ -693,7 +746,11 @@ function throwIfWebhookRetry(retry: boolean, signal: AbortSignal) {
     throw new Error(signal.aborted ? 'Webhook delivery interrupted' : 'Webhook delivery failed')
 }
 
-export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
+export function webhookCleanupJob(
+  db: Db,
+  now = () => Temporal.Now.instant(),
+  workflowAudit?: WorkflowAuditPort,
+) {
   return defineJob({
     name: 'webhook-cleanup',
     payload: z.strictObject({}),
@@ -701,16 +758,13 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
     schedule: { cron: '*/15 * * * *', payload: {} },
     expireInSeconds: 30,
     handler: async (_, { signal }) => {
-      // One orphan batch and one retention batch per dispatch; unfinished work stays for
-      // the next scheduled run. Leave 20s of the 30s pg-boss lease for scheduling/commit.
+      // Bound reconciliation and retention per dispatch. Leave 20s of the 30s pg-boss
+      // lease for scheduling and commit.
       const deadline = performance.now() + 10_000
-      async function batch(
-        phase: 'reconciliation' | 'retention',
-        run: (trx: Db) => Promise<unknown>,
-      ) {
+      async function batch<T>(phase: 'reconciliation' | 'retention', run: (trx: Db) => Promise<T>) {
         if (signal.aborted || performance.now() >= deadline) return
         try {
-          await db.transaction().execute(async (trx) => {
+          return await db.transaction().execute(async (trx) => {
             // Pool acquisition may itself have consumed the budget.
             const remaining = Math.floor(deadline - performance.now())
             if (signal.aborted || remaining <= 0) return
@@ -719,7 +773,7 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
               set_config('lock_timeout', ${`${Math.min(1000, remaining)}ms`}, true)
             `.execute(trx)
             if (signal.aborted || performance.now() >= deadline) return
-            await run(trx)
+            return run(trx)
           })
         } catch (error) {
           // A canceled or lock-unavailable batch rolls back completely. Retry next pass rather than
@@ -735,8 +789,9 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
       // job cannot make progress. Keep this test in the UPDATE statement and skip locked
       // deliveries so reconciliation never races an in-flight acknowledgement.
       // pg-boss is pinned; its schema belongs to pg-boss and is never migrated here.
-      await batch('reconciliation', (trx) =>
-        sql`
+      function failOrphanedDeliveries(trx: Db, workflow: boolean, limit: number) {
+        const runFilter = workflow ? sql`IS NOT NULL` : sql`IS NULL`
+        return sql<{ id: string }>`
         WITH job_history AS MATERIALIZED (
           -- Keep only pending keys before aggregating. Reuse one retained-job scan for
           -- liveness and attempts; hashing all retained jobs can spill as history grows.
@@ -748,31 +803,71 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
           FROM pgboss.job j
           WHERE j.name = ${WEBHOOK_DELIVERY_JOB}
             AND j.singleton_key IN (
-              SELECT p.id::text FROM webhook_deliveries p WHERE p.status = 'pending'
+              SELECT p.id::text FROM webhook_deliveries p
+              WHERE p.status = 'pending' AND p.workflow_run_id ${runFilter}
             )
           GROUP BY j.singleton_key
         ), orphaned AS MATERIALIZED (
           SELECT d.id, h.attempts FROM webhook_deliveries d
           LEFT JOIN job_history h ON h.singleton_key = d.id::text
-          WHERE d.status = 'pending' AND NOT COALESCE(h.live, false)
-          ORDER BY d.id LIMIT 1000 FOR UPDATE OF d SKIP LOCKED
+          WHERE d.status = 'pending' AND d.workflow_run_id ${runFilter} AND NOT COALESCE(h.live, false)
+          ORDER BY d.id LIMIT ${limit} FOR UPDATE OF d SKIP LOCKED
         )
         UPDATE webhook_deliveries d SET status = 'failed', last_error = 'job_missing',
           attempts = LEAST(13, GREATEST(d.attempts, COALESCE(o.attempts, 0)))
         FROM orphaned o
         WHERE d.id = o.id AND d.status = 'pending'
-      `.execute(trx),
+        RETURNING d.id
+      `.execute(trx)
+      }
+      const limit = 1000
+      // Commit ordinary repairs independently of the workflow audit writer.
+      const ordinary = await batch('reconciliation', (trx) =>
+        failOrphanedDeliveries(trx, false, limit),
       )
-      await batch('retention', (trx) =>
-        sql`
-        WITH expired AS (
-          SELECT id FROM webhook_deliveries
-          WHERE created_at < ${new Date(now().subtract({ hours: 24 * 30 }).epochMilliseconds)}
-          ORDER BY created_at, id LIMIT 1000 FOR UPDATE SKIP LOCKED
+      try {
+        const remaining = limit - (ordinary?.rows.length ?? limit)
+        if (remaining > 0)
+          await batch('reconciliation', async (trx) => {
+            const pending = await trx
+              .selectFrom('webhook_deliveries')
+              .select('id')
+              .where('status', '=', 'pending')
+              .where('workflow_run_id', 'is not', null)
+              .limit(1)
+              .executeTakeFirst()
+            if (!pending) return
+            const { rows } = await failOrphanedDeliveries(trx, true, remaining)
+            if (rows.length === 0) return
+            const { hardOffWorkflowAuditPort, workflowWebhookAuditIdentities } = await import(
+              '@hourmere/workflows'
+            )
+            const repaired = await workflowWebhookAuditIdentities(
+              trx,
+              rows.map(({ id }) => id),
+            )
+            const audit = workflowAudit ?? hardOffWorkflowAuditPort()
+            const occurredAt = now()
+            for (const auditIdentity of repaired)
+              await audit.record(trx, {
+                ...auditIdentity,
+                event: 'workflow.webhook_failed',
+                occurredAt,
+                actor: { kind: 'background', job: 'repair' },
+              })
+          })
+      } finally {
+        await batch('retention', (trx) =>
+          sql`
+          WITH expired AS (
+            SELECT id FROM webhook_deliveries
+            WHERE created_at < ${new Date(now().subtract({ hours: 24 * 30 }).epochMilliseconds)}
+            ORDER BY created_at, id LIMIT 1000 FOR UPDATE SKIP LOCKED
+          )
+          DELETE FROM webhook_deliveries d USING expired e WHERE d.id = e.id
+        `.execute(trx),
         )
-        DELETE FROM webhook_deliveries d USING expired e WHERE d.id = e.id
-      `.execute(trx),
-      )
+      }
     },
   })
 }

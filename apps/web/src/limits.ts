@@ -53,6 +53,7 @@ export const PROFILE = {
 } as const
 
 export const BOOKING = {
+  maxGuests: 10,
   cancelReasonMaxLength: 1000,
   /** The booking list's `q`, after trimming. */
   searchMaxLength: 100,

@@ -24,15 +24,23 @@ import {
 } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { WorkflowAuditPort } from './audit.ts'
 import { captureCreatedWorkflows, captureWorkflowCreation } from './capture.ts'
 import { createWorkflowDefinition } from './creates.ts'
 import { deleteWorkflowDefinition } from './deletes.ts'
+import { createRecordingWorkflowAudit, expectWorkflowAuditRedacted } from './testing.ts'
 import { updateWorkflowDefinition } from './updates.ts'
 
 const NOW = Temporal.Instant.from('2030-01-07T08:00:00Z')
 const START = NOW.add({ hours: 72 })
 const secret = 'synthetic-workflow-capture-secret'
 const quiet = JSON.stringify(createNotificationSnapshot({ reminders: [], followUps: [] }))
+const answer = 'synthetic private capture answer'
+const rawUrl = 'https://meet.example.test/private-workflow-room'
+const auditPrivateBooking = {
+  responses: JSON.stringify({ notes: answer }),
+  location: JSON.stringify({ kind: 'link', url: rawUrl }),
+}
 
 describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture', () => {
   let owned: TestDatabase
@@ -96,11 +104,17 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
       .execute()
     return row.id
   }
-  const capture = (id: string, now = NOW) =>
+  const capture = (id: string, now = NOW, audit?: WorkflowAuditPort) =>
     db
       .transaction()
       .execute((trx) =>
-        captureCreatedWorkflows(trx, { type: 'created', bookingId: id, start: START }, now, secret),
+        captureCreatedWorkflows(
+          trx,
+          { type: 'created', bookingId: id, start: START },
+          now,
+          secret,
+          audit,
+        ),
       )
   const runs = (id: string) =>
     db.selectFrom('workflow_runs').selectAll().where('booking_id', '=', id).orderBy('id').execute()
@@ -119,22 +133,35 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
       .orderBy('id')
       .execute()
 
-  it('rolls booking, enrollment, due run and recipient intents back together', async () => {
+  it('rolls booking, enrollment, due run, recipient intents and audit back together', async () => {
     const { user, eventTypeId } = await setup()
-    await define(user)
+    const workflow = await define(user)
+    const audit = await createRecordingWorkflowAudit(db)
     let id = ''
     await expect(
       db.transaction().execute(async (trx) => {
-        id = await booking(user, eventTypeId, {}, trx)
+        id = await booking(user, eventTypeId, auditPrivateBooking, trx)
         await captureCreatedWorkflows(
           trx,
           { type: 'created', bookingId: id, start: START },
           NOW,
           secret,
+          audit.port,
         )
         expect(
           await trx.selectFrom('workflow_runs').select('id').where('booking_id', '=', id).execute(),
         ).toHaveLength(1)
+        const records = await audit.read(trx)
+        expectWorkflowAuditRedacted(records, [
+          secret,
+          answer,
+          rawUrl,
+          'booker@example.com',
+          user.email,
+        ])
+        expect(records).toMatchObject([
+          { event: 'workflow.run_scheduled', workflowId: workflow.id },
+        ])
         throw new Error('Booking transaction aborted')
       }),
     ).rejects.toThrow('Booking transaction aborted')
@@ -142,13 +169,15 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
     expect(await enrollments(id)).toEqual([])
     expect(await runs(id)).toEqual([])
     expect(await claims(id)).toEqual([])
+    expect(await audit.read()).toEqual([])
   })
 
   it('coalesces concurrent duplicate captures and keeps the original revision and due instant after editing', async () => {
     const { user, eventTypeId } = await setup()
     const workflow = await define(user)
-    const id = await booking(user, eventTypeId)
-    await Promise.all([capture(id), capture(id)])
+    const audit = await createRecordingWorkflowAudit(db)
+    const id = await booking(user, eventTypeId, auditPrivateBooking)
+    await Promise.all([capture(id, NOW, audit.port), capture(id, NOW, audit.port)])
     expect(await enrollments(id)).toHaveLength(1)
     expect(await runs(id)).toHaveLength(1)
     expect(await claims(id)).toHaveLength(1)
@@ -161,13 +190,30 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
       expectedRevision: 1,
       trigger: { type: 'booking.created', delayMinutes: 30 },
     })
-    await capture(id, NOW.add({ minutes: 10 }))
+    await capture(id, NOW.add({ minutes: 10 }), audit.port)
     expect({
       enrollments: await enrollments(id),
       runs: await runs(id),
       claims: await claims(id),
     }).toEqual(before)
     expect(before.enrollments[0]).toMatchObject({ revision: 1, occurrence: 'created' })
+    const records = await audit.read()
+    expectWorkflowAuditRedacted(records, [secret, answer, rawUrl, 'booker@example.com', user.email])
+    expect(records).toEqual([
+      {
+        event: 'workflow.run_scheduled',
+        occurredAt: NOW,
+        actor: { kind: 'background', job: 'capture' },
+        owner: {
+          kind: 'personal',
+          organizationId: user.principal.organization.id,
+          userId: user.id,
+        },
+        workflowId: workflow.id,
+        revision: 1,
+        trigger: 'booking.created',
+      },
+    ])
   })
 
   it.each([
@@ -178,11 +224,14 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
     async (reason, start, offsetMinutes) => {
       const { user, eventTypeId } = await setup()
       const workflow = await define(user, { trigger: { type: 'before_start', offsetMinutes } })
+      const audit = await createRecordingWorkflowAudit(db)
       const id = await booking(user, eventTypeId, {
+        ...auditPrivateBooking,
         start_at: start,
         end_at: Temporal.Instant.from(start).add({ minutes: 30 }).toString(),
       })
-      await capture(id)
+      await capture(id, NOW, audit.port)
+      await capture(id, NOW.add({ minutes: 1 }), audit.port)
       expect(await runs(id)).toEqual([
         expect.objectContaining({
           state: 'skipped',
@@ -198,6 +247,30 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
           .execute(),
       ).toEqual([expect.objectContaining({ outcome: 'skipped', reason })])
       expect(await claims(id)).toEqual([])
+      const records = await audit.read()
+      expectWorkflowAuditRedacted(records, [
+        secret,
+        answer,
+        rawUrl,
+        'booker@example.com',
+        user.email,
+      ])
+      expect(records).toEqual([
+        {
+          event: 'workflow.run_skipped',
+          occurredAt: NOW,
+          actor: { kind: 'background', job: 'capture' },
+          owner: {
+            kind: 'personal',
+            organizationId: user.principal.organization.id,
+            userId: user.id,
+          },
+          workflowId: workflow.id,
+          revision: 1,
+          trigger: 'before_start',
+          reason,
+        },
+      ])
     },
   )
 
@@ -244,17 +317,20 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
 
   it('does not enroll foreign owners or a mismatching event-specific scope', async () => {
     const { user, eventTypeId } = await setup()
+    const audit = await createRecordingWorkflowAudit(db)
     const foreign = await createTestUser(db)
     await define(foreign)
     const otherEvent = await createFixtures(db).eventType(user.principal.organization.id, user.id)
     await define(user, { scope: { type: 'event_type', eventTypeId: otherEvent } })
     const id = await booking(user, eventTypeId)
-    await capture(id)
+    await capture(id, NOW, audit.port)
     expect(await enrollments(id)).toEqual([])
+    expect(await audit.read()).toEqual([])
   })
 
   it('captures only team workflows for team bookings, never the assigned host personal workflow', async () => {
     const user = await createTestUser(db)
+    const audit = await createRecordingWorkflowAudit(db)
     const team = await createTestTeam(db, [{ user, role: 'owner' }])
     const teamUser = { ...user, principal: team.as(user) }
     const eventTypeId = await createFixtures(db).eventType(team.id, null, {
@@ -263,9 +339,22 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
     await define(user)
     const workflow = await define(teamUser, { owner: { kind: 'team', id: team.id } })
     const id = await booking(teamUser, eventTypeId)
-    await capture(id)
+    await capture(id, NOW, audit.port)
     expect(await enrollments(id)).toEqual([
       expect.objectContaining({ workflow_id: workflow.id, organization_id: team.id }),
+    ])
+    const records = await audit.read()
+    expectWorkflowAuditRedacted(records, [secret, 'booker@example.com', user.email])
+    expect(records).toEqual([
+      {
+        event: 'workflow.run_scheduled',
+        occurredAt: NOW,
+        actor: { kind: 'background', job: 'capture' },
+        owner: { kind: 'team', organizationId: team.id },
+        workflowId: workflow.id,
+        revision: 1,
+        trigger: 'booking.created',
+      },
     ])
   })
   it('records only condition_false for a private condition mismatch', async () => {
