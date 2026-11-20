@@ -22,11 +22,24 @@ type LinkUpdate = {
   attempts: number
 }
 
-// The delivery worker supplies the renderer once link-update content is available.
-export type RenderSeriesLinkUpdate = (input: {
-  recipient: Recipient
-  seriesId: string
-}) => MailMessage
+export type RenderSeriesLinkUpdate = (
+  trx: Db,
+  link: Pick<LinkUpdate, 'organization_id' | 'series_id' | 'root_booking_id'>,
+  recipient: Recipient,
+  clock: () => Date,
+) => Promise<
+  | {
+      message: () => MailMessage
+      report: {
+        calendar_ordinals: number[]
+        reported_ordinals: number[]
+        reported_link_states: string[]
+        manage_token_hash: Buffer | null
+        capability_scope: 'manage' | 'read' | null
+      }
+    }
+  | undefined
+>
 
 function hasUpcomingMember(
   organizationId: Expression<string>,
@@ -91,14 +104,7 @@ export async function wakeSeriesLinkUpdates(
     .execute()
 }
 
-function claimLinkUpdate(
-  db: Db,
-  now: Date,
-  leaseId: string,
-  leaseMs: number,
-  maxAttempts: number,
-  canSend: boolean,
-) {
+function claimLinkUpdate(db: Db, now: Date, leaseId: string, leaseMs: number, maxAttempts: number) {
   return sql<LinkUpdate>`
     WITH next AS (
       SELECT link.id, o.root_booking_id, s.revision FROM booking_series_notifications link
@@ -111,7 +117,7 @@ function claimLinkUpdate(
         AND link.outbox_state = 'pending'
         AND (link.lease_until IS NULL OR link.lease_until <= ${now})
         AND (
-          (${canSend}::boolean AND NOT link.waiting_for_earlier AND link.due_at <= ${now})
+          (NOT link.waiting_for_earlier AND link.due_at <= ${now})
           OR NOT ${hasUpcomingMember(sql.ref('link.organization_id'), sql.ref('link.series_id'), now)}
         )
       ORDER BY link.due_at, link.id LIMIT 1 FOR UPDATE OF link SKIP LOCKED
@@ -172,10 +178,10 @@ async function sendLinkUpdate(
   clock: () => Date,
   signal: AbortSignal,
   maxAttempts: number,
-  render: RenderSeriesLinkUpdate | undefined,
+  render: RenderSeriesLinkUpdate,
 ) {
   return deps.db.transaction().execute(async (trx) => {
-    const recipient = render && (await lockLinkRecipient(trx, link))
+    const recipient = await lockLinkRecipient(trx, link)
     await lockNotificationEmailBudget(trx)
     signal.throwIfAborted()
     const now = clock()
@@ -195,7 +201,7 @@ async function sendLinkUpdate(
     if (!claim) return
     const finish = () =>
       ownedLinkUpdate(trx, link, leaseId).set({ lease_id: null, lease_until: null })
-    if (!claim.active || (render && !recipient)) {
+    if (!claim.active || !recipient) {
       await finish().set({ outbox_state: 'skipped', due_at: now }).execute()
       return
     }
@@ -207,14 +213,15 @@ async function sendLinkUpdate(
       await finish().set({ waiting_for_earlier: true }).execute()
       return
     }
-    if (!render || !recipient) {
-      await finish().execute()
+    const content = await render(trx, link, recipient, clock)
+    if (!content) {
+      await finish().set({ outbox_state: 'skipped', due_at: clock() }).execute()
       return
     }
 
     const inviteeFacing = recipient.role !== 'host'
     const recipientHash = notificationRecipientHash(recipient.email, deps.secret)
-    const reason = await notificationEmailBudget(trx, deps, recipientHash, inviteeFacing, now)
+    const reason = await notificationEmailBudget(trx, deps, recipientHash, inviteeFacing, clock())
     const receipt = {
       organization_id: link.organization_id,
       series_id: link.series_id,
@@ -239,11 +246,7 @@ async function sendLinkUpdate(
         deps.mailer,
         link.organization_id,
         inviteeFacing ? recipientHash : null,
-        () => ({
-          ...render({ recipient, seriesId: link.series_id }),
-          to: recipient.email,
-          sensitive: true,
-        }),
+        content.message,
         clock,
         signal,
       )
@@ -257,8 +260,7 @@ async function sendLinkUpdate(
               ...receipt,
               outcome: 'delivered',
               sent_at: sentAt,
-              reported_ordinals: [],
-              reported_link_states: [],
+              ...content.report,
             }
           : { ...receipt, outcome: 'rejected' },
       )
@@ -280,21 +282,14 @@ export async function dispatchSeriesLinkUpdates(
     maxAttempts: number
     retryDelay: (attempt: number) => number
   },
-  render: RenderSeriesLinkUpdate | undefined,
+  render: RenderSeriesLinkUpdate,
 ) {
   for (let batch = 0; batch < limits.batchSize; batch++) {
     signal.throwIfAborted()
     const leaseId = randomUUID()
     const {
       rows: [link],
-    } = await claimLinkUpdate(
-      deps.db,
-      clock(),
-      leaseId,
-      limits.leaseMs,
-      limits.maxAttempts,
-      !!render,
-    )
+    } = await claimLinkUpdate(deps.db, clock(), leaseId, limits.leaseMs, limits.maxAttempts)
     if (!link) return
     let exhausted = false
     try {
