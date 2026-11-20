@@ -33,10 +33,12 @@ import {
   EmbeddedTeamBookingPage,
   EventTypeEditorPage,
   EventTypesPage,
+  HostMeetingPollRoute,
   HostPage,
   ManageBookingPage,
   McpAuthorizePage,
   MeetingPollPage,
+  MeetingPollsPage,
   OneTimeBookingPage,
   RequireSession,
   RoutingFormPage,
@@ -82,6 +84,8 @@ export const appRoutes = createRoutesFromElements(
           <Route path="availability/troubleshoot" element={<TroubleshootPage />} />
           <Route path="availability/:id" element={<ScheduleEditorPage />} />
           <Route path="bookings" element={<BookingsPage />} />
+          <Route path="meeting-polls" element={<MeetingPollsPage />} />
+          <Route path="meeting-polls/:id" element={<HostMeetingPollRoute />} />
           <Route path="team/bookings" element={<TeamBookingsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="bookings/:id" element={<BookingDetailPage />} />

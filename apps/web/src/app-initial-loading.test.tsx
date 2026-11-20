@@ -26,10 +26,12 @@ vi.mock('./lazy-pages.tsx', () => {
     'EmbeddedTeamBookingPage',
     'EventTypeEditorPage',
     'EventTypesPage',
+    'HostMeetingPollRoute',
     'HostPage',
     'ManageBookingPage',
     'McpAuthorizePage',
     'MeetingPollPage',
+    'MeetingPollsPage',
     'OneTimeBookingPage',
     'RequireSession',
     'RoutingFormPage',
@@ -45,19 +47,23 @@ vi.mock('./lazy-pages.tsx', () => {
 })
 
 describe('before route chunks are available', () => {
-  it.each(['/app', '/app/settings', '/app/team/bookings', '/'])(
-    'shows the admin shell immediately at %s',
-    async (path) => {
-      render(
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-        </MemoryRouter>,
-      )
-      await waitFor(() => expect(screen.queryByRole('banner')).not.toBeNull())
-      expect(screen.getByRole('main').querySelector('.page-skeleton')).not.toBeNull()
-      expect(document.querySelector('.skeleton-nav')).not.toBeNull()
-    },
-  )
+  it.each([
+    '/app',
+    '/app/settings',
+    '/app/team/bookings',
+    '/app/meeting-polls',
+    '/app/meeting-polls/poll-id',
+    '/',
+  ])('shows the admin shell immediately at %s', async (path) => {
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <App />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.queryByRole('banner')).not.toBeNull())
+    expect(screen.getByRole('main').querySelector('.page-skeleton')).not.toBeNull()
+    expect(document.querySelector('.skeleton-nav')).not.toBeNull()
+  })
 
   it.each([
     '/ada',
