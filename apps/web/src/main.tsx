@@ -1,16 +1,16 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, RouterProvider } from 'react-router'
-import { App } from './App.tsx'
+import { RouterProvider } from 'react-router'
+import { createAppRouter, isRoutingContinuationPath } from './App.tsx'
 import { installPreloadRecovery } from './preload-recovery.ts'
 import './styles.css'
 
-installPreloadRecovery()
+const router = createAppRouter()
+// A reload would discard a cleared, in-memory continuation capability.
+installPreloadRecovery(() => !isRoutingContinuationPath(window.location.pathname))
 
 const root = document.getElementById('root')
 if (!root) throw new Error('#root is missing from index.html')
-
-const router = createBrowserRouter([{ path: '*', element: <App /> }])
 
 createRoot(root).render(
   <StrictMode>

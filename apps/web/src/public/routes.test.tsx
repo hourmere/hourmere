@@ -2,8 +2,10 @@
 // apart: the app's paths keep working, public pages never touch the session, and every
 // top-level path of the app is reserved so no handle can take it.
 import { isClaimReservedHandle, isReservedName } from '@hourmere/core/reserved'
-import { screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { RouterProvider } from 'react-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createAppRouter } from '../App.tsx'
 import { NAV_ITEMS } from '../components/AppShell.tsx'
 import {
   fakeApi,
@@ -149,6 +151,94 @@ it('uses the ordinary public page when instance discovery fails', async () => {
   renderApp('/route/ada/intro')
   expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeDefined()
   expect(api.calls.map(({ path }) => path)).toEqual(['/api/v1/instance'])
+})
+
+describe('routing continuation handoff in the browser', () => {
+  let router: ReturnType<typeof createAppRouter> | undefined
+  const fixtureLink = '/route/continue#token=fixture%2Dcapability'
+  const resolve = 'POST /api/v1/routing-continuations/resolve'
+
+  function open(path: string) {
+    window.history.replaceState(null, '', path)
+    router = createAppRouter()
+    expect(window.location.hash).toBe('')
+    expect(router.state.location.hash).toBe('')
+    expect(JSON.stringify(window.history.state ?? null)).not.toContain('fixture')
+    render(<RouterProvider router={router} />)
+  }
+
+  afterEach(() => {
+    router?.dispose()
+    router = undefined
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('clears the fragment before discovery, then uses ordinary booking resolution when off', async () => {
+    const event = { ...EVENT, handle: 'route', slug: 'continue' }
+    const api = fakeApi({
+      ...eventRoutes(event, []),
+      'GET /api/v1/instance': () => {
+        expect(window.location.hash).toBe('')
+        return json(200, { routingFormsEnabled: false })
+      },
+      [resolve]: () => json(404, { error: 'routing_forms_disabled' }),
+    })
+    open(fixtureLink)
+    await waitFor(() => {
+      expect(api.to(resolve)).toHaveLength(0)
+      expect(api.to('GET /api/v1/public/route/continue')).toHaveLength(1)
+    })
+    expect(await screen.findByRole('heading', { level: 1, name: 'Intro call' })).toBeDefined()
+    expect(api.calls.every(({ method }) => method === 'GET')).toBe(true)
+    expect(JSON.stringify(api.calls)).not.toContain('fixture-capability')
+    expect(window.location.pathname).toBe('/route/continue')
+  })
+
+  it('waits for enablement before sending the decoded token in a POST body', async () => {
+    const capability = later()
+    const storageRead = vi.spyOn(Storage.prototype, 'getItem')
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
+    const api = fakeApi({
+      'GET /api/v1/instance': () => {
+        expect(window.location.hash).toBe('')
+        return capability.response
+      },
+      [resolve]: () => json(404, { error: 'routing_unavailable' }),
+    })
+    open(fixtureLink)
+    expect(screen.getByRole('status').textContent).toBe('Loading…')
+    expect(api.to(resolve)).toHaveLength(0)
+    await capability.answer(json(200, { routingFormsEnabled: true }))
+    await waitFor(() => expect(api.to(resolve)).toHaveLength(1))
+    expect(api.to(resolve)[0]).toMatchObject({
+      path: '/api/v1/routing-continuations/resolve',
+      body: { routeToken: 'fixture-capability' },
+    })
+    expect(window.location.href).not.toContain('fixture')
+    expect(JSON.stringify(window.history.state ?? null)).not.toContain('fixture')
+    window.dispatchEvent(new Event('pagehide'))
+    // The data router reads its own view-transition metadata (pathname only).
+    expect(storageRead.mock.calls.filter(([key]) => key !== 'remix-router-transitions')).toEqual([])
+    expect(storageWrite).not.toHaveBeenCalled()
+  })
+
+  it('clears a fresh fragment-only link opened on the same page', async () => {
+    const event = { ...EVENT, handle: 'route', slug: 'continue' }
+    const api = fakeApi({
+      ...eventRoutes(event, []),
+      'GET /api/v1/instance': () => json(200, { routingFormsEnabled: true }),
+      [resolve]: () => {
+        expect(window.location.hash).toBe('')
+        return json(404, { error: 'routing_unavailable' })
+      },
+    })
+    open('/route/continue')
+    await screen.findByRole('heading', { name: 'Intro call', level: 1 })
+    window.location.hash = '#token=fixture%2Dfresh'
+    await waitFor(() => expect(api.to(resolve)[0]?.body).toEqual({ routeToken: 'fixture-fresh' }))
+    expect(window.location.hash).toBe('')
+    expect(JSON.stringify(window.history.state ?? null)).not.toContain('fixture')
+  })
 })
 
 it.each(['/route/legacy-event', '/route/continue', '/team/route/legacy-event'])(

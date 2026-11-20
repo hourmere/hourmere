@@ -1,5 +1,14 @@
-import { type ReactNode, Suspense, useEffect, useId, useRef, useState } from 'react'
 import {
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
+import {
+  createBrowserRouter,
   createRoutesFromElements,
   type Location,
   matchRoutes,
@@ -13,7 +22,7 @@ import { api } from './api/client.ts'
 import { AdminLoading } from './components/AdminLoading.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
-import { InterfaceScope, useI18n } from './i18n/runtime.tsx'
+import { InterfaceScope, MemoryLanguage, useI18n } from './i18n/runtime.tsx'
 import { translate } from './i18n/translate.ts'
 import {
   AcceptInvitationPage,
@@ -42,6 +51,7 @@ import {
   MeetingPollsPage,
   OneTimeBookingPage,
   RequireSession,
+  RoutingContinuationPage,
   RoutingFormPage,
   ScheduleEditorPage,
   SessionLayout,
@@ -134,7 +144,49 @@ const routingFormRoutes = createRoutesFromElements(
   </>,
 )
 
-function RoutingFormGate({ fallback }: { fallback: ReactNode }) {
+type RoutingContinuation = { routeToken: string | null }
+
+export function isRoutingContinuationPath(pathname: string): boolean {
+  // Decode each segment without mistaking an encoded slash for a path separator.
+  try {
+    const segments = pathname.replace(/\/+$/, '').split('/').map(decodeURIComponent)
+    return (
+      segments.length === 3 &&
+      segments[1]?.toLowerCase() === 'route' &&
+      segments[2]?.toLowerCase() === 'continue'
+    )
+  } catch {
+    return false
+  }
+}
+
+function continuationParams(pathname: string, hash: string): URLSearchParams | undefined {
+  if (!hash || !isRoutingContinuationPath(pathname)) return
+  const params = new URLSearchParams(hash.slice(1))
+  return params.has('token') ? params : undefined
+}
+
+function takeRoutingContinuation(): RoutingContinuation | undefined {
+  const { pathname, search, hash } = window.location
+  const params = continuationParams(pathname, hash)
+  if (!params) return
+  window.history.replaceState(window.history.state, '', pathname + search)
+  return { routeToken: params.get('token') || null }
+}
+
+export function createAppRouter() {
+  // Clear the capability before the router snapshots the initial address or renders a page.
+  const continuation = takeRoutingContinuation()
+  return createBrowserRouter([{ path: '*', element: <App continuation={continuation} /> }])
+}
+
+function RoutingFormGate({
+  fallback,
+  continuation,
+}: {
+  fallback: ReactNode
+  continuation?: RoutingContinuation | undefined
+}) {
   const [enabled, setEnabled] = useState<boolean>()
   const form = useRoutes(routingFormRoutes)
   useEffect(() => {
@@ -149,11 +201,22 @@ function RoutingFormGate({ fallback }: { fallback: ReactNode }) {
     )
     return () => controller.abort()
   }, [])
-  if (enabled === undefined) return <RouteLoadingStatus />
-  return enabled ? form : fallback
+  if (enabled === undefined) return <RouteLoadingStatus memoryOnly={!!continuation} />
+  if (!enabled) return fallback
+  return continuation ? <RoutingContinuationPage routeToken={continuation.routeToken} /> : form
 }
 
-function RouteLoadingStatus() {
+function RouteLoadingStatus({ memoryOnly = false }: { memoryOnly?: boolean }) {
+  return memoryOnly ? (
+    <MemoryLanguage>
+      <LoadingStatus />
+    </MemoryLanguage>
+  ) : (
+    <LoadingStatus />
+  )
+}
+
+function LoadingStatus() {
   const { t } = useI18n()
   const { pathname, search } = useLocation()
   const language = pathname.startsWith('/embed/') ? embedQueryLanguage(search) : undefined
@@ -162,6 +225,16 @@ function RouteLoadingStatus() {
       {language ? translate(language, 'Loading…') : t('Loading…')}
     </div>
   )
+}
+
+function PageDescription() {
+  const { t } = useI18n()
+  useEffect(() => {
+    const description = t('Scheduling page powered by Hourmere — pick a time that works.')
+    for (const selector of ['meta[name="description"]', 'meta[property="og:description"]'])
+      document.querySelector(selector)?.setAttribute('content', description)
+  }, [t])
+  return null
 }
 
 /**
@@ -173,7 +246,7 @@ function RouteLoadingStatus() {
  * pages (/{handle}/{slug}). The old top-level addresses (/api-keys, /settings, …) are not
  * kept: they are free for public pages.
  */
-export function App() {
+export function App({ continuation }: { continuation?: RoutingContinuation | undefined }) {
   const { pathname } = useLocation()
   useAdminPwa(pathname)
   const admin = matchRoutes(appRoutes, pathname)?.some(
@@ -181,13 +254,30 @@ export function App() {
   )
   return (
     <InterfaceScope surface={admin ? 'admin' : 'public'}>
-      <AppRoutes />
+      <AppRoutes initialContinuation={continuation} />
     </InterfaceScope>
   )
 }
 
-function AppRoutes() {
+function AppRoutes({
+  initialContinuation,
+}: {
+  initialContinuation: RoutingContinuation | undefined
+}) {
   const location = useLocation()
+  const [visit, setVisit] = useState(
+    () => initialContinuation && { location, continuation: initialContinuation },
+  )
+  const continuation = visit?.location === location ? visit.continuation : undefined
+  const incomingContinuation =
+    !continuation && !!continuationParams(location.pathname, location.hash)
+  const privateVisit = !!continuation || incomingContinuation
+  // Opening a fresh link while already on this address can be a fragment-only navigation.
+  useLayoutEffect(() => {
+    if (visit?.location === location) return
+    const next = incomingContinuation ? takeRoutingContinuation() : undefined
+    if (next || visit) setVisit(next && { location, continuation: next })
+  }, [visit, location, incomingContinuation])
   const navigate = useNavigate()
   const currentLocation = useRef(location)
   currentLocation.current = location
@@ -230,33 +320,40 @@ function AppRoutes() {
       navigate(-1)
     },
   }
-  const { t } = useI18n()
-  const { pathname } = useLocation()
-  useEffect(() => {
-    const description = t('Scheduling page powered by Hourmere — pick a time that works.')
-    for (const selector of ['meta[name="description"]', 'meta[property="og:description"]'])
-      document.querySelector(selector)?.setAttribute('content', description)
-  }, [t])
+  const { pathname } = location
 
   return (
-    <RouteErrorBoundary>
-      <Suspense
-        fallback={
-          pathname === '/' || pathname === '/app' || pathname.startsWith('/app/') ? (
-            <AdminLoading />
-          ) : (
-            <RouteLoadingStatus />
-          )
-        }
-      >
-        <BookingPanelContext value={panel}>
-          {matchRoutes(routingFormRoutes, pathname) ? (
-            <RoutingFormGate key={pathname} fallback={routes} />
-          ) : (
-            routes
-          )}
-        </BookingPanelContext>
-      </Suspense>
-    </RouteErrorBoundary>
+    <>
+      {privateVisit ? (
+        <MemoryLanguage>
+          <PageDescription />
+        </MemoryLanguage>
+      ) : (
+        <PageDescription />
+      )}
+      <RouteErrorBoundary>
+        <Suspense
+          fallback={
+            pathname === '/' || pathname === '/app' || pathname.startsWith('/app/') ? (
+              <AdminLoading />
+            ) : (
+              <RouteLoadingStatus memoryOnly={privateVisit} />
+            )
+          }
+        >
+          <BookingPanelContext value={panel}>
+            {incomingContinuation ? (
+              <RouteLoadingStatus memoryOnly />
+            ) : continuation ? (
+              <RoutingFormGate key={location.key} fallback={routes} continuation={continuation} />
+            ) : matchRoutes(routingFormRoutes, pathname) ? (
+              <RoutingFormGate key={pathname} fallback={routes} />
+            ) : (
+              routes
+            )}
+          </BookingPanelContext>
+        </Suspense>
+      </RouteErrorBoundary>
+    </>
   )
 }

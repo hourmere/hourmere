@@ -57,4 +57,15 @@ describe('deployment chunk recovery', () => {
     expect(preloadError().defaultPrevented).toBe(false)
     expect(reload).not.toHaveBeenCalled()
   })
+
+  it('leaves a private page to the boundary without using storage', () => {
+    const reload = vi.spyOn(browser, 'reloadPage').mockImplementation(() => {})
+    const get = vi.spyOn(Storage.prototype, 'getItem')
+    const set = vi.spyOn(Storage.prototype, 'setItem')
+    cleanups.push(installPreloadRecovery(() => false))
+    expect(preloadError().defaultPrevented).toBe(false)
+    expect(get).not.toHaveBeenCalled()
+    expect(set).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+  })
 })

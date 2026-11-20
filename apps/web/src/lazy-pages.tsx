@@ -160,3 +160,9 @@ export const RoutingFormPage = page(
   () => import('./public/RoutingFormPage.tsx'),
   (m) => m.RoutingFormPage,
 )
+
+export const RoutingContinuationPage = lazy(() =>
+  import('./public/RoutingContinuationPage.tsx').then((module) => ({
+    default: module.RoutingContinuationPage,
+  })),
+)
