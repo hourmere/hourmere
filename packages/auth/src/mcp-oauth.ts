@@ -6,6 +6,7 @@ import { cimd } from '@better-auth/cimd'
 import { fetchClientMetadataResource } from '@better-auth/cimd/node'
 import { mcp } from '@better-auth/mcp'
 import type { Database, Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { APIError } from 'better-auth/api'
 import {
   createDpopReplayStore,
@@ -93,6 +94,7 @@ async function requireMembership(
     .where('m.userId', '=', userId)
     .where('m.organizationId', '=', organizationId)
     .where('u.emailVerified', '=', true)
+    .where((eb) => eb.not(scimSuspended(organizationId, userId)))
     .executeTakeFirst()
   if (!row) throw refusal()
 }
@@ -561,6 +563,7 @@ export function createMcpOAuthResolver({
       .whereRef('c.clientId', '=', 'grant_row.client_id')
       .whereRef('c.userId', '=', 'grant_row.user_id')
       .where('u.emailVerified', '=', true)
+      .where((eb) => eb.not(scimSuspended(eb.ref('grant_row.organization_id'), eb.ref('u.id'))))
       .where(sql<boolean>`a.disabled IS DISTINCT FROM true`)
       .executeTakeFirst()
     if (

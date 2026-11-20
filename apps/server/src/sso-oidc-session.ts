@@ -1,6 +1,7 @@
 import { AUTH_SESSION_LIFETIME_SECONDS, createBrowserSession } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import type { SsoProviderRevision } from './sso-configuration.ts'
 import { normalizeSsoDomain } from './sso-domains.ts'
@@ -66,6 +67,7 @@ export async function lockOidcSignInContext(
     .select('id')
     .where('organizationId', '=', organizationId)
     .where('userId', '=', user.id)
+    .where((eb) => eb.not(scimSuspended(organizationId, user.id)))
     .forShare()
     .executeTakeFirst()
   if (!member) return { reason: 'mailbox_unproven' } as const

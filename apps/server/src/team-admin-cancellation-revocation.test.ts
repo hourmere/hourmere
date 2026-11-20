@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
@@ -21,6 +22,7 @@ import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { isMember } from '../../../packages/auth/src/organizations.ts'
 import { createApp } from './app.ts'
 import * as openapi from './openapi.ts'
 import { CancelBody, ListBookingsQuery } from './routes/bookings.ts'
@@ -58,7 +60,7 @@ function sourceCopy<T>(
 async function copiedRoutes(replacements: [string, string][] = []): Promise<RouteFactory> {
   const shared = sourceCopy<Record<string, unknown>>(
     '../../../packages/auth/src/team-management.ts',
-    { sql },
+    { sql, isMember, scimSuspended },
     ['checkTeamManagementAccess', 'TeamManagementError'],
     replacements,
   )

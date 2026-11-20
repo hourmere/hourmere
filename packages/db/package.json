@@ -7,6 +7,7 @@
     "./testing": "./src/testing.ts",
     "./test-database-registry": "./src/test-database-registry.ts",
     "./audit": "./src/audit.ts",
+    "./scim-suspension": "./src/scim-suspension.ts",
     "./team-write": "./src/team-write.ts"
   },
   "scripts": {

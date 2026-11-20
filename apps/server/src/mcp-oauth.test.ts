@@ -21,6 +21,7 @@ import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { Kysely, PostgresDialect, sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { suspendScimMember } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import { seeded } from '../../../packages/db/src/sso-identity-fixtures.ts'
 import {
   claimedDomainValues,
@@ -596,6 +597,35 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect(mcp.status).toBe(200)
     expect(await mcp.text()).toContain('"kind":"oauth"')
     expect(statements).toHaveLength(2)
+  })
+
+  it('refuses a suspended team for a previously issued MCP OAuth token', async () => {
+    const s = await session()
+    const owner = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: s.user, role: 'member' },
+    ])
+    const otherTeam = await createTestTeam(db, [{ user: s.user, role: 'owner' }])
+    const personal = s.user.principal.organization.id
+    const teamToken = await connected(s, team.id)
+    const personalToken = await connected(s, personal)
+    const otherTeamToken = await connected(s, otherTeam.id)
+    const application = app()
+    const whoami = (token: typeof teamToken) => application.request(mcpRequest(token.access_token))
+    async function expectAccess(token: typeof teamToken, organizationId: string) {
+      const response = await whoami(token)
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain(organizationId)
+    }
+
+    await expectAccess(teamToken, team.id)
+    await suspendScimMember(db, team.id, s.user.id)
+    const denied = await whoami(teamToken)
+    expect(denied.status).toBe(401)
+    expect(await denied.json()).toEqual({ error: 'invalid_token' })
+    await expectAccess(personalToken, personal)
+    await expectAccess(otherTeamToken, otherTeam.id)
   })
 
   it('resumes the same consent after team proof and binding and checks the grant again on exchange', async () => {

@@ -128,7 +128,14 @@ export function nativeTeamSso(db: Db, capabilities: TeamSsoCapabilities) {
         organizationId = uuid(explicitId || activeId)
       }
       if (!organizationId) return
-      if (!(await checkFor(ctx, sessionIdentity(session))(organizationId)).allowed) {
+      const access = await checkFor(ctx, sessionIdentity(session))(organizationId)
+      if (access.suspended) {
+        throw new APIError('FORBIDDEN', {
+          code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+          message: 'team_management_access_denied',
+        })
+      }
+      if (!access.allowed) {
         // Keep native membership errors uniform for outsiders probing team selectors.
         // Trusted admission, and an invitation already bound to its verified recipient,
         // have their own scope and require proof even without a current membership.

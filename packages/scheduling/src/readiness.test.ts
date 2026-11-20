@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
 import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import { createDb, type Db, type Json } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type KyselyPlugin, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -86,6 +87,7 @@ function sourceCopy(
   const bindings = {
     validateTimeZone,
     validateWeeklyHours,
+    scimSuspended,
     sql,
     z,
     assertCachedCalendarSync: calendarSyncGuard,

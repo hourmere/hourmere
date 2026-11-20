@@ -20,6 +20,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import {
   checkTeamWriteBeforeAuthorityChange,
   checkTeamWriteDeadline,
@@ -43,6 +44,7 @@ import {
 import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { isMember } from '../../../packages/auth/src/organizations.ts'
 import { ssoRecoveryOwner } from '../../../packages/auth/src/sso-recovery-membership.ts'
 import { createApp } from './app.ts'
 import { ErrorBody, errorResponses, json, serviceContext } from './openapi.ts'
@@ -86,8 +88,10 @@ function managementCopy(replacement?: Replacement) {
   return new Function(
     'sql',
     'ssoRecoveryOwner',
+    'isMember',
+    'scimSuspended',
     `${source}; return { checkTeamManagementAccess, TeamManagementError }`,
-  )(sql, ssoRecoveryOwner) as {
+  )(sql, ssoRecoveryOwner, isMember, scimSuspended) as {
     checkTeamManagementAccess: typeof checkTeamManagementAccess
     TeamManagementError: typeof TeamManagementError
   }

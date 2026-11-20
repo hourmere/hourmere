@@ -23,7 +23,7 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
-import { isUuid, organizationGuards, personalOwner } from './organizations.ts'
+import { isMember, isUuid, organizationGuards, personalOwner } from './organizations.ts'
 import {
   removeSsoRecoveryOwner,
   SsoRecoveryRequiredError,
@@ -111,6 +111,7 @@ function policySourceCopy(
     MemberDepartureBlockedError,
     MemberDepartureOwnerRequiredError,
     recordTeamRoleChange,
+    isMember,
     isUuid,
     personalOwner,
     checkTeamManagementAccess,
