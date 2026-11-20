@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { importedBookingCondition, isImportedBooking } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { defineJob } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { conferenceJoinUrl } from '@hourmere/scheduling/conference-url'
@@ -402,7 +403,7 @@ export async function writeConferenceMirrors(
   }
 }
 export async function retryConferenceMirror(ctx: ServiceContext, bookingId: string) {
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     const user = await trx
       .selectFrom('auth.user')

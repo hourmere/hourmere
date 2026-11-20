@@ -32,7 +32,10 @@ export const CallerDescription = z.object({
   }),
 })
 
-export const Me = CallerDescription.extend({ sso: MeSso.optional() }).openapi('Me')
+export const Me = CallerDescription.extend({ sso: MeSso.optional() }).openapi('Me', {
+  description:
+    'The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings.',
+})
 
 export function describeCaller(p: Principal): z.infer<typeof CallerDescription> {
   return {

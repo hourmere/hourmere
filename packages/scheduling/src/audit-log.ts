@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import type { ServiceContext } from './context.ts'
@@ -341,7 +342,7 @@ export async function setAuditLogSettings(
   input: AuditLogSettingsUpdate,
 ): Promise<AuditLogSettingsView> {
   const organizationId = ctx.principal.organization.id
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     const role = await managementRole(trx, ctx.principal)
     if (role !== 'owner')

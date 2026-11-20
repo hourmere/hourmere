@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -17,8 +17,8 @@ import {
 import { at, insert, oidcProviderValues } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { bindingCookieName, sha256 } from './sso-mailbox-proof.ts'
-import type { SsoMeDeps } from './sso-me.ts'
 import { LINK_SSO_ACCOUNT, OIDC_COMPLETE_LINK } from './sso-oidc-link.ts'
+import type { SsoTeamReadDeps } from './sso-team-reads.ts'
 
 const publicUrl = 'https://hourmere.example.test'
 const browser = 'a'.repeat(43)
@@ -40,40 +40,21 @@ const withoutSso = {
   },
 } satisfies Principal
 
-function me(principal: Principal, ssoMe: SsoMeDeps, headers?: Record<string, string>) {
+function me(principal: Principal, ssoTeamReads: SsoTeamReadDeps, headers?: Record<string, string>) {
   const app = createApp({
     checkDb: async () => {},
     authHandler: async () => new Response(null, { status: 404 }),
     resolveCaller: async () => ({ ok: true, principal, setCookie: [] }),
     publicUrl,
-    ssoMe,
+    ssoTeamReads,
   })
   return app.request('/api/v1/me', headers ? { headers } : undefined)
 }
 
-it('pins the hard-off /me body byte-for-byte and reads no SSO data', async () => {
-  const db = new Proxy({} as Db, {
-    get() {
-      throw new Error('SSO data is unreachable')
-    },
-  })
-  const response = await me(withoutSso, {
-    db,
-    capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false },
-  })
-  expect(response.status).toBe(200)
-  expect(await response.text()).toBe(
-    '{"user":{"id":"585d1355-b239-486c-bf76-e7867a1f43ca","name":"Original User","email":"original@example.test"},' +
-      '"personalOrganizationId":"af514911-7ccb-4db0-8f77-d310b1cb225d",' +
-      '"organization":{"id":"b86334d0-238b-4a2a-8c48-af0dacd2f57b","name":"Example Team","slug":"example-team","personal":false},' +
-      '"principal":{"kind":"session","apiKeyId":null}}',
-  )
-})
-
 describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
   let owned: TestDatabase
   let fixture: IdentityFixture
-  let deps: SsoMeDeps
+  let deps: SsoTeamReadDeps
   let principal: Extract<Principal, { kind: 'session' }>
   let fresh: Record<string, unknown>
   let authorization: Record<string, unknown>
@@ -175,6 +156,19 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
     await owned?.drop()
   })
 
+  it('pins the hard-off /me body byte-for-byte for a team without a policy', async () => {
+    const response = await me(withoutSso, {
+      db: deps.db,
+      capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false },
+    })
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe(
+      '{"user":{"id":"585d1355-b239-486c-bf76-e7867a1f43ca","name":"Original User","email":"original@example.test"},' +
+        '"personalOrganizationId":"af514911-7ccb-4db0-8f77-d310b1cb225d",' +
+        '"organization":{"id":"b86334d0-238b-4a2a-8c48-af0dacd2f57b","name":"Example Team","slug":"example-team","personal":false},' +
+        '"principal":{"kind":"session","apiKeyId":null}}',
+    )
+  })
   it('returns only the active team’s safe provider metadata and the caller’s current status', async () => {
     const response = await me(principal, deps, browserHeaders())
     expect(response.status).toBe(200)
@@ -241,14 +235,14 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
     expect(await personal.json()).not.toHaveProperty('sso')
   })
 
-  it('keeps SSO status out of responses to API keys and OAuth clients', async () => {
+  it('limits the own-summary exception to browser sessions', async () => {
     const key = await me(
       { ...principal, kind: 'api_key', apiKeyId: randomUUID(), apiKeyScope: 'full' },
       deps,
       { ...browserHeaders(), authorization: 'Bearer hm_synthetic' },
     )
-    expect(key.status).toBe(200)
-    expect(await key.json()).not.toHaveProperty('sso')
+    expect(key.status).toBe(403)
+    expect(await key.json()).toEqual({ error: 'sso_required' })
     const oauth = await me(
       {
         ...principal,
@@ -260,7 +254,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
       deps,
       browserHeaders(),
     )
-    expect(oauth.status).toBe(200)
-    expect(await oauth.json()).not.toHaveProperty('sso')
+    expect(oauth.status).toBe(403)
+    expect(await oauth.json()).toEqual({ error: 'sso_required' })
   })
 })

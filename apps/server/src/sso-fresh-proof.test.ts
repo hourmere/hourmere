@@ -25,6 +25,7 @@ import * as mailbox from './sso-mailbox-proof.ts'
 const PUBLIC_URL = 'http://localhost:4321'
 const ON: SsoCapabilities = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const OFF: SsoCapabilities = { ssoOidcEnabled: false, ssoSamlEnabled: false }
+const SAML_ONLY: SsoCapabilities = { ssoOidcEnabled: false, ssoSamlEnabled: true }
 const schema = z.object({
   name: z.string().min(1),
   nested: z.object({ a: z.number(), b: z.number() }).optional(),
@@ -69,7 +70,7 @@ const resolveCaller: CallerResolver = async (headers) => {
     setCookie: [],
   }
 }
-function harness(M: Module = real, capabilities = ON) {
+function harness(M: Module = real, capabilities = ON, proofMode?: 'mailbox') {
   const state = { now: undefined as string | undefined, clockReads: 0, fail: false }
   const app = new Hono()
   app.post('/test/:team/:operation', async (c) => {
@@ -96,6 +97,7 @@ function harness(M: Module = real, capabilities = ON) {
           operation: c.req.param('operation'),
           input: await c.req.json(),
           schema,
+          ...(proofMode && { proofMode }),
         },
         {
           authorize: async (trx) => {
@@ -320,6 +322,10 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
       ])
     for (const [user, id] of Object.entries(f.sessions)) users.set(id, user)
     await client.query(
+      'INSERT INTO sso_policies (organization_id, require_sso) VALUES ($1, true)',
+      [f.otherTeam],
+    )
+    await client.query(
       'CREATE TABLE fresh_proof_test_writes (id integer GENERATED ALWAYS AS IDENTITY, organization_id uuid NOT NULL)',
     )
   }, 60_000)
@@ -328,17 +334,22 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
     await owned?.drop()
   })
 
-  it('returns an attempt only, proves through mailbox send/consume, and retries exactly once', async () => {
-    const h = harness()
-    const who = browser()
+  it.each([
+    { name: 'OIDC enabled without enforcement', capabilities: ON },
+    { name: 'OIDC disabled with stored enforcement', capabilities: SAML_ONLY },
+  ])('keeps mailbox proof and one-time retry with $name', async ({ capabilities }) => {
+    const h = harness(real, capabilities)
+    const team = capabilities.ssoOidcEnabled ? f.team : f.otherTeam
+    const user = capabilities.ssoOidcEnabled ? f.owner : f.otherOwner
+    const who = browser(f.sessions[user])
     const before = await count('fresh_proof_test_writes')
-    const a = await required(await write(h, who))
+    const a = await required(await write(h, who, { name: 'draft' }, team))
     expect(a.proofMethods).toEqual(['mailbox'])
     expect(await count('fresh_proof_test_writes')).toBe(before)
     expect((await row(a.attemptId)).kind).toBe('fresh_proof')
     expect((await row(a.attemptId)).browser_binding_digest).toBe(mailbox.sha256(who.binding))
     const pending = await required(
-      await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }),
+      await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }, team),
     )
     expect(pending.attemptId).toBe(a.attemptId)
     const queued: mailbox.MailboxProofEmailPayload[] = []
@@ -350,7 +361,7 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
       publicUrl: PUBLIC_URL,
       ssoMailboxProof: mailbox.mailboxProofRoutes({
         db,
-        capabilities: ON,
+        capabilities,
         queue: {
           enqueue: async (_name, payload) => {
             queued.push(mailbox.MailboxProofEmailPayload.parse(payload))
@@ -367,7 +378,7 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
     await mailbox.deliverMailboxProof(
       {
         db,
-        capabilities: ON,
+        capabilities,
         publicUrl: PUBLIC_URL,
         secret: 'synthetic-secret-at-least-32-characters',
         mailer: {
@@ -385,9 +396,11 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
       (await post(mailbox.MAILBOX_PROOF_CONSUME_PATH, { attemptId: a.attemptId, token })).status,
     ).toBe(200)
     expect(await count('fresh_proof_test_writes')).toBe(before)
-    expect((await write(h, who, { name: 'draft', proofAttemptId: a.attemptId })).status).toBe(200)
+    expect((await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }, team)).status).toBe(
+      200,
+    )
     const replay = await required(
-      await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }),
+      await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }, team),
     )
     expect(replay.attemptId).not.toBe(a.attemptId)
     expect(await count('fresh_proof_test_writes')).toBe(before + 1)
@@ -501,33 +514,58 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
     expect(await count('fresh_proof_test_writes')).toBe(before + 1)
   })
 
-  it('requires unsatisfiable SSO on an enforced team even with a mailbox proof', async () => {
-    await client.query(
-      'INSERT INTO sso_policies (organization_id, require_sso) VALUES ($1, true)',
-      [f.otherTeam],
-    )
+  it('refuses mailbox-only proof and keeps SSO required on an OIDC-enforced team', async () => {
     const h = harness()
     const who = browser(f.sessions[f.otherOwner])
-    const a = await required(await write(h, who, { name: 'draft' }, f.otherTeam))
+    const before = await count('fresh_proof_test_writes')
+    const mailboxOnly = await required(
+      await write(harness(real, SAML_ONLY), who, { name: 'draft' }, f.otherTeam),
+    )
+    expect(mailboxOnly.proofMethods).toEqual(['mailbox'])
+    await prove(mailboxOnly.attemptId)
+    const a = await required(
+      await write(h, who, { name: 'draft', proofAttemptId: mailboxOnly.attemptId }, f.otherTeam),
+    )
+    expect(a.attemptId).not.toBe(mailboxOnly.attemptId)
     expect(a.proofMethods).toEqual(['sso'])
-    await client.query('BEGIN')
-    try {
-      await client.query('SET LOCAL session_replication_role=replica')
-      await client.query(
-        "UPDATE sso_attempts SET requires_mailbox=true, mailbox_proven_at=clock_timestamp(), mailbox_proof_expires_at=clock_timestamp()+interval '240 seconds' WHERE id=$1",
-        [a.attemptId],
-      )
-      await client.query('COMMIT')
-    } catch (error) {
-      await client.query('ROLLBACK')
-      throw error
-    }
+    expect((await row(mailboxOnly.attemptId)).consumed_at).toBeNull()
+
+    await client.query('UPDATE sso_attempts SET requires_mailbox=true WHERE id=$1', [a.attemptId])
+    await prove(a.attemptId)
     const retry = await required(
       await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }, f.otherTeam),
     )
     expect(retry.attemptId).toBe(a.attemptId)
     expect(retry.proofMethods).toEqual(['sso'])
     expect((await row(a.attemptId)).consumed_at).toBeNull()
+    expect(await count('fresh_proof_test_writes')).toBe(before)
+  })
+
+  it('continues to accept independent mailbox proof on an OIDC-enforced team', async () => {
+    const h = harness(real, ON, 'mailbox')
+    const who = browser(f.sessions[f.otherOwner])
+    const a = await required(await write(h, who, { name: 'draft' }, f.otherTeam))
+    expect(a.proofMethods).toEqual(['mailbox'])
+    await prove(a.attemptId)
+    expect(
+      (await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }, f.otherTeam)).status,
+    ).toBe(200)
+  })
+
+  it('continues to accept mailbox proof when enforcement has no active OIDC provider', async () => {
+    const h = harness()
+    const who = browser(f.sessions[f.otherOwner])
+    await client.query('UPDATE sso_providers SET enabled=false WHERE id=$1', [f.otherProvider.id])
+    try {
+      const a = await required(await write(h, who, { name: 'draft' }, f.otherTeam))
+      expect(a.proofMethods).toEqual(['mailbox'])
+      await prove(a.attemptId)
+      expect(
+        (await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }, f.otherTeam)).status,
+      ).toBe(200)
+    } finally {
+      await client.query('UPDATE sso_providers SET enabled=true WHERE id=$1', [f.otherProvider.id])
+    }
   })
 
   it('is off before any attempt or operation write and ships no route', async () => {

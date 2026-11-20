@@ -5,6 +5,7 @@ import * as HourmereAuth from '@hourmere/auth'
 import * as HourmereDb from '@hourmere/db'
 import { createDb, type Db } from '@hourmere/db'
 import * as Audit from '@hourmere/db/audit'
+import * as TeamWrite from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as Kysely from 'kysely'
 import * as PhoneNumbers from 'libphonenumber-js/max'
@@ -47,6 +48,7 @@ const dependencies: Record<string, object> = {
   '@hourmere/db': HourmereDb,
   '@hourmere/auth': HourmereAuth,
   '@hourmere/db/audit': Audit,
+  '@hourmere/db/team-write': TeamWrite,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
   './change-deadlines.ts': ChangeDeadlines,

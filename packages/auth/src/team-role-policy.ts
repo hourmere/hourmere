@@ -25,6 +25,8 @@ import {
 } from './team-management.ts'
 import { removeTeamMember, teamMemberRemovalTarget } from './team-member-removal.ts'
 import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
+import { lockTeamSsoProof, ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
+import { nativeSsoRequired, trustedAddMember } from './team-sso-native.ts'
 
 const changeRole = '/organization/update-member-role'
 const accept = '/organization/accept-invitation'
@@ -251,14 +253,27 @@ export function createTeamRolePolicy(
     teamId: string,
     expectedOrganizationId: string,
     transaction?: Db,
+    ssoCapabilities?: TeamSsoCapabilities,
   ) => Promise<{ organizationId: string }>,
   scimClaims?: ScimClaimCompletion,
   recordAdmissionRemoval?: SsoAdmissionRemoval,
+  ssoCapabilities = ssoHardOff,
 ) {
   const requests = new AsyncLocalStorage<{ ctx?: AuthMiddlewareContext }>()
   const transactions = new AsyncLocalStorage<Transaction<Database>>()
   // A claim the acceptance decided to complete, finished once its member row exists.
   const claimFinishes = new WeakMap<Transaction<Database>, ScimClaimFinish>()
+
+  const requireProof = (trx: Db, ctx: AuthMiddlewareContext, organizationId: string) => {
+    const session = ctx.context.session
+    return lockTeamSsoProof(
+      { capabilities: ssoCapabilities },
+      trx,
+      session ? { sessionId: session.session.id, userId: session.user.id } : null,
+      organizationId,
+      nativeSsoRequired,
+    )
+  }
 
   function operationContext() {
     const current = requests.getStore()?.ctx
@@ -266,6 +281,8 @@ export function createTeamRolePolicy(
     // Server-side auth.api calls have the native endpoint context but do not pass
     // through the HTTP handler's request storage. Protect their membership writes too.
     const endpoint = tryGetCurrentAuthEndpointContext()
+    if (endpoint && trustedAddMember(endpoint as { operationId?: string }))
+      return endpoint as AuthMiddlewareContext
     if (
       !endpoint ||
       (!selfDeparturePaths.has(endpoint.path ?? '') && !protectedPaths.has(endpoint.path ?? '')) ||
@@ -397,6 +414,7 @@ export function createTeamRolePolicy(
       userId: actor.user.id,
       email: user.email,
     })
+    await requireProof(trx, ctx, organization.id)
     // A SCIM-issued invitation's claim, after the organization and invitation locks: a live
     // admission blocker refuses, and a completable claim is finished with the member row.
     const claim = await scimClaims?.invitation(trx, {
@@ -509,8 +527,32 @@ export function createTeamRolePolicy(
 
     adapter(adapter: DBTransactionAdapter): DBTransactionAdapter {
       const { create, update, findOne, findMany, incrementOne, delete: deleteOne } = adapter
-      adapter.create = async (request) => {
+      adapter.create = async <T extends Record<string, unknown>, R = T>(request: {
+        model: string
+        data: Omit<T, 'id'>
+        select?: string[] | undefined
+        forceAllowId?: boolean | undefined
+      }) => {
         const ctx = operationContext()
+        if (
+          ctx &&
+          trustedAddMember(ctx as { operationId?: string }) &&
+          request.model === 'member'
+        ) {
+          const organizationId = (request.data as Record<string, unknown>).organizationId
+          if (typeof organizationId !== 'string' || !isUuid(organizationId)) throw teamRoleDenied()
+          return write(async (trx) => {
+            await trx
+              .selectFrom('auth.organization')
+              .select('id')
+              .where('id', '=', organizationId)
+              .forUpdate()
+              .executeTakeFirstOrThrow()
+            const member = await create<T, R>(request)
+            await requireProof(trx, ctx, organizationId)
+            return member
+          })
+        }
         if (ctx?.request && ctx.path === createOrganization && request.model === 'organization') {
           return write(async (trx) => {
             const actor = await principal(ctx)
@@ -551,7 +593,7 @@ export function createTeamRolePolicy(
             return member as never
           }
         }
-        return create(request)
+        return create<T, R>(request)
       }
       adapter.delete = async (request) => {
         const ctx = operationContext()
@@ -580,6 +622,7 @@ export function createTeamRolePolicy(
               memberUserId: member.userId,
               expectedOrganizationId,
               recordAdmissionRemoval,
+              ssoCapabilities,
             })
           })
         }
@@ -602,6 +645,7 @@ export function createTeamRolePolicy(
             target.organizationId,
             ctx.request?.headers.get('x-expected-organization-id') ?? target.organizationId,
             transactions.getStore(),
+            ssoCapabilities,
           )
           // The native handler clears the old active organization after deleteMember.
           // Refresh its request snapshot so that cleanup cannot overwrite the personal
@@ -633,6 +677,7 @@ export function createTeamRolePolicy(
             throw new APIError('CONFLICT', { code: 'ORGANIZATION_CONTEXT_CHANGED', message: code })
           }
           if (code === 'team_management_access_denied') throw teamRoleDenied()
+          if (code === 'sso_required') nativeSsoRequired()
           throw error
         }
       }
@@ -674,14 +719,28 @@ export function createTeamRolePolicy(
             : member,
         )
       }
-      adapter.update = async (request) => {
+      adapter.update = async <T>(request: Parameters<DBTransactionAdapter['update']>[0]) => {
         const ctx = operationContext()
         if (
-          ctx?.request &&
-          ctx.path === setActiveOrganization &&
+          ctx?.path === setActiveOrganization &&
           request.model === 'session' &&
           'activeOrganizationId' in request.update
         ) {
+          const targetId = request.update.activeOrganizationId
+          if (!ctx.request) {
+            if (typeof targetId !== 'string' || !isUuid(targetId)) return update<T>(request)
+            return write(async (trx) => {
+              await trx
+                .selectFrom('auth.organization')
+                .select('id')
+                .where('id', '=', targetId)
+                .forShare()
+                .executeTakeFirst()
+              const updated = await update<T>(request)
+              await requireProof(trx, ctx, targetId)
+              return updated
+            })
+          }
           return write(async (trx) => {
             const actor = await principal(ctx)
             const session = await getSessionFromCtx(ctx)
@@ -693,7 +752,6 @@ export function createTeamRolePolicy(
             )
               throw teamRoleDenied()
             await teamSessionUser(trx, actor, true)
-            const targetId = request.update.activeOrganizationId
             if (targetId !== null) {
               if (typeof targetId !== 'string' || !isUuid(targetId)) throw teamRoleDenied()
               const organization = await trx
@@ -728,13 +786,15 @@ export function createTeamRolePolicy(
               if (effective?.toLowerCase() !== expected.toLowerCase())
                 throw new TeamManagementError('organization_context_changed')
             }
-            return trx
+            const updated = await trx
               .updateTable('auth.session')
               .set({ activeOrganizationId: targetId as string | null, updatedAt: new Date() })
               .where('id', '=', actor.sessionId)
               .where('userId', '=', actor.user.id)
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            if (typeof targetId === 'string') await requireProof(trx, ctx, targetId)
+            return updated as never
           })
         }
         if (ctx?.path === updateOrganization && request.model === 'organization') {
@@ -770,6 +830,7 @@ export function createTeamRolePolicy(
               targetType: 'organization',
               targetId: facts.organizationId,
             })
+            await requireProof(trx, ctx, facts.organizationId)
             return updated as never
           })
         }
@@ -799,10 +860,11 @@ export function createTeamRolePolicy(
                 targetId: target.userId,
               })
             }
+            await requireProof(trx, ctx, facts.organizationId)
             return updated as never
           })
         }
-        return update(request)
+        return update<T>(request)
       }
       adapter.incrementOne = async (request) => {
         const ctx = operationContext()
@@ -869,6 +931,7 @@ export function createTeamRolePolicy(
               targetType: 'invitation',
               targetId: invitation.id,
             })
+            await requireProof(trx, ctx, organization.id)
             return rejected as never
           })
         }

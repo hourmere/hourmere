@@ -185,6 +185,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `get_sso_policy` | — | `sso policy` | `full, read` |
 | `list_workflows` | — | `workflows list` | `full, read` |
 | `get_workflow` | — | `workflows get` | `full, read` |
+| `list_workflow_runs` | — | `workflows runs` | `full, read` |
 
 <!-- api-key-scope-table:end -->
 
@@ -794,6 +795,17 @@ enabled on the instance; discover availability with `workflowsEnabled` from
 (`{kind: "personal", id: your user ID}` in your personal organization, or
 `{kind: "team", id: team ID}` as a current team owner or admin), and both return the current
 revision's definition with its enabled flag.
+
+`list_workflow_runs` takes a workflow `id` and optional `limit` (1–100, default 50) and
+`cursor`. Pass `nextCursor` back as `cursor` to continue within the same workflow and
+organization. The personal owner or current team owner/admin can see fixed outcomes and
+aggregate counts with a `read` or `full` key. History omits booking IDs, names, addresses,
+answers and URLs. This tool is hidden while workflows are unavailable, and direct calls
+return `workflows_disabled`.
+
+中文：`list_workflow_runs` 接收工作流 `id` 及可选的 `limit` 和 `cursor`。个人所有者或当前
+团队所有者、管理员可用 `read` 或 `full` 密钥查看安全状态和汇总计数。历史不含预约 ID、姓名、
+邮箱、回答或链接。功能仍硬关闭，MCP 不列出该工具，直接调用返回 `workflows_disabled`。
 
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as

@@ -10,7 +10,7 @@ import { organization } from 'better-auth/plugins/organization'
 import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-providers'
 import pg from 'pg'
 import { parse } from 'pg-connection-string'
-import { API_KEY_RATE_LIMIT } from './api-keys.ts'
+import { API_KEY_RATE_LIMIT, apiKeyDelegationSummaries } from './api-keys.ts'
 import { authAuditRecords } from './audit.ts'
 import { AUTH_SESSION_LIFETIME_SECONDS } from './browser-session.ts'
 import type { Principal } from './caller.ts'
@@ -30,6 +30,8 @@ import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } fro
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
 import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
+import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
+import { nativeTeamSso } from './team-sso-native.ts'
 
 export { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
 export {
@@ -95,6 +97,7 @@ export {
   type BoundMcpOAuthIntent,
   createMcpOAuthResolver,
   hasMcpOAuthIntent,
+  MCP_OAUTH_CONSENT_LIFETIME_MS,
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
   mcpOAuthUrls,
@@ -119,6 +122,10 @@ export {
   recordSsoAdmissionRemoval,
   type SsoAdmissionRemoval,
 } from './sso-admission-blocks.ts'
+export {
+  liveSsoDelegationSummaries,
+  type SsoDelegationSummary,
+} from './sso-delegation-summaries.ts'
 export {
   checkTeamManagementAccess,
   checkTeamManagementMembership,
@@ -228,6 +235,7 @@ export interface AuthConfig {
         teamId: string,
         expectedOrganizationId: string,
         transaction?: Db,
+        ssoCapabilities?: TeamSsoCapabilities,
       ) => Promise<{ organizationId: string }>)
     | undefined
   /** Where people reach Hourmere (PUBLIC_URL); sign-in links and cookies are built from it. */
@@ -267,6 +275,8 @@ export interface AuthConfig {
   scimClaims?: ScimClaimCompletion | undefined
   /** Optional SSO tombstone write in the existing administrative removal transaction. */
   recordAdmissionRemoval?: SsoAdmissionRemoval | undefined
+  /** Test-only protocol capabilities. A stored policy is checked even when both are off. */
+  ssoCapabilities?: TeamSsoCapabilities | undefined
   socialProviderOptions?: { google?: Partial<GoogleOptions>; microsoft?: Partial<MicrosoftOptions> }
 }
 
@@ -296,6 +306,7 @@ export function createAuth({
   leaveTeamMember,
   scimClaims,
   recordAdmissionRemoval,
+  ssoCapabilities = ssoHardOff,
 }: AuthConfig) {
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
@@ -305,7 +316,9 @@ export function createAuth({
     leaveTeamMember,
     scimClaims,
     recordAdmissionRemoval,
+    ssoCapabilities,
   )
+  const teamSso = nativeTeamSso(db, ssoCapabilities)
   const auth = betterAuth({
     database: teamTransactionAdapter(createDb(pool), teamRolePolicy.withTransaction),
     disabledPaths: [
@@ -458,7 +471,14 @@ export function createAuth({
       },
     },
     hooks: {
-      before: beforeHook(db, teamRolePolicy.before, reserveInvitationEmail, enqueueInvitationEmail),
+      before: beforeHook(
+        db,
+        teamRolePolicy.before,
+        reserveInvitationEmail,
+        enqueueInvitationEmail,
+        ssoCapabilities,
+        teamSso.before,
+      ),
     },
     plugins: [
       {
@@ -521,11 +541,15 @@ export function createAuth({
         }),
       ),
       memberReadPrivacy(db),
+      teamSso.plugin,
       apiKey({
         defaultPrefix: API_KEY_PREFIX,
         enableMetadata: true,
         rateLimit: { enabled: true, ...API_KEY_RATE_LIMIT },
       }),
+      ...(ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled
+        ? [apiKeyDelegationSummaries(db, ssoCapabilities)]
+        : []),
       magicLink({
         expiresIn: MAGIC_LINK_MINUTES * 60,
         // Only a hash is stored, so a database leak does not expose usable links.
@@ -592,3 +616,17 @@ export {
   type ScimTokenActor,
   ScimTokenError,
 } from './scim-tokens.ts'
+
+export {
+  liveBrowserProofQuery,
+  lockSharedTeamSsoProof,
+  lockTeamSsoProof,
+  memoizeTeamSsoAccess,
+  ssoHardOff,
+  type TeamReadAccess,
+  type TeamReadPolicy,
+  type TeamSsoCapabilities,
+  type TeamSsoDeps,
+  type TeamSsoSession,
+  teamSsoAccess,
+} from './team-sso.ts'

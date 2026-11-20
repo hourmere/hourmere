@@ -342,12 +342,13 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       if (state !== 'running') throw new Error(`jobs are not running (${state})`)
       // This intentionally reads pg-boss internals. Startup pins their version; never add
       // an application FK. Use its clock so expiry agrees with pg-boss in transactions too.
+      // Session provenance is checked by the sender. It does not change the job identity.
       const connection = transaction ? fromKysely(transaction) : boss.getDb()
       const result = await connection.executeSql(
         `SELECT 1 FROM pgboss.job
          WHERE id = $1::uuid AND name = 'invitation-email-v1'
            AND singleton_key = $2
-           AND data = $3::jsonb
+           AND data - 'actor' = $3::jsonb
            AND (
              (state IN ('created', 'retry') AND keep_until > pgboss.job_now())
              OR (state = 'active' AND started_on IS NOT NULL
@@ -371,7 +372,7 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       await fromKysely(transaction).executeSql(
         `UPDATE pgboss.job SET state = 'cancelled', completed_on = pgboss.job_now()
          WHERE name = 'invitation-email-v1'
-           AND singleton_key = $1 AND data = $2::jsonb AND policy = 'exclusive'
+           AND singleton_key = $1 AND data - 'actor' = $2::jsonb AND policy = 'exclusive'
            AND (
              (state IN ('created', 'retry') AND keep_until <= pgboss.job_now())
              OR (state = 'active' AND started_on IS NOT NULL

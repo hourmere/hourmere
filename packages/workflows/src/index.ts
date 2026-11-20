@@ -96,12 +96,15 @@ export {
 export { PreviewWorkflowInputSchema, previewWorkflow, WorkflowPreviewSchema } from './preview.ts'
 export {
   getWorkflow,
+  listWorkflowRuns,
   listWorkflows,
   WORKFLOW_PAGE,
+  WORKFLOW_RUN_PAGE,
   type WorkflowListInput,
   type WorkflowPage,
   type WorkflowReadContext,
   type WorkflowReader,
+  WorkflowRunHistoryEntrySchema,
   type WorkflowView,
 } from './reads.ts'
 export {

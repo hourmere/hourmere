@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { ssoHardOff, type TeamSsoSession, teamSsoAccess } from '@hourmere/auth'
 import { type Db, isImportedBooking, type WebhookDeliveries, type Webhooks } from '@hourmere/db'
 import { writeAuditEvent } from '@hourmere/db/audit'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
@@ -13,11 +14,14 @@ import { SLACK_EVENTS, slackPayload, slackUrl } from './slack-format.ts'
 import { sendWebhook, type WebhookTransport, webhookUrl } from './transport.ts'
 
 export const WEBHOOK_DELIVERY_JOB = 'webhook-delivery'
-export const WebhookDeliveryPayload = z.strictObject({ deliveryId: z.uuid() })
+export const WebhookDeliveryPayload = z.strictObject({
+  deliveryId: z.uuid(),
+  actor: z.strictObject({ userId: z.uuid(), sessionId: z.uuid() }).optional(),
+})
 export interface WebhookQueue {
   enqueue(
     name: typeof WEBHOOK_DELIVERY_JOB,
-    payload: { deliveryId: string },
+    payload: z.input<typeof WebhookDeliveryPayload>,
     options?: EnqueueOptions,
   ): Promise<string | null>
 }
@@ -349,8 +353,8 @@ export function webhookDeliveryJob(deps: WebhookDeps) {
     expireInSeconds: 30,
     retentionSeconds: 30 * 24 * 3600,
     concurrency: 2,
-    handler: ({ deliveryId }, { signal, attempt }) =>
-      deliverWebhook(deps, deliveryId, signal, attempt),
+    handler: ({ deliveryId, actor }, { signal, attempt }) =>
+      deliverWebhook(deps, deliveryId, signal, attempt, actor),
   })
 }
 
@@ -497,6 +501,7 @@ export async function deliverWebhook(
   deliveryId: string,
   signal: AbortSignal,
   jobAttempt = 1,
+  actor?: TeamSsoSession,
 ) {
   const found = await deps.db
     .selectFrom('webhook_deliveries')
@@ -582,6 +587,19 @@ export async function deliverWebhook(
         .where('id', '=', deliveryId)
         .execute()
       return false
+    }
+    // A Slack sample acts for its requester. Booking and workflow events reconcile
+    // durable outcomes of a committed booking and do not borrow a browser's authority.
+    if (endpoint.destination_kind === 'slack' && delivery.booking_id === null) {
+      const access = await teamSsoAccess(
+        { db: trx, capabilities: deps.ssoCapabilities ?? ssoHardOff },
+        actor ?? null,
+        delivery.organization_id,
+      )
+      if (!access.allowed) {
+        await skipWebhookDelivery(trx, deliveryId, 'disabled')
+        return false
+      }
     }
     const { retry } = await attemptWebhook(trx, deps, endpoint, delivery, signal, now, jobAttempt)
     return retry

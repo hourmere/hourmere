@@ -45,8 +45,17 @@
     "exemption": "browser-session-only",
     "reason": "Retiring a conflicting member identity requires fresh administrator proof."
   },
+  "bindSsoDelegation": {
+    "exemption": "browser-session-only",
+    "reason": "Binding an owned API key or OAuth grant requires fresh interactive SSO proof."
+  },
+  "revokeSsoDelegation": {
+    "exemption": "browser-session-only",
+    "reason": "Withdrawing the caller's delegated SSO proof requires the owning browser session."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "previewWorkflow": { "mcp": "preview_workflow", "cli": "workflows preview" },
+  "listWorkflowRuns": { "mcp": "list_workflow_runs", "cli": "workflows runs" },
   "listSsoProviders": { "mcp": "list_sso_providers", "cli": "sso providers list" },
   "getSsoPolicy": { "mcp": "get_sso_policy", "cli": "sso policy" },
   "createRoutingForm": { "mcp": "create_routing_form", "cli": "routing-forms create" },

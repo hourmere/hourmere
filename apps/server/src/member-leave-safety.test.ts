@@ -9,13 +9,21 @@ import {
   createAuthPool,
   createCallerResolver,
   ensurePersonalOrganization,
+  lockSharedTeamSsoProof,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
+  ssoHardOff,
   TeamManagementError,
   teamRoles,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import {
+  checkTeamWriteBeforeAuthorityChange,
+  checkTeamWriteDeadline,
+  teamWriteCheckFor,
+  teamWriteTransaction,
+} from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   DomainError,
@@ -98,6 +106,12 @@ function serviceCopy(
   const bindings = {
     auditActor,
     writeAuditEvent,
+    checkTeamWriteBeforeAuthorityChange,
+    checkTeamWriteDeadline,
+    teamWriteCheckFor,
+    teamWriteTransaction,
+    lockSharedTeamSsoProof,
+    ssoHardOff,
     ensurePersonalOrganization,
     MemberDepartureBlockedError,
     MemberDepartureOwnerRequiredError,

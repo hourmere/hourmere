@@ -13,7 +13,10 @@ import { fakeApi, json, later, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import type { HostSlotPicker, HostSlotPickerProps } from './HostSlotPicker.tsx'
 
-const source = readFileSync('apps/web/src/pages/event-types/HostSlotPicker.tsx', 'utf8')
+const source = [
+  readFileSync('apps/web/src/pages/event-types/HostSlotPicker.tsx', 'utf8'),
+  readFileSync('apps/web/src/pages/event-types/HostTimeSelection.tsx', 'utf8'),
+].join('\n')
 const production = source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')
 const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
 afterEach(() => {
@@ -64,11 +67,11 @@ function component(code: string, overrides: Record<string, unknown> = {}): typeo
     useI18n,
     eventSlots,
     getEventType,
-    codeOf,
     dateKeyIn,
-    instantOf,
+    codeOf,
     addDays,
     parseDateKey,
+    instantOf,
     ...overrides,
   }
   return new Function('reactRuntime', ...Object.keys(deps), `${compiled}; return HostSlotPicker`)(
@@ -995,14 +998,14 @@ describe('host picker production-source protections', () => {
       '2026-03-08',
     ],
     [
-      'instantOf(parseDateKey(date), 0, 0, displayTimeZone)',
+      'instantOf(parseDateKey(date), 0, 0, timeZone)',
       "Date.parse(date + 'T00:00:00Z')",
       'Pacific/Kiritimati',
       '2026-03-07T12:30:00Z',
       '2026-03-08',
     ],
     [
-      'instantOf(parseDateKey(addDays(date, 1)), 0, 0, displayTimeZone)',
+      'instantOf(parseDateKey(addDays(date, 1)), 0, 0, timeZone)',
       'start + 86_400_000',
       'America/Los_Angeles',
       '2026-03-09T01:00:00Z',

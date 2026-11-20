@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { type AuditEvent, writeAuditEvent } from '@hourmere/db/audit'
+import { checkTeamWriteDeadline } from '@hourmere/db/team-write'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -13,6 +14,13 @@ import {
 import { isUuid } from './organizations.ts'
 import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
 import { fixedTeamRole, recipientAlreadyMember, teamRoleDenied } from './team-role-policy.ts'
+import {
+  lockTeamSsoProof,
+  ssoHardOff,
+  type TeamSsoCapabilities,
+  type TeamSsoSession,
+} from './team-sso.ts'
+import { nativeSsoRequired } from './team-sso-native.ts'
 
 export type ReserveInvitationEmail = (
   trx: Db,
@@ -24,6 +32,7 @@ export type ReserveInvitationEmail = (
 export type EnqueueInvitationEmail = (payload: {
   invitationId: string
   generation: number
+  actor?: TeamSsoSession
 }) => Promise<void>
 
 const denied = teamRoleDenied
@@ -70,6 +79,7 @@ export async function manageInvitation(
     requireContext?: boolean
     reserve?: ReserveInvitationEmail | undefined
     enqueue?: EnqueueInvitationEmail | undefined
+    ssoCapabilities?: TeamSsoCapabilities | undefined
   } = {},
 ) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw invalid()
@@ -127,7 +137,7 @@ export async function manageInvitation(
   const email = input.email.trim().toLowerCase()
   const requestId = typeof input.requestId === 'string' ? input.requestId.toLowerCase() : undefined
 
-  const admitted = await db
+  const { response: admitted, deliveryActor } = await db
     .transaction()
     .setIsolationLevel('read committed')
     .execute(async (trx) => {
@@ -172,30 +182,43 @@ export async function manageInvitation(
       )
         throw contextChanged()
 
-      const { invitation, delivery, existing, replacingExpired } = await admitInvitation(
+      const identity = { userId: actor.userId, sessionId: actor.sessionId }
+      const deadline = await lockTeamSsoProof(
+        { capabilities: options.ssoCapabilities ?? ssoHardOff },
         trx,
-        {
-          userId: actor.userId,
-          audit: {
-            actor: { type: 'user', id: actor.userId },
-            credential: { type: 'session', id: actor.sessionId },
-          },
-          // Row locks can wait beyond the session's remaining lifetime.
-          current: (at) => {
-            if (session.expiresAt <= at) throw denied()
-          },
-        },
-        {
-          organizationId,
-          email,
-          resend,
-          invitationId: input.invitationId as string | undefined,
-          expectedGeneration: input.expectedGeneration as number | undefined,
-          requestId,
-        },
-        { reserve: options.reserve },
+        identity,
+        organizationId,
+        nativeSsoRequired,
       )
-      return result(invitation, delivery, existing && !replacingExpired)
+      const { invitation, delivery, existing, replacingExpired, newGeneration } =
+        await admitInvitation(
+          trx,
+          {
+            userId: actor.userId,
+            audit: {
+              actor: { type: 'user', id: actor.userId },
+              credential: { type: 'session', id: actor.sessionId },
+            },
+            // Row locks can wait beyond the session's remaining lifetime.
+            current: (at) => {
+              if (session.expiresAt <= at) throw denied()
+            },
+          },
+          {
+            organizationId,
+            email,
+            resend,
+            invitationId: input.invitationId as string | undefined,
+            expectedGeneration: input.expectedGeneration as number | undefined,
+            requestId,
+          },
+          { reserve: options.reserve },
+        )
+      await checkTeamWriteDeadline(trx, deadline, nativeSsoRequired)
+      return {
+        response: result(invitation, delivery, existing && !replacingExpired),
+        deliveryActor: deadline && newGeneration ? identity : undefined,
+      }
     })
   // Admission is already committed: queue failure must not discard the invitation or
   // its due delivery intent. The repairer can enqueue that same generation later.
@@ -204,6 +227,7 @@ export async function manageInvitation(
       await options.enqueue({
         invitationId: admitted.id,
         generation: admitted.delivery.generation,
+        ...(deliveryActor ? { actor: deliveryActor } : {}),
       })
     } catch {
       // Cancellation or acceptance can win after admission commits. A fresh read
@@ -357,7 +381,7 @@ export async function admitInvitation(
       delivery?.resend_request_id === requestId &&
       generation === (input.expectedGeneration as number) + 1
     )
-      return { invitation, delivery, existing, replacingExpired: false }
+      return { invitation, delivery, existing, replacingExpired: false, newGeneration: false }
     if (generation !== input.expectedGeneration || delivery?.resend_request_id === requestId)
       throw conflict()
     const resendDenial =
@@ -390,7 +414,7 @@ export async function admitInvitation(
       message: 'An invitation is already pending. Reload before trying again.',
     })
   if (invitation && delivery && !resend)
-    return { invitation, delivery, existing, replacingExpired: false }
+    return { invitation, delivery, existing, replacingExpired: false, newGeneration: false }
   // Lock every potentially expiring row before the shared mail-budget lock.
   // A live invitation can expire while admission waits for that shared budget.
   const retiringCandidates = await trx
@@ -532,7 +556,7 @@ export async function admitInvitation(
     .onConflict((oc) => oc.column('invitation_id').doUpdateSet(values))
     .returningAll()
     .executeTakeFirstOrThrow()
-  return { invitation, delivery, existing, replacingExpired }
+  return { invitation, delivery, existing, replacingExpired, newGeneration: true }
 }
 
 function result<T>(
@@ -556,6 +580,7 @@ export async function invitationRules(
   db: Db,
   reserve?: ReserveInvitationEmail,
   enqueue?: EnqueueInvitationEmail,
+  ssoCapabilities = ssoHardOff,
 ) {
   if (ctx.path !== '/organization/invite-member') return
   if (ctx.request && ctx.request.headers.get('origin') !== new URL(ctx.context.baseURL).origin)
@@ -578,6 +603,7 @@ export async function invitationRules(
           expectedOrganizationId: ctx.request?.headers.get('x-expected-organization-id'),
           reserve,
           enqueue,
+          ssoCapabilities,
         },
       ),
     )

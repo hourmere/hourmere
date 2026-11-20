@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
 import { isPublicTeamSlug } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { servedHandle } from './availability.ts'
 import { canonicalJson } from './bookings.ts'
@@ -841,11 +842,10 @@ export async function createRoutingForm(
   const operation = operationOf(ctx, 'create', validRequestId(fields.requestId), { slug, draft })
   const organizationId = ctx.principal.organization.id
   return withWriteErrors(() =>
-    ctx.db
-      .transaction()
+    teamWriteTransaction(
       // Form admission counts with a fresh snapshot after waiting (migration 0072).
-      .setIsolationLevel('read committed')
-      .execute(async (trx) => {
+      ctx.db.transaction().setIsolationLevel('read committed'),
+      async (trx) => {
         await ctx.authorizeOrganizationWrite?.(trx, organizationId)
         await authorize(trx, ctx, true)
         await lockFormAdmission(trx, organizationId)
@@ -867,7 +867,8 @@ export async function createRoutingForm(
           .executeTakeFirstOrThrow()
         if (operation) await recordOperation(trx, operation, id, null)
         return loadForm(trx, organizationId, id)
-      }),
+      },
+    ),
   )
 }
 
@@ -968,10 +969,10 @@ export async function updateRoutingForm(
   const enabled = fields.enabled as boolean | undefined
   const organizationId = ctx.principal.organization.id
   return withWriteErrors(() =>
-    ctx.db
-      .transaction()
-      .setIsolationLevel('read committed')
-      .execute(async (trx) => {
+    teamWriteTransaction(
+      // Re-read the draft revision after waiting for the form lock.
+      ctx.db.transaction().setIsolationLevel('read committed'),
+      async (trx) => {
         await ctx.authorizeOrganizationWrite?.(trx, organizationId)
         await authorize(trx, ctx, true)
         const form = await findForm(trx, organizationId, id, true)
@@ -1004,7 +1005,8 @@ export async function updateRoutingForm(
           .where('id', '=', form.id)
           .execute()
         return loadForm(trx, organizationId, form.id)
-      }),
+      },
+    ),
   )
 }
 
@@ -1020,10 +1022,9 @@ export async function archiveRoutingForm(
   requireScope(ctx, 'write')
   const expected = validRevision(fieldsOf(input, ['expectedRevision']).expectedRevision)
   const organizationId = ctx.principal.organization.id
-  await ctx.db
-    .transaction()
-    .setIsolationLevel('read committed')
-    .execute(async (trx) => {
+  await teamWriteTransaction(
+    ctx.db.transaction().setIsolationLevel('read committed'),
+    async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, organizationId)
       await authorize(trx, ctx, true)
       const form = await findForm(trx, organizationId, id, true)
@@ -1037,7 +1038,8 @@ export async function archiveRoutingForm(
         })
         .where('id', '=', form.id)
         .execute()
-    })
+    },
+  )
 }
 
 // --- Publication ---------------------------------------------------------------------------
@@ -1132,10 +1134,10 @@ export async function publishRoutingForm(
   })
   const organizationId = ctx.principal.organization.id
   return withWriteErrors(() =>
-    ctx.db
-      .transaction()
-      .setIsolationLevel('read committed')
-      .execute(async (trx) => {
+    teamWriteTransaction(
+      // Resolve the current request receipt and targets under their locks.
+      ctx.db.transaction().setIsolationLevel('read committed'),
+      async (trx) => {
         await ctx.authorizeOrganizationWrite?.(trx, organizationId)
         // The organization boundary first, so membership is current once it is granted.
         await authorize(trx, ctx, true)
@@ -1218,7 +1220,8 @@ export async function publishRoutingForm(
           form: await loadForm(trx, organizationId, form.id),
           version: await loadVersion(trx, organizationId, form.id, version.id),
         }
-      }),
+      },
+    ),
   )
 }
 

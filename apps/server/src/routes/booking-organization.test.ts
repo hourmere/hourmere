@@ -130,6 +130,36 @@ describe.skipIf(!serverUrl)('booking space resolution', () => {
     })
   })
 
+  it('applies the policy of the resolved booking space across active spaces', async () => {
+    await test.db
+      .insertInto('sso_policies')
+      .values({ organization_id: teamId, require_sso: true })
+      .execute()
+    try {
+      const personal = test.as(await session(host))
+      expect(await personal.get(`/api/v1/bookings/${bookingId}/organization`)).toEqual({
+        status: 403,
+        body: { error: 'sso_required' },
+      })
+      const team = test.as(await session(host, teamId))
+      expect(await team.get(`/api/v1/bookings/${personalBookingId}/organization`)).toEqual({
+        status: 200,
+        body: { organizationId: host.principal.organization.id, access: 'host' },
+      })
+      const unrelated = test.as(await session(outsider))
+      expect(await unrelated.get(`/api/v1/bookings/${bookingId}/organization`)).toEqual({
+        status: 404,
+        body: { error: 'booking_not_found', message: 'Booking not found' },
+      })
+    } finally {
+      await test.db
+        .updateTable('sso_policies')
+        .set({ require_sso: false, trust_generation: 2, policy_revision: 2 })
+        .where('organization_id', '=', teamId)
+        .execute()
+    }
+  })
+
   it('denies scoped credentials, expired sessions and revoked target membership', async () => {
     const path = `/api/v1/bookings/${bookingId}/organization`
     const key = await test.as(host.principal).get(path)

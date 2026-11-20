@@ -7,12 +7,13 @@ import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
-import type { MessageKey } from '../../i18n/translate.ts'
+import type { MessageKey, UiMessage } from '../../i18n/translate.ts'
 import { randomHex } from '../../random.ts'
 import { MissingRecord } from '../NotFound.tsx'
 import { PollFinalizeForm } from './PollFinalizeForm.tsx'
 import { PollLifecycleActions } from './PollLifecycleActions.tsx'
 import { PollResultsMatrix } from './PollResultsMatrix.tsx'
+import { PollRoster } from './PollRoster.tsx'
 import {
   changePoll,
   type FinalizeAttempt,
@@ -32,6 +33,11 @@ type Props = {
   backTo: string
   bookingLink: (id: string) => string
   onDeleted: () => void
+}
+
+type RosterRefresh = {
+  rosterNotice: UiMessage | undefined
+  refreshRoster: (notice?: UiMessage) => void
 }
 
 type WriteIssue =
@@ -104,13 +110,20 @@ function writeIssue(error: unknown): WriteIssue {
 const back = (to: string) => ({ to, label: 'Back to meeting polls' })
 
 export function MeetingPollResults(props: Props) {
-  const [version, setVersion] = useState(0)
+  const [{ version, rosterNotice }, setView] = useState<{
+    version: number
+    rosterNotice?: UiMessage
+  }>({ version: 0 })
   return (
     <LoadResults
       key={`${props.organizationId}:${props.id}:${version}`}
       {...props}
       refreshed={version > 0}
-      refresh={() => setVersion((value) => value + 1)}
+      refresh={() => setView((view) => ({ version: view.version + 1 }))}
+      rosterNotice={rosterNotice}
+      refreshRoster={(notice) =>
+        setView((view) => ({ version: view.version + 1, ...(notice && { rosterNotice: notice }) }))
+      }
     />
   )
 }
@@ -119,7 +132,7 @@ function LoadResults({
   refreshed,
   refresh,
   ...props
-}: Props & { refreshed: boolean; refresh: () => void }) {
+}: Props & RosterRefresh & { refreshed: boolean; refresh: () => void }) {
   const { t, ui } = useI18n()
   const { id, organizationId, backTo } = props
   const load = useCallback(
@@ -206,13 +219,16 @@ function ResultsView({
   onDeleted,
   results,
   refresh,
-}: Props & { results: PollResults; refresh: () => void }) {
+  rosterNotice,
+  refreshRoster,
+}: Props & RosterRefresh & { results: PollResults; refresh: () => void }) {
   const { t, formatLocale } = useI18n()
   const mounted = useMounted()
   const inflight = useRef(false)
   const issueRef = useRef<HTMLDivElement>(null)
   const bookingRef = useRef<HTMLAnchorElement>(null)
   const [busy, setBusy] = useState(false)
+  const [rosterLocked, setRosterLocked] = useState(false)
   const [issue, setIssue] = useState<WriteIssue | null>(null)
   const [confirming, setConfirming] = useState<LifecycleAction | null>(null)
   const [attempt, setAttempt] = useState<FinalizeAttempt | null>(null)
@@ -275,12 +291,13 @@ function ResultsView({
   }
 
   function beginFinalization(body: FinalizeBody) {
-    if (attempt || confirming || issue?.kind === 'refresh' || inflight.current) return
+    if (attempt || confirming || rosterLocked || issue?.kind === 'refresh' || inflight.current)
+      return
     void finalize({ key: randomHex(16), body })
   }
 
   async function lifecycle(action: LifecycleAction) {
-    if (attempt || issue?.kind === 'refresh' || inflight.current) return
+    if (attempt || rosterLocked || issue?.kind === 'refresh' || inflight.current) return
     inflight.current = true
     setBusy(true)
     setIssue(null)
@@ -350,11 +367,21 @@ function ResultsView({
         )}
       </section>
       <PollResultsMatrix results={results} candidates={candidates} showAvailability={canSchedule} />
+      <PollRoster
+        results={finalized ? { ...results, poll } : results}
+        disabled={busy || Boolean(attempt || confirming) || issue?.kind === 'refresh'}
+        notice={rosterNotice}
+        onLockChange={setRosterLocked}
+        onRefresh={refreshRoster}
+        onAccessError={(error) => setIssue(writeIssue(error))}
+      />
       {canSchedule && (
         <PollFinalizeForm
           results={results}
           candidates={candidates}
-          disabled={busy || Boolean(attempt || confirming) || issue?.kind === 'refresh'}
+          disabled={
+            busy || rosterLocked || Boolean(attempt || confirming) || issue?.kind === 'refresh'
+          }
           busy={busy && Boolean(attempt)}
           onRefresh={issue ? undefined : refresh}
           onFinalize={beginFinalization}
@@ -374,7 +401,12 @@ function ResultsView({
             </button>
           )}
           {issue.kind !== 'retry' && !attempt && (
-            <button type="button" className="button button-small" disabled={busy} onClick={refresh}>
+            <button
+              type="button"
+              className="button button-small"
+              disabled={busy || rosterLocked}
+              onClick={refresh}
+            >
               {t('Refresh results')}
             </button>
           )}
@@ -384,7 +416,7 @@ function ResultsView({
         status={poll.status}
         confirmation={confirming}
         busy={busy}
-        disabled={Boolean(attempt) || issue?.kind === 'refresh'}
+        disabled={Boolean(attempt) || rosterLocked || issue?.kind === 'refresh'}
         onChoose={setConfirming}
         onConfirm={(action) => void lifecycle(action)}
       />

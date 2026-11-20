@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import type { TeamSsoCapabilities } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { requireWorkflowsImplemented } from '@hourmere/workflows/hard-off'
@@ -38,6 +40,7 @@ export interface WebhookSettings {
   publicUrl?: string | undefined
   encryptionKey?: string | undefined
   privateTargets?: readonly WebhookPrivateTarget[] | undefined
+  ssoCapabilities?: TeamSsoCapabilities | undefined
 }
 export interface WebhookView {
   id: string
@@ -198,7 +201,7 @@ export async function createWebhook(
   const url = webhookUrl(parsed.data.url, settings.privateTargets)
   if (!url) throw destinationNotAllowed(settings)
   const encryptionKey = requireEnabled(settings)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
       await requireAdmin(trx, ctx)
@@ -274,7 +277,7 @@ export async function updateWebhook(
   if (!parsed.success || Object.keys(parsed.data).length === 0) throw invalid()
   const events = parsed.data.events === undefined ? undefined : eventsOf(parsed.data.events)
   const pauseOnly = parsed.data.isActive === false && parsed.data.events === undefined
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
     if (events) requireWorkflowSubscription(events, row.events)
     // Pausing must remain available after an operator revokes a destination. Every
@@ -312,7 +315,7 @@ export async function rotateWebhookSecret(
   id: unknown,
 ) {
   const encryptionKey = requireEnabled(settings)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
     const secret = newWebhookSecret()
     await trx
@@ -329,7 +332,7 @@ export async function rotateWebhookSecret(
 }
 
 export async function deleteWebhook(ctx: WebhookServiceContext, id: unknown) {
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()
     await auditWebhook(trx, ctx, 'webhook.deleted', row)

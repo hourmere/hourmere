@@ -11,12 +11,15 @@ import {
   teamRoles,
 } from './team-management.ts'
 import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
+import { lockSharedTeamSsoProof, ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
+import { nativeSsoRequired } from './team-sso-native.ts'
 
 export interface TeamMemberRemovalInput {
   teamId: string
   memberUserId: string
   expectedOrganizationId: string
   recordAdmissionRemoval?: SsoAdmissionRemoval | undefined
+  ssoCapabilities?: TeamSsoCapabilities | undefined
 }
 
 export interface TeamMemberRemoval {
@@ -156,6 +159,10 @@ export function removeTeamMember(
       allowPersonal: false,
     })
     if (actor.role === 'member') throw teamManagementDenied()
+    const identity =
+      principal.kind === 'session'
+        ? { userId: principal.user.id, sessionId: principal.sessionId }
+        : null
     const result = await removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
     await writeAuditEvent(trx, {
       organizationId: actor.organizationId,
@@ -164,6 +171,13 @@ export function removeTeamMember(
       targetType: 'user',
       targetId: result.memberUserId,
     })
+    await lockSharedTeamSsoProof(
+      trx,
+      input.ssoCapabilities ?? ssoHardOff,
+      identity,
+      actor.organizationId,
+      nativeSsoRequired,
+    )
     return result
   }
   return db.isTransaction
