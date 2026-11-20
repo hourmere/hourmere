@@ -161,5 +161,9 @@
   "series.cancelled.member": "Cancelled",
   "series.manage": "Manage series",
   "series.view": "View series",
-  "series.repair": "To retry a meeting link, open the affected booking in Hourmere."
+  "series.repair": "To retry a meeting link, open the affected booking in Hourmere.",
+  "ssoRecovery.nominated.subject": "You were nominated for single sign-on recovery",
+  "ssoRecovery.nominated.message": "A team owner nominated you for single sign-on recovery. Open Hourmere within 72 hours to review the nomination. Accepting requires a separate confirmation from your own mailbox.",
+  "ssoRecovery.enrolled.subject": "Single sign-on recovery enrollment was accepted",
+  "ssoRecovery.enrolled.message": "A team owner accepted a nomination for single sign-on recovery. Contact your team administrator if you did not expect this change."
 }

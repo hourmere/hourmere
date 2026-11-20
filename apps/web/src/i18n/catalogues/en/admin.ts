@@ -2298,4 +2298,8 @@ export const admin = {
 
   // Native team SSO
   'Sign in with this team’s SSO to continue.': 'Sign in with this team’s SSO to continue.',
+
+  // SSO recovery enrollment
+  'This team must retain at least one recovery owner while SSO is enforced.':
+    'This team must retain at least one recovery owner while SSO is enforced.',
 } as const

@@ -161,5 +161,9 @@
   "series.cancelled.member": "已取消",
   "series.manage": "管理系列预约",
   "series.view": "查看系列预约",
-  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。"
+  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。",
+  "ssoRecovery.nominated.subject": "您已获提名单点登录恢复所有者",
+  "ssoRecovery.nominated.message": "一位团队所有者提名您为单点登录恢复所有者。请在 72 小时内打开 Hourmere 查看提名。接受提名时，您需要使用自己的邮箱单独完成验证。",
+  "ssoRecovery.enrolled.subject": "单点登录恢复提名已接受",
+  "ssoRecovery.enrolled.message": "一位团队所有者接受了单点登录恢复提名。如果您没有预期此变更，请联系团队管理员。"
 }

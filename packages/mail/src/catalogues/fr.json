@@ -161,5 +161,9 @@
   "series.cancelled.member": "Annulée",
   "series.manage": "Gérer la série",
   "series.view": "Voir la série",
-  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere."
+  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
+  "ssoRecovery.nominated.subject": "Vous avez été proposé pour la récupération de l’authentification unique",
+  "ssoRecovery.nominated.message": "Un propriétaire d’équipe vous a proposé pour la récupération de l’authentification unique. Ouvrez Hourmere dans les 72 heures pour consulter la proposition. Pour l’accepter, vous devez confirmer séparément votre adresse e-mail.",
+  "ssoRecovery.enrolled.subject": "Proposition de récupération de l’authentification unique acceptée",
+  "ssoRecovery.enrolled.message": "Un propriétaire d’équipe a accepté une proposition de récupération de l’authentification unique. Si ce changement vous surprend, contactez l’administration de votre équipe."
 }

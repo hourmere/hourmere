@@ -161,5 +161,9 @@
   "series.cancelled.member": "Storniert",
   "series.manage": "Terminserie verwalten",
   "series.view": "Terminserie ansehen",
-  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen."
+  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen.",
+  "ssoRecovery.nominated.subject": "Sie wurden für die Wiederherstellung der Single-Sign-on-Anmeldung nominiert",
+  "ssoRecovery.nominated.message": "Ein Teaminhaber hat Sie für die Wiederherstellung der Single-Sign-on-Anmeldung nominiert. Öffnen Sie Hourmere innerhalb von 72 Stunden, um die Nominierung einzusehen. Für die Annahme ist eine separate Bestätigung über Ihr eigenes E-Mail-Postfach erforderlich.",
+  "ssoRecovery.enrolled.subject": "Nominierung für die Single-Sign-on-Wiederherstellung angenommen",
+  "ssoRecovery.enrolled.message": "Ein Teaminhaber hat eine Nominierung für die Single-Sign-on-Wiederherstellung angenommen. Wenden Sie sich an Ihre Teamadministration, wenn Sie diese Änderung nicht erwartet haben."
 }

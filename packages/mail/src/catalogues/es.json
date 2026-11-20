@@ -161,5 +161,9 @@
   "series.cancelled.member": "Cancelada",
   "series.manage": "Gestionar la serie",
   "series.view": "Ver la serie",
-  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere."
+  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere.",
+  "ssoRecovery.nominated.subject": "Te han nominado para la recuperación del inicio de sesión único",
+  "ssoRecovery.nominated.message": "Una persona propietaria del equipo te ha nominado para la recuperación del inicio de sesión único. Abre Hourmere en un plazo de 72 horas para revisar la nominación. Para aceptarla, confirma tu propio correo electrónico por separado.",
+  "ssoRecovery.enrolled.subject": "Nominación para la recuperación del inicio de sesión único aceptada",
+  "ssoRecovery.enrolled.message": "Una persona propietaria del equipo ha aceptado una nominación para la recuperación del inicio de sesión único. Si no esperabas este cambio, contacta con la persona que administra tu equipo."
 }

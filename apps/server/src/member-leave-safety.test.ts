@@ -12,6 +12,8 @@ import {
   lockSharedTeamSsoProof,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
+  removeSsoRecoveryOwner,
+  SsoRecoveryRequiredError,
   ssoHardOff,
   TeamManagementError,
   teamRoles,
@@ -41,6 +43,7 @@ import {
 import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { ssoRecoveryOwner } from '../../../packages/auth/src/sso-recovery-membership.ts'
 import { createApp } from './app.ts'
 import { ErrorBody, errorResponses, json, serviceContext } from './openapi.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -82,8 +85,9 @@ function managementCopy(replacement?: Replacement) {
   )
   return new Function(
     'sql',
+    'ssoRecoveryOwner',
     `${source}; return { checkTeamManagementAccess, TeamManagementError }`,
-  )(sql) as {
+  )(sql, ssoRecoveryOwner) as {
     checkTeamManagementAccess: typeof checkTeamManagementAccess
     TeamManagementError: typeof TeamManagementError
   }
@@ -111,6 +115,7 @@ function serviceCopy(
     teamWriteCheckFor,
     teamWriteTransaction,
     lockSharedTeamSsoProof,
+    removeSsoRecoveryOwner,
     ssoHardOff,
     ensurePersonalOrganization,
     MemberDepartureBlockedError,
@@ -141,6 +146,7 @@ function routeCopy(depart: Departure = leaveTeamMember, replacement?: Replacemen
     MemberDepartureBlockedError,
     MemberDepartureOwnerRequiredError,
     leaveTeamMember: depart,
+    SsoRecoveryRequiredError,
     MemberDepartureImpactSchema,
     DomainError,
     ErrorBody,
@@ -1466,8 +1472,8 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
 
   it('detects applying management-only expected-team authority to member leave', async () => {
     const management = managementCopy([
-      'allowMemberRead,\n  )',
-      'allowMemberRead && !expectedTeamId,\n  )',
+      'allowMemberRead,\n    context?.includeRecoveryOwner,',
+      'allowMemberRead && !expectedTeamId,\n    context?.includeRecoveryOwner,',
     ])
     await expect(verifyStaleMemberLeave(serviceCopy([], management))).rejects.toThrow(
       expect.objectContaining({ name: 'AssertionError', actual: 403, expected: 409 }),

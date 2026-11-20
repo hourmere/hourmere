@@ -463,12 +463,12 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       }),
     })
 
-  const refresh = (refreshToken: string) =>
+  const refresh = (refreshToken: string, grantType = 'refresh_token') =>
     request('/api/auth/oauth2/token', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        grant_type: 'refresh_token',
+        grant_type: grantType,
         client_id: CLIENT,
         refresh_token: refreshToken,
         resource: `${BASE}/mcp`,
@@ -710,6 +710,34 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect(await mcp.text()).toContain('sso_required')
   })
 
+  it('checks delegation on a normalized refresh grant type before replaying a rotation', async () => {
+    const s = await session()
+    const team = await createTestTeam(db, [{ user: s.user, role: 'owner' }])
+    const { refresh_token: refreshToken } = await connected(s, team.id)
+    const { id: grantId } = await db
+      .selectFrom('mcp_oauth_grants')
+      .select('id')
+      .where('user_id', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    await enforce(team.id)
+    await bind(await delegationFixture(s, team.id), grantId)
+
+    const rotated = await refresh(refreshToken)
+    expect(rotated.status).toBe(200)
+    const normalizedRefresh = () => refresh(refreshToken, '\t refresh_token \r\n')
+    const replay = await normalizedRefresh()
+    expect(replay.status).toBe(200)
+    const [initial, retried] = (await Promise.all([rotated.json(), replay.json()])) as {
+      access_token: string
+      refresh_token: string
+    }[]
+    expect(retried?.access_token === initial?.access_token).toBe(true)
+    expect(retried?.refresh_token === initial?.refresh_token).toBe(true)
+
+    await db.deleteFrom('sso_delegation_bindings').where('oauth_grant_id', '=', grantId).execute()
+    await expectSsoRequired(await normalizedRefresh())
+  })
+
   it('rechecks OAuth refresh after a concurrent provider trust change commits', async () => {
     const s = await session(),
       team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
@@ -764,6 +792,84 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       .execute()
     expect(stored).toEqual([{ revoked: null }])
   })
+
+  it.each(['code exchange', 'refresh rotation'] as const)(
+    'withholds the %s response when delegation is revoked during token persistence',
+    async (flow) => {
+      const s = await session()
+      const team = await createTestTeam(db, [{ user: s.user, role: 'owner' }])
+      const a = await begin(s, team.id)
+      const url = await approved(s, a)
+      const exchangeCode = () => exchange(a, url.searchParams.get('code') as string)
+      let issue = exchangeCode
+      if (flow === 'refresh rotation') {
+        const initial = await exchangeCode()
+        expect(initial.status).toBe(200)
+        const tokens = (await initial.json()) as { refresh_token: string }
+        issue = () => refresh(tokens.refresh_token)
+      }
+      const { id: grantId } = await db
+        .selectFrom('mcp_oauth_grants')
+        .select('id')
+        .where('user_id', '=', s.user.id)
+        .executeTakeFirstOrThrow()
+      await enforce(team.id)
+      const reliance = await delegationFixture(s, team.id)
+      await bind(reliance, grantId)
+
+      let pending: Promise<Response> | undefined
+      try {
+        await withConnection(async (blocker) => {
+          await blocker.query('BEGIN')
+          try {
+            const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+            // Block writes but permit the refresh lookup and the first delegation check.
+            await blocker.query('LOCK TABLE auth."oauthRefreshToken" IN SHARE MODE')
+            pending = issue()
+            await vi.waitFor(
+              async () => {
+                const { rows: waiters } = await owned.pool.query<{ blocked: boolean }>(
+                  `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
+                   AND $1 = ANY(pg_blocking_pids(pid)) AND query ILIKE '%oauthRefreshToken%') AS blocked`,
+                  [rows[0]?.pid],
+                )
+                expect(waiters[0]?.blocked).toBe(true)
+              },
+              { timeout: 5000 },
+            )
+            const deleted = await db
+              .deleteFrom('sso_delegation_bindings')
+              .where('oauth_grant_id', '=', grantId)
+              .executeTakeFirst()
+            expect(deleted.numDeletedRows).toBe(1n)
+          } finally {
+            await blocker.query('ROLLBACK')
+          }
+        })
+        if (!pending) throw new Error('Expected a pending token request')
+        await expectSsoRequired(await pending)
+      } finally {
+        await pending
+      }
+
+      const stored = await db
+        .selectFrom('auth.oauthRefreshToken')
+        .select(['revoked', 'rotationReplayResponse', 'rotationReplayExpiresAt'])
+        .where('referenceId', '=', grantId)
+        .execute()
+      expect(stored).toEqual(
+        flow === 'code exchange'
+          ? []
+          : [
+              {
+                revoked: expect.any(Date),
+                rotationReplayResponse: null,
+                rotationReplayExpiresAt: null,
+              },
+            ],
+      )
+    },
+  )
 
   it('serves discovery through the actual app and challenges OAuth clients without reading their body', async () => {
     for (const path of [

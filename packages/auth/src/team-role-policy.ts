@@ -12,9 +12,15 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
-import { isUuid, personalOwner } from './organizations.ts'
+import { isUuid } from './organizations.ts'
 import type { ScimClaimCompletion, ScimClaimFinish } from './scim-claims.ts'
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
+import {
+  removeSsoRecoveryOwner,
+  SsoRecoveryRequiredError,
+  soleOwnerDepartureFlags,
+  ssoRecoveryOwner,
+} from './sso-recovery-membership.ts'
 import {
   checkTeamManagementAccess,
   checkTeamManagementMembership,
@@ -121,6 +127,9 @@ async function asAuthError<T>(operation: () => Promise<T>): Promise<T> {
         message: error.message,
         handling: error.handling,
       })
+    }
+    if (error instanceof SsoRecoveryRequiredError) {
+      throw new APIError('CONFLICT', { code: error.code, message: error.message })
     }
     if (error instanceof TeamManagementError) {
       if (error.code === 'organization_context_changed') {
@@ -373,11 +382,16 @@ export function createTeamRolePolicy(
     let targetQuery = targetDb
       .selectFrom('auth.member')
       .selectAll()
+      .select(ssoRecoveryOwner)
       .where('id', '=', memberId)
       .where('organizationId', '=', facts.organizationId)
     if (lock) targetQuery = targetQuery.forUpdate()
     const target = await targetQuery.executeTakeFirst()
-    if (!target || target.userId === facts.userId || teamRoles(target.role).includes('owner'))
+    if (
+      !target ||
+      target.userId === facts.userId ||
+      (teamRoles(target.role).includes('owner') && !target.recoveryOwner)
+    )
       throw teamRoleDenied()
     if (lock && teamRoles(target.role).includes('owner')) {
       await assertTeamOwnerRemains(targetDb, facts.organizationId, target.userId)
@@ -512,14 +526,22 @@ export function createTeamRolePolicy(
             return response
           const ctx = requests.getStore()?.ctx
           const actor = ctx ? await principal(ctx) : null
-          if (!actor || (await personalOwner(db, actor.organization.id))) return response
+          if (!actor) return response
+          const flags = isUuid(actor.organization.id)
+            ? await soleOwnerDepartureFlags(db, actor.organization.id, actor.user.id)
+            : undefined
+          if (flags?.personal) return response
           // Keep Better Auth's early sole-owner refusal intact. Its native 400 and our
           // locked write refusal describe the same conflict, including legacy roles.
-          const error = new MemberDepartureOwnerRequiredError()
+          const error = flags?.recoveryRequired
+            ? new SsoRecoveryRequiredError()
+            : new MemberDepartureOwnerRequiredError()
+          const handling =
+            error instanceof MemberDepartureOwnerRequiredError ? error.handling : undefined
           const headers = new Headers(response.headers)
           headers.delete('content-length')
           return new Response(
-            JSON.stringify({ code: error.code, message: error.message, handling: error.handling }),
+            JSON.stringify({ code: error.code, message: error.message, handling }),
             { status: 409, headers },
           )
         })
@@ -678,6 +700,9 @@ export function createTeamRolePolicy(
           }
           if (code === 'team_management_access_denied') throw teamRoleDenied()
           if (code === 'sso_required') nativeSsoRequired()
+          if (code === 'sso_recovery_required') {
+            throw new APIError('CONFLICT', { code, message: code })
+          }
           throw error
         }
       }
@@ -839,6 +864,16 @@ export function createTeamRolePolicy(
             const { facts, target, role } = await roleChange(ctx, trx, true, request.update.role)
             if (!selects(request.where, { id: target.id })) {
               throw teamRoleDenied()
+            }
+            if (target.recoveryOwner) {
+              const actor = await principal(ctx)
+              if (!actor) throw teamRoleDenied()
+              await requireProof(trx, ctx, facts.organizationId)
+              await removeSsoRecoveryOwner(trx, actor, {
+                organizationId: facts.organizationId,
+                userId: target.userId,
+                isOwner: teamRoles(target.role).includes('owner'),
+              })
             }
             const updated = await trx
               .updateTable('auth.member')

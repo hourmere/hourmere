@@ -123,6 +123,8 @@ const restContract = {
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
     'POST /api/v1/team/sso/delegations',
     'DELETE /api/v1/team/sso/delegations/{bindingId}',
+    'POST /api/v1/team/sso/recovery',
+    'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',

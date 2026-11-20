@@ -25,6 +25,12 @@ import {
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid, organizationGuards, personalOwner } from './organizations.ts'
 import {
+  removeSsoRecoveryOwner,
+  SsoRecoveryRequiredError,
+  soleOwnerDepartureFlags,
+  ssoRecoveryOwner,
+} from './sso-recovery-membership.ts'
+import {
   checkTeamManagementAccess,
   TeamManagementError,
   teamManagementDenied,
@@ -69,6 +75,8 @@ function sourceCopy(replacement?: Replacement): Remove {
     lockSharedTeamSsoProof,
     ssoHardOff,
     nativeSsoRequired,
+    ssoRecoveryOwner,
+    removeSsoRecoveryOwner,
   }
   return guardCopy(
     new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
@@ -116,6 +124,10 @@ function policySourceCopy(
     ssoHardOff,
     nativeSsoRequired,
     trustedAddMember,
+    ssoRecoveryOwner,
+    removeSsoRecoveryOwner,
+    soleOwnerDepartureFlags,
+    SsoRecoveryRequiredError,
   }
   return guardCopy(
     new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(
@@ -736,7 +748,10 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   }[] = [
     {
       name: 'owner target refusal',
-      replacement: ["    roles.includes('owner') ||\n", ''],
+      replacement: [
+        "    (roles.includes('owner') && (actor.role !== 'owner' || !member.recoveryOwner)) ||\n",
+        '',
+      ],
       verify: (remove) => verifyTarget(remove, 'owner', 'owner,member'),
     },
     {

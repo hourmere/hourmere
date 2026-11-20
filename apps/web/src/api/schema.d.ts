@@ -4756,7 +4756,7 @@ export interface paths {
         put?: never;
         /**
          * Revoke a team membership immediately
-         * @description Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing context returns 409 organization_context_changed. A caller who still owns or administers the expected team receives the same 409 after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Owners may remove admins and members; admins may remove members. Owner targets and administrative self-removal receive the uniform 403 team_management_access_denied; owners may only use safe self departure. A defensive owner count preserves at least one current owner. The owner check runs after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.
+         * @description Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing context returns 409 organization_context_changed. A caller who still owns or administers the expected team receives the same 409 after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Owners may remove admins, members and other owners with accepted SSO recovery status. Admins may remove members. Administrative self-removal and other owner targets receive the uniform 403 team_management_access_denied. An enforced team must retain a recovery owner. The owner checks run after the same organization FOR UPDATE lock used by leave and role changes, inside the membership write transaction. In that transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.
          */
         post: operations["removeTeamMember"];
         delete?: never;
@@ -5075,6 +5075,46 @@ export interface paths {
          * @description Verified team owner/admin browser session with fresh proof and expected revision. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.
          */
         post: operations["testSsoProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nominate a current team owner for SSO recovery
+         * @description Requires a team owner browser session and fresh administration proof. SSO remains unavailable.
+         */
+        post: operations["configureSsoRecovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/recovery/{enrollmentId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept the caller’s SSO recovery nomination
+         * @description Requires the nominated owner’s browser session and independent mailbox proof. SSO remains unavailable.
+         */
+        post: operations["acceptSsoRecoveryEnrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -18075,7 +18115,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description organization_context_changed: reload the page before trying this team write again; member_departure_owner_required: add another owner first */
+            /** @description organization_context_changed: reload the page before trying this team write again; member_departure_owner_required: add another owner first; sso_recovery_required: an enforced team must retain a recovery owner */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19365,6 +19405,184 @@ export interface operations {
             };
         };
     };
+    configureSsoRecovery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    ownerUserId: string;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Pending enrollment and the resulting policy revision */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        enrollmentId: string;
+                        /** Format: date-time */
+                        expiresAt: string;
+                        policyRevision: number;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    acceptSsoRecoveryEnrollment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                enrollmentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The nominee was added as a recovery owner */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     leaveTeam: {
         parameters: {
             query?: never;
@@ -19412,7 +19630,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner and handling.nextStep (the team must retain at least one owner), or organization_context_changed: reload before retrying */
+            /** @description member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner and handling.nextStep (the team must retain at least one owner), sso_recovery_required (an enforced team must retain a recovery owner), or organization_context_changed: reload before retrying */
             409: {
                 headers: {
                     [name: string]: unknown;

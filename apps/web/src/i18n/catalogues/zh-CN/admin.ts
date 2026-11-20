@@ -2188,4 +2188,8 @@ export const admin = {
 
   // Native team SSO
   'Sign in with this team’s SSO to continue.': '请使用此团队的单点登录继续。',
+
+  // SSO recovery enrollment
+  'This team must retain at least one recovery owner while SSO is enforced.':
+    '团队启用强制单点登录时，必须保留至少一位恢复所有者。',
 } as const

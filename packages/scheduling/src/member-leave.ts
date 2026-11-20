@@ -4,6 +4,7 @@ import {
   lockSharedTeamSsoProof,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
+  removeSsoRecoveryOwner,
   type SsoAdmissionRemoval,
   ssoHardOff,
   TeamManagementError,
@@ -59,9 +60,30 @@ export async function leaveTeamMember(
         principal,
         input.teamId,
         true,
-        { expectedOrganizationId: input.expectedOrganizationId, allowPersonal: false },
+        {
+          expectedOrganizationId: input.expectedOrganizationId,
+          allowPersonal: false,
+          includeRecoveryOwner: true,
+        },
         true,
       )
+      const identity = { userId: principal.user.id, sessionId: principal.sessionId }
+      const denied = () => {
+        throw new DomainError('forbidden', 'sso_required')
+      }
+      if (actor.recoveryOwner) {
+        await lockSharedTeamSsoProof(trx, ssoCapabilities, identity, actor.organizationId, denied)
+        await removeSsoRecoveryOwner(
+          trx,
+          principal,
+          {
+            organizationId: actor.organizationId,
+            userId: actor.userId,
+            isOwner: actor.role === 'owner',
+          },
+          ctx.requestId,
+        )
+      }
       if (actor.role === 'owner') {
         // Every leave and role change holds this organization UPDATE lock. Count only
         // other current members with an exact owner token, after waiting for that lock.
@@ -85,11 +107,7 @@ export async function leaveTeamMember(
         throw new MemberDepartureBlockedError(impact)
       }
       // The write itself removes the membership and proof that authorized it.
-      const identity = { userId: principal.user.id, sessionId: principal.sessionId }
       const check = teamWriteCheckFor(actor.organizationId, identity)
-      const denied = () => {
-        throw new DomainError('forbidden', 'sso_required')
-      }
       const deadline = check
         ? await checkTeamWriteBeforeAuthorityChange(trx)
         : await lockSharedTeamSsoProof(trx, ssoCapabilities, identity, actor.organizationId, denied)
