@@ -20,6 +20,7 @@ export const AUDIT_HOST_NOTE =
   '请分享你的后续问题：这是一段用于检查窄屏留言输入框的合成主持人留言。'
 
 export interface AuditFixtureState {
+  userId: string
   organizationId: string
   teamOrganizationId: string
   eventTypeId: string

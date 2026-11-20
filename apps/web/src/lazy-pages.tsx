@@ -70,6 +70,19 @@ export const MeetingPollsPage = page(
   () => import('./pages/meeting-polls/MeetingPolls.tsx'),
   (m) => m.MeetingPollsPage,
 )
+export const WorkflowsPage = page(
+  () => import('./pages/WorkflowsPage.tsx'),
+  (m) => m.default,
+)
+export const WorkflowEditorPage = lazy(() =>
+  import('./pages/workflow-editor/WorkflowEditorPage.tsx').then((m) => ({
+    default: m.WorkflowEditorPage,
+  })),
+)
+export const WorkflowRunHistoryPage = page(
+  () => import('./pages/WorkflowRunHistoryPage.tsx'),
+  (m) => m.default,
+)
 export const MeetingPollCreatePage = page(
   () => import('./pages/meeting-polls/MeetingPollCreate.tsx'),
   (m) => m.MeetingPollCreatePage,
