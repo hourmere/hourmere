@@ -342,17 +342,29 @@ check suspension on the committing connection. SSO JIT admission checks live blo
 for the proven mailbox under the team lock. Authorization and credential revocation are
 separate steps in the implementation plan below.
 
-The shared suspension write takes the team lock and records the blocker in the same
-transaction as two bulk deletes. It deletes the account's sessions whose active
-organization is that team and removes that team's browser proofs on surviving sessions.
+The shared suspension write locks the organization row `FOR UPDATE` first, before
+locking or deleting sessions, browser proofs, API keys or OAuth grants. A concurrent
+team write takes its organization lock before checking live authority on the writing
+connection. If the write holds the lock first, it can commit before suspension. A write
+that waits for suspension to commit must recheck and refuse the suspended member.
+
+The suspension transaction records the blocker, deletes the account's sessions whose
+active organization is that team and removes that team's browser proofs on surviving sessions.
 Personal and other-team sessions stay usable, and team selection refuses the suspended
 team. Rolling refresh only updates an existing session, so it cannot recreate a deleted
 one. Team selection and proof issuance check the blocker under the same team lock.
-Production still registers no SCIM resource handler. Do not delete
-global social sign-in accounts, calendar connections, personal bookings or credentials for
-other organizations. Preserve historical bookings and attribution. Existing departure and
-booking-host handling policy must be reused: suspend eligibility for new team work and
-surface outstanding-booking handling to authorized admins; do not silently cancel meetings.
+The transaction also deletes the member's API keys assigned to the team and their team's
+MCP OAuth grants, including the matching provider consents, token rows and delegation
+bindings. Keys and grants in personal space and other teams, and those of other team
+members, are retained. A session-bound OAuth access token still depends on its issuing
+session. Clearing the blocker during later reactivation cannot restore deleted keys or
+grants. The member must create a new key or authorize a new OAuth grant.
+
+Production still registers no SCIM resource handler. Preserve global social sign-in
+accounts, calendar connections, personal bookings, historical bookings and attribution.
+Existing departure and booking-host handling policy must be reused: suspend eligibility for
+new team work and surface outstanding-booking handling to authorized admins; do not silently
+cancel meetings.
 
 DELETE performs the same revocation and permanently tombstones this SCIM resource;
 every subsequent operation on that resource, including repeated DELETE, returns 404
@@ -588,6 +600,9 @@ accepting person's session like the `membership.accepted` event beside it, in th
 transaction. Profile replacement records `scim_user.updated` on the resource ID with the
 same token attribution as creation, in the profile transaction. PUT leaves details empty.
 PATCH records only the ordered operation types, normalized to lowercase.
+The shared suspension write records `scim_user.credentials_revoked` on the SCIM resource
+ID with the provisioning token as actor and empty details. The blocker, credential
+deletions and audit row commit or roll back together.
 Token foundation must never claim full audit coverage. SCIM action names follow the journal's
 one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
 check allows exactly one dot. Required future actions:
@@ -597,7 +612,7 @@ aggregation); `scim_user.deactivated`,
 `scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
 `scim_mapping.linked`, `scim_mapping.unlinked`; `scim_user.conflicted`;
 `scim_user.privileged_member_blocked`; `scim_user.last_owner_blocked`;
-`scim_user.membership_suspended`; `scim_user.credentials_revoked`.
+`scim_user.membership_suspended`.
 Record organization/connection, safe credential ID or human actor, target opaque ID,
 request correlation ID, result and time; omit bearer, digest, attribute values and bodies.
 Transactional lifecycle audit integration is a release prerequisite for Users/Groups.

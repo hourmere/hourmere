@@ -1,4 +1,3 @@
-import { apiKey } from '@better-auth/api-key'
 import { type InterfaceLanguage, resolveAdminLanguage } from '@hourmere/core/language'
 import { createDb, type Db, guardPoolErrors, type PoolOptions, poolTimeouts } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
@@ -10,7 +9,7 @@ import { organization } from 'better-auth/plugins/organization'
 import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-providers'
 import pg from 'pg'
 import { parse } from 'pg-connection-string'
-import { API_KEY_RATE_LIMIT, apiKeyDelegationSummaries } from './api-keys.ts'
+import { API_KEY_RATE_LIMIT, apiKeyDelegationSummaries, nativeApiKey } from './api-keys.ts'
 import { authAuditRecords } from './audit.ts'
 import { AUTH_SESSION_LIFETIME_SECONDS } from './browser-session.ts'
 import type { Principal } from './caller.ts'
@@ -547,7 +546,7 @@ export function createAuth({
       ),
       memberReadPrivacy(db),
       teamSso.plugin,
-      apiKey({
+      nativeApiKey({
         defaultPrefix: API_KEY_PREFIX,
         enableMetadata: true,
         rateLimit: { enabled: true, ...API_KEY_RATE_LIMIT },

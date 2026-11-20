@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { TeamSsoCapabilities } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
-import { teamWriteTransaction } from '@hourmere/db/team-write'
+import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { requireWorkflowsImplemented } from '@hourmere/workflows/hard-off'
@@ -112,6 +112,7 @@ export async function lockAuthorizationParents(
     .where('id', '=', ctx.principal.organization.id)
   organization = exclusiveOrganization ? organization.forUpdate() : organization.forKeyShare()
   if (!(await organization.executeTakeFirst())) throw insufficientRole()
+  recordTeamWriteOrganizationLock(trx, ctx.principal.organization.id)
 }
 
 function requireEnabled(settings: WebhookSettings): string {
