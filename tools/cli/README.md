@@ -427,8 +427,8 @@ event types and continue processing known ones. Every delivery has a required `b
 
 `workflows list` (JSON `owner` as `{"kind":"personal","id":USER_ID}` or
 `{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)
-read booking workflows with a `read` or `full` key. Booking workflows are not available yet:
-until they are enabled on the instance both commands exit `1` with `workflows_disabled`.
+read booking workflows with a `read` or `full` key. In this hard-off release, both commands
+exit `1` with `workflows_disabled`. See the [workflow operating guide](../../docs/workflows.md#operating-guide).
 
 `workflows runs --input FILE|-` accepts the workflow `id` and optional `limit` (1–100,
 default 50) and `cursor` as JSON. It requires a `read` or `full` key and personal ownership
@@ -444,11 +444,12 @@ are hard-off.
 答案或链接。使用同一工作流 ID，将 `nextCursor` 作为 `cursor` 读取下一页。功能仍硬关闭，命令
 退出码为 `1`，并在标准错误输出 `workflows_disabled`。
 
-`workflows create` requires a `full` key and is also unavailable. Its JSON input carries
-`owner`, a retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`, and optional
-`enabled` and `conditions`. Identical normalized retries return the stored definition;
-changed input conflicts. IDs are server-generated; unknown fields and webhook actions
-are rejected.
+`workflows create` requires a `full` key and returns `workflows_disabled` while hard-off.
+Its JSON input carries `owner`, a retained `idempotencyKey`, `name`, `scope`, `trigger`,
+`actions`, and optional `enabled` and `conditions`. Identical normalized retries return
+the stored definition and changed input conflicts. The server assigns IDs and rejects
+unknown fields. A webhook action references an active endpoint in the key's organization
+subscribed to `workflow.executed`.
 
 Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking list's
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.
@@ -572,14 +573,16 @@ Files contain attendee personal data; store and share them privately. See
 with the same body except `id`. Omitted fields are preserved; supplied arrays replace their
 previous values. Content edits append a revision, while an `enabled`-only change preserves
 it. A stale expectation returns `workflow_revision_conflict`. Disabling and re-enabling
-leave existing booking enrollments and execution rows unchanged. Webhook actions are
-rejected. These operations remain unavailable (`workflows_disabled`).
+leave existing booking enrollments and execution rows unchanged. A webhook action must
+reference an active endpoint in the key's organization subscribed to `workflow.executed`.
+These operations return `workflows_disabled` while hard-off.
 
 中文：`update_workflow` / `workflows update` 需要 `full` 权限，输入 `id`、
 `expectedRevision` 和要修改的字段。REST 使用 `PATCH /api/v1/workflows/{id}`，正文不含
 `id`。省略的字段保持不变，数组整体替换。内容修改会新增修订，仅切换 `enabled` 不改变
 修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
-登记或执行记录。暂不支持 webhook 动作；功能仍关闭，返回 `workflows_disabled`。
+登记或执行记录。Webhook 动作须引用当前组织中已订阅 `workflow.executed` 的启用端点。
+功能仍硬关闭，返回 `workflows_disabled`。
 
 
 `delete_workflow` / `workflows delete` requires `full` scope and accepts `id` and

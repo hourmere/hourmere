@@ -55,6 +55,9 @@ request schemas reject unknown fields. Errors use `{ "error": "stable_code", "me
 
 ## Read workflow run history
 
+The [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#rest-mcp-and-cli-operations)
+lists the published workflow operations and includes a synthetic preview request.
+
 `GET /api/v1/workflows/{id}/runs` returns `{data, nextCursor}` to the personal owner or
 current team owner/admin in their acting organization. API keys need `read` or `full`.
 Missing and inaccessible workflows share `404 workflow_not_found`. Set `limit` to 1–100
