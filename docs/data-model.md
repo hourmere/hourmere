@@ -147,14 +147,16 @@ recipient deliveries. Generated database interfaces and selectable row types des
 storage. The internal host lifecycle service in `packages/scheduling/src/meeting-polls.ts`
 creates, reads, closes, cancels and deletes polls and rotates public links; it validates
 every candidate against the availability engine at creation, fixes every
-creation setting and never reopens a closed or canceled poll. Host reads and lifecycle
-writes are exposed through REST, MCP and CLI. Creation and link rotation remain internal. The
-internal enrollment and verification service in
+creation setting and never reopens a closed or canceled poll. Hosts can create polls,
+read results, rotate links and manage the lifecycle through the web app, REST, MCP and
+CLI. The enrollment and verification service in
 `packages/scheduling/src/meeting-poll-voters.ts` enrolls public voters, invites and
 re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
 invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
-resend counters under the poll lock. It queues durable delivery rows. Credential mail workers now deliver those rows and an
-hourly sweep erases expired capability ciphertext; no transport, flag or UI is added. The internal ballot service in
+resend counters under the poll lock. It queues durable delivery rows for the mail worker.
+An hourly sweep erases expired capability ciphertext. Voters use the no-login browser
+pages or public REST, or supply the same capabilities through authenticated MCP and CLI.
+There is no meeting-poll feature flag. The ballot service in
 `packages/scheduling/src/meeting-poll-ballots.ts` submits and replaces complete ballots,
 withdraws and reactivates voters and records reminder opt-outs under the same locks and
 database deadline clock. Ballots and withdrawals advance the ballot and results revisions;
@@ -182,16 +184,15 @@ status and sequence to skip superseded notices and uses the existing recipient l
 deduplicate sends.
 The internal cleanup service in `packages/scheduling/src/meeting-poll-cleanup.ts`, run by the
 hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending voters and
-replay tombstones past their purge instant (and terminal polls once an installation
-retention is supplied) in bounded batches that skip locked rows instead of waiting. Poll
+replay tombstones past their purge instant. Batches skip locked rows. Poll
 deletion and cleanup leave no voter data behind: only the receipts' pseudonymous replay
 tombstones remain after a poll is deleted. Migration `0088_meeting_poll_receipt_tombstones.sql`
 makes the deletion trigger also replace the request fingerprint of every receipt but `create`
 (an invitation's covers invitee names and mailboxes) with a constant, and clears existing
 tombstones the same way.
-See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
-capacity bounds and the remaining implementation steps. Numeric admission and cleanup
-constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
+Numeric admission and cleanup constants live in
+`packages/scheduling/src/meeting-poll-policy.ts`. See the [meeting poll reference](meeting-polls.md)
+for lifecycle, scoped foreign keys and capacity bounds.
 
 Migration `0084_meeting_poll_key_state.sql` adds the installation-wide
 `meeting_poll_key_state` row: a keyed fingerprint of the meeting-poll secret that mailbox
@@ -213,15 +214,14 @@ both revisions. The deadline closure transaction queues a host delivery for the 
 creator if they still manage the event. The mail worker rechecks current authority before
 sending.
 Capacity and voting expiry are synchronous database-clock decisions, never dependent on
-worker punctuality. Normal terminal poll history follows the installation's booking-data
-retention policy from its terminal transition (deadline for automatic closure); with no
-such policy, the current repository retains booking and terminal poll history until
-explicit deletion. Both cleanup and capability-expiry workers are registered in worker roles.
+worker punctuality. The shipped worker does not set the internal terminal-retention
+parameter. Terminal poll history remains until explicit poll, linked-booking or
+organization deletion. Both cleanup and capability-expiry jobs run in worker-enabled roles.
 
-Mailbox digest counters and terminal delivery receipts remain for the entire retained
-poll lifetime so removing/recreating voters cannot reset mail budgets, reminder receipts
-or opt-outs. Counters' `purge_at` is unset until the parent is due for retention deletion;
-poll deletion cascades them. Delivery ciphertext is cleared immediately at terminal
+Mailbox digest counters remain for the entire retained poll lifetime, so
+removing or recreating a voter cannot reset mail budgets, reminder receipts or opt-outs.
+Terminal deliveries remain with their recipient until deletion. Poll deletion cascades
+counters and deliveries. Delivery ciphertext is cleared immediately at terminal
 sent/suppressed/skipped state; retries have at most 5 attempts and 5-minute leases.
 Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion,
 then retain only pseudonymous replay digests for 90 days before the hourly purge: the
@@ -230,8 +230,8 @@ digest can be recomputed from the bare ID, and in a personal space the organizat
 identifies the user.
 Organization deletion removes them immediately. Poll deletion preserves the booking;
 linked-booking deletion first deletes poll history and clears receipt references.
-See [the full cleanup contract](meeting-polls.md#storage-policy-and-cleanup-schedule)
-for the later workers and installation retention integration.
+See [the cleanup schedule](meeting-polls.md#storage-policy-and-cleanup-schedule)
+for worker cadence and retention behavior.
 
 ## Tables
 
