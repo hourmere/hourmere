@@ -13,6 +13,18 @@ Ordinary invitations for series members record whether an attachment was deliver
 Cancellations use that recipient's receipt evidence to choose which entries to attach.
 Dates with unknown attachment history on older receipts appear in the cancellation body.
 
+After series confirmation dispatch begins, a terminal conference result for a future
+root queues one link update per recipient. Further results join the waiting row. Migration
+0157 records which aggregate actions precede that row and whether it is waiting for an
+earlier copy. An earlier copy's terminal receipt or outbox transition wakes eligible rows
+in the same transaction. Waiting leaves the attempt count untouched, and the worker skips
+copies when the series has no future confirmed member.
+Each send attempt reads that recipient's delivered confirmation and link-update receipts
+after taking the shared mail-budget lock. The receipt delivery times determine the
+60-minute spacing and the three link updates allowed per rolling day. When either limit
+requires waiting, the worker releases the lease and moves `due_at` to the next eligible
+time without adding an attempt.
+
 Single-occurrence moves retain the same `series_occurrence_id` on the successor.
 Member writes use the ordinary organization lock, then the series row and the booking
 row before the operation's existing host locks. Moves, cancellations and new or

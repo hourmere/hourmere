@@ -58,9 +58,9 @@ export function meetingPollTools({
   return [
     defineTool({
       name: 'read_meeting_poll',
-      title: 'Read a meeting poll',
+      title: 'Read a meeting poll by token',
       description:
-        'Read the poll named by token, a public-link or voter capability. Returns its safe snapshot and only this voter’s own ballot; aggregate counts require verified voter access and aggregate visibility. No names, mailboxes, roster or other ballots are disclosed. Voting credentials retain read access after the deadline until removal or retention. Requires read, bookings or full key scope; the key alone grants no poll access.',
+        'Read an existing poll with its public-link, verification or voting token. A voting token can return its voter’s own profile and ballot. Aggregate counts require a verified, non-withdrawn voter and aggregate visibility. Omits the host roster and other voters’ details. API keys need read, bookings or full scope and grant no access by themselves.',
       input: ReadMeetingPollInput,
       output: ReadMeetingPollOutput,
       annotations: read,
@@ -73,7 +73,7 @@ export function meetingPollTools({
       name: 'enroll_meeting_poll_voter',
       title: 'Join a meeting poll',
       description:
-        'Request mailbox verification with publicToken, name, email, timeZone and optional locale. Relay only the invitee’s request. Requires bookings or full key scope. Accepted is uniform for known and unknown mailboxes; poll_full applies uniformly to every mailbox when the poll has 40 places. Does not verify, vote or return a credential. Enrollment, recovery and verification share a durable 10-request/minute trusted-IP budget across REST and MCP; pending reservations are additionally limited to three per IP/poll. Never retry automatically.',
+        'With the voter’s permission, request verification mail using publicToken on an existing poll. Acceptance is uniform for all mailboxes, as is poll_full at capacity. Does not create a poll or return a voter credential. API keys need bookings or full scope.',
       input: EnrollMeetingPollInput,
       output: AcceptedMeetingPollOutput,
       annotations: { ...read, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
@@ -86,7 +86,7 @@ export function meetingPollTools({
       name: 'recover_meeting_poll_voter',
       title: 'Recover a meeting poll email',
       description:
-        'On the voter’s explicit request, submit pollId and email without any valid token. Requires bookings or full key scope. Always answers accepted without revealing whether the poll or mailbox exists or mail was sent. Eligible recipients receive the unchanged current credential under persistent mail cooldowns and caps; recovery never enrolls an uninvited address, rotates a credential or extends expiry. Shares the admission request budget. Never retry automatically.',
+        'Request recovery mail on the voter’s behalf using pollId and email. Valid requests return accepted without confirming delivery. Eligible recipients receive the same credential, subject to cooldowns and caps. Does not enroll voters or disclose, rotate or extend credentials. API keys need bookings or full scope.',
       input: RecoverMeetingPollInput,
       output: AcceptedMeetingPollOutput,
       annotations: { ...read, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
@@ -99,7 +99,7 @@ export function meetingPollTools({
       name: 'verify_meeting_poll_voter',
       title: 'Verify a meeting poll mailbox',
       description:
-        'Explicitly confirm the voter’s emailed token while voting is open, only with their permission. Requires bookings or full key scope. A public verification token is consumed once; its replacement votingToken is returned once and mailed privately. Repeats mint and send nothing. Invitation voting credentials stay unchanged. Does not submit a ballot or consent. Keep any returned token private; shares the admission request budget.',
+        'Verify the voter’s mailbox with their permission and emailed token while voting is open. Consuming a verification token returns a new votingToken once and emails it privately. Invitation voting tokens stay valid without replacement. Does not submit a ballot or consent. API keys need bookings or full scope.',
       input: MeetingPollTokenInput,
       output: VerifyMeetingPollOutput,
       annotations: { ...read, readOnlyHint: false, openWorldHint: true },
@@ -112,7 +112,7 @@ export function meetingPollTools({
       name: 'submit_meeting_poll_vote',
       title: 'Submit a meeting poll ballot',
       description:
-        'Relay only the voter’s explicit choices using their voting token, one yes/if_need_be/no vote per candidate, consent:true, booking-question responses and expectedBallotRevision (0 initially). Optional name/timeZone/locale edits do not change email. Requires bookings or full key scope. Replaces the complete ballot; from withdrawn state it reactivates with renewed consent and an atomic capacity check. Returns only the own ballot and revision. A stale or lost-response retry returns poll_changed; read before reconciling. Shares a durable 30-request/minute trusted-IP budget with withdraw and opt-out. No automatic retry.',
+        'Replace the voter’s complete ballot with their voting token and explicit consent. Supply one yes/if_need_be/no vote per slot and expectedBallotRevision (0 initially). If poll_changed occurs, read and reconcile before resubmitting. Does not change the voter’s email or book a time. API keys need bookings or full scope.',
       input: SubmitMeetingPollVoteInput,
       output: MeetingPollBallotOutput,
       annotations: { ...read, readOnlyHint: false, idempotentHint: false, destructiveHint: true },
@@ -125,7 +125,7 @@ export function meetingPollTools({
       name: 'withdraw_meeting_poll_vote',
       title: 'Withdraw a meeting poll ballot',
       description:
-        'Withdraw with the voter’s explicit permission, their voting token and expectedBallotRevision while the poll is open. Requires bookings or full key scope. Clears votes, answers and consent, frees the place and stops poll mail. Returns only the own withdrawn state. Retains the credential for reading and explicit reactivation by a new consented ballot; stale revisions return poll_changed. Shares the ballot request budget.',
+        'Withdraw with the voter’s permission, voting token and expectedBallotRevision while voting is open. Clears votes, answers and consent and stops poll mail. The credential remains usable for reads and reactivation by a new consented ballot. API keys need bookings or full scope.',
       input: WithdrawMeetingPollInput,
       output: MeetingPollBallotOutput,
       annotations: { ...read, readOnlyHint: false, destructiveHint: true },
@@ -138,7 +138,7 @@ export function meetingPollTools({
       name: 'opt_out_meeting_poll_reminder',
       title: 'Stop meeting poll reminders',
       description:
-        'Use only the purpose-limited reminder-opt-out token from the email, with the recipient’s permission, to stop reminders. Requires bookings or full key scope. Returns opted-out state; never verifies a mailbox or reads/writes a ballot. Repeats preserve the first opt-out instant, including after poll closure. Voting and verification tokens cannot perform this operation. Shares the ballot request budget.',
+        'Stop reminders with the recipient’s permission and the reminder-opt-out token from their poll email. Works after poll closure and preserves the first opt-out time on retry. Does not verify mailboxes or access ballots. API keys need bookings or full scope.',
       input: MeetingPollTokenInput,
       output: OptOutMeetingPollOutput,
       annotations: { ...read, readOnlyHint: false },

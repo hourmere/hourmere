@@ -9,12 +9,18 @@ import { deliverMeetingPollEmail } from '@hourmere/notifications'
 import { MEETING_POLL_LIMITS } from '@hourmere/scheduling'
 import { createTestTeam } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { z } from 'zod'
 import { createFinalizeFixture } from '../../../packages/scheduling/src/meeting-poll-finalize-fixture.ts'
 import { createMeetingPoll } from '../../../packages/scheduling/src/meeting-polls.ts'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { meetingPollHostTools } from './mcp/meeting-poll-host.ts'
+import type {
+  MeetingPollHostOutput,
+  MeetingPollResultsOutput,
+} from './meeting-poll-host-schemas.ts'
+import type { VerifyMeetingPollOutput } from './meeting-poll-schemas.ts'
 import { meetingPollHostRoutes } from './routes/meeting-poll-host.ts'
 import { meetingPollRoutes } from './routes/meeting-polls.ts'
 
@@ -231,16 +237,20 @@ describe.skipIf(!process.env.DATABASE_URL)('host poll transport parity on Postgr
         idempotencyKey: randomUUID(),
       }
     }
-    async function publicRead(link: string) {
-      const token = new URL(link).hash.slice(1)
-      const response = await app.request(`${publicUrl}/api/v1/public/meeting-polls/read`, {
+    async function publicPost(operation: 'read' | 'enroll' | 'verify' | 'vote', body: Json) {
+      const response = await app.request(`${publicUrl}/api/v1/public/meeting-polls/${operation}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify(body),
       })
-      const text = await response.text()
-      expect(text.includes(token)).toBe(false)
-      return { status: response.status, body: JSON.parse(text) as Json }
+      const result = (await response.json()) as Json
+      for (const secret of [body.token, body.publicToken]) {
+        if (typeof secret === 'string') expect(JSON.stringify(result).includes(secret)).toBe(false)
+      }
+      return { status: response.status, body: result }
+    }
+    function publicRead(link: string) {
+      return publicPost('read', { token: new URL(link).hash.slice(1) })
     }
     function invitationDeliveries(id: string) {
       return db
@@ -267,10 +277,138 @@ describe.skipIf(!process.env.DATABASE_URL)('host poll transport parity on Postgr
       cli,
       errorAcrossSurfaces,
       createInput,
+      publicPost,
       publicRead,
       invitationDeliveries,
     }
   }
+
+  it.each([
+    { via: 'rest', scope: 'bookings', source: 'api', writeStatus: 201 },
+    { via: 'mcp', scope: 'full', source: 'mcp', writeStatus: 200 },
+    { via: 'cli', scope: 'bookings', source: 'mcp', writeStatus: 0 },
+  ] as const)(
+    'creates and finalizes through $via with a $scope key and shares the results across adapters',
+    async ({ via, scope, source, writeStatus }) => {
+      const f = await setup()
+      const hostKey = await f.key(scope)
+      const readKey = await f.key('read')
+      const input = f.createInput()
+      await f.errorAcrossSurfaces('create', input, 403, 'insufficient_scope', readKey)
+
+      const created = await f[via]('create', input, hostKey)
+      expect(created.status).toBe(writeStatus)
+      assert(created.body)
+      const poll = created.body.poll as z.infer<typeof MeetingPollHostOutput>
+      expect(poll).toMatchObject({ eventTypeId: f.eventTypeId, status: 'open', source })
+      const resultsInput = { id: poll.id }
+      const link = created.body.publicLink as string
+      const publicToken = new URL(link).hash.slice(1)
+      const email = `contract-${poll.id}@example.test`
+      expect(
+        await f.publicPost('enroll', {
+          publicToken,
+          name: 'Contract Voter',
+          email,
+          timeZone: 'UTC',
+        }),
+      ).toEqual({ status: 202, body: { accepted: true } })
+      const delivery = await db
+        .selectFrom('meeting_poll_deliveries')
+        .selectAll()
+        .where('poll_id', '=', resultsInput.id)
+        .where('kind', '=', 'verification')
+        .executeTakeFirstOrThrow()
+      const mail: MailMessage[] = []
+      await deliverMeetingPollEmail(
+        {
+          db,
+          publicUrl,
+          meetingPollSecret: f.ctx.meetingPollSecret,
+          secret: 'synthetic-poll-contract-mail-ledger-key',
+          smtpConfigured: true,
+          mailMaxPerHour: 0,
+          mailer: { send: async (message) => void mail.push(message) },
+        },
+        delivery,
+      )
+      expect(mail.map(({ to }) => to)).toEqual([email])
+      const verificationToken = /\/poll\/voter#([\w-]+)/.exec(mail[0]?.text ?? '')?.[1]
+      assert(verificationToken, 'Verification mail must include a voter link')
+      const verified = await f.publicPost('verify', { token: verificationToken })
+      expect(verified.status).toBe(200)
+      const { voter, votingToken } = verified.body as z.infer<typeof VerifyMeetingPollOutput>
+      assert(votingToken, 'First verification must issue a voting credential')
+      const votes = poll.candidates.map(({ id }) => ({ slotId: id, value: 'yes' }))
+      expect(
+        await f.publicPost('vote', {
+          token: votingToken,
+          votes,
+          consent: true,
+          expectedBallotRevision: 0,
+        }),
+      ).toMatchObject({ status: 200, body: { ballotRevision: 1, votes } })
+
+      const credentials = [publicToken, verificationToken, votingToken]
+      const result = await f[via]('results', resultsInput, hostKey)
+      expect(credentials.some((token) => JSON.stringify(result.body).includes(token))).toBe(false)
+      expect(result).toMatchObject({
+        status: via === 'cli' ? 0 : 200,
+        body: {
+          poll: { id: resultsInput.id, status: 'open', source },
+          countedBallots: 1,
+          roster: [{ voterId: voter.voterId, ballotRevision: 1, votes }],
+          candidates: poll.candidates.map(({ id }) => ({ id, yes: 1, availability: 'available' })),
+        },
+      })
+      for (const read of [f.rest, f.mcp, f.cli]) {
+        const { body } = await read('results', resultsInput, readKey)
+        expect(credentials.some((token) => JSON.stringify(body).includes(token))).toBe(false)
+        expect(body).toEqual(result.body)
+      }
+
+      const results = result.body as z.infer<typeof MeetingPollResultsOutput>
+      const [chosen] = results.candidates
+      const [booker] = results.roster
+      assert(chosen && booker)
+      const finalize = {
+        ...resultsInput,
+        slotId: chosen.id,
+        bookerVoterId: booker.voterId,
+        attendeeVoterIds: [booker.voterId],
+        expectedResultsRevision: results.resultsRevision,
+        expectedBallotRevisions: { [booker.voterId]: booker.ballotRevision },
+        acknowledgeConditional: false,
+        idempotencyKey: randomUUID(),
+      }
+      await f.errorAcrossSurfaces('finalize', finalize, 403, 'insufficient_scope', readKey)
+      const finalized = await f[via]('finalize', finalize, hostKey)
+      expect(credentials.some((token) => JSON.stringify(finalized.body).includes(token))).toBe(
+        false,
+      )
+      expect(finalized).toMatchObject({
+        status: writeStatus,
+        body: {
+          replayed: false,
+          poll: { id: resultsInput.id, status: 'scheduled', chosenSlotId: chosen.id },
+          booking: {
+            status: 'confirmed',
+            source,
+            start: new Date(chosen.startAt).toISOString(),
+            end: new Date(chosen.endAt).toISOString(),
+          },
+        },
+      })
+      const replay = { ...finalized.body, replayed: true }
+      for (const [request, status] of [
+        [f.rest, 200],
+        [f.mcp, 200],
+        [f.cli, 0],
+      ] as const) {
+        expect(await request('finalize', finalize, hostKey)).toEqual({ status, body: replay })
+      }
+    },
+  )
 
   it('binds host scope and tenant for every ID access and refuses an invalid bearer', async () => {
     const f = await setup()

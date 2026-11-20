@@ -10,6 +10,10 @@ import {
   conferenceRoot,
 } from '@hourmere/scheduling/conferences'
 import { DomainError } from '@hourmere/scheduling/errors'
+import {
+  queueSeriesLinkUpdates,
+  recordSeriesConferenceDeadline,
+} from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { GoogleCalendarError } from './google.ts'
@@ -468,7 +472,7 @@ export async function writeBookingConference(
     // Actual service order: booking before intent. Never take these locks over network.
     const booking = await trx
       .selectFrom('bookings')
-      .select(['status', 'start_at'])
+      .select(['status', 'start_at', 'series_occurrence_id'])
       .where('id', '=', c.booking_id)
       .forUpdate()
       .executeTakeFirst()
@@ -479,6 +483,9 @@ export async function writeBookingConference(
       .forUpdate()
       .executeTakeFirst()
     if (!current || !booking) return
+    // The series dispatcher reads each root's committed conference state. A moved
+    // member still gets its ordinary reschedule invitation and failure notice.
+    const seriesOccurrenceId = c.booking_id === root ? booking.series_occurrence_id : null
     if (
       outcome.event &&
       safeGoogleEventId(outcome.event.id) &&
@@ -669,12 +676,14 @@ export async function writeBookingConference(
         })
         .where('id', '=', c.booking_id)
         .execute()
-      const kind = c.booking_id === root ? 'confirmed' : 'rescheduled'
-      await trx
-        .insertInto('booking_conference_notifications')
-        .values({ booking_id: c.booking_id, kind, due_at: now })
-        .onConflict((oc) => oc.doNothing())
-        .execute()
+      if (!seriesOccurrenceId) {
+        const kind = c.booking_id === root ? 'confirmed' : 'rescheduled'
+        await trx
+          .insertInto('booking_conference_notifications')
+          .values({ booking_id: c.booking_id, kind, due_at: now })
+          .onConflict((oc) => oc.doNothing())
+          .execute()
+      }
       const savedPolicy = await trx
         .selectFrom('bookings')
         .select('notification_snapshot')
@@ -700,12 +709,16 @@ export async function writeBookingConference(
           .values({ booking_id: c.booking_id, kind: 'reminder', due_at: reminder })
           .onConflict((oc) => oc.doNothing())
           .execute()
-    } else if (state === 'failed' && booking.status === 'confirmed') {
+    } else if (!seriesOccurrenceId && state === 'failed' && booking.status === 'confirmed') {
       await trx
         .insertInto('booking_conference_notifications')
         .values({ booking_id: c.booking_id, kind: 'conference_failed', due_at: now })
         .onConflict((oc) => oc.doNothing())
         .execute()
+    }
+    if (seriesOccurrenceId && state !== 'pending' && booking.status === 'confirmed') {
+      await recordSeriesConferenceDeadline(trx, seriesOccurrenceId, now)
+      if (!expired) await queueSeriesLinkUpdates(trx, seriesOccurrenceId, now)
     }
   })
 }

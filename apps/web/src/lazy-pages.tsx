@@ -66,6 +66,18 @@ export const BookingsPage = page(
   () => import('./pages/bookings/Bookings.tsx'),
   (m) => m.BookingsPage,
 )
+export const MeetingPollsPage = page(
+  () => import('./pages/meeting-polls/MeetingPolls.tsx'),
+  (m) => m.MeetingPollsPage,
+)
+export const MeetingPollCreatePage = page(
+  () => import('./pages/meeting-polls/MeetingPollCreate.tsx'),
+  (m) => m.MeetingPollCreatePage,
+)
+export const HostMeetingPollRoute = page(
+  () => import('./pages/meeting-polls/HostMeetingPollRoute.tsx'),
+  (m) => m.HostMeetingPollRoute,
+)
 export const TeamBookingsPage = page(
   () => import('./pages/team-bookings/TeamBookings.tsx'),
   (m) => m.TeamBookingsPage,

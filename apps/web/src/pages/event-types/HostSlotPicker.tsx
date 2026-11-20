@@ -13,9 +13,9 @@ import type { EventType, Profile } from '../../api/resources.ts'
 import { timeZoneNames } from '../../components/TimeZonePicker.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
-import { codeOf, eventSlots, getEventType, type Slot } from '../../public/api.ts'
-import { addDays, parseDateKey } from '../../public/calendar.ts'
-import { dateKeyIn, instantOf } from '../../public/time.ts'
+import { eventSlots, getEventType, type Slot } from '../../public/api.ts'
+import { dateKeyIn } from '../../public/time.ts'
+import { AvailableHostTimes, loadHostDaySlots, MeetingLengthSelect } from './HostTimeSelection.tsx'
 
 export interface HostSlotPickerProps {
   event: EventType
@@ -196,47 +196,15 @@ function Picker({
     setOffered([])
     async function load() {
       try {
-        const start = instantOf(parseDateKey(date), 0, 0, displayTimeZone)
-        const boundary = instantOf(parseDateKey(addDays(date, 1)), 0, 0, displayTimeZone)
-        // Include cross-midnight meetings within one display-zone calendar day (23–25 hours at DST).
-        const load = eventSlots(handle, slug, team, durationMinutes)
-        const end = boundary + durationMinutes * 60_000
-        let slots: Slot[]
-        try {
-          slots = await load(
-            new Date(start).toISOString(),
-            new Date(end).toISOString(),
-            controller.signal,
-          )
-        } catch (error) {
-          if (codeOf(error) !== 'range_too_long' || controller.signal.aborted) throw error
-          // Two bounded start windows also fit the candidate budget for eight hosts,
-          // a one-minute step and a 24-hour meeting. Never scan a larger horizon.
-          const middle = start + (boundary - start) / 2
-          const halves = await Promise.all([
-            load(
-              new Date(start).toISOString(),
-              new Date(middle + durationMinutes * 60_000).toISOString(),
-              controller.signal,
-            ),
-            load(new Date(middle).toISOString(), new Date(end).toISOString(), controller.signal),
-          ])
-          slots = [
-            ...halves[0].filter((slot) => Date.parse(slot.start) < middle),
-            ...halves[1].filter((slot) => Date.parse(slot.start) >= middle),
-          ]
-        }
-        if (controller.signal.aborted) return
-        setOffered(
-          sorted(
-            slots.filter(
-              (slot) =>
-                Date.parse(slot.start) >= start &&
-                Date.parse(slot.start) < boundary &&
-                Date.parse(slot.end) === Date.parse(slot.start) + durationMinutes * 60_000,
-            ),
-          ),
+        const slots = await loadHostDaySlots(
+          eventSlots(handle, slug, team, durationMinutes),
+          date,
+          displayTimeZone,
+          durationMinutes,
+          controller.signal,
         )
+        if (controller.signal.aborted) return
+        setOffered(slots)
       } catch {
         if (!controller.signal.aborted) setLoadError(true)
       } finally {
@@ -484,22 +452,17 @@ function Picker({
       <fieldset disabled={disabled || busy}>
         <legend>{t('Email display')}</legend>
         <label htmlFor={`${id}-duration`}>{t('Meeting length')}</label>
-        <select
-          id={`${id}-duration`}
+        <MeetingLengthSelect
+          control={{ id: `${id}-duration` }}
+          allowed={event.allowedDurationsMinutes}
           value={durationMinutes}
-          onChange={(change) => {
+          onChange={(minutes) => {
             invalidate()
             setSelected([])
             setStale([])
-            setDuration(Number(change.target.value))
+            setDuration(minutes)
           }}
-        >
-          {event.allowedDurationsMinutes.map((duration) => (
-            <option key={duration} value={duration}>
-              {t('{0} min', { '0': duration })}
-            </option>
-          ))}
-        </select>
+        />
         <label htmlFor={`${id}-language`}>{t('Email language')}</label>
         <select
           id={`${id}-language`}
@@ -551,31 +514,24 @@ function Picker({
           }}
         />
       </fieldset>
-      <fieldset disabled={disabled || busy || loading} aria-busy={loading}>
-        <legend>{t('Available times')}</legend>
-        {loading ? (
-          <p role="status">{t('Loading available times…')}</p>
-        ) : loadError ? (
-          <p role="alert">{t('We could not load available times. Please try again.')}</p>
-        ) : offered.length === 0 ? (
-          <p>{t('No times are offered on this date.')}</p>
-        ) : (
-          offered.map((slot) => {
-            const checked = selected.some((item) => exact(item, slot))
-            return (
-              <label key={slot.start} className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={!checked && selected.length >= 10}
-                  onChange={() => choose(slot)}
-                />
-                {label(slot)}
-              </label>
-            )
-          })
-        )}
-      </fieldset>
+      <AvailableHostTimes loading={loading} error={loadError} disabled={disabled || busy}>
+        {offered.length > 0
+          ? offered.map((slot) => {
+              const checked = selected.some((item) => exact(item, slot))
+              return (
+                <label key={slot.start} className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!checked && selected.length >= 10}
+                    onChange={() => choose(slot)}
+                  />
+                  {label(slot)}
+                </label>
+              )
+            })
+          : null}
+      </AvailableHostTimes>
       <button
         type="button"
         className="button button-small"

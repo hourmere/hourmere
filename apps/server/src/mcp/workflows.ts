@@ -91,7 +91,10 @@ export function workflowTools({
       output: WorkflowPreview,
       annotations,
       run(args, call) {
-        return previewWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, args)
+        return previewWorkflow(
+          { db, audit, followUpHostNotesEnabled, principal: call.caller },
+          args,
+        )
       },
     }),
     defineTool({

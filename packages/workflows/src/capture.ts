@@ -9,8 +9,9 @@ import {
   type NotificationSnapshot,
 } from '@hourmere/scheduling/notification-settings'
 import { sql } from 'kysely'
+import { hardOffWorkflowAuditPort, type WorkflowAuditPort } from './audit.ts'
 import { evaluateConditions } from './conditions.ts'
-import { WorkflowDefinitionSchema } from './definition.ts'
+import { WorkflowDefinitionSchema, type WorkflowTriggerType } from './definition.ts'
 import { workflowCapture } from './hard-off.ts'
 import {
   scopeSelectsEventType,
@@ -74,6 +75,7 @@ export async function captureBookingWorkflows(
   event: BookingEvent,
   now: Temporal.Instant,
   secret: string,
+  audit: WorkflowAuditPort = hardOffWorkflowAuditPort(),
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Workflow capture needs the booking transaction')
   if (event.type !== 'created' && event.type !== 'rescheduled' && event.type !== 'cancelled') return
@@ -147,25 +149,45 @@ export async function captureBookingWorkflows(
   if (event.type !== 'created') {
     // Definition locks above precede run locks, including when deletion is waiting.
     // Excluding cancellation preserves its delayed run on replay.
-    await trx
-      .updateTable('workflow_runs')
-      .set({ state: 'retired', finished_at: date(now), claim_token: null, lease_until: null })
-      .where('organization_id', '=', booking.organization_id)
-      .where('booking_id', '=', predecessor?.id ?? booking.id)
-      .where('state', 'in', ['pending', 'claimed'])
-      .where('enrollment_id', 'in', (eb) =>
-        eb
-          .selectFrom('workflow_enrollments')
-          .select('id')
-          .where('organization_id', '=', booking.organization_id)
-          .where('trigger', 'in', [
-            'before_start',
-            'after_end',
-            'booking.created',
-            'booking.rescheduled',
-          ]),
+    const retired = await trx
+      .updateTable('workflow_runs as run')
+      .from('workflow_enrollments as enrollment')
+      .leftJoin(
+        'personal_organizations as owner',
+        'owner.organization_id',
+        'enrollment.organization_id',
       )
+      .set({ state: 'retired', finished_at: date(now), claim_token: null, lease_until: null })
+      .where('run.organization_id', '=', booking.organization_id)
+      .where('run.booking_id', '=', predecessor?.id ?? booking.id)
+      .where('run.state', 'in', ['pending', 'claimed'])
+      .whereRef('enrollment.id', '=', 'run.enrollment_id')
+      .whereRef('enrollment.organization_id', '=', 'run.organization_id')
+      .where('enrollment.trigger', 'in', [
+        'before_start',
+        'after_end',
+        'booking.created',
+        'booking.rescheduled',
+      ])
+      .returning([
+        'enrollment.workflow_id',
+        'enrollment.revision',
+        'enrollment.trigger',
+        'owner.user_id',
+      ])
       .execute()
+    for (const { workflow_id, revision, trigger, user_id } of retired)
+      await audit.record(trx, {
+        event: 'workflow.run_cancelled',
+        occurredAt: now,
+        actor: { kind: 'background', job: 'capture' },
+        owner: user_id
+          ? { kind: 'personal', organizationId: booking.organization_id, userId: user_id }
+          : { kind: 'team', organizationId: booking.organization_id },
+        workflowId: workflow_id,
+        revision,
+        trigger: trigger as WorkflowTriggerType,
+      })
   }
   const eventType = await trx
     .selectFrom('event_types')
@@ -310,7 +332,7 @@ export async function captureBookingWorkflows(
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    if (reason) {
+    if (reason)
       await trx
         .insertInto('workflow_run_history')
         .values({
@@ -325,8 +347,17 @@ export async function captureBookingWorkflows(
           reason,
         })
         .execute()
-      continue
-    }
+    await audit.record(trx, {
+      event: reason ? 'workflow.run_skipped' : 'workflow.run_scheduled',
+      occurredAt: now,
+      actor: { kind: 'background', job: 'capture' },
+      owner,
+      workflowId: row.id,
+      revision: capturedRevision,
+      trigger,
+      reason,
+    })
+    if (reason) continue
     const action = definition.actions[0]
     if (action?.type !== 'email') continue
     const seen = new Set<string>()
@@ -374,9 +405,10 @@ export async function captureCreatedWorkflows(
   event: BookingEvent,
   now: Temporal.Instant,
   secret: string,
+  audit?: WorkflowAuditPort,
 ): Promise<void> {
   if (event.type !== 'created') return
-  await captureBookingWorkflows(trx, event, now, secret)
+  await captureBookingWorkflows(trx, event, now, secret, audit)
 }
 
 export const captureWorkflowCreation = workflowCapture(captureCreatedWorkflows)
