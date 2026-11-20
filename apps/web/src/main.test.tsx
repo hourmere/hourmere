@@ -11,6 +11,7 @@ it('registers chunk recovery before rendering the application', async () => {
   const root = document.createElement('div')
   root.id = 'root'
   document.body.append(root)
+  window.history.replaceState(null, '', '/route/continue#token=fixture')
   try {
     await import('./main.tsx')
     expect(install).toHaveBeenCalledOnce()
@@ -19,7 +20,13 @@ it('registers chunk recovery before rendering the application', async () => {
     expect(install.mock.invocationCallOrder[0]).toBeLessThan(
       createRoot.mock.invocationCallOrder[0] ?? 0,
     )
+    expect(window.location.hash).toBe('')
+    const shouldReload = install.mock.calls[0]?.[0]
+    expect(shouldReload?.()).toBe(false)
+    window.history.replaceState(null, '', '/ada/booking')
+    expect(shouldReload?.()).toBe(true)
   } finally {
     root.remove()
+    window.history.replaceState(null, '', '/')
   }
 })

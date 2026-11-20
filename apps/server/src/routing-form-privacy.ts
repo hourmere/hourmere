@@ -20,14 +20,22 @@ export function privateRoutingApiPrefix(path: string): string | undefined {
   )
 }
 
-export function isPublicRoutingFormPage(path: string): boolean {
+function decodedPage(path: string): string {
   // The web router decodes each segment without turning encoded slashes into separators.
-  let normalized = path
   try {
-    normalized = path
+    return path
       .split('/')
       .map((segment) => decodeURIComponent(segment).replaceAll('/', '%2F'))
       .join('/')
-  } catch {}
-  return /^\/route\/(?:team\/[^/]+|[^/]+)\/[^/]+\/*$/i.test(normalized)
+  } catch {
+    return path
+  }
+}
+
+export function isPublicRoutingContinuationPage(path: string): boolean {
+  return /^\/route\/continue\/*$/i.test(decodedPage(path))
+}
+
+export function isPublicRoutingFormPage(path: string): boolean {
+  return /^\/route\/(?:team\/[^/]+|[^/]+)\/[^/]+\/*$/i.test(decodedPage(path))
 }

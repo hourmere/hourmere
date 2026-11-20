@@ -14,17 +14,22 @@ export type ManagedBooking = Schemas['ManagedBooking']
 export type BookingWithToken = Schemas['BookingWithToken']
 export type PublicBookingResult = Schemas['PublicBookingResult']
 export type CreateBooking = Schemas['CreateBooking']
+export type RoutingContinuation = Schemas['RoutingContinuation']
+export type RoutedBookingInput = Schemas['RoutedBookingInput']
+export type RoutedBookingResult = Schemas['RoutedBookingResult']
 export type OneTimeBookingPage = Schemas['OneTimeBookingPage']
 export type JoinWaitlist = Schemas['JoinWaitlist']
 
 /** A request the server refused; `retryAfter` (seconds) comes with 429. */
 export class PublicRequestError extends RequestError {
   readonly retryAfter: number | undefined
+  readonly privateResponse: boolean
 
-  constructor(base: RequestError, retryAfter: number | undefined) {
+  constructor(base: RequestError, retryAfter: number | undefined, privateResponse = false) {
     super(base.status, base.code, base.message, base.displayMessage)
     this.name = 'PublicRequestError'
     this.retryAfter = retryAfter
+    this.privateResponse = privateResponse
   }
 }
 
@@ -63,7 +68,11 @@ async function call<T>(
         : privateResponse
           ? undefined
           : error
-    throw new PublicRequestError(requestError(response.status, safeError), retryAfterOf(response))
+    throw new PublicRequestError(
+      requestError(response.status, safeError),
+      retryAfterOf(response),
+      privateResponse,
+    )
   }
   return { data: data as T, status: response.status }
 }
@@ -77,7 +86,14 @@ export function failureMessage(err: unknown): UiText {
         })
       : 'Too many requests from your network. Wait a minute and try again.'
   }
-  return errorMessage(err)
+  const message = errorMessage(err)
+  // Private responses have no server prose. Localize their synthesized fallback as well.
+  return err instanceof PublicRequestError &&
+    err.privateResponse &&
+    typeof message === 'object' &&
+    'literal' in message
+    ? 'That did not work. Try again.'
+    : message
 }
 
 export const codeOf = (err: unknown) => (err instanceof RequestError ? err.code : undefined)
@@ -129,6 +145,62 @@ export async function submitRoutingForm(
     true,
   )
   return data
+}
+
+export async function resolveRoutingContinuation(
+  routeToken: string,
+  signal: AbortSignal,
+): Promise<RoutingContinuation> {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/routing-continuations/resolve', {
+        ...privateRoutingRequest,
+        body: { routeToken },
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return data
+}
+
+export function routingContinuationSlots(
+  routeToken: string,
+  durationMinutes: number,
+  locationOptionId: string | undefined,
+): SlotLoader {
+  return async (start, end, signal) => {
+    const { data } = await call(
+      () =>
+        api.POST('/api/v1/routing-continuations/slots', {
+          ...privateRoutingRequest,
+          body: { routeToken, start, end, durationMinutes, locationOptionId },
+          signal,
+        }),
+      signal,
+      true,
+    )
+    return data.slots
+  }
+}
+
+export async function createRoutedBooking(
+  body: RoutedBookingInput,
+  idempotencyKey: string,
+  signal: AbortSignal,
+): Promise<{ result: RoutedBookingResult; replayed: boolean }> {
+  const { data, status } = await call(
+    () =>
+      api.POST('/api/v1/routing-continuations/bookings', {
+        ...privateRoutingRequest,
+        params: { header: { 'idempotency-key': idempotencyKey } },
+        body,
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return { result: data, replayed: status === 200 }
 }
 
 export async function getHost(handle: string, signal: AbortSignal): Promise<PublicHost> {

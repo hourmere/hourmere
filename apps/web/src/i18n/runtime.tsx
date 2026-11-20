@@ -39,9 +39,10 @@ export function InterfaceScope({
   return <Surface value={surface}>{children}</Surface>
 }
 
-const EmbeddedLanguage = createContext<{
+const ScopedLanguage = createContext<{
   language: InterfaceLanguage | undefined
   setLanguage: (language: InterfaceLanguage) => void
+  memoryOnly: boolean
 } | null>(null)
 export function EmbedLanguage({
   language,
@@ -50,11 +51,32 @@ export function EmbedLanguage({
   language: InterfaceLanguage | undefined
   children: ReactNode
 }) {
+  return (
+    <LanguageScope language={language} memoryOnly={false}>
+      {children}
+    </LanguageScope>
+  )
+}
+
+/** A capability page can offer the language picker without touching the preference store. */
+export function MemoryLanguage({ children }: { children: ReactNode }) {
+  return <LanguageScope memoryOnly>{children}</LanguageScope>
+}
+
+function LanguageScope({
+  language,
+  memoryOnly,
+  children,
+}: {
+  language?: InterfaceLanguage | undefined
+  memoryOnly: boolean
+  children: ReactNode
+}) {
   const [current, setCurrent] = useState(language)
   return (
-    <EmbeddedLanguage value={{ language: current, setLanguage: setCurrent }}>
+    <ScopedLanguage value={{ language: current, setLanguage: setCurrent, memoryOnly }}>
       <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
-    </EmbeddedLanguage>
+    </ScopedLanguage>
   )
 }
 const AccountDefault = createContext<InterfaceLanguage | undefined>(undefined)
@@ -72,30 +94,38 @@ export function AccountLanguage({
     </AccountDefault>
   )
 }
+const subscribeInMemory = () => () => {}
+const emptyPreference = () => undefined
+
 export function useI18n() {
-  const explicit = useSyncExternalStore(subscribeLanguage, languageChoice, () => undefined)
+  const scoped = useContext(ScopedLanguage)
+  const memoryOnly = scoped?.memoryOnly === true
+  const explicit = useSyncExternalStore(
+    memoryOnly ? subscribeInMemory : subscribeLanguage,
+    memoryOnly ? emptyPreference : languageChoice,
+    emptyPreference,
+  )
   const account = useContext(AccountDefault)
-  const embedded = useContext(EmbeddedLanguage)
   const surface = useContext(Surface)
   const available = interfaceLanguages(surface)
   const supported = (language: InterfaceLanguage | undefined) =>
     language && available.includes(language) ? language : undefined
-  const preference = embedded?.language ?? explicit
+  const preference = scoped?.language ?? explicit
   const selected = supported(preference)
   const locale = selected ?? supported(account) ?? browserLanguage(surface)
   // Keep the browser's regional conventions for implicit English. Every other active
   // language, including a browser preference, uses its registered formatting locale.
   const formatLanguage = selected ?? (locale === 'en' ? undefined : locale)
   const formatLocale = formatLanguage ? formattingLocale(formatLanguage) : undefined
-  const scopedSetLanguage = embedded?.setLanguage
+  const scopedSetLanguage = scoped?.setLanguage
   const setLanguage = useCallback(
     (language: InterfaceLanguage) => {
       const valid = explicitLanguage(language)
       if (!valid || !interfaceLanguages(surface).includes(valid)) return
       scopedSetLanguage?.(valid)
-      chooseLanguage(valid)
+      if (!memoryOnly) chooseLanguage(valid)
     },
-    [scopedSetLanguage, surface],
+    [memoryOnly, scopedSetLanguage, surface],
   )
   const t = useCallback(
     (key: MessageKey, values?: UiMessage['values']) =>
