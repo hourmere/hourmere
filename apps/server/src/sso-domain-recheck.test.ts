@@ -65,9 +65,7 @@ it('never schedules or accesses storage/DNS while hard-off, including queued rep
   expect(await recheckSsoDomains(options)).toBe(0)
   expect(resolveTxt).not.toHaveBeenCalled()
   const server = await readFile(new URL('./server.ts', import.meta.url), 'utf8')
-  expect(server).toContain(
-    'disabledSchedules: ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB]',
-  )
+  expect(server).toContain('...(ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB])')
   expect(server).toContain('ssoDomainRecheckJob({')
 })
 
