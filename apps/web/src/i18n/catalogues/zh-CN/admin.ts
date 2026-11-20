@@ -2185,6 +2185,107 @@ export const admin = {
   'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
     '未列出团队活动类型：只有团队所有者和管理员才能查看这些时间无法预约的原因。',
   'Another scheduling rule applies.': '受其他排期规则限制。',
+
+  // Host meeting polls
+  'Meeting polls': '会议投票',
+  'Loading meeting polls…': '正在加载会议投票…',
+  'No meeting polls yet.': '暂无会议投票。',
+  'Could not load meeting polls.': '无法加载会议投票。',
+  'Only team owners and admins can manage meeting polls in this space.':
+    '只有团队所有者和管理员可以管理此空间中的会议投票。',
+  'Voting open': '投票进行中',
+  'Voting closed': '投票已截止',
+  'Poll scheduled': '已排定',
+  'Poll canceled': '已取消',
+  'Voting deadline: {deadline} ({timeZone})': '投票截止时间：{deadline}（{timeZone}）',
+  'Meeting poll pages': '会议投票分页',
+  'Back to meeting polls': '返回会议投票',
+  'This poll belongs to another space.': '此投票属于另一个空间。',
+  'This meeting poll is unavailable.': '此会议投票不可用。',
+  'Switch to {space}': '切换到{space}',
+  'Could not open the space for this poll.': '无法打开此投票所在的空间。',
+  'Poll results': '投票结果',
+  'Loading poll results…': '正在加载投票结果…',
+  'Could not load the poll results.': '无法加载投票结果。',
+  'Meeting poll unavailable': '会议投票不可用',
+  'This poll changed. Refresh results and review them before continuing.':
+    '此投票已更新。请刷新结果并核对后再继续。',
+  'The selected attendees changed. Refresh results and make a new selection.':
+    '所选参会者的状态已变化。请刷新结果并重新选择。',
+  'This event type changed since the poll was created. A new poll is required to schedule it.':
+    '此活动类型在投票创建后已有变更。请创建新的投票来安排会议。',
+  'This time is no longer available. Choose another time or refresh results.':
+    '此时间已不可用。请选择其他时间或刷新结果。',
+  'Connected calendars could not be checked. Try scheduling again shortly.':
+    '暂时无法检查已连接的日历。请稍后重新安排。',
+  'This event type does not allow guests. Choose only the booker.':
+    '此活动类型不允许添加嘉宾。请只选择预约人。',
+  'Too many attendees were selected. Remove an additional attendee and try again.':
+    '所选参会人数超过上限。请移除一位其他参会者后重试。',
+  'Acknowledge the selected conditional votes before scheduling.':
+    '安排会议前，请确认所选参会者的有条件同意票。',
+  'Could not update the meeting poll. Try again.': '无法更新会议投票。请重试。',
+  'The booking may have been created. Retry to recover the result.':
+    '预约可能已创建。请重试以获取结果。',
+  'Original scheduled time: {time}': '最初安排的时间：{time}',
+  'View booking': '查看预约',
+  'Retry scheduling': '重试安排',
+  'Refresh results': '刷新结果',
+  'Verification pending': '待验证',
+  'Invited to vote': '已邀请投票',
+  'Verified voter': '已验证',
+  'Withdrawn voter': '已撤回',
+  'If need be': '必要时可以',
+  'Currently available': '当前可用',
+  'Currently unavailable': '当前不可用',
+  'Availability unknown': '暂无法确认',
+  Votes: '投票情况',
+  'Submitted ballots: {count}': '已提交的选票：{count}份',
+  'Verified voters can see totals. In a small poll, subtracting their own vote can reveal how someone else voted.':
+    '已验证的投票人可以查看票数。在参与人数较少的投票中，扣除自己的一票后，可能推断出他人的选择。',
+  'Voters can see only their own votes. This results page is private to poll managers.':
+    '投票人只能查看自己的选票。此结果页面仅投票管理者可见。',
+  'Availability can change. Hourmere checks the chosen time again when you schedule.':
+    '时间是否可用可能发生变化。安排会议时，Hourmere 会再次检查所选时间。',
+  'Votes by voter and time': '各投票人在不同时段的选择',
+  Voter: '投票人',
+  'No vote': '未投票',
+  'Schedule meeting': '安排会议',
+  'Scheduling creates a booking, ends voting and sends the outcome. The booker can manage the whole meeting.':
+    '安排会议会创建预约、结束投票并发送结果通知。预约人可以管理整场会议。',
+  'No candidate time can be selected right now.': '目前没有可选择的候选时段。',
+  'Scheduling choices': '会议安排选项',
+  'Meeting time': '会议时间',
+  'Choose a time': '选择时间',
+  '{time} ({availability})': '{time}（{availability}）',
+  'No verified voters agreed to attend at this time.': '没有已验证的投票人同意在此时间参会。',
+  Booker: '预约人',
+  'Choose a booker': '选择预约人',
+  '{name} ({email})': '{name}（{email}）',
+  'Additional attendees': '其他参会者',
+  'Choose up to {count} additional attendees.': '最多可选{count}位其他参会者。',
+  'Attendee limit reached ({count} including the booker).':
+    '已达到参会人数上限（含预约人共{count}位）。',
+  'I acknowledge the selected conditional votes.': '我确认所选参会者中有人只是必要时可以参会。',
+  'Scheduling…': '正在安排…',
+  'Close voting…': '结束投票…',
+  'Close voting now? Voters can no longer change their votes. You can still schedule the meeting.':
+    '现在结束投票吗？投票人将无法修改选票，你仍可以安排会议。',
+  'Close voting': '结束投票',
+  'Closing voting…': '正在结束投票…',
+  'Cancel poll…': '取消投票…',
+  'Cancel this poll? Voting ends and active voters receive a cancellation notice.':
+    '取消此投票吗？投票将结束，仍在参与的投票人会收到取消通知。',
+  'Cancel poll': '取消投票',
+  'Canceling poll…': '正在取消投票…',
+  'Delete poll…': '删除投票…',
+  'Permanently delete this poll and its votes? Any booking created from it is kept.':
+    '永久删除此投票及其选票吗？由此投票创建的预约将保留。',
+  'Delete poll': '删除投票',
+  'Deleting poll…': '正在删除投票…',
+  'Poll actions': '投票操作',
+  'Go back': '返回',
+  'Current booking time: {time}': '当前预约时间：{time}',
   // Workflow audit
   Workflows: '工作流',
 } as const

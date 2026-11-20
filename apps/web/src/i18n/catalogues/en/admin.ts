@@ -2295,6 +2295,108 @@ export const admin = {
   'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
     'Team event types are not listed: only team owners and admins can see why their times are unavailable.',
   'Another scheduling rule applies.': 'Another scheduling rule applies.',
+
+  // Host meeting polls
+  'Meeting polls': 'Meeting polls',
+  'Loading meeting polls…': 'Loading meeting polls…',
+  'No meeting polls yet.': 'No meeting polls yet.',
+  'Could not load meeting polls.': 'Could not load meeting polls.',
+  'Only team owners and admins can manage meeting polls in this space.':
+    'Only team owners and admins can manage meeting polls in this space.',
+  'Voting open': 'Voting open',
+  'Voting closed': 'Voting closed',
+  'Poll scheduled': 'Scheduled',
+  'Poll canceled': 'Canceled',
+  'Voting deadline: {deadline} ({timeZone})': 'Voting deadline: {deadline} ({timeZone})',
+  'Meeting poll pages': 'Meeting poll pages',
+  'Back to meeting polls': 'Back to meeting polls',
+  'This poll belongs to another space.': 'This poll belongs to another space.',
+  'This meeting poll is unavailable.': 'This meeting poll is unavailable.',
+  'Switch to {space}': 'Switch to {space}',
+  'Could not open the space for this poll.': 'Could not open the space for this poll.',
+  'Poll results': 'Poll results',
+  'Loading poll results…': 'Loading poll results…',
+  'Could not load the poll results.': 'Could not load the poll results.',
+  'Meeting poll unavailable': 'Meeting poll unavailable',
+  'This poll changed. Refresh results and review them before continuing.':
+    'This poll changed. Refresh results and review them before continuing.',
+  'The selected attendees changed. Refresh results and make a new selection.':
+    'The selected attendees changed. Refresh results and make a new selection.',
+  'This event type changed since the poll was created. A new poll is required to schedule it.':
+    'This event type changed since the poll was created. A new poll is required to schedule it.',
+  'This time is no longer available. Choose another time or refresh results.':
+    'This time is no longer available. Choose another time or refresh results.',
+  'Connected calendars could not be checked. Try scheduling again shortly.':
+    'Connected calendars could not be checked. Try scheduling again shortly.',
+  'This event type does not allow guests. Choose only the booker.':
+    'This event type does not allow guests. Choose only the booker.',
+  'Too many attendees were selected. Remove an additional attendee and try again.':
+    'Too many attendees were selected. Remove an additional attendee and try again.',
+  'Acknowledge the selected conditional votes before scheduling.':
+    'Acknowledge the selected conditional votes before scheduling.',
+  'Could not update the meeting poll. Try again.': 'Could not update the meeting poll. Try again.',
+  'The booking may have been created. Retry to recover the result.':
+    'The booking may have been created. Retry to recover the result.',
+  'Original scheduled time: {time}': 'Original scheduled time: {time}',
+  'View booking': 'View booking',
+  'Retry scheduling': 'Retry scheduling',
+  'Refresh results': 'Refresh results',
+  'Verification pending': 'Verification pending',
+  'Invited to vote': 'Invited to vote',
+  'Verified voter': 'Verified voter',
+  'Withdrawn voter': 'Withdrawn voter',
+  'If need be': 'If need be',
+  'Currently available': 'Currently available',
+  'Currently unavailable': 'Currently unavailable',
+  'Availability unknown': 'Availability unknown',
+  Votes: 'Votes',
+  'Submitted ballots: {count}': 'Submitted ballots: {count}',
+  'Verified voters can see totals. In a small poll, subtracting their own vote can reveal how someone else voted.':
+    'Verified voters can see totals. In a small poll, subtracting their own vote can reveal how someone else voted.',
+  'Voters can see only their own votes. This results page is private to poll managers.':
+    'Voters can see only their own votes. This results page is private to poll managers.',
+  'Availability can change. Hourmere checks the chosen time again when you schedule.':
+    'Availability can change. Hourmere checks the chosen time again when you schedule.',
+  'Votes by voter and time': 'Votes by voter and time',
+  Voter: 'Voter',
+  'No vote': 'No vote',
+  'Schedule meeting': 'Schedule meeting',
+  'Scheduling creates a booking, ends voting and sends the outcome. The booker can manage the whole meeting.':
+    'Scheduling creates a booking, ends voting and sends the outcome. The booker can manage the whole meeting.',
+  'No candidate time can be selected right now.': 'No candidate time can be selected right now.',
+  'Scheduling choices': 'Scheduling choices',
+  'Meeting time': 'Meeting time',
+  'Choose a time': 'Choose a time',
+  '{time} ({availability})': '{time} ({availability})',
+  'No verified voters agreed to attend at this time.':
+    'No verified voters agreed to attend at this time.',
+  Booker: 'Booker',
+  'Choose a booker': 'Choose a booker',
+  '{name} ({email})': '{name} ({email})',
+  'Additional attendees': 'Additional attendees',
+  'Choose up to {count} additional attendees.': 'Choose up to {count} additional attendees.',
+  'Attendee limit reached ({count} including the booker).':
+    'Attendee limit reached ({count} including the booker).',
+  'I acknowledge the selected conditional votes.': 'I acknowledge the selected conditional votes.',
+  'Scheduling…': 'Scheduling…',
+  'Close voting…': 'Close voting…',
+  'Close voting now? Voters can no longer change their votes. You can still schedule the meeting.':
+    'Close voting now? Voters can no longer change their votes. You can still schedule the meeting.',
+  'Close voting': 'Close voting',
+  'Closing voting…': 'Closing voting…',
+  'Cancel poll…': 'Cancel poll…',
+  'Cancel this poll? Voting ends and active voters receive a cancellation notice.':
+    'Cancel this poll? Voting ends and active voters receive a cancellation notice.',
+  'Cancel poll': 'Cancel poll',
+  'Canceling poll…': 'Canceling poll…',
+  'Delete poll…': 'Delete poll…',
+  'Permanently delete this poll and its votes? Any booking created from it is kept.':
+    'Permanently delete this poll and its votes? Any booking created from it is kept.',
+  'Delete poll': 'Delete poll',
+  'Deleting poll…': 'Deleting poll…',
+  'Poll actions': 'Poll actions',
+  'Go back': 'Go back',
+  'Current booking time: {time}': 'Current booking time: {time}',
   // Workflow audit
   Workflows: 'Workflows',
 } as const

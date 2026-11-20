@@ -26,6 +26,7 @@ describe('routing between the app and the public pages', () => {
       'GET /api/v1/event-types': () => json(200, { data: [] }),
       'GET /api/v1/schedules': () => json(200, { data: [] }),
       'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
+      'GET /api/v1/meeting-polls': () => json(200, { data: [], nextAfter: null }),
       'GET /api/v1/analytics/bookings': () =>
         json(200, {
           startDate: '2026-10-01',

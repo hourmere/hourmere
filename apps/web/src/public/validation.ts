@@ -5,6 +5,7 @@
 import type { Schemas } from '../api/client.ts'
 import type { RequestError } from '../api/errors.ts'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
+import { BOOKING } from '../limits.ts'
 
 export type Question = Schemas['Question']
 export type Answer = string | string[] | boolean
@@ -27,7 +28,7 @@ export function guestsFor(guests: readonly BookingGuest[]): BookingGuest[] {
 export const LIMITS = {
   name: 200,
   email: 254,
-  guests: 10,
+  guests: BOOKING.maxGuests,
   short_text: 500,
   long_text: 5000,
   phone: 32,
