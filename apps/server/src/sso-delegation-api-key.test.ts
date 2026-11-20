@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import {
+  type CallerResolver,
   createAuth,
   createAuthPool,
   createBrowserSession,
@@ -72,11 +73,15 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
     }
   })
 
-  function instance(capabilities = enabled, enforce = true) {
+  function instance(
+    capabilities = enabled,
+    enforce = true,
+    resolveCaller = createCallerResolver({ auth, db, ssoCapabilities: capabilities }),
+  ) {
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db, ssoCapabilities: capabilities }),
+      resolveCaller,
       publicUrl,
       mcp: mcpEndpoint({ tools: [whoamiTool] }),
       ...(enforce && { ssoTeamReads: { db, capabilities } }),
@@ -177,7 +182,7 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
       .toBe(true)
   }
 
-  it('keeps the successful response bytes and query count without enforced policy', async () => {
+  it('keeps successful response bytes with one live check at team-key reliance', async () => {
     const credential = await key()
     async function outcome(app: ReturnType<typeof instance>) {
       statements.length = 0
@@ -189,16 +194,17 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
     expect(previous.status).toBe(200)
     // Persisted key metadata and member/key/organization lookup, with no SSO round-trip.
     expect(previous.queries).toBe(2)
-    expect(await outcome(instance(disabled))).toEqual(previous)
-    expect(await outcome(instance())).toEqual(previous)
+    const checked = { ...previous, queries: previous.queries + 1 }
+    expect(await outcome(instance(disabled))).toEqual(checked)
+    expect(await outcome(instance())).toEqual(checked)
     await policy(false)
-    expect(await outcome(instance())).toEqual(previous)
+    expect(await outcome(instance())).toEqual(checked)
 
     statements.length = 0
     const mcp = await mcpWhoami(instance(), credential.headers)
     expect(mcp.status).toBe(200)
     expect(await mcp.text()).toContain(fixture.team)
-    expect(statements).toHaveLength(2)
+    expect(statements).toHaveLength(3)
   })
 
   it('keeps browser session authorization within its existing membership and team policy queries', async () => {
@@ -238,7 +244,8 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
     const personalKey = await key(personal)
     const otherTeamKey = await key(fixture.otherTeam)
     const otherMemberKey = await key(fixture.team, fixture.owner)
-    const app = instance(enforced ? enabled : disabled)
+    const capabilities = enforced ? enabled : disabled
+    const app = instance(capabilities)
     if (enforced) {
       await policy()
       await bind(credential.id)
@@ -253,7 +260,41 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
     }
 
     await expectAccess(credential.headers, fixture.team)
-    await suspendScimMember(db, fixture.team, fixture.member)
+    const resolvedRest = Promise.withResolvers<Awaited<ReturnType<CallerResolver>>>()
+    const resolvedMcp = Promise.withResolvers<Awaited<ReturnType<CallerResolver>>>()
+    const release = Promise.withResolvers<void>()
+    const resolveCaller = createCallerResolver({ auth, db, ssoCapabilities: capabilities })
+    const pauseAfterResolution =
+      (resolved: typeof resolvedRest): CallerResolver =>
+      async (headers) => {
+        const result = await resolveCaller(headers)
+        resolved.resolve(result)
+        await release.promise
+        return result
+      }
+    const pendingRest = me(
+      instance(capabilities, true, pauseAfterResolution(resolvedRest)),
+      credential.headers,
+    )
+    const pendingMcp = mcpWhoami(
+      instance(capabilities, true, pauseAfterResolution(resolvedMcp)),
+      credential.headers,
+    )
+    try {
+      for (const decision of await Promise.all([resolvedRest.promise, resolvedMcp.promise]))
+        expect(decision).toMatchObject({
+          ok: true,
+          principal: { ssoDelegationStatus: enforced ? 'valid' : null },
+        })
+      await suspendScimMember(db, fixture.team, fixture.member, { revoke: true })
+    } finally {
+      release.resolve()
+    }
+    const [inFlightRest, inFlightMcp] = await Promise.all([pendingRest, pendingMcp])
+    expect(inFlightRest.status).toBe(403)
+    expect(await inFlightRest.json()).toEqual({ error: 'team_management_access_denied' })
+    expect(inFlightMcp.status).toBe(200)
+    expect(await inFlightMcp.text()).toContain('team_management_access_denied')
     const rest = await me(app, credential.headers)
     expect(rest.status).toBe(401)
     expect(await rest.json()).toEqual({ error: 'unauthorized' })

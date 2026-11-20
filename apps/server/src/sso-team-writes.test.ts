@@ -7,11 +7,13 @@ import {
   lockSharedTeamSsoProof,
 } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
+import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures } from '@hourmere/scheduling/testing'
-import { Kysely, PostgresDialect, TableNode, UpdateQueryNode } from 'kysely'
+import { Kysely, PostgresDialect, sql, TableNode, UpdateQueryNode } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { prepareScimSuspension } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
   bindingValues,
   type IdentityFixture,
@@ -367,6 +369,57 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
       expect(blocked.rowCount).toBe(1)
     })
   }
+
+  it('rolls back a host cancellation by an ordinary team key after suspension commits', async () => {
+    const start = Temporal.Now.instant().add({ hours: 24 })
+    const bookingId = await createFixtures(db).booking(
+      fixture.team,
+      [fixture.member],
+      start.toString(),
+      start.add({ minutes: 30 }).toString(),
+    )
+    const credential = await auth.api.createApiKey({
+      body: {
+        userId: fixture.member,
+        metadata: { organizationId: fixture.team, scope: 'bookings' },
+      },
+    })
+    const app = instance()
+    const target = await db
+      .transaction()
+      .execute((trx) => prepareScimSuspension(trx, fixture.team, fixture.member))
+    let pending: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        const { rows } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
+        await suspendScimMembership(trx, target)
+        pending = Promise.resolve(
+          app.request(new URL(`/api/v1/bookings/${bookingId}/cancel`, publicUrl), {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${credential.key}`,
+            },
+            body: '{}',
+          }),
+        )
+        // Request admission still sees the pre-commit membership. Its actual write
+        // waits for the team lock and must recheck suspension before committing.
+        await waitForBlocked(rows[0]?.pid)
+      })
+      if (!pending) throw new Error('Expected a pending cancellation')
+      await expectRefused(await pending)
+    } finally {
+      await pending
+    }
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('status')
+        .where('id', '=', bookingId)
+        .executeTakeFirst(),
+    ).toEqual({ status: 'confirmed' })
+  })
 
   it('rolls back a write when another transaction revokes its proof before commit', async () => {
     await requireSso()

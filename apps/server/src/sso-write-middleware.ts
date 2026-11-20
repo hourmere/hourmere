@@ -17,11 +17,8 @@ export async function withTeamWriteAccess<T>(
 ): Promise<T> {
   const access = await check()
   requireTeamRead(access)
-  const machineWithPolicy =
-    principal.kind !== 'session' &&
-    principal.ssoDelegationStatus !== undefined &&
-    principal.ssoDelegationStatus !== null
-  return access.policy || machineWithPolicy
+  const machineTeam = principal.kind !== 'session' && !principal.organization.personal
+  return access.policy || machineTeam
     ? withTeamWriteCheck(teamWriteCheck(deps, principal), write)
     : write()
 }

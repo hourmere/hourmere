@@ -15,7 +15,7 @@ export interface TeamWriteCheck {
 const activeCheck = new AsyncLocalStorage<TeamWriteCheck>()
 const checkedBeforeChange = new WeakMap<TeamTransaction, { deadline: string | undefined }>()
 
-/** Only the authenticated team transport enters this scope after finding a stored policy. */
+/** The authenticated team transport enters this scope to recheck authority at commit. */
 export function withTeamWriteCheck<T>(check: TeamWriteCheck, write: () => Promise<T>): Promise<T> {
   return activeCheck.run(check, write)
 }

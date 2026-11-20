@@ -346,8 +346,7 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         expect(new TextDecoder().decode(after.bytes), name).toContain(example)
         expect(after, name).toEqual(before)
         expect(policyStatements(), name).toHaveLength(1)
-        const machine = name === 'API key' || name.startsWith('MCP')
-        expect(statements, name).toHaveLength(previousQueryCount + (machine ? 0 : 1))
+        expect(statements, name).toHaveLength(previousQueryCount + 1)
         expect(
           statements.some((statement) => statement.includes('sso_delegation_bindings')),
           name,

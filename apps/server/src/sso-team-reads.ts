@@ -9,6 +9,7 @@ import {
   type TeamSsoSession,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { DomainError } from '@hourmere/scheduling'
 
 export type { TeamReadPolicy } from '@hourmere/auth'
@@ -47,10 +48,11 @@ function missingProof(): never {
   throw new DomainError('forbidden', 'sso_required')
 }
 
-/** One decision per request, including when the handler also needs the policy. */
+/** One live decision per request, including when the handler also needs the policy. */
 export function teamReadAccess(deps: SsoTeamReadDeps, principal: Principal) {
   const decision = memoizeTeamSsoAccess(deps, sessionIdentity(principal))
   let organizationId: string | undefined
+  let machineDecision: Promise<TeamReadAccess> | undefined
   return (scope: Scope = principal.organization): Promise<TeamReadAccess> => {
     if (scope.personal) return Promise.resolve({ allowed: true, policy: null })
     if (organizationId !== undefined && organizationId !== scope.id)
@@ -61,10 +63,19 @@ export function teamReadAccess(deps: SsoTeamReadDeps, principal: Principal) {
       principal.ssoDelegationStatus !== undefined &&
       scope.id === principal.organization.id
     ) {
-      return Promise.resolve({
-        allowed: principal.ssoDelegationStatus !== 'required',
-        policy: principal.ssoDelegationStatus === null ? null : undefined,
-      })
+      const status = principal.ssoDelegationStatus
+      if (status === 'required') return Promise.resolve({ allowed: false, policy: undefined })
+      // The resolver captured delegation before this operation. SCIM can commit
+      // between those two boundaries while leaving the credential itself in place.
+      machineDecision ??= deps.db
+        .selectNoFrom(scimSuspended(scope.id, principal.user.id).as('suspended'))
+        .executeTakeFirstOrThrow()
+        .then<TeamReadAccess>(({ suspended }) => ({
+          allowed: !suspended,
+          ...(suspended && { suspended: true }),
+          policy: status === null ? null : undefined,
+        }))
+      return machineDecision
     }
     return decision(scope.id)
   }

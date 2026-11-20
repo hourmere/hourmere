@@ -334,16 +334,19 @@ same transaction. Persist revocation work before success if an existing integrat
 needs an outbox. Every REST/MCP/native auth path must check current membership/suspension;
 a previously issued token or cached proof must not keep granting access.
 
-Authorization uses the live SCIM suspension for the account and team. A browser session
-in a suspended team resolves to its personal space, and native team selection refuses the
-suspended team. Existing team API keys, SSO delegation and browser proofs, and MCP OAuth
-tokens lose authorization for that team. Personal and other-team access continues. SSO JIT
-admission also checks live blockers for the proven mailbox under the team lock. Authorization
+Authorization uses the live SCIM suspension for the account and team. Existing team API
+keys, SSO delegation and MCP OAuth tokens lose authorization for that team. REST and
+MCP check the blocker again when using a previously resolved team credential. SSO JIT
+admission checks live blockers for the proven mailbox under the team lock. Authorization
 and credential revocation are separate steps in the implementation plan below.
 
-Sessions are account-wide today. Delete sessions whose active organization is the affected
-team and invalidate team-scoped proofs on all others; shared personal sessions can remain
-usable for personal/other-team work but cannot reselect the suspended team. Do not delete
+The shared suspension write takes the team lock and records the blocker in the same
+transaction as two bulk deletes. It deletes the account's sessions whose active
+organization is that team and removes that team's browser proofs on surviving sessions.
+Personal and other-team sessions stay usable, and team selection refuses the suspended
+team. Rolling refresh only updates an existing session, so it cannot recreate a deleted
+one. Team selection and proof issuance check the blocker under the same team lock.
+Production still registers no SCIM resource handler. Do not delete
 global social sign-in accounts, calendar connections, personal bookings or credentials for
 other organizations. Preserve historical bookings and attribution. Existing departure and
 booking-host handling policy must be reused: suspend eligibility for new team work and

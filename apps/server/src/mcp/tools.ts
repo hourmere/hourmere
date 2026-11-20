@@ -50,6 +50,8 @@ export type McpCaller = Extract<Principal, { kind: 'api_key' | 'oauth' }>
 export interface ToolCall {
   caller: McpCaller
   checkTeamRead?: ((toolName: string) => Promise<TeamReadAccess | undefined>) | undefined
+  /** The team read decision established for the current tool invocation. */
+  teamRead?: TeamReadAccess | undefined
   runTeamWrite?:
     | (<T>(tool: string, mode: string | undefined, run: () => Promise<T>) => Promise<T>)
     | undefined
@@ -271,7 +273,7 @@ export async function runTool(
     // A feature that is not available answers its DomainError code here, after the scope
     // check and before the argument checks.
     checkAvailable(tool)
-    await call.checkTeamRead?.(tool.name)
+    const teamRead = await call.checkTeamRead?.(tool.name)
     if (hasUnsafeJsonText(args)) {
       const field = privateInput ? undefined : successRedirectUnsafeField(args, hasUnsafeJsonText)
       return errorResult({
@@ -293,7 +295,7 @@ export async function runTool(
           : describeIssues(parsed.error.issues),
       })
     }
-    const run = () => tool.run(parsed.data, call)
+    const run = () => tool.run(parsed.data, { ...call, teamRead })
     const value = call.runTeamWrite ? await call.runTeamWrite(tool.name, mode, run) : await run()
     const result = tool.output.safeParse(value)
     if (!result.success) {
