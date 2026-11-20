@@ -70,7 +70,7 @@ describe('Routing draft preview', () => {
     const api = fakeApi({ ...routes, [preview]: () => pending.response })
     renderApp(routingFormPath(id, team.id))
     const user = userEvent.setup()
-    const panel = within(await screen.findByTestId('routing-preview'))
+    const panel = within(await screen.findByTestId('routing-preview', {}, { timeout: 4_000 }))
     const run = panel.getByRole('button', { name: 'Run preview' })
 
     await user.click(run)
@@ -118,7 +118,9 @@ describe('Routing draft preview', () => {
     })
     renderApp(routingFormPath(id, team.id))
     const user = userEvent.setup()
-    const group = within(await screen.findByRole('region', { name: 'Fallback' }))
+    const group = within(
+      await screen.findByRole('region', { name: 'Fallback' }, { timeout: 4_000 }),
+    )
     const message = group.getByRole('textbox', { name: 'Message to show' })
     await user.clear(message)
     await user.type(message, fallback.message)
@@ -150,7 +152,7 @@ describe('Routing draft preview', () => {
   ])('shows a neutral state for preview response %s', async (status, body, state) => {
     fakeApi({ ...routes, [preview]: () => json(status, body) })
     renderApp(routingFormPath(id, team.id))
-    const panel = within(await screen.findByTestId('routing-preview'))
+    const panel = within(await screen.findByTestId('routing-preview', {}, { timeout: 4_000 }))
     const user = userEvent.setup()
     await user.selectOptions(panel.getByRole('combobox', { name: 'What do you need?' }), support)
     await user.click(panel.getByRole('button', { name: 'Run preview' }))

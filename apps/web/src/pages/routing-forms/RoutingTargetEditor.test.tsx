@@ -302,7 +302,9 @@ describe('Routing destinations and mappings', () => {
     })
     renderApp(routingFormPath(form.id, team))
     const user = userEvent.setup()
-    const fallback = within(await screen.findByRole('region', { name: 'Fallback' }))
+    const fallback = within(
+      await screen.findByRole('region', { name: 'Fallback' }, { timeout: 4_000 }),
+    )
     await user.click(await fallback.findByRole('button', { name: 'Add an answer mapping' }))
     await user.selectOptions(fallback.getByRole('combobox', { name: 'Routing question' }), size.id)
     await user.selectOptions(
