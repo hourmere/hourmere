@@ -5328,6 +5328,26 @@ export interface paths {
         patch: operations["updateWorkflow"];
         trace?: never;
     };
+    "/api/v1/workflows/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List finished runs of a booking workflow
+         * @description Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
+         */
+        get: operations["listWorkflowRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workflows/preview": {
         parameters: {
             query?: never;
@@ -8875,6 +8895,31 @@ export interface components {
             match: "matched" | "scope_mismatch" | "condition_false";
             /** @enum {boolean} */
             synthetic: true;
+        };
+        /** @description A finished run with fixed outcome codes and aggregate recipient counts */
+        WorkflowRunHistoryEntry: {
+            deliveryUnknown: number;
+            /** Format: date-time */
+            dueAt: string;
+            /** Format: date-time */
+            finishedAt: string;
+            /** @enum {string} */
+            outcome: "completed" | "retired" | "skipped";
+            /** @enum {string|null} */
+            reason: "condition_false" | "existing_notification" | "minimum_gap" | "offset_not_future" | "expired" | "budget_suppressed" | "render_limit" | "workflow_disabled" | "instance_disabled" | null;
+            rejected: number;
+            revision: number;
+            sent: number;
+            skipped: number;
+            /** @enum {string} */
+            trigger: "booking.created" | "booking.cancelled" | "booking.rescheduled" | "before_start" | "after_end";
+            /** Format: uuid */
+            workflowId: string;
+        };
+        WorkflowRunHistoryPage: {
+            data: components["schemas"]["WorkflowRunHistoryEntry"][];
+            /** @description Pass as `cursor` for the same workflow; null on the last page */
+            nextCursor: string | null;
         };
         /** @description One of the owner's event types, or all of its current and future event types */
         WorkflowScope: {
@@ -19857,6 +19902,77 @@ export interface operations {
             };
             /** @description workflow_revision_conflict, workflow_limit_reached or organization_context_changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listWorkflowRuns: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                /** @description Page size, 1–100 (default 50) */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workflow’s finished runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowRunHistoryPage"];
+                };
+            };
+            /** @description invalid_request or invalid_cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description workflows_disabled: workflows are not available on this instance; workflow_not_found: no such workflow of the owner the caller acts as */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -240,6 +240,7 @@ export function productRoutes({
   waitlistSecret,
   meetingPollSecret,
   routingSecret,
+  workflowRunCursorSecret,
   smtpConfigured,
   recurringBookingsEnabled,
   auditLogRetentionDays = null,
@@ -274,6 +275,7 @@ export function productRoutes({
   waitlistSecret?: string | undefined
   meetingPollSecret?: string | undefined
   routingSecret?: string | undefined
+  workflowRunCursorSecret?: string | undefined
   smtpConfigured?: boolean | undefined
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   webhookQueue?: import('@hourmere/webhooks').WebhookQueue | undefined
@@ -414,7 +416,7 @@ export function productRoutes({
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
     // Registered while hard-off: every operation answers 404 workflows_disabled.
-    workflowRoutes({ db, followUpHostNotesEnabled }),
+    workflowRoutes({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
   ]
 }
 
@@ -431,6 +433,7 @@ export function productTools({
   slotSnippetsEnabled = false,
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
   followUpHostNotesEnabled,
+  workflowRunCursorSecret,
   smsRemindersAvailable = false,
   successRedirectPolicy,
   notify,
@@ -457,6 +460,7 @@ export function productTools({
   publicUrl?: string | undefined
   smsRemindersAvailable?: boolean | undefined
   followUpHostNotesEnabled?: boolean | undefined
+  workflowRunCursorSecret?: string | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   notify?: BookingNotifier | undefined
@@ -514,7 +518,7 @@ export function productTools({
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
-    ...workflowTools({ db, followUpHostNotesEnabled }),
+    ...workflowTools({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
     ...routingFormConfigurationTools({
       db,
@@ -665,6 +669,7 @@ export function productionAppOptions({
       enqueueCalendarSync,
       enqueueCalendarWritebackRecovery,
       routingSecret: config.BETTER_AUTH_SECRET,
+      workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
     }),
     mcp: mcpEndpoint({
       ...(config.MCP_OAUTH_ENABLED
@@ -697,6 +702,7 @@ export function productionAppOptions({
         webhooks: webhookSettings,
         webhookQueue,
         routingSecret: config.BETTER_AUTH_SECRET,
+        workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
       }),
     }),
   }

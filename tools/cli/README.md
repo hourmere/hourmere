@@ -429,6 +429,21 @@ event types and continue processing known ones. Every delivery has a required `b
 `{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)
 read booking workflows with a `read` or `full` key. Booking workflows are not available yet:
 until they are enabled on the instance both commands exit `1` with `workflows_disabled`.
+
+`workflows runs --input FILE|-` accepts the workflow `id` and optional `limit` (1–100,
+default 50) and `cursor` as JSON. It requires a `read` or `full` key and personal ownership
+or the current team owner/admin role in the key's organization. History shows metadata
+and aggregate outcomes, including the `workflow_disabled` skip reason. Rows omit booking IDs,
+names, emails, answers and URLs. Send `nextCursor` as `cursor` with the same workflow ID to
+read the next page. The command exits `1` with `workflows_disabled` on stderr while workflows
+are hard-off.
+
+中文：`workflows runs --input FILE|-` 接收工作流 `id` 和可选的 `limit`（1–100，默认 50）及
+`cursor`。需要 `read` 或 `full` 密钥，以及密钥所属组织中的个人所有者或当前团队所有者／管理员
+权限。历史仅包含元数据和汇总结果，包括 `workflow_disabled` 跳过原因，不含预约 ID、姓名、邮箱、
+答案或链接。使用同一工作流 ID，将 `nextCursor` 作为 `cursor` 读取下一页。功能仍硬关闭，命令
+退出码为 `1`，并在标准错误输出 `workflows_disabled`。
+
 `workflows create` requires a `full` key and is also unavailable. Its JSON input carries
 `owner`, a retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`, and optional
 `enabled` and `conditions`. Identical normalized retries return the stored definition;

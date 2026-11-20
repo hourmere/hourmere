@@ -96,6 +96,7 @@ const all = [
   'preview_workflow',
   'list_workflows',
   'get_workflow',
+  'list_workflow_runs',
   'list_sso_providers',
   'get_sso_policy',
   'list_routing_forms',
@@ -118,6 +119,7 @@ const unavailable = new Set([
   'preview_workflow',
   'list_workflows',
   'get_workflow',
+  'list_workflow_runs',
   ...ssoUnavailable,
 ])
 const disabled = (name: string) => ({
@@ -203,6 +205,7 @@ const otherReads = new Set([
   'list_one_time_links',
   'list_workflows',
   'get_workflow',
+  'list_workflow_runs',
   'list_sso_providers',
   'get_sso_policy',
 ])
@@ -597,6 +600,7 @@ describe('CLI scope parity', () => {
     ['workflows create', 'create_workflow'],
     ['workflows list', 'list_workflows'],
     ['workflows get', 'get_workflow'],
+    ['workflows runs', 'list_workflow_runs'],
     ['sso providers list', 'list_sso_providers'],
     ['sso policy', 'get_sso_policy'],
     ['routing-forms list', 'list_routing_forms'],

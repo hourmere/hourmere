@@ -43,6 +43,7 @@ const restContract = {
     'GET /api/v1/webhooks/{id}/deliveries',
     'GET /api/v1/workflows',
     'GET /api/v1/workflows/{id}',
+    'GET /api/v1/workflows/{id}/runs',
   ],
   booking_read: [
     'GET /api/v1/meeting-polls',
@@ -559,6 +560,7 @@ describe('shared API-key scope policy', () => {
         'get_sso_policy',
         'list_workflows',
         'get_workflow',
+        'list_workflow_runs',
       ],
       read: [
         'list_meeting_polls',
@@ -595,6 +597,7 @@ describe('shared API-key scope policy', () => {
         'get_sso_policy',
         'list_workflows',
         'get_workflow',
+        'list_workflow_runs',
       ],
       bookings: [
         'get_public_routing_form',

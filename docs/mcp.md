@@ -161,6 +161,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `get_sso_policy` | — | `sso policy` | `full, read` |
 | `list_workflows` | — | `workflows list` | `full, read` |
 | `get_workflow` | — | `workflows get` | `full, read` |
+| `list_workflow_runs` | — | `workflows runs` | `full, read` |
 
 <!-- api-key-scope-table:end -->
 
@@ -543,6 +544,17 @@ and MCP discovery hides the tool.
 使用相同的 JSON 输入，包括所有者、候选定义和可选的合成示例。密钥需要 `full` 权限，
 调用者须为当前个人所有者或团队所有者、管理员。结果包括匹配状态、邮件样本和静态额度
 估计。功能仍硬关闭，返回 `workflows_disabled`，MCP 工具列表隐藏预览。
+
+`list_workflow_runs` and `workflows runs --json` take `id` and optional `limit` and `cursor`.
+Use `nextCursor` for the next page of the same workflow. Pages list finished runs with fixed
+outcome codes and aggregate counts for the personal owner or current team owner/admin.
+History omits booking IDs and private booking details. API keys need `read` or `full`.
+While workflows are off, direct calls return `workflows_disabled` and discovery hides the tool.
+
+中文：`list_workflow_runs` 和 `workflows runs --json` 接收 `id`，可选 `limit` 和 `cursor`。
+个人所有者或当前团队所有者、管理员可用 `read` 或 `full` 密钥查看安全状态与汇总计数。
+历史不含预约 ID 或预约隐私信息。功能仍硬关闭，调用会返回 `workflows_disabled`，
+MCP 工具列表隐藏此工具。
 
 ## SMS reminders
 

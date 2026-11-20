@@ -111,6 +111,8 @@ describe('workflow REST operations while off', () => {
         `/api/v1/workflows/${randomUUID()}`,
         '/api/v1/workflows/not-a-uuid',
         `/api/v1/workflows/${'9'.repeat(300)}`,
+        `/api/v1/workflows/${randomUUID()}/runs?limit=1&cursor=abc`,
+        '/api/v1/workflows/not-a-uuid/runs?limit=0&cursor=bad&extra=%00',
       ]
       for (const url of urls) {
         for (const headers of [
@@ -188,6 +190,7 @@ describe('workflow MCP tools while off', () => {
       'preview_workflow',
       'list_workflows',
       'get_workflow',
+      'list_workflow_runs',
     ])
     for (const tool of tools) {
       expect(tool.requireEnabled).toBeUndefined()
@@ -223,6 +226,8 @@ describe('workflow MCP tools while off', () => {
           ['list_workflows', 'not an object'],
           ['get_workflow', { id: randomUUID() }],
           ['get_workflow', { id: 'x', extra: '\u0000' }],
+          ['list_workflow_runs', { id: randomUUID() }],
+          ['list_workflow_runs', { id: 'x', cursor: '\u0000', limit: 0 }],
         ] as const) {
           const called = await rpc(app, authorization, {
             method: 'tools/call',
@@ -240,7 +245,12 @@ describe('workflow MCP tools while off', () => {
         }
       }
       // The API-key scope check keeps its precedence.
-      for (const name of [...fullOnlyTools, 'list_workflows', 'get_workflow']) {
+      for (const name of [
+        ...fullOnlyTools,
+        'list_workflows',
+        'get_workflow',
+        'list_workflow_runs',
+      ]) {
         const called = await rpc(app, 'Bearer hm_bookings', {
           method: 'tools/call',
           params: { name, arguments: { id: 'x' } },
@@ -336,6 +346,7 @@ describe('workflow CLI commands while off', () => {
   it.each([
     ['list', 'list_workflows', { owner: { kind: 'team', id: organization.id }, limit: 5 }],
     ['get', 'get_workflow', { id: randomUUID() }],
+    ['runs', 'list_workflow_runs', { id: randomUUID(), limit: 1, cursor: 'abc' }],
     ['create', 'create_workflow', {}],
     ['update', 'update_workflow', {}],
     ['delete', 'delete_workflow', {}],
@@ -374,7 +385,7 @@ describe('workflow CLI commands while off', () => {
     },
   )
 
-  it.each([['workflows'], ['workflows', 'runs'], ['workflow', 'list']])(
+  it.each([['workflows'], ['workflow', 'list']])(
     'refuses %j as an unknown command without calling the server',
     async (...argv) => {
       const fetcher = vi.fn<typeof fetch>()
