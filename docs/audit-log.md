@@ -234,11 +234,14 @@ body is recorded.
 | `sso_provider.created`, `sso_provider.updated`, `sso_provider.enabled`, `sso_provider.disabled`, `sso_provider.deleted`, `sso_provider.secret_rotated`, `sso_provider.certificate_rotated`, `sso_maintenance.key_rotated` | `method`, `providerId`, `revision` | | |
 | `sso_provider.tested` | `method`, `providerId`, `revision`, `outcome` | `reason`, `correlationId` | `passed`, `failed` |
 | `sso_domain.renewed` | `outcome` | | `passed`, `failed`, `unknown` |
-| `sso_link.linked`, `sso_link.unlinked`, `sso_link.conflicted`, `sso_authentication.succeeded`, `sso_authentication.replay_rejected`, `sso_jit.admitted`, `sso_delegation.bound`, `sso_delegation.revoked`, `sso_proof.revoked` | `method`, `providerId` | `revision`, `correlationId` | |
+| `sso_link.linked`, `sso_link.unlinked`, `sso_link.conflicted`, `sso_authentication.succeeded`, `sso_authentication.replay_rejected`, `sso_jit.admitted`, `sso_delegation.bound`, `sso_proof.revoked` | `method`, `providerId` | `revision`, `correlationId` | |
 | `sso_authentication.failed`, `sso_jit.refused` | `method`, `providerId`, `reason` | `revision`, `correlationId` | |
 | `sso_enforcement.enabled`, `sso_enforcement.disabled`, `sso_enforcement.updated`, `sso_maintenance.enforcement_disabled` | `revision` | | |
+| `sso_delegation.revoked` | `method`, `providerId` | `revision`, `correlationId`, `reason` | |
 | `sso_recovery.used` | | `correlationId` | |
-| `sso_domain.challenged`, `sso_domain.verified`, `sso_domain.expired`, `sso_domain.released`, `sso_maintenance.domain_retired`, `sso_recovery.nominated`, `sso_recovery.enrolled`, `sso_member.suspended`, `sso_member.reinstated`, `sso_member.scim_suspended`, `sso_member.scim_reinstated` | | | |
+| `sso_domain.challenged`, `sso_domain.verified`, `sso_domain.expired`, `sso_domain.released`, `sso_maintenance.domain_retired`, `sso_recovery.nominated`, `sso_recovery.enrolled`, `sso_recovery.removed`, `sso_member.suspended`, `sso_member.reinstated`, `sso_member.scim_suspended`, `sso_member.scim_reinstated` | | | |
+
+`sso_delegation.revoked` uses `key_moved_team` when an API key moves to another team.
 
 Reason codes: `attempt_invalid`, `attempt_expired`, `browser_mismatch`, `provider_error`,
 `provider_unreachable`, `token_exchange_failed`, `response_malformed`, `signature_invalid`,

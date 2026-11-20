@@ -1102,6 +1102,21 @@ fresh-administration window and is single-use: each repair write consumes it, an
 a retry requires a new ceremony. These proofs
 are distinct from IdP authentication.
 
+As implemented, nomination returns `201` with `{enrollmentId, expiresAt, policyRevision}`
+and queues an email to the nominee's verified Hourmere mailbox. The link carries the
+team context, enrollment ID and resulting revision in its fragment. Opening it cannot
+accept the nomination. The acceptance POST needs the expected-team header and the
+nominee's own browser session and mailbox proof. It returns `204` without any team data
+and queues confirmation to the nominator and nominee. Both writes advance `policyRevision`.
+If another policy or recovery change intervenes, a stale revision returns
+`sso_configuration_changed`. An expired, superseded or other owner's nomination returns
+`sso_not_found`. Both operations return `404 sso_disabled` while both protocols are off.
+
+提名成功后返回入组标识、到期时间和策略版本，并向受邀所有者已验证的 Hourmere 邮箱发送通知。
+打开链接不会接受提名。受邀者须在自己的浏览器会话中验证邮箱，并提交接受请求。成功后返回
+204，不返回团队数据，并通知提名人与受邀者。两个操作均更新策略版本。OIDC 和 SAML 都关闭时，
+两个接口均返回 `404 sso_disabled`。
+
 `bindSsoDelegation` takes `{credentialKind, credentialId, expectedTrustGeneration,
 proofAttemptId?}`, verifies that the current team member owns the credential and
 that it belongs to the current team, and returns `201` with `{id, expiresAt}`.

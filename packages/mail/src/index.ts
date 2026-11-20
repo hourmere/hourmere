@@ -486,6 +486,19 @@ export function ssoLinkRemovalEmail(to: string, language: InterfaceLanguage): Ma
   return { to, subject, text: `Hourmere\n\n${message}\n`, sensitive: true }
 }
 
+/** Recovery notices use verified login mailboxes and contain no team metadata. */
+export function ssoRecoveryEnrollmentEmail(
+  to: string,
+  language: InterfaceLanguage,
+  nominationLink?: URL,
+): MailMessage {
+  const kind = nominationLink ? 'nominated' : 'enrolled'
+  const subject = mailMessage(language, `ssoRecovery.${kind}.subject`)
+  const message = mailMessage(language, `ssoRecovery.${kind}.message`)
+  const link = nominationLink ? `\n\n${nominationLink.href}` : ''
+  return { to, subject, text: `Hourmere\n\n${message}${link}\n`, sensitive: true }
+}
+
 export function magicLinkEmail({
   to,
   url,

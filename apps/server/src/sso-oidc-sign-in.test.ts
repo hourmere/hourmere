@@ -1504,13 +1504,43 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       })
       .returningAll()
       .executeTakeFirstOrThrow()
-    await db
-      .updateTable('auth.apikey')
-      .set({
-        metadata: JSON.stringify({ scope: 'full', organizationId: fixture.otherTeam }),
-      })
-      .where('id', '=', key)
-      .execute()
+    const moved = await app.request(new URL('/api/auth/api-key/update', publicUrl), {
+      method: 'POST',
+      headers: { cookie: actor.cookie, origin: publicUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ keyId: key, metadata: { organizationId: fixture.otherTeam } }),
+    })
+    expect(moved.status).toBe(200)
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .select('id')
+        .where('api_key_id', '=', key)
+        .execute(),
+    ).toEqual([])
+    expect((await audit()).filter((entry) => entry.action === 'sso_delegation.revoked')).toEqual([
+      expect.objectContaining({
+        actor_type: 'user',
+        actor_id: fixture.member,
+        credential_type: 'session',
+        credential_id: actor.id,
+        target_type: 'sso_delegation',
+        target_id: bound.id,
+        details: {
+          method: 'oidc',
+          providerId: f.providerId,
+          revision: 1,
+          reason: 'key_moved_team',
+        },
+      }),
+    ])
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select('id')
+        .where('organization_id', '=', fixture.otherTeam)
+        .where('action', '=', 'sso_delegation.revoked')
+        .execute(),
+    ).toEqual([])
     const oldTeam = await delegationRequest(actor.cookie, key)
     expect(oldTeam.status).toBe(404)
     const otherSession = await browserSession(fixture.member, fixture.otherTeam)

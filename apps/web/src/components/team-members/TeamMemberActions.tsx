@@ -215,6 +215,8 @@ function ActionError({
     message = t(
       'The team must retain at least one owner. Ownership transfer is not available here.',
     )
+  else if (request?.code === 'sso_recovery_required')
+    message = t('This team must retain at least one recovery owner while SSO is enforced.')
   else if (request?.code === 'member_departure_blocked')
     message = t('You cannot leave while team events or bookings still need handling.')
   else if (request?.status === 403)
@@ -242,7 +244,8 @@ function cannotRetryWrite(error: unknown) {
     (error instanceof RequestError &&
       (error.status === 401 ||
         error.status === 403 ||
-        error.code === 'member_departure_owner_required'))
+        error.code === 'member_departure_owner_required' ||
+        error.code === 'sso_recovery_required'))
   )
 }
 

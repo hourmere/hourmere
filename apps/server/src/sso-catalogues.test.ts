@@ -179,6 +179,18 @@ const GUARDED_SSO_WRITES = [
     runtimePath: '/api/v1/team/sso/delegations/:bindingId',
     operationId: 'revokeSsoDelegation',
   },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/recovery',
+    runtimePath: '/api/v1/team/sso/recovery',
+    operationId: 'configureSsoRecovery',
+  },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/recovery/{enrollmentId}/accept',
+    runtimePath: '/api/v1/team/sso/recovery/:enrollmentId/accept',
+    operationId: 'acceptSsoRecoveryEnrollment',
+  },
 ] as const
 
 function expectNoUnguardedSsoRoutes(paths: string[]) {
@@ -687,70 +699,75 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     }
   })
 
-  it('keeps delegation proof inputs private in validation and request diagnostics', async () => {
-    const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
-    const publicUrl = 'http://localhost'
-    const principal: Principal = {
-      kind: 'session',
-      sessionId: randomUUID(),
-      user: { id: randomUUID(), name: 'Synthetic member', email: 'member@example.test' },
-      organization: { id: randomUUID(), name: 'Team', slug: 'team', personal: false },
-    }
-    const marker = 'synthetic-delegation-proof-marker'
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      const app = createApp({
-        checkDb: unavailable,
-        authHandler: unavailable,
-        publicUrl,
-        routes: productRoutes({
-          db,
+  it.each([
+    [
+      '/delegations',
+      { credentialKind: 'api_key', credentialId: randomUUID(), expectedTrustGeneration: 1 },
+    ],
+    ['/recovery', { ownerUserId: randomUUID(), expectedRevision: 1 }],
+    [`/recovery/${randomUUID()}/accept`, { expectedRevision: 1 }],
+  ])(
+    'keeps proof inputs private in validation and request diagnostics for %s',
+    async (suffix, fields) => {
+      const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
+      const publicUrl = 'http://localhost'
+      const principal: Principal = {
+        kind: 'session',
+        sessionId: randomUUID(),
+        user: { id: randomUUID(), name: 'Synthetic member', email: 'member@example.test' },
+        organization: { id: randomUUID(), name: 'Team', slug: 'team', personal: false },
+      }
+      const marker = 'synthetic-sso-proof-marker'
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const app = createApp({
+          checkDb: unavailable,
+          authHandler: unavailable,
           publicUrl,
-          ssoOidcEnabled: true,
-          socialProviders: {},
-          invitationMailLimits: { secret: 'catalogue-test-only' },
-        }),
-        resolveCaller: async (headers) => {
-          if (headers.has('x-test-fail')) throw new Error(marker)
-          return { ok: true, principal, setCookie: [] }
-        },
-      })
-      const input = {
-        credentialKind: 'api_key',
-        credentialId: randomUUID(),
-        expectedTrustGeneration: 1,
-        proofAttemptId: randomUUID(),
+          routes: productRoutes({
+            db,
+            publicUrl,
+            ssoOidcEnabled: true,
+            socialProviders: {},
+            invitationMailLimits: { secret: 'catalogue-test-only' },
+          }),
+          resolveCaller: async (headers) => {
+            if (headers.has('x-test-fail')) throw new Error(marker)
+            return { ok: true, principal, setCookie: [] }
+          },
+        })
+        const input = { ...fields, proofAttemptId: randomUUID() }
+        const headers = {
+          origin: publicUrl,
+          'content-type': 'application/json',
+          'X-Expected-Organization-Id': principal.organization.id,
+        }
+        const path = `/api/v1/team/sso${suffix}?${marker}`
+        const invalid = await app.request(path, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...input, [marker]: true }),
+        })
+        expect(invalid.status).toBe(400)
+        expect(await invalid.json()).toEqual({ error: 'invalid_request' })
+        const failed = await app.request(path, {
+          method: 'POST',
+          headers: { ...headers, 'x-test-fail': '1' },
+          body: JSON.stringify(input),
+        })
+        expect(failed.status).toBe(500)
+        expect(errorLog.mock.calls.flat().join('\n')).toContain('[private SSO diagnostic omitted]')
+        expect(
+          JSON.stringify([await failed.json(), log.mock.calls, errorLog.mock.calls]),
+        ).not.toContain(marker)
+      } finally {
+        log.mockRestore()
+        errorLog.mockRestore()
+        await db.destroy()
       }
-      const headers = {
-        origin: publicUrl,
-        'content-type': 'application/json',
-        'X-Expected-Organization-Id': principal.organization.id,
-      }
-      const path = `/api/v1/team/sso/delegations?${marker}`
-      const invalid = await app.request(path, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ ...input, [marker]: true }),
-      })
-      expect(invalid.status).toBe(400)
-      expect(await invalid.json()).toEqual({ error: 'invalid_request' })
-      const failed = await app.request(path, {
-        method: 'POST',
-        headers: { ...headers, 'x-test-fail': '1' },
-        body: JSON.stringify(input),
-      })
-      expect(failed.status).toBe(500)
-      expect(errorLog.mock.calls.flat().join('\n')).toContain('[private SSO diagnostic omitted]')
-      expect(
-        JSON.stringify([await failed.json(), log.mock.calls, errorLog.mock.calls]),
-      ).not.toContain(marker)
-    } finally {
-      log.mockRestore()
-      errorLog.mockRestore()
-      await db.destroy()
-    }
-  })
+    },
+  )
 
   it('exempts SSO writes only at their exact method, path and operation id', () => {
     for (const write of GUARDED_SSO_WRITES) {
