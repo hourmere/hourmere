@@ -97,6 +97,12 @@ async function verifyRenderedCells(render: typeof renderScopeTables) {
     '<code>full, bookings</code>',
   ])
   expect(rows).toContainEqual([
+    '<code>create_booking</code>',
+    '<code>routed</code>',
+    '<code>book</code>',
+    '<code>full, bookings</code>',
+  ])
+  expect(rows).toContainEqual([
     '<code>reschedule_booking</code>',
     '<code>host</code>',
     '<code>reschedule</code>',
