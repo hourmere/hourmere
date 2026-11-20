@@ -5,6 +5,7 @@ import { common as englishCommon } from '../../apps/web/src/i18n/catalogues/en/c
 import { admin as chineseAdmin } from '../../apps/web/src/i18n/catalogues/zh-CN/admin.ts'
 import { common as chineseCommon } from '../../apps/web/src/i18n/catalogues/zh-CN/common.ts'
 import { PATHS, routingFormPath } from '../../apps/web/src/paths.ts'
+import { spaceCjkBoundaries } from '../../packages/core/src/language.ts'
 import { AUDIT_NOW } from './audit-data.ts'
 import type { FixtureApp } from './fixtures.ts'
 
@@ -76,7 +77,7 @@ type PublicationAuditPageId = Extract<
   `routing-manager-publication-${string}`
 >
 type RoutingRecord = components['schemas']['RoutingForm']
-type Translate = (key: keyof typeof english & keyof typeof chinese) => string
+type Translate = (key: keyof typeof english & keyof typeof chinese, number?: number) => string
 
 export function isRoutingFormManagerAuditPage(id: string): id is RoutingFormManagerAuditPageId {
   return routingFormManagerAuditPages.some((entry) => entry.id === id)
@@ -366,7 +367,7 @@ async function openPublicationState(page: Page, id: PublicationAuditPageId, t: T
     const health = panel.getByTestId('routing-published-health')
     await health
       .getByRole('button', {
-        name: t('Repair rule {number}').replace('{number}', '1'),
+        name: t('Repair rule {number}', 1),
         exact: true,
       })
       .waitFor()
@@ -421,9 +422,7 @@ async function openPublicationState(page: Page, id: PublicationAuditPageId, t: T
         .waitFor()
       break
     case 'routing-manager-publication-published':
-      await status
-        .getByText(t('Published version {number}.').replace('{number}', '1'), { exact: true })
-        .waitFor()
+      await status.getByText(t('Published version {number}.', 1), { exact: true }).waitFor()
       break
     case 'routing-manager-publication-conflict':
       await main.getByRole('button', { name: t('Reload'), exact: true }).waitFor()
@@ -448,7 +447,19 @@ export async function openRoutingFormManagerAuditPage(
   id: RoutingFormManagerAuditPageId,
   locale: 'en' | 'zh-CN',
 ) {
-  const t: Translate = (key) => (locale === 'zh-CN' ? chinese[key] : english[key])
+  const t: Translate = (key, number) => {
+    const template = locale === 'zh-CN' ? chinese[key] : english[key]
+    if (number === undefined) return template
+    return template.replace('{number}', (placeholder, start: number) =>
+      locale === 'zh-CN'
+        ? spaceCjkBoundaries(
+            template.slice(0, start),
+            String(number),
+            template.slice(start + placeholder.length),
+          )
+        : String(number),
+    )
+  }
   const fixture = await app.auditState()
   const rules = id.startsWith('routing-manager-rules')
   const publication = isPublicationAuditPage(id)

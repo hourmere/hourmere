@@ -2682,8 +2682,8 @@ export const admin = {
   // Routing form publication and repair
   Publication: '发布',
   'No version published yet.': '尚未发布任何版本。',
-  'Published version {number}': '当前发布版本为第 {number} 版',
-  'Published version {number}.': '已发布第 {number} 版。',
+  'Published version {number}': '当前发布版本为第{number}版',
+  'Published version {number}.': '已发布第{number}版。',
   'Review publication': '检查发布内容',
   'Saved fallback': '已保存的备用安排',
   'Publishing uses the saved draft and keeps the form’s current enabled status.':
@@ -2707,7 +2707,7 @@ export const admin = {
   Available: '可用',
   'Health unknown': '状态未知',
   'Repair fallback': '修复备用安排',
-  'Repair rule {number}': '修复规则 {number}',
+  'Repair rule {number}': '修复规则{number}',
   'Publish without this rule to remove it from the current version.':
     '发布不含此规则的草稿，即可从当前版本移除该规则。',
   'Save and publish your draft to update the published destinations.':
