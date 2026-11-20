@@ -313,6 +313,20 @@ export function authAuditRecords(): BetterAuthPlugin {
                       .executeTakeFirstOrThrow()
                     organizationId = personal.organization_id
                   }
+                  const patch = request.update as Row | undefined
+                  if (method === 'update' && result && patch && Object.hasOwn(patch, 'metadata')) {
+                    const rawUpdated = (result as Row).metadata
+                    const updated =
+                      typeof rawUpdated === 'string' ? JSON.parse(rawUpdated) : rawUpdated
+                    if (!sameId(organizationId, updated?.organizationId)) {
+                      // The adapter has locked the key. Any bind that won that lock has
+                      // committed, and any later bind must recheck the new organization.
+                      await trx
+                        .deleteFrom('sso_delegation_bindings')
+                        .where('api_key_id', '=', targetId)
+                        .execute()
+                    }
+                  }
                   action =
                     method === 'create'
                       ? 'api_key.created'

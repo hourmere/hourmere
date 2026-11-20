@@ -1,16 +1,22 @@
 import {
   liveBrowserProofQuery,
+  lockSsoDelegation,
   lockTeamSsoProof,
   memoizeTeamSsoAccess,
   type Principal,
-  type TeamReadAccess,
+  type TeamReadPolicy,
   type TeamSsoDeps,
   type TeamSsoSession,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling'
 
-export type { TeamReadAccess, TeamReadPolicy } from '@hourmere/auth'
+export type { TeamReadPolicy } from '@hourmere/auth'
+export interface TeamReadAccess {
+  allowed: boolean
+  /** A machine decision carries only the authorization result. Fetch policy fields on demand. */
+  policy: TeamReadPolicy | null | undefined
+}
 export type SsoTeamReadDeps = TeamSsoDeps
 
 type Scope = Pick<Principal['organization'], 'id' | 'personal'>
@@ -44,11 +50,21 @@ function missingProof(): never {
 export function teamReadAccess(deps: SsoTeamReadDeps, principal: Principal) {
   const decision = memoizeTeamSsoAccess(deps, sessionIdentity(principal))
   let organizationId: string | undefined
-  return (scope: Scope = principal.organization) => {
+  return (scope: Scope = principal.organization): Promise<TeamReadAccess> => {
     if (scope.personal) return Promise.resolve({ allowed: true, policy: null })
     if (organizationId !== undefined && organizationId !== scope.id)
       throw new Error('Team read enforcement received multiple target organizations')
     organizationId = scope.id
+    if (
+      principal.kind !== 'session' &&
+      principal.ssoDelegationStatus !== undefined &&
+      scope.id === principal.organization.id
+    ) {
+      return Promise.resolve({
+        allowed: principal.ssoDelegationStatus !== 'required',
+        policy: principal.ssoDelegationStatus === null ? null : undefined,
+      })
+    }
     return decision(scope.id)
   }
 }
@@ -60,17 +76,30 @@ export function requireTeamRead(access: TeamReadAccess): void {
 }
 
 export function teamWriteCheck(deps: SsoTeamReadDeps, principal: Principal) {
+  const { organization, user } = principal
+  const actor = { organizationId: organization.id, userId: user.id }
   return {
-    organizationId: principal.organization.id,
+    organizationId: organization.id,
     identity: sessionIdentity(principal),
     expired: missingProof,
-    lockProof: (db: Db) =>
-      lockTeamSsoProof(
-        deps,
-        db,
-        sessionIdentity(principal),
-        principal.organization.id,
-        missingProof,
-      ),
+    lockProof: (db: Db) => {
+      if (principal.kind === 'api_key') {
+        return lockSsoDelegation(
+          db,
+          deps.capabilities,
+          { ...actor, kind: 'api_key', credentialId: principal.apiKeyId },
+          missingProof,
+        )
+      }
+      if (principal.kind === 'oauth' && principal.oauthGrantId) {
+        return lockSsoDelegation(
+          db,
+          deps.capabilities,
+          { ...actor, kind: 'oauth_grant', credentialId: principal.oauthGrantId },
+          missingProof,
+        )
+      }
+      return lockTeamSsoProof(deps, db, sessionIdentity(principal), organization.id, missingProof)
+    },
   }
 }

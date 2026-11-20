@@ -20,6 +20,15 @@ import { PageStatus, useSession } from '../session.tsx'
 // The authorization URL comes from the connecting app; schema details are not useful
 // guidance here. Reuse the localized restart message without changing API error handling.
 function authorizationError(error: unknown): unknown {
+  if (error instanceof RequestError && error.code === 'sso_required')
+    return new RequestError(
+      error.status,
+      error.code,
+      error.message,
+      msg(
+        'Complete team SSO before trying again. If you already approved the connection, bind its SSO delegation to continue.',
+      ),
+    )
   if (error instanceof RequestError && error.code === 'invalid_request')
     return new RequestError(
       error.status,

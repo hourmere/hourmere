@@ -123,6 +123,11 @@ export {
   type SsoAdmissionRemoval,
 } from './sso-admission-blocks.ts'
 export {
+  lockSsoDelegation,
+  type SsoDelegationStatus,
+  ssoDelegationStatus,
+} from './sso-delegation-access.ts'
+export {
   liveSsoDelegationSummaries,
   type SsoDelegationSummary,
 } from './sso-delegation-summaries.ts'
@@ -515,7 +520,7 @@ export function createAuth({
           // providerId to credential; Hourmere does not enable password authentication.
         },
       },
-      ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
+      ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher, ssoCapabilities) : []),
       authAuditRecords(),
       organizationOperationRecords(),
       {

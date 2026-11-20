@@ -3,6 +3,8 @@ import { sql } from 'kysely'
 import { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
 import type { Auth } from './index.ts'
 import { ensurePersonalOrganization, isUuid } from './organizations.ts'
+import { type SsoDelegationStatus, ssoDelegationStatus } from './sso-delegation-access.ts'
+import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
 
 /** Every API key starts with this, so leaked keys are recognizable (e.g. by secret scanners). */
 export const API_KEY_PREFIX = 'hm_'
@@ -32,8 +34,21 @@ export type Principal = {
   personalOrganizationId?: string | null
 } & (
   | { kind: 'session'; sessionId: string }
-  | { kind: 'api_key'; apiKeyId: string; apiKeyScope: ApiKeyScope }
-  | { kind: 'oauth'; oauthConsentId: string; clientId: string; scopes: readonly string[] }
+  | {
+      kind: 'api_key'
+      apiKeyId: string
+      apiKeyScope: ApiKeyScope
+      /** Null when this credential's team does not enforce SSO. */
+      ssoDelegationStatus?: SsoDelegationStatus
+    }
+  | {
+      kind: 'oauth'
+      oauthConsentId: string
+      oauthGrantId?: string
+      clientId: string
+      scopes: readonly string[]
+      ssoDelegationStatus?: SsoDelegationStatus
+    }
 )
 
 export type CallerResult = {
@@ -55,10 +70,19 @@ const BEARER = /^Bearer[ \t]+(\S+)[ \t]*$/i
  * the session cookie (the web app). A request that sends an Authorization header is judged
  * by it alone, so a bad key never falls back to a cookie the client happens to carry.
  */
-export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): CallerResolver {
+export function createCallerResolver({
+  auth,
+  db,
+  ssoCapabilities = ssoHardOff,
+}: {
+  auth: Auth
+  db: Db
+  ssoCapabilities?: TeamSsoCapabilities
+}): CallerResolver {
   type Membership = Pick<Principal, 'user' | 'organization' | 'personalOrganizationId'> & {
     emailVerified: boolean
     apiKeyScope?: ApiKeyScope
+    ssoDelegationStatus?: SsoDelegationStatus
   }
 
   /**
@@ -104,6 +128,17 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
         'k.metadata as apiKeyMetadata',
         'k.expiresAt as apiKeyExpiresAt',
       ])
+      .$if(apiKeyId !== undefined, (qb) =>
+        qb.select(
+          sql<SsoDelegationStatus>`CASE WHEN p.user_id IS NULL THEN ${ssoDelegationStatus(
+            sql<string>`o.id`,
+            sql<string>`u.id`,
+            'api_key',
+            sql<string>`k.id`,
+            ssoCapabilities,
+          )} END`.as('ssoDelegationStatus'),
+        ),
+      )
       .where('m.userId', '=', userId)
       .where('m.organizationId', '=', organizationId)
       .executeTakeFirst()
@@ -121,6 +156,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     }
     return {
       ...(metadata ? { apiKeyScope: metadata.scope } : {}),
+      ...(apiKeyId === undefined ? {} : { ssoDelegationStatus: row.ssoDelegationStatus ?? null }),
       emailVerified: row.emailVerified,
       user: { id: row.userId, name: row.userName, email: row.email },
       personalOrganizationId: row.personalOrganizationId,
@@ -203,7 +239,12 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
       (active ? await inOrganization(userId, active) : undefined) ??
       (await inOrganization(userId, await ensurePersonalOrganization(db, userId)))
     if (!membership) return { ok: false, error: 'unauthorized', setCookie }
-    const { emailVerified: _, apiKeyScope: _scope, ...caller } = membership
+    const {
+      emailVerified: _,
+      apiKeyScope: _scope,
+      ssoDelegationStatus: _sso,
+      ...caller
+    } = membership
     return {
       ok: true,
       principal: { ...caller, kind: 'session', sessionId: session.session.id },
