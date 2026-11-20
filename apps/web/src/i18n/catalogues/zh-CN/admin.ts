@@ -2347,12 +2347,12 @@ export const admin = {
     '已验证的投票者、有效邀请和未过期的公开报名各占一个名额。',
   'Invite voters…': '邀请投票者…',
   'Invite voters': '邀请投票者',
-  'Invitee {number}': '受邀者 {number}',
+  'Invitee {number}': '受邀者{number}',
   'Add another invitee': '添加受邀者',
-  'Remove invitee {number}': '移除第 {number} 位受邀者',
+  'Remove invitee {number}': '移除第{number}位受邀者',
   'Send invitations': '发送邀请',
   'Add up to {limit} invitees per batch. If there aren’t enough places for all new voters, the entire batch is refused.':
-    '每批最多可邀请 {limit} 人。若剩余名额不足以容纳所有新投票者，整批邀请都不会发出。',
+    '每批最多可邀请{limit}人。若剩余名额不足以容纳所有新投票者，整批邀请都不会发出。',
   'Inviting someone with a pending public sign-up uses their existing place.':
     '邀请已通过公开链接报名、正在等待验证的人时，会沿用其已占用的名额。',
   'Resending replaces the invitee’s voting link. You can resend once every 15 minutes, up to three times per address for this poll.':
@@ -2382,7 +2382,7 @@ export const admin = {
   'Invitation request recovered. No additional emails were queued.':
     '邀请请求已确认。没有额外邮件加入发送队列。',
   'Invitations queued: {queued}. Existing entries unchanged: {unchanged}.':
-    '已有 {queued} 封邀请加入发送队列，{unchanged} 条现有记录保持原样。',
+    '已有{queued}封邀请加入发送队列，{unchanged}条现有记录保持原样。',
   'Voter removed.': '已移除投票者。',
   'Unverified public sign-ups removed.': '已移除未验证的公开报名。',
   'We could not confirm the removal. Refresh results to check the roster before trying again.':
