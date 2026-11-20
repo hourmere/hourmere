@@ -1014,6 +1014,11 @@ only health metadata changes, with `health_code` restricted to `ok`, `unavailabl
 only be erased. A null ciphertext also permits expiry purge without consuming a receipt.
 Consumed receipt evidence cannot be rebound or revived.
 
+Migration 0165 adds an optional, indexed 32-byte replay fingerprint to `booking_routing`.
+Only keyed routed bookings set it. It binds the token digest and final booking request.
+Replay matches it against the ordinary booking idempotency record's key and credential
+scope without reading a receipt. The fingerprint shares the immutable snapshot's booking retention.
+
 Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
 publication requests that carry a client `requestId`. A record holds the organization, the
 operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
@@ -1043,6 +1048,9 @@ use the fresh-proof gate, seal each new revision, and audit changes transactiona
 Browser-only domain challenge, verification and retirement also use that gate, store only
 bound TXT digests and serialize exact-domain authority changes with the domain lock;
 pending challenges never reserve the name.
+Browser-only recovery enrollment binds the nomination and acceptance to their own proof
+attempts and advances `policy_revision` under the organization write lock. Membership
+changes use that same lock when removing accepted recovery status.
 OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 
@@ -1079,10 +1087,11 @@ and inserting a row again.
   may be pending or retired, which the services check.
 - **Recovery nominations and recovery owners** are written only for a current owner's
   membership (including `owner` among several roles), checked on insert. Deleting the
-  membership, by leaving, removal or the user's deletion, deletes them, and re-joining
-  restores nothing. Deleting them on demotion, with its audit event, belongs to the Recovery
-  enrollment step. Both are immutable. A team has at most one pending nomination per owner,
-  and one recovery record per owner.
+  membership cascades to both records. Leaving, removal and demotion delete
+  accepted recovery status and audit the change in the membership transaction. Re-joining
+  or regaining the owner role does not restore that status. A team enforcing SSO must
+  retain one current recovery owner. Both records are immutable. A team has at most one
+  pending nomination per owner and one recovery record per owner.
 
 `sso-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
 through `checkConstraintCoverage` (expectation file

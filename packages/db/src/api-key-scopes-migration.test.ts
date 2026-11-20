@@ -342,6 +342,13 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
     it('authenticates preserved predecessor credentials with full scope and retains disabled/expired failures', async () => {
       let authPool: ReturnType<typeof createAuthPool> | undefined
       try {
+        // Production migrates to the latest schema before it serves requests, and the current
+        // resolver reads later tables (for example team SSO policies). Bring the upgraded
+        // predecessor forward first so the real resolver runs against a schema it can serve.
+        // This is the last case on the shared upgrade fixture, so earlier preservation checks
+        // still see the database exactly at this migration.
+        await runMigrations(upgraded.pool, migrationsDir)
+        const served = await sentinelRecords(upgraded.pool)
         const signup = { mode: 'open', allowedDomains: [] } as const
         authPool = createAuthPool(upgraded.url, signup)
         const auth = createAuth({
@@ -375,7 +382,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
             await resolve(new Headers({ authorization: `Bearer ${predecessorKey(index)}` })),
           ).toMatchObject({ ok: false, error: 'unauthorized' })
         }
-        expect(await sentinelRecords(upgraded.pool)).toEqual(sentinels)
+        expect(await sentinelRecords(upgraded.pool)).toEqual(served)
         expect(authPool.totalCount).toBeLessThanOrEqual(3)
         expect(upgraded.pool.totalCount).toBeLessThanOrEqual(3)
       } finally {

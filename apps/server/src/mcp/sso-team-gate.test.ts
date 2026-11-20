@@ -38,6 +38,8 @@ const ungated: Record<string, string> = {
   'mcp:opt_out_meeting_poll_reminder': 'capability link: public poll reminder opt-out',
   'mcp:get_public_routing_form': 'public: published routing form',
   'mcp:route_lead': 'public: published routing form submission',
+  'mcp:resolve_routing_continuation': 'capability link: capability token, no team session',
+  'mcp:find_routed_slots': 'capability link: capability token, no team session',
   'mcp:find_available_slots:personal': 'public: personal booking page slots',
   'mcp:find_available_slots:team': 'public: team booking page slots',
   'mcp:create_booking:personal': 'public: personal booking page',

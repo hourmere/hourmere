@@ -1,0 +1,7 @@
+{
+  "migration": "0165_routed_booking_replay.sql",
+  "objects": {
+    "constraint public.booking_routing.booking_routing_replay_fingerprint_shape": "CHECK ((octet_length(replay_fingerprint) = 32))",
+    "index public.booking_routing.booking_routing_replay_fingerprint": "CREATE UNIQUE INDEX booking_routing_replay_fingerprint ON public.booking_routing USING btree (replay_fingerprint) WHERE (replay_fingerprint IS NOT NULL)"
+  }
+}

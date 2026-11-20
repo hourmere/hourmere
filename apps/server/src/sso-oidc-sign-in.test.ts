@@ -1432,6 +1432,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       const fresh = await bindingResponse(await (bindResult as Promise<Response>))
       expect((await revokeResult)?.status).toBe(bindFirst ? 404 : 204)
       expect(fresh.id).not.toBe(old.id)
+      const entries = (await audit()).filter((entry) => entry.action.startsWith('sso_delegation.'))
+      expect(entries.map(({ action, target_id }) => ({ action, target_id }))).toEqual([
+        { action: 'sso_delegation.bound', target_id: old.id },
+        { action: 'sso_delegation.revoked', target_id: old.id },
+        { action: 'sso_delegation.bound', target_id: fresh.id },
+      ])
       expect(
         await db
           .selectFrom('sso_delegation_bindings')
@@ -1498,13 +1504,43 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       })
       .returningAll()
       .executeTakeFirstOrThrow()
-    await db
-      .updateTable('auth.apikey')
-      .set({
-        metadata: JSON.stringify({ scope: 'full', organizationId: fixture.otherTeam }),
-      })
-      .where('id', '=', key)
-      .execute()
+    const moved = await app.request(new URL('/api/auth/api-key/update', publicUrl), {
+      method: 'POST',
+      headers: { cookie: actor.cookie, origin: publicUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ keyId: key, metadata: { organizationId: fixture.otherTeam } }),
+    })
+    expect(moved.status).toBe(200)
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .select('id')
+        .where('api_key_id', '=', key)
+        .execute(),
+    ).toEqual([])
+    expect((await audit()).filter((entry) => entry.action === 'sso_delegation.revoked')).toEqual([
+      expect.objectContaining({
+        actor_type: 'user',
+        actor_id: fixture.member,
+        credential_type: 'session',
+        credential_id: actor.id,
+        target_type: 'sso_delegation',
+        target_id: bound.id,
+        details: {
+          method: 'oidc',
+          providerId: f.providerId,
+          revision: 1,
+          reason: 'key_moved_team',
+        },
+      }),
+    ])
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select('id')
+        .where('organization_id', '=', fixture.otherTeam)
+        .where('action', '=', 'sso_delegation.revoked')
+        .execute(),
+    ).toEqual([])
     const oldTeam = await delegationRequest(actor.cookie, key)
     expect(oldTeam.status).toBe(404)
     const otherSession = await browserSession(fixture.member, fixture.otherTeam)
@@ -2136,6 +2172,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       { returnTo: '//other.example.test/app' },
       { returnTo: '/app/%2e%2e/sign-in' },
       { returnTo: '/app/%5cfoo' },
+      { returnTo: '/oauth/consent?sig=synthetic&exp=123' },
+      { returnTo: '/oauth/authorize?client_id=synthetic' },
+      { returnTo: '/oauth/authorize?sig=synthetic&exp=123#intent=other-session' },
     ]) {
       const response = await post({ ...body, ...extra })
       expect(response.status).toBe(400)
@@ -2160,6 +2199,17 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(restarted.status).toBe(200)
     expect(cookie?.startsWith(`${existingBinding};`) === true).toBe(true)
     expect(cookie).toContain('SameSite=Lax')
+  })
+
+  it('returns to the exact first-party OAuth authorization request after SSO sign-in', async () => {
+    const f = await linked()
+    const destination =
+      '/oauth/authorize?client_id=synthetic&redirect_uri=https%3A%2F%2Fclient.example.test%2Fcallback&sig=synthetic&exp=123'
+    const attempt = await start(f.providerId, app, destination)
+    const response = await callback(attempt, idp.issue(attempt, f.claims))
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(destination)
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer')
   })
 
   it('issues a native session and an immutable team proof for the exact linked identity', async () => {

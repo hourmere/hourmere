@@ -77,6 +77,8 @@ function RoleChangeError({ error, onReload }: { error: unknown; onReload: () => 
     message = t(
       'The team must retain at least one owner. Ownership transfer is not available here.',
     )
+  else if (request?.code === 'sso_recovery_required')
+    message = t('This team must retain at least one recovery owner while SSO is enforced.')
   else if (isOrganizationContextChanged(error))
     message = t('Your team context changed. Reload before making changes.')
   else if (request?.status === 403)

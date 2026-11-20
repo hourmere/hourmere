@@ -206,6 +206,8 @@ describe('published API key scope tables', () => {
         'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
         'POST /api/v1/team/sso/delegations',
         'DELETE /api/v1/team/sso/delegations/{bindingId}',
+        'POST /api/v1/team/sso/recovery',
+        'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
       ])
         expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
     }
@@ -222,6 +224,8 @@ describe('published API key scope tables', () => {
       'delete_sso_domain',
       'bind_sso_delegation',
       'revoke_sso_delegation',
+      'configure_sso_recovery',
+      'accept_sso_recovery_enrollment',
     ])
       expect(API_KEY_MCP_OPERATIONS.some((operation) => operation.tool === tool)).toBe(false)
   })
@@ -263,6 +267,24 @@ describe('published API key scope tables', () => {
         '| `POST /api/v1/workflows/preview` | Session or API key | `full` |',
       )
   })
+
+  it.each(documents)(
+    '$path lists routing continuation reads as capability operations with bookings or full keys',
+    ({ document, section }) => {
+      for (const [verb, tool] of [
+        ['resolve', 'resolve_routing_continuation'],
+        ['slots', 'find_routed_slots'],
+      ]) {
+        expect(document).toContain(
+          `| \`${tool}\` | — | \`routing-forms ${verb}\` | \`full, bookings\` |`,
+        )
+        if (section === 'all')
+          expect(document).toContain(
+            `| \`POST /api/v1/routing-continuations/${verb}\` | Public or manage token; check a supplied key | \`full, bookings\` |`,
+          )
+      }
+    },
+  )
 
   it.each(documents)(
     '$path lists workflow history for full and read keys',

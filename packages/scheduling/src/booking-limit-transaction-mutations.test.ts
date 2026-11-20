@@ -28,6 +28,7 @@ import * as Questions from './questions.ts'
 import * as RecurringCapabilities from './recurring-capabilities.ts'
 import * as RecurringMembers from './recurring-members.ts'
 import * as RoundRobin from './round-robin.ts'
+import * as RoutingBooking from './routing-booking.ts'
 import * as SuccessRedirect from './success-redirect.ts'
 import { createFixtures, type EventTypeFixture, type Fixtures } from './testing.ts'
 import * as Text from './text.ts'
@@ -64,6 +65,7 @@ const dependencies: Record<string, object> = {
   './recurring-capabilities.ts': RecurringCapabilities,
   './recurring-members.ts': RecurringMembers,
   './round-robin.ts': RoundRobin,
+  './routing-booking.ts': RoutingBooking,
   './success-redirect.ts': SuccessRedirect,
   './text.ts': Text,
   './waitlist.ts': Waitlist,

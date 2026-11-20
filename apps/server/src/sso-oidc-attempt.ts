@@ -85,7 +85,7 @@ const operations = {
 // and authenticated state distinguish step-up from every self-linking path.
 const storedKind = (kind: Ceremony['kind']) => (kind === 'step_up' ? 'link' : kind)
 
-/** A canonical, same-origin destination under /app, or undefined for unsafe input. */
+/** Canonical same-origin application and OAuth authorization destinations. */
 export function oidcReturnDestination(raw: string): string | undefined {
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.length > maxReturnPathLength)
     return undefined
@@ -93,9 +93,16 @@ export function oidcReturnDestination(raw: string): string | undefined {
   if (/[\u0000- \u007f-\u009f\\]/.test(raw) || !raw.isWellFormed()) return undefined
   const url = new URL(raw, appOrigin)
   const path = url.pathname + url.search + url.hash
+  // Only the organization selection page can resume after signing in to a new session.
+  // The OAuth broker validates the signed query before it allows the request to continue.
+  const oauth =
+    url.pathname === '/oauth/authorize' &&
+    url.searchParams.has('sig') &&
+    url.searchParams.has('exp') &&
+    !url.hash
   if (
     url.origin !== appOrigin ||
-    !(url.pathname === '/app' || url.pathname.startsWith('/app/')) ||
+    !(url.pathname === '/app' || url.pathname.startsWith('/app/') || oauth) ||
     /%2f|%5c/i.test(url.pathname) ||
     path.length > maxReturnPathLength
   )
