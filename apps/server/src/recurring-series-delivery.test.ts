@@ -85,6 +85,16 @@ function required<T>(value: T | null | undefined): T {
   return value
 }
 
+function rollingHourPeak(times: readonly Date[]) {
+  const timestamps = times.map((time) => time.getTime())
+  return Math.max(
+    0,
+    ...timestamps.map(
+      (end) => timestamps.filter((time) => time <= end && time > end - 3_600_000).length,
+    ),
+  )
+}
+
 const seriesLink = /\/series\/manage#([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g
 
 function deliveredToken(message: MailMessage) {
@@ -184,13 +194,16 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
   const logMailer = createLogMailer((line) => logs.push(line))
   let smtp: (ReturnType<typeof fakeSmtpServer> & { mailer?: Mailer }) | undefined
   let refuseAddress: string | undefined
+  let refuseAllSmtpCopies = false
   let refuseLinkUpdates = false
   let permanentRefusal = false
   const mailer: Mailer = {
     senderEmail,
     async send(message, options) {
       attempts.push(message)
-      const refused = message.to === refuseAddress && isLinkUpdate(message) === refuseLinkUpdates
+      const refused =
+        refuseAllSmtpCopies ||
+        (message.to === refuseAddress && isLinkUpdate(message) === refuseLinkUpdates)
       if (smtp?.mailer) {
         const { rcptReplies } = smtp.received
         rcptReplies.clear()
@@ -263,6 +276,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     attempts.length = 0
     logs.length = 0
     refuseAddress = undefined
+    refuseAllSmtpCopies = false
     refuseLinkUpdates = false
     permanentRefusal = false
     google = fakeGoogle(providerNow)
@@ -289,9 +303,15 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     }
   })
 
-  async function seriesFixture(count = 2, guestCount = 0, hostCount = 1, automaticMeet = false) {
+  async function seriesFixture(
+    count = 2,
+    guestCount = 0,
+    hostCount = 1,
+    automaticMeet = false,
+    options: { firstLocalStart?: string; slotStepMinutes?: number } = {},
+  ) {
     const fixtures = createFixtures(db)
-    const hosts = []
+    const hosts: (Awaited<ReturnType<typeof createTestUser>> & { locale: 'en' | 'zh-CN' })[] = []
     for (let index = 0; index < hostCount; index++) {
       const host = await createTestUser(db, hostName(index))
       const locale = index === 1 ? 'zh-CN' : 'en'
@@ -314,6 +334,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       slug,
       title: eventName,
       allowGuests: true,
+      ...(options.slotStepMinutes !== undefined && { slotStepMinutes: options.slotStepMinutes }),
       hosts: hosts.map(({ id }) => ({ userId: id })),
       ...(automaticMeet && { location: { kind: 'google_meet', autoCreate: true } }),
     })
@@ -328,46 +349,49 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       .execute()
     const rule = { pattern: 'weekly', count } as const
     const guests = Array.from({ length: guestCount }, (_, index) => guestAt(index))
-    const input: CreateBookingSeriesInput = {
-      handle,
-      slug,
-      firstLocalStart,
-      rule,
-      invitee: booker,
-      guests,
-      idempotencyKey: randomUUID(),
-      expectedPreview: {
-        eventRevision: '0',
-        timeZone,
+    const actorDigest = randomBytes(32)
+    const createAnother = async (firstLocalStart: string) => {
+      const input: CreateBookingSeriesInput = {
+        handle,
+        slug,
+        firstLocalStart,
         rule,
-        durationMinutes,
-        occurrences: expandRecurringRule({
-          firstLocalStart,
+        invitee: booker,
+        guests,
+        idempotencyKey: randomUUID(),
+        expectedPreview: {
+          eventRevision: '0',
           timeZone,
           rule,
           durationMinutes,
-          now: now(),
-        }).map(({ ordinal, localStart, start, end, offset }) => ({
-          ordinal,
-          localStart,
-          start: start?.toString() ?? null,
-          end: end?.toString() ?? null,
-          offset,
-        })),
-      },
+          occurrences: expandRecurringRule({
+            firstLocalStart,
+            timeZone,
+            rule,
+            durationMinutes,
+            now: now(),
+          }).map(({ ordinal, localStart, start, end, offset }) => ({
+            ordinal,
+            localStart,
+            start: start?.toString() ?? null,
+            end: end?.toString() ?? null,
+            offset,
+          })),
+        },
+      }
+      const create = () =>
+        createPublicTeamBookingSeries(context(automaticMeet), input, {
+          recurringBookingsEnabled: true,
+          actorDigest,
+          notifyMemberEmail: bookingNotifier(jobs),
+          ...(automaticMeet && { notifyMemberConference: conferenceBookingNotifier(jobs) }),
+        })
+      const result = await create()
+      return { ...result, token: required(result.manageToken), hosts, guests, create, team }
     }
-    const actorDigest = randomBytes(32)
-    const create = () =>
-      createPublicTeamBookingSeries(context(automaticMeet), input, {
-        recurringBookingsEnabled: true,
-        actorDigest,
-        notifyMemberEmail: bookingNotifier(jobs),
-        ...(automaticMeet && { notifyMemberConference: conferenceBookingNotifier(jobs) }),
-      })
-    const result = await create()
-    return { ...result, token: required(result.manageToken), hosts, guests, create, team }
+    return { ...(await createAnother(options.firstLocalStart ?? firstLocalStart)), createAnother }
   }
-  type SeriesFixture = Awaited<ReturnType<typeof seriesFixture>>
+  type SeriesFixture = Omit<Awaited<ReturnType<typeof seriesFixture>>, 'createAnother'>
 
   async function configureMeet(organizerId: string) {
     const account = 'synthetic-meet-account'
@@ -384,7 +408,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
           JSON.stringify({
             accessToken: 'synthetic-meet-access',
             refreshToken: 'synthetic-meet-refresh',
-            expiresAt: now().add({ hours: 2 }).epochMilliseconds,
+            expiresAt: now().add({ hours: 48 }).epochMilliseconds,
           }),
         ),
       })
@@ -660,13 +684,17 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     await provision(occurrence, 'ready')
   }
 
-  async function failedConferenceSeries(count = 2, guestCount = 0, hostCount = 2) {
+  async function startSmtp() {
     smtp = fakeSmtpServer()
     const listening = once(smtp.server, 'listening')
     smtp.server.listen(0, '127.0.0.1')
     await listening
     const { port } = smtp.server.address() as AddressInfo
     smtp.mailer = createSmtpMailer({ url: `smtp://127.0.0.1:${port}`, from: senderEmail })
+  }
+
+  async function failedConferenceSeries(count = 2, guestCount = 0, hostCount = 2) {
+    await startSmtp()
     const f = await seriesFixture(count, guestCount, hostCount, true)
     for (const occurrence of f.occurrences) await provision(occurrence, 'failed')
     expect(await linkOutbox(f.seriesId)).toEqual([])
@@ -948,16 +976,28 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     await expectNoOccurrenceConferenceMail(f.occurrences.map(({ bookingId }) => bookingId))
   }, 20_000)
 
-  it('sends all 12 repaired links and refreshes earlier calendar entries on the wire', async () => {
+  it('spaces all 12 repaired links from confirmation and then cancels within the mail budget', async () => {
     const f = await failedConferenceSeries(12, 10, 8)
     const wire = required(smtp).received.messages
     await dispatch()
+    const confirmed = now()
     const confirmations = sent.slice()
     const confirmationMime = wire.map(decodeMime)
     expect(confirmationMime).toHaveLength(19)
 
     for (const [index] of f.occurrences.entries()) await repairConference(f, index)
     expect(await linkOutbox(f.seriesId)).toHaveLength(19)
+    clock = confirmed.add({ minutes: 60 }).subtract({ milliseconds: 1 })
+    await dispatch()
+    expect(attempts).toHaveLength(19)
+    expect(await linkOutbox(f.seriesId)).toMatchObject(
+      Array.from({ length: 19 }, () => ({
+        outbox_state: 'pending',
+        attempts: 0,
+        due_at: new Date(confirmed.add({ minutes: 60 }).epochMilliseconds),
+      })),
+    )
+    clock = confirmed.add({ minutes: 60 })
     await dispatch()
 
     const updates = sentLinkUpdates()
@@ -975,7 +1015,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       const previous = new ICAL.Component(ICAL.parse(required(prior.ics))).getAllSubcomponents(
         'vevent',
       )
-      expectCalendarEvents(previous, f.occurrences, now(), 'CONFIRMED')
+      expectCalendarEvents(previous, f.occurrences, confirmed, 'CONFIRMED')
       expect(previous.every((event) => !event.getFirstPropertyValue('location'))).toBe(true)
 
       // The Meet organizer already has the provider copy of every repaired member.
@@ -986,8 +1026,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       const calendar = new ICAL.Component(ICAL.parse(required(mime.ics)))
       expect(calendar.getFirstPropertyValue('method')).toBeNull()
       const events = calendar.getAllSubcomponents('vevent')
-      // No clock advance between the reports: the builder must bump DTSTAMP by one second.
-      expectCalendarEvents(events, f.occurrences, now().add({ seconds: 1 }), 'CONFIRMED')
+      expectCalendarEvents(events, f.occurrences, now(), 'CONFIRMED')
       for (const event of events) {
         expect(event.getFirstPropertyValue('location')).toBe(meetJoinUrl)
         expect(event.getFirstPropertyValue('description')).toBe(meetJoinUrl)
@@ -997,19 +1036,149 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
         ])
       }
     }
-    const receipts = (await seriesReceipts(f.seriesId)).filter(({ kind }) => kind === 'link_update')
-    expect(receipts).toHaveLength(19)
-    for (const receipt of receipts) {
+    await cancelManagedBookingSeries(context(true), f.token, all())
+    await dispatch()
+    expect(wire).toHaveLength(57)
+    expect(attempts).toHaveLength(57)
+    assertCompleteBodies(f, sent.slice(38), 1)
+
+    const receipts = await seriesReceipts(f.seriesId)
+    expect(receipts).toHaveLength(57)
+    expect(
+      receipts.every(
+        ({ outcome, suppression_reason }) => outcome === 'delivered' && suppression_reason === null,
+      ),
+    ).toBe(true)
+    const linkReceipts = receipts.filter(({ kind }) => kind === 'link_update')
+    expect(linkReceipts).toHaveLength(19)
+    for (const receipt of linkReceipts) {
       expect(receipt).toMatchObject({
         outcome: 'delivered',
+        sent_at: new Date(now().epochMilliseconds),
         reported_ordinals: ordinals,
         reported_link_states: ordinals.map(() => 'ready'),
         calendar_ordinals: receipt.recipient_id === required(f.hosts[0]).id ? [] : ordinals,
       })
     }
-    expect(await ledger()).toHaveLength(38)
+    const debits = await ledger()
+    expect(debits).toHaveLength(57)
+    expect(rollingHourPeak(debits.map(({ sent_at }) => sent_at))).toBe(38)
     await expectNoOccurrenceConferenceMail(f.occurrences.map(({ bookingId }) => bookingId))
   }, 20_000)
+
+  it.each([
+    { order: 'a cancellation between second updates', gap: 5, cancelBetween: true, retry: false },
+    { order: 'right series cancelled first', gap: 40, cancelBetween: false, retry: false },
+    { order: 'every copy refused once', gap: 40, cancelBetween: false, retry: true },
+  ])(
+    'keeps two maximum-size series within rolling mail budgets with $order',
+    async ({ gap, cancelBetween, retry }) => {
+      async function dispatchCopies() {
+        const beforeSent = sent.length
+        const beforeAttempts = attempts.length
+        if (retry) {
+          refuseAllSmtpCopies = true
+          try {
+            await dispatch()
+          } finally {
+            refuseAllSmtpCopies = false
+          }
+          expect(attempts).toHaveLength(beforeAttempts + 19)
+          expect(sent).toHaveLength(beforeSent)
+          expect(await ledger()).toHaveLength(beforeSent)
+          clock = now().add({ minutes: 1 })
+        }
+        await dispatch()
+        expect(attempts).toHaveLength(beforeAttempts + (retry ? 38 : 19))
+        expect(sent).toHaveLength(beforeSent + 19)
+      }
+
+      async function failConferences(series: SeriesFixture) {
+        for (const occurrence of series.occurrences) await provision(occurrence, 'failed')
+      }
+
+      async function cancel(series: SeriesFixture) {
+        await cancelManagedBookingSeries(context(true), series.token, all())
+        await dispatchCopies()
+      }
+
+      if (retry) await startSmtp()
+      const left = await seriesFixture(12, 10, 8, true)
+      await failConferences(left)
+      await dispatchCopies()
+      const leftConfirmed = now()
+      if (cancelBetween) await repairConference(left, 0)
+
+      clock = leftConfirmed.add({ minutes: gap })
+      const right = await left.createAnother('2040-11-06T09:00+00:00')
+      await failConferences(right)
+      await dispatchCopies()
+      const rightConfirmed = now()
+      await repairConference(right, 0)
+      if (!cancelBetween) await repairConference(left, 0)
+
+      clock = leftConfirmed.add({ minutes: 60 })
+      await dispatchCopies()
+      const leftFirstLink = now()
+      await repairConference(left, 1)
+      clock = rightConfirmed.add({ minutes: 60 })
+      await dispatchCopies()
+      const rightFirstLink = now()
+      await repairConference(right, 1)
+
+      clock = leftFirstLink.add({ minutes: 60 })
+      await dispatchCopies()
+      if (cancelBetween) await cancel(left)
+      clock = rightFirstLink.add({ minutes: 60 })
+      await dispatchCopies()
+      await cancel(right)
+      if (!cancelBetween) await cancel(left)
+
+      for (const series of [left, right]) {
+        const receipts = await seriesReceipts(series.seriesId)
+        expect(receipts).toHaveLength(76)
+        expect(
+          receipts.every(
+            ({ outcome, suppression_reason }) =>
+              outcome === 'delivered' && suppression_reason === null,
+          ),
+        ).toBe(true)
+        expect(receipts.filter(({ kind }) => kind === 'confirmation')).toHaveLength(19)
+        expect(receipts.filter(({ kind }) => kind === 'cancellation')).toHaveLength(19)
+        for (const ordinal of [1, 2]) {
+          const updates = receipts.filter(
+            ({ kind, sequence }) => kind === 'link_update' && sequence === String(ordinal),
+          )
+          expect(updates).toHaveLength(19)
+          expect(
+            updates.every(
+              ({ reported_ordinals }) =>
+                reported_ordinals?.length === 1 && reported_ordinals[0] === ordinal,
+            ),
+          ).toBe(true)
+        }
+      }
+      const debits = await ledger()
+      expect(debits).toHaveLength(152)
+      expect(rollingHourPeak(debits.map(({ sent_at }) => sent_at))).toBe(76)
+      const invitees = Map.groupBy(
+        debits.filter(({ recipient_hash }) => recipient_hash !== null),
+        ({ recipient_hash }) => required(recipient_hash).toString('hex'),
+      )
+      expect(invitees.size).toBe(11)
+      for (const deliveries of invitees.values()) {
+        expect(deliveries).toHaveLength(8)
+        expect(rollingHourPeak(deliveries.map(({ sent_at }) => sent_at))).toBe(4)
+      }
+      expect(sent).toHaveLength(152)
+      expect(attempts).toHaveLength(retry ? 304 : 152)
+      if (retry) {
+        expect(required(smtp).received.to).toHaveLength(304)
+        expect(required(smtp).received.messages).toHaveLength(152)
+      }
+    },
+    35_000,
+  )
 
   it('reports a newly failed member to the booker and hosts without attempting guest mail', async () => {
     const f = await seriesFixture(2, 1, 2, true)
@@ -1027,6 +1196,9 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
 
     clock = now().add({ seconds: 1 })
     await provision(required(f.occurrences[0]), 'failed')
+    await dispatch()
+    expect(sentLinkUpdates()).toHaveLength(0)
+    clock = fixtureNow.add({ minutes: 90 })
     await dispatch()
     expect(
       sentLinkUpdates()
@@ -1088,7 +1260,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     const guest = required(f.guests[0])
     await dispatch()
     const committed = now()
-    clock = committed.add({ seconds: 10 })
+    clock = committed.add({ minutes: 60, seconds: 10 })
     await repairConference(f, 0)
     refuseAddress = guest.email
     refuseLinkUpdates = true
@@ -1098,12 +1270,12 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     expect(guestAttempts()).toHaveLength(1)
     expectLinkUpdateDates(f, required(guestAttempts()[0]), [1])
 
-    clock = committed.add({ seconds: 20 })
+    clock = committed.add({ minutes: 60, seconds: 20 })
     await repairConference(f, 1)
     await dispatch()
     expect(guestAttempts()).toHaveLength(1)
 
-    clock = committed.add({ seconds: 70 })
+    clock = committed.add({ minutes: 61, seconds: 10 })
     refuseAddress = undefined
     await dispatch()
     expect(guestAttempts()).toHaveLength(2)
@@ -1135,11 +1307,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     expect((await linkOutbox(f.seriesId)).map(({ id }) => id)).toEqual(queued.map(({ id }) => id))
 
     await dispatch()
-    expect(
-      sentLinkUpdates()
-        .map(({ to }) => to)
-        .sort(),
-    ).toEqual([...f.hosts, ...f.guests].map(({ email }) => email).sort())
+    expect(sentLinkUpdates()).toHaveLength(0)
     expect(bookerLinkAttempts()).toHaveLength(0)
     const waiting = await bookerLinkOutbox(f.seriesId)
     expect(waiting).toMatchObject({
@@ -1174,85 +1342,147 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       null,
     ])
     expect(refreshed.text.split(meetJoinUrl).length - 1).toBe(2)
-    expect(sentLinkUpdates()).toHaveLength(18)
+    expect(sentLinkUpdates()).toHaveLength(0)
     expect(bookerLinkAttempts()).toHaveLength(0)
+    expect(await bookerLinkOutbox(f.seriesId)).toMatchObject({
+      outbox_state: 'pending',
+      due_at: new Date(committed.add({ minutes: 63 }).epochMilliseconds),
+      attempts: 0,
+    })
+
+    clock = committed.add({ minutes: 60 })
+    await dispatch()
+    expect(
+      sentLinkUpdates()
+        .map(({ to }) => to)
+        .sort(),
+    ).toEqual([...f.hosts, ...f.guests].map(({ email }) => email).sort())
+    expect(bookerLinkAttempts()).toHaveLength(0)
+
+    clock = committed.add({ minutes: 63 })
+    await dispatch()
     expect(await bookerLinkOutbox(f.seriesId)).toMatchObject({
       outbox_state: 'skipped',
       attempts: 0,
     })
     expect(await ledger()).toHaveLength(37)
 
-    clock = committed.add({ minutes: 4 })
+    clock = committed.add({ minutes: 64 })
     await repairConference(f, 2)
     await dispatch()
-    expect(sentLinkUpdates()).toHaveLength(37)
-    for (const message of sentLinkUpdates().slice(18)) expectLinkUpdateDates(f, message, [3])
+    expect(sentLinkUpdates()).toHaveLength(19)
     expect(bookerLinkAttempts()).toHaveLength(1)
     const bookerUpdate = required(bookerLinkAttempts()[0])
     const [updated] = expectSeriesCalendar(bookerUpdate, f.occurrences.slice(2), now(), 'CONFIRMED')
     expect(required(updated).getFirstPropertyValue('location')).toBe(meetJoinUrl)
+    clock = committed.add({ minutes: 120 })
+    await dispatch()
+    expect(sentLinkUpdates()).toHaveLength(37)
+    for (const message of sentLinkUpdates().slice(18)) expectLinkUpdateDates(f, message, [3])
     expect(await ledger()).toHaveLength(56)
     await expectNoOccurrenceConferenceMail(f.occurrences.map(({ bookingId }) => bookingId))
   }, 20_000)
 
-  it.each(['permanent', 'exhausted'] as const)(
+  it.each(['permanent', 'exhausted', 'delivered on attempt 13'] as const)(
     'wakes the booker’s link update when its confirmation refusal becomes %s',
     async (finalState) => {
-      const f = await failedConferenceSeries()
+      const f = await failedConferenceSeries(2, 1)
       const committed = now()
+      const otherAddresses = [...f.hosts, ...f.guests].map(({ email }) => email).toSorted()
+      const confirmationAttempts = () =>
+        attempts.filter((message) => message.to === booker.email && !isLinkUpdate(message))
       refuseAddress = booker.email
       await dispatch()
       clock = committed.add({ seconds: 10 })
       await repairConference(f, 0)
       await dispatch()
-      const hostEmails = f.hosts.map(({ email }) => email)
-      expect(
-        sentLinkUpdates()
-          .map(({ to }) => to)
-          .sort(),
-      ).toEqual(hostEmails.toSorted())
+      expect(sentLinkUpdates()).toHaveLength(0)
       expect(bookerLinkAttempts()).toHaveLength(0)
       const waiting = await bookerLinkOutbox(f.seriesId)
       expect(waiting).toMatchObject({ waiting_for_earlier: true, attempts: 0 })
 
-      if (finalState === 'exhausted') {
-        for (const minutes of [1, 3, 7, 15, 31, 63, 123, 183, 243, 303, 363]) {
+      if (finalState === 'permanent') {
+        clock = committed.add({ minutes: 1 })
+        permanentRefusal = true
+      } else {
+        for (const minutes of [1, 3, 7, 15, 31, 60, 63, 123, 183, 243, 303, 363]) {
           clock = committed.add({ minutes })
           await dispatch()
           expect(await bookerLinkOutbox(f.seriesId)).toEqual(waiting)
         }
+        expect(
+          sentLinkUpdates()
+            .map(({ to }) => to)
+            .sort(),
+        ).toEqual(otherAddresses)
+        expect(confirmationAttempts()).toHaveLength(12)
+        clock = committed.add({ minutes: 423 }).subtract({ milliseconds: 1 })
+        await dispatch()
+        expect(await bookerLinkOutbox(f.seriesId)).toEqual(waiting)
+        expect(confirmationAttempts()).toHaveLength(12)
         expect(bookerLinkAttempts()).toHaveLength(0)
         clock = committed.add({ minutes: 423 })
-      } else {
-        clock = committed.add({ minutes: 1 })
-        permanentRefusal = true
+        if (finalState === 'delivered on attempt 13') refuseAddress = undefined
       }
 
       expect(await observeLinkWake(waiting.id, dispatch)).toEqual([
         expect.objectContaining({
           due_at: new Date(providerNow()),
           attempts: 0,
-          ...(finalState === 'permanent' ? { outcome: 'rejected' } : { outbox_state: 'exhausted' }),
+          ...(finalState === 'exhausted'
+            ? { outbox_state: 'exhausted' }
+            : { outcome: finalState === 'permanent' ? 'rejected' : 'delivered' }),
         }),
       ])
+      const count = finalState === 'permanent' ? 2 : 13
       expect(await seriesOutbox(f.seriesId)).toContainEqual(
         expect.objectContaining({
           kind: 'confirmation',
           outbox_state: finalState === 'exhausted' ? 'exhausted' : 'done',
-          attempts: finalState === 'exhausted' ? 13 : 2,
+          attempts: count,
         }),
       )
-      const confirmationAttempts = () =>
-        attempts.filter((message) => message.to === booker.email && !isLinkUpdate(message))
-      const count = finalState === 'exhausted' ? 13 : 2
       expect(confirmationAttempts()).toHaveLength(count)
-      expect(
-        sentLinkUpdates()
-          .map(({ to }) => to)
-          .sort(),
-      ).toEqual([...hostEmails, booker.email].sort())
-      clock = now().add({ minutes: 60 })
-      await dispatch()
+      if (finalState === 'delivered on attempt 13') {
+        expect(bookerLinkAttempts()).toHaveLength(0)
+        clock = committed.add({ minutes: 424 })
+        await repairConference(f, 1)
+        await dispatch()
+        expect(
+          sentLinkUpdates()
+            .slice(3)
+            .map(({ to }) => to)
+            .sort(),
+        ).toEqual(otherAddresses)
+        const due = committed.add({ minutes: 483 })
+        expect(await bookerLinkOutbox(f.seriesId)).toMatchObject({
+          id: waiting.id,
+          outbox_state: 'pending',
+          waiting_for_earlier: false,
+          due_at: new Date(due.epochMilliseconds),
+          attempts: 0,
+        })
+        clock = due.subtract({ milliseconds: 1 })
+        await dispatch()
+        expect(bookerLinkAttempts()).toHaveLength(0)
+        clock = due
+        await dispatch()
+        expectLinkUpdateDates(f, required(bookerLinkAttempts()[0]), [2])
+      } else {
+        expect(bookerLinkAttempts()).toHaveLength(1)
+        expect(
+          (await seriesReceipts(f.seriesId)).find(
+            ({ kind, recipient_role }) => kind === 'link_update' && recipient_role === 'booker',
+          ),
+        ).toMatchObject({ outcome: 'delivered', sent_at: new Date(providerNow()) })
+        clock = now().add({ minutes: 60 })
+        await dispatch()
+        expect(
+          sentLinkUpdates()
+            .map(({ to }) => to)
+            .sort(),
+        ).toEqual([...otherAddresses, booker.email].sort())
+      }
       expect(confirmationAttempts()).toHaveLength(count)
       expect(bookerLinkAttempts()).toHaveLength(1)
     },
@@ -1285,6 +1515,238 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     expect(await seriesOutbox(f.seriesId)).toContainEqual(
       expect.objectContaining({ kind: 'confirmation', outbox_state: 'exhausted', attempts: 13 }),
     )
+  }, 20_000)
+
+  it('spaces the deferred booker copy from 09:33 while hosts and guests get the timed updates', async () => {
+    const at = (time: string) => Temporal.Instant.from(`2040-11-05T${time}:00Z`)
+    const sentAt = (time: string) => new Date(at(time).epochMilliseconds)
+    clock = at('08:00')
+    await startSmtp()
+    const x = await seriesFixture(12, 10, 8, true, {
+      firstLocalStart: '2040-11-05T10:40+00:00',
+      slotStepMinutes: 5,
+    })
+    const first = required(x.occurrences[0])
+    const confirmationAttempts = () =>
+      attempts.filter((message) => message.to === booker.email && !isLinkUpdate(message))
+    expect(await seriesOutbox(x.seriesId)).toMatchObject([{ due_at: sentAt('08:30') }])
+    await expectConferenceStillWaiting(x)
+
+    refuseAddress = booker.email
+    for (const time of ['08:30', '08:31', '08:33', '08:37', '08:45', '09:01']) {
+      clock = at(time)
+      if (time === '08:45') await provision(first, 'failed')
+      await dispatch()
+    }
+    expect(sent).toHaveLength(18)
+    expect(confirmationAttempts()).toHaveLength(6)
+
+    clock = at('09:30')
+    await dispatch()
+    expect(
+      sentLinkUpdates()
+        .map(({ to }) => to)
+        .sort(),
+    ).toEqual(x.hosts.map(({ email }) => email).sort())
+    const waiting = await bookerLinkOutbox(x.seriesId)
+    expect(waiting).toMatchObject({ waiting_for_earlier: true, attempts: 0 })
+
+    clock = at('09:33')
+    refuseAddress = undefined
+    await dispatch()
+    expect(confirmationAttempts()).toHaveLength(7)
+    expect(await seriesReceipts(x.seriesId)).toContainEqual(
+      expect.objectContaining({
+        kind: 'confirmation',
+        recipient_role: 'booker',
+        outcome: 'delivered',
+        sent_at: sentAt('09:33'),
+        reported_link_states: ['failed', ...Array.from({ length: 11 }, () => 'pending')],
+      }),
+    )
+
+    clock = at('09:45')
+    await repairConference(x, 0)
+    await dispatch()
+    expect(
+      sentLinkUpdates()
+        .slice(8)
+        .map(({ to }) => to)
+        .sort(),
+    ).toEqual(x.guests.map(({ email }) => email).sort())
+    expect(await bookerLinkOutbox(x.seriesId)).toMatchObject({
+      id: waiting.id,
+      outbox_state: 'pending',
+      waiting_for_earlier: false,
+      due_at: sentAt('10:33'),
+      attempts: 0,
+    })
+    const deliveredUpdates = (await seriesReceipts(x.seriesId)).filter(
+      ({ kind }) => kind === 'link_update',
+    )
+    expect(deliveredUpdates).toHaveLength(18)
+    for (const receipt of deliveredUpdates) {
+      const isHost = receipt.recipient_role === 'host'
+      expect(receipt).toMatchObject({
+        recipient_role: isHost ? 'host' : 'guest',
+        sent_at: sentAt(isHost ? '09:30' : '09:45'),
+        outcome: 'delivered',
+        reported_ordinals: [1],
+        reported_link_states: [isHost ? 'failed' : 'ready'],
+      })
+    }
+
+    clock = at('09:50')
+    const y = await x.createAnother('2040-11-05T11:15+00:00')
+    clock = at('09:51')
+    for (const occurrence of y.occurrences) await provision(occurrence, 'ready')
+    await dispatch()
+    clock = at('10:00')
+    await cancelManagedBookingSeries(context(true), x.token, all())
+    await dispatch()
+    clock = at('10:05')
+    await cancelManagedBookingSeries(context(true), y.token, all())
+    await dispatch()
+
+    const receipts = [...(await seriesReceipts(x.seriesId)), ...(await seriesReceipts(y.seriesId))]
+    expect(receipts).toHaveLength(94)
+    expect(receipts.every(({ outcome }) => outcome === 'delivered')).toBe(true)
+    const hourStart = now().subtract({ hours: 1 }).epochMilliseconds
+    expect(
+      receipts
+        .filter(
+          ({ recipient_role, sent_at }) =>
+            recipient_role === 'booker' && required(sent_at).getTime() > hourStart,
+        )
+        .map(({ sent_at }) => required(sent_at).getTime())
+        .sort((a, b) => a - b),
+    ).toEqual(['09:33', '09:51', '10:00', '10:05'].map((time) => at(time).epochMilliseconds))
+    expect(await ledger()).toHaveLength(94)
+    clock = at('10:33')
+    await dispatch()
+    expect(bookerLinkAttempts()).toHaveLength(0)
+    expect(await bookerLinkOutbox(x.seriesId)).toMatchObject({
+      outbox_state: 'skipped',
+      attempts: 0,
+    })
+  }, 20_000)
+
+  it('waits for each recipient’s oldest delivered link update to leave the rolling day', async () => {
+    const f = await failedConferenceSeries(4, 1)
+    await dispatch()
+    const confirmed = now()
+    const atMinute = (minutes: number) => confirmed.add({ minutes })
+    const allOthers = [...f.hosts, ...f.guests].map(({ email }) => email).toSorted()
+    const expectNewUpdates = (previous: number, addresses: string[]) =>
+      expect(
+        sentLinkUpdates()
+          .slice(previous)
+          .map(({ to }) => to)
+          .sort(),
+      ).toEqual(addresses)
+
+    clock = atMinute(60)
+    await repairConference(f, 0)
+    refuseAddress = booker.email
+    refuseLinkUpdates = true
+    await dispatch()
+    expectNewUpdates(0, allOthers)
+    expect(bookerLinkAttempts()).toHaveLength(1)
+    clock = atMinute(61)
+    refuseAddress = undefined
+    await dispatch()
+    expectNewUpdates(3, [booker.email])
+    expect(bookerLinkAttempts()).toHaveLength(2)
+
+    for (const [index, minute] of [
+      [1, 121],
+      [2, 181],
+    ] as const) {
+      clock = atMinute(minute)
+      await repairConference(f, index)
+      await dispatch()
+      expectNewUpdates(4 * index, [...allOthers, booker.email].sort())
+    }
+
+    clock = atMinute(241)
+    await repairConference(f, 3)
+    await dispatch()
+    expect(sentLinkUpdates()).toHaveLength(12)
+    expect(bookerLinkAttempts()).toHaveLength(4)
+    const waiting = (await linkOutbox(f.seriesId)).filter(
+      ({ outbox_state }) => outbox_state === 'pending',
+    )
+    expect(waiting).toHaveLength(4)
+    for (const row of waiting) {
+      expect(row).toMatchObject({
+        due_at: new Date(atMinute(row.recipient_role === 'booker' ? 1501 : 1500).epochMilliseconds),
+        attempts: 0,
+        lease_id: null,
+        lease_until: null,
+      })
+    }
+    clock = atMinute(1500).subtract({ milliseconds: 1 })
+    await dispatch()
+    expect(sentLinkUpdates()).toHaveLength(12)
+    clock = atMinute(1500)
+    await dispatch()
+    expectNewUpdates(12, allOthers)
+    expect(bookerLinkAttempts()).toHaveLength(4)
+    clock = atMinute(1501)
+    await dispatch()
+    expectNewUpdates(15, [booker.email])
+    expect(bookerLinkAttempts()).toHaveLength(5)
+    expect(await ledger()).toHaveLength(20)
+    expect((await seriesReceipts(f.seriesId)).every(({ outcome }) => outcome === 'delivered')).toBe(
+      true,
+    )
+  }, 20_000)
+
+  it('rechecks the spacing gate after an SMTP rollback without using a retry attempt', async () => {
+    const f = await failedConferenceSeries()
+    await dispatch()
+    clock = now().add({ minutes: 60 })
+    const firstAttempt = now()
+    await repairConference(f, 0)
+    refuseAddress = booker.email
+    refuseLinkUpdates = true
+    await dispatch()
+    expect(bookerLinkAttempts()).toHaveLength(1)
+    const retry = await bookerLinkOutbox(f.seriesId)
+    expect(retry).toMatchObject({
+      outbox_state: 'pending',
+      attempts: 1,
+      due_at: new Date(firstAttempt.add({ minutes: 1 }).epochMilliseconds),
+    })
+
+    // Simulate a corrected receipt becoming visible between the rolled-back send and its retry.
+    const committedDelivery = firstAttempt.add({ seconds: 30 })
+    await db
+      .updateTable('booking_series_notifications')
+      .set({ sent_at: new Date(committedDelivery.epochMilliseconds) })
+      .where('series_id', '=', f.seriesId)
+      .where('row_type', '=', 'receipt')
+      .where('kind', '=', 'confirmation')
+      .where('recipient_role', '=', 'booker')
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    clock = firstAttempt.add({ minutes: 1 })
+    refuseAddress = undefined
+    await dispatch()
+    expect(bookerLinkAttempts()).toHaveLength(1)
+    const spaced = committedDelivery.add({ minutes: 60 })
+    expect(await bookerLinkOutbox(f.seriesId)).toMatchObject({
+      id: retry.id,
+      outbox_state: 'pending',
+      attempts: 1,
+      due_at: new Date(spaced.epochMilliseconds),
+      lease_id: null,
+      lease_until: null,
+    })
+    clock = spaced
+    await dispatch()
+    expect(bookerLinkAttempts()).toHaveLength(2)
+    expect(await bookerLinkOutbox(f.seriesId)).toMatchObject({ attempts: 2, outbox_state: 'done' })
   }, 20_000)
 
   it('skips a waiting link update with zero attempts after whole-series cancellation', async () => {
@@ -1324,6 +1786,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
   it('orders a later link update behind a retried earlier partial cancellation per recipient', async () => {
     const f = await failedConferenceSeries()
     await dispatch()
+    clock = now().add({ minutes: 60 })
     const confirmed = now()
     clock = confirmed.add({ seconds: 10 })
     refuseAddress = booker.email
@@ -1394,6 +1857,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       .where('organizationId', '=', f.team.id)
       .where('userId', '=', formerHost.id)
       .executeTakeFirstOrThrow()
+    clock = fixtureNow.add({ minutes: 60 })
     await dispatch()
 
     expect(

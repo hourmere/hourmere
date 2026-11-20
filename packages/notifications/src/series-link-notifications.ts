@@ -10,6 +10,10 @@ import {
   notificationRecipientHash,
 } from './mail-limits.ts'
 
+const LINK_UPDATE_SPACING_MS = 60 * 60_000
+const LINK_UPDATE_DAY_MS = 24 * 60 * 60_000
+const LINK_UPDATES_PER_DAY = 3
+
 type Recipient = { id: string; role: 'booker' | 'guest' | 'host'; email: string }
 type LinkUpdate = {
   id: string
@@ -171,6 +175,38 @@ function ownedLinkUpdate(db: Db, link: LinkUpdate, leaseId: string) {
     .where('lease_id', '=', leaseId)
 }
 
+export function deliveredSeriesReports(
+  db: Db,
+  series: Pick<LinkUpdate, 'organization_id' | 'series_id'>,
+  recipient: Pick<Recipient, 'id' | 'role'>,
+) {
+  return db
+    .selectFrom('booking_series_notifications')
+    .where('organization_id', '=', series.organization_id)
+    .where('series_id', '=', series.series_id)
+    .where('row_type', '=', 'receipt')
+    .where('kind', 'in', ['confirmation', 'link_update'])
+    .where('outcome', '=', 'delivered')
+    .where('recipient_id', '=', recipient.id)
+    .where('recipient_role', '=', recipient.role)
+}
+
+async function linkUpdateDueAt(trx: Db, link: LinkUpdate, recipient: Recipient, now: Date) {
+  const nowMs = now.getTime()
+  const reports = await deliveredSeriesReports(trx, link, recipient)
+    .select(['kind', 'sent_at'])
+    .where('sent_at', '>', new Date(nowMs - LINK_UPDATE_DAY_MS))
+    .orderBy('sent_at', 'desc')
+    .execute()
+  const latest = reports[0]?.sent_at
+  const capReceipt = reports.filter((report) => report.kind === 'link_update')[
+    LINK_UPDATES_PER_DAY - 1
+  ]?.sent_at
+  const spacedAt = latest ? latest.getTime() + LINK_UPDATE_SPACING_MS : nowMs
+  const underCapAt = capReceipt ? capReceipt.getTime() + LINK_UPDATE_DAY_MS : nowMs
+  return new Date(Math.max(spacedAt, underCapAt))
+}
+
 async function sendLinkUpdate(
   deps: NotificationDeps,
   link: LinkUpdate,
@@ -211,6 +247,12 @@ async function sendLinkUpdate(
     }
     if (claim.blocked) {
       await finish().set({ waiting_for_earlier: true }).execute()
+      return
+    }
+    // Re-read committed delivery times on every claim, including after SMTP rollback.
+    const dueAt = await linkUpdateDueAt(trx, link, recipient, now)
+    if (dueAt > now) {
+      await finish().set({ due_at: dueAt }).execute()
       return
     }
     const content = await render(trx, link, recipient, clock)

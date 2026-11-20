@@ -31,6 +31,7 @@ import {
 } from './mail-limits.ts'
 import { type SeriesCalendarMember, seriesCalendarSnapshot } from './series-calendar.ts'
 import {
+  deliveredSeriesReports,
   dispatchSeriesLinkUpdates,
   type RenderSeriesLinkUpdate,
   wakeSeriesLinkUpdates,
@@ -261,18 +262,6 @@ async function prepareSeriesOrganizers(
     const email = sender || (!data.collective && host?.email) || 'calendar@hourmere.invalid'
     await pinCalendarOrganizer(deps.db, member.rootId, { name, email })
   }
-}
-
-function deliveredSeriesReports(db: Db, series: Series, recipient: Recipient) {
-  return db
-    .selectFrom('booking_series_notifications')
-    .where('organization_id', '=', series.organization_id)
-    .where('series_id', '=', series.series_id)
-    .where('row_type', '=', 'receipt')
-    .where('kind', 'in', ['confirmation', 'link_update'])
-    .where('outcome', '=', 'delivered')
-    .where('recipient_id', '=', recipient.id)
-    .where('recipient_role', '=', recipient.role)
 }
 
 async function deliveredSeriesCalendarOrdinals(db: Db, action: Action, recipient: Recipient) {
