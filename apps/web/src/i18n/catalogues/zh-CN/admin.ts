@@ -2393,6 +2393,8 @@ export const admin = {
   'Could not update the invitation roster. Try again.': '无法更新邀请名单。请重试。',
   'This poll has 40 places.': '此投票最多容纳 40 人。',
   'Remove time {time}': '移除时间：{time}',
+  // Workflow audit
+  Workflows: '工作流',
 
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':

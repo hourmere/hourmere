@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.6",
     "@hono/zod-openapi": "1.6.3",
     "@hourmere/auth": "*",
     "@hourmere/calendars": "*",
@@ -23,7 +23,7 @@
     "@hourmere/webhooks": "*",
     "@hourmere/workflows": "*",
     "@modelcontextprotocol/server": "2.4.0",
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "jose": "6.2.12",
     "kysely": "0.29.7",
     "stripe": "23.1.0",

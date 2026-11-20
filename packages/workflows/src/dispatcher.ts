@@ -4,11 +4,7 @@ import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import {
-  hardOffWorkflowAuditPort,
-  type WorkflowAuditPort,
-  type WorkflowSkipReason,
-} from './audit.ts'
+import { type WorkflowAuditPort, type WorkflowSkipReason, workflowAuditPort } from './audit.ts'
 import { WorkflowDefinitionSchema, type WorkflowTriggerType } from './definition.ts'
 import { workflowExecution } from './hard-off.ts'
 import { WORKFLOW_MAX_LATE_MINUTES } from './limits.ts'
@@ -165,7 +161,7 @@ export async function finishWorkflowRun(
       .where('run_id', '=', run.id)
       .where('state', '=', 'pending')
       .execute()
-    await (audit ?? hardOffWorkflowAuditPort()).record(trx, {
+    await (audit ?? workflowAuditPort).record(trx, {
       ...locked.auditIdentity,
       event: 'workflow.run_skipped',
       actor: { kind: 'background', job: 'dispatch' },
@@ -251,7 +247,7 @@ async function recoverWorkflowEmailMarker(
     .returning('id')
     .execute()
   for (const _ of abandoned)
-    await (audit ?? hardOffWorkflowAuditPort()).record(trx, {
+    await (audit ?? workflowAuditPort).record(trx, {
       ...locked.auditIdentity,
       event: 'workflow.email_delivery_unknown',
       actor: { kind: 'background', job: 'repair' },
@@ -588,11 +584,19 @@ export async function repairWorkflowRunWakes(
   }
 }
 
-export const dispatchWorkflowRuns = workflowExecution(dispatchDueWorkflowRuns)
-export const repairWorkflowWakes = workflowExecution(repairWorkflowRunWakes)
+type WorkflowWorkerContext = Omit<WorkflowDispatchContext, 'audit'>
+
+export const dispatchWorkflowRuns = workflowExecution(
+  (ctx: WorkflowWorkerContext, options?: WorkflowClaimOptions) =>
+    dispatchDueWorkflowRuns({ ...ctx, audit: workflowAuditPort }, options),
+)
+export const repairWorkflowWakes = workflowExecution(
+  (ctx: WorkflowWorkerContext, port: WorkflowWakePort, limit?: number) =>
+    repairWorkflowRunWakes({ ...ctx, audit: workflowAuditPort }, port, limit),
+)
 
 /** Definitions are not installed in a production worker while workflows remain hard-off. */
-export function workflowJobs(ctx: WorkflowDispatchContext, port: WorkflowWakePort) {
+export function workflowJobs(ctx: WorkflowWorkerContext, port: WorkflowWakePort) {
   return [
     defineJob({
       name: 'workflow-dispatch-v1',

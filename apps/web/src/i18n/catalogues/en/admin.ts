@@ -2511,6 +2511,8 @@ export const admin = {
     'Could not update the invitation roster. Try again.',
   'This poll has 40 places.': 'This poll has 40 places.',
   'Remove time {time}': 'Remove time {time}',
+  // Workflow audit
+  Workflows: 'Workflows',
 
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':
