@@ -276,6 +276,7 @@ export function expectedFromPlaywrightList(
   listing: PlaywrightList,
   suite: 'layout' | 'a11y',
   projectViewports: ProjectViewports,
+  { allowEmpty = false }: { allowEmpty?: boolean } = {},
 ): ReportIdentity[] {
   if (!Array.isArray(listing.suites) || listing.errors?.length)
     throw new Error('Unable to enumerate UI measurement matrix')
@@ -314,7 +315,10 @@ export function expectedFromPlaywrightList(
     for (const child of node.suites ?? []) visit(child, titles)
   }
   for (const node of listing.suites) visit(node, [])
-  if (!expected.length || new Set(expected.map(reportIdentity)).size !== expected.length)
+  if (
+    (!expected.length && !allowEmpty) ||
+    new Set(expected.map(reportIdentity)).size !== expected.length
+  )
     throw new Error('Empty or duplicate UI measurement matrix')
   return expected
 }
@@ -342,6 +346,8 @@ export async function loadExpectedReports(suite: BlockingSuite, shard?: string) 
     if (previousSuite === undefined) delete process.env.HOURMERE_UI_SUITE
     else process.env.HOURMERE_UI_SUITE = previousSuite
   }
+  // Playwright shards by test count and preparation tests occupy slots, so a shard
+  // may legitimately select no measurement test; the unsharded matrix never may.
   const list = (selectedShard?: string) => {
     const child = spawnSync(
       process.execPath,
@@ -364,13 +370,20 @@ export async function loadExpectedReports(suite: BlockingSuite, shard?: string) 
     )
     if (child.status === 0) {
       try {
-        return expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports)
+        return expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports, {
+          allowEmpty: selectedShard !== undefined,
+        })
       } catch {
         // Parsing diagnostics can contain stdout; expose only the safe child metadata.
       }
     }
     throw new UiMatrixEnumerationError(child)
   }
+  const allExpected = list()
+  if (!shard) return { expected: allExpected, allExpected }
   const expected = list(shard)
-  return { expected, allExpected: shard ? list() : expected }
+  const allIds = new Set(allExpected.map(reportIdentity))
+  if (expected.some((identity) => !allIds.has(reportIdentity(identity))))
+    throw new Error('Unable to enumerate UI measurement matrix')
+  return { expected, allExpected }
 }
