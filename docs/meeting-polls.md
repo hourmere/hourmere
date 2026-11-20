@@ -13,8 +13,8 @@ tombstones are implemented through migration `0088`; credential mail delivery an
 capability ciphertext expiry are implemented, as are public REST/MCP/CLI transports,
 deadline reminders, the browser reminder opt-out page and creator deadline notices.
 Outcome mail and host list, read, results, close, cancel, delete and finalize are implemented.
-The host web app provides the list, results and lifecycle controls for polls created through
-REST, MCP or CLI. Browser creation and roster management remain planned. Competitor research was checked
+The host web app provides creation, the invitation roster, results and lifecycle controls in
+personal and team spaces. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -46,6 +46,26 @@ poll. No official help page establishing that latter behavior was found; the bri
 Cal.com poll premise remains unverified. Do not infer a public voting matrix, vote values,
 privacy defaults or a poll API from those pages. These observations are dated source
 facts; the decisions below are Hourmere's proposal, not competitor claims.
+
+## Create and manage a poll in the app
+
+In **Meeting polls**, choose **Create meeting poll**, select a saved event type and
+meeting length, then pick 2–20 offered times. Times follow the selected display time
+zone, including clock changes. Set a voting deadline and choose who can join and
+whether verified voters can see vote totals. Proposing times does not reserve them.
+
+Copy the public voting link when it is shown after creation or replacement. The app
+cannot recover the original link if the response was lost or the disclosure was
+closed. Replace it from the invitation roster if needed. Replacement immediately
+invalidates the old public link while preserving links emailed to individual voters.
+
+Use the invitation roster to send batches of up to 40 invitations, resend an
+invitation, or remove a voter. Verified voters, active invitations and unexpired
+public sign-ups share the 40-place cap. A batch that requires more places than remain
+is refused in full. Resend replaces the voter's link and is limited to once every
+15 minutes and three times per address for the poll, subject to shared mail limits.
+Removing a voter deletes their ballot and contact details and revokes their links.
+Bulk removal clears unverified public sign-ups and preserves host invitations.
 
 ## Product decisions and authority
 

@@ -37,6 +37,7 @@ import {
   HostPage,
   ManageBookingPage,
   McpAuthorizePage,
+  MeetingPollCreatePage,
   MeetingPollPage,
   MeetingPollsPage,
   OneTimeBookingPage,
@@ -85,6 +86,7 @@ export const appRoutes = createRoutesFromElements(
           <Route path="availability/:id" element={<ScheduleEditorPage />} />
           <Route path="bookings" element={<BookingsPage />} />
           <Route path="meeting-polls" element={<MeetingPollsPage />} />
+          <Route path="meeting-polls/new" element={<MeetingPollCreatePage />} />
           <Route path="meeting-polls/:id" element={<HostMeetingPollRoute />} />
           <Route path="team/bookings" element={<TeamBookingsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />

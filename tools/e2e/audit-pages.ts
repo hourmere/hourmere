@@ -224,7 +224,11 @@ export async function openAuditPage(
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
     if (isHostPollAuditPage(id) || isPollAuditPage(id) || isRoutingFormAuditPage(id)) {
-      await app.auditSignIn(isHostPollAuditPage(id), locale)
+      await app.auditSignIn(
+        isHostPollAuditPage(id),
+        locale,
+        id === 'host-poll-create-team' || id === 'host-poll-create-forbidden' ? 'team' : undefined,
+      )
       await page.addInitScript(prepareAuditLocale, locale)
       if (isPollAuditPage(id)) await openPollAuditPage(page, app, id)
       else {

@@ -14,6 +14,7 @@ export const PATHS = {
   troubleshootAvailability: `${APP_BASE}/availability/troubleshoot`,
   bookings: `${APP_BASE}/bookings`,
   meetingPolls: `${APP_BASE}/meeting-polls`,
+  newMeetingPoll: `${APP_BASE}/meeting-polls/new`,
   teamBookings: `${APP_BASE}/team/bookings`,
   analytics: `${APP_BASE}/analytics`,
   conferences: `${APP_BASE}/conferences`,
