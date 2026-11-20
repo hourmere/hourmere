@@ -52,7 +52,7 @@ export function teamWriteMiddleware(deps: SsoTeamReadDeps, recoveryPublicUrl?: s
         !access.suspended &&
         (await hasSsoRecoveryAuthority(deps.db, principal, c.req.raw.headers, recoveryPublicUrl))
       ) {
-        // The policy service must consume the grant under lock before executing the write.
+        // The route's service must consume the grant under lock before executing the write.
         recoveryWrites.add(c)
         return next()
       }

@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi'
+import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import {
   createWorkflow,
@@ -8,7 +9,10 @@ import {
   listWorkflows,
   PreviewWorkflowInputSchema,
   previewWorkflow,
+  requireWorkflowsEnabled,
+  requireWorkflowUpdateAllowed,
   updateWorkflow,
+  type WorkflowSettings,
 } from '@hourmere/workflows'
 import {
   CreateWorkflowInput,
@@ -28,34 +32,44 @@ import { defineTool, type Tool } from './tools.ts'
 
 /**
  * The booking workflow operations, with REST's validation and authorization. Always in the
- * catalog: while workflows are off, tools/list omits them and a direct call answers
- * `workflows_disabled` after the scope check (workflowFeatureTools).
+ * catalog. While workflows are off, tools/list omits them. Direct calls run the scope and
+ * availability checks before reaching the services.
  */
 export function workflowTools({
   db,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
+  workflowsEnabled,
 }: {
   db: Db
   followUpHostNotesEnabled?: boolean | undefined
   workflowRunCursorSecret?: string | undefined
-}): Tool[] {
+} & WorkflowSettings): Tool[] {
+  const settings = { workflowsEnabled }
+  const requireAvailable = () => requireWorkflowsEnabled(settings)
+  const writeContext = (principal: Principal) => ({
+    db,
+    followUpHostNotesEnabled,
+    principal,
+    ...settings,
+  })
   const annotations = {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false,
   }
-  return workflowFeatureTools([
+  const tools = [
     defineTool({
       name: 'create_workflow',
       title: 'Create a booking workflow',
       description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Creates a personal workflow for yourself or a team workflow as its current owner/admin in that team context. Supply owner, idempotencyKey and the definition fields. Keep the key for retries: identical normalized input returns the stored definition; changed input conflicts. IDs are server-generated. Unknown fields and webhook actions are rejected. No email is sent by creation.`,
       input: CreateWorkflowInput,
       output: Workflow,
+      requireAvailable,
       annotations: { ...annotations, readOnlyHint: false },
       run(args, call) {
-        return createWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, args)
+        return createWorkflow(writeContext(call.caller), args)
       },
     }),
     defineTool({
@@ -64,9 +78,13 @@ export function workflowTools({
       description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Supply id, expectedRevision and changed definition fields. Content edits append an immutable revision; enabled-only changes preserve the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Existing booking enrollments and execution rows stay unchanged. Webhook actions are rejected.`,
       input: UpdateWorkflowInput.extend({ id: z.string() }),
       output: Workflow,
+      requireAvailable(input) {
+        const { id: _id, ...patch } = (input ?? {}) as Record<string, unknown>
+        requireWorkflowUpdateAllowed(settings, patch)
+      },
       annotations: { ...annotations, readOnlyHint: false, idempotentHint: false },
       run({ id, ...args }, call) {
-        return updateWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, id, args)
+        return updateWorkflow(writeContext(call.caller), id, args)
       },
     }),
     defineTool({
@@ -87,9 +105,10 @@ export function workflowTools({
       description: WORKFLOW_PREVIEW_DESCRIPTION,
       input: PreviewWorkflowInputSchema,
       output: WorkflowPreview,
+      requireAvailable,
       annotations,
       run(args, call) {
-        return previewWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, args)
+        return previewWorkflow(writeContext(call.caller), args)
       },
     }),
     defineTool({
@@ -126,5 +145,6 @@ export function workflowTools({
         return listWorkflowRuns({ db, principal: call.caller, workflowRunCursorSecret }, id, args)
       },
     }),
-  ])
+  ]
+  return workflowFeatureTools(tools, settings)
 }

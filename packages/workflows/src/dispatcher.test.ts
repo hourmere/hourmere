@@ -20,6 +20,7 @@ import {
   claimDueWorkflowRuns,
   dispatchClaimedWorkflowRun,
   dispatchDueWorkflowRuns,
+  lockedWorkflowRun,
   repairWorkflowRunWakes,
 } from './dispatcher.ts'
 import {
@@ -299,6 +300,41 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow dispatcher and repair', () 
     expect(current.token).not.toBe(old.token)
     expect(await dispatchClaimedWorkflowRun(s.execution(0), old)).toBe('stale')
     expect(await dispatchClaimedWorkflowRun(s.execution(1), current)).toBe('ready')
+  })
+
+  it('keeps an email retry deferred before an operator-off wake acquires the run lock', async () => {
+    const s = await setup()
+    const pause = gate()
+    const retryAt = NOW.add({ minutes: 2 })
+    const defer = workers[0].transaction().execute(async (trx) => {
+      await lockedWorkflowRun(trx, s.run.id)
+      await trx
+        .updateTable('workflow_recipient_claims')
+        .set({ next_attempt_at: new Date(retryAt.epochMilliseconds) })
+        .where('run_id', '=', s.run.id)
+        .execute()
+      pause.enter()
+      await pause.wait
+    })
+    await pause.ready
+    const off = { ...s.execution(1), instanceDisabled: true }
+    const wake = dispatchDueWorkflowRuns(off, { runId: s.run.id })
+    try {
+      await waiting(1)
+    } finally {
+      pause.release()
+    }
+    await defer
+    await wake
+    expect(await savedRun(s.run.id)).toEqual(s.run)
+    expect(await history(s.run.id)).toEqual([])
+
+    s.clock.now = retryAt
+    await dispatchDueWorkflowRuns(off, { runId: s.run.id })
+    expect(await savedRun(s.run.id)).toMatchObject({
+      state: 'skipped',
+      skip_reason: 'instance_disabled',
+    })
   })
 
   it('cannot reclaim retired work when retirement wins a race with an expired lease', async () => {

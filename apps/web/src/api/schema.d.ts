@@ -5048,7 +5048,7 @@ export interface paths {
         put?: never;
         /**
          * Create a disabled SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof only. Secrets are write-only. OIDC and SAML are being built and remain unavailable.
+         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. OIDC and SAML are being built and remain unavailable.
          */
         post: operations["createSsoProvider"];
         delete?: never;
@@ -5076,7 +5076,7 @@ export interface paths {
         head?: never;
         /**
          * Update an SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.
          */
         patch: operations["updateSsoProvider"];
         trace?: never;
@@ -5092,7 +5092,7 @@ export interface paths {
         put?: never;
         /**
          * Enable or disable an SSO provider
-         * @description Verified team owner browser session with fresh administration proof. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.
+         * @description Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.
          */
         post: operations["activateSsoProvider"];
         delete?: never;
@@ -5155,8 +5155,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start a browser-bound OIDC test of a disabled SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.
+         * Start a browser-bound OIDC provider test
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.
          */
         post: operations["testSsoProvider"];
         delete?: never;
@@ -5216,7 +5216,7 @@ export interface paths {
         put?: never;
         /**
          * Start SSO recovery for the current team
-         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and turning off enforcement once. SSO remains unavailable.
+         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.
          */
         post: operations["useSsoRecovery"];
         delete?: never;

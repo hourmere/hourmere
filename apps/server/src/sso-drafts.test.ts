@@ -2,8 +2,9 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { proveMailbox, session } from '../../../packages/db/src/sso-identity-fixtures.ts'
 import { type SsoFixture, ssoFixture } from '../../../packages/db/src/sso-storage-fixtures.ts'
@@ -20,6 +21,7 @@ let owned: TestDatabase
 let db: Db
 let f: SsoFixture
 const sessions = new Map<string, string>()
+const statements: string[] = []
 const deps = () => ({ db, publicUrl, configurationKey: key, capabilities: ON })
 function principal(user = f.owner, team = f.team): Principal {
   return {
@@ -103,7 +105,12 @@ async function sourceCopy(change: [string, string]): Promise<typeof real> {
 describe.skipIf(!process.env.DATABASE_URL)('SSO provider drafts', () => {
   beforeAll(async () => {
     owned = await createTestDatabase(process.env.DATABASE_URL as string)
-    db = createDb(owned.pool)
+    db = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
     const client = await owned.pool.connect()
     try {
       await client.query('BEGIN')
@@ -128,7 +135,10 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO provider drafts', () => {
   it('creates the first disabled provider with mailbox proof, ciphertext-only storage and safe response/audit', async () => {
     const logs = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
+      statements.length = 0
       const p = await create()
+      expect(statements).toHaveLength(41)
+      expect(statements.some((query) => query.includes('sso_recovery_owners'))).toBe(false)
       expect(p).toMatchObject({
         enabled: false,
         revision: 1,
