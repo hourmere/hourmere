@@ -123,7 +123,12 @@ describe.skipIf(!serverUrl)('synthetic workflow preview', () => {
         workflowId: null,
         revision: null,
         trigger: 'booking.created',
-        actor: { kind: 'api_key', userId: user.id, apiKeyId: principal.apiKeyId },
+        actor: {
+          kind: 'api_key',
+          user: { id: user.id },
+          apiKeyId: principal.apiKeyId,
+          apiKeyScope: principal.apiKeyScope,
+        },
       },
     ])
   })

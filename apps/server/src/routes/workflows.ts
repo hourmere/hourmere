@@ -20,7 +20,6 @@ import {
   WORKFLOW_PAGE,
   WORKFLOW_RECIPIENT_CLASSES,
   WORKFLOW_RUN_PAGE,
-  type WorkflowAuditPort,
   WorkflowPreviewSchema,
   WorkflowRunHistoryEntrySchema,
   WorkflowTriggerSchema,
@@ -261,12 +260,10 @@ const errors = {
 /** Booking workflow definitions of the personal owner or team the caller acts as. */
 export function workflowRoutes({
   db,
-  audit,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
 }: {
   db: Db
-  audit?: WorkflowAuditPort
   followUpHostNotesEnabled?: boolean | undefined
   workflowRunCursorSecret?: string | undefined
 }): RouteModule {
@@ -295,7 +292,6 @@ export function workflowRoutes({
   const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
     db,
     principal,
-    audit,
     followUpHostNotesEnabled,
     prepareOrganizationWrite: async (trx: Db) => {
       await organizationContextWriteLock(principal)(trx)
