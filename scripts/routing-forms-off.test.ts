@@ -158,10 +158,10 @@ const LIFECYCLE = [
   'packages/scheduling/src/routing-form-targets.ts',
   'packages/scheduling/src/routing-form-config.ts',
 ]
-// The only service code that names the routing tables: a4's lifecycle storage and a3's
-// configuration services.
+// Shared configuration, continuation and internal booking services name the routing tables.
 const CONTINUATION_SERVICE = 'packages/scheduling/src/routing-continuation.ts'
-const SHARED_SERVICES = [...CONFIGURATION_SERVICES, CONTINUATION_SERVICE]
+const ROUTED_BOOKING_SERVICE = 'packages/scheduling/src/routing-booking.ts'
+const SHARED_SERVICES = [...CONFIGURATION_SERVICES, CONTINUATION_SERVICE, ROUTED_BOOKING_SERVICE]
 const STORAGE_SERVICES = ['packages/db/src/routing-lifecycle.ts', ...SHARED_SERVICES]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1041,7 +1041,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
       expect(names).not.toContain(command)
   })
 
-  it('loads the configuration service and existing lifecycle through production entry points', () => {
+  it('loads the shared services and lifecycle through production entry points', () => {
     for (const file of SHARED_SERVICES) expect(existsSync(new URL(file, root)), file).toBe(true)
     const reached = runtimeGraph(ENTRY_POINTS)
     // Their own dependencies are loaded, so the graph does reach the package.
@@ -1065,7 +1065,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
-    // The lifecycle storage and the configuration services name the tables (so the matcher
+    // The lifecycle storage and shared services name the tables (so the matcher
     // sees them), and no other source does; which of them production loads is asserted above.
     expect([...referencing].sort()).toEqual([...STORAGE_SERVICES].sort())
   })

@@ -1,4 +1,3 @@
-import { sql } from 'kysely'
 import {
   checkSlotRange,
   eventSlots,
@@ -13,15 +12,15 @@ import { DomainError } from './errors.ts'
 import { publicLocationOptions } from './location-options.ts'
 import { InvalidStoredQuestionsError } from './questions.ts'
 import {
-  RoutingValidationError,
-  validateRoutingAnswers,
-  validateRoutingFormConfig,
-} from './routing-form-config.ts'
-import {
   loadRoutingTargetEvents,
   routingMappingProblem,
   routingTargetProblem,
 } from './routing-form-targets.ts'
+import {
+  isRoutingReceiptToken,
+  routingReceiptCheckedAt,
+  validateRoutingReceiptSnapshot,
+} from './routing-receipt.ts'
 import { openRoutingAnswers, routingTokenDigest } from './routing-receipt-crypto.ts'
 import { cleanText } from './text.ts'
 
@@ -63,32 +62,13 @@ function readOnlySnapshot(ctx: RoutingContinuationContext) {
   return ctx.db.transaction().setIsolationLevel('repeatable read').setAccessMode('read only')
 }
 
-function validateSnapshot(questions: unknown, resolvedTarget: unknown, decrypted: unknown) {
-  // Validate only the pinned target and answers. Current publication cannot reroute this receipt.
-  try {
-    const { questions: sources, fallback: target } = validateRoutingFormConfig({
-      questions,
-      rules: [],
-      fallback: resolvedTarget,
-    })
-    if (target.kind !== 'event') throw unavailable()
-    return { sources, target, answers: validateRoutingAnswers(sources, decrypted) }
-  } catch (error) {
-    if (error instanceof RoutingValidationError) throw unavailable()
-    throw error
-  }
-}
-
 async function readContinuation(
   ctx: RoutingContinuationContext,
   secret: string,
   routeToken: string,
 ) {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(routeToken)) throw unavailable()
-  const now = ctx.receiptNow?.()
-  const checkedAt = now
-    ? sql<Date>`${new Date(now.epochMilliseconds)}::timestamptz`
-    : sql<Date>`statement_timestamp()`
+  if (!isRoutingReceiptToken(routeToken)) throw unavailable()
+  const checkedAt = routingReceiptCheckedAt(ctx.receiptNow)
   const receipt = await ctx.db
     .selectFrom('routing_receipts as r')
     .innerJoin('routing_forms as f', (join) =>
@@ -120,7 +100,7 @@ async function readContinuation(
 
   const decrypted = openRoutingAnswers(secret, 'continuation', receipt, receipt.ciphertext)
   if (decrypted === undefined) throw unavailable()
-  const { sources, target, answers } = validateSnapshot(
+  const { sources, target, answers } = validateRoutingReceiptSnapshot(
     receipt.questions,
     receipt.resolvedTarget,
     decrypted,

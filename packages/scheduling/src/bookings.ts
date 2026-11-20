@@ -87,6 +87,17 @@ import {
 } from './recurring-members.ts'
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
+  consumeRoutingBookingReceipt,
+  findRoutingBookingEvent,
+  findRoutingBookingReceipt,
+  findRoutingBookingReplayEvidence,
+  lockRoutingBookingReceipt,
+  type RoutingBookingClaim,
+  routedBookingUnavailable,
+  routingBookingTokenDigest,
+} from './routing-booking.ts'
+import type { RoutingContinuationContext } from './routing-continuation.ts'
+import {
   type BookingSuccessRedirect,
   bookingSuccessRedirect,
   type SuccessRedirect,
@@ -463,14 +474,17 @@ async function lockManagedBooking(trx: Db, hash: Buffer) {
   }
 }
 
-interface IdempotencyScope {
-  organizationId: string
+interface IdempotentBookingRequest {
   /** The caller's API key; null for anonymous callers, who all share one scope. */
   apiKeyId: string | null
   /** OAuth grants have their own retry and audit scope, separate from keys and anonymous callers. */
   oauthConsentId?: string | null | undefined
   key: string
   fingerprint: Buffer
+}
+
+interface IdempotencyScope extends IdempotentBookingRequest {
+  organizationId: string
 }
 
 /**
@@ -501,11 +515,7 @@ async function findReplay(
   const row = await query.executeTakeFirst()
   if (!row) return undefined
   if (!row.idempotency_fingerprint?.equals(scope.fingerprint)) {
-    throw new DomainError(
-      'conflict',
-      'idempotency_key_reused',
-      'This Idempotency-Key was already used for a different request',
-    )
+    throw reusedBookingIdempotencyKey()
   }
   return {
     booking: await loadBooking(db, row.id),
@@ -1385,6 +1395,118 @@ export interface CreateOneTimeBookingInput extends Omit<CreateBookingInput, 'han
   token: string
 }
 
+export interface CreateRoutedBookingInput
+  extends Omit<CreateBookingInput, 'handle' | 'slug' | 'expectedGroupSlotId' | 'waitlistToken'> {
+  routeToken: string
+}
+
+/** Book the receipt's target using the ordinary booking locks and write transaction. */
+export async function createRoutedBooking(
+  ctx: RoutingContinuationContext,
+  input: CreateRoutedBookingInput,
+  origin: BookingOrigin = BOOKING_PAGE,
+): Promise<CreateBookingResult> {
+  const {
+    start,
+    durationMinutes,
+    invitee,
+    guests,
+    responses,
+    locationOptionId,
+    inviteePhone,
+    smsConsent,
+  } = input
+  const bookingInput = {
+    start,
+    durationMinutes,
+    invitee,
+    guests,
+    responses,
+    locationOptionId,
+    inviteePhone,
+    smsConsent,
+  }
+  const secret = ctx.routingSecret
+  const tokenDigest = routingBookingTokenDigest(secret, input.routeToken)
+  const request =
+    tokenDigest && input.idempotencyKey !== undefined && IDEMPOTENCY_KEY.test(input.idempotencyKey)
+      ? idempotentBookingRequest(bookingInput, input.idempotencyKey, origin, {
+          routingReceiptDigest: tokenDigest,
+        })
+      : undefined
+  // A globally unique, indexed proof of the exact request locates its booking even if
+  // the feature is off. It cannot locate the booking by receipt digest or key alone.
+  const replayFingerprint =
+    request &&
+    sha256(
+      canonicalJson([
+        'routing-booking-replay',
+        request.apiKeyId,
+        request.oauthConsentId,
+        request.key,
+        request.fingerprint.toString('hex'),
+      ]),
+    )
+  const replayCommitted = async () =>
+    request && replayFingerprint
+      ? findRoutedBookingReplay(ctx.db, request, replayFingerprint)
+      : undefined
+  const replay = await replayCommitted()
+  if (replay) return replay
+  if (ctx.routingFormsEnabled !== true) throw new DomainError('not_found', 'routing_forms_disabled')
+  if (!secret) throw new Error('Routed bookings require the server secret')
+  if (!tokenDigest) throw routedBookingUnavailable()
+  if (input.idempotencyKey !== undefined && !request) throw invalidBookingIdempotencyKey()
+
+  try {
+    const receipt = await findRoutingBookingReceipt(ctx, tokenDigest)
+    const et = await findRoutingBookingEvent(ctx.db, receipt)
+    // Only ordinary final fields participate in the booking. The pinned routing
+    // answers are read separately under the receipt lock and never passed to its outbox.
+    validateResponses(et.questions, bookingInput.responses ?? {})
+    const attendees = prepareBookingAttendees(bookingInput)
+    return await ctx.db.transaction().execute(async (trx) => {
+      await lockOrganization(trx, et.organizationId)
+      return createBookingInTransaction(ctx, trx, {
+        input: bookingInput,
+        origin,
+        event: et,
+        resolve: (db, options) => findRoutingBookingEvent(db, receipt, options),
+        attendees,
+        scope: request && { ...request, organizationId: et.organizationId },
+        routing: { receipt, secret, receiptNow: ctx.receiptNow, replayFingerprint },
+      })
+    })
+  } catch (error) {
+    const unavailable =
+      error instanceof DomainError &&
+      ['routing_unavailable', 'event_type_not_found'].includes(error.code)
+    const { code, constraint } = pgError(error)
+    const concurrentKey = code === '23505' && constraint === 'bookings_idempotency'
+    if (!unavailable && !concurrentKey) throw error
+    // A committed winner may have consumed the receipt after the initial replay probe.
+    const committedReplay = await replayCommitted()
+    if (committedReplay) return committedReplay
+    if (concurrentKey) throw reusedBookingIdempotencyKey()
+    throw routedBookingUnavailable()
+  }
+}
+
+async function findRoutedBookingReplay(
+  db: Db,
+  request: IdempotentBookingRequest,
+  replayFingerprint: Buffer,
+): Promise<CreateBookingResult | undefined> {
+  const evidence = await findRoutingBookingReplayEvidence(db, replayFingerprint)
+  if (!evidence) return undefined
+  const result = await findReplay(
+    db,
+    { ...request, organizationId: evidence.organization_id },
+    evidence.booking_id,
+  )
+  return result && { booking: result.booking, manageToken: null, replayed: true }
+}
+
 /** A consumed link permits only an exact replay of the request that won its claim. */
 export async function createOneTimeBooking(
   ctx: PublicContext,
@@ -1463,21 +1585,46 @@ function bookingIdempotency(
 ): IdempotencyScope | undefined {
   if (input.idempotencyKey === undefined) return undefined
   if (!IDEMPOTENCY_KEY.test(input.idempotencyKey)) {
-    throw new DomainError(
-      'invalid',
-      'invalid_idempotency_key',
-      'Idempotency-Key must be 1 to 255 printable ASCII characters',
-    )
+    throw invalidBookingIdempotencyKey()
   }
   return {
     organizationId: et.organizationId,
+    ...idempotentBookingRequest(input, input.idempotencyKey, origin, {
+      eventTypeId: 'eventTypeId' in et ? et.eventTypeId : et.id,
+      ...(oneTimeLinkId !== undefined && { oneTimeLinkId }),
+    }),
+  }
+}
+
+function invalidBookingIdempotencyKey() {
+  return new DomainError(
+    'invalid',
+    'invalid_idempotency_key',
+    'Idempotency-Key must be 1 to 255 printable ASCII characters',
+  )
+}
+
+function reusedBookingIdempotencyKey() {
+  return new DomainError(
+    'conflict',
+    'idempotency_key_reused',
+    'This Idempotency-Key was already used for a different request',
+  )
+}
+
+function idempotentBookingRequest(
+  input: Omit<CreateBookingInput, 'handle' | 'slug'>,
+  key: string,
+  origin: BookingOrigin,
+  target: { eventTypeId: string; oneTimeLinkId?: string } | { routingReceiptDigest: string },
+): IdempotentBookingRequest {
+  return {
     apiKeyId: origin.apiKeyId,
     oauthConsentId: origin.oauthConsentId ?? null,
-    key: input.idempotencyKey,
+    key,
     fingerprint: sha256(
       canonicalJson({
-        eventTypeId: 'eventTypeId' in et ? et.eventTypeId : et.id,
-        ...(oneTimeLinkId !== undefined && { oneTimeLinkId }),
+        ...target,
         start: input.start.toString(),
         durationMinutes: input.durationMinutes,
         locationOptionId: input.locationOptionId,
@@ -1608,6 +1755,7 @@ async function createBookingInTransaction(
     attendees: { invitee, guests },
     scope,
     oneTimeLink,
+    routing,
     checkEvent,
     seriesOccurrence,
   }: {
@@ -1620,6 +1768,7 @@ async function createBookingInTransaction(
         resolve: BookingEventResolver
         scope?: IdempotencyScope | undefined
         oneTimeLink?: { id: string; token: string } | undefined
+        routing?: RoutingBookingClaim | undefined
         checkEvent?: ((current: PublicEventTypeRecord) => Promise<void>) | undefined
         seriesOccurrence?: undefined
       }
@@ -1627,6 +1776,7 @@ async function createBookingInTransaction(
         resolve?: never
         scope?: never
         oneTimeLink?: never
+        routing?: never
         checkEvent?: never
         seriesOccurrence: {
           bookingId: string
@@ -1642,7 +1792,9 @@ async function createBookingInTransaction(
   }
   // A concurrent request with the same key may have committed while we waited.
   if (scope) {
-    const replay = await findReplay(trx, scope)
+    const replay = routing?.replayFingerprint
+      ? await findRoutedBookingReplay(trx, scope, routing.replayFingerprint)
+      : await findReplay(trx, scope)
     if (replay) return { ...replay, replayed: true }
   }
   // The event type may have changed while we waited (duration, questions, rules), and
@@ -1660,6 +1812,10 @@ async function createBookingInTransaction(
       throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
+  // Routed booking takes every ordinary admission lock before the form and receipt.
+  if (routing && current.schedulingType === 'round_robin')
+    await lockRoundRobinState(trx, current.id)
+  const routingSnapshot = routing && (await lockRoutingBookingReceipt(trx, routing))
   if (guests.length > 0 && !current.allowGuests) {
     throw new DomainError('invalid', 'guests_not_allowed', 'This event type does not allow guests')
   }
@@ -1695,7 +1851,7 @@ async function createBookingInTransaction(
   if (seriesOccurrence) {
     selectedHostIds = seriesOccurrence.hostUserIds
   } else if (current.schedulingType === 'round_robin') {
-    await lockRoundRobinState(trx, current.id)
+    if (!routing) await lockRoundRobinState(trx, current.id)
     const available: string[] = []
     let stale = false
     const candidates = automaticMeet(chosenOption)
@@ -1746,7 +1902,7 @@ async function createBookingInTransaction(
     groupSlot ?? (await resolveBookingLocation(ctx, trx, current, selectedHostIds, input))
   requireCollectedPhone(choice.location)
   let settings: SuccessRedirect | null = null
-  if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed')) {
+  if (!oneTimeLink && !routing && (origin.source === 'web' || origin.source === 'embed')) {
     try {
       settings = seriesOccurrence
         ? null
@@ -1797,6 +1953,7 @@ async function createBookingInTransaction(
     changeCutoffs: cutoffsOf(policy),
   })
   if (oneTimeLink) await claimOneTimeBookingLink(trx, oneTimeLink.token, id)
+  if (routingSnapshot) await consumeRoutingBookingReceipt(trx, routingSnapshot, id)
   // Side effects queue through this transaction only when a new booking commits.
   if (ctx.waitlistSecret && input.waitlistToken !== undefined) {
     await attributeWaitlistBooking(trx, {

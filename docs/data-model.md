@@ -1014,6 +1014,11 @@ only health metadata changes, with `health_code` restricted to `ok`, `unavailabl
 only be erased. A null ciphertext also permits expiry purge without consuming a receipt.
 Consumed receipt evidence cannot be rebound or revived.
 
+Migration 0165 adds an optional, indexed 32-byte replay fingerprint to `booking_routing`.
+Only keyed routed bookings set it. It binds the token digest, final booking request,
+idempotency key and credential scope. Replay checks the ordinary booking idempotency record
+and uses no receipt lookup. The fingerprint shares the immutable snapshot's booking retention.
+
 Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
 publication requests that carry a client `requestId`. A record holds the organization, the
 operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
