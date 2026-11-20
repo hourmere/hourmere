@@ -248,9 +248,6 @@ const schema = z
     SLOT_SNIPPETS_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),
-    WORKFLOWS_ENABLED: optional(
-      z.enum(['true', 'false'], { error: 'WORKFLOWS_ENABLED must be true, false or empty' }),
-    ).transform((value) => value === 'true'),
     FOLLOW_UP_HOST_NOTES_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value !== 'false',
     ),
@@ -286,6 +283,9 @@ const schema = z
     INVITATION_TEAM_MAX_PER_HOUR: emailLimit('INVITATION_TEAM_MAX_PER_HOUR', 50, 1),
     INVITATION_TEAM_MAX_PER_DAY: emailLimit('INVITATION_TEAM_MAX_PER_DAY', 200, 1),
     MAIL_MAX_PER_HOUR: emailLimit('MAIL_MAX_PER_HOUR', 100, 0),
+    WORKFLOWS_ENABLED: optional(
+      z.enum(['true', 'false'], { error: 'WORKFLOWS_ENABLED must be true, false or empty' }),
+    ).transform((value) => value === 'true'),
     WORKFLOW_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_MAIL_MAX_PER_HOUR', 20, 0),
     WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_OWNER_MAIL_MAX_PER_HOUR', 5, 0),
     GOOGLE_CLIENT_ID: optional(z.string()),
