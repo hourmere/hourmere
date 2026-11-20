@@ -3,6 +3,7 @@ import {
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
   type SsoAdmissionRemoval,
+  SsoRecoveryRequiredError,
 } from '@hourmere/auth'
 import { DomainError, leaveTeamMember, MemberDepartureImpactSchema } from '@hourmere/scheduling'
 import { ErrorBody, json, type RouteModule, type ServiceDeps, serviceContext } from '../openapi.ts'
@@ -54,7 +55,7 @@ export function memberLeaveRoutes(
           },
           409: {
             description:
-              'member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner and handling.nextStep (the team must retain at least one owner), or organization_context_changed: reload before retrying',
+              'member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner and handling.nextStep (the team must retain at least one owner), sso_recovery_required (an enforced team must retain a recovery owner), or organization_context_changed: reload before retrying',
             content: json(
               ErrorBody.extend({
                 impact: DepartureImpact.optional(),
@@ -85,6 +86,7 @@ export function memberLeaveRoutes(
           )
           return c.json(result, 200)
         } catch (error) {
+          if (error instanceof SsoRecoveryRequiredError) return c.json({ error: error.code }, 409)
           if (error instanceof MemberDepartureOwnerRequiredError) {
             return c.json(
               { error: error.code, message: error.message, handling: error.handling },

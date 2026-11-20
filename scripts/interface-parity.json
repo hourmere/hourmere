@@ -45,6 +45,22 @@
     "exemption": "browser-session-only",
     "reason": "Retiring a conflicting member identity requires fresh administrator proof."
   },
+  "bindSsoDelegation": {
+    "exemption": "browser-session-only",
+    "reason": "Binding an owned API key or OAuth grant requires fresh interactive SSO proof."
+  },
+  "revokeSsoDelegation": {
+    "exemption": "browser-session-only",
+    "reason": "Withdrawing the caller's delegated SSO proof requires the owning browser session."
+  },
+  "configureSsoRecovery": {
+    "exemption": "browser-session-only",
+    "reason": "Nominating a recovery owner requires fresh interactive owner proof."
+  },
+  "acceptSsoRecoveryEnrollment": {
+    "exemption": "browser-session-only",
+    "reason": "The nominee must independently prove their mailbox and explicitly accept."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "previewWorkflow": { "mcp": "preview_workflow", "cli": "workflows preview" },
   "listWorkflowRuns": { "mcp": "list_workflow_runs", "cli": "workflows runs" },
@@ -59,6 +75,11 @@
   "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "routeLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "routeTeamLead": { "mcp": "route_lead", "cli": "routing-forms route" },
+  "resolveRoutingContinuation": {
+    "mcp": "resolve_routing_continuation",
+    "cli": "routing-forms resolve"
+  },
+  "findRoutedSlots": { "mcp": "find_routed_slots", "cli": "routing-forms slots" },
   "updateWorkflow": { "mcp": "update_workflow", "cli": "workflows update" },
   "createWorkflow": { "mcp": "create_workflow", "cli": "workflows create" },
   "listWebhooks": { "mcp": "list_webhooks", "cli": "webhooks list" },

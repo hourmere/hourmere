@@ -2,10 +2,15 @@ import { createHash } from 'node:crypto'
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   type Auth,
+  liveSsoDelegationSummaries,
+  lockSsoDelegation,
+  lockTeamSsoProof,
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
   mcpOAuthUrls,
   type Principal,
+  ssoHardOff,
+  type TeamSsoCapabilities,
   withMcpOAuthIntent,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
@@ -24,6 +29,9 @@ const prefix = '/api/v1/mcp-oauth'
 const invalid = () => new DomainError('invalid', 'invalid_oauth_request')
 const expired = () => new DomainError('conflict', 'oauth_request_expired')
 const forbidden = () => new DomainError('forbidden', 'oauth_organization_forbidden')
+function ssoRequired(): never {
+  throw new DomainError('forbidden', 'sso_required')
+}
 const stableKeys = [
   'client_id',
   'redirect_uri',
@@ -50,7 +58,12 @@ const Info = z.object({
 })
 const Redirect = z.object({ redirectUrl: z.string() })
 
-type Deps = { auth?: Pick<Auth, 'handler'> | undefined; db: Db; publicUrl: string }
+type Deps = {
+  auth?: Pick<Auth, 'handler'> | undefined
+  db: Db
+  publicUrl: string
+  ssoCapabilities?: TeamSsoCapabilities
+}
 type Session = Extract<Principal, { kind: 'session' }>
 function session(principal: Principal): Session {
   if (principal.kind !== 'session') throw new DomainError('forbidden', 'session_required')
@@ -74,7 +87,7 @@ async function recordConsent(db: Db, clientId: string) {
     .execute()
 }
 
-export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
+export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardOff }: Deps) {
   const origin = new URL(publicUrl).origin
   const { resource } = mcpOAuthUrls(publicUrl)
   async function native(path: string, body: object, headers: Headers, clientIp?: string) {
@@ -140,7 +153,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
           : clientId.slice(0, 200),
     }
   }
-  async function organizations(client: Db, p: Session) {
+  function organizations(client: Db, p: Session) {
     return client
       .selectFrom('auth.member as m')
       .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
@@ -149,7 +162,45 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       .where('m.userId', '=', p.user.id)
       .where('u.emailVerified', '=', true)
       .orderBy('o.name')
-      .execute()
+  }
+  async function organization(client: Db, p: Session, organizationId: string) {
+    const row = await organizations(client, p)
+      .leftJoin('sso_policies as policy', 'policy.organization_id', 'o.id')
+      .select('policy.require_sso')
+      .where('o.id', '=', organizationId)
+      .executeTakeFirst()
+    if (row?.id !== organizationId) throw forbidden()
+    return row
+  }
+  async function approvalProof(trx: Db, p: Session, organizationId: string) {
+    // Authority writers lock the team before changing its provider and policy.
+    await trx
+      .selectFrom('auth.organization')
+      .select('id')
+      .where('id', '=', organizationId)
+      .forShare()
+      .executeTakeFirst()
+    return lockTeamSsoProof(
+      { capabilities: ssoCapabilities },
+      trx,
+      { sessionId: p.sessionId, userId: p.user.id },
+      organizationId,
+      ssoRequired,
+    )
+  }
+  async function hasDelegation(trx: Db, p: Session, organizationId: string, credentialId: string) {
+    try {
+      await lockSsoDelegation(
+        trx,
+        ssoCapabilities,
+        { organizationId, userId: p.user.id, kind: 'oauth_grant', credentialId },
+        ssoRequired,
+      )
+      return true
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'sso_required') return false
+      throw error
+    }
   }
   async function current(client: Db, p: Session) {
     const row = await client
@@ -179,8 +230,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       throw expired()
     await lock(trx, p.user.id, row.organization_id, q.get('client_id') as string)
     await current(trx, p)
-    const orgs = await organizations(trx, p)
-    if (!orgs.some((o) => o.id === row.organization_id)) throw forbidden()
+    const selected = await organization(trx, p, row.organization_id)
     const grant = await trx
       .selectFrom('mcp_oauth_grants')
       .select('id')
@@ -190,7 +240,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       .where('client_id', '=', q.get('client_id') as string)
       .executeTakeFirst()
     if (!grant) throw expired()
-    return row
+    return { ...row, hasPolicy: selected.require_sso !== null }
   }
   function redirect(value: Record<string, unknown>, intentId: string) {
     const raw = value.url ?? value.redirect_uri
@@ -211,7 +261,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       const p = session(principal),
         v = await validated(oauthQuery, headers, clientIp)
       await current(db, p)
-      const orgs = await organizations(db, p)
+      const orgs = await organizations(db, p).execute()
       const selected = intentId
         ? await db.transaction().execute(async (trx) => {
             const row = await bound(trx, p, intentId, v.q)
@@ -236,10 +286,12 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
     ) {
       const p = session(principal),
         v = await validated(oauthQuery, headers, clientIp)
-      return db.transaction().execute(async (trx) => {
+      const outcome = await db.transaction().execute(async (trx) => {
         await lock(trx, p.user.id, organizationId, v.clientId)
         await current(trx, p)
-        if (!(await organizations(trx, p)).some((o) => o.id === organizationId)) throw forbidden()
+        const selected = await organization(trx, p, organizationId)
+        const ssoProof =
+          selected.require_sso === null ? undefined : await approvalProof(trx, p, organizationId)
         const previous = await trx
           .selectFrom('mcp_oauth_grants as g')
           .innerJoin('auth.oauthConsent as c', (j) =>
@@ -304,6 +356,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
         )
         const result = redirect(nativeResult.value, intent.id)
         if (!result.consent) {
+          if (ssoProof && !(await hasDelegation(trx, p, organizationId, grant.id))) return null
           await trx
             .updateTable('mcp_oauth_intents')
             .set({ used_at: new Date() })
@@ -313,6 +366,8 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
         }
         return { redirectUrl: result.redirectUrl, cookies: nativeResult.cookies }
       })
+      if (!outcome) ssoRequired()
+      return outcome
     },
     async consent(
       principal: Principal,
@@ -324,8 +379,10 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
     ) {
       const p = session(principal),
         v = await validated(oauthQuery, headers, clientIp)
-      return db.transaction().execute(async (trx) => {
+      const outcome = await db.transaction().execute(async (trx) => {
         const row = await bound(trx, p, intentId, v.q)
+        const ssoProof =
+          accept && row.hasPolicy ? await approvalProof(trx, p, row.organization_id) : undefined
         const nativeResult = await withMcpOAuthIntent(
           {
             id: intentId,
@@ -339,6 +396,10 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
         )
         const result = redirect(nativeResult.value, intentId)
         if (result.consent) throw invalid()
+        // An approved consent must exist before the user can bind its grant. Keep this
+        // signed intent open, and withhold the code until the same approval is retried.
+        if (ssoProof && !(await hasDelegation(trx, p, row.organization_id, row.grant_id)))
+          return null
         await trx
           .updateTable('mcp_oauth_intents')
           .set({ used_at: new Date() })
@@ -347,6 +408,8 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
         if (accept) await recordConsent(trx, v.clientId)
         return { redirectUrl: result.redirectUrl, cookies: nativeResult.cookies }
       })
+      if (!outcome) ssoRequired()
+      return outcome
     },
     async list(principal: Principal) {
       const p = session(principal)
@@ -367,14 +430,36 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
         .where('g.user_id', '=', p.user.id)
         .whereRef('c.userId', '=', 'g.user_id')
         .whereRef('c.clientId', '=', 'g.client_id')
+        .$if(ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled, (query) =>
+          query.select(
+            sql<string | null>`CASE WHEN EXISTS (
+              SELECT FROM auth.member m
+              WHERE m."userId" = g.user_id AND m."organizationId" = g.organization_id
+            ) AND NOT EXISTS (
+              SELECT FROM personal_organizations po WHERE po.organization_id = g.organization_id
+            ) THEN g.id END`.as('credentialId'),
+          ),
+        )
         .orderBy('c.createdAt', 'desc')
         .execute()
+      const summaries = await liveSsoDelegationSummaries(
+        db,
+        ssoCapabilities,
+        p.user.id,
+        'oauth_grant',
+        rows.flatMap((r) => (r.credentialId ? [r.credentialId] : [])),
+      )
       return {
-        data: rows.map((r) => ({
-          ...r,
-          clientName: r.clientName?.slice(0, 200) ?? r.clientId.slice(0, 200),
-          createdAt: new Date(r.createdAt).toISOString(),
-        })),
+        data: rows.map(({ credentialId, ...r }) => {
+          const ssoDelegation = credentialId ? summaries.get(credentialId) : undefined
+          return {
+            ...r,
+            clientName: r.clientName?.slice(0, 200) ?? r.clientId.slice(0, 200),
+            createdAt: new Date(r.createdAt).toISOString(),
+            ...(credentialId ? { credentialId } : {}),
+            ...(ssoDelegation ? { ssoDelegation } : {}),
+          }
+        }),
       }
     },
     async revoke(principal: Principal, id: string) {
@@ -435,11 +520,13 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
       MiddlewareHandler<CallerEnv>,
     ] = [caller, onlySession, limit]
     const common = { tags: ['MCP OAuth'], security: [{ session: [] }], middleware }
-    const responses = (schema: z.ZodType) => ({
+    const responses = (schema: z.ZodType, approvesTeamConsent = false) => ({
       200: { description: 'MCP connection result', content: json(schema) },
       ...errorResponses({
         400: 'invalid_oauth_request',
-        403: 'session_required or oauth_organization_forbidden',
+        403: approvesTeamConsent
+          ? 'session_required, oauth_organization_forbidden or sso_required'
+          : 'session_required or oauth_organization_forbidden',
         409: 'oauth_request_expired',
       }),
     })
@@ -477,7 +564,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
         request: {
           body: { required: true, content: json(Input.extend({ organizationId: z.uuid() })) },
         },
-        responses: responses(Redirect),
+        responses: responses(Redirect, true),
       }),
       async (c) => {
         const b = c.req.valid('json')
@@ -501,7 +588,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
         request: {
           body: { required: true, content: json(IntentInput.extend({ accept: z.boolean() })) },
         },
-        responses: responses(Redirect),
+        responses: responses(Redirect, true),
       }),
       async (c) => {
         const b = c.req.valid('json')
@@ -531,6 +618,8 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
                 clientId: z.string(),
                 organizationName: z.string(),
                 createdAt: z.iso.datetime(),
+                credentialId: z.uuid().optional(),
+                ssoDelegation: z.object({ id: z.uuid(), expiresAt: z.iso.datetime() }).optional(),
               }),
             ),
           }),

@@ -10,7 +10,7 @@ import { organization } from 'better-auth/plugins/organization'
 import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-providers'
 import pg from 'pg'
 import { parse } from 'pg-connection-string'
-import { API_KEY_RATE_LIMIT } from './api-keys.ts'
+import { API_KEY_RATE_LIMIT, apiKeyDelegationSummaries } from './api-keys.ts'
 import { authAuditRecords } from './audit.ts'
 import { AUTH_SESSION_LIFETIME_SECONDS } from './browser-session.ts'
 import type { Principal } from './caller.ts'
@@ -97,6 +97,7 @@ export {
   type BoundMcpOAuthIntent,
   createMcpOAuthResolver,
   hasMcpOAuthIntent,
+  MCP_OAUTH_CONSENT_LIFETIME_MS,
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
   mcpOAuthUrls,
@@ -121,6 +122,15 @@ export {
   recordSsoAdmissionRemoval,
   type SsoAdmissionRemoval,
 } from './sso-admission-blocks.ts'
+export {
+  lockSsoDelegation,
+  type SsoDelegationStatus,
+  ssoDelegationStatus,
+} from './sso-delegation-access.ts'
+export {
+  liveSsoDelegationSummaries,
+  type SsoDelegationSummary,
+} from './sso-delegation-summaries.ts'
 export {
   checkTeamManagementAccess,
   checkTeamManagementMembership,
@@ -510,7 +520,7 @@ export function createAuth({
           // providerId to credential; Hourmere does not enable password authentication.
         },
       },
-      ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
+      ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher, ssoCapabilities) : []),
       authAuditRecords(),
       organizationOperationRecords(),
       {
@@ -542,6 +552,9 @@ export function createAuth({
         enableMetadata: true,
         rateLimit: { enabled: true, ...API_KEY_RATE_LIMIT },
       }),
+      ...(ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled
+        ? [apiKeyDelegationSummaries(db, ssoCapabilities)]
+        : []),
       magicLink({
         expiresIn: MAGIC_LINK_MINUTES * 60,
         // Only a hash is stored, so a database leak does not expose usable links.
@@ -608,7 +621,11 @@ export {
   type ScimTokenActor,
   ScimTokenError,
 } from './scim-tokens.ts'
-
+export {
+  advanceSsoRecoveryRevision,
+  removeSsoRecoveryOwner,
+  SsoRecoveryRequiredError,
+} from './sso-recovery-membership.ts'
 export {
   liveBrowserProofQuery,
   lockSharedTeamSsoProof,

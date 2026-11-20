@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
-import { APIError, type createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
+import type { BetterAuthPlugin } from 'better-auth'
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
 import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from './api-key-errors.ts'
 import {
@@ -9,6 +10,8 @@ import {
 } from './api-key-metadata.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { ensurePersonalOrganization, isMember, isUuid } from './organizations.ts'
+import { liveSsoDelegationSummaries } from './sso-delegation-summaries.ts'
+import type { TeamSsoCapabilities } from './team-sso.ts'
 
 /**
  * Per-key limit written into each new key. A safety net against runaway agents, not the
@@ -101,6 +104,41 @@ export function apiKeyCredentialBoundary(ctx: AuthMiddlewareContext) {
       message: 'API key management requires a browser session without Authorization',
     })
   }
+}
+
+/** Add a summary only after the native inventory checked session, ownership and paging. */
+export function apiKeyDelegationSummaries(db: Db, capabilities: TeamSsoCapabilities) {
+  return {
+    id: 'api-key-delegation-summaries',
+    hooks: {
+      after: [
+        {
+          matcher: (ctx) => ctx.path === '/api-key/list',
+          handler: createAuthMiddleware(async (ctx) => {
+            const returned = ctx.context.returned as { apiKeys?: { id: string }[] } | undefined
+            if (!Array.isArray(returned?.apiKeys) || returned.apiKeys.length === 0) return
+            const session = await getSessionFromCtx(ctx)
+            if (!session || !isUuid(session.user.id)) return
+            const summaries = await liveSsoDelegationSummaries(
+              db,
+              capabilities,
+              session.user.id,
+              'api_key',
+              returned.apiKeys.map((key) => key.id),
+            )
+            if (!summaries.size) return
+            return ctx.json({
+              ...returned,
+              apiKeys: returned.apiKeys.map((key) => {
+                const ssoDelegation = summaries.get(key.id)
+                return ssoDelegation ? { ...key, ssoDelegation } : key
+              }),
+            })
+          }),
+        },
+      ],
+    },
+  } satisfies BetterAuthPlugin
 }
 
 /**

@@ -5,6 +5,7 @@ import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { type SsoProviderRevision, ssoProviderConfigurationAad } from './sso-configuration.ts'
+import { BIND_SSO_DELEGATION } from './sso-delegation-proof.ts'
 import { browserBindingDigest, MAILBOX_PROOF_LIMITS, sha256 } from './sso-mailbox-proof.ts'
 import { authenticationAttemptLifetime, oidcClockSkew } from './sso-oidc-limits.ts'
 
@@ -84,7 +85,7 @@ const operations = {
 // and authenticated state distinguish step-up from every self-linking path.
 const storedKind = (kind: Ceremony['kind']) => (kind === 'step_up' ? 'link' : kind)
 
-/** A canonical, same-origin destination under /app, or undefined for unsafe input. */
+/** Canonical same-origin application and OAuth authorization destinations. */
 export function oidcReturnDestination(raw: string): string | undefined {
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.length > maxReturnPathLength)
     return undefined
@@ -92,9 +93,16 @@ export function oidcReturnDestination(raw: string): string | undefined {
   if (/[\u0000- \u007f-\u009f\\]/.test(raw) || !raw.isWellFormed()) return undefined
   const url = new URL(raw, appOrigin)
   const path = url.pathname + url.search + url.hash
+  // Only the organization selection page can resume after signing in to a new session.
+  // The OAuth broker validates the signed query before it allows the request to continue.
+  const oauth =
+    url.pathname === '/oauth/authorize' &&
+    url.searchParams.has('sig') &&
+    url.searchParams.has('exp') &&
+    !url.hash
   if (
     url.origin !== appOrigin ||
-    !(url.pathname === '/app' || url.pathname.startsWith('/app/')) ||
+    !(url.pathname === '/app' || url.pathname.startsWith('/app/') || oauth) ||
     /%2f|%5c/i.test(url.pathname) ||
     path.length > maxReturnPathLength
   )
@@ -217,7 +225,7 @@ async function lockOidcStepUpTarget(
   if (!session) throw refused()
   const attempt = await trx
     .selectFrom('sso_attempts')
-    .select(['id', 'created_at', 'expires_at', 'mailbox'])
+    .select(['id', 'created_at', 'expires_at', 'mailbox', 'operation'])
     .where('id', '=', attemptId)
     .where('kind', '=', 'fresh_proof')
     .where('organization_id', '=', provider.organizationId)
@@ -232,9 +240,8 @@ async function lockOidcStepUpTarget(
   if (!attempt) throw refused()
   const policy = await trx
     .selectFrom('sso_policies')
-    .select('trust_generation')
+    .select(['trust_generation', 'require_sso'])
     .where('organization_id', '=', provider.organizationId)
-    .where('require_sso', '=', true)
     .forShare()
     .executeTakeFirst()
   const link = await trx
@@ -253,7 +260,13 @@ async function lockOidcStepUpTarget(
   const { now } = await trx
     .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
     .executeTakeFirstOrThrow()
-  if (!policy || !link || session.expiresAt <= now || attempt.expires_at <= now) throw refused()
+  if (
+    (!policy?.require_sso && attempt.operation !== BIND_SSO_DELEGATION) ||
+    !link ||
+    session.expiresAt <= now ||
+    attempt.expires_at <= now
+  )
+    throw refused()
   return {
     attempt,
     link,
@@ -264,7 +277,7 @@ async function lockOidcStepUpTarget(
       attemptId: attempt.id,
       linkId: link.id,
       linkGeneration: link.generation,
-      trustGeneration: policy.trust_generation,
+      trustGeneration: policy?.trust_generation ?? 1,
     },
   }
 }
@@ -286,7 +299,12 @@ export async function recordOidcStepUp(
   provider: OriginatingBrowser,
   stepUp: BoundStepUp,
   ceremonyCreatedAt: Date,
-  identity: { issuer: string; subject: string; authTime: number | undefined },
+  identity: {
+    issuer: string
+    subject: string
+    authTime: number | undefined
+    sessionDeadline?: Date | undefined
+  },
 ) {
   return db.transaction().execute(async (trx) => {
     const { attempt, binding, issuer, link, mailbox, now } = await lockBoundStepUp(
@@ -301,12 +319,18 @@ export async function recordOidcStepUp(
     const authTime = identity.authTime === undefined ? undefined : identity.authTime * 1000
     const needsMailbox = authTime === undefined
     if (
+      identity.sessionDeadline &&
+      identity.sessionDeadline <= now &&
+      attempt.operation === BIND_SSO_DELEGATION
+    )
+      return { failure: 'timing_invalid' } as const
+    if (
       authTime !== undefined &&
       (authTime < Math.max(attempt.created_at.getTime(), ceremonyCreatedAt.getTime()) - skew ||
         authTime > now.getTime() + skew ||
         authTime + lifetime <= now.getTime())
     )
-      return 'authentication_stale' as const
+      return { failure: 'authentication_stale' } as const
     if (needsMailbox && attempt.mailbox !== mailbox) throw refused()
 
     // A missing claim proves identity only. Receipt time bounds that identity result
@@ -326,6 +350,16 @@ export async function recordOidcStepUp(
       })
       .where('id', '=', attempt.id)
       .execute()
+    return {
+      delegation:
+        attempt.operation === BIND_SSO_DELEGATION
+          ? {
+              attemptId: attempt.id,
+              linkGeneration: binding.linkGeneration,
+              expiresAt: new Date(expiresAt),
+            }
+          : undefined,
+    }
   })
 }
 

@@ -10,6 +10,7 @@ import {
   createMcpOAuthResolver,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
+  SsoRecoveryRequiredError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -57,6 +58,7 @@ function routeCopy(
     z,
     MemberDepartureBlockedError,
     MemberDepartureOwnerRequiredError,
+    SsoRecoveryRequiredError,
     leaveTeamMember,
     DomainError,
     MemberDepartureImpactSchema,

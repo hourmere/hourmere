@@ -1,5 +1,5 @@
-// Routing configuration, public metadata and submission interfaces are present by name.
-// Production remains hard-off. Continuation and UI surfaces are reserved. Runtime refusal is tested by the
+// Routing configuration, public form and continuation read interfaces are present by name.
+// Production remains hard-off. Booking and UI surfaces are reserved. Runtime refusal is tested by the
 // routing adapter tests. This inventory still examines production assembly and all source
 // paths, without snapshots or a git baseline. The web keeps its separate Off inventory.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -93,6 +93,16 @@ const SHIPPED_OPERATIONS = [
     path: '/api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     operationId: 'routeTeamLead',
   },
+  {
+    method: 'post',
+    path: '/api/v1/routing-continuations/resolve',
+    operationId: 'resolveRoutingContinuation',
+  },
+  {
+    method: 'post',
+    path: '/api/v1/routing-continuations/slots',
+    operationId: 'findRoutedSlots',
+  },
 ]
 const SHIPPED_PATHS = [...new Set(SHIPPED_OPERATIONS.map(({ path }) => path))]
 const SHIPPED_COMMANDS = {
@@ -105,6 +115,8 @@ const SHIPPED_COMMANDS = {
   'routing-forms preview': 'preview_routing_form',
   'routing-forms public': 'get_public_routing_form',
   'routing-forms route': 'route_lead',
+  'routing-forms resolve': 'resolve_routing_continuation',
+  'routing-forms slots': 'find_routed_slots',
 }
 // Explicit component names keep future public schemas visible to this test.
 const SHIPPED_SCHEMAS = [
@@ -121,6 +133,10 @@ const SHIPPED_SCHEMAS = [
   'PublicRoutingForm',
   'RoutingSubmission',
   'RoutingSubmissionResponse',
+  'RoutingContinuationInput',
+  'RoutingContinuationSlotsInput',
+  'RoutingContinuation',
+  'RoutingContinuationSlots',
 ]
 const SHIPPED_TAGS = ['Routing forms']
 
@@ -142,10 +158,11 @@ const LIFECYCLE = [
   'packages/scheduling/src/routing-form-targets.ts',
   'packages/scheduling/src/routing-form-config.ts',
 ]
-// The only service code that names the routing tables: a4's lifecycle storage and a3's
-// configuration services.
-const STORAGE_SERVICES = ['packages/db/src/routing-lifecycle.ts', ...CONFIGURATION_SERVICES]
-const SHARED_SERVICES = CONFIGURATION_SERVICES
+// Shared configuration, continuation and internal booking services name the routing tables.
+const CONTINUATION_SERVICE = 'packages/scheduling/src/routing-continuation.ts'
+const ROUTED_BOOKING_SERVICE = 'packages/scheduling/src/routing-booking.ts'
+const SHARED_SERVICES = [...CONFIGURATION_SERVICES, CONTINUATION_SERVICE, ROUTED_BOOKING_SERVICE]
+const STORAGE_SERVICES = ['packages/db/src/routing-lifecycle.ts', ...SHARED_SERVICES]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -655,7 +672,12 @@ describe('routing forms remain hard-off with configuration and public metadata i
           ? isRoutingName(property ?? '')
           : isRoutingName(name)
       }),
-    ).toEqual([INSTANCE_CAPABILITY, 'RoutingSubmissionResponse.routeToken'])
+    ).toEqual([
+      INSTANCE_CAPABILITY,
+      'RoutingSubmissionResponse.routeToken',
+      'RoutingContinuationInput.routeToken',
+      'RoutingContinuationSlotsInput.routeToken',
+    ])
   })
 
   it('registers exactly the configuration routes in production with every optional group on', async () => {
@@ -813,6 +835,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
       [
         ...SHIPPED_PATHS,
         '/api/v1/public/-/routing',
+        '/api/v1/routing-continuations',
         '/route/:handle/:slug',
         '/route/team/:teamSlug/:slug',
         '/route/continue',
@@ -1018,7 +1041,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
       expect(names).not.toContain(command)
   })
 
-  it('loads the configuration service and existing lifecycle through production entry points', () => {
+  it('loads the shared services and lifecycle through production entry points', () => {
     for (const file of SHARED_SERVICES) expect(existsSync(new URL(file, root)), file).toBe(true)
     const reached = runtimeGraph(ENTRY_POINTS)
     // Their own dependencies are loaded, so the graph does reach the package.
@@ -1042,7 +1065,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file))
       .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
-    // The lifecycle storage and the configuration services name the tables (so the matcher
+    // The lifecycle storage and shared services name the tables (so the matcher
     // sees them), and no other source does; which of them production loads is asserted above.
     expect([...referencing].sort()).toEqual([...STORAGE_SERVICES].sort())
   })

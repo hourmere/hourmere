@@ -3,6 +3,7 @@ import {
   MemberDepartureOwnerRequiredError,
   removeTeamMember,
   type SsoAdmissionRemoval,
+  SsoRecoveryRequiredError,
   TeamManagementError,
 } from '@hourmere/auth'
 import {
@@ -140,6 +141,7 @@ export function memberRemovalRoutes(
           )
           return c.json(result, 200)
         } catch (error) {
+          if (error instanceof SsoRecoveryRequiredError) return c.json({ error: error.code }, 409)
           if (error instanceof MemberDepartureOwnerRequiredError) {
             return c.json(
               { error: error.code, message: error.message, handling: error.handling },

@@ -29,6 +29,25 @@ const receipt = {
   continuationUrl,
   expiresAt: '2026-11-19T10:30:00Z',
 }
+const range = { start: '2026-11-20T10:00:00Z', end: '2026-11-20T11:00:00Z' }
+const continuationCommands = [
+  [
+    'resolve',
+    'resolve_routing_continuation',
+    { routeToken },
+    {
+      eventType: { title: 'Intro', durationMinutes: 30 },
+      prefill: {},
+      expiresAt: receipt.expiresAt,
+    },
+  ],
+  [
+    'slots',
+    'find_routed_slots',
+    { routeToken, ...range, durationMinutes: 30, locationOptionId: id },
+    { slots: [{ start: range.start, end: '2026-11-20T10:30:00Z' }] },
+  ],
+] as const
 
 async function run(
   command: string,
@@ -263,12 +282,79 @@ describe('routing form CLI commands', () => {
     expect(result.fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('advertises the configuration, metadata and submission commands', () => {
+  it.each(continuationCommands)(
+    'dispatches %s with the capability and redacts it from stdout, files and errors',
+    async (command, tool, input, result) => {
+      const echoed = { ...result, diagnostic: { [routeToken]: `Echoed ${routeToken}` } }
+      const redacted = { ...result, diagnostic: { '[redacted]': 'Echoed [redacted]' } }
+      const reply = { structuredContent: echoed }
+      const stdout = await run(command, false, reply, '-', input)
+      expect(stdout.code).toBe(0)
+      expect(stdout.stderr).toBe('')
+      expect(JSON.parse(stdout.stdout)).toEqual(redacted)
+      expect(stdout.fetcher).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(String(stdout.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+        name: tool,
+        arguments: input,
+      })
+
+      const dir = await mkdtemp(join(tmpdir(), 'hourmere-cli-continuation-'))
+      const inputPath = join(dir, 'input.json')
+      const outputPath = join(dir, 'output.json')
+      try {
+        await writeFile(inputPath, JSON.stringify(input), { mode: 0o600 })
+        const file = await run(command, false, reply, inputPath, input, ['--output', outputPath])
+        expect(file.code).toBe(0)
+        expect(file.stderr).toBe('')
+        expect(JSON.parse(file.stdout)).toEqual({ outputWritten: true })
+        expect((await stat(outputPath)).mode & 0o777).toBe(0o600)
+        expect(JSON.parse(await readFile(outputPath, 'utf8'))).toEqual(redacted)
+      } finally {
+        await unlink(outputPath).catch(() => {})
+        await unlink(inputPath).catch(() => {})
+        await rmdir(dir)
+      }
+
+      const error = await run(
+        command,
+        false,
+        {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ error: `echo_${routeToken}` }) }],
+        },
+        '-',
+        input,
+      )
+      expect(error.code).toBe(1)
+      expect(error.stdout).toBe('')
+      expect(JSON.parse(error.stderr)).toEqual({
+        error: 'echo_[redacted]',
+        outcomeMayBeUnknown: true,
+      })
+    },
+  )
+
+  it.each(continuationCommands)(
+    'prints the hard-off error for %s',
+    async (command, _tool, input) => {
+      const result = await run(command, true, undefined, '-', input)
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(JSON.parse(result.stderr)).toEqual({
+        error: 'routing_forms_disabled',
+        outcomeMayBeUnknown: true,
+      })
+      expect(result.fetcher).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('advertises the configuration and public routing commands', () => {
     expect(Object.keys(COMMANDS).filter((command) => command.startsWith('routing-forms '))).toEqual(
       [
         ...commands.map(([command]) => `routing-forms ${command}`),
         'routing-forms public',
         'routing-forms route',
+        ...continuationCommands.map(([command]) => `routing-forms ${command}`),
       ],
     )
     expect(HELP).toContain('routing-forms list|get|create|update|archive|publish|preview|public')
@@ -276,5 +362,7 @@ describe('routing form CLI commands', () => {
     expect(HELP).toContain('routing-forms route --input FILE|- [--output FILE]')
     expect(HELP).toContain('Stdout redacts routeToken and continuationUrl')
     expect(HELP).toContain('new 0600 JSON file')
+    expect(HELP).toContain('routing-forms resolve|slots --input FILE|- [--output FILE]')
+    expect(HELP).toContain('The input token is redacted from stdout, output files and errors.')
   })
 })

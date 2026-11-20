@@ -24,6 +24,7 @@ const spec = (action: SsoAuditAction) =>
     required: readonly SsoAuditDetailKey[]
     optional: readonly SsoAuditDetailKey[]
     outcomes?: readonly string[]
+    reasons?: readonly string[]
   }
 const ssoKeys: SsoAuditDetailKey[] = [
   'method',
@@ -104,7 +105,8 @@ describe('SSO audit details: database check bound to the catalogue', () => {
         const reasons = inList(branch.text, 'reason')
         const outcomes = inList(branch.text, 'outcome')
         if (key === 'method') expect(methods).toEqual(present ? [[...SSO_AUDIT_METHODS]] : [])
-        if (key === 'reason') expect(reasons).toEqual(present ? [[...SSO_AUDIT_REASONS]] : [])
+        if (key === 'reason')
+          expect(reasons).toEqual(present ? [[...(spec(action).reasons ?? SSO_AUDIT_REASONS)]] : [])
         if (key === 'outcome')
           expect(outcomes).toEqual(present ? [[...(spec(action).outcomes ?? [])]] : [])
         if (key === 'providerId' || key === 'correlationId')
@@ -145,7 +147,7 @@ describe.skipIf(!serverUrl)('SSO audit details: database verdicts follow the cat
       providerId: [ssoAuditTestId()],
       revision: [1, SSO_AUDIT_MAX_REVISION],
       outcome: [...(spec(action).outcomes ?? [])],
-      reason: [...SSO_AUDIT_REASONS],
+      reason: [...(spec(action).reasons ?? SSO_AUDIT_REASONS)],
       correlationId: [ssoAuditTestId()],
     })[key]
 

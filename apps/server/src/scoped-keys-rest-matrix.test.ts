@@ -22,6 +22,7 @@ import {
   createRoutingForm,
   getScheduleAvailability,
   publishRoutingForm,
+  submitRoutingForm,
   updateRoutingForm,
 } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
@@ -80,6 +81,8 @@ const classes = {
     'POST /api/v1/meeting-polls/{id}/finalize',
     'POST /api/v1/public/-/routing/{handle}/{slug}/route',
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
+    'POST /api/v1/routing-continuations/resolve',
+    'POST /api/v1/routing-continuations/slots',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -188,6 +191,10 @@ const classes = {
     'POST /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
+    'POST /api/v1/team/sso/delegations',
+    'DELETE /api/v1/team/sso/delegations/{bindingId}',
+    'POST /api/v1/team/sso/recovery',
+    'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -274,6 +281,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let fullPrincipal: Principal
     let app: ReturnType<typeof createApp>
     let date: string
+    let routeToken: string
     let sequence = 0
     const keys = new Map<ApiKeyScope, string>()
     const personalKeys = new Map<ApiKeyScope, string>()
@@ -296,7 +304,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
         slug: 'intro',
         hosts: [{ userId: owner.user.id }],
       })
-      await f.eventType(owner.organization.id, owner.user.id, { slug: 'intro' })
+      const personalEvent = await f.eventType(owner.organization.id, owner.user.id, {
+        slug: 'intro',
+      })
       const today = Temporal.Now.plainDateISO('UTC')
       date = today.add({ days: 7 + ((8 - today.dayOfWeek) % 7) }).toString()
       const signup = { mode: 'closed', allowedDomains: [] } as const
@@ -346,7 +356,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
         const form = await createRoutingForm(context, {
           slug: 'scope-matrix',
           title: 'Public routing scope matrix',
-          fallback: { kind: 'message', message: 'Thanks' },
+          fallback: principal.organization.personal
+            ? { kind: 'event', eventTypeId: personalEvent }
+            : { kind: 'message', message: 'Thanks' },
         })
         const publication = await publishRoutingForm(context, form.id, {
           expectedRevision: form.draftRevision,
@@ -355,6 +367,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedRevision: publication.form.draftRevision,
           enabled: true,
         })
+        if (principal.organization.personal) {
+          const outcome = await submitRoutingForm(
+            { db, routingFormsEnabled: true, routingSecret: secret },
+            { formId: form.id, organizationId: principal.organization.id },
+            { versionId: publication.version.id, answers: {} },
+          )
+          if (outcome.kind !== 'continuation') throw Error('Fixture must issue a continuation')
+          routeToken = outcome.routeToken
+        }
       }
       mainWebhook = (
         await createWebhook(
@@ -487,6 +508,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{id}', randomUUID())
           .replaceAll('{providerId}', randomUUID())
           .replaceAll('{linkId}', randomUUID())
+          .replaceAll('{bindingId}', randomUUID())
+          .replaceAll('{enrollmentId}', randomUUID())
           .replaceAll('{invitationId}', randomUUID())
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
@@ -649,6 +672,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }
           expectedStatus = 201
         }
+      } else if (template.startsWith('/api/v1/routing-continuations/')) {
+        payload = { routeToken, ...(template.endsWith('/slots') && { start, end }) }
       } else if (template.startsWith('/api/v1/public/-/routing/')) {
         path = path
           .replace('{handle}', 'rest-scoped-host')
@@ -994,14 +1019,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 179-operation contract and all 537 scope combinations', () => {
+    it('covers the exact 185-operation contract and all 555 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(179)
-      expect(new Set(ids).size).toBe(179)
+      expect(ids).toHaveLength(185)
+      expect(new Set(ids).size).toBe(185)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(537)
+      expect(cases).toHaveLength(555)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

@@ -575,4 +575,7 @@ export const common = {
   Continue: 'Continuar',
   'Thank you': 'Gracias',
   Optional: 'Opcional',
+  // MCP OAuth SSO delegation
+  'Complete team SSO before trying again. If you already approved the connection, bind its SSO delegation to continue.':
+    'Complete primero el SSO del equipo y vuelva a intentarlo. Si ya aprobó la conexión, vincule su delegación de SSO para continuar.',
 } as const

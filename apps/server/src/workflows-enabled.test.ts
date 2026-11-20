@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Database, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   createFixtures,
@@ -16,6 +16,7 @@ import {
   type TestUser,
 } from '@hourmere/scheduling/testing'
 import { WEBHOOK_EVENTS } from '@hourmere/webhooks'
+import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   validateWorkflowDefinition,
@@ -173,21 +174,44 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     await define('foreign', outsider.principal.organization.id, outsider.id)
     await define('team', team.id, null)
     await define('otherTeam', other.id, null)
-    app = createApp({
+    app = build(db)
+  })
+
+  /** The workflow transports over `routesDb`, with the team SSO read gate when `ssoDb` is set. */
+  function build(routesDb: Db, ssoDb?: Db) {
+    return createApp({
       publicUrl: URL,
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller,
       routes: [
-        workflowRoutes({ db, workflowRunCursorSecret, audit: { record: async () => {} } }),
+        workflowRoutes({
+          db: routesDb,
+          workflowRunCursorSecret,
+          audit: { record: async () => {} },
+        }),
         instanceRoutes({ publicUrl: URL, socialProviders: {} }),
-        webhookRoutes({ db, enabled: true, encryptionKey: Buffer.alloc(32, 4).toString('base64') }),
+        webhookRoutes({
+          db: routesDb,
+          enabled: true,
+          encryptionKey: Buffer.alloc(32, 4).toString('base64'),
+        }),
       ],
       mcp: mcpEndpoint({
-        tools: workflowTools({ db, workflowRunCursorSecret, audit: { record: async () => {} } }),
+        tools: workflowTools({
+          db: routesDb,
+          workflowRunCursorSecret,
+          audit: { record: async () => {} },
+        }),
+      }),
+      ...(ssoDb && {
+        ssoTeamReads: {
+          db: ssoDb,
+          capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false },
+        },
       }),
     })
-  })
+  }
   afterAll(async () => {
     await owned?.drop()
   })
@@ -462,6 +486,98 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
           .executeTakeFirst(),
       ).toEqual({ id: before.enrollment_id })
     }
+  })
+
+  it('refuses team run history without a current SSO proof on REST and MCP, with one policy lookup', async () => {
+    const statements: string[] = []
+    const logged = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
+    const policyStatements = () =>
+      statements.filter((statement) =>
+        /\b(?:from|join)\s+(?:"?public"?\.)?"?sso_policies\b/i.test(statement),
+      )
+    const legacy = build(logged)
+    const gated = build(logged, logged)
+    const enforced = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    await define('enforcedTeam', enforced.id, null)
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: enforced.id, require_sso: true })
+      .execute()
+    const call = (target: typeof app, token: string, id: string) =>
+      target.request('/mcp', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'list_workflow_runs', arguments: { id } },
+        }),
+      })
+    const result = async (response: Response) => {
+      const text = await response.text()
+      const data = text.split('\n').find((line) => line.startsWith('data: '))
+      return JSON.parse(data ? data.slice(6) : text).result
+    }
+
+    // An enforced team without a fresh proof gets the stable refusal on both transports.
+    const enforcedToken = bearer(owner, 'read', enforced)
+    statements.length = 0
+    const refused = await gated.request(runPath(workflow.enforcedTeam as string), {
+      headers: { authorization: `Bearer ${enforcedToken}` },
+    })
+    expect(refused.status).toBe(403)
+    expect(refused.headers.get('location')).toBeNull()
+    expect(await refused.json()).toEqual({ error: 'sso_required' })
+    expect(policyStatements()).toHaveLength(1)
+    expect(statements.some((statement) => statement.includes('workflow_'))).toBe(false)
+    statements.length = 0
+    expect(
+      toolError(await result(await call(gated, enforcedToken, workflow.enforcedTeam as string))),
+    ).toEqual({ error: 'sso_required' })
+    expect(policyStatements()).toHaveLength(1)
+    expect(statements.some((statement) => statement.includes('workflow_'))).toBe(false)
+
+    // A team without a policy answers as before, adding only the one policy lookup.
+    const plainToken = bearer(owner, 'read', team)
+    for (const send of [
+      (target: typeof app) =>
+        target.request(runPath(workflow.team as string), {
+          headers: { authorization: `Bearer ${plainToken}` },
+        }),
+      (target: typeof app) => call(target, plainToken, workflow.team as string),
+    ]) {
+      statements.length = 0
+      const before = await (await send(legacy)).text()
+      const legacyStatements = [...statements]
+      statements.length = 0
+      const after = await (await send(gated)).text()
+      expect(policyStatements()).toHaveLength(1)
+      expect(statements.filter((statement) => !policyStatements().includes(statement))).toEqual(
+        legacyStatements,
+      )
+      // Sealed cursors carry a fresh nonce; everything else is byte-identical.
+      const sealed = (text: string) => text.replace(/"nextCursor":"[^"]*"/g, '"nextCursor":"…"')
+      expect(sealed(after)).toBe(sealed(before))
+      expect(after).toContain('"data":')
+    }
+
+    // Personal history needs no policy lookup.
+    statements.length = 0
+    const personal = await gated.request(runPath(workflow.personal as string), {
+      headers: { authorization: `Bearer ${bearer(owner, 'read')}` },
+    })
+    expect(personal.status).toBe(200)
+    expect(policyStatements()).toHaveLength(0)
   })
 
   it('pages history with exact timestamp and run ordering, rejects tampering and conceals foreign workflows', async () => {

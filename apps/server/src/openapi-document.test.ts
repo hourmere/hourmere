@@ -39,6 +39,19 @@ it('attaches the team proof middleware to every private team read in the server 
       privateReads.add(id)
   }
   expect(new Set(teamReadRoutes)).toEqual(privateReads)
+  // Workflow run history is a team read like the other workflow reads.
+  for (const read of [
+    'GET /api/v1/workflows',
+    'GET /api/v1/workflows/:id',
+    'GET /api/v1/workflows/:id/runs',
+  ])
+    expect(teamReadRoutes).toContain(read)
+  // Routing continuations authorize by capability token, not by a team session.
+  for (const route of [
+    'POST /api/v1/routing-continuations/resolve',
+    'POST /api/v1/routing-continuations/slots',
+  ])
+    expect(teamReadRoutes).not.toContain(route)
 })
 
 it('attaches the team proof middleware to every private team write in the server inventory', async () => {
@@ -87,6 +100,9 @@ it('attaches the team proof middleware to every private team write in the server
     // Independent proof is available before a member has a live SSO proof.
     'POST /api/v1/team/sso/providers/:providerId/link',
     'DELETE /api/v1/team/sso/providers/:providerId/link',
+    'POST /api/v1/team/sso/recovery/:enrollmentId/accept',
+    // A current member may withdraw their delegated authority after browser proof expires.
+    'DELETE /api/v1/team/sso/delegations/:bindingId',
   ])
   const privateWrites = new Set<string>()
   for (const { method, path } of routes) {
@@ -99,6 +115,14 @@ it('attaches the team proof middleware to every private team write in the server
       privateWrites.add(id)
   }
   expect(new Set(teamWriteRoutes)).toEqual(privateWrites)
+  // Routing continuations authorize by capability token, not by a team session.
+  for (const route of [
+    'POST /api/v1/routing-continuations/resolve',
+    'POST /api/v1/routing-continuations/slots',
+  ]) {
+    expect(routes.map(({ method, path }) => `${method} ${path}`)).toContain(route)
+    expect(teamWriteRoutes).not.toContain(route)
+  }
   // A new route must use the guarded transaction in its committing service as well as
   // the request middleware. Keep this list explicit so new writes surface in review.
   expect(privateWrites).toEqual(
@@ -113,6 +137,8 @@ it('attaches the team proof middleware to every private team write in the server
       'PATCH /api/v1/branding',
       'POST /api/v1/branding/logo',
       'PUT /api/v1/audit-log/settings',
+      'POST /api/v1/team/sso/delegations',
+      'POST /api/v1/team/sso/recovery',
       'POST /api/v1/team/sso/domains',
       'POST /api/v1/team/sso/domains/:domainId/verify',
       'DELETE /api/v1/team/sso/domains/:domainId',

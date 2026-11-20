@@ -69,7 +69,7 @@ ALTER TABLE audit_events ADD CONSTRAINT audit_events_details_check CHECK (
     -- Links, sign-ins, replays, JIT admission, delegations and proofs: the protocol and the
     -- provider, and the revision and the attempt when known; never a subject, an email, a token
     -- or an assertion.
-    WHEN action IN ('sso_link.linked','sso_link.unlinked','sso_link.conflicted','sso_authentication.succeeded','sso_authentication.replay_rejected','sso_jit.admitted','sso_delegation.bound','sso_delegation.revoked','sso_proof.revoked') THEN details - ARRAY['method','providerId','revision','correlationId'] = '{}'::jsonb
+    WHEN action IN ('sso_link.linked','sso_link.unlinked','sso_link.conflicted','sso_authentication.succeeded','sso_authentication.replay_rejected','sso_jit.admitted','sso_delegation.bound','sso_proof.revoked') THEN details - ARRAY['method','providerId','revision','correlationId'] = '{}'::jsonb
       AND coalesce(jsonb_typeof(details->'method') = 'string' AND details->>'method' IN ('oidc','saml'), false)
       AND coalesce(jsonb_typeof(details->'providerId') = 'string'
         AND details->>'providerId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', false)
@@ -77,6 +77,17 @@ ALTER TABLE audit_events ADD CONSTRAINT audit_events_details_check CHECK (
         THEN (details->>'revision')::bigint <= 2147483647 ELSE false END)
       AND (NOT details ? 'correlationId' OR coalesce(jsonb_typeof(details->'correlationId') = 'string'
         AND details->>'correlationId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', false))
+    -- A key moving teams invalidates its old binding with a fixed reason code.
+    WHEN action = 'sso_delegation.revoked' THEN details - ARRAY['method','providerId','revision','correlationId','reason'] = '{}'::jsonb
+      AND coalesce(jsonb_typeof(details->'method') = 'string' AND details->>'method' IN ('oidc','saml'), false)
+      AND coalesce(jsonb_typeof(details->'providerId') = 'string'
+        AND details->>'providerId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', false)
+      AND (NOT details ? 'revision' OR CASE WHEN jsonb_typeof(details->'revision') = 'number' AND details->>'revision' ~ '^[1-9][0-9]{0,9}$'
+        THEN (details->>'revision')::bigint <= 2147483647 ELSE false END)
+      AND (NOT details ? 'correlationId' OR coalesce(jsonb_typeof(details->'correlationId') = 'string'
+        AND details->>'correlationId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', false))
+      AND (NOT details ? 'reason' OR coalesce(jsonb_typeof(details->'reason') = 'string'
+        AND details->>'reason' IN ('key_moved_team'), false))
     -- Failed SSO sign-ins and JIT refusals: the same with a listed reason code, never the
     -- provider's error text.
     WHEN action IN ('sso_authentication.failed','sso_jit.refused') THEN details - ARRAY['method','providerId','revision','reason','correlationId'] = '{}'::jsonb

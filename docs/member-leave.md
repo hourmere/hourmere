@@ -35,6 +35,12 @@ The REST refusal is
 Legacy comma-separated roles are trimmed and matched by exact tokens. Another owner
 does not bypass the event and booking impact rules.
 
+A team enforcing SSO must also retain a current recovery owner. Leaving by its last
+recovery owner returns `409 sso_recovery_required`. Recovery status never changes who
+may remove or demote whom. An allowed departure, removal or demotion deletes accepted
+recovery status and records the change in the same transaction. Re-joining or regaining
+the owner role requires a new nomination and acceptance to regain recovery status.
+
 An affected event type (including a disabled one) or a confirmed booking whose end is still
 in the future blocks departure. HTTP 409 has `error: member_departure_blocked`, `message`,
 `impact` and `handling`. `impact` is the existing departure-impact projection, with bounded
