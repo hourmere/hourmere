@@ -577,4 +577,7 @@ export const common = {
   // MCP OAuth SSO delegation
   'Complete team SSO before trying again. If you already approved the connection, bind its SSO delegation to continue.':
     'Conclua primeiro o SSO da equipe e tente novamente. Se você já aprovou a conexão, vincule a delegação de SSO dela para continuar.',
+  // Routing continuation booking
+  'Open the original form to request a new booking link.':
+    'Abra o formulário original para solicitar um novo link de agendamento.',
 } as const

@@ -3,9 +3,10 @@ import { reloadPage } from './browser.ts'
 const RELOAD_KEY = 'hourmere-preload-reloaded'
 
 /** A stale deployment chunk gets one automatic retry for this tab's session. */
-export function installPreloadRecovery() {
+export function installPreloadRecovery(shouldReload = () => true) {
   let reloading = false
   const recover = (event: Event) => {
+    if (!shouldReload()) return
     if (reloading) {
       event.preventDefault()
       return
