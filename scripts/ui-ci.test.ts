@@ -162,7 +162,7 @@ describe('UI measurement CI contract', () => {
     ])
     expect(workflow.jobs['e2e-layout']?.strategy).toEqual({
       'fail-fast': false,
-      matrix: { shard: [1, 2, 3, 4] },
+      matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] },
     })
   })
 
@@ -223,7 +223,7 @@ describe('UI measurement CI contract', () => {
       const suite = id.slice('e2e-'.length)
       const summary = job?.steps.find((step) => step.name === 'Summarize measurements')
       // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
-      const shard = suite === 'layout' ? ' --shard=${{ matrix.shard }}/4' : ''
+      const shard = suite === 'layout' ? ' --shard=${{ matrix.shard }}/8' : ''
       expect(summary?.run).toBe(`node tools/e2e/reports-summary.ts --suite=${suite}${shard}`)
       expect(summary?.if).toBe('always()')
       const browser = job?.steps.find((step) => step.run?.includes('node tools/e2e/run-audit.ts'))
