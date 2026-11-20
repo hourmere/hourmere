@@ -21,6 +21,8 @@ import { sql, type Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
 import type { Auth } from './index.ts'
 import { isUuid } from './organizations.ts'
+import { lockSsoDelegation, ssoDelegationStatus } from './sso-delegation-access.ts'
+import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
 
 export const MCP_OAUTH_SCOPE = 'mcp:tools'
 export const MCP_OAUTH_SCOPES = [MCP_OAUTH_SCOPE, 'offline_access']
@@ -31,6 +33,12 @@ const invalidGrant = () =>
     error: 'invalid_grant',
     error_description: 'Connection expired or revoked',
   })
+const delegationRequired = (): never => {
+  throw new APIError('FORBIDDEN', {
+    error: 'sso_required',
+    error_description: 'This team requires a current SSO delegation.',
+  })
+}
 
 /** Created and checked by the session-authenticated broker; never supplied by a client. */
 export interface BoundMcpOAuthIntent {
@@ -102,16 +110,41 @@ async function touchClient(db: Db, clientId: string) {
     .execute()
 }
 
-async function currentConsent(db: Db, grantId: string, userId: string, clientId?: string) {
+function grantDelegationStatus(capabilities: TeamSsoCapabilities) {
+  return ssoDelegationStatus(
+    sql.ref('grant_row.organization_id'),
+    sql.ref('grant_row.user_id'),
+    'oauth_grant',
+    sql.ref('grant_row.id'),
+    capabilities,
+  ).as('ssoDelegationStatus')
+}
+
+async function currentConsent(
+  db: Db,
+  capabilities: TeamSsoCapabilities,
+  grantId: string,
+  userId: string,
+  clientId?: string,
+) {
   const consent = await db
-    .selectFrom('mcp_oauth_grants as g')
-    .innerJoin('auth.oauthConsent as c', (j) => j.on(sql<boolean>`c."referenceId" = g.id::text`))
-    .select(['g.organization_id', 'g.client_id', 'c.createdAt', 'c.scopes', 'c.resources'])
-    .where('g.id', '=', grantId)
-    .where('g.user_id', '=', userId)
-    .whereRef('c.userId', '=', 'g.user_id')
-    .whereRef('c.clientId', '=', 'g.client_id')
-    .$if(clientId !== undefined, (q) => q.where('g.client_id', '=', clientId as string))
+    .selectFrom('mcp_oauth_grants as grant_row')
+    .innerJoin('auth.oauthConsent as c', (j) =>
+      j.on(sql<boolean>`c."referenceId" = grant_row.id::text`),
+    )
+    .select([
+      'grant_row.organization_id',
+      'grant_row.client_id',
+      'c.createdAt',
+      'c.scopes',
+      'c.resources',
+    ])
+    .select(grantDelegationStatus(capabilities))
+    .where('grant_row.id', '=', grantId)
+    .where('grant_row.user_id', '=', userId)
+    .whereRef('c.userId', '=', 'grant_row.user_id')
+    .whereRef('c.clientId', '=', 'grant_row.client_id')
+    .$if(clientId !== undefined, (q) => q.where('grant_row.client_id', '=', clientId as string))
     .executeTakeFirst()
   if (
     !consent ||
@@ -121,7 +154,37 @@ async function currentConsent(db: Db, grantId: string, userId: string, clientId?
   return consent
 }
 
-function offlineAccessLifecycle(db: Db, resource: string): BetterAuthPlugin {
+async function requireDelegation(
+  db: Db,
+  capabilities: TeamSsoCapabilities,
+  consent: Awaited<ReturnType<typeof currentConsent>>,
+  userId: string,
+  credentialId: string,
+) {
+  if (consent.ssoDelegationStatus === null || consent.ssoDelegationStatus === 'unenforced') return
+  if (consent.ssoDelegationStatus === 'required') delegationRequired()
+  await db.transaction().execute(async (trx) => {
+    // Authority writers lock the team before changing its provider and policy.
+    await trx
+      .selectFrom('auth.organization')
+      .select('id')
+      .where('id', '=', consent.organization_id)
+      .forShare()
+      .executeTakeFirst()
+    await lockSsoDelegation(
+      trx,
+      capabilities,
+      { organizationId: consent.organization_id, userId, kind: 'oauth_grant', credentialId },
+      delegationRequired,
+    )
+  })
+}
+
+function offlineAccessLifecycle(
+  db: Db,
+  resource: string,
+  capabilities: TeamSsoCapabilities,
+): BetterAuthPlugin {
   return {
     id: 'hourmere-mcp-offline-access',
     hooks: {
@@ -141,6 +204,7 @@ function offlineAccessLifecycle(db: Db, resource: string): BetterAuthPlugin {
             if (!refresh.referenceId || !isUuid(refresh.referenceId)) throw invalidGrant()
             const consent = await currentConsent(
               db,
+              capabilities,
               refresh.referenceId,
               refresh.userId,
               refresh.clientId,
@@ -157,6 +221,7 @@ function offlineAccessLifecycle(db: Db, resource: string): BetterAuthPlugin {
               throw invalidGrant()
             // Check even lost-response replay, which bypasses customAccessTokenClaims.
             await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)
+            await requireDelegation(db, capabilities, consent, refresh.userId, refresh.referenceId)
           }),
         },
       ],
@@ -190,6 +255,7 @@ export function mcpOAuthPlugins(
   db: Db,
   baseUrl: string,
   metadataFetcher = fetchClientMetadataResource,
+  capabilities = ssoHardOff,
 ) {
   const { issuer, resource } = mcpOAuthUrls(baseUrl)
   return [
@@ -227,8 +293,7 @@ export function mcpOAuthPlugins(
           return intent.grantId
         },
       },
-      // Runs at the token endpoint (code exchange and refresh), where a grant that no
-      // longer holds is RFC 6749 invalid_grant, never the browser flow's 403.
+      // Runs after provider validation at code exchange and ordinary refresh.
       customAccessTokenClaims: async ({ user, referenceId, scopes }) => {
         if (!user || !referenceId || !isUuid(referenceId)) throw invalidGrant()
         const grant = await db
@@ -239,7 +304,7 @@ export function mcpOAuthPlugins(
           .executeTakeFirst()
         if (!grant) throw invalidGrant()
         await requireMembership(db, user.id, grant.organization_id, invalidGrant)
-        const consent = await currentConsent(db, referenceId, user.id)
+        const consent = await currentConsent(db, capabilities, referenceId, user.id)
         if (
           !Array.isArray(consent.scopes) ||
           !consent.scopes.includes(MCP_OAUTH_SCOPE) ||
@@ -248,6 +313,7 @@ export function mcpOAuthPlugins(
           !consent.resources.includes(resource)
         )
           throw invalidGrant()
+        await requireDelegation(db, capabilities, consent, user.id, referenceId)
         await touchClient(db, consent.client_id)
         return {
           'https://hourmere.com/organization': grant.organization_id,
@@ -256,7 +322,7 @@ export function mcpOAuthPlugins(
       },
     }),
     cimd({ fetchClientMetadataResource: metadataFetcher, metadataProfile: 'mcp-2026-07-28' }),
-    offlineAccessLifecycle(db, resource),
+    offlineAccessLifecycle(db, resource, capabilities),
   ] as const
 }
 
@@ -265,10 +331,12 @@ export function createMcpOAuthResolver({
   auth,
   db,
   publicUrl,
+  ssoCapabilities = ssoHardOff,
 }: {
   auth: Auth
   db: Db
   publicUrl: string
+  ssoCapabilities?: TeamSsoCapabilities
 }) {
   const { issuer, resource } = mcpOAuthUrls(publicUrl)
   return async (
@@ -392,14 +460,18 @@ export function createMcpOAuthResolver({
     }
     if (!scopes.includes(MCP_OAUTH_SCOPE)) return { ok: false, error: 'insufficient_scope' }
     const row = await db
-      .selectFrom('mcp_oauth_grants as g')
-      .innerJoin('auth.oauthConsent as c', (j) => j.on(sql<boolean>`c."referenceId" = g.id::text`))
-      .innerJoin('auth.oauthClient as a', 'a.clientId', 'g.client_id')
-      .innerJoin('auth.member as m', (j) =>
-        j.onRef('m.userId', '=', 'g.user_id').onRef('m.organizationId', '=', 'g.organization_id'),
+      .selectFrom('mcp_oauth_grants as grant_row')
+      .innerJoin('auth.oauthConsent as c', (j) =>
+        j.on(sql<boolean>`c."referenceId" = grant_row.id::text`),
       )
-      .innerJoin('auth.user as u', 'u.id', 'g.user_id')
-      .innerJoin('auth.organization as o', 'o.id', 'g.organization_id')
+      .innerJoin('auth.oauthClient as a', 'a.clientId', 'grant_row.client_id')
+      .innerJoin('auth.member as m', (j) =>
+        j
+          .onRef('m.userId', '=', 'grant_row.user_id')
+          .onRef('m.organizationId', '=', 'grant_row.organization_id'),
+      )
+      .innerJoin('auth.user as u', 'u.id', 'grant_row.user_id')
+      .innerJoin('auth.organization as o', 'o.id', 'grant_row.organization_id')
       .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
       .select([
         'c.id',
@@ -414,12 +486,13 @@ export function createMcpOAuthResolver({
         'c.scopes',
         'c.resources',
       ])
-      .where('g.id', '=', grantId)
-      .where('g.user_id', '=', payload.sub)
-      .where('g.organization_id', '=', organizationId)
-      .where('g.client_id', '=', payload.client_id)
-      .whereRef('c.clientId', '=', 'g.client_id')
-      .whereRef('c.userId', '=', 'g.user_id')
+      .select(grantDelegationStatus(ssoCapabilities))
+      .where('grant_row.id', '=', grantId)
+      .where('grant_row.user_id', '=', payload.sub)
+      .where('grant_row.organization_id', '=', organizationId)
+      .where('grant_row.client_id', '=', payload.client_id)
+      .whereRef('c.clientId', '=', 'grant_row.client_id')
+      .whereRef('c.userId', '=', 'grant_row.user_id')
       .where('u.emailVerified', '=', true)
       .where(sql<boolean>`a.disabled IS DISTINCT FROM true`)
       .executeTakeFirst()
@@ -439,6 +512,8 @@ export function createMcpOAuthResolver({
       principal: {
         kind: 'oauth',
         oauthConsentId: row.id,
+        oauthGrantId: grantId,
+        ssoDelegationStatus: row.ssoDelegationStatus,
         clientId: payload.client_id,
         scopes,
         user: { id: row.userId, name: row.name, email: row.email },
