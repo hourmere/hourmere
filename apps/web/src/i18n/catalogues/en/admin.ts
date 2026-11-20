@@ -2397,4 +2397,114 @@ export const admin = {
   'Poll actions': 'Poll actions',
   'Go back': 'Go back',
   'Current booking time: {time}': 'Current booking time: {time}',
+
+  // Meeting poll creation and invitations.
+  'Create meeting poll': 'Create meeting poll',
+  'No active individual event types are available for polls in this space.':
+    'No active individual event types are available for polls in this space.',
+  'Choose 2–20 available times. Proposing times does not reserve them.':
+    'Choose 2–20 available times. Proposing times does not reserve them.',
+  'Set the deadline 1 hour to 30 days from now. Leave the event’s minimum notice before the earliest candidate.':
+    'Set the deadline 1 hour to 30 days from now. Leave the event’s minimum notice before the earliest candidate.',
+  'Voting deadline': 'Voting deadline',
+  'Choose a valid deadline in the display time zone.':
+    'Choose a valid deadline in the display time zone.',
+  'This local time occurs twice. Choose its UTC offset.':
+    'This local time occurs twice. Choose its UTC offset.',
+  'The deadline must be 1 hour to 30 days from now.':
+    'The deadline must be 1 hour to 30 days from now.',
+  'The deadline must be before every candidate and leave the event’s minimum notice.':
+    'The deadline must be before every candidate and leave the event’s minimum notice.',
+  'Choose 2–20 candidate times.': 'Choose 2–20 candidate times.',
+  Admission: 'Admission',
+  'Invitation only': 'Invitation only',
+  'Public link': 'Public link',
+  'Only the people you invite by email can join.': 'Only the people you invite by email can join.',
+  'Anyone with the link can request to join without signing in. They must verify their email address to vote.':
+    'Anyone with the link can request to join without signing in. They must verify their email address to vote.',
+  Visibility: 'Visibility',
+  'Private votes': 'Private votes',
+  'Share vote totals': 'Share vote totals',
+  'Voters see their own choices. Hosts can see the roster and individual votes.':
+    'Voters see their own choices. Hosts can see the roster and individual votes.',
+  'Verified voters see totals for each time. In small groups, totals can reveal another person’s choices.':
+    'Verified voters see totals for each time. In small groups, totals can reveal another person’s choices.',
+  'Admission and visibility are fixed after creation.':
+    'Admission and visibility are fixed after creation.',
+  'This event type changed. Reload event types and review your choices before creating the poll.':
+    'This event type changed. Reload event types and review your choices before creating the poll.',
+  'Reload event types': 'Reload event types',
+  'Some selected times are no longer offered. Review your candidate times.':
+    'Some selected times are no longer offered. Review your candidate times.',
+  'The poll may have been created. Retry this submission to recover it.':
+    'The poll may have been created. Retry this submission to recover it.',
+  'Retry creation': 'Retry creation',
+  'Your poll was already created.': 'Your poll was already created.',
+  'The public link was shown only in the original response. Open the poll to rotate the link.':
+    'The public link was shown only in the original response. Open the poll to rotate the link.',
+  'This poll was already created and has since been deleted.':
+    'This poll was already created and has since been deleted.',
+  'Meeting poll created': 'Meeting poll created',
+  'Open meeting poll': 'Open meeting poll',
+  'Could not create the meeting poll. Review your choices and try again.':
+    'Could not create the meeting poll. Review your choices and try again.',
+  'Could not check the saved event type. Try again.':
+    'Could not check the saved event type. Try again.',
+  'Creating meeting poll…': 'Creating meeting poll…',
+  'Public voting link': 'Public voting link',
+  'Copy this link now. It will only be shown here once.':
+    'Copy this link now. It will only be shown here once.',
+  'Copy voting link': 'Copy voting link',
+  'Hide voting link': 'Hide voting link',
+  'Invitation roster': 'Invitation roster',
+  'There are no voters on this poll yet.': 'There are no voters on this poll yet.',
+  'Reserved places: {used} of {limit}': 'Reserved places: {used} of {limit}',
+  'Verified voters, active invitations and unexpired public sign-ups each reserve a place.':
+    'Verified voters, active invitations and unexpired public sign-ups each reserve a place.',
+  'Invite voters…': 'Invite voters…',
+  'Invite voters': 'Invite voters',
+  'Invitee {number}': 'Invitee {number}',
+  'Add another invitee': 'Add another invitee',
+  'Remove invitee {number}': 'Remove invitee {number}',
+  'Send invitations': 'Send invitations',
+  'Add up to {limit} invitees per batch. If there aren’t enough places for all new voters, the entire batch is refused.':
+    'Add up to {limit} invitees per batch. If there aren’t enough places for all new voters, the entire batch is refused.',
+  'Inviting someone with a pending public sign-up uses their existing place.':
+    'Inviting someone with a pending public sign-up uses their existing place.',
+  'Resending replaces the invitee’s voting link. You can resend once every 15 minutes, up to three times per address for this poll.':
+    'Resending replaces the invitee’s voting link. You can resend once every 15 minutes, up to three times per address for this poll.',
+  'Remove voter…': 'Remove voter…',
+  'Remove voter': 'Remove voter',
+  'Remove this voter? This deletes their details and ballot, revokes their links and stops queued email. Only a new invitation can let them join again.':
+    'Remove this voter? This deletes their details and ballot, revokes their links and stops queued email. Only a new invitation can let them join again.',
+  'Remove unverified sign-ups…': 'Remove unverified sign-ups…',
+  'Remove unverified sign-ups': 'Remove unverified sign-ups',
+  'Remove all unverified public sign-ups? This revokes their links, stops queued email and frees their places. Voters invited by the host are kept.':
+    'Remove all unverified public sign-ups? This revokes their links, stops queued email and frees their places. Voters invited by the host are kept.',
+  'Replace public link…': 'Replace public link…',
+  'Replace public link': 'Replace public link',
+  'Replace the public link? The old link stops working immediately. Links already emailed to individual voters still work.':
+    'Replace the public link? The old link stops working immediately. Links already emailed to individual voters still work.',
+  'This poll or roster changed. Refresh results and review them before trying again.':
+    'This poll or roster changed. Refresh results and review them before trying again.',
+  'There aren’t enough places for all new voters in this batch. No invitations were queued.':
+    'There aren’t enough places for all new voters in this batch. No invitations were queued.',
+  'Poll mail requests are limited. Try again later.':
+    'Poll mail requests are limited. Try again later.',
+  'We could not confirm the roster update. Retry the same request to check its outcome.':
+    'We could not confirm the roster update. Retry the same request to check its outcome.',
+  'Retry roster request': 'Retry roster request',
+  'The public link was already replaced. Refresh results, then replace it again to get a new link.':
+    'The public link was already replaced. Refresh results, then replace it again to get a new link.',
+  'Invitation request recovered. No additional emails were queued.':
+    'Invitation request recovered. No additional emails were queued.',
+  'Invitations queued: {queued}. Existing entries unchanged: {unchanged}.':
+    'Invitations queued: {queued}. Existing entries unchanged: {unchanged}.',
+  'Voter removed.': 'Voter removed.',
+  'Unverified public sign-ups removed.': 'Unverified public sign-ups removed.',
+  'We could not confirm the removal. Refresh results to check the roster before trying again.':
+    'We could not confirm the removal. Refresh results to check the roster before trying again.',
+  'Could not update the invitation roster. Try again.':
+    'Could not update the invitation roster. Try again.',
+  'This poll has 40 places.': 'This poll has 40 places.',
 } as const

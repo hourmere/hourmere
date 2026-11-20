@@ -4,8 +4,10 @@ description: Verify your email, choose possible meeting times, and understand po
 ---
 
 Open the public link shared by the host or the private voting link sent to your mailbox.
-Hosts can create and manage polls through [REST](/docs/rest#manage-meeting-polls), MCP and CLI.
+Hosts can create and manage polls in the dashboard or through [REST](/docs/rest#manage-meeting-polls), MCP and CLI.
 In the dashboard, **Meeting polls** shows completed and active polls in your current space.
+Choose **Create meeting poll** to propose times, and copy the public voting link while
+it is shown if you chose public admission. Use the invitation roster to send invitations.
 Open a poll to review ballots and advisory availability, choose a time and attendees,
 or close, cancel or delete the poll. The deadline email links to the poll's results.
 Sign in and switch to its space if prompted. After scheduling, open the resulting booking
@@ -77,9 +79,11 @@ Português (Brasil).
 
 ## 中文说明
 
-请打开主持人分享的公开链接，或发送到你邮箱的私密投票链接。主持人可通过
+请打开主持人分享的公开链接，或发送到你邮箱的私密投票链接。主持人可在管理端或通过
 [REST](/docs/rest#manage-meeting-polls)、MCP 和 CLI 创建并管理投票。
-在管理端打开**会议投票**，即可查看当前空间的投票。打开投票后，可以查看选票和参考
+在管理端打开**会议投票**，即可查看当前空间的投票。选择**创建会议投票**后可提出候选时间。
+如果选择通过公开链接参与，请在链接显示时立即复制。你也可以从邀请名单发送邀请。
+打开投票后，可以查看选票和参考
 可用性、选择时段及参会者，或结束、取消或删除投票。截止通知会链接到结果页，必要时
 请先登录并切换到投票所属空间。排定后可从结果页打开预约，删除投票不会取消预约。
 
