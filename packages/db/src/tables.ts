@@ -447,6 +447,7 @@ export interface Bookings {
   event_type_id: string | null;
   group_booker_key: string | null;
   group_slot_id: string | null;
+  has_routing_snapshot: Generated<boolean>;
   hosts_use_default_schedule: Generated<boolean>;
   ical_organizer_email: string | null;
   ical_organizer_name: string | null;

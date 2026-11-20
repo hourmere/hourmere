@@ -89,6 +89,7 @@ import {
 import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import {
   consumeRoutingBookingReceipt,
+  copyBookingRoutingSnapshot,
   findRoutingBookingEvent,
   findRoutingBookingReceipt,
   findRoutingBookingReplayEvidence,
@@ -428,6 +429,7 @@ const RESCHEDULE_COLUMNS = [
   'responses',
   'required_host_user_ids',
   'hosts_use_default_schedule',
+  'has_routing_snapshot',
   'manage_token_hash',
   'notification_snapshot',
   'sms_reminders_enabled',
@@ -2455,6 +2457,7 @@ async function rescheduleLocked(
       smsConsent: a.sms_consent,
     })),
   })
+  if (old.has_routing_snapshot) await copyBookingRoutingSnapshot(trx, old, id)
   await resolveRescheduleRequest(trx, old.id, 'picked', now)
   await trx
     .updateTable('booking_reschedule_requests')

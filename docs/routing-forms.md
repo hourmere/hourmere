@@ -242,6 +242,9 @@ pins its version and matched rule until its receipt expires. Later publication d
 reroute that receipt. Current target eligibility, form enablement and booking validation
 are still checked on continuation and booking. Existing bookings retain their original
 form/version/rule attribution; rescheduling copies it and never evaluates routing again.
+The original booking keeps the consumed receipt and its replay evidence. Copies carry only
+the attribution and saved answers. Cancelling any booking in the chain leaves its snapshot
+and the consumed receipt in place. These rules also apply while routing is disabled.
 
 ## Targets and failure behavior
 
@@ -695,13 +698,16 @@ unavailable, the page asks the invitee to check the link. Routing is currently h
 
 The continuation link opens a booking page for the selected event. Invitees choose an
 available time, review or edit the prefilled details and confirm the booking. The flow
-ends at the booking confirmation. The page removes the token from the address and keeps
+ends at the booking confirmation. If the event's questions, durations or location choices
+change, the page refreshes a still-valid continuation and keeps compatible draft values
+for review. The page removes the token from the address and keeps
 the token and draft in memory. To resume after a reload, reopen the original continuation
 link while it is still valid. Expired and used links show the same recovery page, which
 asks the invitee to open the original form for a new link.
 
 中文：后续链接会打开所选活动的预约页面。受邀人可以选择可用时段，检查或修改预填信息，然后确认预约。
-流程在预约确认页结束。页面会从地址中移除令牌，仅在内存中保留令牌和预约草稿。刷新页面后，可在原后续链接
+流程在预约确认页结束。如果活动的问题、时长或地点选项发生变化，页面会重新读取仍有效的后续链接，保留仍适用的草稿内容供受邀人核对。
+页面会从地址中移除令牌，仅在内存中保留令牌和预约草稿。刷新页面后，可在原后续链接
 仍有效时重新打开该链接。已过期和已使用的链接显示相同的提示，请受邀人打开原表单获取新链接。
 
 Draft create and publish each take a client-generated UUID `requestId` scoped to

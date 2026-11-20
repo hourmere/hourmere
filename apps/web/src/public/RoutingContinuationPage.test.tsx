@@ -241,6 +241,216 @@ describe('routing continuation', () => {
     expect(replay?.body).toEqual(first?.body)
   })
 
+  it('refreshes changed questions and keeps compatible answers and the chosen time', async () => {
+    const user = userEvent.setup()
+    let changed = false
+    const previous = {
+      ...projection,
+      eventType: {
+        ...projection.eventType,
+        questions: [
+          ...projection.eventType.questions,
+          {
+            id: 'track',
+            label: 'Track',
+            type: 'multi_select',
+            required: false,
+            options: ['A', 'B'],
+          },
+          {
+            id: 'choice',
+            label: 'Choice',
+            type: 'select',
+            required: false,
+            options: ['Old', 'New'],
+          },
+        ],
+      },
+    } satisfies Schemas['RoutingContinuation']
+    const updated = {
+      ...previous,
+      eventType: {
+        ...previous.eventType,
+        questions: [
+          { id: 'topic', label: 'Updated topic', type: 'short_text', required: true },
+          {
+            id: 'track',
+            label: 'Track',
+            type: 'multi_select',
+            required: false,
+            options: ['A', 'C'],
+          },
+          { id: 'choice', label: 'Choice', type: 'select', required: false, options: ['New'] },
+          { id: 'reference', label: 'New reference', type: 'checkbox', required: true },
+        ],
+      },
+    } satisfies Schemas['RoutingContinuation']
+    const api = fakeApi({
+      [resolveRoute]: () => json(200, changed ? updated : previous),
+      [slotsRoute]: slotsResponse,
+      [bookingsRoute]: () => {
+        if (changed) return json(201, result)
+        changed = true
+        return json(422, { error: 'invalid_responses', message: `Private value ${TOKEN}` })
+      },
+    })
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    await chooseTime(user)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), {
+      target: { value: 'Edited name' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Topic' }), {
+      target: { value: 'Edited topic' },
+    })
+    await user.type(screen.getByRole('textbox', { name: 'Project reference' }), 'PRJ-42')
+    await user.click(screen.getByRole('checkbox', { name: 'A' }))
+    await user.click(screen.getByRole('checkbox', { name: 'B' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: /^Choice/ }), 'Old')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    expect(
+      await screen.findByText('This form has changed. Review your answers before continuing.'),
+    ).toBeDefined()
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Your name' }).value).toBe(
+      'Edited name',
+    )
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Updated topic' }).value).toBe(
+      'Edited topic',
+    )
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'A' }).checked).toBe(true)
+    expect(screen.queryByRole('checkbox', { name: 'B' })).toBeNull()
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: /^Choice/ }).value).toBe('')
+    const reference = screen.getByRole<HTMLInputElement>('checkbox', { name: 'New reference' })
+    expect(reference.checked).toBe(false)
+    expect(document.body.innerHTML).not.toContain(TOKEN)
+    await user.click(reference)
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+    const [first, second] = api.to(bookingsRoute)
+    expect(second?.headers.get('Idempotency-Key')).not.toBe(first?.headers.get('Idempotency-Key'))
+    const body = second?.body as Schemas['RoutedBookingInput'] | undefined
+    expect(body?.start).toBe(start)
+    expect(body?.responses).toEqual({ topic: 'Edited topic', track: ['A'], reference: true })
+    expect(api.to(resolveRoute)).toHaveLength(2)
+  })
+
+  it('returns to the picker when the submitted meeting length is no longer offered', async () => {
+    const user = userEvent.setup()
+    let changed = false
+    const api = fakeApi({
+      [resolveRoute]: () =>
+        json(
+          200,
+          changed
+            ? {
+                ...projection,
+                eventType: {
+                  ...projection.eventType,
+                  durationMinutes: 60,
+                  allowedDurationsMinutes: [60, 90],
+                },
+              }
+            : projection,
+        ),
+      [slotsRoute]: ({ body }) =>
+        json(200, {
+          slots: [slot(start, (body as Schemas['RoutingContinuationSlotsInput']).durationMinutes)],
+        }),
+      [bookingsRoute]: () => {
+        changed = true
+        return json(422, { error: 'invalid_duration' })
+      },
+    })
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    await user.click(await screen.findByRole('radio', { name: '45 min' }))
+    await chooseTime(user)
+    await user.type(screen.getByRole('textbox', { name: 'Project reference' }), 'PRJ-42')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    expect(await screen.findByRole('heading', { name: 'Pick a time' })).toBeDefined()
+    expect(
+      screen.getByText('This meeting length is no longer offered. Please choose a time again.'),
+    ).toBeDefined()
+    expect(screen.queryByRole('radio', { name: '45 min' })).toBeNull()
+    await chooseTime(user)
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Project reference' }).value).toBe(
+      'PRJ-42',
+    )
+    expect(api.to(resolveRoute)).toHaveLength(2)
+    expect(api.to(slotsRoute).at(-1)?.body).toMatchObject({ durationMinutes: 60 })
+  })
+
+  it('refreshes a stale location while loading slots and keeps the draft', async () => {
+    const user = userEvent.setup()
+    let changed = false
+    const api = fakeApi({
+      [resolveRoute]: () =>
+        json(
+          200,
+          changed
+            ? {
+                ...projection,
+                eventType: {
+                  ...projection.eventType,
+                  locations: [{ id: 'default-phone', kind: 'phone', isDefault: true }],
+                },
+              }
+            : projection,
+        ),
+      [slotsRoute]: ({ body }) =>
+        changed && (body as Schemas['RoutingContinuationSlotsInput']).locationOptionId === 'office'
+          ? json(422, { error: 'invalid_location_choice' })
+          : slotsResponse(),
+    })
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    await user.click(await screen.findByRole('radio', { name: 'Office' }))
+    await chooseTime(user)
+    await user.type(screen.getByRole('textbox', { name: 'Project reference' }), 'PRJ-42')
+    changed = true
+    await user.click(screen.getByRole('button', { name: 'Change time' }))
+
+    expect(await screen.findByText('Choose one of the available locations.')).toBeDefined()
+    expect(screen.queryByRole('radio', { name: 'Office' })).toBeNull()
+    await chooseTime(user)
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Project reference' }).value).toBe(
+      'PRJ-42',
+    )
+    expect(api.to(resolveRoute)).toHaveLength(2)
+    expect(api.to(slotsRoute).at(-1)?.body).toMatchObject({ locationOptionId: 'default-phone' })
+  })
+
+  it('shows the usual recovery if the link expires while refreshing', async () => {
+    let changed = false
+    const api = fakeApi({
+      [resolveRoute]: () => (changed ? unavailableResponse() : json(200, projection)),
+      [slotsRoute]: () => {
+        changed = true
+        return json(422, { error: 'invalid_duration' })
+      },
+    })
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    expect(
+      await screen.findByRole('heading', { name: 'This booking link is unavailable' }),
+    ).toBeDefined()
+    expect(api.to(resolveRoute)).toHaveLength(2)
+    expect(document.body.innerHTML).not.toContain(TOKEN)
+  })
+
+  it('keeps waitlist controls and direct event addresses out of an empty routed picker', async () => {
+    const hiddenPath = '/ada/private-discovery'
+    const api = fakeApi({
+      [resolveRoute]: () => json(200, projection),
+      [slotsRoute]: () => json(200, { slots: [] }),
+    })
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    expect(await screen.findByText('No available times this month.')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /waitlist/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /waitlist/i })).toBeNull()
+    expect(api.to(slotsRoute).length).toBeGreaterThan(0)
+    expect(document.body.innerHTML).not.toContain(hiddenPath)
+  })
+
   it.each(['resolve', 'slots', 'bookings'] as const)(
     'shows the same recovery if the link is unusable on %s',
     async (endpointName) => {
