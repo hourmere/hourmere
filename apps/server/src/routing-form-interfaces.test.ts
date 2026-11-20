@@ -27,8 +27,9 @@ import { runCli } from '../../../tools/cli/src/cli.ts'
 import type { paths } from '../../web/src/api/schema.d.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { BOOKING_BODY_LIMIT, publicRoutes } from './routes/public.ts'
 import { routingContinuationRoutes } from './routes/routing-continuations.ts'
-import { openApiDocument } from './routes/test-app.ts'
+import { escapedJson, openApiDocument } from './routes/test-app.ts'
 import { productRoutes, productTools } from './server.ts'
 
 const paymentRequired = vi.hoisted(() => new Set<string>())
@@ -57,6 +58,7 @@ vi.mock(import('../../../packages/scheduling/src/routing-form-targets.ts'), asyn
 const publicUrl = 'http://localhost:4189'
 const routingSecret = 'synthetic-routing-interface-secret'
 const routingOwnerHandle = 'routing-public-owner'
+const routedBookingPath = '/api/v1/routing-continuations/bookings'
 const operations = ['list', 'get', 'create', 'update', 'archive', 'publish', 'preview'] as const
 type Operation = (typeof operations)[number]
 const tools = {
@@ -155,6 +157,78 @@ it('documents both continuation requests with complete strict schemas and option
   }
 })
 
+it('documents routed booking with a strict request and dedicated creation and replay result', async () => {
+  const application = createApp({
+    publicUrl,
+    checkDb: async () => {},
+    authHandler: async () => new Response(null, { status: 404 }),
+    resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+    routes: [publicRoutes({ db: {} as Db })],
+  })
+  const document = await openApiDocument(application)
+  const result = {
+    content: {
+      'application/json': { schema: { $ref: '#/components/schemas/RoutedBookingResult' } },
+    },
+  }
+  expect(document.paths[routedBookingPath]?.post).toMatchObject({
+    operationId: 'createRoutedBooking',
+    security: [{}, { apiKey: [] }],
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': { schema: { $ref: '#/components/schemas/RoutedBookingInput' } },
+      },
+    },
+    parameters: [expect.objectContaining({ in: 'header', name: 'idempotency-key' })],
+    responses: {
+      200: result,
+      201: result,
+      400: {},
+      401: {},
+      403: {},
+      404: {},
+      409: {},
+      413: {},
+      429: {},
+    },
+  })
+  const input = document.components.schemas.RoutedBookingInput
+  expect(input).toMatchObject({
+    additionalProperties: false,
+    required: ['start', 'invitee', 'routeToken'],
+  })
+  expect(input).not.toHaveProperty('properties.oneTimeToken')
+  expect(input).not.toHaveProperty('properties.slug')
+  expect(document.components.schemas.RoutedBookingResult).toMatchObject({
+    required: ['booking', 'manageToken'],
+  })
+  expect(document.components.schemas.RoutedBookingResult).not.toHaveProperty(
+    'properties.successRedirect',
+  )
+})
+
+it('charges routed booking and ordinary public booking to the same book bucket', async () => {
+  const application = createApp({
+    publicUrl,
+    checkDb: async () => {},
+    authHandler: async () => new Response(null, { status: 404 }),
+    resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+    routes: [publicRoutes({ db: {} as Db, rateLimits: { book: { limit: 1, windowSeconds: 60 } } })],
+  })
+  const post = (path: string) =>
+    application.request(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+  expect((await post(routedBookingPath)).status).toBe(400)
+  const refused = await post('/api/v1/public/some-host/some-event/bookings')
+  expect(refused.status).toBe(429)
+  expect(refused.headers.get('Retry-After')).toMatch(/^\d+$/)
+  expect(await refused.json()).toEqual({ error: 'rate_limited' })
+})
+
 describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', () => {
   let owned: TestDatabase
   let db: Db
@@ -173,7 +247,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       ? { ok: true, principal, setCookie: [] }
       : { ok: false, error: 'unauthorized', setCookie: [] }
   }
-  function app(enabled = true) {
+  function app(enabled = true, routingBookingReceiptNow?: () => Temporal.Instant) {
     return createApp({
       publicUrl,
       checkDb: async () => {},
@@ -187,9 +261,17 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
         invitationMailLimits: { secret: routingSecret },
         routingFormsEnabled: enabled,
         routingSecret,
+        ...(routingBookingReceiptNow && { routingBookingReceiptNow }),
       }),
       mcp: mcpEndpoint({
-        tools: productTools({ db, notify, publicUrl, routingFormsEnabled: enabled, routingSecret }),
+        tools: productTools({
+          db,
+          notify,
+          publicUrl,
+          routingFormsEnabled: enabled,
+          routingSecret,
+          routingBookingReceiptNow,
+        }),
       }),
     })
   }
@@ -260,9 +342,12 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
     })
     if (
       'name' in params &&
-      ['route_lead', 'resolve_routing_continuation', 'find_routed_slots'].includes(
-        String(params.name),
-      )
+      [
+        'route_lead',
+        'resolve_routing_continuation',
+        'find_routed_slots',
+        'create_booking',
+      ].includes(String(params.name))
     ) {
       expect(response.headers.get('cache-control')).toBe('no-store')
       expect(response.headers.get('referrer-policy')).toBe('no-referrer')
@@ -309,13 +394,13 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
   async function callCli(
     application: ReturnType<typeof app>,
     token: string,
-    op: Operation | 'public' | 'route' | 'resolve' | 'slots',
+    op: Operation | 'public' | 'route' | 'resolve' | 'slots' | 'book',
     input: Record<string, unknown>,
   ) {
     let stdout = ''
     let stderr = ''
     const code = await runCli({
-      argv: ['routing-forms', op, '--input', '-'],
+      argv: [...(op === 'book' ? [op] : ['routing-forms', op]), '--input', '-'],
       env: { HOURMERE_URL: publicUrl, HOURMERE_API_KEY: token },
       stdin: (async function* () {
         yield JSON.stringify(input)
@@ -355,6 +440,232 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
 
   const versions = (id: string) =>
     db.selectFrom('routing_form_versions').select('id').where('form_id', '=', id).execute()
+
+  async function bookingReceipt(eventTypeId: string) {
+    const principal = credentials.get(await credential(owner))
+    if (!principal) throw Error('Expected a persisted fixture key')
+    const context = testContext(db, principal)
+    const form = await createRoutingForm(context, {
+      ...draft(),
+      fallback: { kind: 'event', eventTypeId, mappings: [] },
+    })
+    const publication = await publishRoutingForm(context, form.id, {
+      expectedRevision: form.draftRevision,
+    })
+    await updateRoutingForm(context, form.id, {
+      expectedRevision: publication.form.draftRevision,
+      enabled: true,
+    })
+    const receipt = await submitRoutingForm(
+      { db, routingFormsEnabled: true, routingSecret },
+      { organizationId: owner.principal.organization.id, formId: form.id },
+      { versionId: publication.version.id, answers: {} },
+    )
+    if (receipt.kind !== 'continuation') throw Error('Expected a booking capability')
+    return receipt
+  }
+
+  const bookingStart = (time: string) => {
+    const nextWeek = Temporal.Now.plainDateISO('UTC').add({ days: 7 })
+    const monday = nextWeek.add({ days: (8 - nextWeek.dayOfWeek) % 7 })
+    return `${monday}T${time}:00Z`
+  }
+
+  it('books a hidden target and authorizes only exact routed replay after expiry and disablement', async () => {
+    const fixtures = createFixtures(db)
+    const slug = 'hidden-routed-booking-event'
+    const redirect = 'https://host.example/after-booking'
+    const scheduleId = await fixtures.schedule(owner.id, { timeZone: 'UTC', isDefault: false })
+    const eventTypeId = await fixtures.eventType(owner.principal.organization.id, owner.id, {
+      slug,
+      hosts: [{ userId: owner.id, scheduleId }],
+    })
+    await db
+      .updateTable('event_types')
+      .set({
+        is_hidden: true,
+        success_redirect: JSON.stringify({
+          url: redirect,
+          parameters: ['eventTypeSlug'],
+          includeInviteePersonalData: false,
+          allowEmbedParent: false,
+        }),
+      })
+      .where('id', '=', eventTypeId)
+      .execute()
+
+    const receipt = await bookingReceipt(eventTypeId)
+    const key = await credential(outsider, 'bookings')
+    const otherKey = await credential(outsider, 'bookings')
+    const readKey = await credential(outsider, 'read')
+    const idempotencyKey = randomUUID()
+    const input = {
+      routeToken: receipt.routeToken,
+      start: bookingStart('10:00'),
+      invitee: { name: 'Routed invitee', email: 'routed@example.test', timeZone: 'UTC' },
+    }
+    const enabled = app()
+    const expiry = () => Temporal.Instant.from(receipt.expiresAt).add({ seconds: 1 })
+    const expired = app(true, expiry)
+    const off = app(false, expiry)
+    const rest = async (
+      application: ReturnType<typeof app>,
+      args = input,
+      requestKey = idempotencyKey,
+      auth: string | null = key,
+    ) => {
+      const client = createClient<paths>({
+        baseUrl: publicUrl,
+        fetch: async (request) => application.request(request),
+      })
+      const { data, error, response } = await client.POST(
+        '/api/v1/routing-continuations/bookings',
+        {
+          params: { header: { 'idempotency-key': requestKey } },
+          headers: auth === null ? {} : { authorization: `Bearer ${auth}` },
+          body: args,
+        },
+      )
+      expect(response.headers.get('Cache-Control')).toBe('no-store')
+      expect(response.headers.get('Referrer-Policy')).toBe('no-referrer')
+      return { status: response.status, body: data ?? error }
+    }
+    expect(await rest(off)).toEqual({ status: 404, body: { error: 'routing_forms_disabled' } })
+    expect(await rest(expired)).toEqual({ status: 409, body: { error: 'routing_unavailable' } })
+    expect(await rest(enabled, input, idempotencyKey, readKey)).toMatchObject({
+      status: 403,
+      body: { error: 'insufficient_scope' },
+    })
+    expect(await rest(enabled, input, idempotencyKey, 'invalid-fixture')).toEqual({
+      status: 401,
+      body: { error: 'unauthorized' },
+    })
+    const oneTimeInput = { ...input, oneTimeToken: 'a'.repeat(43) }
+    expect(await rest(enabled, oneTimeInput)).toEqual({
+      status: 400,
+      body: { error: 'invalid_request' },
+    })
+    const mcp = (application: ReturnType<typeof app>, arguments_: object) =>
+      rpc(application, key, 'tools/call', { name: 'create_booking', arguments: arguments_ })
+    const invalidMcp = await mcp(enabled, { ...oneTimeInput, idempotencyKey })
+    expect(invalidMcp.isError).toBe(true)
+    expect(JSON.parse(invalidMcp.content[0].text)).toMatchObject({ error: 'invalid_request' })
+
+    const { body, status } = await rest(enabled)
+    expect(status).toBe(201)
+    expect(body).toMatchObject({
+      booking: { eventTypeId, status: 'confirmed', source: 'api' },
+      manageToken: expect.any(String),
+    })
+    expect(Object.keys(body ?? {}).sort()).toEqual(['booking', 'manageToken'])
+    for (const privateValue of [slug, redirect, receipt.routeToken, routingOwnerHandle]) {
+      expect(JSON.stringify(body).includes(privateValue)).toBe(false)
+    }
+    const replay = { ...body, manageToken: null }
+    expect(await rest(expired)).toEqual({ status: 200, body: replay })
+    expect(await rest(off)).toEqual({ status: 200, body: replay })
+    const mcpInput = { ...input, idempotencyKey }
+    expect((await mcp(off, mcpInput)).structuredContent).toEqual({ ...replay, replayed: true })
+    expect(await callCli(off, key, 'book', mcpInput)).toEqual({
+      ok: true,
+      body: { ...replay, replayed: true },
+    })
+
+    const changed = { ...input, invitee: { ...input.invitee, name: 'Changed' } }
+    for (const [args, requestKey, auth] of [
+      [changed, idempotencyKey, key],
+      [input, randomUUID(), key],
+      [input, idempotencyKey, otherKey],
+      [input, idempotencyKey, null],
+    ] as const) {
+      expect(await rest(off, args, requestKey, auth)).toEqual({
+        status: 404,
+        body: { error: 'routing_forms_disabled' },
+      })
+      expect(await rest(expired, args, requestKey, auth)).toEqual({
+        status: 409,
+        body: { error: 'routing_unavailable' },
+      })
+    }
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('id')
+        .where('event_type_id', '=', eventTypeId)
+        .execute(),
+    ).toHaveLength(1)
+  })
+
+  it('accepts the fully escaped maximum legal routed booking and rejects one byte over 2 MiB', async () => {
+    const fixtures = createFixtures(db)
+    const scheduleId = await fixtures.schedule(owner.id, { timeZone: 'UTC', isDefault: false })
+    const options = Array.from(
+      { length: 50 },
+      (_, i) => String.fromCharCode(0x4e00 + i) + 'é'.repeat(199),
+    )
+    const questions = Array.from({ length: 20 }, (_, i) => ({
+      id: `q${i}`.padEnd(64, 'x'),
+      label: `Question ${i}`,
+      type: 'multi_select',
+      required: true,
+      options,
+    }))
+    const eventTypeId = await fixtures.eventType(owner.principal.organization.id, owner.id, {
+      questions,
+      allowGuests: true,
+      hosts: [{ userId: owner.id, scheduleId }],
+    })
+    await db
+      .updateTable('event_types')
+      .set({
+        success_redirect: JSON.stringify({
+          url: 'https://host.example/after-booking',
+          parameters: ['eventTypeSlug'],
+          includeInviteePersonalData: false,
+          allowEmbedParent: false,
+        }),
+      })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const { routeToken } = await bookingReceipt(eventTypeId)
+    const email = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`
+    const body = escapedJson({
+      routeToken,
+      start: bookingStart('11:00'),
+      invitee: {
+        name: 'é'.repeat(200),
+        email,
+        timeZone: 'Europe/Berlin',
+        locale: 'abcdefgh-abcdefgh-abcdefgh-abcdefgh',
+      },
+      guests: Array.from({ length: 10 }, (_, index) => ({
+        name: 'ü'.repeat(200),
+        email: `${index}${email.slice(1)}`,
+      })),
+      responses: Object.fromEntries(questions.map(({ id }) => [id, options])),
+    })
+    expect(Buffer.byteLength(body)).toBeGreaterThan(1_200_000)
+    const application = app()
+    const idempotencyKey = randomUUID()
+    const send = (size: number) =>
+      application.request(routedBookingPath, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+        body: body.padEnd(size, ' '),
+      })
+    const accepted = await send(BOOKING_BODY_LIMIT)
+    expect(accepted.status).toBe(201)
+    const result = (await accepted.json()) as { booking: { responses: Record<string, string[]> } }
+    const firstQuestion = questions[0]?.id as string
+    expect(result.booking.responses[firstQuestion]).toHaveLength(50)
+    expect(result).not.toHaveProperty('successRedirect')
+    const replay = await send(BOOKING_BODY_LIMIT)
+    expect(replay.status).toBe(200)
+    expect(await replay.json()).toEqual({ ...result, manageToken: null })
+    const tooBig = await send(BOOKING_BODY_LIMIT + 1)
+    expect(tooBig.status).toBe(413)
+    expect(await tooBig.json()).toEqual({ error: 'payload_too_large' })
+  })
 
   it('resolves only the selected event over REST, MCP and CLI and refuses every token while off', async () => {
     const fixtures = createFixtures(db)
