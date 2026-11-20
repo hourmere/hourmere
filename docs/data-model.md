@@ -1058,9 +1058,11 @@ pending challenges never reserve the name.
 Browser-only recovery enrollment binds the nomination and acceptance to their own proof
 attempts and advances `policy_revision` under the organization write lock. Membership
 changes use that same lock when removing accepted recovery status.
-Browser-only policy writes share the organization write lock. Enabling enforcement checks
-the enabled provider's current owner test receipt, its verified domain and an accepted
-current recovery owner. The policy and its audit event commit together.
+Browser-only policy writes share the organization write lock. Enabling enforcement share-locks
+the latest general and owner test receipts for the current provider revision after taking the
+organization lock. An eligible OIDC provider must have passing results from both receipts and a
+verified domain, and the team must have an accepted current recovery owner. The policy and its audit
+event commit together.
 OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 
@@ -1175,9 +1177,14 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   trust generation current. Logging out deletes the session's attempts.
   A consumed mailbox attempt for `useSsoRecovery` grants recovery to that session, team
   and browser binding, while the mailbox and accepted recovery ownership are still
-  current. Cleanup keeps it until the mailbox proof expires. An enforcement-disable
-  write spends the grant by deleting that attempt in the same transaction as the policy
-  update. A later ceremony supersedes the session's previous grant for the team.
+  current. Cleanup keeps it until the mailbox proof expires. Each recovery-authorized
+  provider repair or enforcement-disable write spends the grant by deleting that attempt
+  in the same transaction as the protected write. A later ceremony supersedes the session's
+  previous grant for the team.
+  A recovery-authorized provider test creates a separate test attempt in that transaction.
+  Its expiry cannot exceed the grant's deadline. The authenticated state binds the provider's
+  activation state and the owner's accepted recovery enrollment. The callback can only record
+  that attempt's test receipt.
   The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
   the state digest and browser-binding digest. The authenticated state envelope carries the
   nonce, PKCE verifier and return path, bound to the attempt and its provider revision.

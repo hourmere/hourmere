@@ -7,7 +7,7 @@ import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { requireSsoEnabled, USE_SSO_RECOVERY } from './sso.ts'
-import { runWithFreshProof } from './sso-fresh-proof.ts'
+import { type RecoveryProofContext, runWithFreshProof } from './sso-fresh-proof.ts'
 import { bindingCookieName, browserBindingDigest, readBindingCookie } from './sso-mailbox-proof.ts'
 import { notifySsoRecoveryUse, type SsoRecoveryEnrollmentDeps } from './sso-recovery-enrollment.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
@@ -94,8 +94,9 @@ function recoveryAttempts(db: Db, principal: Browser) {
 
 async function liveRecoveryAuthority(db: Db, principal: Browser, binding: string, now?: string) {
   const observedAt = sql`coalesce(${now ?? null}::timestamptz, statement_timestamp())`
-  const { rows } = await sql<{ id: string; deadline: string }>`
-    SELECT a.id, least(a.mailbox_proof_expires_at, a.expires_at, s."expiresAt")::text AS deadline
+  const { rows } = await sql<{ id: string; deadline: string; acceptedAt: string }>`
+    SELECT a.id, least(a.mailbox_proof_expires_at, a.expires_at, s."expiresAt")::text AS deadline,
+      r.accepted_at::text AS "acceptedAt"
     FROM sso_attempts a
     JOIN auth.session s ON s.id = a.session_id AND s."userId" = a.user_id
     JOIN auth."user" u ON u.id = a.user_id
@@ -143,12 +144,29 @@ export async function consumeSsoRecoveryAuthority(
   principal: Browser,
   binding: string,
   now: string,
+  expectedId?: string,
 ) {
   const authority = await liveRecoveryAuthority(trx, principal, binding, now)
-  if (!authority) return
+  if (!authority || (expectedId !== undefined && authority.id !== expectedId)) return
   const spent = await recoveryAttempts(trx, principal)
     .where('id', '=', authority.id)
     .returning('id')
     .executeTakeFirst()
   return spent && authority
+}
+
+/** Only a listed provider write may use this fallback to fresh administration. */
+export function providerRecoveryAuthority(principal: Browser, recoveryRequired: boolean) {
+  return async (trx: Db, binding: string, now: string, context: RecoveryProofContext) => {
+    const required = recoveryRequired || context.preparedGrantId !== undefined
+    if (!context.enforced || (!recoveryRequired && context.hasProofAttempt)) {
+      if (required) throw new DomainError('forbidden', 'sso_required')
+      return
+    }
+    const authority = await (context.preflight
+      ? liveRecoveryAuthority(trx, principal, binding, now)
+      : consumeSsoRecoveryAuthority(trx, principal, binding, now, context.preparedGrantId))
+    if (!authority && required) throw new DomainError('forbidden', 'sso_required')
+    return authority
+  }
 }

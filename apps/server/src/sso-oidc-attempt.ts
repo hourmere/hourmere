@@ -34,12 +34,17 @@ const oidcStepUpBinding = z.strictObject({
   trustGeneration: z.int().positive(),
 })
 type StepUpBinding = z.infer<typeof oidcStepUpBinding>
+const oidcRecoveryTestBinding = z.strictObject({
+  testProviderEnabled: z.boolean(),
+  acceptedAt: z.string(),
+})
+type RecoveryTestBinding = z.infer<typeof oidcRecoveryTestBinding>
 const statePayload = z.tuple([
   secret,
   secret,
   z.string(),
   z.hex().length(64).optional(),
-  z.union([oidcLinkBinding, oidcStepUpBinding]).optional(),
+  z.union([oidcLinkBinding, oidcStepUpBinding, oidcRecoveryTestBinding]).optional(),
 ])
 export class OidcAttemptRefused extends Error {
   constructor() {
@@ -68,11 +73,12 @@ export interface OidcTestActor {
 }
 type Ceremony =
   | { kind: 'sign_in' }
-  | { kind: 'test'; actor: OidcTestActor }
+  | { kind: 'test'; actor: OidcTestActor; recovery?: RecoveryTestBinding & { deadline: string } }
   | { kind: 'link'; actor: OidcTestActor; binding: z.infer<typeof oidcLinkBinding> }
   | { kind: 'step_up'; actor: OidcTestActor; attemptId: string }
 
 type BoundStepUp = { kind: 'step_up'; actor: OidcTestActor; binding: StepUpBinding }
+type BoundTest = { kind: 'test'; actor: OidcTestActor; recovery?: RecoveryTestBinding }
 
 const operations = {
   sign_in: signInOperation,
@@ -162,6 +168,7 @@ export async function lockOidcTestActor(
   trx: Db,
   provider: SsoProviderRevision,
   actor: OidcTestActor,
+  recovery?: RecoveryTestBinding,
 ) {
   const user = await trx
     .selectFrom('auth.user')
@@ -171,7 +178,7 @@ export async function lockOidcTestActor(
     .forShare()
     .executeTakeFirst()
   if (!user) throw refused()
-  await lockOidcProvider(trx, provider, false)
+  await lockOidcProvider(trx, provider, recovery?.testProviderEnabled ?? false)
   try {
     const member = await checkTeamManagementMembership(
       trx,
@@ -179,6 +186,17 @@ export async function lockOidcTestActor(
       provider.organizationId,
       true,
     )
+    if (recovery) {
+      if (member.role !== 'owner') throw refused()
+      const enrollment = await trx
+        .selectFrom('sso_recovery_owners')
+        .select('member_id')
+        .where('organization_id', '=', provider.organizationId)
+        .where('user_id', '=', actor.userId)
+        .where('accepted_at', '=', sql<Date>`${recovery.acceptedAt}::timestamptz`)
+        .executeTakeFirst()
+      if (!enrollment) throw refused()
+    }
     const session = await trx
       .selectFrom('auth.session')
       .select(['expiresAt', 'activeOrganizationId'])
@@ -379,13 +397,24 @@ export async function startOidcAttempt(
       ceremony.kind === 'step_up'
         ? await lockOidcStepUpTarget(trx, browser, ceremony.actor, ceremony.attemptId)
         : undefined
-    if (!stepUp) await lockOidcProvider(trx, browser, ceremony.kind !== 'test')
-    const { id, now } = await trx
+    if (!stepUp)
+      await lockOidcProvider(
+        trx,
+        browser,
+        ceremony.kind === 'test' ? (ceremony.recovery?.testProviderEnabled ?? false) : true,
+      )
+    const deadline =
+      stepUp?.attempt.expires_at ??
+      (ceremony.kind === 'link' ? ceremony.binding.proofExpiresAt : null) ??
+      (ceremony.kind === 'test' ? (ceremony.recovery?.deadline ?? null) : null)
+    const { id, now, live } = await trx
       .selectNoFrom([
         sql<string>`uuidv7()`.as('id'),
-        sql<string>`clock_timestamp()::text`.as('now'),
+        sql<string>`statement_timestamp()::text`.as('now'),
+        sql<boolean>`coalesce(${deadline}::timestamptz > statement_timestamp(), true)`.as('live'),
       ])
       .executeTakeFirstOrThrow()
+    if (!live) throw refused()
     // Ceremony material travels in authenticated ciphertext. The attempt stores only
     // digests of the browser binding and full state for the eventual one-shot update.
     const payload: z.infer<typeof statePayload> = [codeVerifier, nonce, returnPath]
@@ -397,6 +426,11 @@ export async function startOidcAttempt(
     if (stepUp) {
       if (!browser.endpointsDigest) throw refused()
       payload.push(stepUp.binding)
+    }
+    if (ceremony.kind === 'test' && ceremony.recovery) {
+      if (!browser.endpointsDigest) throw refused()
+      const { testProviderEnabled, acceptedAt } = ceremony.recovery
+      payload.push({ testProviderEnabled, acceptedAt })
     }
     const envelope = encryptCredential(
       configurationKey,
@@ -422,7 +456,7 @@ export async function startOidcAttempt(
         created_at: now,
         expires_at: sql`least(
           ${now}::timestamptz + make_interval(secs => ${authenticationAttemptLifetime}),
-          ${stepUp?.attempt.expires_at ?? (ceremony.kind === 'link' ? ceremony.binding.proofExpiresAt : null)}::timestamptz
+          ${deadline}::timestamptz
         )`,
       })
       .execute()
@@ -459,7 +493,7 @@ function openState(configurationKey: Buffer, aad: string, envelope: string) {
 export async function consumeOidcAttempt(
   { db, configurationKey }: AttemptDependencies,
   browser: OriginatingBrowser & { state: string | null },
-  test: Extract<Ceremony, { kind: 'test' }> | undefined = undefined,
+  test: BoundTest | undefined = undefined,
   readActor?: () => Promise<OidcTestActor | null | undefined>,
 ) {
   const binding = bindingDigest(browser)
@@ -470,19 +504,27 @@ export async function consumeOidcAttempt(
   const envelope = match?.[2]
   if (!id || !envelope) throw refused()
   const material = openState(configurationKey, stateAad(browser, id, binding), envelope)
-  let ceremony: Exclude<Ceremony, { kind: 'step_up' }> | BoundStepUp = test ?? { kind: 'sign_in' }
-  if (material.ceremonyBinding) {
+  let ceremony: Exclude<Ceremony, { kind: 'step_up' | 'test' }> | BoundStepUp | BoundTest =
+    test ?? {
+      kind: 'sign_in',
+    }
+  const storedBinding = material.ceremonyBinding
+  if (storedBinding && 'testProviderEnabled' in storedBinding) {
+    const actor = test?.actor ?? (await readActor?.())
+    if (!actor) throw refused()
+    ceremony = { kind: 'test', actor, recovery: storedBinding }
+  } else if (storedBinding) {
     const actor = !test && (await readActor?.())
     if (!actor) throw refused()
-    const binding = material.ceremonyBinding
     ceremony =
-      'attemptId' in binding
-        ? { kind: 'step_up', actor, binding }
-        : { kind: 'link', actor, binding }
+      'attemptId' in storedBinding
+        ? { kind: 'step_up', actor, binding: storedBinding }
+        : { kind: 'link', actor, binding: storedBinding }
   }
 
   const attempt = await db.transaction().execute(async (trx) => {
-    if (ceremony.kind === 'test') await lockOidcTestActor(trx, browser, ceremony.actor)
+    if (ceremony.kind === 'test')
+      await lockOidcTestActor(trx, browser, ceremony.actor, ceremony.recovery)
     else if (ceremony.kind === 'step_up') await lockBoundStepUp(trx, browser, ceremony)
     else await lockOidcProvider(trx, browser)
     const query = trx
@@ -533,6 +575,7 @@ export async function consumeOidcAttempt(
     ...material,
     createdAt: attempt.created_at,
     expiresAt: attempt.expires_at,
+    test: ceremony.kind === 'test' ? ceremony : undefined,
     link: ceremony.kind === 'link' ? ceremony : undefined,
     stepUp: ceremony.kind === 'step_up' ? ceremony : undefined,
   }

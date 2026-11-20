@@ -11,6 +11,7 @@ import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
+import { providerRecoveryAuthority } from './sso-recovery-use.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
 
 export interface SsoDraftDeps extends FreshProofDeps {
@@ -96,7 +97,7 @@ function summary(row: Provider) {
     displayName: row.display_name,
     issuer: row.issuer,
     clientId: row.client_id,
-    hasClientSecret: true,
+    hasClientSecret: row.protocol === 'oidc',
     validationStatus: 'unknown',
     testStatus: 'unknown',
   }
@@ -142,7 +143,7 @@ async function changeTrust(db: Db, organizationId: string) {
     .where('organization_id', '=', organizationId)
     .execute()
 }
-function enabled(deps: SsoDraftDeps, principal: Principal, input: unknown) {
+function enabled(deps: SsoDraftDeps, principal: Principal, input: unknown, requiresOidc = true) {
   requireSsoEnabled(deps.capabilities)
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
   if (
@@ -151,7 +152,7 @@ function enabled(deps: SsoDraftDeps, principal: Principal, input: unknown) {
     (('protocol' in input && input.protocol === 'saml') || 'saml' in input)
   )
     throw new DomainError('not_found', 'sso_disabled')
-  if (!deps.capabilities.ssoOidcEnabled) throw new DomainError('not_found', 'sso_disabled')
+  if (requiresOidc) requireSsoEnabled(deps.capabilities, 'oidc')
   return principal
 }
 async function authorize(deps: SsoDraftDeps, db: Db, principal: Principal, headers: Headers) {
@@ -181,7 +182,11 @@ async function audit(
     action,
     targetType: 'sso_provider',
     targetId: row.id,
-    details: { method: 'oidc', providerId: row.id, revision: row.revision },
+    details: {
+      method: row.protocol === 'saml' ? 'saml' : 'oidc',
+      providerId: row.id,
+      revision: row.revision,
+    },
   })
 }
 
@@ -190,6 +195,7 @@ export async function createSsoProvider(
   principal: Principal,
   headers: Headers,
   input: unknown,
+  recoveryRequired = false,
 ) {
   const p = enabled(deps, principal, input)
   return runWithFreshProof(
@@ -204,6 +210,7 @@ export async function createSsoProvider(
       schema: create,
     },
     {
+      consumeRecovery: providerRecoveryAuthority(p, recoveryRequired),
       authorize: async (db) => {
         await authorize(deps, db, p, headers)
         const parsed = CreateSsoProviderInput.parse(input)
@@ -283,7 +290,7 @@ async function checkActivation(
 }
 
 async function requireUsableReplacement(db: Db, capabilities: SsoCapabilities, row: Provider) {
-  if (!row.enabled) return
+  if (!row.enabled || row.protocol !== 'oidc' || !capabilities.ssoOidcEnabled) return
   const enforced = await db
     .selectFrom('sso_policies')
     .select('organization_id')
@@ -303,7 +310,7 @@ async function requireUsableReplacement(db: Db, capabilities: SsoCapabilities, r
     .where('p.id', '!=', row.id)
     .where('p.enabled', '=', true)
     .where('p.retired_at', 'is', null)
-    .where('p.protocol', 'in', capabilities.ssoSamlEnabled ? ['oidc', 'saml'] : ['oidc'])
+    .where('p.protocol', '=', 'oidc')
     .limit(1)
     .executeTakeFirst()
   if (!alternative) throw new DomainError('conflict', 'sso_last_provider')
@@ -315,8 +322,9 @@ export async function activateSsoProvider(
   headers: Headers,
   providerId: string,
   input: z.infer<typeof ActivateSsoProviderInput>,
+  recoveryRequired = false,
 ) {
-  const p = enabled(deps, principal, input)
+  const p = enabled(deps, principal, input, input.enabled)
   const organizationId = p.organization.id
   let target: { row: Provider; testStatus: string }
   return runWithFreshProof(
@@ -327,12 +335,13 @@ export async function activateSsoProvider(
       sessionId: p.sessionId,
       organizationId,
       operation: 'activateSsoProvider',
-      proofMode: 'administration',
+      proofMode: input.enabled ? 'administration' : 'trust_reduction',
       input: boundInput(input, providerId),
       schema: activation.extend({ providerId: z.uuid() }),
     },
     {
       changesAuthority: !input.enabled,
+      consumeRecovery: providerRecoveryAuthority(p, recoveryRequired),
       authorize: async (db) => {
         await authorize(deps, db, p, headers)
         const member = await db
@@ -345,7 +354,8 @@ export async function activateSsoProvider(
 
         const row = await provider(db, organizationId, providerId)
         if (row.retired_at) throw missing()
-        if (row.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
+        if (input.enabled && row.protocol !== 'oidc')
+          throw new DomainError('not_found', 'sso_disabled')
         if (row.revision !== input.expectedRevision) throw changed()
         const { testStatus } = await db
           .selectFrom('sso_providers')
@@ -398,6 +408,7 @@ export async function updateSsoProvider(
   headers: Headers,
   providerId: string,
   input: unknown,
+  recoveryRequired = false,
 ) {
   const p = enabled(deps, principal, input)
   return runWithFreshProof(
@@ -413,6 +424,7 @@ export async function updateSsoProvider(
     },
     {
       changesAuthority: true,
+      consumeRecovery: providerRecoveryAuthority(p, recoveryRequired),
       authorize: async (db) => {
         await authorize(deps, db, p, headers)
         const row = await provider(db, p.organization.id, providerId)
@@ -485,7 +497,7 @@ export async function deleteSsoProvider(
   providerId: string,
   input: unknown,
 ) {
-  const p = enabled(deps, principal, input)
+  const p = enabled(deps, principal, input, false)
   return runWithFreshProof(
     deps,
     {
@@ -494,6 +506,7 @@ export async function deleteSsoProvider(
       sessionId: p.sessionId,
       organizationId: p.organization.id,
       operation: 'deleteSsoProvider',
+      proofMode: 'trust_reduction',
       input: boundInput(input, providerId),
       schema: remove.extend({ providerId: z.uuid() }),
     },
@@ -502,7 +515,6 @@ export async function deleteSsoProvider(
       authorize: async (db) => {
         await authorize(deps, db, p, headers)
         const row = await provider(db, p.organization.id, providerId)
-        if (row.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
         if (
           !row.retired_at &&
           row.revision !== DeleteSsoProviderInput.parse(input).expectedRevision

@@ -23,8 +23,10 @@ import {
   ssoFixture,
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
+import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoPolicyRoutes } from './routes/sso-policy.ts'
+import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { sealSsoProviderConfiguration } from './sso-configuration.ts'
 import { recheckSsoDomains } from './sso-domain-recheck.ts'
 import {
@@ -45,6 +47,8 @@ const clientSecret = 'synthetic-provider-activation-secret'
 const signup = { mode: 'open', allowedDomains: [] } as const
 const on = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const off = { ssoOidcEnabled: false, ssoSamlEnabled: false }
+const bothOn = { ssoOidcEnabled: true, ssoSamlEnabled: true }
+const samlOnly = { ssoOidcEnabled: false, ssoSamlEnabled: true }
 const providerPath = (id: string) => `/api/v1/team/sso/providers/${id}`
 const activationPath = (id: string) => `${providerPath(id)}/activation`
 const activate = { expectedRevision: 1, enabled: true }
@@ -103,6 +107,13 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
       routes: [
         ssoDraftRoutes({ db, capabilities, publicUrl, configurationKey }),
         ssoPolicyRoutes({ db, capabilities, publicUrl }),
+        ssoDomainRoutes({ db, capabilities, publicUrl }),
+        ssoRecoveryEnrollmentRoutes({
+          db,
+          capabilities,
+          publicUrl,
+          notificationQueue: { enqueue: async () => 'synthetic-recovery-job' },
+        }),
       ],
       ssoTeamReads: { db, capabilities },
       ssoMailboxProof: mailboxProofRoutes({
@@ -174,7 +185,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     return { id: body.attemptId, cookie: binding ? `${cookie}; ${binding.split(';')[0]}` : cookie }
   }
 
-  async function mailbox(response: Response) {
+  async function mailbox(response: Response, capabilities = on) {
     const proof = await challenge(response)
     const sent = await write(MAILBOX_PROOF_SEND_PATH, { attemptId: proof.id }, proof)
     expect(sent.status).toBe(202)
@@ -183,7 +194,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     const messages: MailMessage[] = []
     await deliverMailboxProof(
       {
-        capabilities: on,
+        capabilities,
         db,
         mailer: { send: async (message) => void messages.push(message) },
         publicUrl,
@@ -561,7 +572,8 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(await activationEvents()).toEqual([])
   })
 
-  it('preserves the last usable provider of a seeded enforced team', async () => {
+  it('preserves the last usable OIDC provider even with SAML enabled', async () => {
+    app = instance(bothOn)
     const provider = await draft({ enabled: true })
     const claim = await domain()
     await serve(provider.id, claim.id)
@@ -573,12 +585,12 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
     await error(await write(path, deactivate), 403, 'sso_required')
     const reliance = await seedOwnerProof(provider, claim)
-    const offProtocol = await db
+    const saml = await db
       .insertInto('sso_providers')
       .values({ ...samlProviderValues(fixture.team), enabled: true })
       .returning('id')
       .executeTakeFirstOrThrow()
-    await serve(offProtocol.id, claim.id)
+    await serve(saml.id, claim.id)
     const alternate = await draft({ enabled: true })
     const expired = await domain({ ...lapsedDomainValues(fixture.team), next_check_at: null })
     await serve(alternate.id, expired.id)
@@ -655,7 +667,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(await policy()).toBeUndefined()
   })
 
-  it('refuses enforcement when the only enabled provider uses hard-off SAML', async () => {
+  it('refuses a SAML-only provider even when SAML is enabled', async () => {
     const provider = await db
       .insertInto('sso_providers')
       .values({ ...samlProviderValues(fixture.team), enabled: true })
@@ -665,7 +677,148 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     await receipt(provider.id, 1, 'passed', true, 'saml')
     await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
     await error(await setPolicy(enforce), 404, 'sso_disabled')
+    for (const capabilities of [bothOn, samlOnly]) {
+      await error(await setPolicy(enforce, { target: instance(capabilities) }), 404, 'sso_disabled')
+    }
     expect(await policy()).toBeUndefined()
+  })
+
+  it('locks the test result under the organization lock and checks it after waiting', async () => {
+    const { provider } = await testedEnabledProvider()
+    await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
+    const proof = await mailbox(await setPolicy(enforce))
+    let enabling: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        const blocker = await blockerPid(trx)
+        const tests = trx
+          .selectFrom('audit_events')
+          .select('id')
+          .where('organization_id', '=', fixture.team)
+          .where('target_id', '=', provider.id)
+          .where('action', '=', 'sso_provider.tested')
+        const current = await tests.forUpdate().executeTakeFirstOrThrow()
+        enabling = Promise.resolve(setPolicy({ ...enforce, proofAttemptId: proof.id }, proof))
+        await Promise.race([
+          waitForBlocked(blocker),
+          enabling.then((response) => {
+            expect(response.status, 'The policy write must wait for the locked receipt').toBe(409)
+            return expect.unreachable('The policy write returned before the receipt changed')
+          }),
+        ])
+
+        // This models a concurrent result change at the row. Real test writers also acquire
+        // the organization lock before they append a result.
+        await trx
+          .updateTable('audit_events')
+          .set({
+            details: { method: 'oidc', providerId: provider.id, revision: 1, outcome: 'failed' },
+          })
+          .where('id', '=', current.id)
+          .execute()
+      })
+    } finally {
+      await Promise.allSettled([enabling])
+    }
+    if (!enabling) throw new Error('Missing concurrent policy request')
+    await error(await enabling, 409, 'sso_test_required')
+    expect(await consumption(proof.id)).toEqual({ consumed_at: null })
+    expect(await policy()).toBeUndefined()
+  })
+
+  it('can recover without any linked admin and remove trust after OIDC turns off', async () => {
+    const { provider, claim } = await testedEnabledProvider()
+    await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
+    expect(
+      await db
+        .selectFrom('sso_identity_links')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .execute(),
+    ).toEqual([])
+    const enabling = await mailbox(await setPolicy(enforce))
+    expect((await setPolicy({ ...enforce, proofAttemptId: enabling.id }, enabling)).status).toBe(
+      200,
+    )
+
+    app = instance(samlOnly)
+    const turnOff = { ...enforce, expectedRevision: 2, requireSso: false }
+    const removals = [
+      { path: activationPath(provider.id), method: 'POST', body: deactivate },
+      { path: providerPath(provider.id), method: 'DELETE', body: { expectedRevision: 1 } },
+      {
+        path: `/api/v1/team/sso/domains/${claim.id}`,
+        method: 'DELETE',
+        body: { expectedGeneration: claim.generation },
+      },
+    ]
+    await error(await setPolicy(turnOff), 403, 'sso_required')
+    for (const { path, method, body } of removals) {
+      await error(await write(path, body, { method }), 403, 'sso_required')
+    }
+    await error(await write(activationPath(provider.id), activate), 404, 'sso_disabled')
+
+    const use = '/api/v1/team/sso/recovery/use'
+    const recovery = await mailbox(await write(use, { expectedRevision: 2 }), samlOnly)
+    expect(
+      (await write(use, { expectedRevision: 2, proofAttemptId: recovery.id }, recovery)).status,
+    ).toBe(204)
+    const disabled = await setPolicy(turnOff, recovery)
+    expect(disabled.status).toBe(200)
+    expect(await disabled.json()).toMatchObject({ requireSso: false, policyRevision: 3 })
+    for (const { path, method, body } of removals) {
+      const proof = await mailbox(await write(path, body, { method }), samlOnly)
+      expect(
+        (await write(path, { ...body, proofAttemptId: proof.id }, { ...proof, method })).status,
+      ).toBe(200)
+    }
+    expect(await stored(provider.id)).toMatchObject({
+      enabled: false,
+      retired_at: expect.any(Date),
+    })
+    const retired = await db
+      .selectFrom('sso_domains')
+      .select('retired_at')
+      .where('id', '=', claim.id)
+      .executeTakeFirstOrThrow()
+    expect(retired.retired_at).toBeInstanceOf(Date)
+  })
+
+  it('points an enforced owner with only a SAML browser proof to recovery for trust reductions', async () => {
+    const saml = await db
+      .insertInto('sso_providers')
+      .values({ ...samlProviderValues(fixture.team), enabled: true })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    const claim = await domain()
+    await serve(saml.id, claim.id)
+    await seedOwnerProof(saml, claim)
+    const oidc = await draft({ enabled: true })
+    await serve(oidc.id, claim.id)
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: true })
+      .execute()
+    app = instance(samlOnly)
+
+    await error(await setPolicy({ ...enforce, requireSso: false }), 403, 'sso_required')
+    for (const { id } of [saml, oidc]) {
+      await error(await write(activationPath(id), deactivate), 403, 'sso_required')
+      await error(
+        await write(providerPath(id), { expectedRevision: 1 }, { method: 'DELETE' }),
+        403,
+        'sso_required',
+      )
+    }
+    await error(
+      await write(
+        `/api/v1/team/sso/domains/${claim.id}`,
+        { expectedGeneration: claim.generation },
+        { method: 'DELETE' },
+      ),
+      403,
+      'sso_required',
+    )
   })
 
   it('requires an accepted current recovery owner and refuses a demoted or re-promoted former owner', async () => {
