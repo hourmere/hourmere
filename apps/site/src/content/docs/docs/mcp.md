@@ -1113,6 +1113,13 @@ not whether older retained history exists beyond that bound.
 
 ## Create and manage meeting polls
 
+In `tools/list`, a `read` key sees the host list, metadata and results tools plus
+`read_meeting_poll` for voters. A `bookings` or `full` key also sees poll writes. Host
+results include private voter details and the revisions for `finalize_meeting_poll`.
+Availability in results is advisory. Finalize rechecks it and returns booking metadata
+without a booking management link or token. Public tools act on existing polls and
+cannot create one. A host key cannot replace a voter's own capability or consent.
+
 Call `create_meeting_poll` with the event type ID, offered candidate starts, deadline,
 display time zone, admission mode and an `idempotencyKey`. A `bookings` or `full` key
 requires personal event ownership or current team owner/admin access in its organization.
@@ -1131,6 +1138,10 @@ invalidates the old public link and discloses the replacement once.
 创建投票、邀请、重发、移除投票者及轮换链接。请保留创建、邀请、重发和轮换使用的
 幂等键。邀请重试只返回本次提交的邮箱的当前状态。公开链接只在创建或轮换首次成功时
 返回，轮换后旧链接立即失效。受邀投票没有公开链接。
+`read` 密钥在 `tools/list` 中可见管理端的列表、详情和结果工具，以及投票者的读取工具。
+`bookings` 或 `full` 密钥还可看到写入工具。主持人结果包含投票者的私人信息及最终确认所需的版本。
+候选时间的可用性仅供参考，最终确认会重新检查并返回预约元数据，不含预约管理链接或令牌。
+公开工具仅用于现有投票，不能创建投票。密钥不能替代投票者的专用令牌或本人同意。
 
 ## Duplicate an event type
 
