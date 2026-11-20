@@ -36,6 +36,8 @@ import * as removalExports from './team-member-removal.ts'
 import { removeTeamMember, teamMemberRemovalTarget } from './team-member-removal.ts'
 import { assertTeamOwnerRemains } from './team-owner-continuity.ts'
 import type { createTeamRolePolicy } from './team-role-policy.ts'
+import { lockSharedTeamSsoProof, lockTeamSsoProof, ssoHardOff } from './team-sso.ts'
+import { nativeSsoRequired, trustedAddMember } from './team-sso-native.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4393'
@@ -64,6 +66,9 @@ function sourceCopy(replacement?: Replacement): Remove {
     teamManagementDenied,
     teamRoles,
     setRoutingTargetHealth,
+    lockSharedTeamSsoProof,
+    ssoHardOff,
+    nativeSsoRequired,
   }
   return guardCopy(
     new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
@@ -107,6 +112,10 @@ function policySourceCopy(
     teamSessionUser,
     removeTeamMember: remove,
     teamMemberRemovalTarget,
+    lockTeamSsoProof,
+    ssoHardOff,
+    nativeSsoRequired,
+    trustedAddMember,
   }
   return guardCopy(
     new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(

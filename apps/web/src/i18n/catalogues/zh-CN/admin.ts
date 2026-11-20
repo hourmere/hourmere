@@ -2186,6 +2186,9 @@ export const admin = {
     '未列出团队活动类型：只有团队所有者和管理员才能查看这些时间无法预约的原因。',
   'Another scheduling rule applies.': '受其他排期规则限制。',
 
+  // Native team SSO
+  'Sign in with this team’s SSO to continue.': '请使用此团队的单点登录继续。',
+
   // Host meeting polls
   'Meeting polls': '会议投票',
   'Loading meeting polls…': '正在加载会议投票…',

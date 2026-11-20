@@ -36,6 +36,8 @@ import { localeDescription } from '../i18n/locale-description.ts'
 import { authenticated, ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { publicBookingAuditOrigin } from '../rest-scopes.ts'
+import { restTeamReadAccess } from '../sso-read-routes.ts'
+import { requireTeamRead } from '../sso-team-reads.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 import { PublicBranding } from './public-branding.ts'
 
@@ -1170,11 +1172,17 @@ export function bookingRoutes({
           429: keyRateLimited,
         },
       }),
-      async (c) =>
-        c.json(
-          await resolveBookingOrganization(context(c.var.principal), c.req.valid('param').id),
+      async (c) => {
+        const check = restTeamReadAccess(c)
+        return c.json(
+          await resolveBookingOrganization(
+            context(c.var.principal),
+            c.req.valid('param').id,
+            check && (async (scope) => requireTeamRead(await check(scope))),
+          ),
           200,
-        ),
+        )
+      },
     )
 
     app.openapi(

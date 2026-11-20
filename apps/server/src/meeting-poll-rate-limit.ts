@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import {
   ensureMeetingPollKey,
   MEETING_POLL_LIMITS,
@@ -58,7 +59,7 @@ async function enforceRequestBudget(
   const windowSeconds = MEETING_POLL_LIMITS.requestWindowSeconds
   const secret = meetingPollDerivedKey(meetingPollSecret, 'request/v1')
   const digests = keys.map((key) => createHmac('sha256', secret).update(key).digest())
-  const retryAfter = await db.transaction().execute(async (trx) => {
+  const retryAfter = await teamWriteTransaction(db.transaction(), async (trx) => {
     await ensureMeetingPollKey(trx, meetingPollSecret)
     await authorize?.(trx)
     // A bounded opportunistic sweep; locked counters are left to another request.

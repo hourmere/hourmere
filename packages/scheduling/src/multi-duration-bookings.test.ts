@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { parsePersistedApiKeyMetadata } from '@hourmere/auth'
 import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -113,6 +114,7 @@ function sourceCopy(...changes: Change[]): Api {
   const bindings = {
     auditActor,
     writeAuditEvent,
+    teamWriteTransaction,
     parsePersistedApiKeyMetadata,
     createHash,
     randomBytes,

@@ -1,6 +1,7 @@
 /** Shared, session-only SSO write gate. No route enables this while protocols are off. */
 import { randomBytes } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { checkTeamWriteBeforeAuthorityChange, teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
@@ -96,6 +97,8 @@ export async function runWithFreshProof<T>(
   request: FreshProofRequest,
   callbacks: {
     authorize: (trx: Db) => Promise<void>
+    /** The operation can revoke the acting session's team proof in this transaction. */
+    changesAuthority?: boolean
     /** Optional I/O after preflight, outside the transaction. Authority is checked again. */
     prepare?: () => Promise<void>
     mutate: (
@@ -138,8 +141,8 @@ export async function runWithFreshProof<T>(
   const cookie = setCookie === undefined ? {} : { setCookie }
   const clock = deps.now ?? databaseClock
   const prepare = Symbol('prepare')
-  const run = (prepared: boolean) =>
-    deps.db.transaction().execute(async (trx): Promise<FreshProofResult<T> | typeof prepare> => {
+  const run = (prepared: boolean): Promise<FreshProofResult<T> | typeof prepare> =>
+    teamWriteTransaction(deps.db.transaction(), async (trx) => {
       // Follow the shared team-write lock order: person, organization, then session/attempt.
       await sql`SELECT id FROM auth."user"
       WHERE id IN (${request.userId}::uuid, ${request.affectedUserId ?? request.userId}::uuid)
@@ -166,10 +169,19 @@ export async function runWithFreshProof<T>(
         AND s."expiresAt" > ${now}::timestamptz`.execute(trx)
       const mailbox = session.rows[0]?.mailbox
       if (!mailbox) throw new HTTPException(403, { message: 'forbidden' })
-      const policy = await sql<{ require_sso: boolean }>`SELECT require_sso FROM sso_policies
-      WHERE organization_id = ${request.organizationId}::uuid`.execute(trx)
       const independentMailbox = request.proofMode === 'mailbox'
-      const needsSso = !independentMailbox && policy.rows[0]?.require_sso === true
+      const policy =
+        deps.capabilities.ssoOidcEnabled && !independentMailbox
+          ? await sql<{ trust_generation: number }>`SELECT trust_generation FROM sso_policies
+          WHERE organization_id = ${request.organizationId}::uuid AND require_sso
+            AND EXISTS (
+              SELECT 1 FROM sso_providers
+              WHERE organization_id = ${request.organizationId}::uuid
+                AND protocol = 'oidc' AND enabled AND retired_at IS NULL
+            )`.execute(trx)
+          : undefined
+      const trustGeneration = policy?.rows[0]?.trust_generation ?? null
+      const needsSso = trustGeneration !== null
       const needsMailbox = !needsSso
       if (proofAttemptId) {
         const { rows } = await sql<{
@@ -178,11 +190,13 @@ export async function runWithFreshProof<T>(
           requires_mailbox: boolean
           requires_sso: boolean
           mailbox_live: boolean
+          sso_live: boolean
           proven_at: string | null
           proof_expires_at: string | null
         }>`SELECT id, expires_at::text, requires_mailbox, requires_sso,
           mailbox_proven_at::text AS proven_at,
           mailbox_proof_expires_at::text AS proof_expires_at,
+          step_up_link_id IS NOT NULL AS sso_live,
           (mailbox_proven_at IS NOT NULL AND mailbox_proof_expires_at > ${now}::timestamptz)
             AS mailbox_live
         FROM sso_attempts
@@ -195,13 +209,24 @@ export async function runWithFreshProof<T>(
           AND (mailbox_proven_at IS NULL OR mailbox_proof_expires_at > ${now}::timestamptz)
           AND requires_sso = ${needsSso}
           AND (NOT ${independentMailbox} OR mailbox = ${mailbox})
-          AND (requires_mailbox OR NOT ${needsMailbox})`.execute(trx)
+          AND (requires_mailbox OR NOT ${needsMailbox})
+          AND (step_up_link_id IS NULL OR (
+            step_up_proof_expires_at > ${now}::timestamptz
+            AND step_up_trust_generation = ${trustGeneration}::integer
+            AND (NOT requires_mailbox OR mailbox = ${mailbox})
+            AND EXISTS (
+              SELECT 1 FROM sso_identity_links l JOIN sso_providers p ON p.id = l.provider_id
+              WHERE l.id = step_up_link_id AND l.user_id = sso_attempts.user_id
+                AND l.organization_id = sso_attempts.organization_id
+                AND p.id = step_up_provider_id AND p.protocol = 'oidc'
+                AND l.retired_at IS NULL AND p.enabled AND p.retired_at IS NULL
+            )
+          ))`.execute(trx)
         const attempt = rows[0]
         if (attempt) {
           const remaining: string[] = []
           if (attempt.requires_mailbox && !attempt.mailbox_live) remaining.push('mailbox')
-          // SSO proof cannot be satisfied until the protocol's step-up implementation exists.
-          if (attempt.requires_sso) remaining.push('sso')
+          if (attempt.requires_sso && !attempt.sso_live) remaining.push('sso')
           if (remaining.length > 0)
             return {
               status: 'proof_required',
@@ -214,6 +239,7 @@ export async function runWithFreshProof<T>(
               ...cookie,
             }
           if (!prepared) return prepare
+          if (callbacks.changesAuthority) await checkTeamWriteBeforeAuthorityChange(trx)
           await sql`UPDATE sso_attempts SET consumed_at = ${now}::timestamptz
           WHERE id = ${attempt.id}::uuid`.execute(trx)
           return {

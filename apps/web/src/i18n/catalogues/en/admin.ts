@@ -2296,6 +2296,9 @@ export const admin = {
     'Team event types are not listed: only team owners and admins can see why their times are unavailable.',
   'Another scheduling rule applies.': 'Another scheduling rule applies.',
 
+  // Native team SSO
+  'Sign in with this team’s SSO to continue.': 'Sign in with this team’s SSO to continue.',
+
   // Host meeting polls
   'Meeting polls': 'Meeting polls',
   'Loading meeting polls…': 'Loading meeting polls…',

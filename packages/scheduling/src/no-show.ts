@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { assertBookingLocallyManaged } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -21,7 +22,7 @@ export async function setAttendeeNoShow(
 ): Promise<AttendeeNoShow> {
   const missing = () => new DomainError('not_found', 'booking_not_found')
   if (!isUuid(bookingId) || !isUuid(attendeeId)) throw missing()
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     const booking = await authorizeBookingNoShow(trx, ctx, bookingId)
     // Confirmed paid bookings: paid_booking_management_unavailable, as for other host actions.
