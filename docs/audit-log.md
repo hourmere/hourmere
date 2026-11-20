@@ -66,11 +66,12 @@ Branding updates allow only `logo` (`uploaded`, `selected` or `removed`) and
 `primaryColor` (`set` or `cleared`), at least one of them; the database also checks
 these values. Attendee no-show changes require exactly `attendeeId` (the attendee's
 stored ID, a lowercase UUID) and `noShow` (`marked` or `unmarked`); the database checks
-both values. Every other action, including the SCIM provisioning token and User actions,
-requires an empty object. No key or token names, webhook or Slack URLs, secrets,
+both values. Actions without an allow-list require an empty object. No key or token
+names, webhook or Slack URLs, secrets,
 images, logo hashes, colours, attendee names, email addresses or free text are
 recorded. New detail keys require deliberate schema and documentation review. The
-[SSO actions](#sso-actions) have their own allow-lists and value checks.
+[SSO actions](#sso-actions) and [workflow actions](#workflow-actions) have their own
+allow-lists and value checks.
 
 | Area | Actions |
 | --- | --- |
@@ -85,6 +86,7 @@ recorded. New detail keys require deliberate schema and documentation review. Th
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
+| Workflows | `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`, `workflow.deleted`, `workflow.previewed` |
 | Audit log | `audit_log.retention_updated` |
 
 `organization.ownership_transferred` and `api_key.rotated` are reserved action
@@ -196,6 +198,22 @@ An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity by its stored ID, whatever UUID
 spelling the request used; removal events preserve those IDs after the entity
 disappears.
+
+## Workflow actions
+
+[Booking workflow](workflows.md) definition changes and successful synthetic previews
+use the shared journal in the transaction that authorizes and performs the operation.
+The resolved personal or team organization owns the row. The actor and credential follow
+the journal's normal rules. A definition event targets the stored workflow ID and records
+its revision and trigger type, with only the revision on deletion. A candidate preview
+targets the current organization as `workflow_preview` and records the trigger type and
+`condition_false` when the synthetic example fails a condition. Workflow names,
+configuration, recipients, example values and rendered content stay out of the journal.
+
+Creation and deletion replays, repeats of the current enabled state, and stale updates
+emit no additional event. Each successful preview request is a separate audited operation.
+These events use the space's existing audit permissions and retention. Workflows remain
+hard-off, so production requests currently produce no workflow audit events.
 
 ## SSO actions
 

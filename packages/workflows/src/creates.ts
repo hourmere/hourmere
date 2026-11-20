@@ -7,7 +7,7 @@ import { lockWorkflowOwner } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort, type WorkflowAuditPort } from './audit.ts'
+import { hardOffWorkflowAuditPort, type WorkflowAuditPort, workflowAuditActor } from './audit.ts'
 import { assertWorkflowTextPolicy, WorkflowDefinitionSchema } from './definition.ts'
 import { workflowOperation } from './hard-off.ts'
 import { WORKFLOW_MAX_DEFINITIONS_PER_OWNER, WORKFLOW_MAX_ENABLED_PER_EVENT } from './limits.ts'
@@ -245,7 +245,6 @@ export async function createWorkflowDefinition(
         request_fingerprint: digest,
       })
       .execute()
-    const actor = ctx.principal
     await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
       event: 'workflow.created',
       occurredAt: Temporal.Now.instant(),
@@ -253,12 +252,7 @@ export async function createWorkflowDefinition(
       workflowId: row.id,
       revision: 1,
       trigger: definition.trigger.type,
-      actor:
-        actor.kind === 'api_key'
-          ? { kind: actor.kind, userId: actor.user.id, apiKeyId: actor.apiKeyId }
-          : actor.kind === 'oauth'
-            ? { kind: actor.kind, userId: actor.user.id, clientId: actor.clientId }
-            : { kind: actor.kind, userId: actor.user.id },
+      actor: workflowAuditActor(ctx.principal),
     })
     return workflowView(owner, { ...row, definition: revision })
   })

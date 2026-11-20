@@ -10,6 +10,7 @@ export {
   type WorkflowAuditPort,
   type WorkflowAuditRecord,
   type WorkflowSkipReason,
+  workflowDefinitionAuditPort,
 } from './audit.ts'
 export {
   captureWorkflowBooking,

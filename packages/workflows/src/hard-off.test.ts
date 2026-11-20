@@ -100,6 +100,7 @@ const PACKAGE_EXPORTS = [
   'updateWorkflow',
   'validateWorkflowDefinition',
   'workflowCapture',
+  'workflowDefinitionAuditPort',
   'workflowDispatchWindow',
   'workflowExecution',
   'workflowJobs',
@@ -479,6 +480,7 @@ describe('workflow hard-off', () => {
       '@hourmere/scheduling/errors',
       '@hourmere/scheduling/text',
     ])
+    const auditImports = new Set(['@hourmere/db/audit'])
     // Creation adds hashing, scope enforcement and SQL; these dependencies are confined to
     // that service, while hard-off.ts and the other modules keep the existing import pin.
     const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
@@ -517,6 +519,7 @@ describe('workflow hard-off', () => {
           (specifier) =>
             !specifier.startsWith('./') &&
             !allowed.has(specifier) &&
+            !(file === 'packages/workflows/src/audit.ts' && auditImports.has(specifier)) &&
             !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
             !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)) &&
             !(file === 'packages/workflows/src/capture.ts' && captureImports.has(specifier)) &&
@@ -549,16 +552,22 @@ describe('workflow audit port while hard-off', () => {
         },
       },
     ) as Db
-    await expect(
-      port.record(trx, {
-        event: 'workflow.created',
-        occurredAt: Temporal.Instant.from('2026-11-09T00:00:00Z'),
-        actor: { kind: 'session', userId: '10000000-0000-4000-8000-000000000001' },
-        owner: { kind: 'team', organizationId: '30000000-0000-4000-8000-000000000001' },
-        workflowId: '60000000-0000-4000-8000-000000000001',
-        revision: 1,
-      }),
-    ).resolves.toBeUndefined()
+    for (const audit of [port, workflows.workflowDefinitionAuditPort])
+      await expect(
+        audit.record(trx, {
+          event: 'workflow.created',
+          occurredAt: Temporal.Instant.from('2026-11-09T00:00:00Z'),
+          actor: {
+            kind: 'session',
+            user: { id: '10000000-0000-4000-8000-000000000001' },
+            sessionId: '20000000-0000-4000-8000-000000000001',
+          },
+          owner: { kind: 'team', organizationId: '30000000-0000-4000-8000-000000000001' },
+          workflowId: '60000000-0000-4000-8000-000000000001',
+          revision: 1,
+          trigger: 'booking.created',
+        }),
+      ).resolves.toBeUndefined()
     expect(Object.isFrozen(port)).toBe(true)
     expect(hardOffWorkflowAuditPort()).toBe(port)
   })

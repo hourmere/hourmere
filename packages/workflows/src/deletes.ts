@@ -2,7 +2,7 @@ import { ApiKeyScopeError } from '@hourmere/auth'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort } from './audit.ts'
+import { hardOffWorkflowAuditPort, workflowAuditActor } from './audit.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import { workflowOperation } from './hard-off.ts'
 import { uuidSchema } from './ownership.ts'
@@ -46,7 +46,7 @@ export async function deleteWorkflowDefinition(
     )
     const current = await trx
       .selectFrom('workflow_definitions')
-      .select(['revision', 'deleted_at'])
+      .select(['id', 'revision', 'deleted_at'])
       .where('id', '=', id)
       .where('organization_id', '=', owner.organizationId)
       .forUpdate()
@@ -78,19 +78,13 @@ export async function deleteWorkflowDefinition(
       .execute()
     // History, enrollments, recipient claims and mail charges retain their own lifetimes.
     // Claimed runs require the dispatcher's live-definition check before an attempt.
-    const actor = ctx.principal
     await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
       event: 'workflow.deleted',
       occurredAt: Temporal.Now.instant(),
       owner,
-      workflowId: id,
+      workflowId: current.id,
       revision: current.revision,
-      actor:
-        actor.kind === 'api_key'
-          ? { kind: actor.kind, userId: actor.user.id, apiKeyId: actor.apiKeyId }
-          : actor.kind === 'oauth'
-            ? { kind: actor.kind, userId: actor.user.id, clientId: actor.clientId }
-            : { kind: actor.kind, userId: actor.user.id },
+      actor: workflowAuditActor(ctx.principal),
     })
   })
 }

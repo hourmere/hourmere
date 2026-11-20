@@ -75,6 +75,12 @@ export const auditDetails = {
   'event_type.notifications_updated': [],
   'event_type.waitlist_updated': [],
   'event_type.round_robin_activated': [],
+  'workflow.created': ['revision', 'trigger'],
+  'workflow.updated': ['revision', 'trigger'],
+  'workflow.enabled': ['revision', 'trigger'],
+  'workflow.disabled': ['revision', 'trigger'],
+  'workflow.deleted': ['revision'],
+  'workflow.previewed': ['trigger', 'reason'],
   'audit_log.retention_updated': [],
 } as const
 export type AuditAction = keyof typeof auditDetails

@@ -2,7 +2,7 @@ import { ApiKeyScopeError } from '@hourmere/auth'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort } from './audit.ts'
+import { hardOffWorkflowAuditPort, workflowAuditActor } from './audit.ts'
 import { WorkflowConditionsSchema } from './conditions.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import { WorkflowDefinitionSchema } from './definition.ts'
@@ -131,7 +131,6 @@ export async function updateWorkflowDefinition(
       .where('id', '=', id)
       .returning(['id', 'revision', 'enabled', 'created_at', 'updated_at'])
       .executeTakeFirstOrThrow()
-    const actor = ctx.principal
     const audit = ctx.audit ?? hardOffWorkflowAuditPort()
     const auditEvents = [
       ...(edited ? ['workflow.updated' as const] : []),
@@ -144,15 +143,10 @@ export async function updateWorkflowDefinition(
         event,
         occurredAt: Temporal.Now.instant(),
         owner,
-        workflowId: id,
+        workflowId: row.id,
         revision: nextRevision,
         trigger: definition.trigger.type,
-        actor:
-          actor.kind === 'api_key'
-            ? { kind: actor.kind, userId: actor.user.id, apiKeyId: actor.apiKeyId }
-            : actor.kind === 'oauth'
-              ? { kind: actor.kind, userId: actor.user.id, clientId: actor.clientId }
-              : { kind: actor.kind, userId: actor.user.id },
+        actor: workflowAuditActor(ctx.principal),
       })
     return workflowView(owner, { ...row, definition: revision })
   })

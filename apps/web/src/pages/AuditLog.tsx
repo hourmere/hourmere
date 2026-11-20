@@ -51,7 +51,7 @@ const CREDENTIAL_TYPES: Record<string, MessageKey> = {
   none: 'No credential',
 }
 
-/** Actions the server records today, by area. Unknown actions in results still render. */
+/** Supported audit filters by area. Unknown actions in results still render. */
 export const AUDIT_ACTIONS: readonly (readonly [MessageKey, readonly string[]])[] = [
   [
     'Members',
@@ -129,6 +129,17 @@ export const AUDIT_ACTIONS: readonly (readonly [MessageKey, readonly string[]])[
       'event_type.notifications_updated',
       'event_type.waitlist_updated',
       'event_type.round_robin_activated',
+    ],
+  ],
+  [
+    'Workflows',
+    [
+      'workflow.created',
+      'workflow.updated',
+      'workflow.enabled',
+      'workflow.disabled',
+      'workflow.deleted',
+      'workflow.previewed',
     ],
   ],
   ['Audit log', ['audit_log.retention_updated']],

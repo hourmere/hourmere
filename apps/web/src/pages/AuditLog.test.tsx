@@ -225,6 +225,33 @@ describe('audit log page', () => {
     )
   })
 
+  it('offers all six workflow actions and filters for the selected action', async () => {
+    const api = setup()
+    await openPage()
+    const group = await screen.findByRole('group', { name: 'Workflows' })
+    expect(
+      within(group)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual([
+      'workflow.created',
+      'workflow.updated',
+      'workflow.enabled',
+      'workflow.disabled',
+      'workflow.deleted',
+      'workflow.previewed',
+    ])
+    const user = userEvent.setup()
+    await user.selectOptions(screen.getByLabelText('Action'), 'workflow.previewed')
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }))
+    await waitFor(() =>
+      expect(query(api.to(EVENTS).at(-1)?.path)).toEqual({
+        limit: '50',
+        action: 'workflow.previewed',
+      }),
+    )
+  })
+
   it('ignores an actor ID without an actor type and filters by a clicked actor', async () => {
     const api = setup({
       events: () =>

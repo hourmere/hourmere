@@ -3,7 +3,7 @@ import { validateTimeZone } from '@hourmere/core'
 import { LOCATION_KINDS, MAX_ANSWER_LENGTH, MAX_GUESTS, MAX_QUESTIONS } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort } from './audit.ts'
+import { hardOffWorkflowAuditPort, workflowAuditActor } from './audit.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import {
   validateWorkflowDefinition,
@@ -120,12 +120,7 @@ export async function previewWorkflowCandidate(
       revision: null,
       trigger: definition.trigger.type,
       reason: preview.match === 'condition_false' ? 'condition_false' : undefined,
-      actor:
-        principal.kind === 'api_key'
-          ? { kind: principal.kind, userId: principal.user.id, apiKeyId: principal.apiKeyId }
-          : principal.kind === 'oauth'
-            ? { kind: principal.kind, userId: principal.user.id, clientId: principal.clientId }
-            : { kind: principal.kind, userId: principal.user.id },
+      actor: workflowAuditActor(principal),
     })
     return preview
   })

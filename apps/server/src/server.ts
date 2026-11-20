@@ -112,7 +112,7 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
-import { captureWorkflowBooking } from '@hourmere/workflows'
+import { captureWorkflowBooking, workflowDefinitionAuditPort } from '@hourmere/workflows'
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -426,7 +426,12 @@ export function productRoutes({
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
     // Registered while hard-off: every operation answers 404 workflows_disabled.
-    workflowRoutes({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
+    workflowRoutes({
+      db,
+      audit: workflowDefinitionAuditPort,
+      followUpHostNotesEnabled,
+      workflowRunCursorSecret,
+    }),
   ]
 }
 
@@ -528,7 +533,12 @@ export function productTools({
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
-    ...workflowTools({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
+    ...workflowTools({
+      db,
+      audit: workflowDefinitionAuditPort,
+      followUpHostNotesEnabled,
+      workflowRunCursorSecret,
+    }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
     ...routingFormConfigurationTools({
       db,
