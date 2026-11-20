@@ -52,7 +52,8 @@ describe('the public routing form', () => {
     const address = screen.getByRole('textbox', { name: 'Work email' })
     const department = screen.getByRole('combobox', { name: 'Department' })
     const button = screen.getByRole('button', { name: 'Continue' })
-    expect(document.activeElement).toBe(heading)
+    // Focus moves to the heading in an effect after it renders; under load that can lag the heading.
+    await waitFor(() => expect(document.activeElement).toBe(heading))
     expect(company.hasAttribute('required')).toBe(true)
     expect(address.getAttribute('type')).toBe('email')
     expect(screen.getByRole('combobox', { name: 'Department', description: 'Optional' })).toBe(
