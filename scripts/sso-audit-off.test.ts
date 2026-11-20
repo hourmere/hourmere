@@ -33,6 +33,8 @@ const EMITTERS: Readonly<Record<string, readonly string[]>> = {
   'apps/server/src/sso-drafts.ts': [
     'sso_provider.created',
     'sso_provider.updated',
+    'sso_provider.enabled',
+    'sso_provider.disabled',
     'sso_provider.deleted',
     'sso_provider.secret_rotated',
   ],

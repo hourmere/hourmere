@@ -871,6 +871,7 @@ The stable domain codes are exactly:
 | `sso_configuration_changed` | 409 | An expected provider revision, `policyRevision`, domain generation, link generation or `trustGeneration` no longer matches |
 | `sso_domain_unverified` | 409 | A new link, JIT admission, provider activation or enforcement needs a domain whose verification is unexpired and whose latest recheck was positive (a failed or unknown recheck freezes them) |
 | `sso_test_required` | 409 | Activation or enforcement needs a passed test for the exact current provider revision (an owner's, for enforcement) |
+| `sso_last_provider` | 409 | Disabling the last usable provider is refused while the team enforces SSO |
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), the last recovery owner tries to leave, be removed or lose the owner role, or the account affected by a link retirement lacks a verified login mailbox |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
@@ -892,7 +893,7 @@ The existing leave, member-removal and role-change operations gain
 | POST `/domains/D/verify` | `verifySsoDomain` | Session: activating domain authority requires interactive administrator proof. |
 | DELETE `/domains/D` | `deleteSsoDomain` | Session: releasing domain authority requires interactive administrator proof. |
 | POST `/providers/P/test` | `testSsoProvider` | Session: the test binds the current administrator and browser to a configuration revision. |
-| POST `/providers/P/activation` | `activateSsoProvider` | Session: enabling/disabling authentication authority requires interactive administrator proof. |
+| POST `/providers/P/activation` | `activateSsoProvider` | Session: changing which providers can authenticate a team requires fresh interactive owner proof. |
 | PUT `/policy` | `setSsoPolicy` | Session: enforcement/admission changes require interactive proof and owner authority for enforcement. |
 | POST `/recovery` | `configureSsoRecovery` | Session: nominating a recovery owner requires interactive owner proof; the nominee accepts separately. |
 | POST `/recovery/{enrollmentId}/accept` | `acceptSsoRecoveryEnrollment` | Session: the nominated owner must independently prove their own mailbox and consent. |
@@ -993,8 +994,30 @@ displayName?, domainIds?, oidc?, saml?, proofAttemptId?}` and delete takes
 and live proofs.
 A changed identity tuple requires a replacement provider. Repeating the delete of the
 team's own retired provider succeeds idempotently for an authorized caller; every other
-operation on a retired ID returns `sso_not_found`. Activation takes `{expectedRevision, enabled,
-proofAttemptId?}`.
+operation on a retired ID returns `sso_not_found`.
+
+Provider activation takes `{expectedRevision, enabled, proofAttemptId?}` and returns the
+same safe `{provider}` summary. A verified current team owner must use a browser session
+with the exact Origin, expected organization header and fresh administration proof.
+A team without enforcement uses mailbox proof. An enforcing team requires SSO step-up,
+with mailbox proof as well if the IdP cannot prove a fresh sign-in. Activation uses the
+ordinary owner proof flow until recovery repair ships. Enabling requires a
+passed test for the exact current revision and at least one associated, unexpired verified
+domain with a positive latest recheck. Disabling the last usable provider while enforcing
+SSO returns `409 sso_last_provider`. Another enabled, non-retired provider can satisfy the
+guard if its protocol is on and it has an unexpired verified domain. A failed recheck freezes
+new activation while the existing provider can still serve that domain until verification expires.
+Changing activation state keeps the provider revision and records an audit event.
+Disabling also increments `trustGeneration`. An authorized request to enable an already
+enabled provider still checks the current prerequisites.
+Both protocols remain hard-off, and the operation returns `404 sso_disabled` in production.
+
+提供者启停仅限当前团队中邮箱已验证的所有者使用浏览器会话发起，须提供同源请求、预期团队、
+预期提供者版本和操作绑定的新鲜证明。未强制 SSO 的团队使用邮箱证明；已强制的团队需要 SSO
+重新认证，身份提供方无法证明本次认证足够新时，还须提供邮箱证明。启用前，当前版本必须通过测试，
+且至少一个关联域名的验证仍有效、最近一次复查通过。已强制 SSO 的团队停用最后一个可用提供者时，
+会收到 `409 sso_last_provider`。启停变更保留提供者版本并写入审计日志，停用还会递增信任代次。
+两种协议仍在代码中保持关闭，生产环境返回 `404 sso_disabled`。
 
 Domain challenge takes `{domain, proofAttemptId?}` and returns `{domain: {id, name,
 status}, txtName, txtValue, expiresAt}` once; repeated creation rotates rather than

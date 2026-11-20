@@ -115,7 +115,7 @@ async function authorize(deps: SsoDomainDeps, db: Db, principal: Principal, head
   )(db, principal.organization.id)
 }
 // All domain operations take the same instance-wide exact-name lock, after the team lock.
-async function lockDomain(db: Db, name: string) {
+export async function lockSsoDomain(db: Db, name: string) {
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`sso-domain:${name}`}, 0))`.execute(db)
 }
 async function domain(db: Db, organizationId: string, id: string) {
@@ -210,7 +210,7 @@ export async function createSsoDomainChallenge(
     {
       authorize: async (db) => {
         await authorize(deps, db, p, headers)
-        await lockDomain(db, CreateSsoDomainChallengeInput.parse(input).domain)
+        await lockSsoDomain(db, CreateSsoDomainChallengeInput.parse(input).domain)
       },
       mutate: async (db, raw) => {
         const { domain: name } = create.parse(raw)
@@ -284,7 +284,7 @@ async function authorizeDomain(
 ) {
   await authorize(deps, db, p, headers)
   const before = await domain(db, p.organization.id, id)
-  await lockDomain(db, before.name)
+  await lockSsoDomain(db, before.name)
   const row = await domain(db, p.organization.id, id)
   if (row.generation !== VerifySsoDomainInput.parse(input).expectedGeneration) throw changed()
   return row
