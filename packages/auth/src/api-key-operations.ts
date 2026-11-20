@@ -296,6 +296,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('POST', '/api/v1/workflows/preview', 'other_write', 'key'),
   rest('GET', '/api/v1/workflows', 'other_read', 'key'),
   rest('GET', '/api/v1/workflows/{id}', 'other_read', 'key'),
+  rest('GET', '/api/v1/workflows/{id}/runs', 'other_read', 'key'),
   rest('POST', '/api/v1/team/sso/domains', 'session_only', 'session_only'),
   rest('POST', '/api/v1/team/sso/domains/{domainId}/verify', 'session_only', 'session_only'),
   rest('DELETE', '/api/v1/team/sso/domains/{domainId}', 'session_only', 'session_only'),
@@ -518,6 +519,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('get_sso_policy', 'other_read', ['GET /api/v1/team/sso/policy']),
   mcp('list_workflows', 'other_read', ['GET /api/v1/workflows']),
   mcp('get_workflow', 'other_read', ['GET /api/v1/workflows/{id}']),
+  mcp('list_workflow_runs', 'other_read', ['GET /api/v1/workflows/{id}/runs']),
 ])
 
 function cli(command: string, tool: string): ApiKeyCliOperation {
@@ -627,6 +629,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('sso policy', 'get_sso_policy'),
   cli('workflows list', 'list_workflows'),
   cli('workflows get', 'get_workflow'),
+  cli('workflows runs', 'list_workflow_runs'),
 ])
 
 export type ClassifiedApiKeyOperation =

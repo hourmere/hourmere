@@ -116,12 +116,23 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `workflows preview` | `preview_workflow` | `owner`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`, synthetic `example`. Requires `full`. Returns `workflows_disabled` while hard-off. |
 | `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
 | `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+| `workflows runs` | `list_workflow_runs` | `id`; optional `limit` (1–100, default 50) and `cursor`; requires `read` or `full`; returns `workflows_disabled` while hard-off. |
 
-`workflows list` and `workflows get` read booking workflows, which are not available yet:
-until they are enabled on the instance both exit `1` with `workflows_disabled` on stderr
+`workflows list`, `workflows get` and `workflows runs` read booking workflows. While the
+feature is hard-off, they exit `1` with `workflows_disabled` on stderr
 (a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
 key acts as: your personal workflows from a personal key, or a team's from a team key held by a
 current owner or admin.
+
+`hourmere workflows runs --input history.json` reads one page of run history, newest first.
+Pass `nextCursor` as `cursor` with the same workflow ID for the next page. Rows contain
+metadata and aggregate outcomes, including the `workflow_disabled` skip reason. Booking IDs,
+names, emails, answers and URLs are omitted from the history.
+
+中文：`workflows runs` 接收工作流 `id` 和可选的 `limit`、`cursor`，按完成时间从新到旧返回历史。
+使用同一工作流 ID，将 `nextCursor` 作为 `cursor` 读取下一页。结果包含元数据、汇总结果和
+`workflow_disabled` 等跳过原因，不含预约 ID、姓名、邮箱、答案或链接。功能仍硬关闭，命令
+退出码为 `1`，并在标准错误输出 `workflows_disabled`。
 
 `hourmere workflows preview --input candidate.json` reads the preview request from a file.
 Use `--input -` or pipe JSON on stdin to preview the same candidate. The response

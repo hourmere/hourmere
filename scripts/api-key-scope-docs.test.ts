@@ -265,6 +265,17 @@ describe('published API key scope tables', () => {
   })
 
   it.each(documents)(
+    '$path lists workflow history for full and read keys',
+    ({ document, section }) => {
+      expect(document).toContain('| `list_workflow_runs` | — | `workflows runs` | `full, read` |')
+      if (section === 'all')
+        expect(document).toContain(
+          '| `GET /api/v1/workflows/{id}/runs` | Session or API key | `full, read` |',
+        )
+    },
+  )
+
+  it.each(documents)(
     '$path lists optional-key public routing metadata and submission',
     ({ document, section }) => {
       expect(document).toContain(
