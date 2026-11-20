@@ -819,6 +819,63 @@ describe('CLI transport and arguments', () => {
     },
   )
 
+  it('forwards workflow history pagination and prints the history page as JSON', async () => {
+    const id = '019a0000-0000-7000-8000-000000000001'
+    const input = { id, cursor: 'opaque-cursor', limit: 5 }
+    const page = {
+      data: [
+        {
+          workflowId: id,
+          revision: 1,
+          trigger: 'after_end',
+          dueAt: '2026-11-19T19:00:00.000Z',
+          finishedAt: '2026-11-19T19:01:00.000Z',
+          outcome: 'skipped',
+          reason: 'workflow_disabled',
+          sent: 0,
+          rejected: 0,
+          deliveryUnknown: 0,
+          skipped: 1,
+        },
+      ],
+      nextCursor: 'opaque-next-cursor',
+    }
+    const fetcher = vi.fn<typeof fetch>(async () => response(page))
+    const result = await run(['workflows', 'runs', '--input', '-'], input, { fetch: fetcher })
+
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(JSON.parse(result.stdout)).toEqual(page)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+      name: 'list_workflow_runs',
+      arguments: input,
+    })
+  })
+
+  it('reports hard-off workflow history the same way as workflow definitions', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: '{"error":"workflows_disabled"}' }],
+        },
+      }),
+    )
+    for (const command of ['get', 'runs']) {
+      const result = await run(['workflows', command, '--input', '-'], {}, { fetch: fetcher })
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(JSON.parse(result.stderr)).toEqual({
+        error: 'workflows_disabled',
+        outcomeMayBeUnknown: true,
+      })
+    }
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it.each([
     ['stdin', false],
     ['a file', true],
@@ -861,6 +918,7 @@ describe('CLI transport and arguments', () => {
       const result = await run(argv, undefined, { env: {} })
       expect(result.code).toBe(0)
       expect(result.stdout).toContain('Commands:')
+      expect(result.stdout).toContain('workflows runs (id')
       expect(result.fetcher).not.toHaveBeenCalled()
     },
   )

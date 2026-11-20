@@ -32,7 +32,8 @@ revision under the marker transaction, rechecks live booking and workflow eligib
 resolves the current host-text policy. Dispatcher and repair entry points are no-ops while
 hard-off, and production registers no workflow worker. The wake port requires transactional
 enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. No retention
-worker or web interface exists yet. Decisions below are Hourmere decisions unless explicitly
+worker or web interface exists yet. Step 16a adds the guarded workflow run history reads.
+Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
 中文：原生预约确认时的工作流登记、到期记录和收件人意图已在预约事务内实现，先记录核心
@@ -851,6 +852,30 @@ Lists are oldest first by time-ordered ID, with `limit` 1–100 (default 50) and
 and the API-key scope check and before input validation or any lookup: REST through a route
 guard listed right after the caller, MCP through the tool's availability check
 (`Tool.requireAvailable`), which also keeps the tool out of `tools/list`.
+
+Step 16a adds `GET /api/v1/workflows/{id}/runs`, `list_workflow_runs` and `workflows runs`.
+History uses the same owner and current team owner/admin checks as definition detail.
+Missing, malformed, deleted and inaccessible workflow IDs return `404 workflow_not_found`.
+API keys need `read` or `full`. While workflows are off, allowed callers receive
+`workflows_disabled` and MCP discovery hides the tool.
+
+Supply `limit` (1–100, default 50) and, for later pages, the previous `nextCursor` as `cursor`.
+Pages return `{data, nextCursor}`, newest finish time first with a stable tie-breaker.
+Use the cursor with the same workflow and acting organization. Cursor tokens are limited to
+512 characters, and invalid tokens within that bound return `invalid_cursor`. A null
+`nextCursor` ends pagination. History lists runs finished
+in the past 30 days, with workflow ID, revision, trigger, due and finish times,
+outcome, a fixed reason such as `workflow_disabled` and aggregate recipient counts.
+Both personal and team history omit booking IDs, names, email addresses, answers and URLs.
+The webhook delivery list keeps its required `bookingId`. History retention leaves live
+deduplication identities in place.
+
+中文：个人所有者或当前团队所有者、管理员可使用 `read` 或 `full` 密钥读取执行历史。
+未知、已删除或无权访问的工作流返回 `workflow_not_found`。每页默认 50 条，最多 100 条，
+按完成时间从新到旧列出最近 30 天的记录。用上页的 `nextCursor` 继续读取同一工作流，改动游标会返回
+`invalid_cursor`。历史仅显示安全状态、时间和汇总计数，不含预约 ID、姓名、邮箱、回答或链接。
+Webhook 投递列表保留 `bookingId`，清理历史不会删除仍用于去重的记录。功能仍硬关闭，
+允许调用的身份收到 `workflows_disabled`，MCP 工具列表隐藏此工具。
 
 Keep OpenAPI operation IDs, generated web client types, API-key policy registry, MCP tool
 schemas, CLI help/JSON behavior and interface-parity mappings in the same change as each
