@@ -101,6 +101,40 @@ async function rpc(app: ReturnType<typeof appWith>['app'], authorization: string
 }
 
 describe('workflow REST operations while off', () => {
+  it('publishes the operator switch and recovery operations in OpenAPI and MCP', async () => {
+    const { app, db } = appWith()
+    try {
+      const response = await app.request('/api/v1/openapi.json')
+      expect(response.status).toBe(200)
+      const { paths } = (await response.json()) as {
+        paths: Record<string, Record<string, { description: string }>>
+      }
+      const tools = workflowTools({ db, workflowsEnabled: true })
+      for (const [path, method, name] of [
+        ['/api/v1/workflows', 'post', 'create_workflow'],
+        ['/api/v1/workflows/{id}', 'patch', 'update_workflow'],
+        ['/api/v1/workflows/{id}', 'delete', 'delete_workflow'],
+        ['/api/v1/workflows/preview', 'post', 'preview_workflow'],
+        ['/api/v1/workflows', 'get', 'list_workflows'],
+        ['/api/v1/workflows/{id}', 'get', 'get_workflow'],
+        ['/api/v1/workflows/{id}/runs', 'get', 'list_workflow_runs'],
+      ] as const) {
+        for (const description of [
+          paths[path]?.[method]?.description,
+          tools.find((tool) => tool.name === name)?.description,
+        ]) {
+          expect(description, name).toContain('WORKFLOWS_ENABLED=true')
+          expect(description, name).toContain(
+            'creation, preview, enabling and other edits return 404 workflows_disabled',
+          )
+          expect(description, name).toContain('reads, disable-only updates and deletion')
+        }
+      }
+    } finally {
+      await db.destroy()
+    }
+  })
+
   it('preserves recovery validation and opaque IDs after caller and scope checks', async () => {
     const { app, db } = appWith()
     try {
@@ -215,7 +249,6 @@ describe('workflow MCP tools while off', () => {
           expect.objectContaining({ code: 'workflows_disabled', kind: 'not_found' }),
         )
       else expect(check).not.toThrow()
-      expect(tool.description).toContain('workflows_disabled')
     }
     expect(workflowsEnabled({ workflowsEnabled: false })).toBe(false)
   })

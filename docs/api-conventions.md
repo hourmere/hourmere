@@ -16,8 +16,8 @@ from source attribution. Imported booking mutations return `imported_booking_rea
 Additions include the reschedule-request events, `booking.attendee_no_show_changed` and
 `workflow.executed`. Regenerate clients from the current OpenAPI document, update closed
 validators and ignore unknown event types. New kinds require explicit subscription.
-Workflows are hard-off, so attempts to add `workflow.executed` return
-`404 workflows_disabled`.
+While workflows are off, attempts to add `workflow.executed` return
+`404 workflows_disabled`. Keeping or removing an existing subscription is allowed.
 
 ### Booking activity no-show counts
 
