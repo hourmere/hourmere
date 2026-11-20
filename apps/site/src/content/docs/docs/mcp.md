@@ -176,6 +176,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
 | `delete_workflow` | — | `workflows delete` | `full` |
+| `preview_workflow` | — | `workflows preview` | `full` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
 | `list_sso_providers` | — | `sso providers list` | `full, read` |
@@ -1047,6 +1048,18 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
 
+`preview_workflow` / `workflows preview` use the same body as `POST /api/v1/workflows/preview`.
+Supply `owner`, `name`, `scope`, `trigger` and `actions`, with optional `enabled`,
+`conditions` and synthetic `example` values. API keys need `full` scope and current
+personal owner or team owner/admin authority. Preview returns the example match result,
+rendered email samples and static estimates. While hard-off it returns `workflows_disabled`
+and MCP discovery hides the tool.
+
+中文：`preview_workflow`、`workflows preview` 和 `POST /api/v1/workflows/preview`
+使用相同的 JSON 输入，包括所有者、候选定义和可选的合成示例。密钥需要 `full` 权限，
+调用者须为当前个人所有者或团队所有者、管理员。结果包括匹配状态、邮件样本和静态额度
+估计。功能仍硬关闭，返回 `workflows_disabled`，MCP 工具列表隐藏预览。
+
 ## Group events
 
 Create/update event types with `bookingMode: "group"`, `groupCapacity` (2–100),
@@ -1100,6 +1113,13 @@ not whether older retained history exists beyond that bound.
 
 ## Create and manage meeting polls
 
+In `tools/list`, a `read` key sees the host list, metadata and results tools plus
+`read_meeting_poll` for voters. A `bookings` or `full` key also sees poll writes. Host
+results include private voter details and the revisions for `finalize_meeting_poll`.
+Availability in results is advisory. Finalize rechecks it and returns booking metadata
+without a booking management link or token. Public tools act on existing polls and
+cannot create one. A host key cannot replace a voter's own capability or consent.
+
 Call `create_meeting_poll` with the event type ID, offered candidate starts, deadline,
 display time zone, admission mode and an `idempotencyKey`. A `bookings` or `full` key
 requires personal event ownership or current team owner/admin access in its organization.
@@ -1118,6 +1138,10 @@ invalidates the old public link and discloses the replacement once.
 创建投票、邀请、重发、移除投票者及轮换链接。请保留创建、邀请、重发和轮换使用的
 幂等键。邀请重试只返回本次提交的邮箱的当前状态。公开链接只在创建或轮换首次成功时
 返回，轮换后旧链接立即失效。受邀投票没有公开链接。
+`read` 密钥在 `tools/list` 中可见管理端的列表、详情和结果工具，以及投票者的读取工具。
+`bookings` 或 `full` 密钥还可看到写入工具。主持人结果包含投票者的私人信息及最终确认所需的版本。
+候选时间的可用性仅供参考，最终确认会重新检查并返回预约元数据，不含预约管理链接或令牌。
+公开工具仅用于现有投票，不能创建投票。密钥不能替代投票者的专用令牌或本人同意。
 
 ## Duplicate an event type
 

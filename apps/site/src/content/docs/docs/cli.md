@@ -113,6 +113,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; not available yet (`workflows_disabled`) |
 | `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full`; not available yet (`workflows_disabled`) |
+| `workflows preview` | `preview_workflow` | `owner`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`, synthetic `example`. Requires `full`. Returns `workflows_disabled` while hard-off. |
 | `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
 | `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
 
@@ -121,6 +122,13 @@ until they are enabled on the instance both exit `1` with `workflows_disabled` o
 (a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
 key acts as: your personal workflows from a personal key, or a team's from a team key held by a
 current owner or admin.
+
+`hourmere workflows preview --input candidate.json` reads the preview request from a file.
+Use `--input -` or pipe JSON on stdin to preview the same candidate. The response
+contains synthetic match reasons, email samples and static limits.
+
+中文：`workflows preview` 从 `--input FILE` 指定的文件或标准输入读取候选定义。
+结果仅包含合成示例的匹配状态、邮件样本和静态额度。功能仍硬关闭。
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
@@ -604,6 +612,7 @@ team-admin status alone grants no extra MCP/CLI or API-key access.
 ## Manage meeting polls
 
 Use `hourmere polls <command> --input -` with an API key for the poll's organization.
+`hourmere --help` separates host management from public voting commands.
 Personal event owners and current team owners or admins can manage polls. Reads allow
 `full`, `read` or `bookings`. Writes require `full` or `bookings`. All poll commands
 read JSON only from stdin and reject `--output`. Keep idempotency keys and invitation
@@ -643,6 +652,7 @@ status and host revision. `delete` returns
 `{ "deleted": true }` and preserves any linked booking.
 
 中文：管理端命令使用投票所在组织的密钥，权限限个人活动所有者及团队当前所有者或管理员。
+`hourmere --help` 分别列出主持人管理命令和公开投票命令。
 读取允许 `full`、`read` 或 `bookings`，写入需要 `full` 或 `bookings`。所有参数通过
 `--input -` 从标准输入读取，不支持 `--output`。创建公开投票和轮换链接时只在成功写入后返回一次
 `publicLink`。轮换立即使旧链接失效。仅限邀请的投票无法轮换。创建重试可取得 `pollId`，邀请重试

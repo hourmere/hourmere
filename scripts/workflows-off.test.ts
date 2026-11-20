@@ -45,6 +45,7 @@ const SHIPPED = [
   'getWorkflow',
   'updateWorkflow',
   'deleteWorkflow',
+  'previewWorkflow',
 ]
 const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
 const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
@@ -350,7 +351,7 @@ const toolError = (message: Awaited<ReturnType<typeof mcp>>) => {
   return JSON.parse(message.result?.content?.[0]?.text ?? '{}')
 }
 
-describe('booking workflows are off and expose only definition reads, creation, updates and deletion', () => {
+describe('booking workflows are off and expose the shipped definition and preview operations', () => {
   it('reads every documented workflow operation from the design', () => {
     expect(operations.map(({ operationId }) => operationId)).toEqual([
       'listWorkflows',
@@ -370,10 +371,11 @@ describe('booking workflows are off and expose only definition reads, creation, 
       'GET /api/v1/workflows/{id}',
       'PATCH /api/v1/workflows/{id}',
       'DELETE /api/v1/workflows/{id}',
+      'POST /api/v1/workflows/preview',
     ])
   })
 
-  it('publishes only the definition paths, operations and the instance field in OpenAPI', async () => {
+  it('publishes the shipped paths, operations and the instance field in OpenAPI', async () => {
     const openapi = (await openApiDocument()) as Record<string, unknown>
     expect(isRecord(openapi.paths)).toBe(true)
     const paths = openapi.paths as Record<string, Record<string, unknown>>
@@ -396,8 +398,10 @@ describe('booking workflows are off and expose only definition reads, creation, 
     }
     expect(Object.keys(paths).filter((path) => workflowSegment.test(path))).toEqual([
       '/api/v1/workflows',
+      '/api/v1/workflows/preview',
       '/api/v1/workflows/{id}',
     ])
+    expect(Object.keys(paths['/api/v1/workflows/preview'] ?? {})).toEqual(['post'])
     for (const path of ['/api/v1/workflows', '/api/v1/workflows/{id}'])
       expect(Object.keys(paths[path] ?? {}).sort(), path).toEqual(
         path === '/api/v1/workflows' ? ['get', 'post'] : ['delete', 'get', 'patch'],
@@ -411,7 +415,7 @@ describe('booking workflows are off and expose only definition reads, creation, 
     expect(instance?.properties).toHaveProperty(['workflowsEnabled', 'type'], 'boolean')
   })
 
-  it('serves only the definition routes, each refusing while off, and reports workflows off', async () => {
+  it('serves the shipped workflow routes, each refusing while off, and reports workflows off', async () => {
     const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
     const db = createDb(createPool(databaseUrl))
     try {
@@ -480,7 +484,7 @@ describe('booking workflows are off and expose only definition reads, creation, 
     }
   })
 
-  it('catalogues only the definition tools, lists none of them and refuses direct calls', async () => {
+  it('catalogues the shipped tools, lists none of them and refuses direct calls', async () => {
     // No handlers run and no connection opens; the pool is still closed explicitly.
     const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
     const db = createDb(createPool(databaseUrl))
@@ -498,16 +502,13 @@ describe('booking workflows are off and expose only definition reads, creation, 
         const listed = (await mcp(app, scope, 'tools/list')).result?.tools?.map(({ name }) => name)
         expect(listed).toContain('whoami')
         expect(listed?.filter((name) => /workflow/i.test(name))).toEqual([])
-        for (const { tool } of shipped)
+        for (const { tool, method } of shipped)
           for (const args of [{}, { owner: { kind: 'personal', id: randomUUID() } }, { id: 'x' }])
             expect(
               toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
             ).toMatchObject({
               error:
-                ['create_workflow', 'update_workflow', 'delete_workflow'].includes(tool) &&
-                scope === 'read'
-                  ? 'insufficient_scope'
-                  : 'workflows_disabled',
+                method !== 'GET' && scope === 'read' ? 'insufficient_scope' : 'workflows_disabled',
             })
       }
       // The API-key scope check keeps its precedence over the switch.
@@ -520,7 +521,7 @@ describe('booking workflows are off and expose only definition reads, creation, 
     }
   })
 
-  it('offers only the definition CLI commands and no web page', () => {
+  it('offers the shipped CLI commands and no web page', () => {
     const commands = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),
@@ -649,16 +650,21 @@ describe('booking workflows are off and expose only definition reads, creation, 
     }
     // Only the package entry and definition services load definition modules. Production
     // callers outside those modules receive only the guarded operations.
-    const loaders = sources.filter((file) =>
-      /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher|email-attempt)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|capture|dispatcher|email-attempt))(?:\.ts)?['"`]/.test(
-        readFileSync(new URL(file, root), 'utf8'),
-      ),
-    )
+    const loaders = sources.filter((file) => {
+      const source = readFileSync(new URL(file, root), 'utf8')
+      return (
+        /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher|email-attempt)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|preview|capture|dispatcher|email-attempt))(?:\.ts)?['"`]/.test(
+          source,
+        ) ||
+        (file.startsWith('packages/workflows/src/') && /['"`]\.\/preview\.ts['"`]/.test(source))
+      )
+    })
     expect(loaders).toEqual([
       'packages/workflows/src/creates.ts',
       'packages/workflows/src/deletes.ts',
       'packages/workflows/src/email-attempt.ts',
       'packages/workflows/src/index.ts',
+      'packages/workflows/src/preview.ts',
       'packages/workflows/src/updates.ts',
     ])
   })
@@ -834,15 +840,16 @@ describe('booking workflows are off and expose only definition reads, creation, 
     expect(mocking).toEqual(['apps/server/src/workflows-enabled.test.ts'])
   })
 
-  it('exports only the guarded definition operations, which refuse before touching their context', async () => {
+  it('exports only guarded workflow operations, which refuse before touching their context', async () => {
     const exported = Object.keys(workflows).filter((name) =>
-      /^(?:list|get|create|update|delete)Workflow/.test(name),
+      /^(?:list|get|create|update|delete|preview)Workflow/.test(name),
     )
     expect(exported.sort()).toEqual([
       'createWorkflow',
       'deleteWorkflow',
       'getWorkflow',
       'listWorkflows',
+      'previewWorkflow',
       'updateWorkflow',
     ])
     const untouchable = new Proxy(
@@ -859,6 +866,7 @@ describe('booking workflows are off and expose only definition reads, creation, 
       () => workflows.createWorkflow(untouchable, {} as never),
       () => workflows.updateWorkflow(untouchable, randomUUID(), {} as never),
       () => workflows.deleteWorkflow(untouchable, randomUUID(), {} as never),
+      () => workflows.previewWorkflow(untouchable, {}),
     ])
       await expect(read()).rejects.toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
   })

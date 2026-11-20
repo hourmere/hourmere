@@ -99,6 +99,7 @@ export const COMMANDS = {
   'one-time-links list': 'list_one_time_links',
   'one-time-links revoke': 'revoke_one_time_link',
   'workflows delete': 'delete_workflow',
+  'workflows preview': 'preview_workflow',
   'workflows update': 'update_workflow',
   'workflows create': 'create_workflow',
   'workflows list': 'list_workflows',
@@ -119,7 +120,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms route --input FILE|- [--output FILE] [--url ORIGIN]
-       hourmere workflows list|get|create|update|delete [--input FILE|-] [--url ORIGIN]
+       hourmere workflows list|get|create|update|delete|preview [--input FILE|-] [--url ORIGIN]
        hourmere webhooks list [--json]
        hourmere webhooks create --input FILE|- (--json | --output FILE)
        hourmere webhooks update --input FILE|- [--json]
@@ -153,23 +154,35 @@ Commands: whoami, profile, catalog, event, create-event, duplicate-event, update
           book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
           booking-activity, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
-Polls: Supply JSON through stdin (--input -).
-       Host list accepts limit and after. Get and results take id. Reads allow read, bookings or full.
-       close, cancel and delete take id and expectedHostRevision. Host writes allow bookings or full.
-       create takes eventTypeId, candidateStarts, deadlineAt, displayTimeZone, admissionMode,
-       idempotencyKey and optional durationMinutes and visibility. invite takes id, invitees and idempotencyKey.
-       resend-invitation and remove-voter take id, voterId and expectedHostRevision; resend also takes idempotencyKey.
-       remove-unverified and rotate-link take id and expectedHostRevision; rotate also takes idempotencyKey.
-       create and rotate-link print a newly issued publicLink once in public_link mode. Keep stdout private.
-       finalize takes id, slotId, bookerVoterId, attendeeVoterIds, expectedResultsRevision,
-       expectedBallotRevisions, acknowledgeConditional, idempotencyKey and optional locationOptionId.
-       Retain the idempotency key and exact input for a finalize replay with booking metadata.
-       Relay only the voter’s explicit choices using their token; a host key cannot impersonate them.
-       view accepts token; join uses publicToken, name, email, timeZone; recover uses pollId, email.
-       verify accepts token; vote uses token, votes, consent, responses, expectedBallotRevision;
-       withdraw uses token, expectedBallotRevision; reminder-opt-out accepts its own mail token.
-       All require an API key: read/full/bookings for view, bookings/full for writes.
-       REST also supports access without a login or key. verify prints a newly minted votingToken once; keep it private.
+Meeting polls
+  Every poll command requires JSON on stdin (--input -). Input files and --output are refused.
+  Keep tokens, invitation addresses and idempotency keys out of command arguments and shell history.
+  Reads accept read, bookings or full API keys. Writes require bookings or full.
+
+  Host commands require personal event ownership or a current team owner/admin role.
+    list accepts {} or limit and after (pass nextAfter from the previous page).
+    get takes id and returns metadata. results takes id and includes the private roster,
+      ballots, current revisions and advisory availability. Keep results stdout private.
+    create takes eventTypeId, candidateStarts, deadlineAt, displayTimeZone, admissionMode
+      and idempotencyKey, with optional durationMinutes and visibility. It reserves no time.
+    create and rotate-link print publicLink only once for a public_link poll. Keep it private.
+    invite takes id, invitees and idempotencyKey. resend-invitation and remove-voter take
+      id, voterId and expectedHostRevision. resend-invitation also takes idempotencyKey.
+    close, cancel, delete, remove-unverified and rotate-link take id and expectedHostRevision.
+      rotate-link also takes idempotencyKey and immediately invalidates the old link.
+    finalize takes id, slotId, bookerVoterId and attendeeVoterIds (including the booker),
+      expectedResultsRevision, expectedBallotRevisions, acknowledgeConditional, idempotencyKey
+      and optional locationOptionId. Use revisions from results and acknowledge if_need_be votes.
+      After a lost response, replay the exact input with the original key to get booking metadata.
+
+  Public commands act on existing polls. A host key cannot replace a voter’s token or consent.
+    view takes token (from a public link, verification email or voter link).
+    join takes publicToken, name, email, timeZone and optional locale. recover takes pollId and email.
+    verify takes the emailed token and prints a newly minted votingToken once when issued. Keep it private.
+    vote takes the voting token, complete votes, consent: true, expectedBallotRevision (initially 0)
+      and optional responses. withdraw takes the voting token and expectedBallotRevision.
+      On poll_changed, use view and reconcile before submitting again.
+    reminder-opt-out takes the separate opt-out token from the poll email.
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
@@ -187,8 +200,9 @@ Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows 
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
            workflows update (id, expectedRevision, and changed definition fields).
            workflows delete (id, expectedRevision); authorized repeats are safe.
-           Read or full scope for reads; full scope for create/update/delete. All answer workflows_disabled until booking
-           workflows are enabled on the instance.
+           workflows preview (owner, definition fields, optional synthetic example) accepts JSON from stdin or a file.
+           Read or full scope for list/get; full scope for create/update/delete/preview.
+           All answer workflows_disabled until booking workflows are enabled on the instance.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention
            ({"retention":"instance"|"forever"} or {"retention":"days","retentionDays":30–3650}).

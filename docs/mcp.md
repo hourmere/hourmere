@@ -154,6 +154,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `resend_waitlist_verification` | `personal` | `resend-waitlist-verification` | `full, bookings` |
 | `resend_waitlist_verification` | `team` | `resend-waitlist-verification` | `full, bookings` |
 | `delete_workflow` | — | `workflows delete` | `full` |
+| `preview_workflow` | — | `workflows preview` | `full` |
 | `update_workflow` | — | `workflows update` | `full` |
 | `create_workflow` | — | `workflows create` | `full` |
 | `list_sso_providers` | — | `sso providers list` | `full, read` |
@@ -531,6 +532,18 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
 
+`preview_workflow` / `workflows preview` use the same body as `POST /api/v1/workflows/preview`.
+Supply `owner`, `name`, `scope`, `trigger` and `actions`, with optional `enabled`,
+`conditions` and synthetic `example` values. API keys need `full` scope and current
+personal owner or team owner/admin authority. Preview returns the example match result,
+rendered email samples and static estimates. While hard-off it returns `workflows_disabled`
+and MCP discovery hides the tool.
+
+中文：`preview_workflow`、`workflows preview` 和 `POST /api/v1/workflows/preview`
+使用相同的 JSON 输入，包括所有者、候选定义和可选的合成示例。密钥需要 `full` 权限，
+调用者须为当前个人所有者或团队所有者、管理员。结果包括匹配状态、邮件样本和静态额度
+估计。功能仍硬关闭，返回 `workflows_disabled`，MCP 工具列表隐藏预览。
+
 ## SMS reminders
 
 `create_event_type` and `update_event_type` accept `smsRemindersEnabled`; event reads
@@ -594,6 +607,12 @@ not whether older retained history exists beyond that bound.
 
 ## Create and manage meeting polls
 
+In `tools/list`, a `read` key sees the host list, metadata and results tools plus
+`read_meeting_poll` for voters. A `bookings` or `full` key also sees poll writes. Host
+results include private voter details and the revisions for `finalize_meeting_poll`.
+Availability in results is advisory. Finalize rechecks it and returns booking metadata
+without a booking management link or token.
+
 Call `create_meeting_poll` with the event type ID, offered candidate starts, deadline,
 display time zone, admission mode and an `idempotencyKey`. A `bookings` or `full` key
 requires personal event ownership or current team owner/admin access in its organization.
@@ -612,6 +631,9 @@ invalidates the old public link and discloses the replacement once.
 创建投票、邀请、重发、移除投票者及轮换链接。请保留创建、邀请、重发和轮换使用的
 幂等键。邀请重试只返回本次提交的邮箱的当前状态。公开链接只在创建或轮换首次成功时
 返回，轮换后旧链接立即失效。受邀投票没有公开链接。
+`read` 密钥在 `tools/list` 中可见管理端的列表、详情和结果工具，以及投票者的读取工具。
+`bookings` 或 `full` 密钥还可看到写入工具。主持人结果包含投票者的私人信息及最终确认所需的版本。
+候选时间的可用性仅供参考，最终确认会重新检查并返回预约元数据，不含预约管理链接或令牌。
 
 ## Public meeting polls
 
@@ -620,15 +642,17 @@ accepts `token` and a `read`, `bookings` or `full` key. The following writes req
 `bookings` or `full`: `enroll_meeting_poll_voter`, `recover_meeting_poll_voter`,
 `verify_meeting_poll_voter`, `submit_meeting_poll_vote`, `withdraw_meeting_poll_vote` and
 `opt_out_meeting_poll_reminder`. MCP still authenticates its connection; REST public poll
-operations also work without login or a key. A host key alone cannot identify or impersonate
-a voter: relay only the voter's explicit choices with their own capability.
+operations also work without login or a key. Public tools act on existing polls and cannot
+create one. A host key cannot replace a voter's own capability or consent.
 
-Read returns the safe snapshot and own ballot. Only a verified voter in an `aggregate`
-poll sees separate yes/if-need-be/no counts; no public operation lists other voters or
-mailboxes. Enrollment uses `publicToken`, `name`, `email`, `timeZone` and optional `locale`.
+Read accepts a public-link, verification or voting token. With a voting token it can
+include the voter's own profile and ballot. Only a verified, non-withdrawn voter in an
+`aggregate` poll sees separate yes/if-need-be/no counts. Public operations omit other
+voters' details. Enrollment uses `publicToken`, `name`, `email`, `timeZone` and optional `locale`.
 It answers uniformly with `accepted: true`, except that a full poll answers `poll_full`
-for every mailbox. Recovery needs only `pollId` and `email`, always answers accepted,
-and sends the unchanged credential only to an eligible existing voter under cooldowns/caps.
+for every mailbox. Recovery needs only `pollId` and `email`. After validation and rate-limit
+checks, it answers accepted without revealing delivery. It sends the unchanged credential
+only to an eligible existing voter under cooldowns and caps.
 Verification explicitly consumes a verification token; a replacement `votingToken` is
 returned once and sent by email. Reads never verify or vote.
 
@@ -639,19 +663,19 @@ submission; never automatically retry a lost response. Reminder opt-out takes th
 mail opt-out token and cannot access ballots. Admission requests share 10 per minute per
 trusted IP across REST/MCP/processes; reads use 120 and vote/withdraw/opt-out share 30.
 The [browser voting page](https://hourmere.com/docs/meeting-poll-voting) and host lifecycle tools
-are available without a flag. The page hides aggregate counts for withdrawn voters. The public read API retains its verified-credential behavior.
+are available without a flag.
 
 中文：公开投票工具已提供，无功能开关。读取需要 `read`、`bookings` 或 `full` 密钥，
 写入需要 `bookings` 或 `full`；MCP 连接仍需认证，公开 REST 不要求登录或密钥。
-密钥不代替投票者的专用令牌，也不能用于冒充投票者。只转达投票者明确授权的选择。
-读取仅返回安全快照和自己的选票；只有已验证且采用 `aggregate` 可见性的投票者能查看
-汇总数量，不会公开其他人的姓名、邮箱或选票。报名对已知和未知邮箱统一应答，满员时
-对全部邮箱返回 `poll_full`。找回仅需 `pollId` 和邮箱，统一返回接受；符合条件时重发
+公开工具仅用于现有投票，不能创建投票。密钥不能替代投票者的专用令牌或本人同意。
+读取接受公开链接、验证或投票令牌。使用投票令牌时可读取自己的资料和选票。
+仅 `aggregate` 投票中已验证且未撤回的投票者能查看汇总数量。公开工具不提供其他投票者的资料。
+报名对已知和未知邮箱统一应答，满员时
+对全部邮箱返回 `poll_full`。找回仅需 `pollId` 和邮箱，通过校验和限流后统一返回接受；符合条件时重发
 原令牌，不轮换或延长有效期。验证需明确提交，首次返回的新 `votingToken` 须保密。
 投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
 `poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
 浏览器投票页面和主持人管理工具已提供，无功能开关。
-页面对已撤回者隐藏汇总，公开读取 API 的已验证凭证行为保持不变。
 
 ## Duplicate an event type
 
