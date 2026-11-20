@@ -2389,4 +2389,5 @@ export const admin = {
     '无法确认移除结果。请刷新结果并核对名单后重试。',
   'Could not update the invitation roster. Try again.': '无法更新邀请名单。请重试。',
   'This poll has 40 places.': '此投票最多容纳 40 人。',
+  'Remove time {time}': '移除时间：{time}',
 } as const

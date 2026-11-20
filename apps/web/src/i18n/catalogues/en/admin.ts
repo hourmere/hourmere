@@ -2507,4 +2507,5 @@ export const admin = {
   'Could not update the invitation roster. Try again.':
     'Could not update the invitation roster. Try again.',
   'This poll has 40 places.': 'This poll has 40 places.',
+  'Remove time {time}': 'Remove time {time}',
 } as const

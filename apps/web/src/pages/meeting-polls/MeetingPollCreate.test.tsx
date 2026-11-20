@@ -184,6 +184,7 @@ describe('Create a meeting poll', () => {
     const choices = await selectCandidates('2030-11-03', '可约日期（America/New_York）')
     expect(choices[0]?.parentElement?.textContent).toContain('GMT-4')
     expect(choices[1]?.parentElement?.textContent).toContain('GMT-5')
+    expect(screen.getAllByRole('button', { name: /^移除时间：/ })).toHaveLength(2)
     enterDeadline('2030-11-02T12:00', '投票截止时间')
     await userEvent.click(screen.getByRole('button', { name: '创建会议投票' }))
     expect(await screen.findByRole('heading', { name: '会议投票已创建' })).toBeTruthy()
@@ -289,7 +290,7 @@ describe('Create a meeting poll', () => {
     expect(submit.disabled).toBe(true)
     expect(client.to(create)).toHaveLength(1)
     const marked = screen.getByText('No longer offered').closest('li') as HTMLLIElement
-    await userEvent.click(within(marked).getByRole('button', { name: /Remove/ }))
+    await userEvent.click(within(marked).getByRole('button', { name: /^Remove time / }))
     expect(screen.queryByText('No longer offered')).toBeNull()
     expect(submit.disabled).toBe(false)
   })

@@ -482,7 +482,7 @@ function PollCreateForm({
                     <button
                       className="button button-small"
                       type="button"
-                      aria-label={t('Remove {time}', { time: label })}
+                      aria-label={t('Remove time {time}', { time: label })}
                       onClick={() => toggle(slot)}
                     >
                       {t('Remove time')}
