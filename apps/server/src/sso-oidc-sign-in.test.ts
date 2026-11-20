@@ -4,6 +4,8 @@ import {
   createAuthPool,
   createBrowserSession,
   createCallerResolver,
+  liveSsoDelegationSummaries,
+  MCP_OAUTH_CONSENT_LIFETIME_MS,
   recordSsoAdmissionRemoval,
   type SignupPolicy,
   scimClaimCompletion,
@@ -30,6 +32,7 @@ import { createApp } from './app.ts'
 import { nativeTeamLeave } from './native-team-leave.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
@@ -53,6 +56,7 @@ const completePath = '/api/auth/sso/oidc/complete'
 const acceptInvitationPath = '/api/auth/organization/accept-invitation'
 const providersPath = '/api/v1/team/sso/providers'
 const domainsPath = '/api/v1/team/sso/domains'
+const delegationsPath = '/api/v1/team/sso/delegations'
 const providerTestPath = (providerId: string) => `${providersPath}/${providerId}/test`
 const linkPath = (providerId: string) => `${providersPath}/${providerId}/link`
 const removeLinkPath = (providerId: string, linkId: string) =>
@@ -273,6 +277,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         eventTypeRoutes({ db }),
         ssoRoutes({ db, capabilities }),
         ssoDomainRoutes({ db, publicUrl, capabilities }),
+        ssoDelegationRoutes({ db, publicUrl, capabilities, configurationKey }),
         ssoIdentityRecoveryRoutes({
           db,
           publicUrl,
@@ -1049,6 +1054,478 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   }
 
   const authTime = async () => Math.floor(Date.parse(await databaseClock(db)) / 1000)
+
+  async function delegationKey(userId: string, organizationId: string | null, expiresAt?: string) {
+    return (
+      await db
+        .insertInto('auth.apikey')
+        .values({
+          configId: 'default',
+          referenceId: userId,
+          key: randomBytes(32).toString('hex'),
+          metadata: JSON.stringify({ scope: 'full', ...(organizationId && { organizationId }) }),
+          enabled: true,
+          createdAt: at(0),
+          updatedAt: at(0),
+          expiresAt: expiresAt ?? null,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id
+  }
+
+  async function delegationGrant(userId: string, organizationId: string, createdAt = at(0)) {
+    const clientId = randomUUID()
+    await db
+      .insertInto('auth.oauthClient')
+      .values({ clientId, redirectUris: JSON.stringify(['https://client.example.test/callback']) })
+      .execute()
+    const { id } = await db
+      .insertInto('mcp_oauth_grants')
+      .values({ user_id: userId, organization_id: organizationId, client_id: clientId })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.oauthConsent')
+      .values({
+        clientId,
+        userId,
+        referenceId: id,
+        scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+        resources: JSON.stringify([`${publicUrl}/mcp`]),
+        createdAt,
+        updatedAt: createdAt,
+      })
+      .execute()
+    return id
+  }
+
+  function delegationRequest(
+    cookie: string,
+    credentialId: string,
+    extra: Record<string, unknown> = {},
+    headers: Record<string, string> = {},
+  ) {
+    return post(
+      { credentialKind: 'api_key', credentialId, expectedTrustGeneration: 1, ...extra },
+      app,
+      { cookie, 'X-Expected-Organization-Id': fixture.team, ...headers },
+      delegationsPath,
+    )
+  }
+
+  function revokeDelegation(cookie: string, bindingId: string) {
+    return app.request(new URL(`${delegationsPath}/${bindingId}`, publicUrl), {
+      method: 'DELETE',
+      headers: { origin: publicUrl, cookie, 'X-Expected-Organization-Id': fixture.team },
+    })
+  }
+
+  async function completeDelegationStepUp(
+    f: Awaited<ReturnType<typeof linked>>,
+    challenge: MailboxAttempt,
+    claims: Record<string, unknown> = {},
+  ) {
+    const attempt = await startStepUp(f.providerId, challenge)
+    const response = await callback(
+      attempt,
+      idp.issue(attempt, { ...f.claims, auth_time: await authTime(), ...claims }),
+    )
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(stepUpReturnTo)
+    const receipt = response.headers
+      .getSetCookie()
+      .find((cookie) => cookie.startsWith(`__Secure-hourmere.sso_delegation.${challenge.id}=`))
+    expect(receipt).toMatch(/; HttpOnly/i)
+    expect(receipt).toMatch(/; SameSite=Strict/i)
+    return `${challenge.cookie}; ${receipt?.split(';')[0]}`
+  }
+
+  async function prepareDelegation(
+    f: Awaited<ReturnType<typeof linked>>,
+    cookie: string,
+    credentialId: string,
+    extra: Record<string, unknown> = {},
+    claims: Record<string, unknown> = {},
+    organizationId = fixture.team,
+  ) {
+    const headers = { 'X-Expected-Organization-Id': organizationId }
+    const challenge = await freshProofChallenge(
+      await delegationRequest(cookie, credentialId, extra, headers),
+      cookie,
+      ['sso'],
+    )
+    const proved = await completeDelegationStepUp(f, challenge, claims)
+    return {
+      challenge,
+      submit: () =>
+        delegationRequest(
+          proved,
+          credentialId,
+          { ...extra, proofAttemptId: challenge.id },
+          headers,
+        ),
+    }
+  }
+
+  async function bindingResponse(response: Response) {
+    expect(response.status).toBe(201)
+    const result = (await response.json()) as { id: string; expiresAt: string }
+    expect(result).toEqual({ id: expect.any(String), expiresAt: expect.any(String) })
+    return result
+  }
+
+  async function delegationBrowserProof(
+    f: Awaited<ReturnType<typeof linked>>,
+    sessionId: string,
+    expiresAt = at(300),
+  ) {
+    await db
+      .insertInto('sso_browser_proofs')
+      .values({
+        organization_id: fixture.team,
+        user_id: fixture.member,
+        member_id: fixture.memberMember,
+        session_id: sessionId,
+        provider_id: f.providerId,
+        link_id: f.link.id,
+        link_generation: f.link.generation,
+        trust_generation: 1,
+        domain_id: f.claim.id,
+        domain_generation: f.claim.generation,
+        expires_at: expiresAt,
+      })
+      .execute()
+  }
+
+  it('challenges only for owned active same-team credentials and refuses bearer authorization', async () => {
+    const f = await linked()
+    await enforceSso()
+    const { id, cookie } = await browserSession(fixture.member)
+    await delegationBrowserProof(f, id)
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: fixture.otherTeam,
+        userId: fixture.member,
+        role: 'member',
+        createdAt: at(0),
+      })
+      .execute()
+    const expired = at(-30)
+    const rejected = [
+      [randomUUID(), 'api_key'],
+      [await delegationKey(fixture.admin, fixture.team), 'api_key'],
+      [await delegationKey(fixture.member, fixture.otherTeam), 'api_key'],
+      [await delegationKey(fixture.member, null), 'api_key'],
+      [await delegationKey(fixture.member, fixture.team, expired), 'api_key'],
+      [await delegationGrant(fixture.admin, fixture.team), 'oauth_grant'],
+      [await delegationGrant(fixture.member, fixture.otherTeam), 'oauth_grant'],
+      [await delegationGrant(fixture.member, fixture.team, at(-31 * 86400)), 'oauth_grant'],
+    ]
+    for (const [id, credentialKind] of rejected) {
+      const response = await delegationRequest(cookie, id as string, { credentialKind })
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: 'sso_not_found' })
+    }
+    const own = await delegationKey(fixture.member, fixture.team)
+    const bearer = await delegationRequest(cookie, own, {}, { authorization: 'Bearer fixture' })
+    expect(bearer.status).toBe(403)
+    expect(await bearer.json()).toEqual({ error: 'team_management_access_denied' })
+    const stale = await delegationRequest(cookie, own, { expectedTrustGeneration: 2 })
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toEqual({ error: 'sso_configuration_changed' })
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .execute(),
+    ).toEqual([])
+  })
+
+  it('requires the exact SSO step-up before enforcement and never accepts mailbox proof alone', async () => {
+    const f = await linked()
+    const { cookie } = await browserSession(fixture.member)
+    const key = await delegationKey(fixture.member, fixture.team)
+    const newChallenge = await freshProofChallenge(await delegationRequest(cookie, key), cookie, [
+      'sso',
+    ])
+    const proved = await completeDelegationStepUp(f, newChallenge, { auth_time: undefined })
+    const pending = await freshProofChallenge(
+      await delegationRequest(proved, key, { proofAttemptId: newChallenge.id }),
+      proved,
+      ['mailbox'],
+    )
+    expect(pending.id).toBe(newChallenge.id)
+    await proveMailbox(pending)
+    const missingReceipt = await delegationRequest(newChallenge.cookie, key, {
+      proofAttemptId: newChallenge.id,
+    })
+    expect(missingReceipt.status).toBe(400)
+    expect(await missingReceipt.json()).toEqual({ error: 'sso_oidc_completion_invalid' })
+    expect((await attemptRow(newChallenge)).consumed_at).toBeNull()
+    const different = await delegationKey(fixture.member, fixture.team)
+    const changedInput = await delegationRequest(proved, different, {
+      proofAttemptId: newChallenge.id,
+    })
+    expect((await freshProofChallenge(changedInput, proved, ['sso'])).id).not.toBe(newChallenge.id)
+    const bound = await bindingResponse(
+      await delegationRequest(proved, key, { proofAttemptId: newChallenge.id.toUpperCase() }),
+    )
+    const row = await db
+      .selectFrom('sso_delegation_bindings')
+      .selectAll()
+      .where('id', '=', bound.id)
+      .executeTakeFirstOrThrow()
+    expect(row).toMatchObject({
+      organization_id: fixture.team,
+      member_id: fixture.memberMember,
+      link_id: f.link.id,
+      link_generation: f.link.generation,
+      domain_id: f.claim.id,
+      domain_generation: f.claim.generation,
+      trust_generation: 1,
+    })
+    expect(row.expires_at.getTime() - row.created_at.getTime()).toBe(30 * 86400 * 1000)
+    await enforceSso()
+    const capabilities = { ssoOidcEnabled: true, ssoSamlEnabled: false }
+    expect(
+      (await liveSsoDelegationSummaries(db, capabilities, fixture.member, 'api_key', [key])).get(
+        key,
+      ),
+    ).toEqual(bound)
+  })
+
+  it('caps each lease at the credential or signed IdP deadline and preserves it through domain renewal', async () => {
+    const f = await linked({ domainExpiresIn: 180 })
+    await enforceSso()
+    const actor = await browserSession(fixture.member)
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: at(120) })
+      .where('id', '=', actor.id)
+      .execute()
+    await delegationBrowserProof(f, actor.id, at(90))
+    const keyExpiry = at(300)
+    const key = await delegationKey(fixture.member, fixture.team, keyExpiry)
+    const boundedKey = await prepareDelegation(f, actor.cookie, key)
+    const first = await bindingResponse(await boundedKey.submit())
+    expect(first.expiresAt).toBe(new Date(keyExpiry).toISOString())
+    const createdAt = at(-MCP_OAUTH_CONSENT_LIFETIME_MS / 1000 + 600)
+    const grant = await delegationGrant(fixture.member, fixture.team, createdAt)
+    const boundedGrant = await prepareDelegation(f, actor.cookie, grant, {
+      credentialKind: 'oauth_grant',
+    })
+    const second = await bindingResponse(await boundedGrant.submit())
+    expect(second.expiresAt).toBe(
+      new Date(Date.parse(createdAt) + MCP_OAUTH_CONSENT_LIFETIME_MS).toISOString(),
+    )
+    const uncappedKey = await delegationKey(fixture.member, fixture.team)
+    const deadline = (await authTime()) + 900
+    const boundedIdp = await prepareDelegation(
+      f,
+      actor.cookie,
+      uncappedKey,
+      {},
+      { session_expires_at: deadline },
+    )
+    const third = await bindingResponse(await boundedIdp.submit())
+    expect(third.expiresAt).toBe(new Date(deadline * 1000).toISOString())
+
+    const capabilities = { ssoOidcEnabled: true, ssoSamlEnabled: false }
+    const summaries = () =>
+      liveSsoDelegationSummaries(db, capabilities, fixture.member, 'api_key', [key])
+    expect((await summaries()).get(key)).toEqual(first)
+    await db
+      .updateTable('sso_domains')
+      .set({ verification_expires_at: at(1200) })
+      .where('id', '=', f.claim.id)
+      .execute()
+    expect((await summaries()).get(key)).toEqual(first)
+    await db
+      .updateTable('sso_domains')
+      .set({ verification_expires_at: at(-1) })
+      .where('id', '=', f.claim.id)
+      .execute()
+    expect((await summaries()).size).toBe(0)
+    await expect(
+      db
+        .updateTable('sso_domains')
+        .set({ verification_expires_at: at(1200) })
+        .where('id', '=', f.claim.id)
+        .execute(),
+    ).rejects.toMatchObject({ constraint: 'sso_domains_generation_lapse' })
+  })
+
+  it('revokes only the member’s exact owned binding without live browser proof on an enforced team', async () => {
+    const f = await linked()
+    await enforceSso()
+    const { id, cookie } = await browserSession(fixture.member)
+    await delegationBrowserProof(f, id)
+    const other = await browserSession(fixture.coOwner)
+    const key = await delegationKey(fixture.member, fixture.team)
+    const prepared = await prepareDelegation(f, cookie, key)
+    const binding = await bindingResponse(await prepared.submit())
+    await db.deleteFrom('sso_browser_proofs').where('session_id', '=', id).execute()
+    await expectSsoRequired(cookie)
+    for (const response of [
+      await revokeDelegation(other.cookie, binding.id),
+      await revokeDelegation(cookie, randomUUID()),
+    ]) {
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: 'sso_not_found' })
+    }
+    const revoked = await revokeDelegation(cookie, binding.id.toUpperCase())
+    expect(revoked.status).toBe(204)
+    expect(await revoked.text()).toBe('')
+    expect(revoked.headers.get('cache-control')).toBe('no-store')
+    expect((await revokeDelegation(cookie, binding.id)).status).toBe(404)
+    await expectSsoRequired(cookie)
+    const entries = (await audit()).filter((entry) => entry.action.startsWith('sso_delegation.'))
+    expect(entries.map(({ action, target_id }) => ({ action, target_id }))).toEqual([
+      { action: 'sso_delegation.bound', target_id: binding.id },
+      { action: 'sso_delegation.revoked', target_id: binding.id },
+    ])
+    expect(entries[1]?.details).toEqual({ method: 'oidc', providerId: f.providerId, revision: 1 })
+  })
+
+  it.each([true, false])(
+    'serializes exact revocation and rebinding across transactions (bind first: %s)',
+    async (bindFirst) => {
+      const f = await linked()
+      await enforceSso()
+      const actor = await browserSession(fixture.member)
+      await delegationBrowserProof(f, actor.id)
+      const key = await delegationKey(fixture.member, fixture.team)
+      const initial = await prepareDelegation(f, actor.cookie, key)
+      const old = await bindingResponse(await initial.submit())
+      const rebound = await prepareDelegation(f, actor.cookie, key)
+      const revoke = () => revokeDelegation(actor.cookie, old.id)
+      const blocker = await owned.pool.connect()
+      let bindResult: Promise<Response> | undefined
+      let revokeResult: Promise<Response> | undefined
+      try {
+        await blocker.query('BEGIN')
+        await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+          fixture.team,
+        ])
+        const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        if (bindFirst) bindResult = Promise.resolve(rebound.submit())
+        else revokeResult = Promise.resolve(revoke())
+        await waitForBlocked(rows[0]?.pid)
+        if (bindFirst) revokeResult = Promise.resolve(revoke())
+        else bindResult = Promise.resolve(rebound.submit())
+        await vi.waitFor(
+          async () => {
+            const { rows: waiters } = await owned.pool.query<{ count: string }>(
+              'SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0',
+            )
+            expect(waiters[0]?.count).toBe('2')
+          },
+          { timeout: 2500, interval: 10 },
+        )
+      } finally {
+        await blocker.query('ROLLBACK')
+        blocker.release()
+      }
+      const fresh = await bindingResponse(await (bindResult as Promise<Response>))
+      expect((await revokeResult)?.status).toBe(bindFirst ? 404 : 204)
+      expect(fresh.id).not.toBe(old.id)
+      expect(
+        await db
+          .selectFrom('sso_delegation_bindings')
+          .select('id')
+          .where('api_key_id', '=', key)
+          .execute(),
+      ).toEqual([{ id: fresh.id }])
+    },
+  )
+
+  it('ends a bound member’s lease on unlink while preserving another member’s lease', async () => {
+    const f = await linked()
+    const other = await recoveryTarget(f, fixture.coOwner)
+    const otherProofs = await createRecoveryProofs(f, other, fixture.coOwnerMember)
+    const actor = await browserSession(fixture.member)
+    const key = await delegationKey(fixture.member, fixture.team)
+    const prepared = await prepareDelegation(f, actor.cookie, key)
+    const binding = await bindingResponse(await prepared.submit())
+    const path = linkPath(f.providerId)
+    const unlink = { linkId: f.link.id, expectedLinkGeneration: f.link.generation }
+    const mailbox = await recoveryProof(path, actor.cookie, unlink)
+    const response = await recoveryRequest(path, mailbox.cookie, {
+      ...unlink,
+      proofAttemptId: mailbox.id,
+    })
+    expect(response.status).toBe(204)
+    expect((await revokeDelegation(actor.cookie, binding.id)).status).toBe(404)
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .select('id')
+        .where('provider_id', '=', f.providerId)
+        .execute(),
+    ).toEqual([{ id: otherProofs.delegated.id }])
+  })
+
+  it('replaces a previous lease after the owner changes the key’s team', async () => {
+    const f = await linked()
+    const actor = await browserSession(fixture.member)
+    const key = await delegationKey(fixture.member, fixture.team)
+    const bound = await bindingResponse(
+      await (await prepareDelegation(f, actor.cookie, key)).submit(),
+    )
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: fixture.otherTeam,
+        userId: fixture.member,
+        role: 'member',
+        createdAt: at(0),
+      })
+      .execute()
+    const other = await provider({ organizationId: fixture.otherTeam })
+    const link = await db
+      .insertInto('sso_identity_links')
+      .values({
+        organization_id: fixture.otherTeam,
+        provider_id: other.providerId,
+        user_id: fixture.member,
+        issuer,
+        subject: f.claims.sub,
+        proven_email: other.email,
+        email_proven_at: at(-60),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('auth.apikey')
+      .set({
+        metadata: JSON.stringify({ scope: 'full', organizationId: fixture.otherTeam }),
+      })
+      .where('id', '=', key)
+      .execute()
+    const oldTeam = await delegationRequest(actor.cookie, key)
+    expect(oldTeam.status).toBe(404)
+    const otherSession = await browserSession(fixture.member, fixture.otherTeam)
+    const retry = await prepareDelegation(
+      { ...other, link, claims: { ...f.claims, email: other.email } },
+      otherSession.cookie,
+      key,
+      {},
+      {},
+      fixture.otherTeam,
+    )
+    const rebound = await bindingResponse(await retry.submit())
+    expect(rebound.id).not.toBe(bound.id)
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .select(['id', 'organization_id'])
+        .where('api_key_id', '=', key)
+        .execute(),
+    ).toEqual([{ id: rebound.id, organization_id: fixture.otherTeam }])
+  })
 
   it('hard-disables OIDC auth-protocol endpoints before looking up the request', async () => {
     const off = instance({ enabled: false })
