@@ -748,10 +748,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   }[] = [
     {
       name: 'owner target refusal',
-      replacement: [
-        "    (roles.includes('owner') && (actor.role !== 'owner' || !member.recoveryOwner)) ||\n",
-        '',
-      ],
+      replacement: ["    roles.includes('owner') ||\n", ''],
       verify: (remove) => verifyTarget(remove, 'owner', 'owner,member'),
     },
     {

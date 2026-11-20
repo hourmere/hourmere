@@ -76,27 +76,41 @@ export function advanceSsoRecoveryRevision(trx: Db, organizationId: string) {
     .executeTakeFirstOrThrow()
 }
 
-/** The organization write lock orders this check and deletion with recovery enrollment. */
+/**
+ * The organization write lock orders this check and deletion with recovery enrollment.
+ * The policy row is locked FOR UPDATE before the caller's proof check takes it FOR SHARE,
+ * so the revision advance below never upgrades a share lock (org -> policy order).
+ */
 export async function removeSsoRecoveryOwner(
   trx: Transaction<Database>,
   principal: Principal,
-  { organizationId, userId, isOwner }: { organizationId: string; userId: string; isOwner: boolean },
+  {
+    organizationId,
+    userId,
+    isOwner,
+    checkProof,
+  }: {
+    organizationId: string
+    userId: string
+    isOwner: boolean
+    checkProof: () => Promise<unknown>
+  },
   requestId?: string,
 ) {
   if (!trx.isTransaction) throw new Error('Recovery membership writes require a transaction')
-  if (isOwner) {
-    const policy = await trx
-      .selectFrom('sso_policies')
-      .select('require_sso')
-      .where('organization_id', '=', organizationId)
+  const policy = await trx
+    .selectFrom('sso_policies')
+    .select('require_sso')
+    .where('organization_id', '=', organizationId)
+    .forUpdate()
+    .executeTakeFirst()
+  await checkProof()
+  if (isOwner && policy?.require_sso) {
+    const replacement = await currentRecoveryOwners(trx, organizationId)
+      .where('recovery.user_id', '!=', userId)
+      .limit(1)
       .executeTakeFirst()
-    if (policy?.require_sso) {
-      const replacement = await currentRecoveryOwners(trx, organizationId)
-        .where('recovery.user_id', '!=', userId)
-        .limit(1)
-        .executeTakeFirst()
-      if (!replacement) throw new SsoRecoveryRequiredError()
-    }
+    if (!replacement) throw new SsoRecoveryRequiredError()
   }
   const removed = await trx
     .deleteFrom('sso_recovery_owners')

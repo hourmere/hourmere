@@ -49,7 +49,7 @@ export async function teamMemberRemovalTarget(
   if (
     !member ||
     (!roles.includes('owner') && !roles.includes('admin') && !roles.includes('member')) ||
-    (roles.includes('owner') && (actor.role !== 'owner' || !member.recoveryOwner)) ||
+    roles.includes('owner') ||
     (actor.role !== 'owner' && roles.includes('admin'))
   ) {
     throw teamManagementDenied()
@@ -76,11 +76,11 @@ async function removeTeamMemberInTransaction(
   // Self departure must use scheduling's impact check and atomic personal fallback.
   if (member.userId === actor.userId) throw teamManagementDenied()
   if (member.recoveryOwner) {
-    await checkProof()
     await removeSsoRecoveryOwner(trx, principal, {
       organizationId: actor.organizationId,
       userId: member.userId,
       isOwner: teamRoles(member.role).includes('owner'),
+      checkProof,
     })
   }
 

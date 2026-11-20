@@ -195,6 +195,15 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
       .execute()
   }
 
+  // Records are only inserted for owners; model one left behind on a non-owner role.
+  async function formerOwner(f: Fixture) {
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('id', '=', f.target.memberId)
+      .execute()
+  }
+
   function recoveryOwners(f: Fixture) {
     return db
       .selectFrom('sso_recovery_owners')
@@ -295,12 +304,15 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
     })
   }
 
-  it.each(operations)(
+  const departures = ['REST leave', 'native leave'] as const
+  const ownerTargetActions = ['REST removal', 'native removal', 'demotion'] as const
+
+  it.each(departures)(
     'protects the last recovery owner of an enforced team during %s',
     async (operation) => {
       const f = await fixture()
       await recover(f)
-      await enforce(f, operation.endsWith('leave') ? f.target : f.actor)
+      await enforce(f, f.target)
       const response = await request(f, operation, enforcedApp)
       expect(response.status).toBe(409)
       expect(await response.json()).toMatchObject({
@@ -310,6 +322,34 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
       expect(await recoveryOwners(f)).toEqual([{ user_id: f.target.userId }])
       expect(await removalAudits(f)).toEqual([])
       expect(await policy(f)).toEqual({ policy_revision: 4, trust_generation: 3 })
+    },
+  )
+
+  // Recovery status never loosens owner protection: another owner stays untouchable.
+  it.each(
+    ownerTargetActions.flatMap((operation) =>
+      [false, true].flatMap((enforced) =>
+        [false, true].map((recovery) => [operation, enforced, recovery] as const),
+      ),
+    ),
+  )(
+    'refuses %s of another owner (enforced: %s, recovery owner: %s)',
+    async (operation, enforced, recovery) => {
+      const f = await fixture()
+      if (recovery) {
+        await recover(f)
+        await recover(f, f.other)
+      }
+      if (enforced) await enforce(f, f.actor)
+      const before = await policy(f)
+      const response = await request(f, operation, enforced ? enforcedApp : app)
+      expect(response.status).toBe(403)
+      expect(await memberRole(f)).toEqual({ role: 'owner' })
+      const owners = await recoveryOwners(f)
+      expect(owners).toHaveLength(recovery ? 2 : 0)
+      if (recovery) expect(owners).toContainEqual({ user_id: f.target.userId })
+      expect(await removalAudits(f)).toEqual([])
+      expect(await policy(f)).toEqual(before)
     },
   )
 
@@ -337,10 +377,12 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
   it.each(operations)(
     'deletes non-last recovery status during %s without reviving it later',
     async (operation) => {
+      // Owners may only leave; a record left on a former owner follows the allowed admin paths.
       const f = await fixture()
       const actor = operation.endsWith('leave') ? f.target : f.actor
       await recover(f)
       await recover(f, f.other)
+      if (!operation.endsWith('leave')) await formerOwner(f)
       await enforce(f, actor)
       expect((await request(f, operation, enforcedApp)).status).toBe(200)
       expect(await memberRole(f)).toEqual(operation === 'demotion' ? { role: 'member' } : undefined)
@@ -375,17 +417,32 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
     },
   )
 
-  it('allows the only recovery owner to be demoted on an unenforced team', async () => {
+  // Main allows no owner demotion, so departure is the only allowed transition that
+  // can drop the sole recovery owner of an unenforced team.
+  it.each(departures)(
+    'lets the only recovery owner leave an unenforced team during %s',
+    async (operation) => {
+      const f = await fixture()
+      await recover(f)
+      expect((await request(f, operation)).status).toBe(200)
+      expect(await memberRole(f)).toBeUndefined()
+      expect(await recoveryOwners(f)).toEqual([])
+      expect(await removalAudits(f)).toHaveLength(1)
+    },
+  )
+
+  it('refuses self-demotion of the only recovery owner on an unenforced team', async () => {
     const f = await fixture()
     await recover(f)
-    expect((await request(f, 'demotion')).status).toBe(200)
-    expect(await memberRole(f)).toEqual({ role: 'member' })
-    expect(await recoveryOwners(f)).toEqual([])
+    expect((await request({ ...f, actor: f.target }, 'demotion')).status).toBe(403)
+    expect(await memberRole(f)).toEqual({ role: 'owner' })
+    expect(await recoveryOwners(f)).toEqual([{ user_id: f.target.userId }])
   })
 
   it('rolls back recovery deletion and its audit when demotion cannot commit', async () => {
     const f = await fixture()
     await recover(f)
+    await formerOwner(f)
     await sql`CREATE FUNCTION refuse_role_change_audit() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'fixture role change audit failure'; END $$`.execute(db)
     await sql`CREATE TRIGGER refuse_role_change_audit BEFORE INSERT ON audit_events
@@ -393,7 +450,7 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
       EXECUTE FUNCTION refuse_role_change_audit()`.execute(db)
     try {
       expect((await request(f, 'demotion')).status).toBe(500)
-      expect(await memberRole(f)).toEqual({ role: 'owner' })
+      expect(await memberRole(f)).toEqual({ role: 'admin' })
       expect(await recoveryOwners(f)).toEqual([{ user_id: f.target.userId }])
       expect(await removalAudits(f)).toEqual([])
       expect(await policy(f)).toBeUndefined()

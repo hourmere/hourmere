@@ -72,7 +72,6 @@ export async function leaveTeamMember(
         throw new DomainError('forbidden', 'sso_required')
       }
       if (actor.recoveryOwner) {
-        await lockSharedTeamSsoProof(trx, ssoCapabilities, identity, actor.organizationId, denied)
         await removeSsoRecoveryOwner(
           trx,
           principal,
@@ -80,6 +79,8 @@ export async function leaveTeamMember(
             organizationId: actor.organizationId,
             userId: actor.userId,
             isOwner: actor.role === 'owner',
+            checkProof: () =>
+              lockSharedTeamSsoProof(trx, ssoCapabilities, identity, actor.organizationId, denied),
           },
           ctx.requestId,
         )

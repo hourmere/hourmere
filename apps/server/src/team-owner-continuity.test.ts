@@ -441,11 +441,7 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
     (action) => ownerTargetProtection(action, true),
   )
 
-  const roleTargetGuard = `if (
-      !target ||
-      target.userId === facts.userId ||
-      (teamRoles(target.role).includes('owner') && !target.recoveryOwner)
-    )
+  const roleTargetGuard = `if (!target || target.userId === facts.userId || teamRoles(target.role).includes('owner'))
       throw teamRoleDenied()`
 
   it('detects reallowing owner-to-owner demotion with a real HTTP assertion', async () => {
@@ -618,10 +614,7 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
   it('detects omission of administrative self-removal protection in rebuilt HTTP routes', async () => {
     const copy = await sourceCopy({
       removal: [
-        [
-          "    (roles.includes('owner') && (actor.role !== 'owner' || !member.recoveryOwner)) ||\n",
-          '',
-        ],
+        ["    roles.includes('owner') ||\n", ''],
         ['if (member.userId === actor.userId) throw teamManagementDenied()', ''],
       ],
     })

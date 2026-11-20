@@ -387,11 +387,7 @@ export function createTeamRolePolicy(
       .where('organizationId', '=', facts.organizationId)
     if (lock) targetQuery = targetQuery.forUpdate()
     const target = await targetQuery.executeTakeFirst()
-    if (
-      !target ||
-      target.userId === facts.userId ||
-      (teamRoles(target.role).includes('owner') && !target.recoveryOwner)
-    )
+    if (!target || target.userId === facts.userId || teamRoles(target.role).includes('owner'))
       throw teamRoleDenied()
     if (lock && teamRoles(target.role).includes('owner')) {
       await assertTeamOwnerRemains(targetDb, facts.organizationId, target.userId)
@@ -868,11 +864,11 @@ export function createTeamRolePolicy(
             if (target.recoveryOwner) {
               const actor = await principal(ctx)
               if (!actor) throw teamRoleDenied()
-              await requireProof(trx, ctx, facts.organizationId)
               await removeSsoRecoveryOwner(trx, actor, {
                 organizationId: facts.organizationId,
                 userId: target.userId,
                 isOwner: teamRoles(target.role).includes('owner'),
+                checkProof: () => requireProof(trx, ctx, facts.organizationId),
               })
             }
             const updated = await trx
