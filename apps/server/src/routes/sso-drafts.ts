@@ -5,6 +5,8 @@ import type { CallerEnv } from '../caller.ts'
 import { ErrorBody, errorResponses, json, type RouteModule } from '../openapi.ts'
 import { requireSsoEnabled } from '../sso.ts'
 import {
+  ActivateSsoProviderInput,
+  activateSsoProvider,
   CreateSsoProviderInput,
   createSsoProvider,
   DeleteSsoProviderInput,
@@ -179,6 +181,49 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         const { setCookie, ...body } = result.value
         c.header('Set-Cookie', setCookie, { append: true })
         return c.json(body, 200)
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/team/sso/providers/{providerId}/activation',
+        operationId: 'activateSsoProvider',
+        tags: ['SSO'],
+        summary: 'Enable or disable an SSO provider',
+        description:
+          'Verified team owner browser session with fresh administration proof. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.',
+        security: [{ session: [] }],
+        middleware: [oidcEnabled, ...sessionMiddleware] as const,
+        request: {
+          headers: z.object({
+            'X-Expected-Organization-Id': z.string().optional().openapi({
+              description: 'Required for writes and must match the current team.',
+            }),
+          }),
+          params: z.object({ providerId: z.uuid() }),
+          body: { required: true, content: json(ActivateSsoProviderInput) },
+        },
+        responses: {
+          ...errors,
+          200: { description: 'Safe provider summary', content: json(ProviderResult) },
+          409: {
+            description:
+              'organization_context_changed, sso_configuration_changed, sso_test_required, sso_domain_unverified or sso_last_provider',
+            content: json(ErrorBody),
+          },
+        },
+      }),
+      async (c) => {
+        const result = await activateSsoProvider(
+          deps,
+          c.var.principal,
+          c.req.raw.headers,
+          c.req.valid('param').providerId,
+          c.req.valid('json'),
+        )
+        if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
+        if (result.status === 'proof_required') return c.json(result.body, 403)
+        return c.json(result.value, 200)
       },
     )
     app.openapi(
