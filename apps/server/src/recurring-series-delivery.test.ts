@@ -1,4 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import {
+  bookingConferenceJob,
+  calendarEncryptionKey,
+  conferenceBookingNotifier,
+  encryptCredential,
+  retryBookingConference,
+  tokenAad,
+} from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
@@ -16,6 +24,7 @@ import {
   BookingNotificationPayload,
   bookingNotificationJob,
   bookingNotifier,
+  dispatchConferenceNotifications,
   type NotificationDeps,
   seriesNotificationDispatchJob,
 } from '@hourmere/notifications'
@@ -28,12 +37,15 @@ import {
   createPublicTeamBookingSeries,
   expandRecurringRule,
   getManagedBooking,
+  type PublicContext,
   rescheduleManagedBooking,
   resolveSeriesCapability,
 } from '@hourmere/scheduling'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import ICAL from 'ical.js'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../../packages/calendars/src/google.ts'
+import { fakeGoogle, TEST_CALENDAR_KEY } from '../../../packages/calendars/src/testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 // pg-boss accounts for job retention using PostgreSQL wall time.
@@ -44,6 +56,7 @@ const durationMinutes = 30
 const publicUrl = 'https://hourmere.example.test'
 const eventName = 'Weekly studio hours'
 const senderEmail = 'calendar@hourmere.example.test'
+const meetJoinUrl = 'https://meet.google.com/abc-defg-hij'
 const hostName = (index: number) => `Series host ${index + 1}`
 const booker = { name: 'Primary booker', email: 'booker@example.test', timeZone, locale: 'en' }
 const guestAt = (index: number) => ({
@@ -152,6 +165,8 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
   let jobs: ReturnType<typeof createJobs>
   let clock = fixtureNow
   const now = () => clock
+  const providerNow = () => now().epochMilliseconds
+  let google: ReturnType<typeof fakeGoogle>
   const sent: MailMessage[] = []
   const attempts: MailMessage[] = []
   const logs: string[] = []
@@ -178,17 +193,37 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     log: (line) => logs.push(line),
     ...limits,
   })
-  const context = () => ({ db, now, notify: bookingNotifier(jobs) })
+  const context = (automaticMeet = false): PublicContext => ({
+    db,
+    now,
+    automaticMeet,
+    notify: async (trx, event, at) => {
+      if (automaticMeet && !('requestId' in event))
+        await conferenceBookingNotifier(jobs)(trx, event)
+      await bookingNotifier(jobs)(trx, event, at)
+    },
+  })
   const jobRun = () => ({ id: randomUUID(), attempt: 1, signal: new AbortController().signal })
   const dispatch = (limits?: Partial<NotificationDeps>) =>
     seriesNotificationDispatchJob(deps(limits)).handler({}, jobRun())
+  const meetJob = () =>
+    bookingConferenceJob({
+      db,
+      now: providerNow,
+      google: { client: google.client, encryptionKey: TEST_CALENDAR_KEY },
+    })
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'series_delivery' })
     db = createDb(owned.pool)
+    google = fakeGoogle(providerNow)
     jobs = createJobs({
       connectionString: owned.url,
-      definitions: [bookingNotificationJob(deps()), seriesNotificationDispatchJob(deps())],
+      definitions: [
+        bookingNotificationJob(deps()),
+        seriesNotificationDispatchJob(deps()),
+        meetJob(),
+      ],
       log: (_level, line) => logs.push(line),
       maxConnections: 2,
       work: false,
@@ -203,7 +238,10 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     attempts.length = 0
     logs.length = 0
     refuseAddress = undefined
+    google = fakeGoogle(providerNow)
+    google.controls.importedConferenceRequestMode = 'process_duplicate'
     await db.deleteFrom('notification_email_sends').execute()
+    await db.deleteFrom('booking_conference_notifications').execute()
   })
 
   afterAll(async () => {
@@ -214,7 +252,7 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     }
   })
 
-  async function seriesFixture(count = 2, guestCount = 0, hostCount = 1) {
+  async function seriesFixture(count = 2, guestCount = 0, hostCount = 1, automaticMeet = false) {
     const fixtures = createFixtures(db)
     const hosts = []
     for (let index = 0; index < hostCount; index++) {
@@ -227,6 +265,8 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       await fixtures.schedule(host.id, { timeZone })
       hosts.push({ ...host, locale })
     }
+    const organizer = required(hosts[0])
+    if (automaticMeet) await configureMeet(organizer.id)
     const team = await createTestTeam(
       db,
       hosts.map((user, index) => ({ user, role: index === 0 ? 'owner' : 'member' })),
@@ -238,12 +278,14 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
       title: eventName,
       allowGuests: true,
       hosts: hosts.map(({ id }) => ({ userId: id })),
+      ...(automaticMeet && { location: { kind: 'google_meet', autoCreate: true } }),
     })
     await db
       .updateTable('event_types')
       .set({
         scheduling_type: hostCount > 1 ? 'collective' : 'individual',
         recurrence: JSON.stringify({ timeZone, allowedPatterns: ['weekly'], maxOccurrences: 12 }),
+        ...(automaticMeet && { conference_organizer_user_id: organizer.id }),
       })
       .where('id', '=', eventId)
       .execute()
@@ -279,15 +321,56 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     }
     const actorDigest = randomBytes(32)
     const create = () =>
-      createPublicTeamBookingSeries(context(), input, {
+      createPublicTeamBookingSeries(context(automaticMeet), input, {
         recurringBookingsEnabled: true,
         actorDigest,
         notifyMemberEmail: bookingNotifier(jobs),
+        ...(automaticMeet && { notifyMemberConference: conferenceBookingNotifier(jobs) }),
       })
     const result = await create()
     return { ...result, token: required(result.manageToken), hosts, guests, create, team }
   }
   type SeriesFixture = Awaited<ReturnType<typeof seriesFixture>>
+
+  async function configureMeet(organizerId: string) {
+    const account = 'synthetic-meet-account'
+    const connection = await db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: organizerId,
+        provider: 'google',
+        external_account_id: account,
+        scopes: [...GOOGLE_CALENDAR_SYNC_SCOPES],
+        credentials: encryptCredential(
+          calendarEncryptionKey(TEST_CALENDAR_KEY),
+          tokenAad(organizerId, account),
+          JSON.stringify({
+            accessToken: 'synthetic-meet-access',
+            refreshToken: 'synthetic-meet-refresh',
+            expiresAt: now().add({ hours: 2 }).epochMilliseconds,
+          }),
+        ),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const calendar = await db
+      .insertInto('calendars')
+      .values({
+        connection_id: connection.id,
+        external_id: 'synthetic-primary',
+        name: 'Synthetic Meet calendar',
+        access_role: 'owner',
+        supports_google_meet: true,
+        check_conflicts: false,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('profiles')
+      .set({ destination_calendar_id: calendar.id })
+      .where('user_id', '=', organizerId)
+      .execute()
+  }
 
   async function ordinaryBooking() {
     const fixtures = createFixtures(db)
@@ -420,6 +503,295 @@ describe.skipIf(!serverUrl)('aggregate series notification delivery on PostgreSQ
     expect(new Set(tokens).size).toBe(11)
     return tokens
   }
+
+  type ConferenceState = 'ready' | 'failed' | 'pending'
+  type ConferenceMarker = ConferenceState | 'started' | 'cancelled'
+
+  async function meetSeries(firstStartInMinutes?: number) {
+    if (firstStartInMinutes !== undefined)
+      clock = Temporal.Instant.from(firstLocalStart).subtract({ minutes: firstStartInMinutes })
+    const series = await seriesFixture(12, 10, 8, true)
+    const ids = series.occurrences.map(({ bookingId }) => bookingId)
+    const jobs = await owned.pool.query<{ root_id: string }>(
+      `SELECT data->>'rootBookingId' AS root_id FROM pgboss.job
+        WHERE name = $1 AND data->>'rootBookingId' = ANY($2::text[])`,
+      [meetJob().name, ids],
+    )
+    expect(jobs.rows.map(({ root_id }) => root_id).sort()).toEqual([...ids].sort())
+    const conferences = await db
+      .selectFrom('booking_conferences')
+      .select(['booking_id', 'state'])
+      .where('root_booking_id', 'in', ids)
+      .execute()
+    expect(conferences).toHaveLength(12)
+    expect(conferences.every(({ state }) => state === 'pending')).toBe(true)
+    expect(google.calls).toHaveLength(0)
+    return series
+  }
+
+  async function provision({ bookingId }: CalendarOccurrence, state: ConferenceState) {
+    google.controls.conferencePollsBeforeReady = state === 'pending' ? Infinity : 0
+    google.controls.conferenceOutcome = state === 'failed' ? 'failure' : 'success'
+    await meetJob().handler({ rootBookingId: bookingId }, jobRun())
+    const conference = await db
+      .selectFrom('booking_conferences')
+      .select('state')
+      .where('root_booking_id', '=', bookingId)
+      .executeTakeFirstOrThrow()
+    expect(conference.state).toBe(state)
+  }
+
+  async function expectConferenceConfirmation(f: SeriesFixture, states: ConferenceMarker[]) {
+    const ids = f.occurrences.map(({ bookingId }) => bookingId)
+    await dispatch()
+    await dispatchConferenceNotifications(deps())
+    await runBookingMail(ids, 'confirmed')
+    await dispatch()
+    assertCompleteBodies(f, sent)
+    expect(attempts.length).toBe(19)
+    const receipts = await seriesReceipts(f.seriesId)
+    expect(receipts).toHaveLength(19)
+    expect(await ledger()).toHaveLength(19)
+    expect(await seriesOutbox(f.seriesId)).toMatchObject([
+      { kind: 'confirmation', attempts: 1, outbox_state: 'done', due_at: new Date(providerNow()) },
+    ])
+    const labels = {
+      failed: 'series.failed',
+      pending: 'series.pending',
+      started: 'series.started',
+      cancelled: 'series.cancelled.member',
+    } as const
+    for (const message of sent) {
+      const host = f.hosts.find(({ email }) => email === message.to)
+      const locale = host?.locale === 'zh-CN' ? 'zh-CN' : 'en'
+      const isOrganizer = required(f.hosts[0]).email === message.to
+      const attached = f.occurrences.filter(({ ordinal }) => {
+        const state = states[ordinal - 1]
+        if (isOrganizer) return state === 'failed'
+        return state !== 'started' && state !== 'cancelled'
+      })
+      const events = expectSeriesCalendar(message, attached, now(), 'CONFIRMED')
+      for (const [index, event] of events.entries()) {
+        const state = required(states[required(attached[index]).ordinal - 1])
+        const description = state === 'ready' ? meetJoinUrl : mailMessage(locale, labels[state])
+        expect(event.getFirstPropertyValue('description')).toBe(description)
+        expect(event.getFirstPropertyValue('location')).toBe(state === 'ready' ? meetJoinUrl : null)
+      }
+      for (const state of ['ready', 'failed', 'pending', 'started', 'cancelled'] as const) {
+        const label = state === 'ready' ? meetJoinUrl : mailMessage(locale, labels[state])
+        const count = states.filter((value) => value === state).length
+        expect(message.text.split(label).length - 1).toBe(count)
+        expect(required(message.html).split(escapeHtml(label)).length - 1).toBe(count)
+      }
+      expect(message.text.includes(mailMessage(locale, 'series.repair'))).toBe(
+        Boolean(host) && states.includes('failed'),
+      )
+    }
+    for (const receipt of receipts) {
+      expect({
+        outcome: receipt.outcome,
+        suppression: receipt.suppression_reason,
+        sentAt: receipt.sent_at,
+        reportedOrdinals: receipt.reported_ordinals,
+        reportedStates: receipt.reported_link_states,
+      }).toEqual({
+        outcome: 'delivered',
+        suppression: null,
+        sentAt: new Date(providerNow()),
+        reportedOrdinals: f.occurrences.map(({ ordinal }) => ordinal),
+        reportedStates: states,
+      })
+    }
+    await expectNoOccurrenceConferenceMail(ids)
+  }
+
+  async function expectNoOccurrenceConferenceMail(ids: string[]) {
+    const notices = await db
+      .selectFrom('booking_conference_notifications')
+      .select('kind')
+      .where('booking_id', 'in', ids)
+      .where('kind', 'in', ['confirmed', 'conference_failed'])
+      .execute()
+    expect(notices).toEqual([])
+    const receipts = await db
+      .selectFrom('booking_notifications')
+      .select('kind')
+      .where('booking_id', 'in', ids)
+      .where('kind', 'in', ['confirmed', 'conference_failed'])
+      .execute()
+    expect(receipts).toEqual([])
+  }
+
+  async function expectConferenceStillWaiting(f: SeriesFixture) {
+    await dispatch()
+    expect(sent.length).toBe(0)
+    expect(attempts.length).toBe(0)
+    expect(await seriesReceipts(f.seriesId)).toHaveLength(0)
+    expect(await seriesOutbox(f.seriesId)).toMatchObject([
+      { kind: 'confirmation', attempts: 0, outbox_state: 'pending' },
+    ])
+  }
+
+  it.each([
+    ['all ready', 12],
+    ['eight ready and four failed', 8],
+    ['all failed', 0],
+  ] as const)(
+    'sends one series confirmation per recipient at the last terminal result with %s',
+    async (_label, readyCount) => {
+      const f = await meetSeries()
+      const states = f.occurrences.map(({ ordinal }) =>
+        ordinal <= readyCount ? 'ready' : 'failed',
+      )
+      await expectConferenceStillWaiting(f)
+      clock = fixtureNow.add({ seconds: 5 })
+      for (const [index, occurrence] of f.occurrences.slice(0, -1).entries())
+        await provision(occurrence, required(states[index]))
+      await expectConferenceStillWaiting(f)
+      clock = fixtureNow.add({ seconds: 10 })
+      await provision(required(f.occurrences.at(-1)), required(states.at(-1)))
+      await expectConferenceConfirmation(f, states)
+    },
+    20_000,
+  )
+
+  it('confirms with the first link after ten seconds when the first start is imminent', async () => {
+    const f = await meetSeries(10)
+    const [first, second, ...rest] = f.occurrences
+    const committed = now()
+    await provision(required(first), 'pending')
+    await provision(required(second), 'pending')
+    for (const occurrence of rest) await provision(occurrence, 'ready')
+    clock = committed.add({ seconds: 10 }).subtract({ milliseconds: 1 })
+    await expectConferenceStillWaiting(f)
+    clock = committed.add({ seconds: 10 })
+    await provision(required(first), 'ready')
+    await expectConferenceConfirmation(f, ['ready', 'pending', ...rest.map(() => 'ready' as const)])
+  }, 20_000)
+
+  it('keeps the deadline when the organizer retries a failed first link before the sweep', async () => {
+    const f = await meetSeries(10)
+    const [first, ...rest] = f.occurrences
+    const bookingId = required(first).bookingId
+    const committed = now()
+    for (const occurrence of rest) await provision(occurrence, 'pending')
+    await expectConferenceStillWaiting(f)
+    clock = committed.add({ seconds: 10 })
+    await provision(required(first), 'failed')
+    expect(await seriesOutbox(f.seriesId)).toMatchObject([{ due_at: new Date(providerNow()) }])
+    clock = committed.add({ seconds: 20 })
+    await retryBookingConference(
+      { ...context(true), principal: f.team.as(required(f.hosts[0])) },
+      bookingId,
+    )
+    await expectConferenceConfirmation(
+      f,
+      f.occurrences.map(() => 'pending'),
+    )
+  }, 20_000)
+
+  it.each([
+    [10, 5],
+    [14, 5],
+    [16, 5],
+    [25, 10],
+    [60, 30],
+  ])(
+    'confirms for a start %i minutes after commit at minute %i with the first link pending',
+    async (firstStart, confirmationDue) => {
+      const f = await meetSeries(firstStart)
+      const [first, ...rest] = f.occurrences
+      const committed = now()
+      await provision(required(first), 'pending')
+      for (const occurrence of rest) await provision(occurrence, 'ready')
+      clock = committed.add({ minutes: confirmationDue }).subtract({ milliseconds: 1 })
+      await expectConferenceStillWaiting(f)
+      clock = committed.add({ minutes: confirmationDue })
+      await expectConferenceConfirmation(f, ['pending', ...rest.map(() => 'ready' as const)])
+    },
+    20_000,
+  )
+
+  it('honors a first start before the imminent deadline and omits its started calendar entry', async () => {
+    const f = await meetSeries(3)
+    const [first, ...rest] = f.occurrences
+    for (const occurrence of f.occurrences) await provision(occurrence, 'pending')
+    const start = Temporal.Instant.from(required(first).start)
+    clock = start.subtract({ milliseconds: 1 })
+    await expectConferenceStillWaiting(f)
+    clock = start
+    await expectConferenceConfirmation(f, ['started', ...rest.map(() => 'pending' as const)])
+  }, 20_000)
+
+  it('ignores a cancelled member still pending at the other members’ terminal point', async () => {
+    const f = await meetSeries(60)
+    const [first, ...rest] = f.occurrences
+    const committed = now()
+    await provision(required(first), 'pending')
+    await cancelManagedBooking(context(true), {
+      seriesManageToken: f.token,
+      ordinal: 1,
+      expectedRevision: '1',
+    })
+    for (const occurrence of rest.slice(0, -1)) await provision(occurrence, 'ready')
+    await expectConferenceStillWaiting(f)
+    clock = committed.add({ seconds: 1 })
+    await provision(required(rest.at(-1)), 'ready')
+    await expectConferenceConfirmation(f, ['cancelled', ...rest.map(() => 'ready' as const)])
+  }, 20_000)
+
+  it('uses the next root when the first ready root is cancelled before its lead point', async () => {
+    const f = await meetSeries(25)
+    const [first, ...rest] = f.occurrences
+    const committed = now()
+    for (const occurrence of rest) await provision(occurrence, 'pending')
+    clock = committed.add({ seconds: 10 })
+    await provision(required(first), 'ready')
+    await expectConferenceStillWaiting(f)
+    clock = committed.add({ minutes: 1 })
+    await cancelManagedBooking(context(true), {
+      seriesManageToken: f.token,
+      ordinal: 1,
+      expectedRevision: '1',
+    })
+    clock = committed.add({ minutes: 10 })
+    await expectConferenceStillWaiting(f)
+    clock = committed.add({ minutes: 30 })
+    await expectConferenceConfirmation(f, ['cancelled', ...rest.map(() => 'pending' as const)])
+  }, 20_000)
+
+  it('skips a waiting conference confirmation and sends every copy of a whole cancellation', async () => {
+    const f = await meetSeries(60)
+    for (const occurrence of f.occurrences) await provision(occurrence, 'pending')
+    await expectConferenceStillWaiting(f)
+    clock = now().add({ seconds: 1 })
+    await cancelManagedBookingSeries(context(true), f.token, all())
+    await dispatch()
+    await dispatchConferenceNotifications(deps())
+    assertCompleteBodies(f, sent, 1)
+    expect(attempts.length).toBe(19)
+    expect(sent.every(({ attachments }) => !attachments?.length)).toBe(true)
+    expect(await ledger()).toHaveLength(19)
+    expect(await seriesOutbox(f.seriesId)).toMatchObject([
+      { kind: 'confirmation', outbox_state: 'skipped' },
+      { kind: 'cancellation', outbox_state: 'done', attempts: 1 },
+    ])
+    const receipts = await seriesReceipts(f.seriesId)
+    expect(receipts).toHaveLength(19)
+    expect(
+      receipts.every(
+        (row) =>
+          row.kind === 'cancellation' &&
+          row.outcome === 'delivered' &&
+          row.suppression_reason === null &&
+          row.sent_at?.getTime() === providerNow() &&
+          row.calendar_ordinals?.length === 0 &&
+          row.reported_link_states?.length === 12 &&
+          row.reported_link_states.every((state) => state === 'cancelled'),
+      ),
+    ).toBe(true)
+    await expectNoOccurrenceConferenceMail(f.occurrences.map(({ bookingId }) => bookingId))
+  }, 20_000)
 
   it.each([
     ['following', 8],
