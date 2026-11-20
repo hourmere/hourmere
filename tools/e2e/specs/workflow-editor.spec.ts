@@ -21,6 +21,7 @@ test('creates, previews and edits workflows with keyboard and narrow touch contr
 }) => {
   const copy = isMobile ? chinese : english
   const locale = isMobile ? 'zh-CN' : 'en-US'
+  page.setDefaultTimeout(8_000)
   if (isMobile) await page.setViewportSize({ width: 320, height: 844 })
   await app.auditSignIn(true, locale, isMobile ? 'team' : undefined)
   await page.clock.setFixedTime(new Date(AUDIT_NOW))
@@ -36,7 +37,7 @@ test('creates, previews and edits workflows with keyboard and narrow touch contr
     const heading = (name: string) => main.getByRole('heading', { name, exact: true })
     const button = (name: string) => main.getByRole('button', { name, exact: true })
     const link = (name: string) => main.getByRole('link', { name, exact: true })
-    const field = (name: string) => main.getByLabel(name, { exact: true })
+    const select = (name: string) => main.getByRole('combobox', { name, exact: true })
     const expectNoHorizontalOverflow = async () => {
       const viewport = page.viewportSize()
       if (!viewport) throw new Error('Workflow editor test requires a CSS viewport')
@@ -51,15 +52,15 @@ test('creates, previews and edits workflows with keyboard and narrow touch contr
     else await newLink.press('Enter')
     await expect(heading(copy['New workflow'])).toBeVisible()
 
-    const name = field(copy['Workflow name'])
-    const scope = field(copy['Applies to'])
+    const name = main.getByRole('textbox', { name: copy['Workflow name'], exact: true })
+    const scope = select(copy['Applies to'])
     await name.fill('Synthetic workflow created from the editor')
     if (!isMobile) {
       await page.keyboard.press('Tab')
       await expect(scope).toBeFocused()
     }
     await scope.selectOption('event_type')
-    await field(copy['Event type']).selectOption({ label: AUDIT_TITLE })
+    await select(copy['Event type']).selectOption({ label: AUDIT_TITLE })
     const preview = button(copy['Preview workflow'])
     if (isMobile) await preview.tap()
     else await preview.press('Enter')
@@ -80,7 +81,7 @@ test('creates, previews and edits workflows with keyboard and narrow touch contr
     await expect(page).toHaveURL(app.url + workflowEditPath(AUDIT_EDITOR_WORKFLOW_ID))
     await expect(name).toHaveValue(AUDIT_EDITOR_WORKFLOW_NAME)
     if (isMobile) {
-      const endpoint = field(copy['Webhook endpoint'])
+      const endpoint = select(copy['Webhook endpoint'])
       await expect(endpoint.locator('option:checked')).toHaveText(AUDIT_WORKFLOW_WEBHOOK_URL)
       await expectNoHorizontalOverflow()
     }

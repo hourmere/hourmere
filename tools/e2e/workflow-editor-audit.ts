@@ -255,7 +255,10 @@ export async function mockWorkflowEditorAudit(
   ])
   for (const [url, handler] of routes) await page.route(url, handler)
   return async () => {
-    for (const [url, handler] of routes) await page.unroute(url, handler)
+    for (const [url, handler] of routes) {
+      if (page.isClosed()) return
+      await page.unroute(url, handler)
+    }
   }
 }
 
@@ -303,7 +306,7 @@ export async function openWorkflowEditorAuditPage(
         break
       case 'team-workflow-edit':
         await main
-          .getByLabel(copy['Webhook endpoint'], { exact: true })
+          .getByRole('combobox', { name: copy['Webhook endpoint'], exact: true })
           .locator('option:checked')
           .filter({ hasText: AUDIT_WORKFLOW_WEBHOOK_URL })
           .waitFor({ state: 'attached' })
@@ -327,7 +330,7 @@ export async function openWorkflowEditorAuditPage(
           state === 'workflow-save-pending' || state === 'workflow-preview-loading'
         if (preview)
           await main
-            .getByLabel(copy['Preview language'], { exact: true })
+            .getByRole('combobox', { name: copy['Preview language'], exact: true })
             .selectOption(state === 'workflow-preview-fallback' ? 'zh-CN' : 'en')
         await Promise.all([
           pendingState &&
