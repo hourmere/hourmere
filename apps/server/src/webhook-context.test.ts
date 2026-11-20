@@ -13,7 +13,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
-import { teamWriteTransaction } from '@hourmere/db/team-write'
+import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
@@ -87,6 +87,7 @@ function routeCopy(
       randomUUID,
       auditActor,
       writeAuditEvent,
+      recordTeamWriteOrganizationLock,
       teamWriteTransaction,
       z,
       DomainError,
