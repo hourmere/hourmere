@@ -53,7 +53,7 @@ export function RoutingRulesEditor({
   }
 
   return (
-    <div className="questions">
+    <div className="questions routing-rules-editor">
       <section className="questions" aria-labelledby="routing-rules-heading">
         <h2 id="routing-rules-heading">{t('Routing rules')}</h2>
         <p className="hint">
