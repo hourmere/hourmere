@@ -23,11 +23,13 @@ export type JoinWaitlist = Schemas['JoinWaitlist']
 /** A request the server refused; `retryAfter` (seconds) comes with 429. */
 export class PublicRequestError extends RequestError {
   readonly retryAfter: number | undefined
+  readonly privateResponse: boolean
 
-  constructor(base: RequestError, retryAfter: number | undefined) {
+  constructor(base: RequestError, retryAfter: number | undefined, privateResponse = false) {
     super(base.status, base.code, base.message, base.displayMessage)
     this.name = 'PublicRequestError'
     this.retryAfter = retryAfter
+    this.privateResponse = privateResponse
   }
 }
 
@@ -66,7 +68,11 @@ async function call<T>(
         : privateResponse
           ? undefined
           : error
-    throw new PublicRequestError(requestError(response.status, safeError), retryAfterOf(response))
+    throw new PublicRequestError(
+      requestError(response.status, safeError),
+      retryAfterOf(response),
+      privateResponse,
+    )
   }
   return { data: data as T, status: response.status }
 }
@@ -80,9 +86,14 @@ export function failureMessage(err: unknown): UiText {
         })
       : 'Too many requests from your network. Wait a minute and try again.'
   }
-  if (err instanceof PublicRequestError && err.message === 'That did not work. Try again.')
-    return 'That did not work. Try again.'
-  return errorMessage(err)
+  const message = errorMessage(err)
+  // Private responses have no server prose. Localize their synthesized fallback as well.
+  return err instanceof PublicRequestError &&
+    err.privateResponse &&
+    typeof message === 'object' &&
+    'literal' in message
+    ? 'That did not work. Try again.'
+    : message
 }
 
 export const codeOf = (err: unknown) => (err instanceof RequestError ? err.code : undefined)

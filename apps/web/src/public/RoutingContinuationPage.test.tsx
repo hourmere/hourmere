@@ -284,4 +284,16 @@ describe('routing continuation', () => {
     }
     expect(api.to(resolveRoute)).toHaveLength(0)
   })
+
+  it('localizes the fallback without displaying private response prose', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      [resolveRoute]: () => json(422, { error: 'unknown_error', message: `Private link ${TOKEN}` }),
+    })
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    expect((await screen.findByRole('alert')).textContent).toBe('That did not work. Try again.')
+    await selectPublicLanguage(user, 'es')
+    expect(screen.getByRole('alert').textContent).toBe('No ha funcionado. Vuelva a intentarlo.')
+    expect(document.body.innerHTML).not.toContain(TOKEN)
+  })
 })
