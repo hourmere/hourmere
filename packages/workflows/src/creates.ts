@@ -8,7 +8,7 @@ import { lockWorkflowOwner } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort, type WorkflowAuditPort, workflowAuditActor } from './audit.ts'
+import { type WorkflowAuditPort, workflowAuditActor, workflowAuditPort } from './audit.ts'
 import { assertWorkflowTextPolicy, WorkflowDefinitionSchema } from './definition.ts'
 import { workflowOperation } from './hard-off.ts'
 import { WORKFLOW_MAX_DEFINITIONS_PER_OWNER, WORKFLOW_MAX_ENABLED_PER_EVENT } from './limits.ts'
@@ -246,7 +246,7 @@ export async function createWorkflowDefinition(
         request_fingerprint: digest,
       })
       .execute()
-    await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+    await (ctx.audit ?? workflowAuditPort).record(trx, {
       event: 'workflow.created',
       occurredAt: Temporal.Now.instant(),
       owner,
@@ -258,4 +258,7 @@ export async function createWorkflowDefinition(
     return workflowView(owner, { ...row, definition: revision })
   })
 }
-export const createWorkflow = workflowOperation(createWorkflowDefinition)
+export const createWorkflow = workflowOperation(
+  (ctx: Omit<WorkflowCreateContext, 'audit'>, input: unknown) =>
+    createWorkflowDefinition({ ...ctx, audit: workflowAuditPort }, input),
+)

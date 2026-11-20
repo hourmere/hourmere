@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { expect } from 'vitest'
-import type { WorkflowAuditPort, WorkflowAuditRecord } from './audit.ts'
+import type { WorkflowAuditEvent, WorkflowAuditPort, WorkflowAuditRecord } from './audit.ts'
 import type { WorkflowValidationContext } from './definition.ts'
 import type {
   WorkflowBookingFacts,
@@ -199,7 +199,7 @@ export async function createRecordingWorkflowAudit(db: Db) {
 }
 
 export function expectWorkflowAuditRedacted(
-  events: WorkflowAuditRecord[],
+  events: readonly unknown[],
   forbidden: readonly string[],
 ): void {
   function scan(value: unknown): void {
@@ -214,4 +214,39 @@ export function expectWorkflowAuditRedacted(
   }
 
   scan(events)
+}
+
+export function workflowJournal(db: Db, organizationId: string) {
+  return db
+    .selectFrom('audit_events')
+    .selectAll()
+    .where('organization_id', '=', organizationId)
+    .where('action', 'like', 'workflow.%')
+    .orderBy('id')
+}
+
+export function workflowExecutionAuditRow(
+  organizationId: string,
+  workflowId: string,
+  action: WorkflowAuditEvent,
+  job: 'capture' | 'dispatch' | 'repair',
+  details: Pick<WorkflowAuditRecord, 'revision' | 'trigger' | 'reason'>,
+) {
+  return {
+    action,
+    actor_id: `workflow-${job}`,
+    actor_type: 'system',
+    credential_id: null,
+    credential_scope: null,
+    credential_type: 'none',
+    details,
+    id: expect.any(String),
+    oauth_client_id: null,
+    oauth_grant_id: null,
+    occurred_at: expect.any(Date),
+    organization_id: organizationId,
+    request_id: null,
+    target_id: workflowId,
+    target_type: 'workflow',
+  }
 }

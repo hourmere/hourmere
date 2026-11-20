@@ -11,7 +11,6 @@ import { DomainError } from '@hourmere/scheduling/errors'
 import * as workflows from '@hourmere/workflows'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort } from './audit.ts'
 import { CreateWorkflowInputSchema, createWorkflow } from './creates.ts'
 import { DeleteWorkflowInputSchema, deleteWorkflow } from './deletes.ts'
 import * as hardOff from './hard-off.ts'
@@ -78,7 +77,6 @@ const PACKAGE_EXPORTS = [
   'evaluateConditions',
   // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
   'getWorkflow',
-  'hardOffWorkflowAuditPort',
   'isWorkflowBooking',
   'isWorkflowEventType',
   // Definition and history reads are workflowOperation-wrapped.
@@ -99,8 +97,8 @@ const PACKAGE_EXPORTS = [
   'templateVariableProblem',
   'updateWorkflow',
   'validateWorkflowDefinition',
+  'workflowAuditPort',
   'workflowCapture',
-  'workflowDefinitionAuditPort',
   'workflowDispatchWindow',
   'workflowExecution',
   'workflowJobs',
@@ -540,34 +538,35 @@ describe('workflow hard-off', () => {
   })
 })
 
-describe('workflow audit port while hard-off', () => {
-  it('records nothing and touches no transaction', async () => {
-    const port = hardOffWorkflowAuditPort()
-    const trx = new Proxy(
-      {},
-      {
-        get: () => {
-          throw new Error('the hard-off audit port must not touch the transaction')
+describe('production workflow audit port', () => {
+  it('requires a transaction for definition and execution records', async () => {
+    const { workflowAuditPort } = workflows
+    const record = {
+      occurredAt: Temporal.Instant.from('2026-11-09T00:00:00Z'),
+      owner: { kind: 'team', organizationId: '30000000-0000-4000-8000-000000000001' },
+      workflowId: '60000000-0000-4000-8000-000000000001',
+      revision: 1,
+      trigger: 'booking.created',
+    } as const
+    const db = { isTransaction: false } as Db
+    await expect(
+      workflowAuditPort.record(db, {
+        ...record,
+        event: 'workflow.created',
+        actor: {
+          kind: 'session',
+          user: { id: '10000000-0000-4000-8000-000000000001' },
+          sessionId: '20000000-0000-4000-8000-000000000001',
         },
-      },
-    ) as Db
-    for (const audit of [port, workflows.workflowDefinitionAuditPort])
-      await expect(
-        audit.record(trx, {
-          event: 'workflow.created',
-          occurredAt: Temporal.Instant.from('2026-11-09T00:00:00Z'),
-          actor: {
-            kind: 'session',
-            user: { id: '10000000-0000-4000-8000-000000000001' },
-            sessionId: '20000000-0000-4000-8000-000000000001',
-          },
-          owner: { kind: 'team', organizationId: '30000000-0000-4000-8000-000000000001' },
-          workflowId: '60000000-0000-4000-8000-000000000001',
-          revision: 1,
-          trigger: 'booking.created',
-        }),
-      ).resolves.toBeUndefined()
-    expect(Object.isFrozen(port)).toBe(true)
-    expect(hardOffWorkflowAuditPort()).toBe(port)
+      }),
+    ).rejects.toThrow('Audit writes require a transaction')
+    await expect(
+      workflowAuditPort.record(db, {
+        ...record,
+        event: 'workflow.run_scheduled',
+        actor: { kind: 'background', job: 'capture' },
+      }),
+    ).rejects.toThrow('Audit writes require a transaction')
+    expect(Object.isFrozen(workflowAuditPort)).toBe(true)
   })
 })

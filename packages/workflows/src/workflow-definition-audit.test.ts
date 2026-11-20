@@ -8,7 +8,7 @@ import { listAuditEvents, purgeAuditEvents, setAuditLogSettings } from '@hourmer
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { recordWorkflowDefinitionAudit, type WorkflowAuditPort } from './audit.ts'
+import { type WorkflowAuditPort, workflowAuditPort } from './audit.ts'
 import { createWorkflowDefinition, type WorkflowCreateContext } from './creates.ts'
 import { deleteWorkflowDefinition } from './deletes.ts'
 import type { WorkflowOwnerSelector } from './ownership.ts'
@@ -24,7 +24,7 @@ const privateAnswer = 'Synthetic private service answer'
 const privatePath = '/synthetic-preview-path?private=example'
 const privateAddress = 'synthetic-recipient@example.test'
 const trigger = 'booking.created'
-const boundAudit = { record: recordWorkflowDefinitionAudit }
+const boundAudit = workflowAuditPort
 
 const candidate = (owner: WorkflowOwnerSelector) => ({
   owner,

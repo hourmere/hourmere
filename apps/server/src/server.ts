@@ -112,7 +112,7 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
-import { captureWorkflowBooking, workflowDefinitionAuditPort } from '@hourmere/workflows'
+import { captureWorkflowBooking } from '@hourmere/workflows'
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -428,7 +428,6 @@ export function productRoutes({
     // Registered while hard-off: every operation answers 404 workflows_disabled.
     workflowRoutes({
       db,
-      audit: workflowDefinitionAuditPort,
       followUpHostNotesEnabled,
       workflowRunCursorSecret,
     }),
@@ -535,7 +534,6 @@ export function productTools({
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
     ...workflowTools({
       db,
-      audit: workflowDefinitionAuditPort,
       followUpHostNotesEnabled,
       workflowRunCursorSecret,
     }),

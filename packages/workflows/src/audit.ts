@@ -1,11 +1,9 @@
 // The injected workflow audit port (docs/workflows.md, "Permissions, persistence and audit").
-// Definition and preview events use the shared audit journal. Execution still uses the
-// no-op port while workflows are hard-off.
+// All events use the shared audit journal inside the transition transaction.
 
 import type { Db } from '@hourmere/db'
 import { type AuditPrincipal, auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import type { WorkflowTriggerType } from './definition.ts'
-import { WORKFLOWS_IMPLEMENTED, workflowExecution } from './hard-off.ts'
 import type { WorkflowOwner } from './ownership.ts'
 
 /** Every workflow audit event: definition changes, preview, scheduling and delivery. */
@@ -43,10 +41,16 @@ export const WORKFLOW_SKIP_REASONS = Object.freeze([
 ] as const)
 export type WorkflowSkipReason = (typeof WORKFLOW_SKIP_REASONS)[number]
 
+const BACKGROUND_ACTOR_IDS = {
+  capture: 'workflow-capture',
+  dispatch: 'workflow-dispatch',
+  repair: 'workflow-repair',
+} as const
+
 /** Who caused the event. Background work names its job explicitly instead of a person. */
 export type WorkflowAuditActor =
   | AuditPrincipal
-  | { kind: 'background'; job: 'capture' | 'dispatch' | 'repair' | 'retention' }
+  | { kind: 'background'; job: keyof typeof BACKGROUND_ACTOR_IDS }
 
 /** Project the authenticated principal to the identifiers used by the shared audit policy. */
 export function workflowAuditActor(principal: AuditPrincipal): AuditPrincipal {
@@ -89,29 +93,27 @@ export interface WorkflowAuditRecord {
 }
 
 /**
- * Records audit events inside the caller's transaction, so a record commits or rolls back with
- * the change it describes and a replay cannot duplicate a terminal record.
+ * Records audit events inside the caller's transaction. The transition's replay fence
+ * determines whether to write an event.
  */
 export interface WorkflowAuditPort {
   record(trx: Db, record: WorkflowAuditRecord): Promise<void>
 }
 
-/** The writer behind the hard-off guard. Use only for definition and preview transactions. */
-export async function recordWorkflowDefinitionAudit(
-  trx: Db,
-  record: WorkflowAuditRecord,
-): Promise<void> {
+/** Project workflow records onto the shared journal's actor, scope and safe details. */
+async function recordWorkflowAudit(trx: Db, record: WorkflowAuditRecord): Promise<void> {
   const { actor, event, owner, reason, revision, trigger, workflowId } = record
-  if (actor.kind === 'background') throw new Error('Workflow definition audit requires a caller')
-  const scope = { ...auditActor(actor), organizationId: owner.organizationId }
+  const organizationId = owner.organizationId
   switch (event) {
     case 'workflow.previewed':
+      if (actor.kind === 'background') throw new Error('Workflow preview audit requires a caller')
       if (trigger === undefined) throw new Error('Workflow preview audit requires a trigger')
       return writeAuditEvent(trx, {
-        ...scope,
+        ...auditActor(actor),
+        organizationId,
         action: event,
         targetType: 'workflow_preview',
-        targetId: owner.organizationId,
+        targetId: organizationId,
         details: { trigger, ...(reason === 'condition_false' && { reason }) },
       })
     case 'workflow.created':
@@ -119,36 +121,39 @@ export async function recordWorkflowDefinitionAudit(
     case 'workflow.enabled':
     case 'workflow.disabled':
     case 'workflow.deleted':
+      if (actor.kind === 'background')
+        throw new Error('Workflow definition audit requires a caller')
       if (workflowId === null || revision === null)
         throw new Error('Workflow definition audit requires a workflow and revision')
       if (event !== 'workflow.deleted' && trigger === undefined)
         throw new Error('Workflow definition audit requires a trigger')
       return writeAuditEvent(trx, {
-        ...scope,
+        ...auditActor(actor),
+        organizationId,
         action: event,
         targetType: 'workflow',
         targetId: workflowId,
         details: event === 'workflow.deleted' ? { revision } : { revision, trigger },
       })
     default:
-      throw new Error('Workflow execution audit is not bound to the definition writer')
+      if (actor.kind !== 'background' || !Object.hasOwn(BACKGROUND_ACTOR_IDS, actor.job))
+        throw new Error('Workflow execution audit requires a job')
+      if (workflowId === null || revision === null || trigger === undefined)
+        throw new Error('Workflow execution audit requires a workflow, revision and trigger')
+      if (event === 'workflow.run_skipped' && reason === undefined)
+        throw new Error('Workflow skip audit requires a reason')
+      return writeAuditEvent(trx, {
+        organizationId,
+        actor: { type: 'system', id: BACKGROUND_ACTOR_IDS[actor.job] },
+        credential: { type: 'none' },
+        action: event,
+        targetType: 'workflow',
+        targetId: workflowId,
+        details: { revision, trigger, ...(reason !== undefined && { reason }) },
+      })
   }
 }
 
-export const workflowDefinitionAuditPort: WorkflowAuditPort = Object.freeze({
-  record: workflowExecution(recordWorkflowDefinitionAudit),
+export const workflowAuditPort: WorkflowAuditPort = Object.freeze({
+  record: recordWorkflowAudit,
 })
-
-const noopAuditPort: WorkflowAuditPort = Object.freeze({
-  record: async () => {},
-})
-
-/**
- * The port for hard-off: it records nothing and touches no transaction. It refuses once
- * workflows are implemented, so no production wiring can keep it after the opt-in.
- */
-export function hardOffWorkflowAuditPort(): WorkflowAuditPort {
-  if (WORKFLOWS_IMPLEMENTED !== false)
-    throw new Error('The no-op workflow audit port is only for hard-off; bind the audit writer')
-  return noopAuditPort
-}

@@ -2,7 +2,6 @@
 // behind the hard-off constant (docs/workflows.md). Nothing sends mail or posts webhooks yet.
 
 export {
-  hardOffWorkflowAuditPort,
   WORKFLOW_AUDIT_EVENTS,
   WORKFLOW_SKIP_REASONS,
   type WorkflowAuditActor,
@@ -10,7 +9,7 @@ export {
   type WorkflowAuditPort,
   type WorkflowAuditRecord,
   type WorkflowSkipReason,
-  workflowDefinitionAuditPort,
+  workflowAuditPort,
 } from './audit.ts'
 export {
   captureWorkflowBooking,

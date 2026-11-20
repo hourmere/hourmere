@@ -225,7 +225,7 @@ describe('audit log page', () => {
     )
   })
 
-  it('offers all six workflow actions and filters for the selected action', async () => {
+  it('offers definition and execution workflow actions and filters for the selected action', async () => {
     const api = setup()
     await openPage()
     const group = await screen.findByRole('group', { name: 'Workflows' })
@@ -240,14 +240,24 @@ describe('audit log page', () => {
       'workflow.disabled',
       'workflow.deleted',
       'workflow.previewed',
+      'workflow.run_scheduled',
+      'workflow.run_cancelled',
+      'workflow.run_skipped',
+      'workflow.email_attempted',
+      'workflow.email_sent',
+      'workflow.email_rejected',
+      'workflow.email_delivery_unknown',
+      'workflow.webhook_queued',
+      'workflow.webhook_completed',
+      'workflow.webhook_failed',
     ])
     const user = userEvent.setup()
-    await user.selectOptions(screen.getByLabelText('Action'), 'workflow.previewed')
+    await user.selectOptions(screen.getByLabelText('Action'), 'workflow.webhook_failed')
     await user.click(screen.getByRole('button', { name: 'Apply filters' }))
     await waitFor(() =>
       expect(query(api.to(EVENTS).at(-1)?.path)).toEqual({
         limit: '50',
-        action: 'workflow.previewed',
+        action: 'workflow.webhook_failed',
       }),
     )
   })

@@ -3,7 +3,7 @@ import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort, workflowAuditActor } from './audit.ts'
+import { workflowAuditActor, workflowAuditPort } from './audit.ts'
 import { WorkflowConditionsSchema } from './conditions.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import { WorkflowDefinitionSchema } from './definition.ts'
@@ -132,7 +132,7 @@ export async function updateWorkflowDefinition(
       .where('id', '=', id)
       .returning(['id', 'revision', 'enabled', 'created_at', 'updated_at'])
       .executeTakeFirstOrThrow()
-    const audit = ctx.audit ?? hardOffWorkflowAuditPort()
+    const audit = ctx.audit ?? workflowAuditPort
     const auditEvents = [
       ...(edited ? ['workflow.updated' as const] : []),
       ...(enabled !== current.enabled
@@ -152,4 +152,7 @@ export async function updateWorkflowDefinition(
     return workflowView(owner, { ...row, definition: revision })
   })
 }
-export const updateWorkflow = workflowOperation(updateWorkflowDefinition)
+export const updateWorkflow = workflowOperation(
+  (ctx: Omit<WorkflowUpdateContext, 'audit'>, id: string, input: unknown) =>
+    updateWorkflowDefinition({ ...ctx, audit: workflowAuditPort }, id, input),
+)

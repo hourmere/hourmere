@@ -98,7 +98,7 @@ async function assertWorkflowAuditDetails(pool: pg.Pool) {
   ]) {
     await expect(insert('workflow.previewed', invalid)).rejects.toMatchObject(refused)
   }
-  await expect(insert('workflow.run_scheduled', details)).rejects.toMatchObject(refused)
+  await expect(insert('workflow.unregistered', details)).rejects.toMatchObject(refused)
 }
 
 async function seedJournal(pool: pg.Pool, organization: string) {

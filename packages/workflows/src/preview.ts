@@ -4,7 +4,7 @@ import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { LOCATION_KINDS, MAX_ANSWER_LENGTH, MAX_GUESTS, MAX_QUESTIONS } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort, workflowAuditActor } from './audit.ts'
+import { workflowAuditActor, workflowAuditPort } from './audit.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import {
   validateWorkflowDefinition,
@@ -113,7 +113,7 @@ export async function previewWorkflowCandidate(
     const facts = await loadWorkflowDefinitionFacts(trx, candidate, owner, followUpHostNotesEnabled)
     const definition = validateWorkflowDefinition(candidate, facts)
     const preview = renderPreview(definition, facts, example, followUpHostNotesEnabled)
-    await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+    await (ctx.audit ?? workflowAuditPort).record(trx, {
       event: 'workflow.previewed',
       occurredAt: ctx.now?.() ?? Temporal.Now.instant(),
       owner,
@@ -224,4 +224,7 @@ function renderPreview(
   }
 }
 
-export const previewWorkflow = workflowOperation(previewWorkflowCandidate)
+export const previewWorkflow = workflowOperation(
+  (ctx: Omit<Parameters<typeof previewWorkflowCandidate>[0], 'audit'>, input: unknown) =>
+    previewWorkflowCandidate({ ...ctx, audit: workflowAuditPort }, input),
+)

@@ -2568,7 +2568,9 @@ booking/rule identity and scheduling instants, never phone numbers or message bo
 
 `audit_events` is the append-only management journal available to every instance.
 See [Audit event journal](audit-log.md) for fields, actions, privacy, transaction
-boundaries, indexes and future retention. Events are recorded but not yet viewable.
+boundaries, indexes and retention. Migration 0166 extends the audit detail check to
+workflow execution events. It preserves the previous action branches and audit rows,
+and takes an `ACCESS EXCLUSIVE` lock on `audit_events` while it validates the new check.
 
 Public poll transport request budgets use `meeting_poll_request_limits` (migration `0108`):
 a purpose-bound keyed IP digest, bounded positive request count and reset timestamp. REST

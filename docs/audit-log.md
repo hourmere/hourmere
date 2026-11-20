@@ -86,7 +86,8 @@ allow-lists and value checks.
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
-| Workflows | `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`, `workflow.deleted`, `workflow.previewed` |
+| Workflow definitions | `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`, `workflow.deleted`, `workflow.previewed` |
+| Workflow execution | `workflow.run_scheduled`, `workflow.run_cancelled`, `workflow.run_skipped`, `workflow.email_attempted`, `workflow.email_sent`, `workflow.email_rejected`, `workflow.email_delivery_unknown`, `workflow.webhook_queued`, `workflow.webhook_completed`, `workflow.webhook_failed` |
 | Audit log | `audit_log.retention_updated` |
 
 `organization.ownership_transferred` and `api_key.rotated` are reserved action
@@ -212,8 +213,18 @@ configuration, recipients, example values and rendered content stay out of the j
 
 Creation and deletion replays, repeats of the current enabled state, and stale updates
 emit no additional event. Each successful preview request is a separate audited operation.
-These events use the space's existing audit permissions and retention. Workflows remain
-hard-off, so production requests currently produce no workflow audit events.
+Run scheduling, cancellation and skips, email attempts and outcomes, and webhook queuing
+and terminal outcomes use the same writer. The event is written in the transaction that
+changes the run, recipient claim or delivery. Replays use the existing transition fences,
+so repeated work does not duplicate an already committed event. The system actor is
+`workflow-capture`, `workflow-dispatch` or `workflow-repair`, with credential `none`.
+Execution events target the workflow ID and carry its revision and trigger type. A skipped
+run records its fixed reason, and an expired workflow webhook may record `expired`.
+The journal uses its database insertion timestamp and excludes booking IDs, recipient
+details, bodies, answers, URLs and secrets.
+
+Workflow events use the space's existing audit permissions and retention. Workflows remain
+hard-off.
 
 ## SSO actions
 

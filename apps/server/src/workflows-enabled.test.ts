@@ -179,12 +179,12 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller,
       routes: [
-        workflowRoutes({ db, workflowRunCursorSecret, audit: { record: async () => {} } }),
+        workflowRoutes({ db, workflowRunCursorSecret }),
         instanceRoutes({ publicUrl: URL, socialProviders: {} }),
         webhookRoutes({ db, enabled: true, encryptionKey: Buffer.alloc(32, 4).toString('base64') }),
       ],
       mcp: mcpEndpoint({
-        tools: workflowTools({ db, workflowRunCursorSecret, audit: { record: async () => {} } }),
+        tools: workflowTools({ db, workflowRunCursorSecret }),
       }),
     })
   })
@@ -234,11 +234,9 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         checkDb: async () => {},
         authHandler: async () => new Response(null, { status: 404 }),
         resolveCaller,
-        routes: [
-          workflowRoutes({ db, followUpHostNotesEnabled, audit: { record: async () => {} } }),
-        ],
+        routes: [workflowRoutes({ db, followUpHostNotesEnabled })],
         mcp: mcpEndpoint({
-          tools: workflowTools({ db, followUpHostNotesEnabled, audit: { record: async () => {} } }),
+          tools: workflowTools({ db, followUpHostNotesEnabled }),
         }),
       })
       const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }

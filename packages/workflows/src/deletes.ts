@@ -3,7 +3,7 @@ import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { hardOffWorkflowAuditPort, workflowAuditActor } from './audit.ts'
+import { workflowAuditActor, workflowAuditPort } from './audit.ts'
 import { type WorkflowCreateContext, writableOwner } from './creates.ts'
 import { workflowOperation } from './hard-off.ts'
 import { uuidSchema } from './ownership.ts'
@@ -79,7 +79,7 @@ export async function deleteWorkflowDefinition(
       .execute()
     // History, enrollments, recipient claims and mail charges retain their own lifetimes.
     // Claimed runs require the dispatcher's live-definition check before an attempt.
-    await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+    await (ctx.audit ?? workflowAuditPort).record(trx, {
       event: 'workflow.deleted',
       occurredAt: Temporal.Now.instant(),
       owner,
@@ -90,4 +90,7 @@ export async function deleteWorkflowDefinition(
   })
 }
 
-export const deleteWorkflow = workflowOperation(deleteWorkflowDefinition)
+export const deleteWorkflow = workflowOperation(
+  (ctx: Omit<WorkflowDeleteContext, 'audit'>, id: string, input: unknown) =>
+    deleteWorkflowDefinition({ ...ctx, audit: workflowAuditPort }, id, input),
+)

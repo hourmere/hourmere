@@ -30,11 +30,14 @@ whether it marked or unmarked them; a Slack destination change keeps its subscri
 never its URL; a provisioning token change keeps the token ID, never its name or secret. A
 Slack 404/410 pause is recorded with the delivery system as its actor.
 
-The journal also supports workflow definition changes and synthetic previews. Definition
+The journal supports workflow definition changes, synthetic previews and execution. Definition
 events keep the workflow ID and revision, with a trigger type for creation and updates to
 content or enabled state. Preview events keep the space ID, trigger type and a fixed
-reason code when a condition fails. Both use the space's existing audit permissions and
-retention. Workflows remain off, so these actions produce no events today.
+reason code when a condition fails. Run, email and webhook execution events keep the
+workflow ID, revision and trigger type, plus a fixed reason where applicable. The system
+actor identifies capture, dispatch or repair. Execution writes share the transaction of
+the recorded transition, and replays avoid duplicate events. All workflow events use the
+space's existing audit permissions and retention. Workflows remain off.
 
 ## Reading the audit log
 

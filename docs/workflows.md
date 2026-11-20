@@ -748,9 +748,8 @@ Event ownership:
   writer main has by then, for definition and preview events. Step 16c binds the execution
   events and closes the no-op path, so no production wiring can select it.
 
-If no accepted writer is on main when step 16b starts, stop there: keep hard-off and do not
-proceed to opt-in. The no-op port is safe only while hard-off and must not survive step 16c.
-Record `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`,
+The shared [audit journal](audit-log.md#workflow-actions) is the production binding for
+all workflow events. Record `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`,
 `workflow.deleted`, `workflow.previewed`, `workflow.run_scheduled`,
 `workflow.run_cancelled`, `workflow.run_skipped`, `workflow.email_attempted`,
 `workflow.email_sent`, `workflow.email_rejected`, `workflow.email_delivery_unknown`,
