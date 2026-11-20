@@ -492,7 +492,15 @@ export async function deliverWorkflowWebhook(
   throwIfWebhookRetry(retry, signal)
 }
 
-const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)
+const guardedWorkflowWebhook = workflowExecution(
+  (deps: WebhookDeps, deliveryId: string, signal: AbortSignal, jobAttempt: number) =>
+    deliverWorkflowWebhook(
+      { ...deps, enabled: deps.enabled && deps.workflowsEnabled === true },
+      deliveryId,
+      signal,
+      jobAttempt,
+    ),
+)
 
 /** At least once. A crash after the receiver accepts but before commit can duplicate an ID. */
 export async function deliverWebhook(

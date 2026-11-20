@@ -53,7 +53,7 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         tags: ['SSO'],
         summary: 'Start SSO recovery for the current team',
         description:
-          'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and turning off enforcement once. SSO remains unavailable.',
+          'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: { headers, body: { required: true, content: json(UseSsoRecoveryInput) } },

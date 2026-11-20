@@ -119,7 +119,9 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
    * While it throws, the tool is left out of tools/list, and a direct call answers the scope
    * check and then the thrown DomainError's code, before argument checks or the handler.
    */
-  requireAvailable?(): void
+  requireAvailable?(args?: unknown): void
+  /** Controls discovery while keeping a tool available to authorized direct calls. */
+  discoverable?(): boolean
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
   run(args: z.output<I>, call: ToolCall): Promise<z.input<O>>
 }
@@ -192,8 +194,12 @@ function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
 export type ToolErrorLog = (label: string, detail: unknown) => void
 
 /** Runs a feature check, which must answer synchronously: a return value means off. */
-function synchronousCheck(tool: Tool, check: (() => void) | undefined) {
-  const result: unknown = check?.()
+function synchronousCheck(
+  tool: Tool,
+  check: ((args?: unknown) => void) | undefined,
+  args?: unknown,
+) {
+  const result: unknown = check?.(args)
   if (result === undefined) return
   // A promise's rejection would otherwise go unhandled; its outcome is never waited for.
   if (result instanceof Promise) result.catch(() => {})
@@ -206,16 +212,16 @@ function checkFeature(tool: Tool) {
 }
 
 /** Runs a tool's availability check (Tool.requireAvailable), after the scope check. */
-function checkAvailable(tool: Tool) {
-  synchronousCheck(tool, tool.requireAvailable)
+function checkAvailable(tool: Tool, args?: unknown) {
+  synchronousCheck(tool, tool.requireAvailable, args)
 }
 
 /**
- * Whether the tool's feature is on and available (Tool.requireEnabled and
- * Tool.requireAvailable); anything thrown means off.
+ * Whether the feature and tool are visible in discovery. A failed check hides the tool.
  */
-function featureEnabled(tool: Tool): boolean {
+function isDiscoverable(tool: Tool): boolean {
   try {
+    if (tool.discoverable && tool.discoverable() !== true) return false
     checkFeature(tool)
     checkAvailable(tool)
     return true
@@ -272,7 +278,7 @@ export async function runTool(
     if (mode !== undefined) requireApiKeyOperation(call.caller, `mcp:${tool.name}:${mode}`)
     // A feature that is not available answers its DomainError code here, after the scope
     // check and before the argument checks.
-    checkAvailable(tool)
+    checkAvailable(tool, args)
     const teamRead = await call.checkTeamRead?.(tool.name)
     if (hasUnsafeJsonText(args)) {
       const field = privateInput ? undefined : successRedirectUnsafeField(args, hasUnsafeJsonText)
@@ -461,7 +467,7 @@ export function registerTools(
   const visible = new Map<string, PreparedTool>()
   for (const prepared of tools) {
     const { tool, inputSchema, outputSchema } = prepared
-    if (!featureEnabled(tool) || !apiKeyAllows(caller, `mcp:${tool.name}`)) continue
+    if (!isDiscoverable(tool) || !apiKeyAllows(caller, `mcp:${tool.name}`)) continue
     visible.set(tool.name, prepared)
     server.registerTool(
       tool.name,

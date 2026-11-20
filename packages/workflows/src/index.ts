@@ -75,6 +75,12 @@ export {
 } from './hard-off.ts'
 export * from './limits.ts'
 export {
+  requireWorkflowsEnabled,
+  requireWorkflowUpdateAllowed,
+  type WorkflowSettings,
+  workflowsEnabled,
+} from './operator-settings.ts'
+export {
   isWorkflowBooking,
   isWorkflowEventType,
   ownsEventType,

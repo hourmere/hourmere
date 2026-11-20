@@ -22,6 +22,7 @@ import {
   WORKFLOW_RUN_PAGE,
   WorkflowPreviewSchema,
   WorkflowRunHistoryEntrySchema,
+  type WorkflowSettings,
   WorkflowTriggerSchema,
 } from '@hourmere/workflows'
 import {
@@ -36,7 +37,7 @@ import {
   organizationContextAccess,
   organizationContextWriteLock,
 } from '../team-management.ts'
-import { workflowsGuard } from '../workflows.ts'
+import { workflowsEnabledGuard, workflowsGuard, workflowUpdateGuard } from '../workflows.ts'
 
 // Booking workflow definitions (docs/workflows.md). Workflows are not available
 // yet: every operation answers 404 workflows_disabled until they are enabled. The read
@@ -262,11 +263,12 @@ export function workflowRoutes({
   db,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
+  workflowsEnabled,
 }: {
   db: Db
   followUpHostNotesEnabled?: boolean | undefined
   workflowRunCursorSecret?: string | undefined
-}): RouteModule {
+} & WorkflowSettings): RouteModule {
   const contextAccess =
     (
       principal: Principal,
@@ -293,6 +295,7 @@ export function workflowRoutes({
     db,
     principal,
     followUpHostNotesEnabled,
+    workflowsEnabled,
     prepareOrganizationWrite: async (trx: Db) => {
       await organizationContextWriteLock(principal)(trx)
       await contextAccess(principal, expectedOrganizationId)(trx, principal.organization.id)
@@ -302,6 +305,14 @@ export function workflowRoutes({
   return ({ app, caller }) => {
     // The guard answers after the caller and its scope check, before input validation.
     const middleware = [caller, workflowsGuard] as [CallerMiddleware, typeof workflowsGuard]
+    const enabledMiddleware = [
+      ...middleware,
+      workflowsEnabledGuard({ workflowsEnabled }),
+    ] satisfies [...typeof middleware, typeof workflowsGuard]
+    const updateMiddleware = [...middleware, workflowUpdateGuard({ workflowsEnabled })] satisfies [
+      ...typeof middleware,
+      typeof workflowsGuard,
+    ]
     app.openapi(
       createRoute({
         method: 'post',
@@ -311,7 +322,7 @@ export function workflowRoutes({
         summary: 'Create a booking workflow',
         description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions are not available yet. Creation does not send mail.`,
         security: authenticated,
-        middleware,
+        middleware: enabledMiddleware,
         request: {
           headers: z.object({
             'x-expected-organization-id': z.string().optional().openapi({
@@ -353,7 +364,7 @@ export function workflowRoutes({
         summary: 'Preview a booking workflow with synthetic data',
         description: WORKFLOW_PREVIEW_DESCRIPTION,
         security: authenticated,
-        middleware,
+        middleware: enabledMiddleware,
         request: {
           headers: z.object({
             'x-expected-organization-id': z.string().optional().openapi({
@@ -392,7 +403,7 @@ export function workflowRoutes({
         summary: 'Edit, enable or disable a booking workflow',
         description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions are not available yet.`,
         security: authenticated,
-        middleware,
+        middleware: updateMiddleware,
         request: {
           params: z.object({ id: z.string() }),
           headers: z.object({

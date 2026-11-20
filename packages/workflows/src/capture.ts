@@ -13,6 +13,7 @@ import { type WorkflowAuditPort, workflowAuditPort } from './audit.ts'
 import { evaluateConditions } from './conditions.ts'
 import { WorkflowDefinitionSchema, type WorkflowTriggerType } from './definition.ts'
 import { workflowCapture } from './hard-off.ts'
+import { type WorkflowSettings, workflowsEnabled } from './operator-settings.ts'
 import {
   scopeSelectsEventType,
   type WorkflowBookingFacts,
@@ -411,11 +412,19 @@ export async function captureCreatedWorkflows(
   await captureBookingWorkflows(trx, event, now, secret, audit)
 }
 
-type CaptureArgs = [trx: Db, event: BookingEvent, now: Temporal.Instant, secret: string]
+function guardedCapture(capture: typeof captureBookingWorkflows) {
+  return workflowCapture(
+    async (
+      trx: Db,
+      event: BookingEvent,
+      now: Temporal.Instant,
+      secret: string,
+      settings: WorkflowSettings = {},
+    ) => {
+      if (workflowsEnabled(settings)) await capture(trx, event, now, secret, workflowAuditPort)
+    },
+  )
+}
 
-export const captureWorkflowCreation = workflowCapture((...args: CaptureArgs) =>
-  captureCreatedWorkflows(...args, workflowAuditPort),
-)
-export const captureWorkflowBooking = workflowCapture((...args: CaptureArgs) =>
-  captureBookingWorkflows(...args, workflowAuditPort),
-)
+export const captureWorkflowCreation = guardedCapture(captureCreatedWorkflows)
+export const captureWorkflowBooking = guardedCapture(captureBookingWorkflows)
