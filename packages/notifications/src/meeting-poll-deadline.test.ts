@@ -184,7 +184,9 @@ describe.skipIf(!serverUrl)('meeting poll deadline closure and creator mail', ()
     expect(message?.decoded).toContain('7:30')
     expect(message?.decoded).toContain('Asia/Tokyo')
     expect(message?.decoded).toContain('共收到 1 份答复。')
-    expect(message?.decoded).toContain(`${PUBLIC_URL}/api/v1/meeting-polls/${poll.id}/results`)
+    expect(message?.decoded).toContain(
+      `${PUBLIC_URL}/app/meeting-polls/${poll.id}?organizationId=${fx.team.id}`,
+    )
     expect(message?.decoded).not.toMatch(/Private voter|hidden-[01]@|private answer|\/poll\/voter#/)
     expect(message?.ics).toBeUndefined()
   })

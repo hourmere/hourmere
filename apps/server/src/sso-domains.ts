@@ -408,6 +408,7 @@ export async function deleteSsoDomain(
       schema: generation.extend({ domainId: z.uuid() }),
     },
     {
+      changesAuthority: true,
       authorize: async (db) => {
         await authorizeDomain(deps, db, p, headers, domainId, input)
       },

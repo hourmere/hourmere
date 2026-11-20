@@ -12,6 +12,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
@@ -84,6 +85,7 @@ function routeCopy(
       randomUUID,
       auditActor,
       writeAuditEvent,
+      teamWriteTransaction,
       z,
       DomainError,
       encryptWebhookSecret,

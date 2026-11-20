@@ -384,6 +384,32 @@ alone does not protect trusted calls, transactions or queued operations. A store
 `requireSso` policy is enforced whatever the rollout constants or settings say (see
 Rollout gating); no deployment toggle bypasses it.
 
+Team writes through `/api/v1` and MCP check the bound team's policy at admission and
+recheck live proof inside the committing transaction when a policy exists. Revocation
+or expiry before the commit check rolls back the write and its transactional side
+effects. If the team has no stored policy, the committing transaction is unchanged.
+
+中文：`/api/v1` 和 MCP 的团队写入会先检查目标团队的策略。团队已保存策略时，提交事务会重新检查
+SSO 凭证。凭证在提交检查前过期或被撤销，写入及事务内的副作用一并回滚。没有团队策略时，写入事务照常执行。
+
+Native Better Auth team operations use the same proof check for browser requests and
+trusted `auth.api` calls. Scoped requests without proof receive `403 SSO_REQUIRED`
+with message `sso_required` once the team target is authorized. Lists omit enforced
+teams and invitations the caller cannot read. Clearing active organization remains
+available. Team mutations recheck proof on their committing connection.
+
+Team invitation mail, host-initiated poll invitation mail and Slack sample deliveries
+recheck their initiating browser session before delivery. Queued requests without that
+session cannot act for an enforced team. Booking reminders, mail, webhooks, workflow
+dispatch, calendar reconciliation and public waitlist work use their existing lifecycle
+authority.
+
+中文：Better Auth 的团队操作和受信服务调用会检查同一份 SSO 凭证。已经确认团队访问范围的请求
+缺少凭证时，返回 `403 SSO_REQUIRED`。团队列表和邀请列表会省略无权读取的项目。用户仍可清除
+当前团队。团队写入提交前会在同一事务中复查凭证。团队邀请邮件、主持人发起的投票邀请邮件和
+Slack 测试投递会在发送前复查发起者的会话。预约提醒、邮件、Webhook、工作流、日历同步及公开
+候补名单继续按各自的生命周期规则处理。
+
 Enabling enforcement requires a verified domain, an enabled tested provider of a protocol
 that is currently on, a successful owner SSO test against the exact current revision, and
 at least one usable recovery owner: a current owner with accepted recovery status. A
@@ -500,12 +526,15 @@ An SSO step-up measures a verified authentication event, not session creation or
 ID-token `iat`. OIDC step-up sends `prompt=login` and `max_age=0` and requires a signed
 numeric `auth_time` no earlier than attempt creation minus `oidcClockSkew`, no later
 than now plus `oidcClockSkew`, and at most `freshAdministrationProof` before the
-callback. SAML step-up sends `ForceAuthn="true"` and requires a signed AuthnStatement `AuthnInstant`
-within the same bounds, using `clockSkew`. A missing or out-of-window value is the case
-where the IdP cannot prove freshness. The result must come from the attempt's own user
+callback. The lower bound uses the OIDC authorization attempt created at step-up initiation.
+SAML step-up sends `ForceAuthn="true"` and requires a signed AuthnStatement `AuthnInstant`
+within the same bounds, using `clockSkew`. An OIDC token with a missing `auth_time` proves
+only the linked identity and adds `mailbox`. A signed OIDC `auth_time` outside the allowed
+window is refused. The result must come from the attempt's own user
 and that user's existing link at that provider; it is recorded on the pending attempt
 and creates no session, browser proof or link. It expires at the earlier of attempt
-expiry and the authentication instant plus `freshAdministrationProof`. Silent IdP SSO,
+expiry and the authentication instant plus `freshAdministrationProof`. For the missing-claim
+fallback, receipt time caps the identity result until the mailbox is also proven. Silent IdP SSO,
 rolling sessions and refresh tokens never renew freshness.
 
 ### Browser proof
@@ -555,7 +584,7 @@ tokens after validation; never repurpose calendar or MCP OAuth credentials.
 
 The internal verifier is in place while both protocols stay hard-off. It accepts only
 signed RS256 ID tokens with a matching attempt nonce. It returns the exact issuer and
-subject and, when present, the signed `auth_time` for the future step-up flow.
+subject and, when present, the signed `auth_time` used by step-up.
 Sign-in attempts use a fresh S256 challenge and an authenticated state envelope. The
 attempt row binds that state to the initiating browser, provider revision and team, and
 only one callback can take the verifier and nonce. The OIDC sign-in adapter uses these
@@ -872,16 +901,26 @@ providers' IDs, display names and revisions, the caller's live links as opaque I
 with their provider IDs and generations, and valid proofs for this session with their provider IDs
 and expiry times. The `attempts` array shows pending self-link attempts that belong
 to the session and its original browser. Each reports its ID, provider ID (null
-during fresh proof), phase, mailbox proof status and expiry. Personal sessions, API
-keys and OAuth clients use the existing response shape. With both protocols hard-off,
-the response body stays byte-for-byte identical.
+during fresh proof), phase, mailbox proof status and expiry. A browser session that
+lacks proof for an enforced team keeps its active organization ID for enrollment and
+receives empty organization name and slug strings. Unbound team API keys receive
+`403 sso_required` on private REST reads including `/me`. Private MCP reads including
+`whoami` return a tool error with `sso_required` for unbound API keys and OAuth grants.
+Personal spaces and teams
+without enforcement keep their previous responses. While both protocols are hard-off,
+`/me` omits the `sso` object and an enforced team's browser proofs cannot satisfy the policy.
 
 内部开启 OIDC 时，`GET /api/v1/me` 为当前团队成员的活动团队会话增加可选的 `sso`
 对象。它包含是否强制 SSO、已启用提供商的标识、显示名称与版本、本人有效关联的
 不透明标识、代数及对应提供商，以及当前会话有效证明的提供商与到期时间。`attempts`
 仅列出原发起浏览器与会话中待处理的自助关联尝试，并提供尝试标识、提供商标识
-（新鲜证明阶段为 null）、阶段、邮箱证明状态与到期时间。个人空间会话、API 密钥
-与 OAuth 客户端沿用原响应结构。两种协议均在代码中关闭时，响应正文保持逐字节一致。
+（新鲜证明阶段为 null）、阶段、邮箱证明状态与到期时间。若当前团队强制 SSO，
+未持有效证明的浏览器会话仍可获得登记所需的组织 ID，组织名称和标识符为空字符串。
+缺少绑定的团队 API 密钥读取私有 REST 数据（包括 `/me`）时会收到
+`403 sso_required`。缺少绑定的 API 密钥和 OAuth 授权调用私有 MCP 读取工具
+（包括 `whoami`）时会收到 `sso_required` 工具错误。个人空间和未强制 SSO 的团队
+沿用原响应。两种协议均在代码中关闭时，
+`/me` 省略 `sso` 对象，浏览器证明无法满足已存储的强制策略。
 
 The built draft reads use the current team context and freshly check verified owner/admin
 membership. `listSsoProviders` accepts `limit` (1–100, default 50) and `cursor`; it returns
@@ -951,7 +990,7 @@ reference their IDs; the provider inventory includes safe domain status/generati
 The three domain writes are browser-session-only and remain `404 sso_disabled` while
 both protocols are hard-off; they have no MCP tools or CLI commands. With the internal
 test capability enabled, each requires a verified current team owner/admin, the exact
-Origin, expected organization header and operation-bound mailbox fresh proof. A new
+Origin, expected organization header and operation-bound fresh administration proof. A new
 challenge lasts 24 hours and rotates the generation; the TXT value is returned only once.
 Names are normalized to lowercase IDNA ASCII and one trailing DNS root dot is removed.
 Wildcards, IPs, special-use names, public suffixes (including private suffixes) and known
@@ -970,7 +1009,7 @@ follow the [domain lifecycle runbook](#domain-lifecycle-operations) below.
 
 域名挑战、验证与退役只允许浏览器会话调用，没有 MCP 工具或 CLI 命令。
 OIDC 和 SAML 仍在代码中关闭，三个接口均返回 `404 sso_disabled`。内部测试开启后，
-当前团队中已验证的所有者或管理员须提供同源请求、预期团队和操作绑定的邮箱新鲜证明。
+当前团队中已验证的所有者或管理员须提供同源请求、预期团队和操作绑定的新鲜管理证明。
 域名转换为小写 IDNA ASCII，并移除一个末尾根点；拒绝通配符、IP、特殊用途名称、
 公共后缀（含私有后缀）以及已知公共邮箱域名及其子域名。父域名与子域名须分别证明。
 挑战有效期为 24 小时；重新创建会轮换代次，TXT 值只返回一次。DNS 故障显示 `unknown`，
@@ -1104,8 +1143,10 @@ must append that cookie and return the challenge as HTTP 403, after its attempt 
 Successful proof consumption and the protected mutation share one transaction; a failed
 mutation rolls back consumption. The database clock is read after the row locks, and an
 expired recorded mailbox proof requires a new attempt. Teams without enforcement need
-`mailbox`; seeded enforced teams need `sso`, which this gate deliberately cannot satisfy
-until a protocol step-up implementation exists. Both protocols remain hard-off in production.
+`mailbox`. `sso` is required for fresh administration only when OIDC is available and the
+team has both `requireSso` and an enabled OIDC provider. The gate rechecks the recorded
+result's deadline, provider, link and trust generation before consuming the attempt.
+Independent local proof still requires `mailbox`. Both protocols remain hard-off in production.
 
 Mailbox proof is an authentication protocol surface, outside `/api/v1` and the product
 interface-parity inventory, like sign-in/callback below; it has no MCP/CLI equivalent:
@@ -1211,6 +1252,20 @@ before checking their inputs or accessing the database.
 回调仅使用一次授权码和状态，并在创建会话前重新检查提供商版本、域名声明、身份关联、
 已证明的邮箱和当前团队成员资格。浏览器证明取适用期限中的最早时间，会话续期不延长证明。
 OIDC 在生产代码中保持关闭，登录发起、回调和完成端点均返回 `404 sso_disabled`。
+
+OIDC step-up uses the same initiation and callback. Its state binds the authorization
+response to the pending write attempt, existing session and browser, provider revision,
+linked identity and team trust generation. The callback checks those bindings both before
+code exchange and when recording the result. A successful callback returns to `returnTo`
+and the client retries the write with the same `proofAttemptId`. If the provider omitted
+`auth_time`, that retry returns the same attempt with `mailbox` still required. Provider
+discovery, code exchange and signing-key fetches run outside database transactions.
+
+OIDC 二次验证沿用登录发起和回调端点，并要求身份提供方重新认证。回调在兑换授权码前及记录
+结果时，都检查原写入尝试、浏览器、会话、提供方版本、身份关联和团队信任代数。完成后返回
+`returnTo`，客户端用原 `proofAttemptId` 重试写入。如果令牌缺少 `auth_time`，重试会要求在
+同一个尝试中补做邮箱证明。签名中的认证时间超出允许范围时，二次验证会被拒绝。只有 OIDC
+已启用且团队已强制 SSO 并有活动的 OIDC 提供方时，管理写入才要求此验证。
 
 When the OIDC callback sees a changed email for a linked identity, it stores a short-lived,
 frozen result for the original browser and hands off to `/app/mailbox-proof` with the opaque

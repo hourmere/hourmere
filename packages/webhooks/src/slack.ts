@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { lockSharedTeamSsoProof, ssoHardOff } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { checkTeamWriteDeadline, teamWriteTransaction } from '@hourmere/db/team-write'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
@@ -35,6 +37,9 @@ export interface SlackDestinationView extends WebhookView {
 const invalid = () =>
   new DomainError('invalid', 'invalid_slack_destination', 'Invalid Slack destination configuration')
 const missing = () => new DomainError('not_found', 'slack_destination_not_found')
+const ssoRequired = (): never => {
+  throw new DomainError('forbidden', 'sso_required')
+}
 const columns = [
   'id',
   'organization_id',
@@ -159,7 +164,7 @@ export async function createSlackDestination(
   const url = slackUrl(parsed.data.url)
   if (!url) throw invalid()
   const encryptionKey = key(settings)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await authorize(trx, ctx)
     await filter(trx, ctx, parsed.data.eventTypeId)
     if (
@@ -212,7 +217,7 @@ export async function updateSlackDestination(
   const data = parsed.data
   const url = data.url === undefined ? undefined : slackUrl(data.url)
   if (data.url !== undefined && !url) throw invalid()
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await locked(trx, ctx, id)
     await filter(trx, ctx, data.eventTypeId)
     const updated = await trx
@@ -258,7 +263,7 @@ export async function updateSlackDestination(
   })
 }
 export async function deleteSlackDestination(ctx: WebhookServiceContext, id: unknown) {
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await locked(trx, ctx, id)
     await trx.deleteFrom('webhooks').where('id', '=', row.id).execute()
     await auditSlack(trx, ctx, 'slack_destination.deleted', row)
@@ -279,8 +284,19 @@ export async function testSlackDestination(
   key(settings)
   if (!settings.enabled || !queue)
     throw new DomainError('conflict', 'slack_unavailable', 'Slack delivery is unavailable')
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await locked(trx, ctx, id)
+    const actor =
+      ctx.principal.kind === 'session'
+        ? { userId: ctx.principal.user.id, sessionId: ctx.principal.sessionId }
+        : null
+    const deadline = await lockSharedTeamSsoProof(
+      trx,
+      settings.ssoCapabilities ?? ssoHardOff,
+      actor,
+      row.organization_id,
+      ssoRequired,
+    )
     admit?.()
     if (!row.is_active)
       throw new DomainError(
@@ -324,10 +340,14 @@ export async function testSlackDestination(
       .executeTakeFirstOrThrow()
     await queue.enqueue(
       WEBHOOK_DELIVERY_JOB,
-      { deliveryId: delivery.id },
+      {
+        deliveryId: delivery.id,
+        ...(deadline && actor && { actor }),
+      },
       { transaction: trx, singletonKey: delivery.id },
     )
     await auditSlack(trx, ctx, 'slack_destination.tested', row)
+    await checkTeamWriteDeadline(trx, deadline, ssoRequired)
     return { deliveryId: delivery.id }
   })
 }

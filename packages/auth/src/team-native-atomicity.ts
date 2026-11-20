@@ -51,6 +51,19 @@ export function nativeTeamTransactions<O extends OrganizationOptions>(
     },
     acceptInvitation,
   ) as typeof acceptInvitation
+  const addMember = plugin.endpoints.addMember
+  plugin.endpoints.addMember = Object.assign((context: Parameters<typeof addMember>[0]) => {
+    if (!context?.context) return addMember(context)
+    return runWithTransaction(context.context.adapter, () => addMember(context))
+  }, addMember) as typeof addMember
+  const setActiveOrganization = plugin.endpoints.setActiveOrganization
+  plugin.endpoints.setActiveOrganization = Object.assign(
+    (context: Parameters<typeof setActiveOrganization>[0]) => {
+      if (!context?.context || context.request) return setActiveOrganization(context)
+      return runWithTransaction(context.context.adapter, () => setActiveOrganization(context))
+    },
+    setActiveOrganization,
+  ) as typeof setActiveOrganization
   return plugin
 }
 

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PUBLIC_RATE_LIMITS, type RateLimit } from '../apps/server/src/rate-limit.ts'
+import { BOOKING } from '../apps/web/src/limits.ts'
 import { MAX_GUESTS } from '../packages/scheduling/src/bookings.ts'
 import {
   MEETING_POLL_LIMITS,
@@ -46,6 +47,7 @@ function verifyLimits(source: string) {
 describe('meeting poll design numeric limits', () => {
   it('ties the attendee cap to the booking service guest limit plus the booker', () => {
     verifyLimit(document, 'Attendees per booking', `1–${MAX_GUESTS + 1}`)
+    expect(BOOKING.maxGuests + 1).toBe(MEETING_POLL_LIMITS.maxAttendees)
   })
 
   it.each(limits)('pins %s to %s', (label, value) => {

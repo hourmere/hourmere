@@ -619,7 +619,7 @@ export function productionAppOptions({
     webDist: config.WEB_DIST,
     routingFormsEnabled,
     waitlist,
-    ssoMe: { capabilities: { ssoOidcEnabled, ssoSamlEnabled }, db },
+    ssoTeamReads: { capabilities: { ssoOidcEnabled, ssoSamlEnabled }, db },
     // Mounted in every state: while hard-off both endpoints answer 404 sso_disabled.
     ssoMailboxProof: mailboxProofRoutes({
       capabilities: { ssoOidcEnabled, ssoSamlEnabled },
@@ -755,6 +755,7 @@ export function productionAuthOptions({
     db,
     leaveTeamMember: nativeTeamLeave(db, recordAdmissionRemoval),
     recordAdmissionRemoval,
+    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,
@@ -946,6 +947,7 @@ async function start(
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
+    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
   }
   const calendarDeps: CalendarDeps = {
     db,
@@ -968,6 +970,7 @@ async function start(
   // Background jobs: every role queues them, `all` and `worker` run them.
   const notificationDeps = {
     db,
+    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
     followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
     mailer,
     publicUrl: config.PUBLIC_URL,

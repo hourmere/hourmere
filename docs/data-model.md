@@ -13,6 +13,18 @@ Ordinary invitations for series members record whether an attachment was deliver
 Cancellations use that recipient's receipt evidence to choose which entries to attach.
 Dates with unknown attachment history on older receipts appear in the cancellation body.
 
+After series confirmation dispatch begins, a terminal conference result for a future
+root queues one link update per recipient. Further results join the waiting row. Migration
+0157 records which aggregate actions precede that row and whether it is waiting for an
+earlier copy. An earlier copy's terminal receipt or outbox transition wakes eligible rows
+in the same transaction. Waiting leaves the attempt count untouched, and the worker skips
+copies when the series has no future confirmed member.
+Each send attempt reads that recipient's delivered confirmation and link-update receipts
+after taking the shared mail-budget lock. The receipt delivery times determine the
+60-minute spacing and the three link updates allowed per rolling day. When either limit
+requires waiting, the worker releases the lease and moves `due_at` to the next eligible
+time without adding an attempt.
+
 Single-occurrence moves retain the same `series_occurrence_id` on the successor.
 Member writes use the ordinary organization lock, then the series row and the booking
 row before the operation's existing host locks. Moves, cancellations and new or
@@ -1024,7 +1036,7 @@ counts; receipt lifetime, encryption and admission services land in later steps.
 Migration 0074 installs the configuration storage of the [SSO design](sso.md)
 (Configuration storage step): `sso_policies`, `sso_providers`, `sso_domains`,
 `sso_provider_domains`, `sso_recovery_nominations` and `sso_recovery_owners`. The mailbox proof module reads
-providers and the shared fresh-proof gate reads policies. The draft-read service
+providers and the shared fresh-proof gate reads policies and active OIDC providers. The draft-read service
 reads an explicit safe projection of providers and policies for current team owners/admins;
 it never opens sealed configuration or reads identity links. Browser-only provider draft writes
 use the fresh-proof gate, seal each new revision, and audit changes transactionally.
@@ -1150,6 +1162,11 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   frozen result in an encrypted HttpOnly cookie. The pending result contains no authorization
   code or IdP token. Mailbox proof attaches to this attempt and completion uses it once.
   A verified collision deletes the attempt and its token without updating the link.
+  OIDC step-up reuses the session-bound `link` row shape for its single-use state, with a
+  distinct internal operation. The state binds the existing fresh-proof attempt, live link
+  and trust generation. After token verification the callback records the result on that
+  fresh-proof attempt. If `auth_time` is absent, the callback also marks the frozen mailbox
+  required and caps the identity result from receipt time.
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.

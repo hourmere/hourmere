@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import * as HourmereAuth from '@hourmere/auth'
 import * as HourmereDb from '@hourmere/db'
 import * as HourmereAudit from '@hourmere/db/audit'
+import * as HourmereTeamWrite from '@hourmere/db/team-write'
 import * as Kysely from 'kysely'
 import * as PhoneNumbers from 'libphonenumber-js/max'
 import { expect } from 'vitest'
@@ -46,6 +47,7 @@ const dependencies: Record<string, object> = {
   '@hourmere/auth': HourmereAuth,
   '@hourmere/db': HourmereDb,
   '@hourmere/db/audit': HourmereAudit,
+  '@hourmere/db/team-write': HourmereTeamWrite,
   './availability.ts': Availability,
   './booking-page.ts': BookingPage,
   './change-deadlines.ts': ChangeDeadlines,

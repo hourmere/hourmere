@@ -30,6 +30,8 @@ import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } fro
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
 import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
+import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
+import { nativeTeamSso } from './team-sso-native.ts'
 
 export { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
 export {
@@ -228,6 +230,7 @@ export interface AuthConfig {
         teamId: string,
         expectedOrganizationId: string,
         transaction?: Db,
+        ssoCapabilities?: TeamSsoCapabilities,
       ) => Promise<{ organizationId: string }>)
     | undefined
   /** Where people reach Hourmere (PUBLIC_URL); sign-in links and cookies are built from it. */
@@ -267,6 +270,8 @@ export interface AuthConfig {
   scimClaims?: ScimClaimCompletion | undefined
   /** Optional SSO tombstone write in the existing administrative removal transaction. */
   recordAdmissionRemoval?: SsoAdmissionRemoval | undefined
+  /** Test-only protocol capabilities. A stored policy is checked even when both are off. */
+  ssoCapabilities?: TeamSsoCapabilities | undefined
   socialProviderOptions?: { google?: Partial<GoogleOptions>; microsoft?: Partial<MicrosoftOptions> }
 }
 
@@ -296,6 +301,7 @@ export function createAuth({
   leaveTeamMember,
   scimClaims,
   recordAdmissionRemoval,
+  ssoCapabilities = ssoHardOff,
 }: AuthConfig) {
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
@@ -305,7 +311,9 @@ export function createAuth({
     leaveTeamMember,
     scimClaims,
     recordAdmissionRemoval,
+    ssoCapabilities,
   )
+  const teamSso = nativeTeamSso(db, ssoCapabilities)
   const auth = betterAuth({
     database: teamTransactionAdapter(createDb(pool), teamRolePolicy.withTransaction),
     disabledPaths: [
@@ -458,7 +466,14 @@ export function createAuth({
       },
     },
     hooks: {
-      before: beforeHook(db, teamRolePolicy.before, reserveInvitationEmail, enqueueInvitationEmail),
+      before: beforeHook(
+        db,
+        teamRolePolicy.before,
+        reserveInvitationEmail,
+        enqueueInvitationEmail,
+        ssoCapabilities,
+        teamSso.before,
+      ),
     },
     plugins: [
       {
@@ -521,6 +536,7 @@ export function createAuth({
         }),
       ),
       memberReadPrivacy(db),
+      teamSso.plugin,
       apiKey({
         defaultPrefix: API_KEY_PREFIX,
         enableMetadata: true,
@@ -592,3 +608,17 @@ export {
   type ScimTokenActor,
   ScimTokenError,
 } from './scim-tokens.ts'
+
+export {
+  liveBrowserProofQuery,
+  lockSharedTeamSsoProof,
+  lockTeamSsoProof,
+  memoizeTeamSsoAccess,
+  ssoHardOff,
+  type TeamReadAccess,
+  type TeamReadPolicy,
+  type TeamSsoCapabilities,
+  type TeamSsoDeps,
+  type TeamSsoSession,
+  teamSsoAccess,
+} from './team-sso.ts'

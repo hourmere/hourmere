@@ -5,6 +5,7 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
+import type { TeamReadPolicy } from './sso-team-reads.ts'
 
 export interface SsoReadDeps {
   db: Db
@@ -38,13 +39,20 @@ export async function authorizeSsoRead(deps: SsoReadDeps, principal: Principal) 
     throw denied()
 }
 
-export async function getSsoPolicy(deps: SsoReadDeps, principal: Principal) {
+export async function getSsoPolicy(
+  deps: SsoReadDeps,
+  principal: Principal,
+  checkedPolicy?: TeamReadPolicy | null,
+) {
   await authorizeSsoRead(deps, principal)
-  const policy = await deps.db
-    .selectFrom('sso_policies')
-    .select(['require_sso', 'admission', 'policy_revision', 'trust_generation'])
-    .where('organization_id', '=', principal.organization.id)
-    .executeTakeFirst()
+  const policy =
+    checkedPolicy === undefined
+      ? await deps.db
+          .selectFrom('sso_policies')
+          .select(['require_sso', 'admission', 'policy_revision', 'trust_generation'])
+          .where('organization_id', '=', principal.organization.id)
+          .executeTakeFirst()
+      : checkedPolicy
   return {
     requireSso: policy?.require_sso ?? false,
     admission: policy?.admission ?? 'invitation_only',

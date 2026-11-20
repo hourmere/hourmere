@@ -2185,4 +2185,212 @@ export const admin = {
   'Team event types are not listed: only team owners and admins can see why their times are unavailable.':
     '未列出团队活动类型：只有团队所有者和管理员才能查看这些时间无法预约的原因。',
   'Another scheduling rule applies.': '受其他排期规则限制。',
+
+  // Native team SSO
+  'Sign in with this team’s SSO to continue.': '请使用此团队的单点登录继续。',
+
+  // Host meeting polls
+  'Meeting polls': '会议投票',
+  'Loading meeting polls…': '正在加载会议投票…',
+  'No meeting polls yet.': '暂无会议投票。',
+  'Could not load meeting polls.': '无法加载会议投票。',
+  'Only team owners and admins can manage meeting polls in this space.':
+    '只有团队所有者和管理员可以管理此空间中的会议投票。',
+  'Voting open': '投票进行中',
+  'Voting closed': '投票已截止',
+  'Poll scheduled': '已排定',
+  'Poll canceled': '已取消',
+  'Voting deadline: {deadline} ({timeZone})': '投票截止时间：{deadline}（{timeZone}）',
+  'Meeting poll pages': '会议投票分页',
+  'Back to meeting polls': '返回会议投票',
+  'This poll belongs to another space.': '此投票属于另一个空间。',
+  'This meeting poll is unavailable.': '此会议投票不可用。',
+  'Switch to {space}': '切换到{space}',
+  'Could not open the space for this poll.': '无法打开此投票所在的空间。',
+  'Poll results': '投票结果',
+  'Loading poll results…': '正在加载投票结果…',
+  'Could not load the poll results.': '无法加载投票结果。',
+  'Meeting poll unavailable': '会议投票不可用',
+  'This poll changed. Refresh results and review them before continuing.':
+    '此投票已更新。请刷新结果并核对后再继续。',
+  'The selected attendees changed. Refresh results and make a new selection.':
+    '所选参会者的状态已变化。请刷新结果并重新选择。',
+  'This event type changed since the poll was created. A new poll is required to schedule it.':
+    '此活动类型在投票创建后已有变更。请创建新的投票来安排会议。',
+  'This time is no longer available. Choose another time or refresh results.':
+    '此时间已不可用。请选择其他时间或刷新结果。',
+  'Connected calendars could not be checked. Try scheduling again shortly.':
+    '暂时无法检查已连接的日历。请稍后重新安排。',
+  'This event type does not allow guests. Choose only the booker.':
+    '此活动类型不允许添加嘉宾。请只选择预约人。',
+  'Too many attendees were selected. Remove an additional attendee and try again.':
+    '所选参会人数超过上限。请移除一位其他参会者后重试。',
+  'Acknowledge the selected conditional votes before scheduling.':
+    '安排会议前，请确认所选参会者的有条件同意票。',
+  'Could not update the meeting poll. Try again.': '无法更新会议投票。请重试。',
+  'The booking may have been created. Retry to recover the result.':
+    '预约可能已创建。请重试以获取结果。',
+  'Original scheduled time: {time}': '最初安排的时间：{time}',
+  'View booking': '查看预约',
+  'Retry scheduling': '重试安排',
+  'Refresh results': '刷新结果',
+  'Verification pending': '待验证',
+  'Invited to vote': '已邀请投票',
+  'Verified voter': '已验证',
+  'Withdrawn voter': '已撤回',
+  'If need be': '必要时可以',
+  'Currently available': '当前可用',
+  'Currently unavailable': '当前不可用',
+  'Availability unknown': '暂无法确认',
+  Votes: '投票情况',
+  'Submitted ballots: {count}': '已提交的选票：{count}份',
+  'Verified voters can see totals. In a small poll, subtracting their own vote can reveal how someone else voted.':
+    '已验证的投票人可以查看票数。在参与人数较少的投票中，扣除自己的一票后，可能推断出他人的选择。',
+  'Voters can see only their own votes. This results page is private to poll managers.':
+    '投票人只能查看自己的选票。此结果页面仅投票管理者可见。',
+  'Availability can change. Hourmere checks the chosen time again when you schedule.':
+    '时间是否可用可能发生变化。安排会议时，Hourmere 会再次检查所选时间。',
+  'Votes by voter and time': '各投票人在不同时段的选择',
+  Voter: '投票人',
+  'No vote': '未投票',
+  'Schedule meeting': '安排会议',
+  'Scheduling creates a booking, ends voting and sends the outcome. The booker can manage the whole meeting.':
+    '安排会议会创建预约、结束投票并发送结果通知。预约人可以管理整场会议。',
+  'No candidate time can be selected right now.': '目前没有可选择的候选时段。',
+  'Scheduling choices': '会议安排选项',
+  'Meeting time': '会议时间',
+  'Choose a time': '选择时间',
+  '{time} ({availability})': '{time}（{availability}）',
+  'No verified voters agreed to attend at this time.': '没有已验证的投票人同意在此时间参会。',
+  Booker: '预约人',
+  'Choose a booker': '选择预约人',
+  '{name} ({email})': '{name}（{email}）',
+  'Additional attendees': '其他参会者',
+  'Choose up to {count} additional attendees.': '最多可选{count}位其他参会者。',
+  'Attendee limit reached ({count} including the booker).':
+    '已达到参会人数上限（含预约人共{count}位）。',
+  'I acknowledge the selected conditional votes.': '我确认所选参会者中有人只是必要时可以参会。',
+  'Scheduling…': '正在安排…',
+  'Close voting…': '结束投票…',
+  'Close voting now? Voters can no longer change their votes. You can still schedule the meeting.':
+    '现在结束投票吗？投票人将无法修改选票，你仍可以安排会议。',
+  'Close voting': '结束投票',
+  'Closing voting…': '正在结束投票…',
+  'Cancel poll…': '取消投票…',
+  'Cancel this poll? Voting ends and active voters receive a cancellation notice.':
+    '取消此投票吗？投票将结束，仍在参与的投票人会收到取消通知。',
+  'Cancel poll': '取消投票',
+  'Canceling poll…': '正在取消投票…',
+  'Delete poll…': '删除投票…',
+  'Permanently delete this poll and its votes? Any booking created from it is kept.':
+    '永久删除此投票及其选票吗？由此投票创建的预约将保留。',
+  'Delete poll': '删除投票',
+  'Deleting poll…': '正在删除投票…',
+  'Poll actions': '投票操作',
+  'Go back': '返回',
+  'Current booking time: {time}': '当前预约时间：{time}',
+
+  // Meeting poll creation and invitations.
+  'Create meeting poll': '创建会议投票',
+  'No active individual event types are available for polls in this space.':
+    '当前空间没有可用于创建投票的已启用非团体活动类型。',
+  'Choose 2–20 available times. Proposing times does not reserve them.':
+    '请选择 2 至 20 个可用时间。投票期间不会预留这些时间。',
+  'Set the deadline 1 hour to 30 days from now. Leave the event’s minimum notice before the earliest candidate.':
+    '请将截止时间设在 1 小时至 30 天后，并在最早候选时间之前留出活动要求的最短提前预约时间。',
+  'Voting deadline': '投票截止时间',
+  'Choose a valid deadline in the display time zone.': '请按显示时区选择有效的截止时间。',
+  'This local time occurs twice. Choose its UTC offset.':
+    '这个本地时间会出现两次。请选择对应的 UTC 偏移量。',
+  'The deadline must be 1 hour to 30 days from now.': '截止时间必须在 1 小时至 30 天后。',
+  'The deadline must be before every candidate and leave the event’s minimum notice.':
+    '截止时间必须早于所有候选时间，并留出活动要求的最短提前预约时间。',
+  'Choose 2–20 candidate times.': '请选择 2 至 20 个候选时间。',
+  Admission: '参与方式',
+  'Invitation only': '仅限受邀者',
+  'Public link': '公开链接',
+  'Only the people you invite by email can join.': '只有通过电子邮件收到邀请的人才能参与。',
+  'Anyone with the link can request to join without signing in. They must verify their email address to vote.':
+    '持有链接的人无需登录即可申请参与。验证邮箱后才能投票。',
+  Visibility: '结果可见范围',
+  'Private votes': '仅自己和主持人可见',
+  'Share vote totals': '共享投票汇总',
+  'Voters see their own choices. Hosts can see the roster and individual votes.':
+    '投票者只能查看自己的选择。主持人可以查看名单和每个人的投票。',
+  'Verified voters see totals for each time. In small groups, totals can reveal another person’s choices.':
+    '通过验证的投票者可以查看各候选时间的汇总。人数较少时，汇总可能让人推断出他人的选择。',
+  'Admission and visibility are fixed after creation.': '创建后，参与方式和结果可见范围无法更改。',
+  'This event type changed. Reload event types and review your choices before creating the poll.':
+    '此活动类型已变更。请重新加载活动类型并检查所选内容，再创建投票。',
+  'Reload event types': '重新加载活动类型',
+  'Some selected times are no longer offered. Review your candidate times.':
+    '部分所选时间已不可预约。请检查候选时间。',
+  'The poll may have been created. Retry this submission to recover it.':
+    '投票可能已创建。请重试本次提交以找回投票。',
+  'Retry creation': '重试创建',
+  'Your poll was already created.': '投票已经创建。',
+  'The public link was shown only in the original response. Open the poll to rotate the link.':
+    '公开链接仅在首次响应中显示。请打开投票并更换链接。',
+  'This poll was already created and has since been deleted.': '此投票已创建，后来被删除。',
+  'Meeting poll created': '会议投票已创建',
+  'Open meeting poll': '打开会议投票',
+  'Could not create the meeting poll. Review your choices and try again.':
+    '无法创建会议投票。请检查所选内容后重试。',
+  'Could not check the saved event type. Try again.': '无法核对已保存的活动类型。请重试。',
+  'Creating meeting poll…': '正在创建会议投票…',
+  'Public voting link': '公开投票链接',
+  'Copy this link now. It will only be shown here once.':
+    '请立即复制此链接。它只会在这里显示一次。',
+  'Copy voting link': '复制投票链接',
+  'Hide voting link': '隐藏投票链接',
+  'Invitation roster': '邀请名单',
+  'There are no voters on this poll yet.': '此投票尚无参与者。',
+  'Reserved places: {used} of {limit}': '名额占用：{used}／{limit}',
+  'Verified voters, active invitations and unexpired public sign-ups each reserve a place.':
+    '已验证的投票者、有效邀请和未过期的公开报名各占一个名额。',
+  'Invite voters…': '邀请投票者…',
+  'Invite voters': '邀请投票者',
+  'Invitee {number}': '受邀者{number}',
+  'Add another invitee': '添加受邀者',
+  'Remove invitee {number}': '移除第{number}位受邀者',
+  'Send invitations': '发送邀请',
+  'Add up to {limit} invitees per batch. If there aren’t enough places for all new voters, the entire batch is refused.':
+    '每批最多可邀请{limit}人。若剩余名额不足以容纳所有新投票者，整批邀请都不会发出。',
+  'Inviting someone with a pending public sign-up uses their existing place.':
+    '邀请已通过公开链接报名、正在等待验证的人时，会沿用其已占用的名额。',
+  'Resending replaces the invitee’s voting link. You can resend once every 15 minutes, up to three times per address for this poll.':
+    '重发会更换受邀者的投票链接。此投票的每个邮箱每隔 15 分钟可重发一次，最多重发三次。',
+  'Remove voter…': '移除投票者…',
+  'Remove voter': '移除投票者',
+  'Remove this voter? This deletes their details and ballot, revokes their links and stops queued email. Only a new invitation can let them join again.':
+    '移除此投票者吗？这会删除其资料和选票，使其链接失效，并停止发送待发邮件。只有重新邀请，对方才能再次参与。',
+  'Remove unverified sign-ups…': '移除未验证的公开报名…',
+  'Remove unverified sign-ups': '移除未验证的公开报名',
+  'Remove all unverified public sign-ups? This revokes their links, stops queued email and frees their places. Voters invited by the host are kept.':
+    '移除所有未验证的公开报名吗？这会使其链接失效、停止发送待发邮件并释放名额。主持人发出的邀请将保留。',
+  'Replace public link…': '更换公开链接…',
+  'Replace public link': '更换公开链接',
+  'Replace the public link? The old link stops working immediately. Links already emailed to individual voters still work.':
+    '更换公开链接吗？旧链接会立即失效。已通过邮件发给投票者的个人链接仍可使用。',
+  'This poll or roster changed. Refresh results and review them before trying again.':
+    '投票或名单已变更。请刷新结果并核对后重试。',
+  'There aren’t enough places for all new voters in this batch. No invitations were queued.':
+    '剩余名额不足以容纳本批所有新投票者。本批邀请均未加入发送队列。',
+  'Poll mail requests are limited. Try again later.': '投票邮件发送请求已达到限制。请稍后重试。',
+  'We could not confirm the roster update. Retry the same request to check its outcome.':
+    '无法确认名单更新结果。请重试原请求以核实结果。',
+  'Retry roster request': '重试名单请求',
+  'The public link was already replaced. Refresh results, then replace it again to get a new link.':
+    '公开链接已经更换。请刷新结果后再次更换，以获取新链接。',
+  'Invitation request recovered. No additional emails were queued.':
+    '邀请请求已确认。没有额外邮件加入发送队列。',
+  'Invitations queued: {queued}. Existing entries unchanged: {unchanged}.':
+    '已有{queued}封邀请加入发送队列，{unchanged}条现有记录保持原样。',
+  'Voter removed.': '已移除投票者。',
+  'Unverified public sign-ups removed.': '已移除未验证的公开报名。',
+  'We could not confirm the removal. Refresh results to check the roster before trying again.':
+    '无法确认移除结果。请刷新结果并核对名单后重试。',
+  'Could not update the invitation roster. Try again.': '无法更新邀请名单。请重试。',
+  'This poll has 40 places.': '此投票最多容纳 40 人。',
+  'Remove time {time}': '移除时间：{time}',
 } as const

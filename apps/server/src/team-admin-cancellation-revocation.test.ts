@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
@@ -63,7 +64,7 @@ async function copiedRoutes(replacements: [string, string][] = []): Promise<Rout
   )
   const access = sourceCopy<Record<string, unknown>>(
     './team-management.ts',
-    { ...shared, DomainError, createMiddleware, sql },
+    { ...shared, DomainError, createMiddleware, sql, teamWriteTransaction },
     ['teamManagementAccess', 'EXPECTED_ORGANIZATION_HEADER', 'ORGANIZATION_CONTEXT_CHANGED'],
   )
   return sourceCopy<{ teamBookingRoutes: RouteFactory }>(

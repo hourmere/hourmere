@@ -71,7 +71,7 @@ async function authSourceCopy(enqueueBeforeCommit: boolean): Promise<typeof crea
   const serviceLocation = new URL('../../../packages/auth/src/invitations.ts', import.meta.url)
   let source = readFileSync(serviceLocation, 'utf8')
   const seam =
-    '      return result(invitation, delivery, existing && !replacingExpired)\n    })\n  // Admission is already committed:'
+    '      await checkTeamWriteDeadline(trx, deadline, nativeSsoRequired)\n      return {'
   expect(source.includes(seam), 'mutation matches the admission commit boundary').toBe(true)
   if (enqueueBeforeCommit) {
     const postCommitStart = source.indexOf('  // Admission is already committed:')
@@ -80,13 +80,16 @@ async function authSourceCopy(enqueueBeforeCommit: boolean): Promise<typeof crea
     expect(postCommitEnd, 'mutation finds the post-commit return').toBeGreaterThan(postCommitStart)
     source = source.replace(
       seam,
-      `      const early = result(invitation, delivery, existing && !replacingExpired)
+      `      await checkTeamWriteDeadline(trx, deadline, nativeSsoRequired)
+      const early = result(invitation, delivery, existing && !replacingExpired)
       if (options.enqueue && early.delivery.state === 'queued') {
-        await options.enqueue({ invitationId: invitation.id, generation: delivery.generation })
+        await options.enqueue({
+          invitationId: early.id,
+          generation: early.delivery.generation,
+          ...(deadline && newGeneration ? { actor: identity } : {}),
+        })
       }
-      return early
-    })
-  // Admission is already committed:`,
+      return {`,
     )
     const movedStart = source.indexOf('  // Admission is already committed:')
     const movedEnd = source.indexOf('\n  return admitted\n}', movedStart)

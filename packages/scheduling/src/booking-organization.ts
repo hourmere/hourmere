@@ -8,6 +8,7 @@ import { isUuid } from './internal.ts'
 export async function resolveBookingOrganization(
   { db, principal }: ServiceContext,
   bookingId: string,
+  authorizeSpace?: (scope: { id: string; personal: boolean }) => Promise<void>,
 ): Promise<{ organizationId: string; access: 'host' | 'team_admin' }> {
   const missing = () => new DomainError('not_found', 'booking_not_found', 'Booking not found')
   if (principal.kind !== 'session' || !isUuid(bookingId)) throw missing()
@@ -40,9 +41,13 @@ export async function resolveBookingOrganization(
     .where('session.expiresAt', '>', sql<Date>`clock_timestamp()`)
     .executeTakeFirst()
   if (!booking) throw missing()
-  if (booking.is_host) return { organizationId: booking.organization_id, access: 'host' }
+  const personal = booking.personal_owner !== null
   const roles = booking.role.split(',').map((role) => role.trim())
-  if (booking.personal_owner === null && roles.some((role) => role === 'owner' || role === 'admin'))
-    return { organizationId: booking.organization_id, access: 'team_admin' }
-  throw missing()
+  if (!booking.is_host && (personal || !roles.some((role) => role === 'owner' || role === 'admin')))
+    throw missing()
+  await authorizeSpace?.({ id: booking.organization_id, personal })
+  return {
+    organizationId: booking.organization_id,
+    access: booking.is_host ? 'host' : 'team_admin',
+  }
 }

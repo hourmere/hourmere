@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { type Db, importedBookingCondition, isImportedBooking } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { conferenceJoinUrl, zoomMeetingId } from '@hourmere/scheduling/conference-url'
@@ -9,7 +10,10 @@ import {
   conferenceRoot,
 } from '@hourmere/scheduling/conferences'
 import { DomainError } from '@hourmere/scheduling/errors'
-import { recordSeriesConferenceDeadline } from '@hourmere/scheduling/series-confirmation'
+import {
+  queueSeriesLinkUpdates,
+  recordSeriesConferenceDeadline,
+} from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { GoogleCalendarError } from './google.ts'
@@ -712,13 +716,15 @@ export async function writeBookingConference(
         .onConflict((oc) => oc.doNothing())
         .execute()
     }
-    if (seriesOccurrenceId && state !== 'pending' && booking.status === 'confirmed')
+    if (seriesOccurrenceId && state !== 'pending' && booking.status === 'confirmed') {
       await recordSeriesConferenceDeadline(trx, seriesOccurrenceId, now)
+      if (!expired) await queueSeriesLinkUpdates(trx, seriesOccurrenceId, now)
+    }
   })
 }
 
 export async function retryBookingConference(ctx: ServiceContext, bookingId: string) {
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     // Match the service's parent protection before booking -> intent, and retain current
     // membership through the retry commit. These share locks are compatible with a

@@ -7,6 +7,7 @@ import { requireActiveApiKey } from '@hourmere/auth'
 import { PHONE_NUMBER_PATTERN, validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -318,7 +319,7 @@ export async function setEventTypeNotifications(
   value: unknown,
 ): Promise<NotificationSettings> {
   const notifications = validateNotifications(value, ctx)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
@@ -365,7 +366,7 @@ export async function setEventTypeWaitlist(
   value: unknown,
 ): Promise<WaitlistSettings> {
   const settings = WaitlistSettingsSchema.parse(value)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
@@ -498,7 +499,7 @@ export async function removeEventTypeWaitlistEntry(
   entryId: string,
 ) {
   if (!isUuid(entryId)) throw new DomainError('not_found', 'waitlist_entry_not_found')
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
@@ -647,7 +648,7 @@ async function createEventTypeWrite(
   sourceId?: string,
 ): Promise<EventType> {
   return withWriteErrors(() =>
-    ctx.db.transaction().execute(async (trx) => {
+    teamWriteTransaction(ctx.db.transaction(), async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
       await lockOrganization(trx, ctx.principal.organization.id)
       const { personalOwnerId, canManageTeam } = await access(trx, ctx, true)
@@ -768,7 +769,7 @@ export async function updateEventType(
   const waitlist =
     input.waitlist === undefined ? undefined : WaitlistSettingsSchema.parse(input.waitlist)
   return withWriteErrors(() =>
-    ctx.db.transaction().execute(async (trx) => {
+    teamWriteTransaction(ctx.db.transaction(), async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
       await lockOrganization(trx, ctx.principal.organization.id)
       // Locked, so concurrent updates of different fields cannot undo each other.
@@ -941,7 +942,7 @@ export async function updateEventType(
  * never block deletion: their targets on it are marked unavailable in the same transaction.
  */
 export async function deleteEventType(ctx: ServiceContext, id: string): Promise<void> {
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
@@ -1523,7 +1524,7 @@ export async function listEventTypeHosts(
 
 /** Explicit activation; metadata saves and mode changes never invoke this operation. */
 export async function activateRoundRobin(ctx: ServiceContext, id: string): Promise<EventType> {
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })

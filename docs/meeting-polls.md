@@ -13,7 +13,8 @@ tombstones are implemented through migration `0088`; credential mail delivery an
 capability ciphertext expiry are implemented, as are public REST/MCP/CLI transports,
 deadline reminders, the browser reminder opt-out page and creator deadline notices.
 Outcome mail and host list, read, results, close, cancel, delete and finalize are implemented.
-Host creation and roster writes remain planned. Competitor research was checked
+The host web app provides creation, the invitation roster, results and lifecycle controls in
+personal and team spaces. Competitor research was checked
 against the repository and official help on 2026-11-06. The later
 implementation tasks must deliver the same capability through REST, MCP and CLI, including
 on self-hosted instances without feature gating. This proposal extends the
@@ -45,6 +46,26 @@ poll. No official help page establishing that latter behavior was found; the bri
 Cal.com poll premise remains unverified. Do not infer a public voting matrix, vote values,
 privacy defaults or a poll API from those pages. These observations are dated source
 facts; the decisions below are Hourmere's proposal, not competitor claims.
+
+## Create and manage a poll in the app
+
+In **Meeting polls**, choose **Create meeting poll**, select a saved event type and
+meeting length, then pick 2–20 offered times. Times follow the selected display time
+zone, including clock changes. Set a voting deadline and choose who can join and
+whether verified voters can see vote totals. Proposing times does not reserve them.
+
+Copy the public voting link when it is shown after creation or replacement. The app
+cannot recover the original link if the response was lost or the disclosure was
+closed. Replace it from the invitation roster if needed. Replacement immediately
+invalidates the old public link while preserving links emailed to individual voters.
+
+Use the invitation roster to send batches of up to 40 invitations, resend an
+invitation, or remove a voter. Verified voters, active invitations and unexpired
+public sign-ups share the 40-place cap. A batch that requires more places than remain
+is refused in full. Resend replaces the voter's link and is limited to once every
+15 minutes and three times per address for the poll, subject to shared mail limits.
+Removing a voter deletes their ballot and contact details and revokes their links.
+Bulk removal clears unverified public sign-ups and preserves host invitations.
 
 ## Product decisions and authority
 
@@ -700,8 +721,9 @@ booking mail continues to wait for conference readiness.
 
 Host mail: on deadline closure, enqueue one `deadline_closed` notice for the creator if
 still authorized; never fan out to all team admins or transfer it after departure. It
-contains title, deadline in the profile zone, response count and an authenticated results
-link (the D1 REST results resource until the D4a page lands), no roster, answers or voter capabilities. Recheck current authority before send;
+contains title, deadline in the profile zone, response count and an authenticated browser link
+to `/app/meeting-polls/{id}?organizationId={organizationId}`. The notice omits the roster,
+answers and voter capabilities. Recheck current authority before send;
 skip after cancellation, scheduling or deletion. Explicit early closure does not send it.
 There are no per-vote host emails. A successful booking uses existing normal host
 confirmation/lifecycle mail, without an extra poll-selected host message. Delivery storage
@@ -823,6 +845,38 @@ Deleting a linked booking deletes its poll history first, preserving the schedul
 Installation policies must delete poll history alongside due booking history rather than
 leave an indefinitely retained personal-data copy. Numeric cleanup and delivery bounds
 are named in `MEETING_POLL_RETENTION` alongside the admission constants.
+
+## Host dashboard
+
+Choose **Meeting polls** in the relevant personal or team space. Personal event owners and
+current team owners or admins can open a poll's results and review who voted for each time.
+A deadline notice takes you to the results in that poll's space. Sign in and switch spaces
+if prompted. The matrix keeps the three vote counts separate. In an aggregate poll, verified
+voters can see those totals, and a small group can make individual votes easy to infer.
+Candidate times include UTC offsets to distinguish repeated hours after a clock change.
+
+Choose a time, a booker and up to ten other eligible voters when the event allows guests.
+A selected voter who chose **If need be** at that time requires explicit acknowledgment.
+Availability is advisory. Scheduling checks it again. Review refreshed results after a
+revision conflict. If the scheduling response is lost, use the retry on the results page
+to send the same request with its original key.
+
+You can close voting early, cancel an unscheduled poll, or delete the poll's history.
+After scheduling, **View booking** opens the booking in the admin app. Deleting the poll
+preserves that booking.
+
+中文：请在对应的个人或团队空间打开**会议投票**。个人活动所有者和当前团队所有者或
+管理员可以查看每位投票者为各时段所作的选择。截止通知会打开投票所属空间的结果页，
+必要时请先登录并切换空间。汇总投票会向已验证的投票者显示三类票数，人数较少时仍可能
+推断个人选择。候选时段会显示 UTC 偏移，方便区分时钟回拨时重复的本地时间。
+
+选定时段和预约人后，如果活动允许添加访客，还可选择最多十名符合条件的投票者。任何
+入选者在该时段选择了“必要时可以”，都需要明确确认。页面显示的可用性仅供参考，排定时
+会重新检查。遇到版本冲突后请核对刷新后的结果。如果排定请求的响应丢失，可在结果页
+重试同一次请求。
+
+你可以提前结束投票、取消尚未排定的投票，或删除投票记录。排定后可打开管理端预约页面，
+删除投票不会取消预约。
 
 ## REST, MCP and CLI contract
 

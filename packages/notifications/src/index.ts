@@ -412,7 +412,7 @@ export function loadNotificationData(
   db: Db,
   bookingId: string,
 ): Promise<NotificationData | undefined> {
-  return db.connection().execute(async (conn) => {
+  async function load(conn: Db): Promise<NotificationData | undefined> {
     const b = await conn
       .selectFrom('bookings as b')
       .leftJoin('event_types as et', 'et.id', 'b.event_type_id')
@@ -603,7 +603,8 @@ export function loadNotificationData(
       replaced: successor !== undefined,
       automaticConference: isRecord(b.location) && b.location.autoCreate === true,
     }
-  })
+  }
+  return db.isTransaction ? load(db) : db.connection().execute(load)
 }
 
 /** Whether the booking, as it is now, is still what the email says. */

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { brandContrast } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import sharp from 'sharp'
 import { z } from 'zod'
 import type { ServiceContext } from './context.ts'
@@ -98,7 +99,7 @@ async function auditBranding(
   })
 }
 async function write<T>(ctx: BrandingContext, action: (trx: Db) => Promise<T>) {
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     // Reject non-admin callers before they can contend with booking writes.
     if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)

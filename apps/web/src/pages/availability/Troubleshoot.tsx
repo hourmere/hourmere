@@ -4,6 +4,7 @@ import { getActiveOrganizationMember } from '../../api/auth.ts'
 import { api, unwrap } from '../../api/client.ts'
 import { RequestError } from '../../api/errors.ts'
 import { type EventType, loadEventTypes, loadProfile } from '../../api/resources.ts'
+import { EventTypeSelect } from '../../components/EventTypeSelect.tsx'
 import { ErrorSummary, Field, type FieldErrors } from '../../components/forms.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
@@ -163,21 +164,12 @@ function TroubleshootForm({ eventTypes, timeZone }: { eventTypes: EventType[]; t
           attempt={attempt}
           labels={{ date: 'Date', timeZone: 'Time zone' }}
         />
-        <Field id="eventTypeId" label={t('Event type')}>
-          {(control) => (
-            <select
-              {...control}
-              value={draft.eventTypeId}
-              onChange={(event) => set('eventTypeId', event.target.value)}
-            >
-              {eventTypes.map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.title}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
+        <EventTypeSelect
+          id="eventTypeId"
+          eventTypes={eventTypes}
+          value={draft.eventTypeId}
+          onChange={(value) => set('eventTypeId', value)}
+        />
         <Field id="date" label={t('Date')} error={errors.date}>
           {(control) => (
             <input

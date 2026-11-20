@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { isUuid } from './organizations.ts'
 import { checkTeamManagementAccess, TeamManagementError } from './team-management.ts'
@@ -65,7 +66,7 @@ async function authorized<T>(
   work: (trx: Db) => Promise<T>,
   ownerOnly = false,
 ): Promise<T> {
-  return db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(db.transaction(), async (trx) => {
     try {
       const manager = await checkTeamManagementAccess(
         trx,

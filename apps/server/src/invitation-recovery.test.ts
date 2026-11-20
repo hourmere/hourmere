@@ -6,6 +6,8 @@ import {
   createAuth,
   createAuthPool,
   createCallerResolver,
+  lockSharedTeamSsoProof,
+  ssoHardOff,
   TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
@@ -15,6 +17,7 @@ import { deliverInvitationEmail } from '@hourmere/notifications'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nativeSsoRequired } from '../../../packages/auth/src/team-sso-native.ts'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { createApp } from './app.ts'
 import { withDatabaseClock } from './database-clock-testing.ts'
@@ -535,7 +538,7 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
       new URL('../../../packages/auth/src/invitation-cancellation.ts', import.meta.url),
       'utf8',
     )
-    const guard = "if (invitation.status !== 'pending') return invitation"
+    const guard = "if (invitation.status !== 'pending') {"
     expect(source).toContain(guard)
     if (mutation === 'member')
       source = source.replace(
@@ -546,18 +549,23 @@ describe.skipIf(!serverUrl)('invitation recovery over HTTP and PostgreSQL', () =
       ${guard}`,
       )
     if (mutation === 'lifecycle')
-      source = source.replace(guard, '').replace(".where('status', '=', 'pending')", '')
+      source = source.replace(guard, 'if (false) {').replace(".where('status', '=', 'pending')", '')
     if (mutation === 'team')
       source = source.replace(".where('organizationId', '=', actor.organizationId)", '')
     const javascript = stripTypeScriptTypes(
       source.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
     ).replace(/\bexport /g, '')
+    const bindings = {
+      TeamManagementError,
+      lockSharedTeamSsoProof,
+      nativeSsoRequired,
+      ssoHardOff,
+      writeAuditEvent,
+    }
     return guardCopy(
-      new Function(
-        'TeamManagementError',
-        'writeAuditEvent',
-        `${javascript}; return cancelTeamInvitation`,
-      )(TeamManagementError, writeAuditEvent) as typeof cancelTeamInvitation,
+      new Function(...Object.keys(bindings), `${javascript}; return cancelTeamInvitation`)(
+        ...Object.values(bindings),
+      ) as typeof cancelTeamInvitation,
     )
   }
   it('keeps a joined membership through the unchanged cancellation source copy', () =>

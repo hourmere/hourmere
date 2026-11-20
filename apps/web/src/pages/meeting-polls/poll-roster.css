@@ -1,0 +1,53 @@
+.poll-roster-list {
+  display: grid;
+  gap: var(--space-2);
+  margin-block-start: var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.poll-roster-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--border);
+}
+
+.poll-roster-entry > .confirm {
+  grid-column: 1 / -1;
+}
+
+.poll-invite-fields > legend,
+.poll-invite-row > legend {
+  padding: 0;
+  font-weight: 600;
+}
+
+.poll-invite-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: end;
+  min-inline-size: 0;
+}
+
+.poll-invite-row input {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.poll-invite-row > .button {
+  justify-self: start;
+}
+
+@media (min-width: 640px) {
+  .poll-roster-entry {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .poll-invite-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  }
+}
