@@ -2487,7 +2487,7 @@ export const admin = {
   'Use routing answers to prefill these booking fields.': '使用分流表单的答案预填这些预约字段。',
   'Answer mapping {number}': '答案映射 {number}',
   'Add an answer mapping': '添加答案映射',
-  'Remove answer mapping {number}': '移除答案映射 {number}',
+  'Remove mapping {number}': '移除映射 {number}',
   'Remove mapping': '移除映射',
   'Choose a routing question': '选择分流表单问题',
   'Previous routing question unavailable': '原分流表单问题已不可用',

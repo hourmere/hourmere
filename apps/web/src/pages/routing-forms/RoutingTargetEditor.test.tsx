@@ -175,7 +175,9 @@ describe('Routing destinations and mappings', () => {
       ...event,
       mappings: [repaired, { questionId: contact.id, destination: { kind: 'inviteeEmail' } }],
     })
-    await user.click(second.getByRole('button', { name: 'Remove answer mapping 2' }))
+    const remove = second.getByRole('button', { name: 'Remove mapping 2' })
+    expect(remove.textContent).toBe('Remove mapping')
+    await user.click(remove)
     expect(changes).toHaveBeenLastCalledWith({ ...event, mappings: [repaired] })
   })
 

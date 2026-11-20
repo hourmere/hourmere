@@ -2610,7 +2610,7 @@ export const admin = {
     'Use routing answers to prefill these booking fields.',
   'Answer mapping {number}': 'Answer mapping {number}',
   'Add an answer mapping': 'Add an answer mapping',
-  'Remove answer mapping {number}': 'Remove answer mapping {number}',
+  'Remove mapping {number}': 'Remove mapping {number}',
   'Remove mapping': 'Remove mapping',
   'Choose a routing question': 'Choose a routing question',
   'Previous routing question unavailable': 'Previous routing question unavailable',

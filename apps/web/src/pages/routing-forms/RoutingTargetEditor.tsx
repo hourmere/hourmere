@@ -499,7 +499,7 @@ function MappingRow({
         <button
           type="button"
           className="button button-small"
-          aria-label={t('Remove answer mapping {number}', { number })}
+          aria-label={t('Remove mapping {number}', { number })}
           onClick={onRemove}
         >
           {t('Remove mapping')}
