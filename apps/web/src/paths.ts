@@ -17,6 +17,8 @@ export const PATHS = {
   newMeetingPoll: `${APP_BASE}/meeting-polls/new`,
   routingForms: `${APP_BASE}/routing-forms`,
   newRoutingForm: `${APP_BASE}/routing-forms/new`,
+  workflows: `${APP_BASE}/workflows`,
+  newWorkflow: `${APP_BASE}/workflows/new`,
   teamBookings: `${APP_BASE}/team/bookings`,
   analytics: `${APP_BASE}/analytics`,
   conferences: `${APP_BASE}/conferences`,
@@ -32,6 +34,9 @@ export const PATHS = {
 export const eventTypePath = (id: string) => `${PATHS.eventTypes}/${encodeURIComponent(id)}`
 export const schedulePath = (id: string) => `${PATHS.availability}/${encodeURIComponent(id)}`
 export const bookingPath = (id: string) => `${PATHS.bookings}/${encodeURIComponent(id)}`
+export const workflowEditPath = (id: string) => `${PATHS.workflows}/${encodeURIComponent(id)}/edit`
+export const workflowRunHistoryPath = (id: string) =>
+  `${PATHS.workflows}/${encodeURIComponent(id)}/runs`
 export const meetingPollPath = (id: string, organizationId: string) =>
   `${PATHS.meetingPolls}/${encodeURIComponent(id)}?${new URLSearchParams({ organizationId })}`
 export const routingFormPath = (id: string, organizationId: string) =>

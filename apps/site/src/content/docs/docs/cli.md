@@ -110,16 +110,18 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `webhooks delete` | `delete_webhook` | `id`. Requires `full` and `--yes`. |
 | `webhooks rotate-secret` | `rotate_webhook_secret` | `id`. Requires `full` and either `--output FILE` or `--json`. |
 | `webhooks deliveries` | `list_webhook_deliveries` | `id` and optional `after`. Requires `read` or `full`. |
-| `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; not available yet (`workflows_disabled`) |
-| `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; not available yet (`workflows_disabled`) |
-| `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full`; not available yet (`workflows_disabled`) |
+| `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; hard-off (`workflows_disabled`) |
+| `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; hard-off (`workflows_disabled`) |
+| `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full`; hard-off (`workflows_disabled`) |
 | `workflows preview` | `preview_workflow` | `owner`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`, synthetic `example`. Requires `full`. Returns `workflows_disabled` while hard-off. |
-| `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; not available yet (`workflows_disabled`) |
-| `workflows get` | `get_workflow` | `id`; requires `read` or `full`; not available yet (`workflows_disabled`) |
+| `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; hard-off (`workflows_disabled`) |
+| `workflows get` | `get_workflow` | `id`; requires `read` or `full`; hard-off (`workflows_disabled`) |
 | `workflows runs` | `list_workflow_runs` | `id`; optional `limit` (1–100, default 50) and `cursor`; requires `read` or `full`; returns `workflows_disabled` while hard-off. |
 
-`workflows list`, `workflows get` and `workflows runs` read booking workflows. While the
-feature is hard-off, they exit `1` with `workflows_disabled` on stderr
+`workflows list`, `workflows get` and `workflows runs` read booking workflows. See the
+[workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide)
+for the shared preview example and lifecycle rules. While the feature is hard-off, these
+commands exit `1` with `workflows_disabled` on stderr
 (a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
 key acts as: your personal workflows from a personal key, or a team's from a team key held by a
 current owner or admin.

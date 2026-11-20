@@ -743,6 +743,7 @@ export function createApp({
     }
     const sso =
       ssoTeamReads &&
+      !access?.suspended &&
       (await readSsoMe(
         ssoTeamReads,
         principal,

@@ -12,7 +12,7 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
-import { isUuid } from './organizations.ts'
+import { isMember, isUuid } from './organizations.ts'
 import type { ScimClaimCompletion, ScimClaimFinish } from './scim-claims.ts'
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import {
@@ -788,14 +788,8 @@ export function createTeamRolePolicy(
             const expected = ctx.request?.headers.get('x-expected-organization-id') ?? null
             if (expected !== null) {
               const activeMember =
-                live.activeOrganizationId && isUuid(live.activeOrganizationId)
-                  ? await trx
-                      .selectFrom('auth.member')
-                      .select('id')
-                      .where('organizationId', '=', live.activeOrganizationId)
-                      .where('userId', '=', actor.user.id)
-                      .executeTakeFirst()
-                  : undefined
+                live.activeOrganizationId &&
+                (await isMember(trx, actor.user.id, live.activeOrganizationId))
               const personal = activeMember
                 ? undefined
                 : await trx

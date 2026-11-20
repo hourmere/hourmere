@@ -1,3 +1,4 @@
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -37,6 +38,7 @@ export async function resolveBookingOrganization(
     .where('booking.id', '=', bookingId)
     .where('user.id', '=', principal.user.id)
     .where('user.emailVerified', '=', true)
+    .where((eb) => eb.not(scimSuspended(eb.ref('booking.organization_id'), eb.ref('user.id'))))
     .where('session.id', '=', principal.sessionId)
     .where('session.expiresAt', '>', sql<Date>`clock_timestamp()`)
     .executeTakeFirst()

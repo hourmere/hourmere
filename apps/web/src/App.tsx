@@ -16,10 +16,12 @@ import {
   Route,
   useLocation,
   useNavigate,
+  useOutletContext,
   useRoutes,
 } from 'react-router'
 import { api } from './api/client.ts'
 import { AdminLoading } from './components/AdminLoading.tsx'
+import { PageSkeleton } from './components/PageSkeleton.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
 import { InterfaceScope, MemoryLanguage, useI18n } from './i18n/runtime.tsx'
@@ -64,6 +66,9 @@ import {
   TeamBookingPage,
   TeamBookingsPage,
   TroubleshootPage,
+  WorkflowEditorPage,
+  WorkflowRunHistoryPage,
+  WorkflowsPage,
 } from './lazy-pages.tsx'
 import { BookingPanelContext } from './pages/bookings/BookingPanel.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
@@ -107,6 +112,10 @@ export const appRoutes = createRoutesFromElements(
             <Route path="routing-forms/new" element={<NewRoutingFormPage />} />
             <Route path="routing-forms/:id" element={<EditRoutingFormPage />} />
           </Route>
+          <Route path={PATHS.workflows} element={<WorkflowRoute />} />
+          <Route path={PATHS.newWorkflow} element={<WorkflowRoute view="editor" />} />
+          <Route path={`${PATHS.workflows}/:id/edit`} element={<WorkflowRoute view="editor" />} />
+          <Route path={`${PATHS.workflows}/:id/runs`} element={<WorkflowRoute view="history" />} />
           <Route path="team/bookings" element={<TeamBookingsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="bookings/:id" element={<BookingDetailPage />} />
@@ -145,6 +154,19 @@ export const appRoutes = createRoutesFromElements(
     <Route path="*" element={<NotFoundPage />} />
   </>,
 )
+
+function WorkflowRoute({ view = 'list' }: { view?: 'list' | 'editor' | 'history' }) {
+  const { workflowsEnabled, followUpHostNotesEnabled } = useOutletContext<{
+    workflowsEnabled: boolean | undefined
+    followUpHostNotesEnabled: boolean
+  }>()
+  if (workflowsEnabled === undefined) return <PageSkeleton />
+  if (!workflowsEnabled) return <AppNotFoundPage />
+  if (view === 'editor')
+    return <WorkflowEditorPage followUpHostNotesEnabled={followUpHostNotesEnabled} />
+  if (view === 'history') return <WorkflowRunHistoryPage />
+  return <WorkflowsPage />
+}
 
 const routingFormRoutes = createRoutesFromElements(
   <>

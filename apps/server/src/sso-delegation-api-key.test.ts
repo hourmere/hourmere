@@ -2,7 +2,9 @@ import { randomBytes } from 'node:crypto'
 import {
   createAuth,
   createAuthPool,
+  createBrowserSession,
   createCallerResolver,
+  ensurePersonalOrganization,
   type SsoDelegationStatus,
   ssoDelegationStatus,
 } from '@hourmere/auth'
@@ -11,6 +13,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { Kysely, PostgresDialect, sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { suspendScimMember } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
   bindingValues,
   type IdentityFixture,
@@ -18,6 +21,8 @@ import {
 } from '../../../packages/db/src/sso-identity-fixtures.ts'
 import { insert } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
+import { mcpEndpoint } from './mcp/endpoint.ts'
+import { whoamiTool } from './mcp/whoami.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -73,16 +78,17 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db, ssoCapabilities: capabilities }),
       publicUrl,
+      mcp: mcpEndpoint({ tools: [whoamiTool] }),
       ...(enforce && { ssoTeamReads: { db, capabilities } }),
     })
   }
 
-  async function key() {
+  async function key(organizationId = fixture.team, userId = fixture.member) {
     const { id, key } = await auth.api.createApiKey({
       body: {
-        userId: fixture.member,
+        userId,
         name: 'Synthetic delegation key',
-        metadata: { organizationId: fixture.team, scope: 'read' },
+        metadata: { organizationId, scope: 'read' },
       },
     })
     return { id, headers: { authorization: `Bearer ${key}` } }
@@ -90,6 +96,22 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
 
   const me = (app: ReturnType<typeof instance>, headers: Record<string, string>) =>
     app.request(new URL('/api/v1/me', publicUrl), { headers, redirect: 'manual' })
+
+  const mcpWhoami = (app: ReturnType<typeof instance>, headers: Record<string, string>) =>
+    app.request('/mcp', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        accept: 'application/json, text/event-stream',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'whoami', arguments: {} },
+      }),
+    })
 
   async function expectRefused(response: Response) {
     expect(response.status).toBe(403)
@@ -171,6 +193,76 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
     expect(await outcome(instance())).toEqual(previous)
     await policy(false)
     expect(await outcome(instance())).toEqual(previous)
+
+    statements.length = 0
+    const mcp = await mcpWhoami(instance(), credential.headers)
+    expect(mcp.status).toBe(200)
+    expect(await mcp.text()).toContain(fixture.team)
+    expect(statements).toHaveLength(2)
+  })
+
+  it('keeps browser session authorization within its existing membership and team policy queries', async () => {
+    const personal = await ensurePersonalOrganization(db, fixture.member)
+    const app = instance(disabled)
+    for (const [organizationId, queryCount] of [
+      [fixture.team, 2],
+      [personal, 1],
+    ] as const) {
+      const session = await db.transaction().execute((trx) =>
+        createBrowserSession(
+          trx,
+          { publicUrl, secret },
+          {
+            userId: fixture.member,
+            organizationId,
+            now: new Date().toISOString(),
+            headers: new Headers(),
+          },
+        ),
+      )
+      statements.length = 0
+      const response = await me(app, { cookie: session.cookie.split(';')[0] as string })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ organization: { id: organizationId } })
+      expect(statements).toHaveLength(queryCount)
+    }
+  })
+
+  it.each([
+    { kind: 'ordinary', enforced: false },
+    { kind: 'delegated', enforced: true },
+  ])('refuses a suspended team for an $kind API key in REST and MCP', async ({ enforced }) => {
+    const credential = await key()
+    const personal = await ensurePersonalOrganization(db, fixture.member)
+    await joinOtherTeam()
+    const personalKey = await key(personal)
+    const otherTeamKey = await key(fixture.otherTeam)
+    const otherMemberKey = await key(fixture.team, fixture.owner)
+    const app = instance(enforced ? enabled : disabled)
+    if (enforced) {
+      await policy()
+      await bind(credential.id)
+    }
+    async function expectAccess(headers: Record<string, string>, organizationId: string) {
+      const rest = await me(app, headers)
+      expect(rest.status).toBe(200)
+      expect(await rest.json()).toMatchObject({ organization: { id: organizationId } })
+      const mcp = await mcpWhoami(app, headers)
+      expect(mcp.status).toBe(200)
+      expect(await mcp.text()).toContain(organizationId)
+    }
+
+    await expectAccess(credential.headers, fixture.team)
+    await suspendScimMember(db, fixture.team, fixture.member)
+    const rest = await me(app, credential.headers)
+    expect(rest.status).toBe(401)
+    expect(await rest.json()).toEqual({ error: 'unauthorized' })
+    const mcp = await mcpWhoami(app, credential.headers)
+    expect(mcp.status).toBe(401)
+    expect(await mcp.json()).toMatchObject({ error: 'unauthorized' })
+    await expectAccess(personalKey.headers, personal)
+    await expectAccess(otherTeamKey.headers, fixture.otherTeam)
+    if (!enforced) await expectAccess(otherMemberKey.headers, fixture.team)
   })
 
   it('denies an unbound key on a seeded enforced team even with both protocols off', async () => {

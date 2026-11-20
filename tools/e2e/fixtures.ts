@@ -968,6 +968,7 @@ export const test = base.extend<{
             })
             .execute()
           auditState = {
+            userId: host.userId,
             organizationId: host.organizationId,
             teamOrganizationId: team,
             eventTypeId,

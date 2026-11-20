@@ -1,8 +1,6 @@
 import { type MouseEvent, Suspense, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useOutletContext } from 'react-router'
 import { errorMessage } from '../api/errors.ts'
-import { loadInstance } from '../api/resources.ts'
-import { useLoad } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { AppNotFoundPage } from '../pages/NotFound.tsx'
@@ -11,7 +9,7 @@ import { useMe, useSession } from '../session.tsx'
 import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
 import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
 import { JoinedTeamNotice } from './JoinedTeamNotice.tsx'
-import { LegalLinks } from './LegalLinks.tsx'
+import { LegalLinks, useInstance } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
 import { PageSkeleton } from './PageSkeleton.tsx'
 import { SpaceSwitcher } from './SpaceSwitcher.tsx'
@@ -21,6 +19,7 @@ export const NAV_ITEMS = [
   { to: PATHS.availability, label: 'Availability' },
   { to: PATHS.bookings, label: 'Bookings' },
   { to: PATHS.meetingPolls, label: 'Meeting polls' },
+  { to: PATHS.workflows, label: 'Workflows' },
   { to: PATHS.teamBookings, label: 'Team bookings' },
   { to: PATHS.analytics, label: 'Booking activity' },
   { to: PATHS.conferences, label: 'Conference accounts' },
@@ -34,7 +33,7 @@ export const NAV_ITEMS = [
 const ROUTING_FORM_NAV = { to: PATHS.routingForms, label: 'Routing forms' } as const
 
 const WIDE_PAGES: readonly string[] = NAV_ITEMS.map(({ to }) => to).filter(
-  (to) => to !== PATHS.settings,
+  (to) => to !== PATHS.settings && to !== PATHS.workflows,
 )
 
 function keepActiveVisible(list: HTMLUListElement) {
@@ -60,7 +59,8 @@ export function AppShell() {
 
 /** Use the shell's instance discovery, before mounting anything that can request a form. */
 export function RequireRoutingForms() {
-  const enabled = useOutletContext<boolean | undefined>()
+  const enabled = useOutletContext<{ routingFormsEnabled?: boolean } | undefined>()
+    ?.routingFormsEnabled
   if (enabled === undefined) return <PageSkeleton />
   return enabled === true ? <Outlet /> : <AppNotFoundPage />
 }
@@ -70,16 +70,21 @@ function Shell() {
   const teamAccess = useTeamManagementAccess()
 
   const me = useMe()
-  const [instance] = useLoad(loadInstance)
+  // The shell already discovers instance policies. Use the same response for navigation
+  // and the route gates so disabled and older instances make no additional request.
+  const instance = useInstance()
+  const workflowsEnabled =
+    instance.status === 'loading'
+      ? undefined
+      : instance.status === 'ready' && instance.data?.workflowsEnabled === true
   const routingFormsEnabled =
     instance.status === 'loading'
       ? undefined
-      : instance.status === 'ready' && instance.data.routingFormsEnabled === true
+      : instance.status === 'ready' && instance.data?.routingFormsEnabled === true
   const managesTeam = teamAccess.status === 'ready' && teamAccess.role !== null
-  const showRoutingForms =
-    routingFormsEnabled === true &&
-    me.principal.kind === 'session' &&
-    (me.organization.personal || managesTeam)
+  const managesSpace = me.principal.kind === 'session' && (me.organization.personal || managesTeam)
+  const showWorkflows = workflowsEnabled === true && managesSpace
+  const showRoutingForms = routingFormsEnabled === true && managesSpace
   const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<UiText | null>(null)
   const [spaceError, setSpaceError] = useState<UiText | null>(null)
@@ -107,7 +112,7 @@ function Shell() {
   }, [pathname, locale])
 
   // Fade only the edges that hide more navigation, including after zoom or a locale change.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: observe the new link when instance discovery changes the navigation
+  // biome-ignore lint/correctness/useExhaustiveDependencies: instance discovery can add navigation items after mount
   useEffect(() => {
     const list = nav.current?.querySelector('ul')
     if (!list) return
@@ -135,7 +140,7 @@ function Shell() {
       window.removeEventListener('resize', updateLayout)
       observer?.disconnect()
     }
-  }, [showRoutingForms])
+  }, [showWorkflows, showRoutingForms])
 
   // A notice belongs to one page: drop it once the person is elsewhere, also when it arrives
   // after they left. (Not on the page starting over in place, which is what it explains.)
@@ -216,6 +221,7 @@ function Shell() {
               .filter(({ to }) => {
                 if (to === PATHS.teamBookings) return managesTeam
                 if (to === PATHS.meetingPolls) return me.organization.personal || managesTeam
+                if (to === PATHS.workflows) return showWorkflows
                 if (to === PATHS.auditLog)
                   return (
                     teamAccess.status === 'ready' &&
@@ -246,7 +252,14 @@ function Shell() {
             </div>
           )}
           <Suspense fallback={<PageSkeleton />}>
-            <Outlet context={routingFormsEnabled} />
+            <Outlet
+              context={{
+                workflowsEnabled,
+                routingFormsEnabled,
+                followUpHostNotesEnabled:
+                  instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
+              }}
+            />
           </Suspense>
         </main>
       </div>

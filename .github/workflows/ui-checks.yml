@@ -59,7 +59,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     services:
       postgres:
         image: postgres:18-alpine
@@ -88,10 +88,10 @@ jobs:
       - name: Run layout measurement
         env:
           HOURMERE_UI_FAIL_ON_EXIT: "1"
-        run: node tools/e2e/run-audit.ts layout --shard=${{ matrix.shard }}/4
+        run: node tools/e2e/run-audit.ts layout --shard=${{ matrix.shard }}/8
       - name: Summarize measurements
         if: always()
-        run: node tools/e2e/reports-summary.ts --suite=layout --shard=${{ matrix.shard }}/4
+        run: node tools/e2e/reports-summary.ts --suite=layout --shard=${{ matrix.shard }}/8
       - name: Upload sanitized measurements
         if: always()
         continue-on-error: true

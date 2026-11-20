@@ -1,0 +1,41 @@
+.workflow-editor,
+.workflow-fields {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.workflow-fields > .form-actions {
+  align-items: end;
+}
+
+.workflow-fields > .form-actions > .field {
+  min-width: 0;
+}
+
+.workflow-fields select {
+  min-width: 0;
+  width: 100%;
+}
+
+.workflow-fields legend {
+  margin-bottom: var(--space-2);
+  font-weight: 600;
+}
+
+.workflow-translation,
+.workflow-preview-email {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.workflow-preview-email > h3,
+.workflow-fields > h2,
+.workflow-fields > p {
+  margin: 0;
+}
+
+.workflow-preview-text {
+  white-space: pre-wrap;
+}
