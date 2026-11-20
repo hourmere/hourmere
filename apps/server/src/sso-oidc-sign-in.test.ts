@@ -12,7 +12,7 @@ import {
 import { decryptCredential } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import type { MailMessage } from '@hourmere/mail'
+import type { Mailer, MailMessage } from '@hourmere/mail'
 import type { SsoRequest, SsoResponse } from '@hourmere/outbound/sso'
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from 'jose'
 import { sql } from 'kysely'
@@ -20,6 +20,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import {
   at,
   claimedDomainValues,
+  oidcProviderValues,
   type SsoFixture,
   samlProviderValues,
   ssoFixture,
@@ -27,7 +28,9 @@ import {
 import { createApp } from './app.ts'
 import { ssoRoutes } from './routes/sso.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
+import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { sealSsoProviderConfiguration, ssoProviderConfigurationAad } from './sso-configuration.ts'
+import { ssoLinkRemovalEmailJob } from './sso-link-recovery.ts'
 import {
   databaseClock,
   deliverMailboxProof,
@@ -47,6 +50,8 @@ const acceptInvitationPath = '/api/auth/organization/accept-invitation'
 const providersPath = '/api/v1/team/sso/providers'
 const providerTestPath = (providerId: string) => `${providersPath}/${providerId}/test`
 const linkPath = (providerId: string) => `${providersPath}/${providerId}/link`
+const removeLinkPath = (providerId: string, linkId: string) =>
+  `${providersPath}/${providerId}/links/${linkId}`
 const providerTestLocation = '/app/settings'
 const refusedLocation = '/sign-in?error=unable_to_create_session'
 const bindingCookie = '__Host-hourmere.sso_binding'
@@ -181,6 +186,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   let idp: ReturnType<typeof fakeIdp>
   let app: ReturnType<typeof createApp>
   let mailboxJobs: MailboxProofEmailPayload[]
+  let recoveryJobs: { name: string; payload: unknown }[]
 
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'oidc_sign_in' })
@@ -227,6 +233,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       ),
     )
     mailboxJobs = []
+    recoveryJobs = []
     app = instance()
   })
 
@@ -235,11 +242,13 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expiresIn,
     signupPolicy = signup,
     scimClaims = false,
+    failRecoveryNotification = false,
   }: {
     enabled?: boolean
     expiresIn?: number
     signupPolicy?: SignupPolicy
     scimClaims?: boolean
+    failRecoveryNotification?: boolean
   } = {}) {
     const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     const authentication = scimClaims ? scimAuth : auth
@@ -250,6 +259,19 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       publicUrl,
       routes: [
         ssoRoutes({ db, capabilities }),
+        ssoIdentityRecoveryRoutes({
+          db,
+          publicUrl,
+          capabilities,
+          notificationQueue: {
+            async enqueue(name, payload, options) {
+              expect(options.transaction).toMatchObject({ isTransaction: true })
+              if (failRecoveryNotification) return null
+              recoveryJobs.push({ name, payload })
+              return 'job'
+            },
+          },
+        }),
         ssoDraftRoutes({
           db,
           publicUrl,
@@ -711,6 +733,104 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   const requestLinkProof = async (providerId: string, cookie: string) =>
     freshProofChallenge(await linkRequest(providerId, cookie), cookie)
 
+  function recoveryRequest(
+    path: string,
+    cookie: string,
+    body: Record<string, unknown>,
+    {
+      request = app,
+      headers = {},
+    }: { request?: typeof app; headers?: Record<string, string> } = {},
+  ) {
+    return request.request(new URL(path, publicUrl), {
+      method: 'DELETE',
+      headers: {
+        cookie,
+        origin: publicUrl,
+        'content-type': 'application/json',
+        'X-Expected-Organization-Id': fixture.team,
+        ...headers,
+      },
+      body: JSON.stringify({ expectedLinkGeneration: 1, ...body }),
+    })
+  }
+
+  async function recoveryProof(path: string, cookie: string, body: Record<string, unknown> = {}) {
+    const challenge = await freshProofChallenge(await recoveryRequest(path, cookie, body), cookie)
+    await proveMailbox(challenge)
+    return challenge
+  }
+
+  function storedLink(id: string) {
+    return db.selectFrom('sso_identity_links').selectAll().where('id', '=', id).executeTakeFirst()
+  }
+
+  async function recoveryTarget(
+    f: { providerId: string; claim: { name: string } },
+    userId: string,
+    subject = `Recovery subject ${randomUUID()}`,
+  ) {
+    const email = `${userId}@${f.claim.name}`
+    await db.updateTable('auth.user').set({ email }).where('id', '=', userId).execute()
+    const link = await db
+      .insertInto('sso_identity_links')
+      .values({
+        organization_id: fixture.team,
+        provider_id: f.providerId,
+        user_id: userId,
+        issuer,
+        subject,
+        proven_email: email,
+        email_proven_at: at(-60),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    return { link, claims: { sub: subject, email } }
+  }
+
+  async function createRecoveryProofs(
+    f: { providerId: string; claim: { id: string; generation: number } },
+    target: Awaited<ReturnType<typeof recoveryTarget>>,
+    memberId: string,
+  ) {
+    const attempt = await start(f.providerId)
+    const result = await callback(attempt, idp.issue(attempt, target.claims))
+    expect(result.status).toBe(302)
+    expect(result.headers.get('location')).toBe('/app/bookings?tab=next#recent')
+    const issued = await db
+      .selectFrom('sso_browser_proofs')
+      .selectAll()
+      .where('link_id', '=', target.link.id)
+      .executeTakeFirstOrThrow()
+    const grant = await db
+      .insertInto('mcp_oauth_grants')
+      .values({
+        user_id: target.link.user_id,
+        organization_id: fixture.team,
+        client_id: `synthetic-client-${randomUUID()}`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const delegated = await db
+      .insertInto('sso_delegation_bindings')
+      .values({
+        organization_id: fixture.team,
+        provider_id: f.providerId,
+        member_id: memberId,
+        user_id: target.link.user_id,
+        oauth_grant_id: grant.id,
+        link_id: target.link.id,
+        link_generation: target.link.generation,
+        trust_generation: 1,
+        domain_id: f.claim.id,
+        domain_generation: f.claim.generation,
+        expires_at: at(300),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    return { issued, delegated }
+  }
+
   async function startLink(providerId: string, challenge: MailboxAttempt): Promise<Attempt> {
     const response = await linkRequest(providerId, challenge.cookie, {
       proofAttemptId: challenge.id,
@@ -802,8 +922,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
 
   it('hard-disables OIDC auth-protocol endpoints before looking up the request', async () => {
     const off = instance({ enabled: false })
-    const { providerId } = await linked()
-    for (const provider of [providerId, randomUUID(), 'invalid']) {
+    const { providerId, link } = await linked()
+    for (const [provider, linkId] of [
+      [providerId, link.id],
+      [randomUUID(), randomUUID()],
+      ['invalid', 'invalid'],
+    ] as const) {
       const responses = [
         await post({ providerId: provider, intent: 'sign_in' }, off),
         await off.request(new URL(`${callbackPath(provider)}?code=ignored`, publicUrl)),
@@ -814,10 +938,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           { origin: '' },
           providerTestPath(provider),
         ),
+        await recoveryRequest(linkPath(provider), '', { linkId }, { request: off }),
+        await recoveryRequest(removeLinkPath(provider, linkId), '', {}, { request: off }),
       ]
       for (const response of responses) {
         expect(response.status).toBe(404)
-        expect(await response.json()).toEqual({ error: 'sso_disabled' })
+        expect(await response.text()).toBe('{"error":"sso_disabled"}')
         expect(response.headers.getSetCookie()).toEqual([])
       }
     }
@@ -830,6 +956,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         .execute(),
     ).toEqual([])
     expect(await audit()).toEqual([])
+    expect(recoveryJobs).toEqual([])
   })
 
   it('rejects provider tests without the expected team, exact origin and authorized browser role', async () => {
@@ -2555,6 +2682,413 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         .where('id', '=', other.id)
         .executeTakeFirst(),
     ).toEqual(other)
+  })
+
+  it('requires independent mailbox proof from the exact browser and session to unlink only the caller', async () => {
+    const f = await linked()
+    const other = await recoveryTarget(f, fixture.admin)
+    const actor = await browserSession(fixture.member)
+    const otherSession = await browserSession(fixture.member)
+    const path = linkPath(f.providerId)
+    const input = { linkId: f.link.id }
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: true })
+      .execute()
+
+    const wrongLink = await recoveryRequest(path, actor.cookie, { linkId: other.link.id })
+    expect(wrongLink.status).toBe(404)
+    expect(await wrongLink.json()).toEqual({ error: 'sso_not_found' })
+    for (const response of [
+      await recoveryRequest(path, actor.cookie, input, {
+        headers: { origin: 'https://different.example.test' },
+      }),
+      await recoveryRequest(path, actor.cookie, input, {
+        headers: { authorization: 'Bearer synthetic' },
+      }),
+    ]) {
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: 'team_management_access_denied' })
+    }
+
+    const challenge = await freshProofChallenge(
+      await recoveryRequest(path, actor.cookie, input),
+      actor.cookie,
+    )
+    const retry = { ...input, proofAttemptId: challenge.id }
+    expect(
+      await freshProofChallenge(
+        await recoveryRequest(path, challenge.cookie, retry),
+        challenge.cookie,
+      ),
+    ).toEqual(challenge)
+    const { message, token } = await mailboxMessage(challenge)
+    expect(message.to).toBe(f.email)
+    const binding = challenge.cookie
+      .split('; ')
+      .find((part) => part.startsWith(`${bindingCookie}=`))
+    expect(binding).toBeDefined()
+    const wrongSessionCookie = `${otherSession.cookie}; ${binding}`
+    const wrongConsume = await consumeMailbox({ ...challenge, cookie: wrongSessionCookie }, token)
+    expect(wrongConsume.status).toBe(400)
+    expect(await wrongConsume.json()).toEqual({ error: 'sso_mailbox_proof_invalid' })
+    expect((await consumeMailbox(challenge, token)).status).toBe(200)
+    const wrongBrowserCookie = `${actor.cookie}; ${bindingCookie}=${randomBytes(32).toString('base64url')}`
+    for (const cookie of [wrongSessionCookie, wrongBrowserCookie])
+      expect(
+        (await freshProofChallenge(await recoveryRequest(path, cookie, retry), cookie)).id,
+      ).not.toBe(challenge.id)
+    expect(await storedLink(f.link.id)).toEqual(f.link)
+    expect(recoveryJobs).toEqual([])
+    expect((await attemptRow(challenge)).consumed_at).toBeNull()
+
+    const removed = await recoveryRequest(path, challenge.cookie, retry)
+    expect(removed.status).toBe(204)
+    expect(await removed.text()).toBe('')
+    expect(await storedLink(f.link.id)).toEqual({
+      ...f.link,
+      generation: f.link.generation + 1,
+      retired_at: expect.any(Date),
+    })
+    expect(await storedLink(other.link.id)).toEqual(other.link)
+    expect((await attemptRow(challenge)).consumed_at).toBeInstanceOf(Date)
+    expect(recoveryJobs).toEqual([
+      {
+        name: 'sso-link-removal-email',
+        payload: {
+          userId: fixture.member,
+          language: expect.any(String),
+        },
+      },
+    ])
+    expect(await audit()).toEqual([
+      expect.objectContaining({
+        action: 'sso_link.unlinked',
+        actor_id: fixture.member,
+        credential_id: actor.id,
+        target_id: f.link.id,
+      }),
+    ])
+    expect(idp.send).not.toHaveBeenCalled()
+  })
+
+  it('keeps administrator identity removal inside the active team and provider', async () => {
+    const local = await linked()
+    const secondProvider = await provider()
+    const other = await db
+      .insertInto('sso_providers')
+      .values({ ...oidcProviderValues(fixture.otherTeam), enabled: true })
+      .returning(['id', 'issuer'])
+      .executeTakeFirstOrThrow()
+    const foreign = await db
+      .insertInto('sso_identity_links')
+      .values({
+        organization_id: fixture.otherTeam,
+        provider_id: other.id,
+        user_id: fixture.otherOwner,
+        issuer: other.issuer,
+        subject: 'Foreign subject',
+        proven_email: 'foreign@example.test',
+        email_proven_at: at(-60),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    // Membership in both teams still does not let an administrator cross the active-team boundary.
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: fixture.team,
+        userId: fixture.otherOwner,
+        role: 'member',
+        createdAt: at(0),
+      })
+      .execute()
+    const actor = await browserSession(fixture.owner)
+    const foreignActor = await browserSession(fixture.otherOwner, fixture.otherTeam)
+    for (const response of [
+      await recoveryRequest(removeLinkPath(other.id, foreign.id), actor.cookie, {}),
+      await recoveryRequest(removeLinkPath(local.providerId, foreign.id), actor.cookie, {}),
+      await recoveryRequest(
+        removeLinkPath(secondProvider.providerId, local.link.id),
+        actor.cookie,
+        {},
+      ),
+      await recoveryRequest(removeLinkPath(local.providerId, randomUUID()), actor.cookie, {}),
+      await recoveryRequest(
+        removeLinkPath(local.providerId, local.link.id),
+        foreignActor.cookie,
+        {},
+        {
+          headers: { 'X-Expected-Organization-Id': fixture.otherTeam },
+        },
+      ),
+    ]) {
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: 'sso_not_found' })
+    }
+    expect(await storedLink(foreign.id)).toEqual(foreign)
+    expect(await storedLink(local.link.id)).toEqual(local.link)
+    expect(await audit()).toEqual([])
+    expect(recoveryJobs).toEqual([])
+  })
+
+  it('allows admins to retire admins and members while an owner link needs a different owner', async () => {
+    const f = await linked()
+    const owner = await recoveryTarget(f, fixture.coOwner)
+    const adminTarget = await recoveryTarget(f, fixture.admin)
+    const peerAdmin = await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('id', '=', fixture.memberMember)
+      .returning('userId')
+      .executeTakeFirstOrThrow()
+    const admin = await browserSession(peerAdmin.userId)
+    const adminAsTarget = await browserSession(fixture.admin)
+    const ownerAsTarget = await browserSession(fixture.coOwner)
+    const differentOwner = await browserSession(fixture.owner)
+    const ownerPath = removeLinkPath(f.providerId, owner.link.id)
+    const adminPath = removeLinkPath(f.providerId, adminTarget.link.id)
+    for (const response of [
+      await recoveryRequest(ownerPath, admin.cookie, {}),
+      await recoveryRequest(ownerPath, ownerAsTarget.cookie, {}),
+      await recoveryRequest(adminPath, adminAsTarget.cookie, {}),
+    ]) {
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: 'team_management_access_denied' })
+    }
+    expect(await storedLink(owner.link.id)).toEqual(owner.link)
+    expect(await storedLink(adminTarget.link.id)).toEqual(adminTarget.link)
+
+    for (const { path, session, target } of [
+      { path: adminPath, session: admin, target: adminTarget },
+      { path: ownerPath, session: differentOwner, target: owner },
+    ]) {
+      const challenge = await recoveryProof(path, session.cookie)
+      expect(
+        (await recoveryRequest(path, challenge.cookie, { proofAttemptId: challenge.id })).status,
+      ).toBe(204)
+      expect(await storedLink(target.link.id)).toMatchObject({ retired_at: expect.any(Date) })
+    }
+    const retired = await recoveryRequest(ownerPath, admin.cookie, {})
+    const unknown = await recoveryRequest(
+      removeLinkPath(f.providerId, randomUUID()),
+      admin.cookie,
+      {},
+    )
+    expect(retired.status).toBe(404)
+    expect(unknown.status).toBe(404)
+    expect(await retired.text()).toBe(await unknown.text())
+    expect(await storedLink(f.link.id)).toEqual(f.link)
+    expect(idp.send).not.toHaveBeenCalled()
+  })
+
+  it('resolves concurrent removals of the same generation once and revokes only the affected proofs', async () => {
+    const f = await provider()
+    const target = await recoveryTarget(f, fixture.member)
+    const other = await recoveryTarget(f, fixture.coOwner)
+    const targetProofs = await createRecoveryProofs(f, target, fixture.memberMember)
+    const secondSession = await start(f.providerId)
+    const secondSignIn = await callback(secondSession, idp.issue(secondSession, target.claims))
+    expect(secondSignIn.headers.get('location')).toBe('/app/bookings?tab=next#recent')
+    const otherProofs = await createRecoveryProofs(f, other, fixture.coOwnerMember)
+    const admin = await browserSession(fixture.admin)
+    const owner = await browserSession(fixture.owner)
+    const ordinary = await browserSession(fixture.member)
+    const path = removeLinkPath(f.providerId, target.link.id)
+    const denied = await recoveryRequest(path, ordinary.cookie, {})
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toMatchObject({ error: 'team_management_access_denied' })
+    const wrongGeneration = await recoveryRequest(path, admin.cookie, { expectedLinkGeneration: 2 })
+    expect(wrongGeneration.status).toBe(409)
+    expect(await wrongGeneration.json()).toEqual({ error: 'sso_configuration_changed' })
+    const before = await effects()
+    const adminChallenge = await freshProofChallenge(
+      await recoveryRequest(path, admin.cookie, {}),
+      admin.cookie,
+    )
+    const { message, token } = await mailboxMessage(adminChallenge)
+    const adminEmail = await db
+      .selectFrom('auth.user')
+      .select('email')
+      .where('id', '=', fixture.admin)
+      .executeTakeFirstOrThrow()
+    expect(message.to).toBe(adminEmail.email)
+    expect((await consumeMailbox(adminChallenge, token)).status).toBe(200)
+    const ownerChallenge = await recoveryProof(path, owner.cookie)
+    const beforeFailedWrite = await audit()
+    const failed = await recoveryRequest(
+      path,
+      adminChallenge.cookie,
+      { proofAttemptId: adminChallenge.id },
+      { request: instance({ failRecoveryNotification: true }) },
+    )
+    expect(failed.status).toBe(500)
+    expect(await storedLink(target.link.id)).toEqual(target.link)
+    expect((await attemptRow(adminChallenge)).consumed_at).toBeNull()
+    expect((await effects()).proofs).toBe(before.proofs)
+    expect(await audit()).toEqual(beforeFailedWrite)
+    expect(recoveryJobs).toEqual([])
+    const retries = [adminChallenge, ownerChallenge]
+    idp.send.mockClear()
+    const blocker = await owned.pool.connect()
+    let requests: Promise<Response>[]
+    try {
+      await blocker.query('BEGIN')
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+        fixture.team,
+      ])
+      requests = retries.map((challenge) =>
+        Promise.resolve(
+          recoveryRequest(
+            path,
+            challenge.cookie,
+            { proofAttemptId: challenge.id },
+            { request: instance() },
+          ),
+        ),
+      )
+      await waitForBlocked(rows[0]?.pid)
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    const responses = await Promise.all(requests)
+    expect(responses.map(({ status }) => status).sort()).toEqual([204, 404])
+    const winner = responses.findIndex(({ status }) => status === 204)
+    const stale = responses.find(({ status }) => status === 404) as Response
+    expect(await stale.json()).toEqual({ error: 'sso_not_found' })
+    const attempts = await Promise.all(retries.map(attemptRow))
+    expect(attempts.map(({ consumed_at }) => consumed_at instanceof Date)).toEqual([
+      winner === 0,
+      winner === 1,
+    ])
+    expect(await storedLink(target.link.id)).toMatchObject({
+      generation: target.link.generation + 1,
+      retired_at: expect.any(Date),
+    })
+    expect(await storedLink(other.link.id)).toEqual(other.link)
+    expect(
+      await db
+        .selectFrom('sso_browser_proofs')
+        .selectAll()
+        .where('provider_id', '=', f.providerId)
+        .execute(),
+    ).toEqual([otherProofs.issued])
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .selectAll()
+        .where('provider_id', '=', f.providerId)
+        .execute(),
+    ).toEqual([otherProofs.delegated])
+    expect(await effects()).toMatchObject({
+      sessions: before.sessions,
+      memberships: before.memberships,
+      proofs: String(Number(before.proofs) - 2),
+    })
+    expect(
+      await db
+        .selectFrom('auth.session')
+        .select('id')
+        .where('id', '=', targetProofs.issued.session_id)
+        .executeTakeFirst(),
+    ).toEqual({ id: targetProofs.issued.session_id })
+    expect(recoveryJobs).toEqual([
+      {
+        name: 'sso-link-removal-email',
+        payload: {
+          userId: fixture.member,
+          language: expect.any(String),
+        },
+      },
+    ])
+    const journal = (await audit()).filter(({ action }) => action === 'sso_link.unlinked')
+    expect(journal).toEqual([
+      expect.objectContaining({
+        actor_id: winner === 0 ? fixture.admin : fixture.owner,
+        credential_id: winner === 0 ? admin.id : owner.id,
+        target_id: target.link.id,
+        details: expect.objectContaining({ method: 'oidc', providerId: f.providerId }),
+      }),
+    ])
+    expect(JSON.stringify(journal)).not.toContain(target.claims.email)
+    expect(JSON.stringify(journal)).not.toContain(target.claims.sub)
+    const deliver = vi.fn<Mailer['send']>(async () => {})
+    const worker = ssoLinkRemovalEmailJob({
+      db,
+      capabilities: { ssoOidcEnabled: true, ssoSamlEnabled: false },
+      mailer: { send: deliver },
+    })
+    await worker.handler(worker.payload.parse(recoveryJobs[0]?.payload), {
+      id: 'synthetic-removal-job',
+      attempt: 1,
+      signal: new AbortController().signal,
+    })
+    expect(deliver).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ to: target.claims.email, sensitive: true }),
+      { signal: expect.any(AbortSignal) },
+    )
+    expect(idp.send).not.toHaveBeenCalled()
+  })
+
+  it('refuses administrator removal after the affected person loses their independent sign-in method', async () => {
+    const f = await linked()
+    const actor = await browserSession(fixture.admin)
+    const path = removeLinkPath(f.providerId, f.link.id)
+    const challenge = await recoveryProof(path, actor.cookie)
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', fixture.member)
+      .execute()
+
+    const refused = await recoveryRequest(path, challenge.cookie, { proofAttemptId: challenge.id })
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toEqual({ error: 'sso_recovery_required' })
+    expect(await storedLink(f.link.id)).toEqual(f.link)
+    expect((await attemptRow(challenge)).consumed_at).toBeNull()
+    expect(await audit()).toEqual([])
+    expect(recoveryJobs).toEqual([])
+    expect(idp.send).not.toHaveBeenCalled()
+  })
+
+  it('retires a conflicting identity before another member can explicitly re-link it', async () => {
+    const f = await enrollment()
+    const old = await recoveryTarget(f, fixture.admin, f.claims.sub)
+    await expectCompletionRefused(await complete(await prepareLink(f)))
+    expect(await storedLink(old.link.id)).toEqual(old.link)
+    const admin = await browserSession(fixture.owner)
+    const path = removeLinkPath(f.providerId, old.link.id)
+    const challenge = await recoveryProof(path, admin.cookie)
+    expect(
+      (await recoveryRequest(path, challenge.cookie, { proofAttemptId: challenge.id })).status,
+    ).toBe(204)
+    const retired = await storedLink(old.link.id)
+    expect(retired).toMatchObject({ generation: 2, retired_at: expect.any(Date) })
+    const liveLinks = () =>
+      db
+        .selectFrom('sso_identity_links')
+        .select(['id', 'user_id', 'subject', 'generation'])
+        .where('provider_id', '=', f.providerId)
+        .where('retired_at', 'is', null)
+        .execute()
+    expect(await liveLinks()).toEqual([])
+    const signIn = await start(f.providerId)
+    await refusal(await callback(signIn, idp.issue(signIn, f.claims)))
+    expect(await liveLinks()).toEqual([])
+    const before = await effects()
+    const result = await complete(await prepareLink(f))
+    expect(result.status).toBe(302)
+    expect(result.headers.get('location')).toBe('/app/settings')
+    expect(await liveLinks()).toEqual([
+      { id: expect.any(String), user_id: fixture.member, subject: f.claims.sub, generation: 1 },
+    ])
+    expect(await storedLink(old.link.id)).toEqual(retired)
+    expect(await effects()).toMatchObject({
+      accounts: before.accounts,
+      memberships: before.memberships,
+    })
   })
 
   it('freezes new links when the current positive domain proof has a failed recheck', async () => {

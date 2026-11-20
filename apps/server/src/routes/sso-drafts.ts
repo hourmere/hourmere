@@ -37,7 +37,7 @@ export const SsoProviderDraft = z
   })
   .openapi('SsoProviderDraft')
 const ProviderResult = z.object({ provider: SsoProviderDraft })
-const FreshProofChallenge = ErrorBody.extend({
+export const FreshProofChallenge = ErrorBody.extend({
   attemptId: z.uuid().optional(),
   proofMethods: z.array(z.string()).optional(),
   expiresAt: z.iso.datetime().optional(),

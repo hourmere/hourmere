@@ -1124,7 +1124,9 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   proved for it, never an IdP's email statement, and a new mailbox needs a later proof
   time. A link is retired rather than deleted while its team and account exist; retirement
   is permanent and takes a new link `generation`. New links are made only at an enabled
-  provider.
+  provider. OIDC link recovery locks the affected account before the organization, checks
+  the exact live link generation, and retires the link with its browser proofs and
+  delegations in the same transaction as the audit event and notification job.
 - **Attempts** are a sign-in (before any session), a provider test or self-link (a person
   and their current session), or a fresh proof for one write (a person, their session and
   the team). Each freezes its kind, team, provider and current provider revision, person,

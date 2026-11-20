@@ -202,6 +202,8 @@ describe('published API key scope tables', () => {
         'DELETE /api/v1/team/sso/providers/{providerId}',
         'POST /api/v1/team/sso/providers/{providerId}/test',
         'POST /api/v1/team/sso/providers/{providerId}/link',
+        'DELETE /api/v1/team/sso/providers/{providerId}/link',
+        'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
       ])
         expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
     }
@@ -211,6 +213,8 @@ describe('published API key scope tables', () => {
       'delete_sso_provider',
       'test_sso_provider',
       'link_sso_account',
+      'unlink_sso_account',
+      'remove_sso_identity_link',
       'create_sso_domain_challenge',
       'verify_sso_domain',
       'delete_sso_domain',

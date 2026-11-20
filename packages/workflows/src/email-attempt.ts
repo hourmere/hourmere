@@ -6,6 +6,7 @@ import { stampWorkflowEmail, type WorkflowMailLimits } from '@hourmere/notificat
 import { findPublicBookingPath, parseQuestions } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import type { NotificationSnapshot } from '@hourmere/scheduling/notification-settings'
+import { hardOffWorkflowAuditPort } from './audit.ts'
 import { coreWorkflowIntents } from './capture.ts'
 import {
   completeWorkflowEmailRun,
@@ -197,13 +198,13 @@ export async function markWorkflowEmailAttempt(
         const window = workflowRunWindow(run, now)
         if (run.lease_until <= date(now) || window === 'not_due') return 'stale'
         if (live.reason || window === 'expired') {
-          await finishWorkflowRun(trx, locked, live.reason ?? 'expired', now)
+          await finishWorkflowRun(trx, locked, live.reason ?? 'expired', now, ctx.audit)
           return live.reason ? 'stale' : 'expired'
         }
         if (recipient.next_attempt_at && recipient.next_attempt_at > date(now)) return 'waiting'
         if (recipient.state === 'skipped') {
           if (recipient.skip_reason !== 'existing_notification') return 'stale'
-          await completeWorkflowEmailRun(trx, locked, now, 'existing_notification')
+          await completeWorkflowEmailRun(trx, locked, now, ctx.audit, 'existing_notification')
           return 'existing_notification'
         }
 
@@ -238,7 +239,7 @@ export async function markWorkflowEmailAttempt(
             })
             .where('id', '=', recipientClaimId)
             .execute()
-          if (!(await completeWorkflowEmailRun(trx, locked, at, reason)))
+          if (!(await completeWorkflowEmailRun(trx, locked, at, ctx.audit, reason)))
             await releaseWorkflowRun(trx, run.id)
           return reason
         }
@@ -264,7 +265,7 @@ export async function markWorkflowEmailAttempt(
         now = ctx.now()
         if (run.lease_until <= date(now)) return 'stale'
         if (workflowRunWindow(run, now) === 'expired') {
-          await finishWorkflowRun(trx, locked, 'expired', now)
+          await finishWorkflowRun(trx, locked, 'expired', now, ctx.audit)
           return 'expired'
         }
 
@@ -304,6 +305,12 @@ export async function markWorkflowEmailAttempt(
           })
           .where('id', '=', recipientClaimId)
           .execute()
+        await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+          ...locked.auditIdentity,
+          event: 'workflow.email_attempted',
+          actor: { kind: 'background', job: 'dispatch' },
+          occurredAt: markerTime,
+        })
         return {
           message: {
             to: target.email,
@@ -377,7 +384,17 @@ export async function finishWorkflowEmailAttempt(
         finished_at: date(now),
       })
       .execute()
-    if (runIsClaimed && !(await completeWorkflowEmailRun(trx, locked, now, reason ?? undefined)))
+    if (state !== 'skipped')
+      await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+        ...locked.auditIdentity,
+        event: `workflow.email_${state}`,
+        actor: { kind: 'background', job: 'dispatch' },
+        occurredAt: now,
+      })
+    if (
+      runIsClaimed &&
+      !(await completeWorkflowEmailRun(trx, locked, now, ctx.audit, reason ?? undefined))
+    )
       await releaseWorkflowRun(trx, run.id)
     return outcome === 'known_not_sent' ? 'expired' : outcome
   })

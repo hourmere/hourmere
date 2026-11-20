@@ -12,8 +12,9 @@
 // The OIDC adapter
 // reads providers and its session transaction rechecks the link, policy and domain
 // before writing browser proof. OIDC completion uses pending attempts and updates the
-// proven mailbox on the link. Draft reads owns only
-// the provider/domain inventory and policies, behind the same hard-off gate. The provider test
+// proven mailbox on the link. Draft reads owns
+// the provider/domain inventory, policies and opaque recovery link summaries, behind the same
+// hard-off gate. The provider test
 // receipt query correlates the audit journal with the provider's current revision. The other module
 // that names the tables, apps/server/src/sso-storage-errors.ts, only recognises them in
 // database errors so that the error log omits their row details; it imports nothing and
@@ -82,11 +83,18 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_browser_proofs',
   ],
   'apps/server/src/sso-oidc-sign-in.ts': ['sso_providers'],
+  'apps/server/src/sso-link-recovery.ts': [
+    'sso_providers',
+    'sso_identity_links',
+    'sso_browser_proofs',
+    'sso_delegation_bindings',
+  ],
   'apps/server/src/sso-oidc-test-receipts.ts': ['sso_providers'],
   'apps/server/src/sso-reads.ts': [
     'sso_providers',
     'sso_provider_domains',
     'sso_domains',
+    'sso_identity_links',
     'sso_policies',
   ],
   'packages/auth/src/sso-admission-blocks.ts': [

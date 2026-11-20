@@ -169,6 +169,7 @@ import { slackDestinationRoutes } from './routes/slack-destinations.ts'
 import { ssoRoutes } from './routes/sso.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
+import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -177,6 +178,7 @@ import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
 import { SSO_DOMAIN_RECHECK_JOB, ssoDomainRecheckJob } from './sso-domain-recheck.ts'
+import { type SsoLinkRemovalQueue, ssoLinkRemovalEmailJob } from './sso-link-recovery.ts'
 import {
   type MailboxProofQueue,
   mailboxProofJobs,
@@ -226,6 +228,7 @@ export function productRoutes({
   slotSnippetsEnabled = false,
   ssoConfigurationKey,
   ssoPrivateTargets,
+  ssoLinkRemovalQueue,
   ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
   ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
@@ -257,6 +260,7 @@ export function productRoutes({
   /** Operator-managed key for encrypted provider configuration; does not enable SSO. */
   ssoConfigurationKey?: Buffer | undefined
   ssoPrivateTargets?: OidcProviderTestDeps['privateTargets']
+  ssoLinkRemovalQueue?: SsoLinkRemovalQueue | undefined
   /** In-process test injection only; no operator setting exists during hard-off. */
   ssoOidcEnabled?: boolean
   /** In-process test injection only; no operator setting exists during hard-off. */
@@ -344,6 +348,12 @@ export function productRoutes({
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
       capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
+    ssoIdentityRecoveryRoutes({
+      db,
+      publicUrl,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      notificationQueue: ssoLinkRemovalQueue,
     }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({
@@ -551,6 +561,7 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   enqueueCalendarWritebackRecovery: CalendarDeps['enqueueWritebackRecovery']
   /** The job queue SSO mailbox proof emails are enqueued on. */
   mailboxProofQueue: MailboxProofQueue
+  ssoLinkRemovalQueue?: SsoLinkRemovalQueue | undefined
 }
 
 /**
@@ -579,6 +590,7 @@ export function productionAppOptions({
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
   mailboxProofQueue,
+  ssoLinkRemovalQueue,
   recurringBookingsEnabled,
 }: ProductionAppDeps): AppDeps {
   // All configuration transports and public booking routes share the instance policy.
@@ -629,6 +641,7 @@ export function productionAppOptions({
     routes: productRoutes({
       ssoConfigurationKey,
       ssoPrivateTargets,
+      ssoLinkRemovalQueue,
       scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
       mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
       publicUrl: config.PUBLIC_URL,
@@ -1066,6 +1079,11 @@ async function start(
         signInMailMaxPerDay: config.SIGN_IN_MAIL_MAX_PER_DAY,
         mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
       }),
+      ssoLinkRemovalEmailJob({
+        db,
+        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        mailer,
+      }),
       bookingNotificationJob(notificationDeps),
       rescheduleRequestExpiryJob({
         db,
@@ -1244,6 +1262,7 @@ async function start(
             { singletonKey: connectionId, transaction: trx },
           ),
         mailboxProofQueue: jobs,
+        ssoLinkRemovalQueue: jobs,
       }),
     ).fetch
   }

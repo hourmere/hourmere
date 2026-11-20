@@ -67,6 +67,8 @@
   "mailboxProof.expiry": "Der Link ist {minutes} Minuten lang gültig und kann nur einmal verwendet werden, in dem Browser, in dem die Bestätigung angefordert wurde. Falls Sie dies nicht angefordert haben, können Sie diese E-Mail ignorieren.",
   "mailboxProof.fallback": "Falls die Schaltfläche nicht funktioniert, kopieren Sie diesen Link in Ihren Browser:",
   "mailboxProof.footer": "Sie erhalten diese E-Mail, weil Hourmere gebeten wurde, diese E-Mail-Adresse zu bestätigen.",
+  "ssoLinkRemoval.subject": "Eine Single-Sign-on-Verknüpfung wurde entfernt",
+  "ssoLinkRemoval.message": "Eine Single-Sign-on-Verknüpfung Ihres Hourmere-Kontos wurde entfernt. Sie können sich weiterhin per E-Mail anmelden. Wenn Sie diese Änderung nicht erwartet haben, wenden Sie sich an Ihre Teamadministration.",
   "teamInvitation.defaultTeam": "Ihr Team",
   "teamInvitation.defaultInviter": "Ein Teammitglied",
   "teamInvitation.subject": "Einladung zum Team {team}",

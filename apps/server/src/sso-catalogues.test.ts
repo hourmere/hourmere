@@ -155,6 +155,18 @@ const GUARDED_SSO_WRITES = [
     runtimePath: '/api/v1/team/sso/providers/:providerId/link',
     operationId: 'linkSsoAccount',
   },
+  {
+    method: 'delete',
+    path: '/api/v1/team/sso/providers/{providerId}/link',
+    runtimePath: '/api/v1/team/sso/providers/:providerId/link',
+    operationId: 'unlinkSsoAccount',
+  },
+  {
+    method: 'delete',
+    path: '/api/v1/team/sso/providers/{providerId}/links/{linkId}',
+    runtimePath: '/api/v1/team/sso/providers/:providerId/links/:linkId',
+    operationId: 'removeSsoIdentityLink',
+  },
 ] as const
 
 function expectNoUnguardedSsoRoutes(paths: string[]) {

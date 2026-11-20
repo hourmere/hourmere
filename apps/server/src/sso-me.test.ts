@@ -14,7 +14,7 @@ import {
   seeded,
   session,
 } from '../../../packages/db/src/sso-identity-fixtures.ts'
-import { at, insert } from '../../../packages/db/src/sso-storage-fixtures.ts'
+import { at, insert, oidcProviderValues } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { bindingCookieName, sha256 } from './sso-mailbox-proof.ts'
 import type { SsoMeDeps } from './sso-me.ts'
@@ -150,6 +150,15 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
       await seeded(client, 'sso_attempts', { ...attempt, created_at: at(-60), expires_at: at(-30) })
       await link(f, f.admin)
       await link(f, f.member, f.otherProvider)
+      const retiredProvider = await insert(client, 'sso_providers', {
+        ...oidcProviderValues(f.team),
+        enabled: true,
+      })
+      await link(f, f.member, retiredProvider)
+      await client.query(
+        'UPDATE sso_providers SET retired_at=clock_timestamp(), enabled=false WHERE id=$1',
+        [retiredProvider.id],
+      )
       proof = await insert(client, 'sso_browser_proofs', proofValues(f))
       await insert(client, 'sso_browser_proofs', {
         ...proofValues(f),
@@ -196,7 +205,9 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
           pending(authorization, 'authorization', f.provider.id),
           pending(completion, 'completion', f.provider.id),
         ].toSorted((a, b) => String(a.id).localeCompare(String(b.id))),
-        links: [{ id: f.memberLink.id, providerId: f.provider.id }],
+        links: [
+          { id: f.memberLink.id, providerId: f.provider.id, generation: f.memberLink.generation },
+        ],
         proofs: [
           {
             providerId: f.provider.id,

@@ -828,7 +828,7 @@ The stable domain codes are exactly:
 | `sso_configuration_changed` | 409 | An expected provider revision, `policyRevision`, domain generation, link generation or `trustGeneration` no longer matches |
 | `sso_domain_unverified` | 409 | A new link, JIT admission, provider activation or enforcement needs a domain whose verification is unexpired and whose latest recheck was positive (a failed or unknown recheck freezes them) |
 | `sso_test_required` | 409 | Activation or enforcement needs a passed test for the exact current provider revision (an owner's, for enforcement) |
-| `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), or the last recovery owner of an enforced team tries to leave, be removed or lose the owner role |
+| `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), the last recovery owner tries to leave, be removed or lose the owner role, or the account affected by a link retirement lacks a verified login mailbox |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
 | `sso_invitation_required` | 409 | The proven OIDC subject needs explicit acceptance of a current team invitation |
@@ -869,7 +869,7 @@ not administrator inventories. No first-release machine write changes SSO trust.
 With the internal OIDC capability enabled, `GET /api/v1/me` adds an optional `sso`
 object for a current member's active team session. It contains `requireSso`, enabled
 providers' IDs, display names and revisions, the caller's live links as opaque IDs
-with their provider IDs, and valid proofs for this session with their provider IDs
+with their provider IDs and generations, and valid proofs for this session with their provider IDs
 and expiry times. The `attempts` array shows pending self-link attempts that belong
 to the session and its original browser. Each reports its ID, provider ID (null
 during fresh proof), phase, mailbox proof status and expiry. Personal sessions, API
@@ -878,7 +878,7 @@ the response body stays byte-for-byte identical.
 
 内部开启 OIDC 时，`GET /api/v1/me` 为当前团队成员的活动团队会话增加可选的 `sso`
 对象。它包含是否强制 SSO、已启用提供商的标识、显示名称与版本、本人有效关联的
-不透明标识及对应提供商，以及当前会话有效证明的提供商与到期时间。`attempts`
+不透明标识、代数及对应提供商，以及当前会话有效证明的提供商与到期时间。`attempts`
 仅列出原发起浏览器与会话中待处理的自助关联尝试，并提供尝试标识、提供商标识
 （新鲜证明阶段为 null）、阶段、邮箱证明状态与到期时间。个人空间会话、API 密钥
 与 OAuth 客户端沿用原响应结构。两种协议均在代码中关闭时，响应正文保持逐字节一致。
@@ -892,14 +892,16 @@ Domain summaries expose only `id`, `name`, `generation` and `status`; failed and
 checks remain distinct. Validation status is currently `unknown`. Test status reflects
 the latest `passed` or `failed` receipt at the current revision, or `unknown` if no
 applicable receipt is retained. These reads use the audit journal without opening the
-sealed provider configuration.
+sealed provider configuration. The active team's owner/admin browser sessions also receive
+`links: [{id, generation}]` for OIDC providers, limited to current members and live links.
 `getSsoPolicy` returns `requireSso`, `admission`, `policyRevision` and `trustGeneration`;
 a team without a stored policy gets `false`, `invitation_only`, `1` and `1` respectively.
-No read creates a policy, changes trust, emits an audit event or returns identity links.
+No read creates a policy, changes trust or emits an audit event.
 
 当前草稿读取仅允许当前团队中已验证的所有者或管理员使用；API 密钥须具有 `read` 或
 `full` 范围，MCP OAuth 须具有 `mcp:tools` 权限。提供者列表按团队分页，不返回已退役
-提供者、密封配置、密钥、原始元数据或身份关联。验证状态目前为 `unknown`，测试状态
+提供者、密封配置、密钥或原始元数据。当前团队的所有者或管理员通过浏览器会话查看 OIDC
+提供者时，还可看到现有团队成员的有效关联不透明标识和代数。验证状态目前为 `unknown`，测试状态
 仅显示当前版本的最新收据。没有适用收据时，测试状态为 `unknown`。OIDC 和 SAML 仍在
 代码中保持关闭，读取返回 `sso_disabled`。
 
@@ -1051,11 +1053,23 @@ and returns redacted metadata/expiry; revoke accepts only an owned binding and n
 fresh proof, because it only withdraws authority. Existing
 key/OAuth inventory responses gain additive binding summaries for the owner's UI.
 A key/grant cannot be rebound to a different organization by this operation.
-Unlink/remove take `{expectedLinkGeneration, proofAttemptId?}` and use the exact
-provider/link scope;
-self unlink never accepts another user ID. The caller's `/me` includes own opaque link
-IDs; owner/admin provider inventory includes team-scoped opaque link IDs for explicit
-recovery selection without exposing raw subjects or mailbox capabilities.
+Both link-retirement operations take `{expectedLinkGeneration, proofAttemptId?}`.
+Self-unlink also takes `linkId` from `/me`; administrator removal takes `linkId` from
+the path. The OIDC recovery endpoints use the caller's active team membership. The ID
+and generation bind the request to the original row even if a
+replacement link starts at the same generation. Verify the affected member's request
+out of band before administrator removal. The operations return 204 on success,
+`sso_configuration_changed` for a stale live generation and `sso_not_found` for an
+already retired link. A verified current login mailbox supplies the independent
+email sign-in method, including when new sign-ups are closed. Retirement, link-specific
+proof and delegation revocation, the `sso_link.unlinked` audit event and the affected
+person's email notification job commit in one transaction. The notification goes to
+the affected account's current verified login mailbox.
+
+两种解除操作都要求关联代数。本人解除时从 `/me` 获取 `linkId` 并在请求体中提交，
+管理员解除时在路径中提交 `linkId`，并应先通过其他渠道核实成员的恢复请求。成功返回
+204。此操作撤销该关联的浏览器证明和委托，写入审计，并向受影响账户的已验证登录邮箱
+发送通知。该邮箱继续支持登录，即使实例已关闭新用户注册。
 
 **Fresh-proof retry.** For every write that needs fresh proof (see Fresh proof), after
 session, role, Origin, expected-team and strict input validation and before any
