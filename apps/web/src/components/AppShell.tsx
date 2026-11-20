@@ -8,7 +8,7 @@ import { useMe, useSession } from '../session.tsx'
 import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
 import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
 import { JoinedTeamNotice } from './JoinedTeamNotice.tsx'
-import { InstanceLegalLinks } from './LegalLinks.tsx'
+import { LegalLinks, useInstance } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
 import { PageSkeleton } from './PageSkeleton.tsx'
 import { SpaceSwitcher } from './SpaceSwitcher.tsx'
@@ -18,6 +18,7 @@ export const NAV_ITEMS = [
   { to: PATHS.availability, label: 'Availability' },
   { to: PATHS.bookings, label: 'Bookings' },
   { to: PATHS.meetingPolls, label: 'Meeting polls' },
+  { to: PATHS.workflows, label: 'Workflows' },
   { to: PATHS.teamBookings, label: 'Team bookings' },
   { to: PATHS.analytics, label: 'Booking activity' },
   { to: PATHS.conferences, label: 'Conference accounts' },
@@ -29,7 +30,7 @@ export const NAV_ITEMS = [
 ] as const
 
 const WIDE_PAGES: readonly string[] = NAV_ITEMS.map(({ to }) => to).filter(
-  (to) => to !== PATHS.settings,
+  (to) => to !== PATHS.settings && to !== PATHS.workflows,
 )
 
 function keepActiveVisible(list: HTMLUListElement) {
@@ -58,6 +59,18 @@ function Shell() {
   const teamAccess = useTeamManagementAccess()
 
   const me = useMe()
+  // The shell already discovers instance policies. Use the same response for navigation
+  // and the route gate so disabled and older instances make no additional request.
+  const instance = useInstance()
+  const workflowsEnabled =
+    instance.status === 'loading'
+      ? undefined
+      : instance.status === 'ready' && instance.data?.workflowsEnabled === true
+  const managesTeam = teamAccess.status === 'ready' && teamAccess.role !== null
+  const showWorkflows =
+    workflowsEnabled === true &&
+    me.principal.kind === 'session' &&
+    (me.organization.personal || managesTeam)
   const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<UiText | null>(null)
   const [spaceError, setSpaceError] = useState<UiText | null>(null)
@@ -85,6 +98,7 @@ function Shell() {
   }, [pathname, locale])
 
   // Fade only the edges that hide more navigation, including after zoom or a locale change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workflow discovery can add an item after mount
   useEffect(() => {
     const list = nav.current?.querySelector('ul')
     if (!list) return
@@ -112,7 +126,7 @@ function Shell() {
       window.removeEventListener('resize', updateLayout)
       observer?.disconnect()
     }
-  }, [])
+  }, [showWorkflows])
 
   // A notice belongs to one page: drop it once the person is elsewhere, also when it arrives
   // after they left. (Not on the page starting over in place, which is what it explains.)
@@ -190,9 +204,9 @@ function Shell() {
         >
           <ul data-layout-scroll="horizontal">
             {NAV_ITEMS.filter(({ to }) => {
-              const managesTeam = teamAccess.status === 'ready' && teamAccess.role !== null
               if (to === PATHS.teamBookings) return managesTeam
               if (to === PATHS.meetingPolls) return me.organization.personal || managesTeam
+              if (to === PATHS.workflows) return showWorkflows
               if (to === PATHS.auditLog)
                 return (
                   teamAccess.status === 'ready' &&
@@ -222,11 +236,11 @@ function Shell() {
             </div>
           )}
           <Suspense fallback={<PageSkeleton />}>
-            <Outlet />
+            <Outlet context={{ workflowsEnabled }} />
           </Suspense>
         </main>
       </div>
-      <InstanceLegalLinks />
+      {instance.status === 'ready' && <LegalLinks {...instance.data} />}
     </div>
   )
 }

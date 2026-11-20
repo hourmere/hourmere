@@ -15,6 +15,7 @@ export const PATHS = {
   bookings: `${APP_BASE}/bookings`,
   meetingPolls: `${APP_BASE}/meeting-polls`,
   newMeetingPoll: `${APP_BASE}/meeting-polls/new`,
+  workflows: `${APP_BASE}/workflows`,
   teamBookings: `${APP_BASE}/team/bookings`,
   analytics: `${APP_BASE}/analytics`,
   conferences: `${APP_BASE}/conferences`,

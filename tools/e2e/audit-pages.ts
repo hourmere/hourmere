@@ -24,6 +24,13 @@ import {
   type RoutingFormAuditPageId,
   routingFormAuditPages,
 } from './routing-form-audit.ts'
+import {
+  isWorkflowAuditPage,
+  leavePendingWorkflowAudit,
+  openWorkflowAuditPage,
+  type WorkflowAuditPageId,
+  workflowAuditPages,
+} from './workflow-audit.ts'
 
 const pollAuditPages = [
   { id: 'poll-unavailable', title: 'Unavailable meeting poll' },
@@ -48,6 +55,7 @@ export const auditPages = [
   ...pollAuditPages,
   ...hostPollAuditPages,
   ...routingFormAuditPages,
+  ...workflowAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -220,9 +228,19 @@ export async function openAuditPage(
   try {
     await leavePendingRoutingFormAudit(page, app.url)
     await leavePendingHostPollAudit(page, app.url)
+    await leavePendingWorkflowAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
+    if (isWorkflowAuditPage(id)) {
+      await app.auditSignIn(true, locale, id === 'team-workflows' ? 'team' : undefined)
+      await page.addInitScript(prepareAuditLocale, locale)
+      const path = await openWorkflowAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
+      verifyAuditPath(page.url(), path)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
     if (isHostPollAuditPage(id) || isPollAuditPage(id) || isRoutingFormAuditPage(id)) {
       await app.auditSignIn(
         isHostPollAuditPage(id),
@@ -250,7 +268,10 @@ export async function openAuditPage(
     )
     await page.addInitScript(prepareAuditLocale, locale)
     const paths: Record<
-      Exclude<AuditPageId, HostPollAuditPageId | PollAuditPageId | RoutingFormAuditPageId>,
+      Exclude<
+        AuditPageId,
+        HostPollAuditPageId | PollAuditPageId | RoutingFormAuditPageId | WorkflowAuditPageId
+      >,
       string
     > = {
       host: '/fixture-host',

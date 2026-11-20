@@ -2511,4 +2511,36 @@ export const admin = {
     'Could not update the invitation roster. Try again.',
   'This poll has 40 places.': 'This poll has 40 places.',
   'Remove time {time}': 'Remove time {time}',
+  // Booking workflows
+  Workflows: 'Workflows',
+  'Loading workflows…': 'Loading workflows…',
+  'No workflows yet.': 'No workflows yet.',
+  'Workflows are unavailable in this space.': 'Workflows are unavailable in this space.',
+  'Could not load workflows.': 'Could not load workflows.',
+  'Workflow pages': 'Workflow pages',
+  Enabled: 'Enabled',
+  Enable: 'Enable',
+  Disable: 'Disable',
+  'Enable {name}': 'Enable {name}',
+  'Disable {name}': 'Disable {name}',
+  'Delete {name}': 'Delete {name}',
+  'Enable this workflow?': 'Enable this workflow?',
+  'Disable this workflow? Runs picked up while it is disabled are skipped.':
+    'Disable this workflow? Runs picked up while it is disabled are skipped.',
+  'Delete this workflow? Pending runs will be canceled. This cannot be undone.':
+    'Delete this workflow? Pending runs will be canceled. This cannot be undone.',
+  'Enable workflow': 'Enable workflow',
+  'Disable workflow': 'Disable workflow',
+  'Delete workflow': 'Delete workflow',
+  'Updating workflow…': 'Updating workflow…',
+  'Workflow enabled.': 'Workflow enabled.',
+  'Workflow disabled.': 'Workflow disabled.',
+  'Workflow deleted.': 'Workflow deleted.',
+  'This workflow changed. Review the latest version before trying again.':
+    'This workflow changed. Review the latest version before trying again.',
+  'Your space changed. Reload before making changes.':
+    'Your space changed. Reload before making changes.',
+  'This workflow is unavailable.': 'This workflow is unavailable.',
+  'Could not update this workflow. Review the list before trying again.':
+    'Could not update this workflow. Review the list before trying again.',
 } as const

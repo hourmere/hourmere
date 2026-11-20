@@ -7,10 +7,12 @@ import {
   Route,
   useLocation,
   useNavigate,
+  useOutletContext,
   useRoutes,
 } from 'react-router'
 import { api } from './api/client.ts'
 import { AdminLoading } from './components/AdminLoading.tsx'
+import { PageSkeleton } from './components/PageSkeleton.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
 import { InterfaceScope, useI18n } from './i18n/runtime.tsx'
@@ -50,6 +52,7 @@ import {
   TeamBookingPage,
   TeamBookingsPage,
   TroubleshootPage,
+  WorkflowsPage,
 } from './lazy-pages.tsx'
 import { BookingPanelContext } from './pages/bookings/BookingPanel.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
@@ -88,6 +91,7 @@ export const appRoutes = createRoutesFromElements(
           <Route path="meeting-polls" element={<MeetingPollsPage />} />
           <Route path="meeting-polls/new" element={<MeetingPollCreatePage />} />
           <Route path="meeting-polls/:id" element={<HostMeetingPollRoute />} />
+          <Route path={PATHS.workflows} element={<WorkflowRoute />} />
           <Route path="team/bookings" element={<TeamBookingsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="bookings/:id" element={<BookingDetailPage />} />
@@ -126,6 +130,12 @@ export const appRoutes = createRoutesFromElements(
     <Route path="*" element={<NotFoundPage />} />
   </>,
 )
+
+function WorkflowRoute() {
+  const { workflowsEnabled } = useOutletContext<{ workflowsEnabled: boolean | undefined }>()
+  if (workflowsEnabled === undefined) return <PageSkeleton />
+  return workflowsEnabled ? <WorkflowsPage /> : <AppNotFoundPage />
+}
 
 const routingFormRoutes = createRoutesFromElements(
   <>

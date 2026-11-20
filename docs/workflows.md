@@ -31,8 +31,9 @@ claimed for the internal attempt service. The email attempt resolves the capture
 revision under the marker transaction, rechecks live booking and workflow eligibility and
 resolves the current host-text policy. Dispatcher and repair entry points are no-ops while
 hard-off, and production registers no workflow worker. The wake port requires transactional
-enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. No retention
-worker or web interface exists yet. Step 16a adds the guarded workflow run history reads.
+enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. The
+retention worker is still planned. Guarded workflow run history reads and the web workflow
+list with lifecycle actions are in place.
 Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
@@ -896,11 +897,30 @@ The web app learns availability from instance discovery. Step 4 adds an optional
 `followUpHostNotesEnabled` and `slotSnippetsEnabled`, and documents it as false until
 workflows are enabled. It reports the constant and the operator switch together: false
 while hard-off, then the value of `WORKFLOWS_ENABLED` from step 19b. Step 19a computes it
-from the injected operator state. Clients treat an absent field as false. The web app
-(steps 17a and 17b) shows workflow navigation and the editor only when it is true. Its
-editor hides custom subject/body fields when `followUpHostNotesEnabled` is false. Under operator-off, recovery
+from the injected operator state. Clients treat an absent field as false. The web app shows
+workflow navigation and routes only when it is true. The planned editor will hide custom
+subject/body fields when `followUpHostNotesEnabled` is false. Under operator-off, recovery
 reads, disable and delete stay available through REST, MCP and CLI; the web app offers no
 separate recovery view in v1.
+
+### Manage existing workflows in the app
+
+When the feature is available, choose your personal or team space and open **Workflows**.
+The list shows the workflows and their status for that space. You can manage your personal
+workflows. Only current team owners and admins can manage their team's workflows.
+
+Use **Enable workflow** or **Disable workflow** to change its status. Runs picked up while
+the workflow is disabled are skipped. Re-enabling the workflow does not replay skipped runs.
+Confirm **Delete workflow** to remove it and retire pending runs. Deletion cannot be undone.
+If the workflow or your space changes while you have an action open, review the current
+state before trying again.
+
+中文：功能开放后，切换到个人或团队空间，再打开 **工作流**。列表显示当前空间的工作流及其状态。
+你可以管理自己的工作流。团队工作流仅限当前团队所有者和管理员管理。
+
+选择 **启用工作流** 或 **禁用工作流** 可更改状态。禁用期间，系统领取的待执行任务会被跳过，
+重新启用也不会补跑。确认 **删除工作流** 后，工作流将被移除，待执行任务也会终止。删除无法撤销。
+如果操作期间工作流或当前空间发生变化，请核对最新状态后再试。
 
 ## Rollout and limitations
 

@@ -6,6 +6,7 @@ import {
   fakeApi,
   instance,
   json,
+  later,
   renderApp,
   signedIn,
   signedOut,
@@ -70,5 +71,67 @@ describe('the app under /app', () => {
     renderApp('/app/bookings?tab=past')
     await screen.findByRole('heading', { name: 'Sign in to Hourmere' })
     expect(location()).toBe('/sign-in?next=%2Fapp%2Fbookings%3Ftab%3Dpast')
+  })
+})
+
+describe('workflow discovery in the app shell', () => {
+  const termsUrl = 'https://example.test/terms'
+
+  it.each([false, undefined])('keeps workflows hidden when discovery returns %s', async (flag) => {
+    const api = fakeApi({
+      ...signedIn,
+      ...emptyAccount,
+      'GET /api/v1/instance': () => json(200, { termsUrl, workflowsEnabled: flag }),
+    })
+    renderApp('/app/event-types')
+
+    await screen.findByRole('link', { name: 'Terms of service' })
+    const nav = within(screen.getByRole('navigation', { name: 'Main' }))
+    expect(nav.queryByRole('link', { name: 'Workflows' })).toBeNull()
+    expect(api.to('GET /api/v1/instance')).toHaveLength(1)
+    expect(api.to('GET /api/v1/workflows')).toHaveLength(0)
+  })
+
+  it.each([false, undefined])(
+    'handles the direct route as absent when discovery returns %s',
+    async (flag) => {
+      const discovery = later()
+      const api = fakeApi({
+        ...signedIn,
+        'GET /api/v1/instance': () => discovery.response,
+      })
+      renderApp('/app/workflows')
+
+      await screen.findByRole('status', { name: 'Loading…' })
+      expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
+      expect(api.to('GET /api/v1/workflows')).toHaveLength(0)
+      await discovery.answer(json(200, { termsUrl, workflowsEnabled: flag }))
+
+      await screen.findByRole('heading', { name: 'Page not found', level: 1 })
+      expect(screen.getByRole('link', { name: 'Terms of service' }).getAttribute('href')).toBe(
+        termsUrl,
+      )
+      expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
+      expect(api.to('GET /api/v1/instance')).toHaveLength(1)
+      expect(api.to('GET /api/v1/workflows')).toHaveLength(0)
+    },
+  )
+
+  it('adds workflow navigation after affirmative discovery using the policy request', async () => {
+    const api = fakeApi({
+      ...signedIn,
+      ...emptyAccount,
+      'GET /api/v1/instance': () => json(200, { termsUrl, workflowsEnabled: true }),
+    })
+    renderApp('/app/event-types')
+
+    expect((await screen.findByRole('link', { name: 'Workflows' })).getAttribute('href')).toBe(
+      '/app/workflows',
+    )
+    expect(screen.getByRole('link', { name: 'Terms of service' }).getAttribute('href')).toBe(
+      termsUrl,
+    )
+    expect(api.to('GET /api/v1/instance')).toHaveLength(1)
+    expect(api.to('GET /api/v1/workflows')).toHaveLength(0)
   })
 })

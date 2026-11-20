@@ -70,6 +70,10 @@ export const MeetingPollsPage = page(
   () => import('./pages/meeting-polls/MeetingPolls.tsx'),
   (m) => m.MeetingPollsPage,
 )
+export const WorkflowsPage = page(
+  () => import('./pages/WorkflowsPage.tsx'),
+  (m) => m.default,
+)
 export const MeetingPollCreatePage = page(
   () => import('./pages/meeting-polls/MeetingPollCreate.tsx'),
   (m) => m.MeetingPollCreatePage,

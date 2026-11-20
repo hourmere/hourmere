@@ -48,6 +48,10 @@ describe('routing between the app and the public pages', () => {
           effectiveRetentionDays: null,
           canChangeRetention: true,
         }),
+      ...(path === '/app/workflows' && {
+        'GET /api/v1/instance': () => json(200, { workflowsEnabled: true }),
+        'GET /api/v1/workflows': () => json(200, { data: [], nextCursor: null }),
+      }),
     })
     renderApp(path)
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeDefined()

@@ -525,7 +525,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     }
   })
 
-  it('offers the shipped CLI commands and no web page', () => {
+  it('registers only the shipped CLI commands and workflow list path', () => {
     const commands = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),
@@ -544,11 +544,12 @@ describe('booking workflows are off and expose the shipped operations', () => {
     ).toEqual(shipped.map(({ command, tool }) => [command, tool]).sort())
     expect(Object.keys(REST_COMMANDS).filter((name) => /workflow/i.test(name))).toEqual([])
     expect(HELP).toContain('workflows_disabled')
+    // app-routes.test.tsx verifies the path and navigation stay hidden while off.
     expect(
       Object.entries(PATHS).filter(
         ([name, path]) => /workflow/i.test(name) || workflowSegment.test(path),
       ),
-    ).toEqual([])
+    ).toEqual([['workflows', '/app/workflows']])
   })
 
   it('recognises the workflow storage tables as whole identifiers, in any case', () => {

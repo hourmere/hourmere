@@ -2393,4 +2393,35 @@ export const admin = {
   'Could not update the invitation roster. Try again.': '无法更新邀请名单。请重试。',
   'This poll has 40 places.': '此投票最多容纳 40 人。',
   'Remove time {time}': '移除时间：{time}',
+  // Booking workflows
+  Workflows: '工作流',
+  'Loading workflows…': '正在加载工作流…',
+  'No workflows yet.': '暂无工作流。',
+  'Workflows are unavailable in this space.': '当前空间无法使用工作流。',
+  'Could not load workflows.': '无法加载工作流。',
+  'Workflow pages': '工作流分页',
+  Enabled: '已启用',
+  Enable: '启用',
+  Disable: '禁用',
+  'Enable {name}': '启用“{name}”',
+  'Disable {name}': '禁用“{name}”',
+  'Delete {name}': '删除“{name}”',
+  'Enable this workflow?': '启用此工作流吗？',
+  'Disable this workflow? Runs picked up while it is disabled are skipped.':
+    '禁用此工作流吗？禁用期间，系统领取的待执行任务会被跳过。',
+  'Delete this workflow? Pending runs will be canceled. This cannot be undone.':
+    '删除此工作流吗？待执行任务将一并终止。此操作无法撤销。',
+  'Enable workflow': '启用工作流',
+  'Disable workflow': '禁用工作流',
+  'Delete workflow': '删除工作流',
+  'Updating workflow…': '正在更新工作流…',
+  'Workflow enabled.': '已启用工作流。',
+  'Workflow disabled.': '已禁用工作流。',
+  'Workflow deleted.': '已删除工作流。',
+  'This workflow changed. Review the latest version before trying again.':
+    '此工作流已变更。请核对最新版本后重试。',
+  'Your space changed. Reload before making changes.': '当前空间已切换。请重新加载后再更改。',
+  'This workflow is unavailable.': '此工作流无法访问。',
+  'Could not update this workflow. Review the list before trying again.':
+    '无法更新此工作流。请核对列表后重试。',
 } as const
