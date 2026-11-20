@@ -109,7 +109,8 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider_domains',
     'sso_providers',
   ],
-  'packages/auth/src/sso-delegation-summaries.ts': [
+  'packages/auth/src/sso-delegation-summaries.ts': ['sso_policies'],
+  'packages/auth/src/sso-delegation-access.ts': [
     'sso_delegation_bindings',
     'sso_domains',
     'sso_identity_links',
@@ -117,6 +118,8 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider_domains',
     'sso_providers',
   ],
+  'packages/auth/src/audit.ts': ['sso_delegation_bindings'],
+  'apps/server/src/mcp/oauth.ts': ['sso_policies'],
   'apps/server/src/sso-oidc-test-receipts.ts': ['sso_providers'],
   'apps/server/src/sso-reads.ts': [
     'sso_providers',

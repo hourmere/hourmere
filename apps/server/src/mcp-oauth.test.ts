@@ -15,11 +15,18 @@ import {
   MCP_OAUTH_SCOPE,
   withMcpOAuthIntent,
 } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
-import { sql } from 'kysely'
+import { Kysely, PostgresDialect, sql } from 'kysely'
+import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { seeded } from '../../../packages/db/src/sso-identity-fixtures.ts'
+import {
+  claimedDomainValues,
+  insert,
+  oidcProviderValues,
+} from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
@@ -30,6 +37,7 @@ const BASE = 'http://localhost:4197'
 const CLIENT = 'https://client.test/metadata.json'
 const CALLBACK = 'https://client.test/callback'
 const secret = randomBytes(32).toString('base64')
+const ssoCapabilities = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 let nextAddress = 0
 const testIp = () => `198.18.${Math.floor(++nextAddress / 250)}.${(nextAddress % 250) + 1}`
 const queryOf = (url: URL) => url.searchParams.toString()
@@ -46,9 +54,15 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     pool: ReturnType<typeof createAuthPool>,
     auth: ReturnType<typeof createAuth>
   const fetched: string[] = []
+  const statements: string[] = []
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string)
-    db = createDb(owned.pool)
+    db = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
     const signup = { mode: 'closed', allowedDomains: [] } as const
     pool = createAuthPool(owned.url, signup)
     auth = createAuth({
@@ -59,6 +73,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       signup,
       mailer: { send: async () => {} },
       mcpOAuth: true,
+      ssoCapabilities,
       mcpMetadataFetcher: async (input) => {
         const url = String(input)
         fetched.push(url)
@@ -323,11 +338,12 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: BASE,
       trustedProxies,
-      routes: [mcpOAuthRoutes({ auth, db, publicUrl: BASE })],
+      routes: [mcpOAuthRoutes({ auth, db, publicUrl: BASE, ssoCapabilities })],
+      ssoTeamReads: { db, capabilities: ssoCapabilities },
       mcp: mcpEndpoint({
         tools: [whoamiTool],
         oauth: {
-          resolve: createMcpOAuthResolver({ auth, db, publicUrl: BASE }),
+          resolve: createMcpOAuthResolver({ auth, db, publicUrl: BASE, ssoCapabilities }),
           handler: auth.handler,
         },
       }),
@@ -446,6 +462,308 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
         },
       }),
     })
+
+  const refresh = (refreshToken: string) =>
+    request('/api/auth/oauth2/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: CLIENT,
+        refresh_token: refreshToken,
+        resource: `${BASE}/mcp`,
+      }),
+    })
+
+  async function expectSsoRequired(response: Response) {
+    expect(response.status).toBe(403)
+    expect(response.headers.has('location')).toBe(false)
+    const result = await response.json()
+    expect(result).toMatchObject({ error: 'sso_required' })
+    expect(result).not.toHaveProperty('redirectUrl')
+    expect(result).not.toHaveProperty('access_token')
+    expect(result).not.toHaveProperty('refresh_token')
+  }
+
+  async function delegationFixture(s: Awaited<ReturnType<typeof session>>, organizationId: string) {
+    const { id: memberId } = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('userId', '=', s.user.id)
+      .where('organizationId', '=', organizationId)
+      .executeTakeFirstOrThrow()
+    const client = await owned.pool.connect()
+    try {
+      const now = (await databaseTime(client)).getTime()
+      const at = (seconds: number) => new Date(now + seconds * 1000)
+      const provider = await insert(client, 'sso_providers', {
+        ...oidcProviderValues(organizationId),
+        enabled: true,
+      })
+      const day = 86_400
+      const domain = await insert(client, 'sso_domains', {
+        ...claimedDomainValues(organizationId),
+        challenge_expires_at: at(day),
+        claimed_at: at(-day),
+        verified_at: at(-day),
+        verification_expires_at: at(6 * day),
+        last_checked_at: at(-60),
+        next_check_at: at(day),
+      })
+      await insert(client, 'sso_provider_domains', {
+        organization_id: organizationId,
+        provider_id: provider.id,
+        domain_id: domain.id,
+      })
+      const link = await insert(client, 'sso_identity_links', {
+        organization_id: organizationId,
+        provider_id: provider.id,
+        user_id: s.user.id,
+        issuer: provider.issuer,
+        subject: `synthetic-${randomUUID()}`,
+        proven_email: `test@${domain.name}`,
+        email_proven_at: at(-1),
+      })
+      return {
+        organization_id: organizationId,
+        user_id: s.user.id,
+        member_id: memberId,
+        provider_id: provider.id,
+        link_id: link.id,
+        link_generation: link.generation,
+        trust_generation: 1,
+        domain_id: domain.id,
+        domain_generation: domain.generation,
+      }
+    } finally {
+      client.release()
+    }
+  }
+
+  async function databaseTime(client: PoolClient, seconds = 0) {
+    const { rows } = await client.query<{ now: Date }>(
+      'SELECT clock_timestamp() + make_interval(secs => $1) AS now',
+      [seconds],
+    )
+    const row = rows[0]
+    if (!row) throw new Error('Expected the database clock')
+    return row.now
+  }
+
+  async function withConnection<T>(run: (client: PoolClient) => Promise<T>) {
+    const client = await owned.pool.connect()
+    try {
+      return await run(client)
+    } finally {
+      client.release()
+    }
+  }
+
+  const enforce = (organizationId: string) =>
+    db
+      .insertInto('sso_policies')
+      .values({ organization_id: organizationId, require_sso: true })
+      .execute()
+
+  const bind = (reliance: Awaited<ReturnType<typeof delegationFixture>>, grantId: string) =>
+    withConnection(async (client) =>
+      insert(client, 'sso_delegation_bindings', {
+        ...reliance,
+        oauth_grant_id: grantId,
+        expires_at: await databaseTime(client, 300),
+      }),
+    )
+
+  it('keeps the existing refresh and MCP query counts for a team without an SSO policy', async () => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      tokens = await connected(s, team.id)
+    statements.length = 0
+    const rotated = await refresh(tokens.refresh_token)
+    expect(rotated.status).toBe(200)
+    expect(statements).toHaveLength(8)
+    const next = (await rotated.json()) as typeof tokens
+    statements.length = 0
+    const replay = await refresh(tokens.refresh_token)
+    expect(replay.status).toBe(200)
+    expect(statements).toHaveLength(4)
+    const retry = (await replay.json()) as typeof tokens
+    expect(
+      retry.refresh_token === next.refresh_token && retry.access_token === next.access_token,
+    ).toBe(true)
+    statements.length = 0
+    const mcp = await app().request(mcpRequest(next.access_token))
+    expect(mcp.status).toBe(200)
+    expect(await mcp.text()).toContain('"kind":"oauth"')
+    expect(statements).toHaveLength(2)
+  })
+
+  it('resumes the same consent after team proof and binding and checks the grant again on exchange', async () => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      a = await begin(s, team.id)
+    await enforce(team.id)
+    const approve = () =>
+      api('consent', s, { oauthQuery: a.oauthQuery, intentId: a.intentId, accept: true })
+    const consent = () =>
+      db
+        .selectFrom('auth.oauthConsent')
+        .selectAll()
+        .where('userId', '=', s.user.id)
+        .executeTakeFirst()
+    await expectSsoRequired(await approve())
+    expect(await consent()).toBeUndefined()
+
+    const reliance = await delegationFixture(s, team.id)
+    await withConnection(async (client) =>
+      insert(client, 'sso_browser_proofs', {
+        ...reliance,
+        session_id: s.sessionId,
+        expires_at: await databaseTime(client, 300),
+      }),
+    )
+    await expectSsoRequired(await approve())
+    const staged = await consent()
+    if (!staged?.referenceId) throw new Error('Expected a staged grant')
+    const grantId = staged.referenceId
+    expect(
+      await db
+        .selectFrom('mcp_oauth_intents')
+        .select('used_at')
+        .where('id', '=', a.intentId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ used_at: null })
+    const binding = await bind(reliance, grantId)
+    const reply = await approve()
+    expect(reply.status).toBe(200)
+    const url = new URL(((await reply.json()) as { redirectUrl: string }).redirectUrl)
+    expect(url.searchParams.get('state')).toBe(a.query.get('state'))
+    expect((await consent())?.createdAt).toEqual(staged.createdAt)
+    await db
+      .deleteFrom('sso_delegation_bindings')
+      .where('id', '=', binding.id as string)
+      .execute()
+    await expectSsoRequired(await exchange(a, url.searchParams.get('code') as string))
+    expect(
+      await db
+        .selectFrom('auth.oauthRefreshToken')
+        .select('id')
+        .where('userId', '=', s.user.id)
+        .execute(),
+    ).toHaveLength(0)
+
+    await bind(reliance, grantId)
+    const tokens = await connected(s, team.id)
+    const mcp = await app().request(mcpRequest(tokens.access_token))
+    expect(mcp.status).toBe(200)
+    expect(await mcp.text()).toContain('"kind":"oauth"')
+  })
+
+  it('keeps the absolute delegation deadline through refresh and denies rotation replay after expiry', async () => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      tokens = await connected(s, team.id)
+    const { id: grantId } = await db
+      .selectFrom('mcp_oauth_grants')
+      .select('id')
+      .where('user_id', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    await enforce(team.id)
+    const reliance = await delegationFixture(s, team.id)
+    const values = { ...reliance, oauth_grant_id: grantId }
+    const before = await bind(reliance, grantId)
+    const rotated = await refresh(tokens.refresh_token)
+    expect(rotated.status).toBe(200)
+    const next = (await rotated.json()) as typeof tokens
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .selectAll()
+        .where('oauth_grant_id', '=', grantId)
+        .executeTakeFirst(),
+    ).toEqual(before)
+    // Move the database fixture to the far side of a complete 30-day lease without
+    // running a clock shim against Better Auth's independently timed refresh tokens.
+    await withConnection(async (client) => {
+      await client.query('BEGIN')
+      try {
+        await client.query('DELETE FROM sso_delegation_bindings WHERE oauth_grant_id = $1', [
+          grantId,
+        ])
+        const expiredAt = await databaseTime(client, -1)
+        await seeded(client, 'sso_delegation_bindings', {
+          ...values,
+          created_at: new Date(expiredAt.getTime() - 30 * 86_400_000),
+          expires_at: expiredAt,
+        })
+        await client.query('COMMIT')
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      }
+    })
+    await expectSsoRequired(await refresh(tokens.refresh_token))
+    await expectSsoRequired(await refresh(next.refresh_token))
+    const mcp = await app().request(mcpRequest(next.access_token))
+    expect(mcp.status).toBe(200)
+    expect(mcp.headers.has('location')).toBe(false)
+    expect(await mcp.text()).toContain('sso_required')
+  })
+
+  it('rechecks OAuth refresh after a concurrent provider trust change commits', async () => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      tokens = await connected(s, team.id)
+    const { id: grantId } = await db
+      .selectFrom('mcp_oauth_grants')
+      .select('id')
+      .where('user_id', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    await enforce(team.id)
+    const reliance = await delegationFixture(s, team.id)
+    await bind(reliance, grantId)
+    // Mirror provider edits' parent -> provider -> policy lock order. The refresh's
+    // initial snapshot sees the old lease until the writing transaction commits.
+    let pending: Promise<Response> | undefined
+    try {
+      await withConnection(async (writer) => {
+        await writer.query('BEGIN')
+        try {
+          await writer.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [team.id])
+          await writer.query('UPDATE sso_providers SET enabled = false WHERE id = $1', [
+            reliance.provider_id,
+          ])
+          await writer.query(
+            'UPDATE sso_policies SET trust_generation = trust_generation + 1 WHERE organization_id = $1',
+            [team.id],
+          )
+          pending = refresh(tokens.refresh_token)
+          await vi.waitFor(
+            async () => {
+              const { rows } = await owned.pool.query(
+                `SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
+               AND wait_event_type = 'Lock' AND query ILIKE '%auth%organization%for share%'`,
+              )
+              expect(rows).toHaveLength(1)
+            },
+            { timeout: 5000 },
+          )
+        } finally {
+          await writer.query('COMMIT')
+        }
+      })
+      if (!pending) throw new Error('Expected a pending refresh request')
+      await expectSsoRequired(await pending)
+    } finally {
+      await pending
+    }
+    const stored = await db
+      .selectFrom('auth.oauthRefreshToken')
+      .select('revoked')
+      .where('userId', '=', s.user.id)
+      .execute()
+    expect(stored).toEqual([{ revoked: null }])
+  })
 
   it('serves discovery through the actual app and challenges OAuth clients without reading their body', async () => {
     for (const path of [
