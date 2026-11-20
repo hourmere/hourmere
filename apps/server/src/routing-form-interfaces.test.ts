@@ -20,11 +20,15 @@ import {
   createRoutingForm,
   publishRoutingForm,
   type RoutingForm,
+  submitRoutingForm,
+  updateRoutingForm,
 } from '../../../packages/scheduling/src/routing-form-service.ts'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import type { paths } from '../../web/src/api/schema.d.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { routingContinuationRoutes } from './routes/routing-continuations.ts'
+import { openApiDocument } from './routes/test-app.ts'
 import { productRoutes, productTools } from './server.ts'
 
 const paymentRequired = vi.hoisted(() => new Set<string>())
@@ -77,6 +81,78 @@ const draft = () => ({
   slug: `form-${randomUUID()}`,
   title: 'Routing form',
   fallback: { kind: 'message', message: 'Thank you' },
+})
+
+it('charges both continuation routes to one bucket before transport and input refusals', async () => {
+  const path = '/api/v1/routing-continuations'
+  for (const [first, second] of [
+    ['resolve', 'slots'],
+    ['slots', 'resolve'],
+  ] as const) {
+    const application = createApp({
+      publicUrl,
+      checkDb: async () => {},
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+      routes: [
+        routingContinuationRoutes(
+          { db: {} as Db, now: () => Temporal.Now.instant(), routingFormsEnabled: true },
+          { limit: 4, windowSeconds: 60 },
+        ),
+      ],
+    })
+    const post = (route: string, body: string, headers: Record<string, string> = {}) =>
+      application.request(`${path}/${route}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body,
+      })
+    expect((await post(first, '{}', { authorization: 'Bearer invalid-fixture' })).status).toBe(401)
+    expect((await post(second, '{}', { 'content-length': '65537' })).status).toBe(413)
+    const invalid = await post(
+      first,
+      JSON.stringify({ routeToken: 'fixture', eventTypeId: 'forbidden' }),
+    )
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toEqual({ error: 'invalid_request' })
+    expect((await post(second, '{')).status).toBe(400)
+    const refused = await post(first, '{}')
+    expect(refused.status).toBe(429)
+    expect(refused.headers.get('Retry-After')).toMatch(/^\d+$/)
+    expect(refused.headers.get('Cache-Control')).toBe('no-store')
+    expect(refused.headers.get('Referrer-Policy')).toBe('no-referrer')
+    expect(await refused.json()).toEqual({ error: 'rate_limited' })
+  }
+})
+
+it('documents both continuation requests with complete strict schemas and optional keys', async () => {
+  const application = createApp({
+    publicUrl,
+    checkDb: async () => {},
+    authHandler: async () => new Response(null, { status: 404 }),
+    resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+    routes: [routingContinuationRoutes({ db: {} as Db, now: () => Temporal.Now.instant() })],
+  })
+  const document = await openApiDocument(application)
+  for (const [path, operationId, schema, required] of [
+    ['resolve', 'resolveRoutingContinuation', 'RoutingContinuationInput', ['routeToken']],
+    ['slots', 'findRoutedSlots', 'RoutingContinuationSlotsInput', ['routeToken', 'start', 'end']],
+  ] as const) {
+    expect(document.paths[`/api/v1/routing-continuations/${path}`]?.post).toMatchObject({
+      operationId,
+      security: [{}, { apiKey: [] }],
+      requestBody: {
+        required: true,
+        content: { 'application/json': { schema: { $ref: `#/components/schemas/${schema}` } } },
+      },
+      responses: { 200: {}, 400: {}, 401: {}, 403: {}, 404: {}, 409: {}, 413: {}, 429: {} },
+    })
+    expect(document.components.schemas[schema]).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required,
+    })
+  }
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', () => {
@@ -182,7 +258,12 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     })
-    if ('name' in params && params.name === 'route_lead') {
+    if (
+      'name' in params &&
+      ['route_lead', 'resolve_routing_continuation', 'find_routed_slots'].includes(
+        String(params.name),
+      )
+    ) {
       expect(response.headers.get('cache-control')).toBe('no-store')
       expect(response.headers.get('referrer-policy')).toBe('no-referrer')
     }
@@ -228,7 +309,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
   async function callCli(
     application: ReturnType<typeof app>,
     token: string,
-    op: Operation | 'public' | 'route',
+    op: Operation | 'public' | 'route' | 'resolve' | 'slots',
     input: Record<string, unknown>,
   ) {
     let stdout = ''
@@ -274,6 +355,174 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
 
   const versions = (id: string) =>
     db.selectFrom('routing_form_versions').select('id').where('form_id', '=', id).execute()
+
+  it('resolves only the selected event over REST, MCP and CLI and refuses every token while off', async () => {
+    const fixtures = createFixtures(db)
+    const principal = credentials.get(await credential(owner))
+    if (!principal) throw Error('Expected a persisted fixture key')
+    const ownerContext = testContext(db, principal)
+    const organizationId = owner.principal.organization.id
+    const slug = 'private-routing-continuation-event'
+    const questionId = randomUUID()
+    const eventTypeId = await fixtures.eventType(organizationId, owner.id, {
+      slug,
+      title: 'Selected appointment',
+      questions: [{ id: questionId, type: 'short_text', label: 'Company', required: true }],
+    })
+    await db
+      .updateTable('event_types')
+      .set({ is_hidden: true })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const scheduleId = await fixtures.schedule(owner.id, { timeZone: 'UTC', isDefault: false })
+    await db
+      .updateTable('event_type_hosts')
+      .set({ schedule_id: scheduleId })
+      .where('event_type_id', '=', eventTypeId)
+      .execute()
+    const nameId = randomUUID()
+    const form = await createRoutingForm(ownerContext, {
+      ...draft(),
+      questions: [{ id: nameId, type: 'short_text', label: 'Name' }],
+      fallback: {
+        kind: 'event',
+        eventTypeId,
+        mappings: [{ questionId: nameId, destination: { kind: 'inviteeName' } }],
+      },
+    })
+    const published = await publishRoutingForm(ownerContext, form.id, {
+      expectedRevision: form.draftRevision,
+    })
+    await updateRoutingForm(ownerContext, form.id, {
+      expectedRevision: published.form.draftRevision,
+      enabled: true,
+    })
+    const issue = async (now?: () => Temporal.Instant) => {
+      const result = await submitRoutingForm(
+        { db, routingSecret, routingFormsEnabled: true, ...(now && { now }) },
+        { organizationId, formId: form.id },
+        { versionId: published.version.id, answers: { [nameId]: 'Routed invitee' } },
+      )
+      if (result.kind !== 'continuation') throw Error('Expected a continuation')
+      return result
+    }
+    const valid = await issue()
+    const expired = await issue(() => Temporal.Now.instant().subtract({ hours: 1 }))
+    const unknown = 'z'.repeat(43)
+    const receiptState = () =>
+      db
+        .selectFrom('routing_receipts')
+        .selectAll()
+        .where('form_id', '=', form.id)
+        .orderBy('id')
+        .execute()
+    const before = await receiptState()
+    expect(before).toHaveLength(2)
+
+    const enabled = app()
+    const off = app(false)
+    const key = await credential(outsider, 'bookings')
+    const readKey = await credential(outsider, 'read')
+    const nextWeek = Temporal.Now.plainDateISO('UTC').add({ days: 7 })
+    const monday = nextWeek.add({ days: (8 - nextWeek.dayOfWeek) % 7 })
+    const range = { start: `${monday}T09:00:00Z`, end: `${monday}T10:00:00Z` }
+    for (const [command, name] of [
+      ['resolve', 'resolve_routing_continuation'],
+      ['slots', 'find_routed_slots'],
+    ] as const) {
+      const input = (routeToken: string) => ({ routeToken, ...(command === 'slots' && range) })
+      const rest = async (
+        application: ReturnType<typeof app>,
+        routeToken: string,
+        authorization?: string,
+      ) => {
+        const response = await application.request(`/api/v1/routing-continuations/${command}`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(authorization && { authorization: `Bearer ${authorization}` }),
+          },
+          body: JSON.stringify(input(routeToken)),
+        })
+        expect(response.headers.get('Cache-Control')).toBe('no-store')
+        expect(response.headers.get('Referrer-Policy')).toBe('no-referrer')
+        return { status: response.status, body: await response.json() }
+      }
+      const mcp = (application: ReturnType<typeof app>, routeToken: string, credential = key) =>
+        rpc(application, credential, 'tools/call', { name, arguments: input(routeToken) })
+
+      const tokens = [valid.routeToken, expired.routeToken, unknown]
+      expect(await Promise.all(tokens.map((token) => rest(off, token)))).toEqual(
+        tokens.map(() => ({ status: 404, body: { error: 'routing_forms_disabled' } })),
+      )
+      for (const token of tokens) {
+        const result = await mcp(off, token, readKey)
+        expect(result.isError).toBe(true)
+        expect(JSON.parse(result.content[0].text)).toEqual({ error: 'routing_forms_disabled' })
+        expect(await callCli(off, key, command, input(token))).toEqual({
+          ok: false,
+          body: { error: 'routing_forms_disabled', outcomeMayBeUnknown: true },
+        })
+      }
+      expect((await rpc(off, key, 'tools/list')).tools).not.toContainEqual(
+        expect.objectContaining({ name }),
+      )
+      expect(await receiptState()).toEqual(before)
+
+      const accepted = await rest(enabled, valid.routeToken)
+      expect(accepted.status).toBe(200)
+      const { body } = accepted
+      expect(await rest(enabled, valid.routeToken, readKey)).toMatchObject({
+        status: 403,
+        body: { error: 'insufficient_scope' },
+      })
+      for (const token of [expired.routeToken, unknown, 'malformed']) {
+        expect(await rest(enabled, token)).toEqual({
+          status: 409,
+          body: { error: 'routing_unavailable' },
+        })
+      }
+      expect((await rpc(enabled, key, 'tools/list')).tools).toContainEqual(
+        expect.objectContaining({
+          name,
+          annotations: expect.objectContaining({ readOnlyHint: true }),
+        }),
+      )
+      expect((await mcp(enabled, valid.routeToken)).structuredContent).toEqual(body)
+      expect(await callCli(enabled, key, command, input(valid.routeToken))).toEqual({
+        ok: true,
+        body,
+      })
+      expect(JSON.stringify(body)).not.toContain(slug)
+      expect(JSON.stringify(body)).not.toContain(eventTypeId)
+      if (command === 'resolve') {
+        expect(body).toEqual({
+          eventType: {
+            title: 'Selected appointment',
+            description: null,
+            durationMinutes: 30,
+            location: null,
+            locations: null,
+            questions: [{ id: questionId, type: 'short_text', label: 'Company', required: true }],
+            allowGuests: false,
+            smsRemindersEnabled: false,
+            host: { name: 'Owner', timeZone: 'UTC' },
+          },
+          prefill: { inviteeName: 'Routed invitee', responses: {} },
+          expiresAt: valid.expiresAt,
+        })
+      } else {
+        const ordinary = await enabled.request(
+          `/api/v1/public/${routingOwnerHandle}/${slug}/slots?${new URLSearchParams(range)}`,
+        )
+        expect(ordinary.status).toBe(200)
+        const { data } = (await ordinary.json()) as { data: unknown[] }
+        expect(data).toHaveLength(2)
+        expect(body).toEqual({ slots: data })
+      }
+      expect(await receiptState()).toEqual(before)
+    }
+  })
 
   async function previewSideEffects(id: string) {
     const { rows } = await owned.pool.query<Record<string, number>>(

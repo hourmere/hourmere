@@ -618,6 +618,37 @@ transport checks return `routing_forms_disabled` and MCP discovery omits `route_
 隐藏凭据和链接，`--output FILE` 可将完整响应写入新建的 0600 文件。功能目前硬关闭，通过传输
 检查的调用返回 `routing_forms_disabled`，MCP 工具列表不显示 `route_lead`。
 
+Send `{ routeToken }` to `POST /api/v1/routing-continuations/resolve` to read the
+selected event's current title, duration options, locations and booking questions,
+along with editable `prefill` and the original `expiresAt`. The response may show an
+individual host's display details and leaves out the event's booking address and host pool. Prefill contains only values whose
+saved mappings still fit the current booking fields. To find available times, send
+`{ routeToken, start, end }` to `POST /api/v1/routing-continuations/slots`.
+Use RFC 3339 instants for the range and supply `durationMinutes` or
+`locationOptionId` when selecting a non-default length or location. The response
+contains `slots` from ordinary availability. Reads neither reserve a time nor
+renew or consume the 30-minute capability. Unusable capabilities return
+`routing_unavailable`. The two endpoints share the 120-per-minute client limit
+and accept anonymous requests or a supplied `bookings` or `full` key.
+
+MCP `resolve_routing_continuation` and `find_routed_slots` take the same JSON on an
+authorized MCP connection. In the CLI, use `routing-forms resolve` or
+`routing-forms slots` with `--input -` or `--input FILE`. Keep the token private
+and in the request body. Routing remains hard-off. Calls return
+`routing_forms_disabled` after transport checks, and MCP discovery omits both tools.
+
+中文：向 `POST /api/v1/routing-continuations/resolve` 发送 `{ routeToken }`，读取所选活动的
+当前标题、时长选项、地点、预约问题、可编辑的预填值及原失效时间。响应可显示单主持人的公开信息，
+不包含活动的预约地址或主持人池。
+仅在已保存的映射仍适用于当前预约字段时预填。查询时段使用
+`POST /api/v1/routing-continuations/slots`，在 JSON 中提供凭据和 RFC 3339 格式的
+`start`、`end`。选择非默认时长或地点时可提供 `durationMinutes` 或 `locationOptionId`。
+返回的 `slots` 使用普通预约的可用时段规则。读取不会保留时段，也不会消耗凭据或延长其 30 分钟有效期。
+不可用的凭据统一返回 `routing_unavailable`。两个接口共享每个客户端每分钟 120 次的限额，支持匿名访问，
+提供密钥时须具备 `bookings` 或 `full` 权限。MCP 和 CLI 接受相同的 JSON，CLI 使用
+`routing-forms resolve` 或 `routing-forms slots` 并从标准输入或文件读取。功能目前硬关闭，
+通过传输检查的调用返回 `routing_forms_disabled`，MCP 工具列表不显示这两个工具。
+
 When routing is enabled, invitees open a personal form at `/route/{handle}/{slug}` or
 a team form at `/route/team/{teamSlug}/{slug}`. The page marks optional questions and
 explains validation errors alongside the affected fields. If the host publishes a new

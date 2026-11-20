@@ -410,6 +410,12 @@ export {
   type RecurringRule,
 } from './recurring-rules.ts'
 export {
+  listRoutingContinuationSlots,
+  type RoutingContinuationContext,
+  type RoutingContinuationEventType,
+  resolveRoutingContinuation,
+} from './routing-continuation.ts'
+export {
   archiveRoutingForm,
   createRoutingForm,
   getPublicRoutingForm,

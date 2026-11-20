@@ -1,4 +1,4 @@
-export const PUBLIC_ROUTING_FORM_API_PREFIX = '/api/v1/public/-/routing'
+const privateRoutingApiPrefixes = ['/api/v1/public/-/routing', '/api/v1/routing-continuations']
 
 /** Cover encoded addresses and refused requests without changing request routing. */
 function decodedPath(path: string): string {
@@ -10,10 +10,13 @@ function decodedPath(path: string): string {
 }
 
 export function isPublicRoutingFormPath(path: string): boolean {
+  return privateRoutingApiPrefix(path) !== undefined
+}
+
+export function privateRoutingApiPrefix(path: string): string | undefined {
   const normalized = decodedPath(path).toLowerCase()
-  return (
-    normalized === PUBLIC_ROUTING_FORM_API_PREFIX ||
-    normalized.startsWith(`${PUBLIC_ROUTING_FORM_API_PREFIX}/`)
+  return privateRoutingApiPrefixes.find(
+    (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
   )
 }
 

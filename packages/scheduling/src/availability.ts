@@ -855,7 +855,7 @@ async function requireLocationAvailability(
   })
 }
 
-async function eventSlots(
+export async function eventSlots(
   ctx: PublicContext,
   input: {
     start: Temporal.Instant
