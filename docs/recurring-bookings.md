@@ -517,8 +517,11 @@ net changes since that recipient's last delivered report. Newly ready members ge
 with the same UID and SEQUENCE and a newer DTSTAMP, now with the link, which updates the
 entry already delivered. For the booker and hosts, newly failed members are reported too. A
 guest gets one only when it contains a newly ready link. A member that has started is never
-reported in a link update. A link update is skipped when no member remains confirmed and not
-started. Between mails, host series detail and the series manage page list every member's
+reported in a link update. Each date is compared with the last state delivered for that date
+to that recipient, even if intervening copies covered other dates. If a retried confirmation
+already included a ready link, the next link update leaves that date out. When there are no
+changes left to report, the waiting copy is skipped without an SMTP attempt. Between mails,
+host series detail and the series manage page list every member's
 current state, with each ready member's current join link, also after that member starts
 (step 5d returns it, steps 6c and 6d show it); hosts also see the link on their booking page
 and in their provider calendar copy of that member, if they have one. A per-occurrence

@@ -1,0 +1,8 @@
+{
+  "migration": "0157_series_link_update_ordering.sql",
+  "objects": {
+    "constraint public.booking_series_notifications.booking_series_notifications_after_action_revision_check": "CHECK (((after_action_revision IS NULL) OR ((row_type = 'outbox'::text) AND (kind = 'link_update'::text) AND (after_action_revision > 0))))",
+    "constraint public.booking_series_notifications.booking_series_notifications_waiting_for_earlier_check": "CHECK (((NOT waiting_for_earlier) OR ((after_action_revision IS NOT NULL) AND (NOT (outbox_state IS DISTINCT FROM 'pending'::text)) AND (lease_id IS NULL))))",
+    "not_null public.booking_series_notifications.waiting_for_earlier": "NOT NULL DEFAULT false"
+  }
+}
