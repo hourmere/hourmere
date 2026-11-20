@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { CreateWorkflowInputSchema, createWorkflow } from './creates.ts'
 import { DeleteWorkflowInputSchema, deleteWorkflow } from './deletes.ts'
 import * as hardOff from './hard-off.ts'
+import * as operatorSettings from './operator-settings.ts'
 import { PreviewWorkflowInputSchema, previewWorkflow, WorkflowPreviewSchema } from './preview.ts'
 import { UpdateWorkflowInputSchema, updateWorkflow } from './updates.ts'
 
@@ -68,7 +69,6 @@ const PACKAGE_EXPORTS = [
   'WorkflowRunHistoryEntrySchema',
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
-  // Definition creation is workflowOperation-wrapped, so off while hard-off.
   'captureWorkflowBooking',
   'captureWorkflowCreation',
   'createWorkflow',
@@ -91,6 +91,8 @@ const PACKAGE_EXPORTS = [
   // Pure rendering has no delivery or other side effects.
   'renderWorkflowEmail',
   'repairWorkflowWakes',
+  'requireWorkflowUpdateAllowed',
+  'requireWorkflowsEnabled',
   'requireWorkflowsImplemented',
   'scopeSelectsEventType',
   'templatePlaceholders',
@@ -111,6 +113,7 @@ const PACKAGE_EXPORTS = [
   'workflowTimerDueAt',
   // Read-only identity lookup for the shared webhook repair job's workflow rows.
   'workflowWebhookAuditIdentities',
+  'workflowsEnabled',
 ]
 
 async function disabled(run: () => Promise<unknown>) {
@@ -196,6 +199,23 @@ describe('workflow hard-off', () => {
     expect(workflows.WORKFLOWS_IMPLEMENTED).toBe(false)
   })
 
+  it('does not read injected settings or a recovery patch while hard-off', () => {
+    const untouched = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('hard-off touched an injected dependency')
+        },
+      },
+    )
+    expect(workflows.workflowsEnabled({ workflowsEnabled: true })).toBe(false)
+    expect(workflows.workflowsEnabled(untouched)).toBe(false)
+    expect(() => workflows.requireWorkflowsEnabled(untouched)).toThrow('workflows_disabled')
+    expect(() => workflows.requireWorkflowUpdateAllowed(untouched, untouched)).toThrow(
+      'workflows_disabled',
+    )
+  })
+
   it('captures nothing through the production entry before touching the booking transaction', async () => {
     const trx = new Proxy({} as Db, {
       get: () => {
@@ -212,6 +232,7 @@ describe('workflow hard-off', () => {
         },
         Temporal.Instant.from('2026-11-16T00:00Z'),
         'synthetic-capture-secret',
+        { workflowsEnabled: true },
       ),
     ).resolves.toBeUndefined()
     for (const type of [
@@ -232,6 +253,7 @@ describe('workflow hard-off', () => {
           },
           Temporal.Instant.from('2026-11-16T00:00Z'),
           'synthetic-capture-secret',
+          { workflowsEnabled: true },
         ),
       ).resolves.toBeUndefined()
     }
@@ -246,7 +268,14 @@ describe('workflow hard-off', () => {
         },
       },
     )
-    const ctx = untouched as Parameters<typeof workflows.dispatchWorkflowRuns>[0]
+    const ctx = new Proxy(
+      { workflowsEnabled: true },
+      {
+        get: (_target, property) => {
+          throw new Error(`hard-off execution touched ${String(property)}`)
+        },
+      },
+    ) as Parameters<typeof workflows.dispatchWorkflowRuns>[0]
     const port = untouched as Parameters<typeof workflows.repairWorkflowWakes>[1]
     await expect(workflows.dispatchWorkflowRuns(ctx)).resolves.toBeUndefined()
     await expect(workflows.repairWorkflowWakes(ctx, port)).resolves.toBeUndefined()
@@ -284,10 +313,17 @@ describe('workflow hard-off', () => {
     const manifest = JSON.parse(
       readFileSync(join(root, 'packages/workflows/package.json'), 'utf8'),
     ) as { exports?: unknown }
-    expect(manifest.exports).toEqual({ '.': './src/index.ts', './hard-off': './src/hard-off.ts' })
+    expect(manifest.exports).toEqual({
+      '.': './src/index.ts',
+      './hard-off': './src/hard-off.ts',
+      './operator-settings': './src/operator-settings.ts',
+    })
     expect(await import('@hourmere/workflows/hard-off')).toBe(hardOff)
+    expect(await import('@hourmere/workflows/operator-settings')).toBe(operatorSettings)
     // The constant and every guard, as production imports them, are hard-off.ts's own.
     for (const [name, value] of Object.entries(hardOff))
+      expect((workflows as Record<string, unknown>)[name], name).toBe(value)
+    for (const [name, value] of Object.entries(operatorSettings))
       expect((workflows as Record<string, unknown>)[name], name).toBe(value)
     expect(Object.keys(workflows).sort()).toEqual(PACKAGE_EXPORTS)
     expect(workflows.createWorkflow).toBe(createWorkflow)

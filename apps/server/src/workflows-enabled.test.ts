@@ -1,8 +1,6 @@
-// The workflow definition paths through REST, MCP and the CLI, as it will behave once workflows are
-// enabled. The constant stays false and pinned: this file alone replaces the hard-off module
-// with WORKFLOWS_IMPLEMENTED-equivalent guards (a test-only module mock, not an option any
-// production code can pass), so the transports reach the definition services. It checks scope and
-// role decisions, opaque refusals, the response schema and the parity of the three transports.
+// The workflow definition paths through REST, MCP and the CLI. This file replaces the hard-off
+// module so the tests can exercise the injected operator setting with implementation available.
+// Scope, role, privacy and response schema checks still run in the actual transports and services.
 import { randomUUID } from 'node:crypto'
 import '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
@@ -19,8 +17,12 @@ import { WEBHOOK_EVENTS } from '@hourmere/webhooks'
 import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
+  captureWorkflowBooking,
+  createWorkflow,
+  updateWorkflow,
   validateWorkflowDefinition,
   WORKFLOWS_IMPLEMENTED,
+  workflowJobs,
 } from '../../../packages/workflows/src/index.ts'
 import { listWorkflowDefinitions } from '../../../packages/workflows/src/reads.ts'
 import {
@@ -38,7 +40,7 @@ import { webhookRoutes } from './routes/webhooks.ts'
 import { Workflow, WorkflowPage, WorkflowPreview, workflowRoutes } from './routes/workflows.ts'
 import { productRoutes, productTools } from './server.ts'
 
-// The enabled build's guards, for this file only: every operation runs its service.
+// The implemented build's guards, for this file only.
 vi.mock('../../../packages/workflows/src/hard-off.ts', () => ({
   WORKFLOWS_IMPLEMENTED: true,
   requireWorkflowsImplemented: () => {},
@@ -118,8 +120,8 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     `/api/v1/workflows?ownerKind=${kind}&ownerId=${id}${extra}`
   const runPath = (id: string, query = '') => `/api/v1/workflows/${id}/runs${query}`
 
-  async function mcp(token: string, method: string, params: object = {}) {
-    const res = await app.request('/mcp', {
+  async function mcp(token: string, method: string, params: object = {}, target = app) {
+    const res = await target.request('/mcp', {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
@@ -137,7 +139,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     return JSON.parse(result.content[0]?.text ?? '')
   }
 
-  async function cli(token: string, argv: string[], input: object) {
+  async function cli(token: string, argv: string[], input: object, target = app) {
     let stdout = ''
     let stderr = ''
     const code = await runCli({
@@ -152,7 +154,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       stderr: (text) => {
         stderr += text
       },
-      fetch: async (request, init) => app.request(request, init),
+      fetch: async (request, init) => target.request(request, init),
     })
     return { code, stdout, stderr }
   }
@@ -178,23 +180,24 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
   })
 
   /** The workflow transports over `routesDb`, with the team SSO read gate when `ssoDb` is set. */
-  function build(routesDb: Db, ssoDb?: Db) {
+  function build(routesDb: Db, ssoDb?: Db, workflowsEnabled = true) {
     return createApp({
       publicUrl: URL,
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller,
       routes: [
-        workflowRoutes({ db: routesDb, workflowRunCursorSecret }),
-        instanceRoutes({ publicUrl: URL, socialProviders: {} }),
+        workflowRoutes({ db: routesDb, workflowRunCursorSecret, workflowsEnabled }),
+        instanceRoutes({ publicUrl: URL, socialProviders: {}, workflowsEnabled }),
         webhookRoutes({
           db: routesDb,
           enabled: true,
+          workflowsEnabled,
           encryptionKey: Buffer.alloc(32, 4).toString('base64'),
         }),
       ],
       mcp: mcpEndpoint({
-        tools: workflowTools({ db: routesDb, workflowRunCursorSecret }),
+        tools: workflowTools({ db: routesDb, workflowRunCursorSecret, workflowsEnabled }),
       }),
       ...(ssoDb && {
         ssoTeamReads: {
@@ -250,9 +253,9 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         checkDb: async () => {},
         authHandler: async () => new Response(null, { status: 404 }),
         resolveCaller,
-        routes: [workflowRoutes({ db, followUpHostNotesEnabled })],
+        routes: [workflowRoutes({ db, followUpHostNotesEnabled, workflowsEnabled: true })],
         mcp: mcpEndpoint({
-          tools: workflowTools({ db, followUpHostNotesEnabled }),
+          tools: workflowTools({ db, followUpHostNotesEnabled, workflowsEnabled: true }),
         }),
       })
       const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
@@ -887,8 +890,9 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         db,
         socialProviders: {},
         invitationMailLimits: { secret: workflowRunCursorSecret },
+        workflowsEnabled: true,
       }),
-      mcp: mcpEndpoint({ tools: productTools({ db }) }),
+      mcp: mcpEndpoint({ tools: productTools({ db, workflowsEnabled: true }) }),
     })
     const headers = {
       authorization: `Bearer ${bearer(user, 'full')}`,
@@ -1397,9 +1401,165 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     expect(await db.selectFrom('workflow_definitions').select('id').execute()).toEqual(before)
   })
 
-  it('reports the guard decision on /instance', async () => {
+  it('reports the operator setting on /instance and hides all workflow tools while off', async () => {
     const res = await app.request('/api/v1/instance')
     expect(await res.json()).toHaveProperty('workflowsEnabled', true)
+    const off = build(db, undefined, false)
+    const stopped = await off.request('/api/v1/instance')
+    expect(await stopped.json()).toHaveProperty('workflowsEnabled', false)
+    expect((await mcp(bearer(owner, 'full'), 'tools/list', {}, off)).tools).toEqual([])
+  })
+
+  it('admits only recovery operations over REST, MCP and CLI while operator-off', async () => {
+    const off = build(db, undefined, false)
+    const user = await createTestUser(db)
+    const selected = { kind: 'personal' as const, id: user.id }
+    const full = bearer(user, 'full')
+    const read = bearer(user, 'read')
+    const draft = () => ({ ...createInput(), owner: selected, enabled: true })
+    const createEnabled = async () => {
+      const response = await post(full, draft())
+      expect(response.status).toBe(201)
+      return Workflow.parse(await response.json())
+    }
+    const created = await createEnabled()
+    const path = `/api/v1/workflows/${created.id}`
+    const request = (token: string, method: string, url: string, input?: object) =>
+      off.request(url, {
+        method,
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        ...(input && { body: JSON.stringify(input) }),
+      })
+    const call = (token: string, name: string, args: object) =>
+      mcp(token, 'tools/call', { name, arguments: args }, off)
+    const run = (token: string, command: string, input: object) =>
+      cli(token, ['workflows', command], input, off)
+
+    for (const [command, tool, url, args, expected] of [
+      [
+        'list',
+        'list_workflows',
+        listPath(selected.kind, selected.id),
+        { owner: selected },
+        { data: [created], nextCursor: null },
+      ],
+      ['get', 'get_workflow', path, { id: created.id }, created],
+      [
+        'runs',
+        'list_workflow_runs',
+        runPath(created.id),
+        { id: created.id },
+        { data: [], nextCursor: null },
+      ],
+    ] as const) {
+      const response = await request(read, 'GET', url)
+      expect(response.status, command).toBe(200)
+      expect(await response.json()).toEqual(expected)
+      expect((await call(read, tool, args)).structuredContent).toEqual(expected)
+      const cliResult = await run(read, command, args)
+      expect(cliResult.code, command).toBe(0)
+      expect(JSON.parse(cliResult.stdout)).toEqual(expected)
+    }
+
+    const disabled = { error: 'workflows_disabled' }
+    const disable = { expectedRevision: created.revision, enabled: false }
+    for (const [command, tool, method, url, body, args] of [
+      ['create', 'create_workflow', 'POST', '/api/v1/workflows', draft(), draft()],
+      [
+        'preview',
+        'preview_workflow',
+        'POST',
+        '/api/v1/workflows/preview',
+        previewInput(selected),
+        previewInput(selected),
+      ],
+      ...[
+        { ...disable, enabled: true },
+        { expectedRevision: created.revision, name: 'Rename' },
+        { ...disable, name: 'Disable and rename' },
+        { expectedRevision: created.revision },
+      ].map(
+        (patch) =>
+          [
+            'update',
+            'update_workflow',
+            'PATCH',
+            path,
+            patch,
+            { id: created.id, ...patch },
+          ] as const,
+      ),
+    ] as const) {
+      const response = await request(full, method, url, body)
+      expect(response.status, command).toBe(404)
+      expect(await response.json()).toEqual(disabled)
+      expect(toolError(await call(full, tool, args))).toEqual(disabled)
+      const cliResult = await run(full, command, args)
+      expect(cliResult.code, command).toBe(1)
+      expect(JSON.parse(cliResult.stderr)).toMatchObject(disabled)
+    }
+    expect(await (await request(read, 'GET', path)).json()).toEqual(created)
+
+    const insufficient = await request(read, 'PATCH', path, disable)
+    expect(insufficient.status).toBe(403)
+    expect(await insufficient.json()).toMatchObject({ error: 'insufficient_scope' })
+    const foreign = bearer(outsider, 'full')
+    expect(toolError(await call(foreign, 'get_workflow', { id: created.id }))).toMatchObject({
+      error: 'workflow_not_found',
+    })
+    expect(
+      toolError(await call(foreign, 'update_workflow', { id: created.id, ...disable })),
+    ).toMatchObject({ error: 'workflow_not_found' })
+    expect(
+      JSON.parse(
+        (
+          await run(foreign, 'delete', {
+            id: created.id,
+            expectedRevision: disable.expectedRevision,
+          })
+        ).stderr,
+      ),
+    ).toMatchObject({ error: 'workflow_not_found' })
+
+    for (const surface of ['REST', 'MCP', 'CLI'] as const) {
+      const target = surface === 'REST' ? created : await createEnabled()
+      const url = `/api/v1/workflows/${target.id}`
+      const revision = { expectedRevision: target.revision }
+      const update = { ...revision, enabled: false }
+      if (surface === 'REST') {
+        const response = await request(full, 'PATCH', url, update)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ enabled: false, revision: target.revision })
+      } else if (surface === 'MCP') {
+        const response = await call(full, 'update_workflow', { id: target.id, ...update })
+        expect(response.structuredContent).toMatchObject({
+          enabled: false,
+          revision: target.revision,
+        })
+      } else {
+        const response = await run(full, 'update', { id: target.id, ...update })
+        expect(response.code).toBe(0)
+        expect(JSON.parse(response.stdout)).toMatchObject({
+          enabled: false,
+          revision: target.revision,
+        })
+      }
+      expect(await (await request(read, 'GET', url)).json()).toHaveProperty('enabled', false)
+
+      if (surface === 'REST') {
+        expect((await request(full, 'DELETE', url, revision)).status).toBe(204)
+      } else if (surface === 'MCP') {
+        const response = await call(full, 'delete_workflow', { id: target.id, ...revision })
+        expect(response.structuredContent).toEqual({ deleted: true })
+      } else {
+        const response = await run(full, 'delete', { id: target.id, ...revision })
+        expect(response.code).toBe(0)
+        expect(JSON.parse(response.stdout)).toEqual({ deleted: true })
+      }
+      expect(await (await request(read, 'GET', url)).json()).toMatchObject({
+        error: 'workflow_not_found',
+      })
+    }
   })
 
   it('publishes response schemas that keep every canonical definition whole', () => {
@@ -1457,5 +1617,119 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         updatedAt: '2026-11-12T00:00:00.000Z',
       }),
     ).not.toThrow()
+  })
+
+  it('captures only while on and terminally skips due wakes claimed while off', async () => {
+    const user = await createTestUser(db, 'Workflow wake owner')
+    const organizationId = user.principal.organization.id
+    const fixtures = createFixtures(db)
+    const eventTypeId = await fixtures.eventType(organizationId, user.id)
+    const on = { workflowsEnabled: true }
+    const off = { workflowsEnabled: false }
+    const context = { db, principal: user.principal, ...on }
+    const definition = await createWorkflow(context, {
+      owner: { kind: 'personal', id: user.id },
+      idempotencyKey: randomUUID(),
+      name: 'Delayed booking workflow',
+      scope: { type: 'event_type', eventTypeId },
+      trigger: { type: 'booking.created', delayMinutes: 20 },
+      actions: [{ type: 'email', recipients: ['booker'] }],
+      enabled: true,
+    })
+    let now = Temporal.Instant.from('2031-03-10T08:00:00Z')
+    const initialTime = now
+    async function capture(settings: typeof on, capturedAt: Temporal.Instant, offsetHours: number) {
+      const start = initialTime.add({ hours: offsetHours })
+      const bookingId = await fixtures.booking(
+        organizationId,
+        [user.id],
+        start.toString(),
+        start.add({ minutes: 30 }).toString(),
+        { eventTypeId },
+      )
+      await db
+        .transaction()
+        .execute((trx) =>
+          captureWorkflowBooking(
+            trx,
+            { type: 'created', bookingId, start },
+            capturedAt,
+            'synthetic-workflow-capture-key',
+            settings,
+          ),
+        )
+      return db
+        .selectFrom('workflow_runs')
+        .selectAll()
+        .where('booking_id', '=', bookingId)
+        .executeTakeFirst()
+    }
+    expect(await capture(off, now, 30)).toBeUndefined()
+    const due = await capture(on, now.subtract({ minutes: 20 }), 31)
+    const future = await capture(on, now, 32)
+    if (!due || !future) throw new Error('Expected captures while workflows are on')
+    const saved = (id: string) =>
+      db.selectFrom('workflow_runs').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
+    const wakes = new Set<string>()
+    const port = {
+      ensureWake: async (_trx: Db, id: string) => {
+        wakes.add(id)
+      },
+    }
+    const offJobs = workflowJobs({ db, now: () => now, ...off }, port)
+    const onJobs = workflowJobs({ db, now: () => now, ...on }, port)
+    const job = { id: randomUUID(), attempt: 1, signal: new AbortController().signal }
+    await offJobs[1].handler({}, job)
+    expect(wakes.has(due.id)).toBe(true)
+    expect(wakes.has(future.id)).toBe(false)
+    await offJobs[0].handler({ runId: future.id }, job)
+    expect(await saved(future.id)).toEqual(future)
+    await offJobs[0].handler({ runId: due.id }, job)
+    const skipped = await saved(due.id)
+
+    now = now.add({ minutes: 20 })
+    await onJobs[0].handler({ runId: due.id }, job)
+    expect(await saved(due.id)).toEqual(skipped)
+    expect(skipped).toMatchObject({ state: 'skipped', skip_reason: 'instance_disabled' })
+    await onJobs[0].handler({ runId: future.id }, job)
+    expect(await saved(future.id)).toMatchObject({ state: 'claimed', skip_reason: null })
+
+    const disabled = await capture(on, initialTime, 33)
+    if (!disabled) throw new Error('Expected capture before disabling the definition')
+    await updateWorkflow(context, definition.id, {
+      expectedRevision: definition.revision,
+      enabled: false,
+    })
+    await onJobs[0].handler({ runId: disabled.id }, job)
+    expect(await saved(disabled.id)).toMatchObject({
+      state: 'skipped',
+      skip_reason: 'workflow_disabled',
+    })
+    expect(
+      await db
+        .selectFrom('workflow_run_history')
+        .select(['run_id', 'outcome', 'reason'])
+        .where('workflow_id', '=', definition.id)
+        .orderBy('reason')
+        .execute(),
+    ).toEqual([
+      { run_id: due.id, outcome: 'skipped', reason: 'instance_disabled' },
+      { run_id: disabled.id, outcome: 'skipped', reason: 'workflow_disabled' },
+    ])
+    const audit = await db
+      .selectFrom('audit_events')
+      .select('details')
+      .where('organization_id', '=', organizationId)
+      .where('target_id', '=', definition.id)
+      .where('action', '=', 'workflow.run_skipped')
+      .execute()
+    expect(audit).toHaveLength(2)
+    expect(audit).toEqual(
+      expect.arrayContaining(
+        ['instance_disabled', 'workflow_disabled'].map((reason) => ({
+          details: { revision: definition.revision, trigger: 'booking.created', reason },
+        })),
+      ),
+    )
   })
 })

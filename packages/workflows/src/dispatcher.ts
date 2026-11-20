@@ -8,6 +8,7 @@ import { type WorkflowAuditPort, type WorkflowSkipReason, workflowAuditPort } fr
 import { WorkflowDefinitionSchema, type WorkflowTriggerType } from './definition.ts'
 import { workflowExecution } from './hard-off.ts'
 import { WORKFLOW_MAX_LATE_MINUTES } from './limits.ts'
+import { type WorkflowSettings, workflowsEnabled } from './operator-settings.ts'
 import type { WorkflowOwner } from './ownership.ts'
 import { workflowDispatchWindow, workflowTimerDueAt } from './timers.ts'
 
@@ -17,6 +18,7 @@ export interface WorkflowDispatchContext {
   db: Db
   now: () => Temporal.Instant
   audit?: WorkflowAuditPort | undefined
+  instanceDisabled?: boolean
 }
 export interface WorkflowRunClaim {
   runId: string
@@ -458,9 +460,21 @@ export async function claimDueWorkflowRuns(
       const recovered =
         run.state === 'claimed' && (await recoverWorkflowEmailMarker(trx, locked, now, ctx.audit))
       if (recovered && (await completeWorkflowEmailRun(trx, locked, now, ctx.audit))) return
-      const { reason } = await workflowRunEligibility(trx, locked)
+      const reason = ctx.instanceDisabled
+        ? 'instance_disabled'
+        : (await workflowRunEligibility(trx, locked)).reason
       const afterWait = ctx.now()
-      if (reason || workflowRunWindow(run, afterWait) === 'expired') {
+      const window = workflowRunWindow(run, afterWait)
+      if (reason || window === 'expired') {
+        // A concurrent attempt can defer the retry while this wake is waiting for the run lock.
+        if (
+          reason === 'instance_disabled' &&
+          window !== 'expired' &&
+          (await waitingForEmailRetry(trx, run.id, afterWait))
+        ) {
+          if (run.state === 'claimed') await releaseWorkflowRun(trx, run.id)
+          return
+        }
         await finishWorkflowRun(trx, locked, reason ?? 'expired', afterWait, ctx.audit)
         return
       }
@@ -501,11 +515,14 @@ export async function dispatchClaimedWorkflowRun(
       run.lease_until.getTime() <= ctx.now().epochMilliseconds
     )
       return 'stale'
-    const { reason } = await workflowRunEligibility(trx, locked)
+    const reason = ctx.instanceDisabled
+      ? 'instance_disabled'
+      : (await workflowRunEligibility(trx, locked)).reason
     const now = ctx.now()
     // Eligibility itself may wait on live parent rows, so fence and deadline are read again.
     if (run.lease_until.getTime() <= now.epochMilliseconds) return 'stale'
     const window = workflowRunWindow(run, now)
+    if (ctx.instanceDisabled && window === 'not_due') return 'stale'
     if (reason || window === 'expired') {
       // A rechecked ready claim cannot retire or skip an in-flight email marker.
       const marker = await trx
@@ -584,11 +601,15 @@ export async function repairWorkflowRunWakes(
   }
 }
 
-type WorkflowWorkerContext = Omit<WorkflowDispatchContext, 'audit'>
+type WorkflowWorkerContext = Omit<WorkflowDispatchContext, 'audit' | 'instanceDisabled'> &
+  WorkflowSettings
 
 export const dispatchWorkflowRuns = workflowExecution(
   (ctx: WorkflowWorkerContext, options?: WorkflowClaimOptions) =>
-    dispatchDueWorkflowRuns({ ...ctx, audit: workflowAuditPort }, options),
+    dispatchDueWorkflowRuns(
+      { ...ctx, audit: workflowAuditPort, instanceDisabled: !workflowsEnabled(ctx) },
+      options,
+    ),
 )
 export const repairWorkflowWakes = workflowExecution(
   (ctx: WorkflowWorkerContext, port: WorkflowWakePort, limit?: number) =>
