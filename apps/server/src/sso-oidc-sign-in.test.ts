@@ -1432,6 +1432,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       const fresh = await bindingResponse(await (bindResult as Promise<Response>))
       expect((await revokeResult)?.status).toBe(bindFirst ? 404 : 204)
       expect(fresh.id).not.toBe(old.id)
+      const entries = (await audit()).filter((entry) => entry.action.startsWith('sso_delegation.'))
+      expect(entries.map(({ action, target_id }) => ({ action, target_id }))).toEqual([
+        { action: 'sso_delegation.bound', target_id: old.id },
+        { action: 'sso_delegation.revoked', target_id: old.id },
+        { action: 'sso_delegation.bound', target_id: fresh.id },
+      ])
       expect(
         await db
           .selectFrom('sso_delegation_bindings')
@@ -2136,6 +2142,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       { returnTo: '//other.example.test/app' },
       { returnTo: '/app/%2e%2e/sign-in' },
       { returnTo: '/app/%5cfoo' },
+      { returnTo: '/oauth/consent?sig=synthetic&exp=123' },
+      { returnTo: '/oauth/authorize?client_id=synthetic' },
+      { returnTo: '/oauth/authorize?sig=synthetic&exp=123#intent=other-session' },
     ]) {
       const response = await post({ ...body, ...extra })
       expect(response.status).toBe(400)
@@ -2160,6 +2169,17 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(restarted.status).toBe(200)
     expect(cookie?.startsWith(`${existingBinding};`) === true).toBe(true)
     expect(cookie).toContain('SameSite=Lax')
+  })
+
+  it('returns to the exact first-party OAuth authorization request after SSO sign-in', async () => {
+    const f = await linked()
+    const destination =
+      '/oauth/authorize?client_id=synthetic&redirect_uri=https%3A%2F%2Fclient.example.test%2Fcallback&sig=synthetic&exp=123'
+    const attempt = await start(f.providerId, app, destination)
+    const response = await callback(attempt, idp.issue(attempt, f.claims))
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(destination)
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer')
   })
 
   it('issues a native session and an immutable team proof for the exact linked identity', async () => {

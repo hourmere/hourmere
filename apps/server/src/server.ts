@@ -1252,8 +1252,17 @@ async function start(
         recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
         db,
         auth,
-        resolveCaller: createCallerResolver({ auth, db }),
-        resolveMcpOAuth: createMcpOAuthResolver({ auth, db, publicUrl: config.PUBLIC_URL }),
+        resolveCaller: createCallerResolver({
+          auth,
+          db,
+          ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        }),
+        resolveMcpOAuth: createMcpOAuthResolver({
+          auth,
+          db,
+          publicUrl: config.PUBLIC_URL,
+          ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        }),
         checkDb,
         waitlist: {
           verify: (token) => verifyWaitlist(waitlistDeps, { token }),

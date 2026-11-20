@@ -4,28 +4,35 @@ import {
   createAuthPool,
   createBrowserSession,
   createCallerResolver,
+  lockSharedTeamSsoProof,
 } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { Kysely, PostgresDialect, TableNode, UpdateQueryNode } from 'kysely'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  bindingValues,
   type IdentityFixture,
   identityFixture,
   link,
   proofValues,
+  seeded,
 } from '../../../packages/db/src/sso-identity-fixtures.ts'
-import { insert } from '../../../packages/db/src/sso-storage-fixtures.ts'
+import { insert, sealed } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { openApiRouteInventory } from './openapi-document.ts'
 import { productRoutes } from './server.ts'
 import { databaseClock } from './sso-mailbox-proof.ts'
+import { teamReadAccess } from './sso-team-reads.ts'
+import { withTeamWriteAccess } from './sso-write-middleware.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
 const secret = randomBytes(32).toString('base64url')
 const signup = { mode: 'open', allowedDomains: [] } as const
+const enabledCapabilities = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 
 describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
   let owned: TestDatabase
@@ -116,10 +123,11 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
   }
 
   function instance({ enabled = true, enforce = true, routeDb = db } = {}) {
+    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller: createCallerResolver({ auth, db, ssoCapabilities: capabilities }),
       publicUrl,
       routes: productRoutes({
         db: routeDb,
@@ -135,7 +143,7 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         webhooks: { enabled: true },
       }),
       ...(enforce && {
-        ssoTeamReads: { db, capabilities: { ssoOidcEnabled: enabled, ssoSamlEnabled: false } },
+        ssoTeamReads: { db, capabilities },
       }),
     })
   }
@@ -174,6 +182,64 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
     expect(response.status, operation).toBe(403)
     expect(await response.json(), operation).toMatchObject({ error: 'sso_required' })
     expect(response.headers.get('location'), operation).toBeNull()
+  }
+
+  const issueKey = () =>
+    auth.api.createApiKey({
+      body: {
+        userId: fixture.owner,
+        metadata: { organizationId: fixture.team, scope: 'full' },
+      },
+    })
+
+  const writeAsKey = (app: ReturnType<typeof instance>, authorization: string, title: string) =>
+    app.request(new URL(`/api/v1/event-types/${eventId}`, publicUrl), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization },
+      body: JSON.stringify({ title }),
+    })
+
+  async function delegatedKey(expiresInMs?: number) {
+    const key = await issueKey()
+    const client = await owned.pool.connect()
+    try {
+      const actorLink = await link({ ...fixture, db: client }, fixture.owner)
+      const binding = {
+        ...bindingValues(fixture, { api_key_id: key.id }, actorLink),
+        member_id: fixture.ownerMember,
+      }
+      if (expiresInMs !== undefined) {
+        await client.query('BEGIN')
+        try {
+          const { rows } = await client.query<{ started: Date; deadline: Date }>(
+            `
+            SELECT t - interval '2592000 seconds' AS started, t AS deadline
+            FROM (SELECT clock_timestamp() + $1::integer * interval '1 millisecond' AS t) clock
+          `,
+            [expiresInMs],
+          )
+          await seeded(client, 'sso_delegation_bindings', {
+            ...binding,
+            created_at: rows[0]?.started,
+            expires_at: rows[0]?.deadline,
+          })
+          await client.query('COMMIT')
+        } finally {
+          await client.query('ROLLBACK')
+        }
+      } else {
+        await insert(client, 'sso_delegation_bindings', binding)
+      }
+    } finally {
+      client.release()
+    }
+    const authorization = `Bearer ${key.key}`
+    return {
+      id: key.id,
+      authorization,
+      write: (app: ReturnType<typeof instance>, title: string) =>
+        writeAsKey(app, authorization, title),
+    }
   }
 
   it('refuses unauthenticated-by-SSO writes when a policy is seeded with the protocol hard-off', async () => {
@@ -266,11 +332,7 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
     ).toBeUndefined()
   })
 
-  it('rolls back a write when another transaction revokes its proof before commit', async () => {
-    await requireSso()
-    await grantProof()
-    expect((await updateEvent(instance(), 'Live proof')).status).toBe(200)
-
+  function pauseEventWrite() {
     const wrote = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
     const eventUpdates = new Set<unknown>()
@@ -293,10 +355,29 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         return result
       },
     })
+    return { wrote: wrote.promise, release: release.resolve, writerDb }
+  }
+
+  async function waitForBlocked(pid: number | undefined) {
+    await vi.waitFor(async () => {
+      const blocked = await owned.pool.query(
+        'SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+        [pid],
+      )
+      expect(blocked.rowCount).toBe(1)
+    })
+  }
+
+  it('rolls back a write when another transaction revokes its proof before commit', async () => {
+    await requireSso()
+    await grantProof()
+    expect((await updateEvent(instance(), 'Live proof')).status).toBe(200)
+
+    const { wrote, release, writerDb } = pauseEventWrite()
     const writing = updateEvent(instance({ routeDb: writerDb }), 'Must roll back')
     try {
       await Promise.race([
-        wrote.promise,
+        wrote,
         writing.then(({ status }) => {
           throw new Error(`Request finished with ${status} before reaching the write`)
         }),
@@ -318,9 +399,208 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         expect(removed.numDeletedRows).toBe(1n)
       })
     } finally {
-      release.resolve()
+      release()
     }
     await expectRefused(await writing)
     expect(await currentTitle()).toBe('Live proof')
+  })
+
+  it('denies a lease at 30 days and leaves the write unchanged', async () => {
+    await requireSso()
+    const { write } = await delegatedKey(0)
+    await expectRefused(await write(instance(), 'Expired lease'))
+    expect(await currentTitle()).toBe('Before writing')
+  })
+
+  it('rolls back a delegated write that crosses the 30-day deadline in a lock wait', async () => {
+    await requireSso()
+    const { wrote, release, writerDb } = pauseEventWrite()
+    const app = instance({ routeDb: writerDb })
+    const { id, write } = await delegatedKey(2500)
+    const blocker = await owned.pool.connect()
+    const writing = Promise.resolve(write(app, 'Must roll back'))
+    try {
+      await Promise.race([
+        wrote,
+        writing.then(({ status }) => {
+          throw new Error(`Request finished with ${status} before reaching the write`)
+        }),
+      ])
+      await blocker.query('BEGIN')
+      await blocker.query('SELECT id FROM sso_domains WHERE id = $1 FOR UPDATE', [
+        fixture.domain.id,
+      ])
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      release()
+      await waitForBlocked(rows[0]?.pid)
+      await vi.waitFor(
+        async () => {
+          const { rows } = await blocker.query<{ expired: boolean }>(
+            'SELECT expires_at <= clock_timestamp() AS expired FROM sso_delegation_bindings WHERE api_key_id = $1',
+            [id],
+          )
+          expect(rows[0]?.expired).toBe(true)
+        },
+        { timeout: 3500, interval: 50 },
+      )
+    } finally {
+      release()
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    await expectRefused(await writing)
+    expect(await currentTitle()).toBe('Before writing')
+  }, 8000)
+
+  it.each(['domain deletion', 'provider trust change'] as const)(
+    'rolls back a delegated write racing with %s',
+    async (change) => {
+      await requireSso()
+      const { write } = await delegatedKey()
+      expect((await write(instance(), 'Live delegation')).status).toBe(200)
+      const { wrote, release, writerDb } = pauseEventWrite()
+      const revoker = await owned.pool.connect()
+      const writing = Promise.resolve(write(instance({ routeDb: writerDb }), 'Must roll back'))
+      try {
+        await Promise.race([
+          wrote,
+          writing.then(({ status }) => {
+            throw new Error(`Request finished with ${status} before reaching the write`)
+          }),
+        ])
+        await revoker.query('BEGIN')
+        if (change === 'domain deletion') {
+          await revoker.query(
+            'UPDATE sso_domains SET retired_at = clock_timestamp() WHERE id = $1',
+            [fixture.domain.id],
+          )
+        } else {
+          await revoker.query(
+            'UPDATE sso_policies SET trust_generation = trust_generation + 1 WHERE organization_id = $1',
+            [fixture.team],
+          )
+          await revoker.query(
+            'UPDATE sso_providers SET revision = revision + 1, configuration = $2 WHERE id = $1',
+            [fixture.provider.id, sealed()],
+          )
+        }
+        const { rows } = await revoker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        release()
+        await waitForBlocked(rows[0]?.pid)
+        await revoker.query('COMMIT')
+      } finally {
+        release()
+        await revoker.query('ROLLBACK')
+        revoker.release()
+      }
+      await expectRefused(await writing)
+      expect(await currentTitle()).toBe('Live delegation')
+    },
+  )
+
+  it('rechecks membership on the committing connection when removal wins the race', async () => {
+    await requireSso()
+    const { authorization } = await delegatedKey()
+    const resolve = createCallerResolver({ auth, db, ssoCapabilities: enabledCapabilities })
+    const caller = await resolve(new Headers({ authorization }))
+    if (!caller.ok) throw new Error('The live key must authenticate before removal')
+    const { principal } = caller
+    const deps = { db, capabilities: enabledCapabilities }
+    const { wrote, release, writerDb } = pauseEventWrite()
+    // Production event-type edits also lock the acting membership first. Exercise the
+    // shared SSO commit check with a write that can reach it while removal holds that row.
+    const writing = withTeamWriteAccess(deps, principal, teamReadAccess(deps, principal), () =>
+      teamWriteTransaction(writerDb.transaction(), (trx) =>
+        trx
+          .updateTable('event_types')
+          .set({ title: 'Must roll back' })
+          .where('id', '=', eventId)
+          .execute(),
+      ),
+    )
+    const denied = expect(writing).rejects.toMatchObject({ message: 'sso_required' })
+    const revoker = await owned.pool.connect()
+    try {
+      await wrote
+      await revoker.query('BEGIN')
+      await revoker.query('DELETE FROM auth.member WHERE id = $1', [fixture.ownerMember])
+      const { rows } = await revoker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      release()
+      await waitForBlocked(rows[0]?.pid)
+      await revoker.query('COMMIT')
+    } finally {
+      release()
+      await revoker.query('ROLLBACK')
+      revoker.release()
+    }
+    await denied
+    expect(await currentTitle()).toBe('Before writing')
+  })
+
+  it('keeps another member’s delegation after membership removal', async () => {
+    await requireSso()
+    const { write } = await delegatedKey()
+    const { wrote, release, writerDb } = pauseEventWrite()
+    const writing = Promise.resolve(write(instance({ routeDb: writerDb }), 'Still authorized'))
+    try {
+      await Promise.race([
+        wrote,
+        writing.then(({ status }) => {
+          throw new Error(`Request finished with ${status} before reaching the write`)
+        }),
+      ])
+      await db.transaction().execute(async (trx) => {
+        await trx.deleteFrom('auth.member').where('id', '=', fixture.memberMember).execute()
+      })
+    } finally {
+      release()
+    }
+    expect((await writing).status).toBe(200)
+    expect(await currentTitle()).toBe('Still authorized')
+  })
+
+  it('rechecks a stored policy enabled during a machine write', async () => {
+    await db.insertInto('sso_policies').values({ organization_id: fixture.team }).execute()
+    const key = await issueKey()
+    const { wrote, release, writerDb } = pauseEventWrite()
+    const writing = Promise.resolve(
+      writeAsKey(instance({ routeDb: writerDb }), `Bearer ${key.key}`, 'Must roll back'),
+    )
+    try {
+      await Promise.race([
+        wrote,
+        writing.then(({ status }) => {
+          throw new Error(`Request finished with ${status} before reaching the write`)
+        }),
+      ])
+      await db
+        .updateTable('sso_policies')
+        .set({ require_sso: true, policy_revision: 2 })
+        .where('organization_id', '=', fixture.team)
+        .execute()
+    } finally {
+      release()
+    }
+    await expectRefused(await writing)
+    expect(await currentTitle()).toBe('Before writing')
+  })
+
+  it('keeps browser-only proof checks independent of an ambient machine lease', async () => {
+    await requireSso()
+    const { authorization } = await delegatedKey()
+    const deps = { db, capabilities: enabledCapabilities }
+    const caller = await createCallerResolver({ auth, db, ssoCapabilities: enabledCapabilities })(
+      new Headers({ authorization }),
+    )
+    if (!caller.ok) throw new Error('The live key must authenticate')
+    await expect(
+      withTeamWriteAccess(deps, caller.principal, teamReadAccess(deps, caller.principal), () =>
+        db.transaction().execute((trx) =>
+          lockSharedTeamSsoProof(trx, enabledCapabilities, null, fixture.team, () => {
+            throw new Error('Browser proof required')
+          }),
+        ),
+      ),
+    ).rejects.toThrow('Browser proof required')
   })
 })

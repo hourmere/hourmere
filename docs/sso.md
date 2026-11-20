@@ -496,6 +496,20 @@ expiry; a machine client gets stable `sso_required`, never an interactive redire
 subject to its own policy. No service-account exemption ships in the first version.
 A `full` key still cannot configure the IdP or approve its own SSO binding.
 
+When an enforced team is selected during MCP OAuth authorization, approval requires a
+live browser proof for that team. The first approval saves the connection so its owner
+can bind it, and returns `sso_required` until the binding is ready. Retry the same
+browser approval while its authorization is still valid to return to the connecting app.
+Team SSO sign-in can also return to the original signed OAuth authorization page.
+Moving an API key to a different space ends its previous binding in the same transaction.
+Rebinding records revocation of the previous lease and creation of the new one in the
+audit log.
+
+选择强制 SSO 的团队进行 MCP OAuth 授权时，审批需要该团队的有效浏览器证明。首次审批会
+保存连接，供所有者绑定；绑定前返回 `sso_required`。绑定后，在授权仍有效时重试同一次审批
+即可返回连接应用。通过团队 SSO 登录后也可返回原先已签名的 OAuth 授权页面。API 密钥切换
+空间时会在同一事务中撤销原绑定。重新绑定时，审计日志会记录旧租约撤销及新租约创建。
+
 ### Fresh proof
 
 Every SSO write except `revokeSsoDelegation` requires proof that is fresh for that exact

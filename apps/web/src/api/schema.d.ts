@@ -12902,7 +12902,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description session_required or oauth_organization_forbidden */
+            /** @description session_required, oauth_organization_forbidden or sso_required */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13067,7 +13067,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description session_required or oauth_organization_forbidden */
+            /** @description session_required, oauth_organization_forbidden or sso_required */
             403: {
                 headers: {
                     [name: string]: unknown;
