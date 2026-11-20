@@ -3752,6 +3752,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing-continuations/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a routing continuation
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the selected event's current booking fields and editable prefill. The capability expires 30 minutes after issuance. Reads do not consume or renew it. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         */
+        post: operations["resolveRoutingContinuation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routing-continuations/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Find slots for the selected event
+         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Offers ordinary availability in the given instant range for the event selected by the capability. Availability may change. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         */
+        post: operations["findRoutedSlots"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing-forms": {
         parameters: {
             query?: never;
@@ -7660,6 +7700,78 @@ export interface components {
         /** @description Answers to the event type's questions, keyed by question id: text for short_text, long_text and phone; one option for select; a list of options for multi_select; true or false for checkbox */
         Responses: {
             [key: string]: string | string[] | boolean;
+        };
+        RoutingContinuation: {
+            eventType: {
+                /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
+                allowedDurationsMinutes?: number[];
+                /** @description Whether invitees may add guest recipients */
+                allowGuests: boolean;
+                description: string | null;
+                durationMinutes: number;
+                host?: {
+                    /** @description An existing first-party raster image path; external profile pictures are omitted */
+                    image?: string;
+                    name: string;
+                    /** @description The host's IANA time zone; omitted for round-robin pools */
+                    timeZone?: string;
+                };
+                /** @description Only the kind; details such as a phone number come with the booking */
+                location: {
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                } | null;
+                /** @description Ordered location choices; private host details are disclosed only after booking. */
+                locations: {
+                    /** @enum {boolean} */
+                    askInvitee?: true;
+                    id: string;
+                    /** @enum {boolean} */
+                    isDefault?: true;
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    label?: string;
+                }[] | null;
+                /** @description Booking-form fields beyond name and email */
+                questions: components["schemas"]["Question"][];
+                smsRemindersEnabled: boolean;
+                title: string;
+            };
+            /** Format: date-time */
+            expiresAt: string;
+            prefill: {
+                inviteeEmail?: string;
+                inviteeName?: string;
+                responses: {
+                    [key: string]: string;
+                };
+            };
+        };
+        RoutingContinuationInput: {
+            /** @description Private bearer capability from route submission */
+            routeToken: string;
+        };
+        RoutingContinuationSlots: {
+            slots: components["schemas"]["Slot"][];
+        };
+        RoutingContinuationSlotsInput: {
+            /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+            durationMinutes?: number;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            end: string;
+            locationOptionId?: string;
+            /** @description Private bearer capability from route submission */
+            routeToken: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
         };
         RoutingForm: {
             createdAt: string;
@@ -16245,6 +16357,180 @@ export interface operations {
                 };
             };
             /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resolveRoutingContinuation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoutingContinuationInput"];
+            };
+        };
+        responses: {
+            /** @description Current booking fields and editable prefill */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingContinuation"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (maximum 65,536 bytes) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    findRoutedSlots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoutingContinuationSlotsInput"];
+            };
+        };
+        responses: {
+            /** @description Available slots */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingContinuationSlots"];
+                };
+            };
+            /** @description invalid_request, invalid_range, range_too_long or invalid_duration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_unavailable, location_unavailable or calendar_sync_unavailable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (maximum 65,536 bytes) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; see Retry-After */
             429: {
                 headers: {
                     [name: string]: unknown;

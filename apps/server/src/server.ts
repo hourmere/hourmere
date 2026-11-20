@@ -163,6 +163,7 @@ import { profileRoutes } from './routes/profile.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { publicRoutes } from './routes/public.ts'
 import { readinessRoutes } from './routes/readiness.ts'
+import { routingContinuationRoutes } from './routes/routing-continuations.ts'
 import { routingFormRoutes } from './routes/routing-forms.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { slackDestinationRoutes } from './routes/slack-destinations.ts'
@@ -388,6 +389,15 @@ export function productRoutes({
       automaticZoom,
       successRedirectPolicy,
     }),
+    routingContinuationRoutes({
+      db,
+      now: () => Temporal.Now.instant(),
+      routingFormsEnabled: routingEnabled,
+      routingSecret,
+      automaticMeet,
+      automaticZoom,
+      smsRemindersAvailable,
+    }),
     oneTimeBookingRoutes({
       db,
       smsRemindersAvailable,
@@ -531,6 +541,9 @@ export function productTools({
       routingFormsEnabled: routingEnabled,
       routingSecret,
       publicUrl,
+      automaticMeet,
+      automaticZoom,
+      smsRemindersAvailable,
     }),
   ]
 }

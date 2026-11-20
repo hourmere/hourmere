@@ -45,7 +45,7 @@ import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
-import { isPublicRoutingFormPath, PUBLIC_ROUTING_FORM_API_PREFIX } from './routing-form-privacy.ts'
+import { isPublicRoutingFormPath, privateRoutingApiPrefix } from './routing-form-privacy.ts'
 import { mountScim, type ScimOptions } from './scim.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
@@ -443,10 +443,11 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: () => string) => {
     // Driver messages and disconnect causes can echo contact values and malformed keys.
-    if (isPublicRoutingFormPath(c.req.path)) {
+    const routingPrefix = privateRoutingApiPrefix(c.req.path)
+    if (routingPrefix) {
       const write = level === 'ERROR' ? console.error : console.warn
       write(
-        `${new Date().toISOString()} ${level} ${c.req.method} ${PUBLIC_ROUTING_FORM_API_PREFIX}/[redacted]: private routing form request failed`,
+        `${new Date().toISOString()} ${level} ${c.req.method} ${routingPrefix}/[redacted]: private routing form request failed`,
       )
       return
     }
@@ -595,7 +596,7 @@ export function createApp({
   ssoOidcSignIn?.mount({ app, publicUrl, requestLogger, clientIp: resolveClientIp })
   app.use('/api/*', resolveClientIp)
   app.use('/api/v1/*', noStoreByDefault)
-  // Routing submissions count even when a credential or declared body length is refused.
+  // Routing submissions and continuations count even when credentials or body lengths are refused.
   app.use('/api/v1/*', routeRateLimits({ beforeBodyLimit: true }))
   // Provisioning credentials never fall back to a browser cookie on another surface.
   app.use('*', async (c, next) => {

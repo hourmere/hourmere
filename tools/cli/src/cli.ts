@@ -44,6 +44,8 @@ export const COMMANDS = {
   'routing-forms preview': 'preview_routing_form',
   'routing-forms public': 'get_public_routing_form',
   'routing-forms route': 'route_lead',
+  'routing-forms resolve': 'resolve_routing_continuation',
+  'routing-forms slots': 'find_routed_slots',
 
   'audit-log list': 'list_audit_events',
   'audit-log settings': 'get_audit_log_settings',
@@ -120,6 +122,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms route --input FILE|- [--output FILE] [--url ORIGIN]
+       hourmere routing-forms resolve|slots --input FILE|- [--output FILE] [--url ORIGIN]
        hourmere workflows list|get|create|update|delete|preview [--input FILE|-] [--url ORIGIN]
        hourmere webhooks list [--json]
        hourmere webhooks create --input FILE|- (--json | --output FILE)
@@ -195,6 +198,10 @@ Pass slug, exactly one of handle or teamSlug, versionId from public, and answers
 as JSON to routing-forms route. Requires bookings or full scope. If the form changed, fetch public metadata again.
 Stdout redacts routeToken and continuationUrl. Use --output FILE to save them in a new 0600 JSON file.
 Existing files and symlinks are refused.
+Pass routeToken in private JSON to routing-forms resolve to read current booking fields and prefill.
+For routing-forms slots, also pass start and end as UTC timestamps, and optionally durationMinutes
+and locationOptionId. Both commands require bookings or full scope and leave the receipt usable
+until its original expiry. The input token is redacted from stdout, output files and errors.
 Routing form commands return routing_forms_disabled until routing forms are enabled on the instance.
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
@@ -472,6 +479,13 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    const routeToken =
+      (args.command === 'routing-forms resolve' || args.command === 'routing-forms slots') &&
+      typeof input.routeToken === 'string' &&
+      /^[A-Za-z0-9_-]{43}$/.test(input.routeToken)
+        ? input.routeToken
+        : ''
+    if (routeToken) secrets.push(routeToken)
     if (args.command.startsWith('polls ')) {
       for (const field of ['token', 'publicToken']) {
         const value = input[field]
@@ -590,7 +604,9 @@ export async function runCli(options: {
       )
     }
     if (output) {
-      await output.writeFile(printable(result, [key, oneTimeToken, waitlistToken, slackUrl]))
+      await output.writeFile(
+        printable(result, [key, oneTimeToken, waitlistToken, slackUrl, routeToken]),
+      )
       await output.sync()
       await options.stdout('{"outputWritten":true}\n')
     } else {
