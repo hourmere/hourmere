@@ -200,15 +200,15 @@ SSO 正在开发中，尚不可用。表中的 SSO 操作在运营者能够启�
 `404 sso_disabled`；目前 OIDC 和 SAML 在代码中保持关闭，任何配置均无法启用。
 关闭时 MCP 工具列表不包含上述工具；允许范围内的直接调用和 CLI 命令返回相同错误。
 
-`list_workflows` and `get_workflow` are listed before booking workflows are available:
-until they are enabled, `tools/list` omits them and a direct call by a `read` or `full` key
-returns `isError: true` with `workflows_disabled` (a `bookings` key still gets
-`insufficient_scope`). `workflows list`, `workflows get` and `workflows create` report the same codes.
+The booking workflow tools are published and hard-off. `tools/list` omits them, and a
+direct call with otherwise allowed credentials returns `isError: true` with
+`workflows_disabled`. A `bookings` key gets `insufficient_scope`. The CLI reports the
+same codes. See the [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 `create_workflow` requires full scope and accepts `owner`, a retained `idempotencyKey`,
 and the definition fields (`name`, `scope`, `trigger`, `actions`, optional `enabled` and
 `conditions`). Identical normalized retries return the stored definition; changed input
-conflicts. IDs are server-generated, unknown fields are rejected, and webhook actions
-are not available yet.
+conflicts. The server assigns IDs and rejects unknown fields. A webhook action references
+an active endpoint in the acting organization subscribed to `workflow.executed`.
 
 Scope is immutable: use **Create replacement** on `/app/api-keys`, update the client and
 revoke the old key. Legacy keys and native API creations that omit `metadata.scope` retain
@@ -789,10 +789,10 @@ when the successor falls outside the current page or filters. Public/manage resp
 it. The predecessor's `status` remains `cancelled`; use `rescheduledToId` to distinguish a
 reschedule from a cancellation, and `rescheduledFromId` to trace back to its predecessor.
 
-`list_workflows` and `get_workflow` read booking workflows, which are not available yet. They
-stay out of `tools/list`, and a direct call answers `workflows_disabled`, until workflows are
-enabled on the instance; discover availability with `workflowsEnabled` from
-`GET /api/v1/instance`. Once enabled, `list_workflows` takes the explicit owner you act as
+`list_workflows` and `get_workflow` read booking workflows. The current hard-off release
+hides both from `tools/list` and direct calls return `workflows_disabled` to authorized
+callers. Discover availability with `workflowsEnabled` from `GET /api/v1/instance`.
+`list_workflows` takes the explicit owner you act as
 (`{kind: "personal", id: your user ID}` in your personal organization, or
 `{kind: "team", id: team ID}` as a current team owner or admin), and both return the current
 revision's definition with its enabled flag.
@@ -1036,14 +1036,16 @@ ordinary booking wins.
 with the same body except `id`. Omitted fields are preserved; supplied arrays replace their
 previous values. Content edits append a revision, while an `enabled`-only change preserves
 it. A stale expectation returns `workflow_revision_conflict`. Disabling and re-enabling
-leave existing booking enrollments and execution rows unchanged. Webhook actions are
-rejected. These operations remain unavailable (`workflows_disabled`).
+leave existing booking enrollments and execution rows unchanged. A webhook action must
+reference an active endpoint in the acting organization subscribed to `workflow.executed`.
+These operations return `workflows_disabled` while hard-off.
 
 中文：`update_workflow` / `workflows update` 需要 `full` 权限，输入 `id`、
 `expectedRevision` 和要修改的字段。REST 使用 `PATCH /api/v1/workflows/{id}`，正文不含
 `id`。省略的字段保持不变，数组整体替换。内容修改会新增修订，仅切换 `enabled` 不改变
 修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
-登记或执行记录。暂不支持 webhook 动作；功能仍关闭，返回 `workflows_disabled`。
+登记或执行记录。Webhook 动作须引用当前组织中已订阅 `workflow.executed` 的启用端点。
+功能仍硬关闭，返回 `workflows_disabled`。
 
 
 `delete_workflow` / `workflows delete` requires `full` scope and accepts `id` and
