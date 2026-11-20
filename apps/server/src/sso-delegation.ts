@@ -16,7 +16,11 @@ import { z } from 'zod'
 import { requireSsoEnabled } from './sso.ts'
 import { BIND_SSO_DELEGATION, openDelegationProof } from './sso-delegation-proof.ts'
 import { normalizeSsoDomain } from './sso-domains.ts'
-import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
+import {
+  type FreshProofDeps,
+  requireSsoStepUpAvailable,
+  runWithFreshProof,
+} from './sso-fresh-proof.ts'
 import { browserBindingDigest, databaseClock } from './sso-mailbox-proof.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
@@ -350,6 +354,14 @@ export async function revokeSsoDelegation(
   const { organizationId, userId } = actor
   await deps.db.transaction().execute(async (trx) => {
     await lockActor(trx, actor)
+    if (!deps.capabilities.ssoOidcEnabled) {
+      const policy = await trx
+        .selectFrom('sso_policies')
+        .select('require_sso')
+        .where('organization_id', '=', organizationId)
+        .executeTakeFirst()
+      if (policy?.require_sso) requireSsoStepUpAvailable(deps.capabilities, 'trust_reduction')
+    }
     const binding = await trx
       .deleteFrom('sso_delegation_bindings')
       .where('id', '=', bindingId)

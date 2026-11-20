@@ -69,7 +69,7 @@ export async function useSsoRecovery(
             targetId: organizationId,
             details: { correlationId: attemptId },
           })
-          await notifySsoRecoveryUse(deps, trx, organizationId, headers)
+          await notifySsoRecoveryUse(deps, trx, organizationId)
         },
       },
     )
